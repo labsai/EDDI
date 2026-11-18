@@ -127,5 +127,8 @@
   "conversation.reply.revised": "A resposta final difere da pré-visualização que foi sendo apresentada.",
   "conversation.send.unknownOutcomeStale": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem ou já a ter respondido. Veja a conversa antes de a enviar de novo.",
   "conversation.send.notStored": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta. A sua mensagem permanece acima. Enviá-la de novo executa o turno outra vez.",
-  "conversation.send.notStoredTooLarge": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa é demasiado grande. Inicie uma nova conversa para continuar."
+  "conversation.send.notStoredTooLarge": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta: a conversa está cheia. A sua mensagem permanece acima. Inicie uma nova conversa para continuar.",
+  "conversation.send.notStoredRejected": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa não aceitou os dados. Enviar de novo não ajudará.",
+  "conversation.send.notStoredConflict": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa mudou entretanto. Recarregue a conversa e envie a mensagem de novo.",
+  "conversation.send.conversationFull": "⚠️ A sua mensagem não foi enviada — esta conversa está cheia. Inicie uma nova conversa para continuar."
 }

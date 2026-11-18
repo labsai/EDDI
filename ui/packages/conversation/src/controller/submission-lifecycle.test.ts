@@ -270,7 +270,7 @@ describe("the turn ran but was not saved (S3)", () => {
   });
 
   it("stream error `turn_not_stored`: the same, and an unknown code stays what it was", async () => {
-    const frame = (code: string, retryable = true) => ev("error", { message: "m", code, reason: "x", retryable });
+    const frame = (code: string, retryable = true) => ev("error", { message: "m", code, reason: "conflict", retryable });
     const { transport } = setup([() => events(frame("turn_not_stored"))]);
     const c = await opened(transport);
     await c.send("hello");
@@ -318,5 +318,89 @@ describe("no notice for a turn that did produce something (S4)", () => {
     const c = await opened(transport);
     await c.send("q");
     expect(texts(c).slice(-1)[0]).toContain("differs from the preview");
+  });
+});
+
+describe("the backend's turn_not_stored contract, by status and reason", () => {
+  const err = (status: number, code: string, reason: string | null, retryable: boolean | null) =>
+    Object.assign(new ApiError(status, "", "t"), {
+      body: JSON.stringify({ error: { code, ...(reason ? { reason } : {}), ...(retryable === null ? {} : { retryable }) } }),
+    });
+
+  // [name, status, code, reason, retryable, expected class, extra check]
+  const rows: Array<[string, number, string, string | null, boolean | null, string]> = [
+    ["507 ran, not saved, the conversation is full", 507, "TURN_NOT_STORED", "conversation_too_large", false, "notStored"],
+    ["507 refused at admission, nothing ran", 507, "CONVERSATION_TOO_LARGE", null, null, "notAccepted"],
+    ["422 ran, data rejected, not retryable", 422, "TURN_NOT_STORED", "data_rejected", false, "notStored"],
+    ["409 conflict: ran on a stale view", 409, "TURN_NOT_STORED", "conflict", true, "notStored"],
+    ["409 fenced: lost its lease", 409, "TURN_NOT_STORED", "fenced", true, "notStored"],
+    ["410 conversation_ended", 410, "TURN_NOT_STORED", "conversation_ended", null, "ended"],
+    ["503 store_failure", 503, "TURN_NOT_STORED", "store_failure", null, "unknownOutcome"],
+    ["503 outcome_unknown", 503, "TURN_NOT_STORED", "outcome_unknown", null, "unknownOutcome"],
+    ["503 with a reason this client does not know", 503, "TURN_NOT_STORED", "a_future_reason", null, "unknownOutcome"],
+  ];
+
+  it.each(rows)("REST %s -> %s", async (_name, status, code, reason, retryable, expected) => {
+    const seen: TurnFailure[] = [];
+    const { transport } = setup([() => throwing(err(status, code, reason, retryable))], {
+      read: vi.fn(async () => ({ conversationState: "READY", conversationOutputs: [] }) as unknown as ConversationSnapshot),
+    });
+    const c = await opened(transport, { presentFailure: (f) => (seen.push(f), false) });
+    await c.send("hello");
+    expect(seen[0]?.class).toBe(expected);
+    const keeps = expected === "notStored" || expected === "unknownOutcome";
+    expect(texts(c).includes("hello")).toBe(keeps); // the message stays when the turn ran or may have run
+    if (expected === "notAccepted") expect(c.getSnapshot().restoreDraft).toBe("hello");
+    if (expected === "ended") expect(c.getSnapshot().conversationState).toBe("ENDED");
+  });
+
+  it("the notices say the right next step", async () => {
+    const last = async (status: number, code: string, reason: string | null, retryable: boolean | null) => {
+      const { transport } = setup([() => throwing(err(status, code, reason, retryable))]);
+      const c = await opened(transport);
+      await c.send("hello");
+      return texts(c).slice(-1)[0] ?? "";
+    };
+    expect(await last(507, "TURN_NOT_STORED", "conversation_too_large", false)).toContain("conversation is full");
+    expect(await last(507, "CONVERSATION_TOO_LARGE", null, null)).toContain("this conversation is full");
+    expect(await last(422, "TURN_NOT_STORED", "data_rejected", false)).toContain("will not help");
+    expect(await last(409, "TURN_NOT_STORED", "conflict", true)).toContain("Reload the conversation");
+    expect(await last(503, "TURN_NOT_STORED", "store_failure", null)).toContain("No answer has arrived yet");
+  });
+
+  it("stream: the same reasons on the error frame; conversation_too_large before the turn ran hands the draft back", async () => {
+    const frame = (code: string, reason: string | null, retryable: boolean | null) =>
+      ev("error", { message: "m", code, ...(reason ? { reason } : {}), ...(retryable === null ? {} : { retryable }) });
+    const cases: Array<[string, string | null, boolean | null, string]> = [
+      ["turn_not_stored", "conversation_too_large", false, "notStored"],
+      ["turn_not_stored", "data_rejected", false, "notStored"],
+      ["turn_not_stored", "conflict", true, "notStored"],
+      ["turn_not_stored", "conversation_ended", null, "ended"],
+      ["turn_not_stored", "store_failure", null, "unknownOutcome"],
+      ["turn_not_stored", "outcome_unknown", null, "unknownOutcome"],
+      ["conversation_too_large", null, null, "notAccepted"],
+    ];
+    for (const [code, reason, retryable, expected] of cases) {
+      const seen: TurnFailure[] = [];
+      const { transport } = setup([() => events(frame(code, reason, retryable))]);
+      const c = await opened(transport, { presentFailure: (f) => (seen.push(f), true) });
+      await c.send("hello");
+      expect(seen[0]?.class, `${code}/${reason}`).toBe(expected);
+    }
+    // Without a host: the admission refusal gives the draft back and says the conversation is full.
+    const { transport } = setup([() => events(frame("conversation_too_large", null, null))]);
+    const c = await opened(transport);
+    await c.send("hello");
+    expect(c.getSnapshot().restoreDraft).toBe("hello");
+    expect(texts(c).slice(-1)[0]).toContain("this conversation is full");
+  });
+
+  it("with none of these codes the behaviour is exactly as before", async () => {
+    const { transport } = setup([() => throwing(err(503, "capacity_exceeded", null, null))]);
+    const seen: TurnFailure[] = [];
+    const c = await opened(transport, { presentFailure: (f) => (seen.push(f), false) });
+    await c.send("hello");
+    expect(seen[0]?.class).toBe("notAccepted"); // a plain 503, as before
+    expect(c.getSnapshot().restoreDraft).toBe("hello");
   });
 });

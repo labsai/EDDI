@@ -205,6 +205,8 @@ export interface TurnFailure {
   endReason?: string | null;
   /** The error body's or the stream frame's `retryable`, when it said. */
   retryable?: boolean | null;
+  /** The error body's or the stream frame's `reason` (`turn_not_stored`'s: why it was not saved). */
+  reason?: string | null;
   /** The conversation as the read that decided a 409 or a 410 saw it. */
   conversation?: Partial<ConversationSnapshot> | null;
 }
@@ -997,9 +999,11 @@ export class AgentConversation {
         const { message, code } = parseErrorEvent(event.data);
         // A frame without a code is a failure while the turn ran; a code is
         // classified by `turn-failure` (the one place new codes are mapped).
-        const classified: TurnFailureClass =
-          code === null ? "failed" : classifyTurnFailure({ status: null, code, partial: turn.tokenCount > 0 });
-        const cls: TurnFailureClass = classified === "unknownOutcome" ? "failed" : classified;
+        const frame = parseObject(event.data);
+        const reason = typeof frame?.reason === "string" ? frame.reason : null;
+        const retryable = typeof frame?.retryable === "boolean" ? frame.retryable : null;
+        const cls: TurnFailureClass =
+          code === null ? "failed" : classifyTurnFailure({ status: null, code, partial: turn.tokenCount > 0, reason });
         const unconsumed = turn.tokenCount === 0 && isRefusal(cls);
         if (this.options.presentFailure) {
           // The host shows it, once the stream has ended (it may want a read).
@@ -1010,12 +1014,13 @@ export class AgentConversation {
             code,
             message,
             partial: turn.tokenCount > 0,
-            payload: parseObject(event.data),
-            retryable: typeof parseObject(event.data)?.retryable === "boolean" ? (parseObject(event.data)?.retryable as boolean) : null,
+            payload: frame,
+            retryable,
+            reason,
           };
           return true;
         }
-        this.presentDefaultStreamError(turn, unconsumed, cls, code, message);
+        this.presentDefaultStreamError(turn, unconsumed, cls, code, message, retryable, reason);
         return true;
       }
 
@@ -1429,6 +1434,7 @@ export class AgentConversation {
           failure.code ?? null,
           failure.message,
           failure.retryable ?? null,
+          failure.reason ?? null,
         );
       }
       if (failure.kind === "refused") result = { outcome: "refused", failure };
@@ -1491,6 +1497,7 @@ export class AgentConversation {
     code: string | null,
     message: string,
     retryable: boolean | null = null,
+    reason: string | null = null,
   ): void {
     const dispatch = this.dispatch;
     if (unconsumed && cls === "ended") {
@@ -1505,8 +1512,12 @@ export class AgentConversation {
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeNotice(turnFailureMessage("notStored", null, this.t, { retryable })),
+        message: makeNotice(turnFailureMessage("notStored", null, this.t, { retryable, reason })),
       });
+    } else if (cls === "unknownOutcome") {
+      // It may or may not have been stored: the message stays and the user decides.
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t)) });
     } else if (unconsumed) {
       // Refused before it ran — the streaming twin of a 409. Withdraw the
       // optimistic bubble and hand the draft (a secret included, masked)
@@ -1514,11 +1525,7 @@ export class AgentConversation {
       this.withdraw(turn.userMessageId);
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeNotice(
-          code === "awaiting_approval"
-            ? this.t("conversation.send.awaiting")
-            : this.t("conversation.send.notSent", { message }),
-        ),
+        message: makeNotice(turnFailureMessage("notAccepted", null, this.t, { code, message })),
       });
     } else if (turn.tokenCount === 0) {
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
@@ -1568,7 +1575,7 @@ export class AgentConversation {
     const body = errorBodyOf(err);
     const code = mappedCode(body.code);
     const reach: Reach | undefined = status === null || status === 0 ? this.reachOf(err, partial) : undefined;
-    let cls = classifyTurnFailure({ status, code, partial, reach });
+    let cls = classifyTurnFailure({ status, code, partial, reach, reason: body.reason });
     const build = (): TurnFailure => ({
       class: cls,
       kind: isRefusal(cls) ? "refused" : "failed",
@@ -1578,6 +1585,7 @@ export class AgentConversation {
       error: err,
       partial,
       retryable: body.retryable,
+      reason: body.reason,
     });
     const resultOf = (failure: TurnFailure): TurnResult => ({ outcome: isRefusal(failure.class) ? "refused" : "failed", failure });
     // A failure after New Conversation belongs to the turn the user abandoned.
@@ -1650,7 +1658,7 @@ export class AgentConversation {
       dispatch({ type: "FINISH_STREAMING" });
       dispatch({
         type: "ADD_MESSAGE",
-        message: makeNotice(turnFailureMessage("notStored", status, t, { retryable: body.retryable })),
+        message: makeNotice(turnFailureMessage("notStored", status, t, { retryable: body.retryable, reason: body.reason })),
       });
       return result;
     }
@@ -1661,7 +1669,10 @@ export class AgentConversation {
       // again, shorten, wait, ask the operator). The server's own text is an
       // operator instruction, not something to show an end user.
       this.withdraw(turnId);
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage(cls, status, t)) });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage(cls, status, t, { code: failure.code, message: failure.message })),
+      });
       if (readState?.conversationState) {
         dispatch({
           type: "SET_CONVERSATION_STATE",

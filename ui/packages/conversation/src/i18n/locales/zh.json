@@ -127,5 +127,8 @@
   "conversation.reply.revised": "最终回复与流式显示的预览不同。",
   "conversation.send.unknownOutcomeStale": "⚠️ 尚未收到回复。智能体可能仍在处理你的消息，或已经回答过了。重新发送之前请先查看对话。",
   "conversation.send.notStored": "⚠️ 智能体已执行这一轮，但回复未能保存。你的消息保留在上方。重新发送会再次执行这一轮。",
-  "conversation.send.notStoredTooLarge": "⚠️ 智能体已执行这一轮，但由于对话过大，回复未能保存。请开始新的对话以继续。"
+  "conversation.send.notStoredTooLarge": "⚠️ 智能体已执行这一轮，但对话已满，回复未能保存。你的消息保留在上方。请开始新的对话以继续。",
+  "conversation.send.notStoredRejected": "⚠️ 智能体已执行这一轮，但对话不接受其数据，回复未能保存。重新发送也无济于事。",
+  "conversation.send.notStoredConflict": "⚠️ 智能体已执行这一轮，但对话在此期间发生了变化，回复未能保存。请重新加载对话，然后再次发送你的消息。",
+  "conversation.send.conversationFull": "⚠️ 你的消息未发送——此对话已满。请开始新的对话以继续。"
 }

@@ -127,5 +127,8 @@
   "conversation.reply.revised": "La réponse finale diffère de l’aperçu affiché progressivement.",
   "conversation.send.unknownOutcomeStale": "⚠️ Aucune réponse n’est encore arrivée. L’agent travaille peut-être toujours sur votre message, ou y a déjà répondu. Regardez la conversation avant de le renvoyer.",
   "conversation.send.notStored": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée. Votre message reste affiché. Le renvoyer exécute le tour une nouvelle fois.",
-  "conversation.send.notStoredTooLarge": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée, car la conversation est trop volumineuse. Commencez une nouvelle conversation pour continuer."
+  "conversation.send.notStoredTooLarge": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée : la conversation est pleine. Votre message reste affiché. Commencez une nouvelle conversation pour continuer.",
+  "conversation.send.notStoredRejected": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée, car la conversation n’a pas accepté ses données. Renvoyer le message n’y changera rien.",
+  "conversation.send.notStoredConflict": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée, car la conversation a changé entre-temps. Rechargez la conversation, puis renvoyez votre message.",
+  "conversation.send.conversationFull": "⚠️ Votre message n’a pas été envoyé — cette conversation est pleine. Commencez une nouvelle conversation pour continuer."
 }

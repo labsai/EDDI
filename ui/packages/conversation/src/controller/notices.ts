@@ -32,7 +32,13 @@ export function turnFailureMessage(
   cls: TurnFailureClass,
   status: number | null,
   t: Translate,
-  detail: { code?: string | null; message?: string; retryable?: boolean | null; stale?: boolean } = {},
+  detail: {
+    code?: string | null;
+    message?: string;
+    retryable?: boolean | null;
+    reason?: string | null;
+    stale?: boolean;
+  } = {},
 ): string {
   switch (cls) {
     case "ended":
@@ -47,15 +53,27 @@ export function turnFailureMessage(
     case "empty":
       return t("conversation.send.empty");
     case "notStored":
-      // Too large (507), or the backend says a retry will not help: a new
-      // conversation is the way on. Otherwise sending again runs the turn again.
-      return detail.retryable === false || status === 507
-        ? t("conversation.send.notStoredTooLarge")
-        : t("conversation.send.notStored");
+      // By reason: too large (507) means a new conversation is the way on; rejected
+      // data, or a backend that says `retryable: false`, means sending again will
+      // not help; a conflict or lost lease means reload, then send again; anything
+      // else runs the turn again when sent again.
+      switch ((detail.reason ?? "").toLowerCase()) {
+        case "conversation_too_large":
+          return t("conversation.send.notStoredTooLarge");
+        case "data_rejected":
+          return t("conversation.send.notStoredRejected");
+        case "conflict":
+        case "fenced":
+          return t("conversation.send.notStoredConflict");
+      }
+      if (status === 507) return t("conversation.send.notStoredTooLarge");
+      return detail.retryable === false ? t("conversation.send.notStoredRejected") : t("conversation.send.notStored");
     case "notAccepted":
       break;
   }
   if (detail.code === "awaiting_approval") return t("conversation.send.awaiting");
+  // Refused at admission, before the turn ran: the conversation is full.
+  if (detail.code?.toLowerCase() === "conversation_too_large" || status === 507) return t("conversation.send.conversationFull");
   if (detail.code) return t("conversation.send.notSent", { message: detail.message ?? "" });
   switch (status) {
     case 401:

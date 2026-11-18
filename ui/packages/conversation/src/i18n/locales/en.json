@@ -127,5 +127,8 @@
   "conversation.reply.revised": "The final reply differs from the preview that streamed in.",
   "conversation.send.unknownOutcomeStale": "⚠️ No answer has arrived yet. The agent may still be working on your message, or may already have answered it. Look at the conversation before you send it again.",
   "conversation.send.notStored": "⚠️ The agent ran this turn, but its reply could not be saved. Your message stays above. Sending it again runs the turn again.",
-  "conversation.send.notStoredTooLarge": "⚠️ The agent ran this turn, but its reply could not be saved because the conversation is too large. Start a new conversation to continue."
+  "conversation.send.notStoredTooLarge": "⚠️ The agent ran this turn, but its reply could not be saved: the conversation is full. Your message stays above. Start a new conversation to continue.",
+  "conversation.send.notStoredRejected": "⚠️ The agent ran this turn, but its reply could not be saved because the conversation did not accept its data. Sending it again will not help.",
+  "conversation.send.notStoredConflict": "⚠️ The agent ran this turn, but its reply could not be saved because the conversation changed in the meantime. Reload the conversation, then send your message again.",
+  "conversation.send.conversationFull": "⚠️ Your message was not sent — this conversation is full. Start a new conversation to continue."
 }

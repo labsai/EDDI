@@ -54,7 +54,38 @@ export const STREAM_CODE_CLASSES: Readonly<Record<string, TurnFailureClass>> = {
   awaiting_approval: "paused",
   // The REST body spells it TURN_NOT_STORED; codes are compared lower-cased.
   turn_not_stored: "notStored",
+  // Refused at admission BEFORE the pipeline ran (507 CONVERSATION_TOO_LARGE): nothing ran.
+  conversation_too_large: "notAccepted",
 };
+
+/**
+ * What `turn_not_stored` means by its `reason`: the turn RAN and its result was
+ * not saved, except where the reason says otherwise.
+ *
+ * - `conversation_too_large` (507) and `data_rejected` (422): not saved, and sending
+ *   again cannot help.
+ * - `conflict` and `fenced` (409): the turn ran on a stale view or after losing its
+ *   lease; reload the conversation, then sending again is fine.
+ * - `conversation_ended` (410): the conversation is over.
+ * - `store_failure` and `outcome_unknown` (503): it may or may not have been
+ *   stored — the unknown-outcome class: the message stays and the user decides.
+ * - no reason: the generic "not saved". An unknown reason is the unknown-outcome
+ *   class, never a guess in either direction.
+ */
+export function classifyNotStored(reason: string | null | undefined): TurnFailureClass {
+  if (!reason) return "notStored";
+  switch (reason.toLowerCase()) {
+    case "conversation_too_large":
+    case "data_rejected":
+    case "conflict":
+    case "fenced":
+      return "notStored";
+    case "conversation_ended":
+      return "ended";
+    default: // store_failure, outcome_unknown, and any reason this client does not know
+      return "unknownOutcome";
+  }
+}
 
 /** The class a (stream or REST) code maps to in {@link STREAM_CODE_CLASSES}, or null. */
 export function mappedCode(code: string | null | undefined): string | null {
@@ -124,15 +155,18 @@ export interface FailureSignal {
   partial: boolean;
   /** For a failure without a status: could the request have reached the server? Default: maybe. */
   reach?: Reach;
+  /** The body's or frame's `reason` (for `turn_not_stored`). */
+  reason?: string | null;
 }
 
 /** Statuses after which the server may still have run (or may still be running) the turn. */
 const UNKNOWN_OUTCOME_STATUSES: ReadonlySet<number> = new Set([408, 502, 504]);
 
 /** The class of a turn that did not end with a reply. */
-export function classifyTurnFailure({ status, code, partial, reach }: FailureSignal): TurnFailureClass {
+export function classifyTurnFailure({ status, code, partial, reach, reason }: FailureSignal): TurnFailureClass {
   if (code !== null) {
     const mapped = STREAM_CODE_CLASSES[code.toLowerCase()];
+    if (mapped === "notStored") return classifyNotStored(reason);
     if (mapped) return mapped;
     // A refusal the backend sends before it runs the turn — but not once part of
     // the reply is on screen, then the turn did run.

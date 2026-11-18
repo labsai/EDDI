@@ -91,6 +91,12 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
 - **`turn_not_stored`** is its own class (stream code and REST `TURN_NOT_STORED` on 409/422/503/507): the message
   stays, the notice says the reply was not saved, and for 507 or `retryable:false` says to start a new conversation.
   HTTP error bodies (`code`, `retryable`, `reason`) are read for it.
+- **The backend's `turn_not_stored` contract** is mapped in one place (`turn-failure.ts`): 507 `TURN_NOT_STORED`
+  (`conversation_too_large`) and 422 (`data_rejected`) ran and were not saved, sending again cannot help; 409
+  (`conflict`, `fenced`) ran on a stale view, reload and send again; 410 (`conversation_ended`) is ENDED; 503
+  (`store_failure`, `outcome_unknown`, or a reason this client does not know) is outcome unknown, the message stays;
+  507 `CONVERSATION_TOO_LARGE` (and the stream code `conversation_too_large`) was refused before anything ran: draft
+  back, "this conversation is full". With none of these codes nothing changes. Four more `conversation.send.*` strings.
 - **Copy.** The unknown-outcome notice no longer promises anything absolute and has a variant for a key past its age.
   "Empty" is not shown for quick-reply-only, button, link, image or input-field turns; "revised" is neutral and not
   shown when the final text is the streamed text without its reasoning block.

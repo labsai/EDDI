@@ -127,5 +127,8 @@
   "conversation.reply.revised": "최종 답변이 스트리밍으로 표시된 미리보기와 다릅니다.",
   "conversation.send.unknownOutcomeStale": "⚠️ 아직 답변이 도착하지 않았습니다. 에이전트가 메시지를 계속 처리하고 있거나 이미 답했을 수 있습니다. 다시 보내기 전에 대화를 확인하세요.",
   "conversation.send.notStored": "⚠️ 에이전트가 이번 차례를 실행했지만 답변을 저장하지 못했습니다. 메시지는 위에 그대로 있습니다. 다시 보내면 차례가 다시 실행됩니다.",
-  "conversation.send.notStoredTooLarge": "⚠️ 에이전트가 이번 차례를 실행했지만 대화가 너무 커서 답변을 저장하지 못했습니다. 계속하려면 새 대화를 시작하세요."
+  "conversation.send.notStoredTooLarge": "⚠️ 에이전트가 이번 차례를 실행했지만 대화가 가득 차서 답변을 저장하지 못했습니다. 메시지는 위에 그대로 있습니다. 계속하려면 새 대화를 시작하세요.",
+  "conversation.send.notStoredRejected": "⚠️ 에이전트가 이번 차례를 실행했지만 대화가 데이터를 받아들이지 않아 답변을 저장하지 못했습니다. 다시 보내도 해결되지 않습니다.",
+  "conversation.send.notStoredConflict": "⚠️ 에이전트가 이번 차례를 실행했지만 그사이 대화가 바뀌어 답변을 저장하지 못했습니다. 대화를 다시 불러온 뒤 메시지를 다시 보내세요.",
+  "conversation.send.conversationFull": "⚠️ 메시지가 전송되지 않았습니다 — 이 대화는 가득 찼습니다. 계속하려면 새 대화를 시작하세요."
 }
