@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.shared.RetryConfiguration;
+import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ToolResponseLimits;
 import ai.labs.eddi.modules.llm.tools.PaginatedResponseStore;
@@ -33,6 +34,10 @@ import java.util.Map;
  * scrapes, full PDF dumps, or raw API responses). Truncation happens after the
  * tool executes but before the result is injected into the LLM context.
  * <p>
+ * It receives a result the tool-result guardrail has already screened in full,
+ * so the pages it stores and the text it hands a summarizer are governed text —
+ * see {@code ToolLoopRunner}.
+ * <p>
  * <strong>Strategies:</strong>
  * <ul>
  * <li>{@code headTail} — keep the start and the end, drop the middle, with a
@@ -43,8 +48,11 @@ import java.util.Map;
  * <li>{@code paginate} — split into pages, return first page + responseId for
  * fetch_tool_response_page</li>
  * <li>{@code summarize} — route through a cheap summarizer model, inheriting
- * the parent task's provider and API key. Falls back to truncate on
- * failure.</li>
+ * the parent task's provider and API key. Falls back to truncate on failure.
+ * The provider type is resolved through {@link GlobalVariableResolver}, as
+ * {@code LlmTask} resolves it; the parameters are passed as configured, where
+ * the model registry resolves {@code ${vars:...}} and vault references but a
+ * Qute expression stays unrendered.</li>
  * </ul>
  *
  * @author ginccc
@@ -58,7 +66,8 @@ public class ToolResponseTruncator {
             "Request more specific data or use pagination if available.]";
     private static final String PAGINATION_SUFFIX = "\n\n[PAGINATED: Response was %d characters. " +
             "This is page 1 of %d. Use fetch_tool_response_page(responseId=\"%s\", pageNumber=N) to retrieve more pages.]";
-    private static final String SUMMARY_HEADER = "[SUMMARY — original: %d chars, tool: %s]\n";
+    private static final String SUMMARY_PREFIX = "[SUMMARY — original: ";
+    private static final String SUMMARY_HEADER = SUMMARY_PREFIX + "%d chars, tool: %s]\n";
     private static final String HEAD_TAIL_MARKER = "\n\n[TRUNCATED: Response was %d characters, limit is %d. " +
             "The middle %d characters were omitted; the first %d and the last %d are shown. " +
             "Request more specific data or use pagination if available.]\n\n";
@@ -89,14 +98,26 @@ public class ToolResponseTruncator {
 
     private final MeterRegistry meterRegistry;
     private final ChatModelRegistry chatModelRegistry;
+    private final GlobalVariableResolver globalVariableResolver;
+    private final PaginatedResponseStore paginatedResponseStore;
 
     @Inject
-    PaginatedResponseStore paginatedResponseStore;
-
-    @Inject
-    public ToolResponseTruncator(MeterRegistry meterRegistry, ChatModelRegistry chatModelRegistry) {
+    public ToolResponseTruncator(MeterRegistry meterRegistry, ChatModelRegistry chatModelRegistry, GlobalVariableResolver globalVariableResolver,
+            PaginatedResponseStore paginatedResponseStore) {
         this.meterRegistry = meterRegistry;
         this.chatModelRegistry = chatModelRegistry;
+        this.globalVariableResolver = globalVariableResolver;
+        this.paginatedResponseStore = paginatedResponseStore;
+    }
+
+    /**
+     * Whether {@code text} is a summary this truncator wrote, as opposed to a
+     * result it passed through or cut. A summary is new text a model wrote, which
+     * is why {@code ToolLoopRunner} screens it again; a cut, including the one
+     * {@code summarize} falls back to, only removes text.
+     */
+    static boolean isSummary(String text) {
+        return text != null && text.startsWith(SUMMARY_PREFIX);
     }
 
     /**
@@ -113,8 +134,8 @@ public class ToolResponseTruncator {
      * @param limits
      *            the response limit configuration (may be null)
      * @param taskType
-     *            the parent task's LLM provider type (e.g., "openai"), used by
-     *            summarize strategy
+     *            the parent task's LLM provider type (e.g., "openai", or a
+     *            {@code ${vars:...}} reference to one), used by summarize strategy
      * @param taskParameters
      *            the parent task's parameters (includes apiKey, baseUrl, etc.),
      *            used by summarize strategy
@@ -201,7 +222,8 @@ public class ToolResponseTruncator {
     }
 
     /**
-     * Default truncation: hard cut with note about original length.
+     * Hard cut at {@code maxChars} with a note about the original length. The
+     * {@code truncate} strategy, and the fallback of every other strategy.
      */
     private String truncateResponse(String toolName, String result, int maxChars) {
         int originalLength = result.length();
@@ -245,15 +267,17 @@ public class ToolResponseTruncator {
     }
 
     /**
-     * Paginate: split into pages, store in PaginatedResponseStore, return first
-     * page with responseId.
-     * <p>
-     * Responses exceeding {@link #PAGINATE_MAX_STORABLE_CHARS} fall back to
-     * truncation to prevent excessive memory usage from materializing all page
-     * substrings in the Caffeine cache.
+     * Largest response the {@code paginate} strategy will store; anything longer
+     * falls back to truncation to prevent excessive memory usage from materializing
+     * all page substrings in the Caffeine cache.
      */
     static final int PAGINATE_MAX_STORABLE_CHARS = 500_000;
 
+    /**
+     * Paginate: split into pages, store in PaginatedResponseStore, return first
+     * page with responseId. Falls back to truncation without a conversation, above
+     * {@link #PAGINATE_MAX_STORABLE_CHARS}, or when the store is unavailable.
+     */
     private String paginateResponse(String conversationId, String toolName, String result, int maxChars) {
         int originalLength = result.length();
 
@@ -267,11 +291,6 @@ public class ToolResponseTruncator {
             LOGGER.warnf("Response too large for pagination (%d chars > %d ceiling), " +
                     "falling back to truncation for tool '%s'",
                     originalLength, PAGINATE_MAX_STORABLE_CHARS, sanitize(toolName));
-            return truncateResponse(toolName, result, maxChars);
-        }
-
-        if (paginatedResponseStore == null) {
-            LOGGER.warnf("PaginatedResponseStore not available, falling back to truncation for tool '%s'", sanitize(toolName));
             return truncateResponse(toolName, result, maxChars);
         }
 
@@ -303,8 +322,8 @@ public class ToolResponseTruncator {
      * <li>The spend check refuses the call (conversation cost ceiling, tenant
      * budget) → truncate; an admitted call is charged whatever happens next</li>
      * <li>Model creation or LLM call fails → truncate</li>
-     * <li>Summary is longer than {@code maxChars} → truncate</li>
      * <li>Summary is empty → truncate</li>
+     * <li>Summary plus its header is longer than {@code maxChars} → truncate</li>
      * </ol>
      */
     private String summarizeResponse(String toolName, String result, int maxChars,
@@ -319,9 +338,15 @@ public class ToolResponseTruncator {
             return truncateResponse(toolName, result, maxChars);
         }
 
+        // The task's type may be a ${vars:...} reference, as LlmTask allows; the
+        // registry can build no model for the unresolved string, and the summary
+        // then silently became a truncation. The parameters need no such step: the
+        // registry resolves variable and vault references in them itself.
+        String type = globalVariableResolver.resolveValue(taskType);
+
         // Guard 2: no parent task context (can't build model without provider + API
         // key)
-        if (taskType == null || taskType.isBlank() || taskParameters == null) {
+        if (type == null || type.isBlank() || taskParameters == null) {
             LOGGER.warnf("No task context available for summarization of tool '%s', falling back to truncation", sanitize(toolName));
             incrementCounter(toolName, "summarize_fallback");
             return truncateResponse(toolName, result, maxChars);
@@ -347,12 +372,12 @@ public class ToolResponseTruncator {
         try {
             // Build summarizer params: inherit parent task's params, override modelName
             // (every provider's model key — see ModelParameterKeys#withModel)
-            Map<String, String> summarizerParams = ModelParameterKeys.withModel(taskParameters, taskType, summarizerModel);
+            Map<String, String> summarizerParams = ModelParameterKeys.withModel(taskParameters, type, summarizerModel);
             // Strip responseFormat — summarizer must return plain text, not JSON
             summarizerParams.remove("responseFormat");
 
             // Use the parent task's provider type — inherits API key, baseUrl, etc.
-            ChatModel model = chatModelRegistry.getOrCreate(taskType, summarizerParams, access);
+            ChatModel model = chatModelRegistry.getOrCreate(type, summarizerParams, access);
 
             String systemPrompt = SUMMARIZER_SYSTEM_PROMPT.formatted(maxChars);
             List<ChatMessage> messages = List.of(

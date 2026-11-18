@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
 import ai.labs.eddi.secrets.SecretAccess;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -18,10 +19,11 @@ import org.jboss.logging.Logger;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.UnaryOperator;
 
 /**
@@ -43,7 +45,10 @@ import java.util.function.UnaryOperator;
  * </ol>
  * <p>
  * The summary is incremental and self-correcting: if a summarization call
- * fails, the next turn will catch up by summarizing a larger batch.
+ * fails, the boundary stays put and the next turn retries from it. Each update
+ * covers at most {@code maxTurnsPerUpdate} new turns and keeps the whole
+ * request within {@code maxCharsPerUpdate} characters, so a backlog is worked
+ * off over several turns.
  *
  * @author ginccc
  * @since 6.0.0
@@ -92,10 +97,17 @@ public class ConversationSummarizer {
     private static final int MIN_TURN_SHARE_DIVISOR = 4;
 
     private final SummarizationService summarizationService;
+    private final MeterRegistry meterRegistry;
 
     @Inject
-    public ConversationSummarizer(SummarizationService summarizationService) {
+    public ConversationSummarizer(SummarizationService summarizationService, MeterRegistry meterRegistry) {
         this.summarizationService = summarizationService;
+        this.meterRegistry = meterRegistry;
+    }
+
+    /** Without metrics — for tests that do not look at them. */
+    public ConversationSummarizer(SummarizationService summarizationService) {
+        this(summarizationService, null);
     }
 
     /**
@@ -154,16 +166,21 @@ public class ConversationSummarizer {
      *            summarizer (and through the summary every later system prompt)
      *            verbatim; null sends the stored text
      * @param admitCall
-     *            asked right before the summarizer is called — the conversation's
-     *            cost ceiling and the tenant budget; false skips the update (the
-     *            boundary stays, the turns keep reaching the model verbatim, and
-     *            the next turn tries again); null always admits
+     *            asked right before each summarizer call — the conversation's cost
+     *            ceiling and the tenant budget. Its argument is the token usage
+     *            this update has already spent and not yet reported: empty before
+     *            the first call, the first call's usage before a {@code retry_once}
+     *            call. The caller prices it into the check, since it is not in
+     *            {@code audit:cost} until the caller records the returned usage.
+     *            False skips the call (the boundary stays, the turns keep reaching
+     *            the model verbatim, and the next turn tries again); null always
+     *            admits
      * @return the token usage of the summarizer call (a {@code tokenUsage} map),
      *         empty when no call was made — the caller prices and records it
      */
     public Map<String, Object> updateIfNeeded(IConversationMemory memory, ConversationSummaryConfig config, String propertiesContext,
                                               Map<String, String> inheritedParameters, UnaryOperator<String> inputScreen,
-                                              BooleanSupplier admitCall) {
+                                              Predicate<Map<String, Object>> admitCall) {
         config.validate();
         int totalSteps = memory.getConversationOutputs().size();
         int recentWindow = config.getRecentWindowSteps();
@@ -245,12 +262,15 @@ public class ConversationSummarizer {
             return Map.of();
         }
 
+        // How many characters of the rendered turn were sent, or -1 when none was cut.
+        int sentRenderedChars = -1;
         if (newTurnsText.length() > turnBudget) {
             // A single turn larger than the whole budget: summarize its head.
             // The notice counts toward the budget too, so the input stays within it.
             String notice = "\n[... the rest of this turn was cut to fit the summarizer's input budget ...]";
             notice = notice.substring(0, Math.min(notice.length(), turnBudget));
-            newTurnsText = newTurnsText.substring(0, turnBudget - notice.length()) + notice;
+            sentRenderedChars = turnBudget - notice.length();
+            newTurnsText = newTurnsText.substring(0, sentRenderedChars) + notice;
         }
 
         // Build content to summarize: previous summary + new unsummarized turns
@@ -258,7 +278,7 @@ public class ConversationSummarizer {
                 ? composeContent(existingSummary, alreadySummarized, summarizeThroughStep, newTurnsText)
                 : newTurnsText;
 
-        if (admitCall != null && !admitCall.getAsBoolean()) {
+        if (admitCall != null && !admitCall.test(Map.of())) {
             LOGGER.warnf("[SUMMARY] Rolling summary update skipped for conversation='%s': the spend check refused the summarizer call. "
                     + "Will retry next turn.", sanitize(memory.getConversationId()));
             return Map.of();
@@ -268,24 +288,60 @@ public class ConversationSummarizer {
         String summary;
         Map<String, Object> usage;
         try {
-            var result = summarizationService.summarizeWithUsage(contentToSummarize, instructions, config.getLlmProvider(), config.getLlmModel(),
-                    inheritedParameters, SecretAccess.agent(memory.getAgentId()));
-            summary = result.summary() != null ? result.summary() : "";
-            usage = tokenUsage(result.inputTokens(), result.outputTokens());
-            if (!usage.isEmpty()) {
-                // the metered map, so the summary is priced at its own model
-                usage = new LinkedHashMap<>(result.tokenUsage());
-                usage.putIfAbsent("totalTokens", result.inputTokens() + result.outputTokens());
-            }
+            var attempt = summarizeOnce(contentToSummarize, instructions, config, inheritedParameters, SecretAccess.agent(memory.getAgentId()));
+            summary = attempt.summary();
+            usage = attempt.usage();
         } catch (RuntimeException e) {
             // Logged by the service; a failed call is retried next turn, as before.
             LOGGER.warnf("[SUMMARY] Summarization failed for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
             return Map.of();
         }
 
-        if (summary.isEmpty()) {
+        if (summary.isEmpty() && !config.isCiteSources()) {
             LOGGER.warnf("[SUMMARY] Summarization returned empty for conversation='%s'. Will retry next turn.", sanitize(memory.getConversationId()));
             return usage;
+        }
+        // With citeSources an empty answer goes through the check like any other: it
+        // fails it ("the summary is empty"), so the configured policy applies — a
+        // retry_once makes its corrective call, and the outcome is counted.
+
+        if (config.isCiteSources()) {
+            // The check reads each turn as the summarizer saw it: screened, and — for a
+            // turn cut to fit the budget — only the part of it that was sent.
+            Map<Integer, String> stepTexts = stepTexts(outputs, alreadySummarized, summarizeThroughStep, sentRenderedChars);
+            String previous = hasSummary ? existingSummary : null;
+            var check = SummaryCitations.checkConversationSummary(summary, alreadySummarized, summarizeThroughStep, stepTexts, previous);
+            if (check.valid()) {
+                SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_PASSED);
+            } else {
+                var policy = SummaryCitations.OnValidationFailure.parse(config.getOnValidationFailure(), SummaryCitations.OnValidationFailure.keep);
+                LOGGER.warnf("[SUMMARY] Rolling summary for conversation='%s' (turns %d-%d) failed the citation check (%d problem(s)); "
+                        + "onValidationFailure=%s", sanitize(memory.getConversationId()), alreadySummarized, summarizeThroughStep - 1,
+                        check.problems().size(), policy);
+                // The problems quote the summary text: content, so DEBUG only.
+                LOGGER.debugf("[SUMMARY] Citation problems for conversation='%s': %s", sanitize(memory.getConversationId()),
+                        sanitize(check.describe()));
+                summary = switch (policy) {
+                    // An empty answer has nothing to keep: storing it would replace the
+                    // previous summary with nothing, so keep falls back instead.
+                    case keep -> {
+                        if (summary.isBlank()) {
+                            yield null;
+                        }
+                        SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_KEPT);
+                        yield summary;
+                    }
+                    case fallback_to_previous -> null;
+                    case retry_once -> retry(memory, contentToSummarize, instructions + SummaryCitations.retryFeedback(check), config,
+                            inheritedParameters, admitCall, usage, alreadySummarized, summarizeThroughStep, stepTexts, previous);
+                };
+                if (summary == null) {
+                    // The previous summary and its boundary stay: the turns past it keep
+                    // reaching the model verbatim, and the next turn tries again.
+                    SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_FALLBACK);
+                    return usage;
+                }
+            }
         }
 
         // Store as conversation properties (persisted with the memory, O(1) lookup)
@@ -296,6 +352,126 @@ public class ConversationSummarizer {
         LOGGER.infof("[SUMMARY] Updated rolling summary for conversation='%s': covers steps 1-%d, summary length=%d chars",
                 sanitize(memory.getConversationId()), summarizeThroughStep, summary.length());
         return usage;
+    }
+
+    /** One summarizer answer and what it cost. */
+    private record Attempt(String summary, Map<String, Object> usage) {
+    }
+
+    /**
+     * One summarizer call. The usage map is mutable (a retry adds into it) and
+     * empty when the provider reported no tokens.
+     */
+    private Attempt summarizeOnce(String content, String instructions, ConversationSummaryConfig config, Map<String, String> inheritedParameters,
+                                  SecretAccess access) {
+        var result = summarizationService.summarizeWithUsage(content, instructions, config.getLlmProvider(), config.getLlmModel(),
+                inheritedParameters, access);
+        String summary = result.summary() != null ? result.summary() : "";
+        Map<String, Object> usage = new LinkedHashMap<>();
+        if (!tokenUsage(result.inputTokens(), result.outputTokens()).isEmpty()) {
+            // the metered map, so the summary is priced at its own model
+            usage.putAll(result.tokenUsage());
+            usage.putIfAbsent("totalTokens", result.inputTokens() + result.outputTokens());
+        }
+        return new Attempt(summary, usage);
+    }
+
+    /**
+     * The {@code retry_once} policy: one more call over the same, already screened
+     * content, asked of the spend check first like the first call — with the first
+     * call's {@code usage} as the pending spend, since it is not recorded yet — and
+     * with the problems appended to the instructions. Its tokens are added to
+     * {@code usage}, so the caller prices and records both calls, once.
+     *
+     * @return the second summary when it passes the check; null when it fails,
+     *         comes back empty, throws, or the spend check refuses the call
+     */
+    private String retry(IConversationMemory memory, String content, String instructions, ConversationSummaryConfig config,
+                         Map<String, String> inheritedParameters, Predicate<Map<String, Object>> admitCall, Map<String, Object> usage,
+                         int fromStep, int toStep, Map<Integer, String> stepTexts, String previousSummary) {
+        if (admitCall != null && !admitCall.test(Collections.unmodifiableMap(usage))) {
+            LOGGER.warnf("[SUMMARY] Citation retry for conversation='%s' refused by the spend check; keeping the previous summary.",
+                    sanitize(memory.getConversationId()));
+            return null;
+        }
+        Attempt second;
+        try {
+            second = summarizeOnce(content, instructions, config, inheritedParameters, SecretAccess.agent(memory.getAgentId()));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("[SUMMARY] Citation retry failed for conversation='%s'; keeping the previous summary.",
+                    sanitize(memory.getConversationId()));
+            return null;
+        }
+        CascadingModelExecutor.mergeTokenUsage(usage, second.usage());
+        var check = SummaryCitations.checkConversationSummary(second.summary(), fromStep, toStep, stepTexts, previousSummary);
+        if (!check.valid()) {
+            LOGGER.warnf("[SUMMARY] Citation retry for conversation='%s' failed the check again (%d problem(s)); keeping the previous "
+                    + "summary.", sanitize(memory.getConversationId()), check.problems().size());
+            LOGGER.debugf("[SUMMARY] Citation retry problems for conversation='%s': %s", sanitize(memory.getConversationId()),
+                    sanitize(check.describe()));
+            return null;
+        }
+        SummaryCitations.count(meterRegistry, SummaryCitations.SOURCE_CONVERSATION, SummaryCitations.OUTCOME_RETRIED);
+        return second.summary();
+    }
+
+    /**
+     * The text of each turn in {@code [from, to)} as the summarizer saw it — the
+     * user input and the agent output, without the "Turn N" labels (they would back
+     * every step number trivially). {@code sentRenderedChars >= 0} is the length of
+     * the prefix of the batch's single turn, as {@link #renderTurns} renders it,
+     * that the summarizer was sent; only the user and agent text inside that prefix
+     * is kept. The labels and the cut notice take up part of the budget, so the
+     * text kept is shorter than the budget.
+     */
+    static Map<Integer, String> stepTexts(List<ConversationOutput> outputs, int from, int to, int sentRenderedChars) {
+        Map<Integer, String> texts = new LinkedHashMap<>();
+        if (outputs == null) {
+            return texts;
+        }
+        for (int i = Math.max(0, from); i < Math.min(to, outputs.size()); i++) {
+            var output = outputs.get(i);
+            if (output == null) {
+                continue;
+            }
+            var input = output.get("input", String.class);
+            var outputText = ConversationOutputUtils.extractOutputText(output);
+            String text = sentRenderedChars >= 0
+                    ? sentText(i, input, outputText, sentRenderedChars)
+                    : (input != null ? input : "") + "\n" + (outputText != null ? outputText : "");
+            texts.put(i, text);
+        }
+        return texts;
+    }
+
+    /**
+     * The user and agent text of step {@code step} that lies within the first
+     * {@code sentChars} characters of its rendering, joined as {@link #stepTexts}
+     * joins an uncut turn. Walks the layout of {@link #renderTurns}: label, text,
+     * newline, for the user line and then the agent line.
+     */
+    static String sentText(int step, String input, String outputText, int sentChars) {
+        int remaining = sentChars;
+        String sentInput = "";
+        if (input != null && !input.isBlank()) {
+            remaining -= userLabel(step).length();
+            sentInput = input.substring(0, Math.clamp(remaining, 0, input.length()));
+            remaining -= input.length() + 1;
+        }
+        String sentOutput = "";
+        if (outputText != null && !outputText.isEmpty()) {
+            remaining -= agentLabel(step).length();
+            sentOutput = outputText.substring(0, Math.clamp(remaining, 0, outputText.length()));
+        }
+        return sentInput + "\n" + sentOutput;
+    }
+
+    private static String userLabel(int step) {
+        return "Turn " + step + " — User: ";
+    }
+
+    private static String agentLabel(int step) {
+        return "Turn " + step + " — Agent: ";
     }
 
     private static Map<String, Object> tokenUsage(int inputTokens, int outputTokens) {
@@ -394,10 +570,10 @@ public class ConversationSummarizer {
             // Labelled by step, as the recall tool reads them: turn 0 is the opening
             // step, turn 1 the user's first message.
             if (input != null && !input.isBlank()) {
-                sb.append("Turn ").append(i).append(" — User: ").append(input).append('\n');
+                sb.append(userLabel(i)).append(input).append('\n');
             }
             if (outputText != null && !outputText.isEmpty()) {
-                sb.append("Turn ").append(i).append(" — Agent: ").append(outputText).append('\n');
+                sb.append(agentLabel(i)).append(outputText).append('\n');
             }
         }
 
@@ -407,9 +583,12 @@ public class ConversationSummarizer {
     /**
      * Build the summarization prompt, optionally with property exclusion context.
      */
-    private String buildPrompt(ConversationSummaryConfig config, String propertiesContext) {
+    String buildPrompt(ConversationSummaryConfig config, String propertiesContext) {
+        // With citeSources the citation rules go after any prompt, a custom one
+        // included: the check that follows rejects a summary without them.
+        String citations = config.isCiteSources() ? "\n\n" + SummaryCitations.CONVERSATION_CITATION_INSTRUCTIONS : "";
         if (config.getSummarizationPrompt() != null) {
-            return config.getSummarizationPrompt();
+            return config.getSummarizationPrompt() + citations;
         }
 
         String propertiesBlock = "";
@@ -417,6 +596,6 @@ public class ConversationSummarizer {
             propertiesBlock = String.format(PROPERTIES_EXCLUSION_BLOCK, propertiesContext);
         }
 
-        return String.format(DEFAULT_SUMMARIZATION_PROMPT, propertiesBlock, config.getMaxSummaryTokens());
+        return String.format(DEFAULT_SUMMARIZATION_PROMPT, propertiesBlock, config.getMaxSummaryTokens()) + citations;
     }
 }

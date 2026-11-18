@@ -133,7 +133,7 @@ public class CredentialReferenceResolver {
         try {
             resolved = secretResolver.resolveValue(expanded, access);
         } catch (SecretResolver.SecretNotGrantedException e) {
-            throw new ConnectionException(ConnectionException.Reason.SECRET_NOT_GRANTED,
+            throw new ConnectionException(reasonOf(e),
                     "The " + what + " for connection '" + connectionName + "': " + e.getMessage(), e);
         }
         if (resolved == null || resolved.isBlank()) {
@@ -212,8 +212,18 @@ public class CredentialReferenceResolver {
             secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(effective)), access,
                     "the " + what + " of connection '" + connectionName + "'");
         } catch (SecretResolver.SecretNotGrantedException e) {
-            throw new ConnectionException(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getMessage(), e);
+            throw new ConnectionException(reasonOf(e), e.getMessage(), e);
         }
+    }
+
+    /**
+     * A secret that does not exist is a configuration error (400), not a grant
+     * refusal (403): an administrator widening a grant cannot fix it.
+     */
+    private static ConnectionException.Reason reasonOf(SecretResolver.SecretNotGrantedException e) {
+        return e instanceof SecretResolver.SecretMissingException
+                ? ConnectionException.Reason.INVALID_CONFIGURATION
+                : ConnectionException.Reason.SECRET_NOT_GRANTED;
     }
 
     /**

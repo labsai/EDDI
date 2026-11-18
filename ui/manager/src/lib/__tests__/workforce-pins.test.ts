@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { clearWorkforcePins, pinsStorageKey, WORKFORCE_PINS_PREFIX } from "../workforce-pins";
+import { clearWorkforcePins, pinsStorageKey, WORKFORCE_PINS_PREFIX } from "@eddi/app-kit/lib/workforce-pins";
 
 describe("pinsStorageKey", () => {
   it("names the principal and the board", () => {

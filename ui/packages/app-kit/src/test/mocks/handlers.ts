@@ -1,0 +1,6434 @@
+import { http, HttpResponse } from "msw";
+import { clusterHandlers } from "./cluster-handlers";
+import { ratingHandlers } from "./rating-handlers";
+import { oversightHandlers } from "./oversight-handlers";
+import { alertHandlers } from "./alert-handlers";
+import { editableApprovalStatusFor, editableResumeFor } from "./hitl-review-handlers";
+import { teamHandoffHandlers } from "./team-handoff-handlers";
+import { modelPriceHandlers } from "./model-prices-handlers";
+import { spendControlHandlers } from "./spend-control-handlers";
+import { teamBudgetHandlers } from "./team-budget-handlers";
+import { userEventHandlers } from "./user-event-handlers";
+import { MOCK_SUITE, buildMockRuns, buildRunningRun } from "./agent-test-fixtures";
+import { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS } from "./catalog-fixtures";
+
+export { MOCK_CATALOG_AGENTS, MOCK_CATALOG_GROUPS };
+
+// Stateful, in its own module; re-exported so the OpenAPI contract test, which
+// discovers every handler array this module exports, checks it too.
+export { brandingHandlers, resetBrandingMockState } from "./branding-handlers";
+export { pushMockUserEvent, closeMockUserEventStreams } from "./user-event-handlers";
+
+const AGENTS_MOCK = [
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent1?version=3",
+    name: "Support Agent",
+    description: "24/7 customer support with order tracking, returns processing, and live-agent escalation",
+    createdOn: Date.now() - 12 * 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent2?version=2",
+    name: "FAQ Agent",
+    description: "Self-service knowledge base answering product, billing, and account questions",
+    createdOn: Date.now() - 14 * 86400000,
+    lastModifiedOn: Date.now() - 7200000,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "private"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent3?version=1",
+    name: "Appointment Scheduler",
+    description: "Books, reschedules, and cancels appointments with calendar integration and reminders",
+    createdOn: Date.now() - 10 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 86400000,
+    ownerId: "alice@example.com",
+    spaceId: "team:engineering",
+    visibility: "space"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent4?version=2",
+    name: "Invoice Analyst",
+    description: "Extracts line items from uploaded invoices, validates totals, and flags discrepancies",
+    createdOn: Date.now() - 8 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+    ownerId: "bob@example.com",
+    spaceId: "team:engineering",
+    visibility: "published"
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent5?version=1",
+    name: "Product Recommender",
+    description: "Suggests products based on browsing history, preferences, and real-time inventory",
+    createdOn: Date.now() - 6 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent6?version=1",
+    name: "Employee Onboarding Guide",
+    description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
+    createdOn: Date.now() - 5 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent7?version=1",
+    name: "Contract Review Assistant",
+    description: "Analyzes legal contracts using RAG, highlights key clauses, and flags risk areas",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 5 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.agent/agentstore/agents/agent8?version=1",
+    name: "IT Helpdesk Bot",
+    description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
+    createdOn: Date.now() - 2 * 86400000,
+    lastModifiedOn: Date.now() - 1800000,
+  },
+];
+
+const WORKFLOWS_MOCK = [
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2",
+    name: "Support Ticket Pipeline",
+    description: "Parser → intent rules → LLM response → output with escalation fallback",
+    createdOn: Date.now() - 12 * 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1",
+    name: "FAQ Lookup Flow",
+    description: "Dictionary matching → behavior rules → LLM answer → quick-reply output",
+    createdOn: Date.now() - 14 * 86400000,
+    lastModifiedOn: Date.now() - 7200000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1",
+    name: "Appointment Booking Pipeline",
+    description: "Slot extraction → calendar API → confirmation output with reminder scheduling",
+    createdOn: Date.now() - 10 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 86400000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf4?version=2",
+    name: "Invoice Processing Flow",
+    description: "Document parser → field extraction → validation rules → CRM API update",
+    createdOn: Date.now() - 8 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf5?version=1",
+    name: "Product Recommendation Engine",
+    description: "User context → RAG product catalog → LLM ranking → personalized output",
+    createdOn: Date.now() - 6 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 3600000,
+  },
+  {
+    resource: "eddi://ai.labs.workflow/workflowstore/workflows/wf6?version=1",
+    name: "Contract Analysis Pipeline",
+    description: "RAG legal corpus → clause extraction → risk scoring → structured report output",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 5 * 3600000,
+  },
+];
+
+/**
+ * Renames and pins (`PATCH /conversationstore/conversations/{id}`) layered over
+ * `CONVERSATIONS_MOCK`, so the fixture itself never changes; `src/test/setup.ts`
+ * clears them after every test.
+ */
+const CONVERSATION_PATCHES = new Map<string, Record<string, unknown>>();
+/** Marks a deleted conversation in `CONVERSATION_PATCHES`; never sent to the client. */
+const DELETED = "__deleted";
+
+export function resetConversationPatches(): void {
+  CONVERSATION_PATCHES.clear();
+}
+
+const CONVERSATIONS_MOCK = [
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv1",
+    name: "", description: "",
+    createdOn: Date.now() - 1800000,
+    lastModifiedOn: Date.now() - 300000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "READY",
+    viewState: "UNSEEN",
+    conversationStepSize: 8,
+    environment: "production",
+    agentName: "Support Agent",
+    // B2: the first user message as title, pinned by its owner.
+    title: "Where is order 1042?",
+    titleSource: "AUTO",
+    pinned: true,
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv2",
+    name: "", description: "",
+    createdOn: Date.now() - 86400000,
+    lastModifiedOn: Date.now() - 3600000,
+    agentId: "agent2", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 12,
+    environment: "production",
+    agentName: "FAQ Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv3",
+    name: "", description: "",
+    createdOn: Date.now() - 7200000,
+    lastModifiedOn: Date.now() - 600000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "IN_PROGRESS",
+    viewState: "UNSEEN",
+    conversationStepSize: 3,
+    environment: "production",
+    agentName: "Support Agent",
+    title: "Refund for a damaged parcel",
+    titleSource: "USER",
+    pinned: false,
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv4",
+    name: "", description: "",
+    createdOn: Date.now() - 2 * 86400000,
+    lastModifiedOn: Date.now() - 2 * 3600000,
+    agentId: "agent3", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 6,
+    environment: "production",
+    agentName: "Appointment Scheduler",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv5",
+    name: "", description: "",
+    createdOn: Date.now() - 3 * 86400000,
+    lastModifiedOn: Date.now() - 86400000,
+    agentId: "agent4", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 4,
+    environment: "production",
+    agentName: "Invoice Analyst",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv6",
+    name: "", description: "",
+    createdOn: Date.now() - 3600000,
+    lastModifiedOn: Date.now() - 900000,
+    agentId: "agent5", agentVersion: 1,
+    conversationState: "READY",
+    viewState: "UNSEEN",
+    conversationStepSize: 5,
+    environment: "production",
+    agentName: "Product Recommender",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv7",
+    name: "", description: "",
+    createdOn: Date.now() - 4 * 86400000,
+    lastModifiedOn: Date.now() - 3 * 86400000,
+    agentId: "agent6", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 14,
+    environment: "production",
+    agentName: "Employee Onboarding Guide",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv8",
+    name: "", description: "",
+    createdOn: Date.now() - 5400000,
+    lastModifiedOn: Date.now() - 120000,
+    agentId: "agent7", agentVersion: 1,
+    conversationState: "IN_PROGRESS",
+    viewState: "UNSEEN",
+    conversationStepSize: 2,
+    environment: "production",
+    agentName: "Contract Review Assistant",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv9",
+    name: "", description: "",
+    createdOn: Date.now() - 7 * 86400000,
+    lastModifiedOn: Date.now() - 6 * 86400000,
+    agentId: "agent8", agentVersion: 1,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 9,
+    environment: "production",
+    agentName: "IT Helpdesk Bot",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv10",
+    name: "", description: "",
+    createdOn: Date.now() - 10800000,
+    lastModifiedOn: Date.now() - 1200000,
+    agentId: "agent1", agentVersion: 3,
+    conversationState: "ERROR",
+    viewState: "UNSEEN",
+    conversationStepSize: 1,
+    environment: "test",
+    agentName: "Support Agent",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv11",
+    name: "", description: "",
+    createdOn: Date.now() - 2 * 3600000,
+    lastModifiedOn: Date.now() - 3600000,
+    agentId: "agent5", agentVersion: 1,
+    conversationState: "READY",
+    viewState: "SEEN",
+    conversationStepSize: 7,
+    environment: "test",
+    agentName: "Product Recommender",
+  },
+  {
+    resource: "eddi://ai.labs.conversation/conversationstore/conversations/conv12",
+    name: "", description: "",
+    createdOn: Date.now() - 5 * 86400000,
+    lastModifiedOn: Date.now() - 4 * 86400000,
+    agentId: "agent4", agentVersion: 2,
+    conversationState: "ENDED",
+    viewState: "SEEN",
+    conversationStepSize: 10,
+    environment: "production",
+    agentName: "Invoice Analyst",
+  },
+];
+
+// --- Enriched JSON Schemas (matching victools Draft 2020-12 output) ---
+/**
+ * Whether a `:id` wildcard has matched something that is not an id.
+ *
+ * These handlers are registered before the dedicated `/descriptors` and
+ * `/jsonSchema` routes, so `:id` swallows both unless they stand aside. Only
+ * `/descriptors` used to be checked, which meant every one of these ten stores
+ * answered `GET …/jsonSchema` with a CONFIG DOCUMENT — a ruleset, an apicall —
+ * where the app expects a JSON Schema. `RESOURCE_SCHEMAS` and the factory that
+ * serves it were unreachable for all of them, and use-json-schema.test.tsx
+ * asserted only `toBeDefined()`, so a ruleset satisfied it.
+ */
+function isNotAnId(pathname: string): boolean {
+  return pathname.endsWith("/descriptors") || pathname.endsWith("/jsonSchema");
+}
+
+/**
+ * Stores whose `/descriptors` route has a dedicated handler of its own.
+ *
+ * The generic handler stands aside for these. Registration order alone is not
+ * enough: `agentstore` and `workflowstore` happen to be declared above it and
+ * win anyway, but `groupstore` and `channelstore` are declared below and would
+ * be swallowed. `groupstore` was, silently, for as long as this list said only
+ * `channelstore`.
+ */
+const STORES_WITH_DEDICATED_DESCRIPTORS = ["channelstore", "groupstore", "connectionstore", "testsuitestore"];
+
+/**
+ * The extension each resource store stamps on its `eddi://` URIs — the backend's
+ * `IRest*Store.resourceBaseType`, mirrored in `RESOURCE_TYPES` (lib/api/resources.ts).
+ * Note `ai.labs.property` for property setters and the singular `ai.labs.snippet`.
+ * Inlined rather than imported: e2e/fixtures.ts loads this module under Node.
+ */
+const STORE_EXTENSIONS: Record<string, string> = {
+  rulestore: "ai.labs.rules",
+  apicallstore: "ai.labs.apicalls",
+  outputstore: "ai.labs.output",
+  dictionarystore: "ai.labs.dictionary",
+  llmstore: "ai.labs.llm",
+  propertysetterstore: "ai.labs.property",
+  mcpcallsstore: "ai.labs.mcpcalls",
+  ragstore: "ai.labs.rag",
+  snippetstore: "ai.labs.snippet",
+  parserstore: "ai.labs.parser",
+  testsuitestore: "ai.labs.testsuite",
+};
+
+/**
+ * A freshly created, empty config per store, in the backend model's own shape
+ * and with its Java field defaults — what `createResourceHandlers` answers for a
+ * config GET the store's dedicated handler lets through. It used to answer
+ * `{ type, config: {} }` for every store, a shape no store returns.
+ */
+const EMPTY_CONFIGS: Record<string, object> = {
+  // RuleSetConfiguration
+  rules: { appendActions: true, expressionsAsActions: false, behaviorGroups: [] },
+  // ApiCallsConfiguration
+  apicalls: { httpCalls: [] },
+  // OutputConfigurationSet
+  output: { outputSet: [] },
+  // DictionaryConfiguration
+  dictionary: { lang: "en", words: [], phrases: [], regExs: [] },
+  // LlmConfiguration (record)
+  llm: { tasks: [] },
+  // PropertySetterConfiguration
+  propertysetter: { setOnActions: [] },
+  // McpCallsConfiguration
+  mcpcalls: { transport: "http", timeoutMs: 30000, exposeResources: false, mcpCalls: [] },
+  // RagConfiguration
+  rag: {
+    embeddingProvider: "openai",
+    storeType: "in-memory",
+    chunkStrategy: "recursive",
+    chunkSize: 512,
+    chunkOverlap: 64,
+    maxResults: 5,
+    minScore: 0.6,
+    sources: [],
+  },
+  // ParserConfiguration
+  parser: { extensions: {}, config: {} },
+  // PromptSnippet
+  snippets: { name: "", category: "", description: "", content: "", tags: [], templateEnabled: true },
+};
+
+const RESOURCE_SCHEMAS: Record<string, object> = {
+  behavior: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "BehaviorConfiguration",
+    properties: {
+      appendActions: { type: "boolean", description: "Whether to append actions from behavior rules to existing actions" },
+      expressionsAsActions: { type: "boolean", description: "Whether to use expressions as actions" },
+      behaviorGroups: {
+        type: "array",
+        description: "Groups of behavior rules",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the behavior group" },
+            executionStrategy: { type: "string", description: "Execution strategy: currentStepOnly or allSteps" },
+            behaviorRules: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Rule name" },
+                  actions: { type: "array", items: { type: "string" }, description: "Actions to trigger" },
+                  conditions: { type: "array", items: { type: "object" }, description: "Conditions to evaluate" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  httpcalls: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "HttpCallsConfiguration",
+    properties: {
+      targetServerUrl: { type: "string", description: "Base URL of the target server" },
+      httpCalls: {
+        type: "array",
+        description: "List of HTTP call definitions",
+        items: {
+          type: "object",
+          properties: {
+            name: { type: "string", description: "Name of the HTTP call" },
+            description: { type: "string", description: "Description of what this call does" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this call" },
+            saveResponse: { type: "boolean", description: "Whether to save the response" },
+            responseObjectName: { type: "string", description: "Key to store response under" },
+            fireAndForget: { type: "boolean", description: "Whether to wait for response" },
+            request: {
+              type: "object",
+              properties: {
+                path: { type: "string", description: "URL path (supports Thymeleaf templates)" },
+                method: { type: "string", description: "HTTP method (GET, POST, PUT, DELETE, PATCH)" },
+                headers: { type: "object", additionalProperties: { type: "string" } },
+                contentType: { type: "string" },
+                body: { type: "string" },
+                queryParams: { type: "object", additionalProperties: { type: "string" } },
+              },
+            },
+            preRequest: { type: "object", properties: { propertyInstructions: { type: "array" } } },
+            postResponse: {
+              type: "object",
+              properties: {
+                propertyInstructions: { type: "array" },
+                outputBuildInstructions: { type: "array" },
+                qrBuildInstructions: { type: "array" },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  output: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "OutputConfigurationSet",
+    properties: {
+      lang: { type: "string", description: "Language code (e.g. en, de, fr)" },
+      outputSet: {
+        type: "array",
+        description: "List of output configurations",
+        items: {
+          type: "object",
+          properties: {
+            action: { type: "string", description: "Action that triggers this output" },
+            timesOccurred: { type: "integer", description: "Number of occurrences to match (0 = any)" },
+            outputs: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  valueAlternatives: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        type: { type: "string", description: "Output type: text, image, quickReply, button, etc." },
+                        text: { type: "string" },
+                        delay: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            quickReplies: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  value: { type: "string", description: "Display text" },
+                  expressions: { type: "string", description: "Expression to evaluate" },
+                  isDefault: { type: "boolean" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  dictionary: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RegularDictionaryConfiguration",
+    properties: {
+      lang: { type: "string", description: "Language code" },
+      words: {
+        type: "array",
+        description: "Word definitions",
+        items: {
+          type: "object",
+          description: "A word definition of the dictionary.",
+          properties: {
+            word: { type: "string", description: "A word of a natural language that you want the parser to recognize (e.g. hello)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning of this word (e.g. greeting(hello))" },
+            frequency: { type: "integer", description: "Word frequency weight" },
+          },
+        },
+      },
+      phrases: {
+        type: "array",
+        description: "Phrase definitions",
+        items: {
+          type: "object",
+          description: "A phrase definition of the dictionary.",
+          properties: {
+            phrase: { type: "string", description: "A phrase to recognize (e.g. good morning)." },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+      regExs: {
+        type: "array",
+        description: "Regular expression definitions",
+        items: {
+          type: "object",
+          description: "A RegEx definition of the dictionary.",
+          properties: {
+            regEx: { type: "string", description: "A regular expression pattern" },
+            expressions: { type: "string", description: "Prolog like expressions describing the meaning" },
+          },
+        },
+      },
+    },
+  },
+  langchain: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "LangChainConfiguration",
+    properties: {
+      tasks: {
+        type: "array",
+        description: "List of LangChain tasks",
+        items: {
+          type: "object",
+          properties: {
+            id: { type: "string", description: "Unique task identifier" },
+            type: { type: "string", description: "LLM provider: openai, anthropic, gemini, ollama, mistral, huggingface" },
+            description: { type: "string", description: "Task description" },
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this task" },
+            parameters: {
+              type: "object",
+              description: "Provider-specific parameters",
+              properties: {
+                systemMessage: { type: "string", description: "System prompt for the LLM" },
+                addToOutput: { type: "string", description: "Whether to add response to output" },
+                logSizeLimit: { type: "string", description: "Maximum conversation log entries" },
+              },
+              additionalProperties: { type: "string" },
+            },
+            tools: { type: "array", items: { type: "string" }, description: "URIs to HTTP calls configs used as tools" },
+            enableBuiltInTools: { type: "boolean", description: "Whether to enable built-in tools" },
+            enableHttpCallTools: { type: "boolean", description: "Auto-discover httpcall extensions from the workflow as tools (default: true)" },
+            builtInToolsWhitelist: { type: "array", items: { type: "string" }, description: "Whitelist of built-in tool names" },
+            conversationHistoryLimit: { type: "integer", description: "Max conversation history entries sent to LLM" },
+            maxBudgetPerConversation: { type: "number", description: "Maximum cost budget per conversation" },
+            enableCostTracking: { type: "boolean" },
+            enableToolCaching: { type: "boolean" },
+            enableRateLimiting: { type: "boolean" },
+            defaultRateLimit: { type: "integer", description: "Default rate limit per minute" },
+          },
+        },
+      },
+    },
+  },
+  propertysetter: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "PropertySetterConfiguration",
+    properties: {
+      setOnActions: {
+        type: "array",
+        description: "List of property setter definitions triggered by actions",
+        items: {
+          type: "object",
+          properties: {
+            actions: { type: "array", items: { type: "string" }, description: "Actions that trigger this setter" },
+            setProperties: {
+              type: "array",
+              items: {
+                type: "object",
+                properties: {
+                  name: { type: "string", description: "Property name" },
+                  valueString: { type: "string", description: "Value to set (supports Thymeleaf expressions)" },
+                  scope: { type: "string", description: "Scope: conversation, longTerm, or step" },
+                  fromObjectPath: { type: "string", description: "Path to read value from" },
+                  override: { type: "boolean", description: "Whether to override existing value" },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+  },
+  rag: {
+    $schema: "https://json-schema.org/draft/2020-12/schema",
+    type: "object",
+    title: "RagConfiguration",
+    description: "Knowledge Base configuration for RAG (Retrieval-Augmented Generation)",
+    properties: {
+      name: { type: "string", description: "Display name for this knowledge base" },
+      embeddingProvider: { type: "string", description: "Embedding model provider: openai, ollama, vertex, google, huggingface, jlama" },
+      embeddingParameters: { type: "object", additionalProperties: { type: "string" }, description: "Provider-specific parameters (model, apiKey, baseUrl)" },
+      storeType: { type: "string", description: "Vector store type: in-memory, pgvector, mongodb-atlas, qdrant" },
+      storeParameters: { type: "object", additionalProperties: { type: "string" }, description: "Store-specific connection parameters" },
+      isolationStrategy: { type: "string", description: "Tenant isolation: collection or metadata" },
+      chunkStrategy: { type: "string", description: "Chunking strategy: recursive, paragraph, sentence" },
+      chunkSize: { type: "integer", description: "Chunk size in characters (default: 512)" },
+      chunkOverlap: { type: "integer", description: "Chunk overlap in characters (default: 64)" },
+      maxResults: { type: "integer", description: "Default max results to return (top-K)" },
+      minScore: { type: "number", description: "Default minimum similarity score (0.0-1.0)" },
+    },
+  },
+};
+
+/**
+ * A finished DEBATE, reproducing the two things a real one does that the tidy
+ * `gconv1` fixture does not — both of which broke the board in a demo:
+ *
+ *  1. The judge answers in JSON, so the SYNTHESIS entry's body is a ```json
+ *     verdict rather than prose. The engine parses the same object into
+ *     `decision`; the raw text stays on the entry, and rendering it verbatim
+ *     printed a blob where the conclusion should be.
+ *  2. A member pastes something with no break opportunity in it. That is what
+ *     turned (1) into a layout failure: a flex column at `min-width: auto`
+ *     sizes to its widest unbreakable child, so one long line pushed the config
+ *     panel, the composer's Send button and every per-message action off-screen
+ *     — silently, because the shell clips rather than scrolls, so no
+ *     `scrollWidth` probe could see it.
+ *
+ * Requested by id, so `gconv1` keeps describing the ordinary case.
+ */
+const VERDICT_CONVERSATION_ID = "gconv-verdict";
+
+/** One token, no spaces, wider than any viewport this app supports. */
+const UNBREAKABLE_LINE = `https://example.test/trace/${"a1b2c3d4".repeat(240)}`;
+
+const VERDICT_REASONING =
+  "Both sides argued substantively and both left evidentiary gaps, so the verdict is a tie. " +
+  "PRO carried the modular-scalability point; CON carried the counterparty-credit point.";
+
+function verdictConversation() {
+  const now = Date.now();
+  const at = (agoMs: number) => new Date(now - agoMs).toISOString();
+  const entry = (over: Record<string, unknown>) => ({
+    speakerAgentId: "agent3",
+    speakerDisplayName: "Market Analyst",
+    phaseIndex: 0,
+    phaseName: "Opening Arguments",
+    type: "ARGUMENT",
+    errorReason: null,
+    targetAgentId: null,
+    ...over,
+  });
+
+  return {
+    id: VERDICT_CONVERSATION_ID,
+    groupId: "grp2",
+    userId: "manager-user",
+    state: "COMPLETED",
+    originalQuestion: "Which monetization pathway should we back?",
+    transcript: [
+      entry({
+        speakerAgentId: "user",
+        speakerDisplayName: "User",
+        content: "Which monetization pathway should we back?",
+        phaseIndex: -1,
+        phaseName: null,
+        type: "QUESTION",
+        timestamp: at(600_000),
+      }),
+      entry({
+        content: `## My Proposition\n\nI traced the pipeline run here:\n\n\`\`\`\n${UNBREAKABLE_LINE}\n\`\`\`\n\n---\n\n## Argument 1\n\nThe numbers hold.`,
+        timestamp: at(480_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        // The same token OUTSIDE a fence. A code block brings its own
+        // horizontal scroller; bare prose has nothing but `break-words`,
+        // so this is the case that stretches the card itself — and the
+        // one the viewport probe alone cannot see, because everything in
+        // the transcript sits inside its vertical scroll box.
+        content: `Mine is at ${UNBREAKABLE_LINE} — same conclusion.`,
+        timestamp: at(300_000),
+      }),
+      entry({
+        speakerAgentId: "agent4",
+        speakerDisplayName: "Growth Strategist",
+        phaseIndex: 1,
+        phaseName: "Judgment",
+        type: "SYNTHESIS",
+        content: `\`\`\`json\n{\n  "winner": "TIE",\n  "scores": {"PRO": 7, "CON": 7},\n  "reasoning": ${JSON.stringify(VERDICT_REASONING)}\n}\n\`\`\``,
+        timestamp: at(120_000),
+      }),
+    ],
+    memberConversationIds: {},
+    currentPhaseIndex: 1,
+    currentPhaseName: "Judgment",
+    // Empty on purpose: with no conversation-level synthesis, the SYNTHESIS
+    // entry is the only thing carrying the conclusion, so a surface that cannot
+    // read the verdict has nothing else to fall back on.
+    synthesizedAnswer: "",
+    decision: {
+      type: "VERDICT",
+      outcome: "Tie (PRO 7, CON 7)",
+      winner: null,
+      tally: { PRO: 7, CON: 7 },
+      dissents: [],
+      method: "debate-judgment",
+      decidedAtPhase: "Judgment",
+      raw: null,
+    },
+    depth: 0,
+    taskList: null,
+    dynamicMembers: [],
+    createdAgentIds: [],
+    retainedAgentIds: [],
+    availableActions: [],
+    created: at(600_000),
+    lastModified: at(120_000),
+  };
+}
+
+/**
+ * A deployment that records ownership but does not enforce it — the backend's
+ * own default, and therefore this suite's.
+ */
+const WORKSPACES_DISABLED = {
+  enabled: false,
+  // `principal` and `defaultSpace` are deliberately ABSENT rather than null.
+  // EDDI's REST mapper serialises with NON_NULL, so that is the shape the real
+  // endpoint sends for an anonymous caller — and a mock that sent explicit
+  // nulls would let a `=== null` check pass here and fail in production.
+  spaces: [] as { id: string; kind: string; label: string }[],
+  seesEverything: true,
+};
+
+/** Where an E2E spec plants the workspace context it wants. */
+export const WORKSPACE_SEED_KEY = "eddi-e2e-workspaces";
+
+/** Where an E2E spec plants the update-check switch it wants (default: on). */
+export const UPDATE_CHECK_SEED_KEY = "eddi-e2e-update-check";
+
+/** Where an E2E spec plants the sharing state of one resource, keyed by id. */
+export const SHARE_SEED_KEY = "eddi-e2e-shares";
+
+/** Where an E2E spec plants the signed-in user's notifications. */
+export const NOTIFICATION_SEED_KEY = "eddi-e2e-notifications";
+
+/**
+ * A chat message containing this makes the mocked turn fail the way a rejected
+ * LLM call does: `conversationState: ERROR`, no reply, and the reason under
+ * `taskErrors` — on the plain and the streaming path.
+ */
+export const TASK_FAILURE_TRIGGER = "trigger a task failure";
+
+/**
+ * A chat message containing this gets a streamed reply with display math and a
+ * fenced code block, so the feature matrix can see the one markdown renderer's
+ * KaTeX and highlight.js at work.
+ */
+export const RICH_MARKDOWN_TRIGGER = "show me rich markdown";
+
+/** The reply to {@link RICH_MARKDOWN_TRIGGER}. */
+export const MOCK_RICH_MARKDOWN = "Euler: $$e^{i\\pi} + 1 = 0$$\n\n```js\nconst answer = 42;\n```";
+
+/**
+ * A chat message containing this gets a streamed reply with an `image` output
+ * item (the agent designer's, not the model's), so the feature matrix can see
+ * designer images rendered. Same-origin, so the image is the app's own icon.
+ */
+export const IMAGE_OUTPUT_TRIGGER = "show me an image";
+
+/** The image item of the reply to {@link IMAGE_OUTPUT_TRIGGER}. */
+export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "EDDI logo" };
+
+/** The reason the mocked failed turn reports. */
+export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
+
+/** What the mocked ingestion status says for a `replace=true` ingestion. */
+export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
+
+function readSeed<T>(key: string): T | null {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? (JSON.parse(raw) as T) : null;
+  } catch {
+    // No localStorage (the node tier), or malformed JSON someone hand-edited.
+    // Falling back to the default is right either way: a seed that cannot be
+    // read must not silently become a *different* seed.
+    return null;
+  }
+}
+
+function readWorkspaceSeed() {
+  return readSeed<typeof WORKSPACES_DISABLED>(WORKSPACE_SEED_KEY);
+}
+
+/** The shape `SpaceTenants.tenantFor` produces; the hash is fixed here. */
+function tenantOf(request: Request): string {
+  const space = new URL(request.url).searchParams.get("space") ?? "";
+  return space.startsWith("team:") ? "t.engineering.1a2b3c4d" : "u.alice.5e6f7a8b";
+}
+
+function workspaceSettings(defaultSpace: string | null, legacyVisibility: string | null) {
+  return {
+    enforcing: readWorkspaceSeed()?.enabled === true,
+    groupsClaim: "groups",
+    defaultSpace: {
+      value: defaultSpace,
+      source: defaultSpace ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.default-space",
+    },
+    legacyVisibility: {
+      value: legacyVisibility ?? "shared",
+      source: legacyVisibility ? "STORED" : "DEFAULT",
+      property: "eddi.workspaces.legacy-visibility",
+    },
+    updatedAt: null,
+    updatedBy: null,
+    warnings: [],
+  };
+}
+
+/**
+ * What the space-store mock holds, per tenant and kind, for the page's lifetime.
+ * In memory on purpose: it holds secret metadata, and nothing that describes a
+ * secret belongs in localStorage, mock or not.
+ */
+const spaceStore = new Map<string, Map<string, unknown>>();
+
+function readSpaceStore(request: Request, kind: "secrets" | "variables"): unknown[] {
+  return [...(spaceStore.get(`${tenantOf(request)}/${kind}`)?.values() ?? [])];
+}
+
+function writeSpaceStore(request: Request, kind: "secrets" | "variables", key: string, value: unknown | null) {
+  const bucketKey = `${tenantOf(request)}/${kind}`;
+  const bucket = spaceStore.get(bucketKey) ?? new Map<string, unknown>();
+  if (value === null) bucket.delete(key);
+  else bucket.set(key, value);
+  spaceStore.set(bucketKey, bucket);
+}
+
+type SeededNotification = { id: string; readAt?: string | null } & Record<string, unknown>;
+
+function readNotificationSeed(): SeededNotification[] {
+  return readSeed<SeededNotification[]>(NOTIFICATION_SEED_KEY) ?? [];
+}
+
+function writeNotificationSeed(value: SeededNotification[]) {
+  try {
+    localStorage.setItem(NOTIFICATION_SEED_KEY, JSON.stringify(value));
+  } catch {
+    // No localStorage (the node tier): nothing to remember.
+  }
+}
+
+function readShareSeed(id: string) {
+  const all = readSeed<Record<string, unknown>>(SHARE_SEED_KEY);
+  return all?.[id] ?? null;
+}
+
+/**
+ * What each fixture agent grants the signed-in user once enforcement is on.
+ *
+ * agent1/agent2 are alice's own; agent3 is shared with her team for chatting
+ * only; agent4 is bob's, published, so readable but not hers to delete.
+ */
+const CALLER_LEVELS: Record<string, string> = {
+  agent1: "OWN",
+  agent2: "OWN",
+  agent3: "USE",
+  agent4: "VIEW",
+};
+
+function withCallerLevel<T extends { resource: string }>(agent: T): T & { callerLevel?: string } {
+  const id = /agents\/([^?]+)/.exec(agent.resource)?.[1];
+  const level = id ? CALLER_LEVELS[id] : undefined;
+  return level ? { ...agent, callerLevel: level } : agent;
+}
+
+function stripCallerLevel<T extends object>(agent: T): T {
+  const rest = { ...(agent as T & { callerLevel?: string }) };
+  delete rest.callerLevel;
+  return rest as T;
+}
+
+function defaultShareInfo(id: string) {
+  return {
+    resourceId: id,
+    ownerId: "alice@example.com",
+    spaceId: "user:alice@example.com",
+    visibility: "space",
+    // Empty rather than absent: an empty list is not null, so NON_NULL keeps it.
+    grants: [],
+    // The SHARING endpoint's own level, which is a different field from the one
+    // on a listed descriptor: `describe()` refuses below VIEW, so this is always
+    // present and always at least VIEW. It is what gates the dialog's controls.
+    callerLevel: "OWN",
+  };
+}
+
+/**
+ * The next "0 9 * * MON-FRI" fire in UTC, so the Schedules fixture agrees with
+ * its own cron expression (it used to be `now + 12h`, which on a Sunday evening
+ * showed a weekday-only job firing in the small hours).
+ */
+function nextWeekday9amUtc(from: number = Date.now()): number {
+  const d = new Date(from);
+  let t = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), 9, 0, 0);
+  while (t <= from || [0, 6].includes(new Date(t).getUTCDay())) t += 86_400_000;
+  return t;
+}
+
+export const handlers = [
+  // The server-side update-check switch: on by default, like the real backend.
+  http.get("*/administration/update-check", () =>
+    HttpResponse.json(
+      readSeed<{ enabled: boolean; lockedByConfig: boolean; uiEnabled: boolean }>(UPDATE_CHECK_SEED_KEY) ?? {
+        enabled: true,
+        lockedByConfig: false,
+        uiEnabled: true,
+      },
+    ),
+  ),
+  http.put("*/administration/update-check", async ({ request }) => {
+    const { enabled } = (await request.json()) as { enabled: boolean };
+    return HttpResponse.json({ enabled, lockedByConfig: false, uiEnabled: enabled });
+  }),
+
+  // Conversation ratings: /ratings (maintainers) and /agents/{id}/rating (owner).
+  ...ratingHandlers,
+  // HITL oversight: /hitl/analytics, /hitl/samples, /hitl/autonomy.
+  ...oversightHandlers,
+  // Alerts: /alerts/rules and /alerts/events (the inbox).
+  ...alertHandlers,
+  // Model price catalog: /administration/model-prices (+ resolve, reference, unpriced).
+  ...modelPriceHandlers,
+  // Spend-control changes waiting for an admin: /administration/spend-control-changes.
+  ...spendControlHandlers,
+  // Per-team monthly budgets: /groupstore/groups/{id}/budget* and /administration/team-budgets*.
+  ...teamBudgetHandlers,
+  // The per-user event stream: GET /me/events (ready, then whatever pushMockUserEvent sends).
+  ...userEventHandlers,
+
+  // Workspace context. Disabled by default, matching the backend's own default
+  // and today's behaviour — no existing test should suddenly grow a sharing UI
+  // it never asked for.
+  //
+  // Unit tests override this with `server.use()`. The E2E tier cannot: MSW
+  // answers from a service worker there, so `page.route` never sees the request
+  // (workforce.spec.ts documents that trap at length). So this one handler also
+  // reads a seed from localStorage, which a spec plants with
+  // `page.addInitScript` before the app boots. Confined to the mock layer on
+  // purpose — the application code has no idea this exists.
+  http.get("*/workspaces", () => HttpResponse.json(readWorkspaceSeed() ?? WORKSPACES_DISABLED)),
+
+  // The sharing family, keyed by resource id. Answers for an unshared,
+  // caller-owned resource; a spec that needs grants or a non-owner view seeds
+  // them the same way as above.
+  http.get("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json(readShareSeed(String(params.id)) ?? defaultShareInfo(String(params.id)))
+  ),
+  http.post("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.delete("*/descriptorstore/descriptors/:id/shares", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.put("*/descriptorstore/descriptors/:id/shares/visibility", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  http.put("*/descriptorstore/descriptors/:id/shares/space", ({ params }) =>
+    HttpResponse.json({ updated: [{ id: String(params.id), name: "Support Agent" }], skipped: [] })
+  ),
+  // The real endpoint answers the same for an id that matches nothing, so
+  // this one does too.
+  http.post("*/descriptorstore/descriptors/:id/shares/requests", () => HttpResponse.json({ outcome: "SENT" })),
+
+  // Notifications. Empty unless a spec seeds some; marking read is remembered
+  // for the page's lifetime so the badge behaves.
+  http.get("*/workspaces/notifications/count", () =>
+    HttpResponse.json({ unread: readNotificationSeed().filter((n) => !n.readAt).length })
+  ),
+  http.get("*/workspaces/notifications", () => HttpResponse.json(readNotificationSeed())),
+  http.post("*/workspaces/notifications/read", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { ids?: string[] };
+    const all = readNotificationSeed();
+    const now = new Date().toISOString();
+    let marked = 0;
+    const next = all.map((n) => {
+      if (n.readAt || (body.ids && !body.ids.includes(n.id))) return n;
+      marked += 1;
+      return { ...n, readAt: now };
+    });
+    writeNotificationSeed(next);
+    return HttpResponse.json({ marked });
+  }),
+
+  // The user directory behind the share box's suggestions.
+  http.get("*/workspaces/directory", ({ request }) => {
+    const q = (new URL(request.url).searchParams.get("q") ?? "").toLowerCase();
+    const people = [
+      { subject: "user:bob", kind: "user", label: "Bob Builder", detail: "bob@example.com" },
+      { subject: "user:carol", kind: "user", label: "Carol Test", detail: "carol@example.com" },
+      { subject: "team:engineering", kind: "team", label: "engineering", detail: null },
+    ];
+    return HttpResponse.json(q ? people.filter((p) => `${p.label} ${p.detail ?? ""}`.toLowerCase().includes(q)) : people);
+  }),
+
+  // Runtime workspace settings (administrators).
+  http.get("*/workspaces/settings", () => HttpResponse.json(workspaceSettings(null, null))),
+  http.put("*/workspaces/settings", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      defaultSpace?: string | null;
+      legacyVisibility?: string | null;
+    };
+    return HttpResponse.json(workspaceSettings(body.defaultSpace ?? null, body.legacyVisibility ?? null));
+  }),
+
+  // A space's own secrets and variables.
+  http.get("*/spacestore/tenant", ({ request }) =>
+    HttpResponse.json({ space: new URL(request.url).searchParams.get("space") ?? "", tenant: tenantOf(request) })
+  ),
+  // Stored per tenant for the page's lifetime, so a saved entry shows up in
+  // the list the page re-reads. Values are never returned, as on the server.
+  http.get("*/spacestore/secrets", ({ request }) => HttpResponse.json(readSpaceStore(request, "secrets"))),
+  http.put("*/spacestore/secrets/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+      allowedHosts?: string[];
+    };
+    const key = String(params.key);
+    const existing = (readSpaceStore(request, "secrets") as { keyName: string; allowedAgents?: string[]; allowedHosts?: string[]; createdAt?: string }[])
+      .find((s) => s.keyName === key);
+    // Both lists are required on a create under grant-enforcement=enforce (the
+    // shipped default); `["*"]` is the explicit "every agent" / "any host". A
+    // rotation may omit either and keeps the stored one.
+    if (!existing && (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0)) {
+      return HttpResponse.json({ error: "allowedAgents is required on create" }, { status: 400 });
+    }
+    if (!existing && (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0)) {
+      return HttpResponse.json({ error: "allowedHosts is required on create" }, { status: 400 });
+    }
+    const anyHost = body.allowedHosts?.length === 1 && body.allowedHosts[0] === "*";
+    const secret = {
+      keyName: key,
+      reference: `\${vault:${tenantOf(request)}/${key}}`,
+      description: body.description ?? null,
+      allowedAgents: body.allowedAgents ? [...body.allowedAgents] : (existing?.allowedAgents ?? ["*"]),
+      allowedHosts: body.allowedHosts ? (anyHost ? [] : [...body.allowedHosts]) : (existing?.allowedHosts ?? []),
+      createdAt: existing?.createdAt ?? new Date().toISOString(),
+    };
+    writeSpaceStore(request, "secrets", key, secret);
+    return HttpResponse.json(secret);
+  }),
+  http.delete("*/spacestore/secrets/:key", ({ params, request }) => {
+    writeSpaceStore(request, "secrets", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+  http.get("*/spacestore/variables", ({ request }) => HttpResponse.json(readSpaceStore(request, "variables"))),
+  http.put("*/spacestore/variables/:key", async ({ params, request }) => {
+    const body = (await request.json().catch(() => ({}))) as { value?: string; description?: string };
+    const key = String(params.key);
+    const variable = {
+      key,
+      value: body.value ?? "",
+      description: body.description ?? null,
+      reference: `\${vars:${tenantOf(request)}/${key}}`,
+    };
+    writeSpaceStore(request, "variables", key, variable);
+    return HttpResponse.json(variable);
+  }),
+  http.delete("*/spacestore/variables/:key", ({ params, request }) => {
+    writeSpaceStore(request, "variables", String(params.key), null);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // What a chat window shows about an agent, and how much it is used.
+  http.get("*/agents/:agentId/profile", ({ params }) => {
+    // A listed agent answers with its catalog appearance and controls (B4);
+    // any other with none set: no appearance, the default controls.
+    const listed = MOCK_CATALOG_AGENTS.find((a) => a.agentId === String(params.agentId));
+    return HttpResponse.json({
+      agentId: String(params.agentId),
+      name: listed?.name ?? null,
+      description: listed?.description ?? null,
+      reviewNotice: null,
+      appearance: listed?.appearance ?? null,
+      conversationControls: listed?.conversationControls ?? {
+        undo: true, redo: true, attachments: true, rating: true, quickReplies: true, streaming: true, rawHtml: false,
+      },
+    });
+  }),
+  http.get("*/agents/:agentId/usage", () => HttpResponse.json({ total: 0, active: 0, distinctUsers: 0 })),
+
+  // The end-user catalog (IRestCatalog) — what Workforce reads for an eddi-user.
+  http.get("*/catalog/agents", () => HttpResponse.json(MOCK_CATALOG_AGENTS)),
+  http.get("*/catalog/groups", () => HttpResponse.json(MOCK_CATALOG_GROUPS)),
+
+  // Template preview — resolves Qute templates for the LLM editor preview
+  http.post("*/administration/preview/template", async ({ request }) => {
+    const body = (await request.json()) as { template?: string; conversationId?: string };
+    const template = body.template ?? "";
+    // Sample data matching what the real backend provides
+    const sampleData: Record<string, unknown> = {
+      "properties.userName": "Alice",
+      "properties.language": "en",
+      "properties.email": "alice@example.com",
+      "memory.current.input": "What is my order status?",
+      "memory.current.actions": "check_order, respond",
+      "memory.last.input": "Hello",
+      "memory.last.output": "Welcome! How can I help you today?",
+      "context.output": "Previous context value",
+      "snippets.tone": "Be professional and concise.",
+      "snippets.safety": "Do not reveal internal system details.",
+      "userInfo.userId": "user-12345",
+      "conversationInfo.conversationId": body.conversationId ?? "conv-67890",
+      "conversationInfo.agentId": "agent-abc",
+      "conversationInfo.agentVersion": "1",
+      "input": "What is my order status?",
+    };
+    // Simple template resolution: replace {key} with values
+    let resolved = template;
+    for (const [key, val] of Object.entries(sampleData)) {
+      resolved = resolved.split(`{${key}}`).join(String(val));
+    }
+    // Strip {#if ...} ... {/if} and {#for ...} ... {/for} blocks (just show inner content)
+    resolved = resolved.replace(/\{#if[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/if\}\n?/g, "");
+    resolved = resolved.replace(/\{#for[^}]*\}\n?/g, "");
+    resolved = resolved.replace(/\{\/for\}\n?/g, "");
+    resolved = resolved.replace(/\{#else\}\n?/g, "");
+    return HttpResponse.json({
+      resolved,
+      availableVariables: Object.keys(sampleData),
+      variableValues: sampleData,
+      error: null,
+    });
+  }),
+
+  // Descriptor PATCH — used by create-workflow/create-agent to set name/description
+  http.patch("*/descriptorstore/descriptors/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Single descriptor GET — how a screen resolves the NAME behind a resource
+  // reference it holds only as an eddi:// URI (e.g. a parser's linked
+  // dictionaries). Echoes the id so a test can tell which one it asked for.
+  http.get("*/descriptorstore/descriptors/:id", ({ params, request }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? 1);
+    // A known agent or workflow answers with its own fixture at the asked
+    // version — this is how version lists are read now (one descriptor read
+    // per version), so detail pages keep showing the fixture's real name.
+    const known = [...AGENTS_MOCK, ...WORKFLOWS_MOCK].find((d) =>
+      d.resource.includes(`/${String(params.id)}?`),
+    );
+    if (known) {
+      return HttpResponse.json({
+        ...known,
+        resource: known.resource.replace(/version=\d+/, `version=${version}`),
+      });
+    }
+    return HttpResponse.json({
+      resource: `eddi://ai.labs.mock/descriptorstore/descriptors/${params.id}?version=${version}`,
+      name: `Mock descriptor ${params.id}`,
+      description: "Mock document descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - 3600000,
+      deleted: false,
+    });
+  }),
+
+
+  // Agent descriptors
+  // Honours `filter`, `limit` and `index`, because the backend does.
+  //
+  // It used to return all eight agents whatever was asked of it, which made the
+  // Agents page's search unverifiable: disconnecting the query entirely
+  // (`useInfiniteAgentDescriptors("")`) left all 28 tests in `agents.test.tsx`
+  // green, because no possible assertion could tell filtered from unfiltered.
+  // Checked against a live EDDI 6.3.0: `filter=zzzznomatch` returns 0 of 17.
+  http.get("*/agentstore/agents/descriptors", ({ request }) => {
+    const url = new URL(request.url);
+    const filter = (url.searchParams.get("filter") ?? "").toLowerCase();
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const index = Number(url.searchParams.get("index") ?? "0");
+
+    // Matches the resource URI as well as name and description, because the
+    // backend does — `getAgentDescriptorsWithVersions` looks an agent up with
+    // `filter=${agentId}`, and a mock that only searched the display fields
+    // returned nothing for it, breaking every detail-page test. Verified
+    // against a live EDDI 6.3.0: `filter=<agent id>` returns exactly that one.
+    const matched = filter
+      ? AGENTS_MOCK.filter(
+          (a) =>
+            a.name.toLowerCase().includes(filter) ||
+            a.description.toLowerCase().includes(filter) ||
+            a.resource.toLowerCase().includes(filter),
+        )
+      : AGENTS_MOCK;
+
+    // `?space=` narrows in the query on the backend, so it has to narrow here
+    // too. A mock that accepted the parameter and ignored it would let the
+    // space switcher pass its own E2E test while doing nothing — which is
+    // exactly the bug this feature already shipped once.
+    const space = url.searchParams.get("space") ?? "";
+    const inSpace = space
+      ? matched.filter((a) => "spaceId" in a && a.spaceId === space)
+      : matched;
+
+    // `?ownership=` narrows the same way: "mine" is what the caller owns,
+    // "shared" what somebody else owns. Only while enforced — the backend
+    // ignores it otherwise, since everyone sees everything.
+    const ownership = url.searchParams.get("ownership") ?? "";
+    const seed = readWorkspaceSeed() as { enabled?: boolean; principal?: string } | null;
+    const me = seed?.enabled ? seed.principal : undefined;
+    const scoped =
+      me && ownership === "mine"
+        ? inSpace.filter((a) => "ownerId" in a && a.ownerId === me)
+        : me && ownership === "shared"
+          ? inSpace.filter((a) => "ownerId" in a && !!a.ownerId && a.ownerId !== me)
+          : inSpace;
+
+    // `callerLevel` is stamped by the server ONLY while enforcement is on —
+    // ResourceAccessGuard omits it otherwise, and NON_NULL keeps it off the
+    // wire. Carrying it on the static fixtures produced a pairing the backend
+    // cannot produce (levels present, `enabled: false`), which would let a test
+    // encode "USE gating applies with the feature off" as expected behaviour.
+    const enforced = readWorkspaceSeed()?.enabled === true;
+    const answered = enforced ? scoped.map(withCallerLevel) : scoped.map(stripCallerLevel);
+
+    // Most-recent-first, because the backend orders them that way — verified
+    // against a live EDDI 6.3.0. This matters as soon as `limit` is honoured:
+    // the dashboard's "recent agents" asks for exactly 4, so returning them in
+    // array order hands it the four OLDEST and quietly makes the section a lie.
+    // The E2E expectation encoded the correct four all along; it only passed
+    // before because the handler returned all eight and let the page sort.
+    const ordered = [...answered].sort(
+      (a, b) => b.lastModifiedOn - a.lastModifiedOn,
+    );
+
+    // `index` is a PAGE index: the backend skips `index * limit` rows
+    // (DescriptorStore.readDescriptors). Slicing at `index` as a row offset let
+    // the app send `allPages.length * 50` as the page and still pass.
+    return HttpResponse.json(ordered.slice(index * limit, index * limit + limit));
+  }),
+
+  // Get agent
+  http.get("*/agentstore/agents/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
+    const agentId = params.id as string;
+    // Per-agent configs for a realistic detail view
+    const agentConfigs: Record<string, object> = {
+      agent1: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [{ type: "web", config: { allowedOrigins: ["*"], maxIdleMinutes: 30 } }],
+        a2aEnabled: true,
+        description: "24/7 customer support with order tracking, returns processing, and escalation handling",
+        a2aSkills: ["order-tracking", "return-processing", "escalation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 100 },
+        // Agentic improvements — identity, session management
+        identity: {
+          agentDid: "did:eddi:agent-1",
+          publicKey: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef",
+          keys: [
+            { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAexampleKey1234567890abcdef", validFromMs: 1700000000000, validUntilMs: 0 },
+          ],
+        },
+        sessionManagement: {
+          autoSnapshot: {
+            enabled: true,
+            triggerOn: ["before_tool"],
+          },
+          forkingEnabled: false,
+          maxCheckpointsPerConversation: 10,
+          maxForksPerConversation: 5,
+        },
+      },
+      agent3: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf3?version=1"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://clinic.example.com"] } },
+          { type: "slack", config: { channelId: "C0123ABCDEF", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-123" } },
+        ],
+        a2aEnabled: false,
+        description: "Patient appointment scheduling with slot extraction and calendar integration",
+        a2aSkills: [],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 20 },
+      },
+      agent4: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf4?version=2"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Automated invoice analysis with field extraction, validation, and CRM updates",
+        a2aSkills: ["invoice-parsing", "data-validation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 50 },
+      },
+    };
+    const agentFallbacks: Record<string, object> = {
+      agent2: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf2?version=1"],
+        channels: [{ type: "web", config: { allowedOrigins: ["https://support.example.com"], maxIdleMinutes: 15 } }],
+        a2aEnabled: true,
+        description: "Self-service knowledge base answering product, billing, and account questions",
+        a2aSkills: ["faq", "knowledge-search"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 30 },
+      },
+      agent5: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf5?version=1"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://shop.example.com"], maxIdleMinutes: 20 } },
+        ],
+        a2aEnabled: true,
+        description: "Suggests products based on browsing history, preferences, and real-time inventory",
+        a2aSkills: ["product-recommendation"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 40 },
+      },
+      agent6: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://hr.example.com"] } },
+          { type: "slack", config: { channelId: "C0HR_ONBOARD", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}" } },
+        ],
+        a2aEnabled: false,
+        description: "Walks new hires through IT setup, policy acknowledgement, and benefits enrollment",
+        a2aSkills: ["onboarding"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 60 },
+      },
+      agent7: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf6?version=1"],
+        channels: [],
+        a2aEnabled: true,
+        description: "Analyzes legal contracts using RAG, highlights key clauses, and flags risk areas",
+        a2aSkills: ["contract-analysis", "risk-assessment"],
+        memory: { memoryType: "longTerm", maxConversationSteps: 80 },
+      },
+      agent8: {
+        workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+        channels: [
+          { type: "web", config: { allowedOrigins: ["https://internal.example.com"] } },
+          { type: "slack", config: { channelId: "C0IT_HELP", botToken: "${vault:slack-bot-token}", signingSecret: "${vault:slack-signing-secret}", groupId: "group-it" } },
+        ],
+        a2aEnabled: true,
+        description: "Troubleshoots common IT issues, resets passwords, and creates Jira tickets for escalation",
+        a2aSkills: ["it-troubleshooting", "password-reset"],
+        memory: { memoryType: "shortTerm", maxConversationSteps: 25 },
+      },
+    };
+    const config = agentConfigs[agentId] ?? agentFallbacks[agentId] ?? {
+      workflows: ["eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=2"],
+      channels: [],
+      a2aEnabled: false,
+      description: "AI agent configured for EDDI platform",
+      a2aSkills: [],
+    };
+    // Server-owned compatibility generation (AgentConfiguration). agent1's
+    // v2 and v3 share one; every other mock agent predates version following.
+    const compatibilityGeneration = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    return HttpResponse.json({ ...config, compatibilityGeneration, _version: version });
+  }),
+
+  // Deployment impact — what deploying `version` does to the conversations on
+  // the agent's OTHER deployed versions (IRestAgentAdministration
+  // .getDeploymentImpact). Highest version first; agent1 has a compatible v2
+  // (FOLLOW) and a legacy v1 (STAY), every other agent has nothing else live.
+  http.get("*/administration/:env/deploymentimpact/:agentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    const version = parseInt(url.searchParams.get("version") ?? "1", 10);
+    const agentId = params.agentId as string;
+    const generation = agentId === "agent1" ? (version >= 2 ? 2 : 1) : null;
+    const deployedVersions =
+      agentId === "agent1" && version === 3
+        ? [
+            { version: 2, compatibilityGeneration: 2, activeConversations: 12, outcome: "FOLLOW" },
+            { version: 1, compatibilityGeneration: null, activeConversations: 4, outcome: "STAY" },
+          ]
+        : [];
+    return HttpResponse.json({ agentId, version, compatibilityGeneration: generation, deployedVersions });
+  }),
+
+  // Deployment status
+  http.get("*/administration/:env/deploymentstatus/:agentId", () => {
+    return HttpResponse.json({ status: "READY" });
+  }),
+
+  // Every deployed agent in an environment, each at its highest deployed
+  // version (AgentFactory.getAllLatestAgents) — consistent with the READY the
+  // per-agent handler above answers for every agent.
+  http.get("*/administration/:env/deploymentstatus", ({ params }) =>
+    HttpResponse.json(
+      AGENTS_MOCK.map((a) => {
+        const match = /agents\/([^?]+)\?version=(\d+)/.exec(a.resource);
+        return {
+          environment: params.env,
+          agentId: match?.[1] ?? "",
+          agentVersion: Number(match?.[2] ?? 1),
+          status: "READY",
+        };
+      }),
+    ),
+  ),
+
+  // Deploy preflight (IRestAgentAdministration.preflightDeployment): what a
+  // deploy would run into. Nothing by default — a test that needs a grant
+  // issue overrides this via server.use().
+  http.get("*/administration/:env/deploy/:agentId/preflight", ({ request, params }) => {
+    const url = new URL(request.url);
+    return HttpResponse.json({
+      agentId: params.agentId,
+      version: parseInt(url.searchParams.get("version") ?? "1", 10),
+      enforcement: "ENFORCE",
+      checked: true,
+      ready: true,
+      grantIssues: [],
+    });
+  }),
+
+  // Deploy agent. With waitForCompletion=true the backend answers 200 with the
+  // outcome in the body (status, and error/failure on a refusal); without it,
+  // an empty body.
+  http.post("*/administration/:env/deploy/:agentId", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("waitForCompletion") === "true") {
+      return HttpResponse.json({
+        status: "READY",
+        agentId: params.agentId,
+        version: parseInt(url.searchParams.get("version") ?? "1", 10),
+        environment: params.env,
+      });
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Undeploy agent
+  http.post("*/administration/:env/undeploy/:agentId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Agent setup (wizard quick-create)
+  http.post("*/administration/agents/setup", () => {
+    const newId = `agent-setup-${Date.now()}`;
+    return HttpResponse.json({
+      action: "created",
+      agentId: newId,
+      agentName: "Setup Agent",
+      provider: "openai",
+      model: "gpt-5.4",
+      deployed: true,
+      deploymentStatus: "READY",
+    });
+  }),
+
+  // Update agent. `?compatible=true` (absent = breaking) only decides the new
+  // version's server-owned compatibilityGeneration, which this mock derives
+  // in the GET above, so the answer is the same either way.
+  http.put("*/agentstore/agents/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.agent/agentstore/agents/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
+  // Create agent (bare POST without :id)
+  http.post("*/agentstore/agents", ({ request }) => {
+    const url = new URL(request.url);
+    // Check if this is a duplicate request (has :id param with version query)
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    const lastPart = pathParts[pathParts.length - 1];
+    if (lastPart !== "agents") {
+      // This is a duplicate request (/agents/:id?version=X&deepCopy=Y)
+      const deepCopy = url.searchParams.get("deepCopy");
+      const newId = `dup-${Date.now()}`;
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1${deepCopy ? "&deepCopy=true" : ""}`,
+        },
+      });
+    }
+    // Create new agent
+    const newId = `agent-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.agent/agentstore/agents/${newId}?version=1`,
+      },
+    });
+  }),
+
+  // Generate a signing key: the backend answers 200 (the agent already existed)
+  // with the new identity.keys entry, and Location names the agent version it
+  // was saved as.
+  http.post("*/agentstore/agents/:id/signing-keys", ({ request, params }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? "1");
+    return HttpResponse.json(
+      { version: 1, publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=", validFromMs: Date.now(), validUntilMs: 0, revoked: false },
+      {
+        status: 200,
+        headers: { Location: `eddi://ai.labs.agent/agentstore/agents/${String(params.id)}?version=${version + 1}` },
+      },
+    );
+  }),
+
+  // Revoke a signing key: 200 with the revoked entry; Location names the agent
+  // version that records it.
+  http.post("*/agentstore/agents/:id/signing-keys/:keyVersion/revoke", ({ request, params }) => {
+    const version = Number(new URL(request.url).searchParams.get("version") ?? "1");
+    return HttpResponse.json(
+      {
+        version: Number(params.keyVersion),
+        publicKeyB64: "MCowBQYDK2VwAyEAmockPublicKeyForTestsOnly00000000000=",
+        validFromMs: 0,
+        validUntilMs: 0,
+        revoked: true,
+      },
+      { status: 200, headers: { Location: `eddi://ai.labs.agent/agentstore/agents/${String(params.id)}?version=${version + 1}` } },
+    );
+  }),
+
+  // Delete agent
+  http.delete("*/agentstore/agents/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Workflow descriptors
+  // `limit`/`index` honoured with the backend's page-index semantics (skip
+  // `index * limit`), so a hook that sends a row offset gets an empty page.
+  http.get("*/workflowstore/workflows/descriptors", ({ request }) => {
+    const url = new URL(request.url);
+    const limit = Number(url.searchParams.get("limit") ?? "20");
+    const index = Number(url.searchParams.get("index") ?? "0");
+    return HttpResponse.json(WORKFLOWS_MOCK.slice(index * limit, index * limit + limit));
+  }),
+
+  // Get package
+  http.get("*/workflowstore/workflows/:id", () => {
+    return HttpResponse.json({
+      workflowSteps: [
+        {
+          type: "eddi://ai.labs.parser",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.parser/parserstore/parsers/parser1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.parser",
+          extensions: {
+            dictionaries: [
+              { type: "eddi://ai.labs.parser.dictionaries.integer" },
+              { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+            ],
+            corrections: [],
+            normalizer: [],
+          },
+          config: {
+            appendExpressions: true,
+            includeUnused: true,
+            includeUnknown: true,
+          },
+        },
+        {
+          type: "eddi://ai.labs.rules",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.rules/rulestore/rulesets/beh1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.property",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.property/propertysetterstore/propertysetters/ps1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.llm",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.llm/llmstore/llms/llm1?version=1" },
+        },
+        {
+          type: "eddi://ai.labs.output",
+          extensions: {},
+          config: { uri: "eddi://ai.labs.output/outputstore/outputsets/out1?version=1" },
+        },
+      ],
+    });
+  }),
+
+  // Create workflow
+  http.post("*/workflowstore/workflows", () => {
+    const newId = `wf-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${newId}?version=1`,
+      },
+    });
+  }),
+
+  // Delete package
+  http.delete("*/workflowstore/workflows/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Conversation descriptors — supports agentId, conversationId, conversationState filters
+  http.get("*/conversationstore/conversations", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId");
+    const conversationId = url.searchParams.get("conversationId");
+    const conversationState = url.searchParams.get("conversationState");
+    // What the owner renamed or pinned (PATCH below) since the last reset.
+    let result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      return [{ ...c, ...patch }];
+    });
+    if (agentId) result = result.filter((c) => c.agentId === agentId);
+    if (conversationId) result = result.filter((c) => c.resource.includes(conversationId));
+    if (conversationState) result = result.filter((c) => c.conversationState === conversationState);
+    // excludeGroupMembers=true: the backend leaves out descriptors that record a
+    // groupConversationId (member threads of a team session). `mine` is not
+    // modelled — the mock has a single user.
+    if (url.searchParams.get("excludeGroupMembers") === "true") {
+      result = result.filter((c) => !(c as { groupConversationId?: string }).groupConversationId);
+    }
+    // RestConversationStore.readConversationDescriptors defaults `limit` to 20
+    // and CLAMPS it to 100 — a caller asking for 1000 gets 100, and a mock that
+    // returned everything hid that the dashboard reported the clamp as a total.
+    const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+    const limit = Math.min(rawLimit < 1 ? 20 : rawLimit, 100);
+    const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));
+    return HttpResponse.json(result.slice(index * limit, index * limit + limit));
+  }),
+
+  // Search my conversations (B3) — mirrors RestConversationStore.searchConversations:
+  // titles only, literal and case-insensitive, whitespace collapsed; 400 for a
+  // blank or over-100-character q. The mock data has a single user, so the owner
+  // scope has nothing to filter here.
+  http.get("*/conversationstore/conversations/search", ({ request }) => {
+    const url = new URL(request.url);
+    const q = (url.searchParams.get("q") ?? "").replace(/\s+/g, " ").trim();
+    if (!q || q.length > 100) return HttpResponse.json({ error: "Invalid q" }, { status: 400 });
+    const needle = q.toLowerCase();
+    const result = CONVERSATIONS_MOCK.flatMap((c) => {
+      const patch = CONVERSATION_PATCHES.get(c.resource.slice(c.resource.lastIndexOf("/") + 1));
+      if (patch?.[DELETED]) return [];
+      const entry = { ...c, ...patch } as typeof c & { title?: string };
+      return typeof entry.title === "string" && entry.title.toLowerCase().includes(needle) ? [entry] : [];
+    });
+    // Newest first, as the backend orders it — before the page is cut.
+    result.sort((a, b) => (b.lastModifiedOn ?? 0) - (a.lastModifiedOn ?? 0));
+    const rawLimit = Number(url.searchParams.get("limit") ?? "20");
+    const limit = rawLimit < 1 ? 20 : rawLimit;
+    const index = Math.max(0, Number(url.searchParams.get("index") ?? "0"));
+    return HttpResponse.json(result.slice(index * limit, index * limit + limit));
+  }),
+
+  // Simple conversation log. Detailed (non-public) keys included: every step
+  // records `agent:version`, and step 4 is where the conversation moved from
+  // v2 to a compatible v3 (`agent:switch`).
+  http.get("*/conversationstore/conversations/simple/:id", () => {
+    const now = new Date();
+    const stepTime = (offsetMs: number) => new Date(now.getTime() - offsetMs).toISOString();
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: "conv1",
+      conversationState: "READY",
+      environment: "production",
+      undoAvailable: true,
+      redoAvailable: false,
+      conversationSteps: [
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Hi, I need help with my order", timestamp: stepTime(300000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(299900), originWorkflowId: null },
+            { key: "actions", value: ["greet", "order_inquiry"], timestamp: stepTime(299500), originWorkflowId: "wf1" },
+            { key: "output:text:greet", value: "Hello! I'd be happy to help with your order. Could you share your order number?", timestamp: stepTime(299000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(300000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "It's ORD-2024-78542", timestamp: stepTime(240000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(239900), originWorkflowId: null },
+            { key: "actions", value: ["lookup_order"], timestamp: stepTime(239500), originWorkflowId: "wf1" },
+            { key: "output:text:lookup_order", value: "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd. Is there anything specific you'd like to know about it?", timestamp: stepTime(238000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(240000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Can I change the delivery address?", timestamp: stepTime(180000), originWorkflowId: null },
+            { key: "agent:version", value: 2, timestamp: stepTime(179900), originWorkflowId: null },
+            { key: "actions", value: ["address_change"], timestamp: stepTime(179500), originWorkflowId: "wf1" },
+            { key: "output:text:address_change", value: "Since your order is already in transit, I can try to redirect the package. Please provide the new delivery address and I'll check if a redirect is possible with the carrier.", timestamp: stepTime(178000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Keep current address", "Provide new address", "Cancel order instead"], timestamp: stepTime(177500), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(180000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "123 Oak Street, Suite 4B, Portland OR 97201", timestamp: stepTime(120000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(119900), originWorkflowId: null },
+            { key: "agent:switch", value: { from: 2, to: 3 }, timestamp: stepTime(119900), originWorkflowId: null },
+            { key: "actions", value: ["update_address", "notify_carrier"], timestamp: stepTime(119000), originWorkflowId: "wf1" },
+            { key: "output:text:update_address", value: "Great news! I've submitted a redirect request to the carrier for: 123 Oak Street, Suite 4B, Portland OR 97201. You'll receive a confirmation email within the next 2 hours. The estimated delivery date may shift by 1 business day.", timestamp: stepTime(117000), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(120000),
+        },
+        {
+          conversationStep: [
+            { key: "input:initial", value: "Perfect, thank you!", timestamp: stepTime(60000), originWorkflowId: null },
+            { key: "agent:version", value: 3, timestamp: stepTime(59900), originWorkflowId: null },
+            { key: "actions", value: ["farewell"], timestamp: stepTime(59500), originWorkflowId: "wf1" },
+            { key: "output:text:farewell", value: "You're welcome! Your redirect reference is RDR-98765. Is there anything else I can help you with?", timestamp: stepTime(58000), originWorkflowId: "wf1" },
+            { key: "quickReplies", value: ["Track my order", "View other orders", "No thanks, goodbye"], timestamp: stepTime(57500), originWorkflowId: "wf1" },
+          ],
+          timestamp: stepTime(60000),
+        },
+      ],
+      conversationOutputs: [
+        { "output:text:greet": "Hello! I'd be happy to help with your order. Could you share your order number?" },
+        { "output:text:lookup_order": "I found your order ORD-2024-78542. It was placed on March 28th for a Wireless Keyboard ($89.99). It's currently in transit and expected to arrive by April 2nd." },
+        { "output:text:address_change": "Since your order is already in transit, I can try to redirect the package." },
+        { "output:text:update_address": "Great news! I've submitted a redirect request to the carrier." },
+        { "output:text:farewell": "You're welcome! Your redirect reference is RDR-98765." },
+      ],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // Rename / pin (B2) — owner only; mirrors RestConversationStore.patchConversation:
+  // 400 for neither field or a blank / too long title, 404 for an unknown id.
+  http.patch("*/conversationstore/conversations/:id", async ({ params, request }) => {
+    const body = (await request.json()) as { title?: unknown; pinned?: unknown };
+    const hasTitle = body.title !== undefined && body.title !== null;
+    const hasPinned = body.pinned !== undefined && body.pinned !== null;
+    if (!hasTitle && !hasPinned) return HttpResponse.json({ error: "Nothing to change" }, { status: 400 });
+    const title = hasTitle ? String(body.title).replace(/\s+/g, " ").trim() : undefined;
+    if (title !== undefined && (title.length === 0 || title.length > 200)) {
+      return HttpResponse.json({ error: "Invalid title" }, { status: 400 });
+    }
+    const id = String(params.id);
+    const entry = CONVERSATIONS_MOCK.find((c) => c.resource.endsWith(`/${id}`));
+    if (!entry) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const patch = { ...CONVERSATION_PATCHES.get(id) };
+    if (title !== undefined) {
+      patch.title = title;
+      patch.titleSource = "USER";
+    }
+    if (hasPinned) patch.pinned = body.pinned === true;
+    CONVERSATION_PATCHES.set(id, patch);
+    return HttpResponse.json({ ...entry, ...patch });
+  }),
+
+  // Delete conversation — gone from the listing afterwards, as on the backend
+  // (a soft delete drops the descriptor).
+  http.delete("*/conversationstore/conversations/:id", ({ params }) => {
+    const id = String(params.id);
+    CONVERSATION_PATCHES.set(id, { ...CONVERSATION_PATCHES.get(id), [DELETED]: true });
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --- Chat / Agent Engine ---
+
+  // Start conversation (v6: POST /agents/:agentId/start)
+  // NOTE: must stay above the broad `*/agents/:conversationId` handler below —
+  // MSW's `*` spans path segments, so that pattern also matches this URL and
+  // would otherwise answer setup-api with a conversation snapshot.
+  http.post("*/administration/agents/setup-api", async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    // Mirror the backend contract: AgentSetupService rejects a blank `agentName`
+    // with "Agent name is required". Sending `name` (the old manager bug) must fail.
+    const agentName = body.agentName;
+    if (typeof agentName !== "string" || agentName.trim() === "") {
+      return HttpResponse.json(
+        { message: "Agent name is required" },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json(
+      {
+        action: "api_agent_created",
+        agentId: `api-agent-${Date.now()}`,
+        agentName,
+        provider: body.provider ?? "anthropic",
+        model: body.model ?? "claude-sonnet-4-6",
+        deployed: body.deploy !== false,
+        deploymentStatus: body.deploy !== false ? "READY" : undefined,
+        endpointCount: 5,
+        groups: ["Users", "Orders"],
+        quickRepliesEnabled: body.enableQuickReplies ?? false,
+        sentimentAnalysisEnabled: body.enableSentimentAnalysis ?? false,
+        resources: { agentLocation: "/agentstore/agents/mock-api-agent?version=1" },
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.post("*/agents/:agentId/start", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/agents/conv-${Date.now()}`,
+      },
+    });
+  }),
+
+  // Streaming send (v6: POST /agents/:conversationId/stream). A plain reply, or —
+  // for TASK_FAILURE_TRIGGER — the frames a rejected LLM call produces.
+  http.post("*/agents/:conversationId/stream", async ({ request }) => {
+    const body = await request.clone().text();
+    // One `data:` line per payload line: a multi-line token (the rich-markdown
+    // reply) under a single prefix was cut at its first blank line, which ends
+    // the SSE frame, and only `done` delivered the rest.
+    const frame = (name: string, data: unknown) =>
+      `event: ${name}\n${(typeof data === "string" ? data : JSON.stringify(data))
+        .split("\n")
+        .map((line) => `data: ${line}`)
+        .join("\n")}\n\n`;
+    const frames = body.includes(TASK_FAILURE_TRIGGER)
+      ? [
+          frame("task_failed", {
+            taskId: "eddi://ai.labs.llm",
+            taskType: "langchain",
+            errorType: "unknown",
+            error: "Streaming chat failed: `temperature` is deprecated for this model.",
+          }),
+          frame("done", {
+            conversationState: "ERROR",
+            conversationOutputs: [
+              {
+                actions: ["send_message"],
+                taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+              },
+            ],
+          }),
+        ]
+      : body.includes(RICH_MARKDOWN_TRIGGER)
+        ? [
+            frame("token", MOCK_RICH_MARKDOWN),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: MOCK_RICH_MARKDOWN }] }],
+            }),
+          ]
+        : body.includes(IMAGE_OUTPUT_TRIGGER)
+          ? [
+              frame("token", "Here is the logo."),
+              frame("done", {
+                conversationState: "READY",
+                conversationOutputs: [{ output: [{ type: "text", text: "Here is the logo." }, MOCK_OUTPUT_IMAGE] }],
+              }),
+            ]
+          : [
+            frame("token", "Happy to help."),
+            frame("done", {
+              conversationState: "READY",
+              conversationOutputs: [{ output: [{ type: "text", text: "Happy to help." }] }],
+            }),
+          ];
+    return new HttpResponse(frames.join(""), { headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // Send message (text/plain or JSON) — returns snapshot (v6: POST /agents/:conversationId)
+  http.post("*/agents/:conversationId", async ({ request }) => {
+    if ((await request.clone().text()).includes(TASK_FAILURE_TRIGGER)) {
+      return HttpResponse.json({
+        agentId: "agent1",
+        agentVersion: 3,
+        conversationId: "conv-mock",
+        conversationState: "ERROR",
+        environment: "production",
+        conversationSteps: [],
+        conversationOutputs: [
+          {
+            actions: ["send_message"],
+            taskErrors: [{ type: "errorDigest", taskId: "ai.labs.llm", taskType: "langchain", text: MOCK_TASK_ERROR_TEXT }],
+          },
+        ],
+      });
+    }
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: "conv-mock",
+      conversationState: "READY",
+      environment: "production",
+      conversationSteps: [
+        {
+          input: "",
+          output: "I'd be happy to help! I can assist you with order tracking, returns, account inquiries, or product recommendations. What would you like help with?",
+          actions: ["respond"],
+          quickReplies: ["Track my order", "Start a return", "Browse products"],
+        },
+      ],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // List pending HITL approvals (1:1 surface). MUST precede the ":conversationId"
+  // catch-all below, or MSW (first-match-wins) treats "pending-approvals" as a
+  // conversation id and returns a single conversation object.
+  http.get("*/agents/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "conv-awaiting-1",
+        agentId: "agent1",
+        userId: "user-123",
+        pausedAt: new Date(Date.now() - 300_000).toISOString(),
+        pauseReason: "High-value transaction requires human review",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+      {
+        conversationId: "conv-awaiting-2",
+        agentId: "agent2",
+        userId: "user-456",
+        pausedAt: new Date(Date.now() - 120_000).toISOString(),
+        pauseReason: "Agent requested escalation to human operator",
+        timeoutPolicy: "AUTO_REJECT",
+        approvalTimeout: "PT15M",
+      },
+    ]);
+  }),
+
+  // Read conversation (v6: GET /agents/:conversationId) — the snapshot
+  // `readConversation` reads on load and on the GET that follows starting a
+  // conversation.
+  //
+  // The shape here is load-bearing and was wrong: this used to return
+  // `conversationSteps: [{ output, actions, quickReplies }]` and no
+  // `conversationOutputs` at all — an invented flat shape that
+  // `snapshotToMessages` cannot read (it wants keyed `conversationStep`
+  // entries plus a positionally-matching `conversationOutputs` entry, which is
+  // what the backend and the conversation-detail mock both use). Every load
+  // against this handler therefore produced ZERO messages, and the two tests
+  // that should have caught it asserted `length >= 0`, which is true of any
+  // array. Keep this aligned with `extractInput` / `extractOutputParts`.
+  http.get("*/agents/:conversationId", ({ params }) => {
+    // One handler serves two different situations, and they do not look alike.
+    //
+    // A conversation *just started* has no user turn yet — only the agent's
+    // welcome. Returning a user message there put words in the user's mouth: a
+    // freshly opened chat rendered "Can I change the delivery address?" as
+    // something they had supposedly typed. It made the assertion pass; it was
+    // not the contract. Only an *existing* conversation being reopened has a
+    // transcript, so only `conv1` gets one.
+    const isExisting = params.conversationId === "conv1";
+
+    const welcome = {
+      "output:text:welcome":
+        "Welcome to EDDI Support! I can help with orders, returns, billing, or product questions. How can I assist you today?",
+      quickReplies: ["Order help", "Returns", "Billing question", "Something else"],
+    };
+
+    return HttpResponse.json({
+      agentId: "agent1",
+      agentVersion: 3,
+      conversationId: params.conversationId ?? "conv-mock",
+      conversationState: "READY",
+      environment: "production",
+      conversationSteps: isExisting
+        ? [
+            {
+              conversationStep: [
+                { key: "input:initial", value: "Can I change the delivery address?", timestamp: Date.now() - 180000, originWorkflowId: null },
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 179500, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 180000,
+            },
+          ]
+        : [
+            {
+              conversationStep: [
+                { key: "actions", value: ["welcome"], timestamp: Date.now() - 1000, originWorkflowId: "wf1" },
+              ],
+              timestamp: Date.now() - 1000,
+            },
+          ],
+      conversationOutputs: [welcome],
+      conversationProperties: {
+        agentName: "Support Agent",
+        userId: "user-42",
+        channel: "web",
+      },
+    });
+  }),
+
+  // Undo / redo — RestAgentEngine.undo/redo answer an EMPTY 200 when the step
+  // moved (409 when there was nothing to move). No snapshot body: tests used to
+  // mock one, which is how the app came to read `.conversationSteps` off
+  // `undefined` against the real backend.
+  http.post("*/agents/:conversationId/undo", () => new HttpResponse(null, { status: 200 })),
+  http.post("*/agents/:conversationId/redo", () => new HttpResponse(null, { status: 200 })),
+
+  // --- Extension Store ---
+  http.get("*/extensionstore/extensions", () => {
+    return HttpResponse.json([
+      { type: "eddi://ai.labs.parser", displayName: "Parser", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rules", displayName: "Rules", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.property", displayName: "Property Setter", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.apicalls", displayName: "API Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.llm", displayName: "LLM", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output", displayName: "Output", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.output.template", displayName: "Output Template", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.mcpcalls", displayName: "MCP Calls", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+      { type: "eddi://ai.labs.rag", displayName: "RAG Knowledge Base", configs: { uri: { displayName: "Resource URI", fieldType: "URI", isOptional: false, defaultValue: null } }, extensions: {} },
+    ]);
+  }),
+
+  // Update package
+  http.put("*/workflowstore/workflows/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(
+      url.searchParams.get("version") ?? "1",
+      10
+    );
+    const newVersion = currentVersion + 1;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.workflow/workflowstore/workflows/${params.id}?version=${newVersion}`,
+      },
+    });
+  }),
+
+  // --- Resource Stores ---
+
+  // Generic currentversion handler — returns version 1 for all resource types.
+  // Must be registered before the per-store `:id` handlers so it matches first.
+  http.get("*/:store/:plural/:id/currentversion", () => {
+    return HttpResponse.json(1);
+  }),
+
+  // Generic descriptors handler for resource stores — the stores that have no
+  // dedicated one of their own. Must precede the per-store `:id` wildcards.
+  //
+  // `storesWithDedicatedHandlers` is load-bearing and was incomplete: it named
+  // `channelstore` only, so this handler answered `groupstore` too and the eight
+  // groups defined further down were dead fixture. Every Workforce and Groups
+  // test ran against one synthetic row. `descriptor-handlers.test.ts` now fails
+  // if a dedicated handler is shadowed again.
+  //
+  // Returns THREE rows rather than one, so that list rendering, ordering and
+  // pagination are exercised at all. `limit`/`index` are honoured for the same
+  // reason.
+  http.get("*/:store/:plural/descriptors", ({ request, params }) => {
+    const url = new URL(request.url);
+    const filter = url.searchParams.get("filter") ?? "";
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const storeVal = params.store as string;
+    if (!storeVal.endsWith("store")) return;
+    if (STORES_WITH_DEDICATED_DESCRIPTORS.includes(storeVal)) return;
+
+    // Shaped like the backend's DocumentDescriptor (ResourceDescriptor + name/
+    // description): the URI carries the store's real extension, dates are epoch
+    // millis, and `deleted` is always present (a primitive boolean in Java).
+    const extension = STORE_EXTENSIONS[storeVal] ?? `ai.labs.${storeVal.replace(/store$/, "")}`;
+    const descriptor = (id: string, ageHours: number) => ({
+      resource: `eddi://${extension}/${storeVal}/${params.plural}/${id}?version=1`,
+      name: `Mock ${id}`,
+      description: "Mock resource descriptor",
+      createdOn: Date.now() - 86400000,
+      lastModifiedOn: Date.now() - ageHours * 3600000,
+      deleted: false,
+    });
+
+    // A filter is TWO different things to this app. On a list page it is the
+    // user's search box; in `getResourceVersions` (resources.ts) it is an id
+    // lookup — `descriptors?filter=<id>` — for a resource this mock has never
+    // heard of. So an unmatched filter still echoes a descriptor for whatever
+    // was asked for, because returning [] there would break every version
+    // picker and detail page. A test that needs an empty list should say so
+    // with its own `server.use` override rather than rely on this.
+    if (filter) {
+      return HttpResponse.json([descriptor(filter, 1)]);
+    }
+
+    const all = ["res1", "res2", "res3"].map((id, i) => descriptor(id, i + 1));
+    // Page index, not row offset — see the agent descriptors handler.
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
+  }),
+
+  // Specific handlers for behavior and httpcalls with realistic mock data
+  http.get("*/rulestore/rulesets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    // Don't match descriptor endpoints
+    if (isNotAnId(url.pathname) || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      appendActions: true,
+      expressionsAsActions: false,
+      behaviorGroups: [
+        {
+          name: "Greeting Rules",
+          executionStrategy: "currentStepOnly",
+          behaviorRules: [
+            {
+              name: "greeting_rule",
+              actions: ["greet"],
+              conditions: [
+                {
+                  type: "inputmatcher",
+                  configs: {
+                    expressions: "greeting(*)",
+                    occurrence: "currentStep",
+                  },
+                },
+              ],
+            },
+            {
+              name: "fallback_rule",
+              actions: ["fallback"],
+              conditions: [
+                {
+                  type: "negation",
+                  configs: {},
+                  conditions: [
+                    {
+                      type: "actionmatcher",
+                      configs: { actions: "greet" },
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // EDDI Platform OpenAPI (used for version checking in standalone mode)
+  http.get("*/openapi", () => {
+    return HttpResponse.json({
+      info: {
+        version: "6.0.0-demo",
+        title: "EDDI API Mock",
+      },
+    });
+  }),
+
+  // GitHub latest-release lookup behind the opt-in update check. Returns a
+  // version far ahead of the mock backend's so the "update available" path is
+  // the one exercised by default.
+  http.get("https://api.github.com/repos/labsai/EDDI/releases/latest", () => {
+    return HttpResponse.json({
+      tag_name: "9.9.9",
+      name: "9.9.9",
+      html_url: "https://github.com/labsai/EDDI/releases/tag/9.9.9",
+      published_at: "2026-01-15T10:00:00Z",
+      body: "## Highlights\n\n- Mock release note one\n- Mock release note two",
+    });
+  }),
+
+  // There is deliberately no second outbound handler here. The update check
+  // contacts exactly one host, and `onUnhandledRequest: "error"` in the test
+  // setup means reintroducing a relay (shields.io or otherwise) fails the suite
+  // rather than passing quietly.
+
+  // OpenAPI endpoint discovery.
+  //
+  // POST with a body, mirroring EDDI. The superseded GET took the credential as
+  // `?apiAuth=` and echoed it back inside every generated call; it survives on
+  // the backend only to reject a request that still carries one, so a handler
+  // for it here would let a regression back onto the old path unnoticed.
+  http.post("*/apicallstore/apicalls/discover-endpoints", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as {
+      specUrl?: string;
+      authHeaderRef?: string;
+    } | null;
+    const specUrl = body?.specUrl;
+    if (!specUrl) {
+      return HttpResponse.json({ error: "a request body with a 'specUrl' is required" }, { status: 400 });
+    }
+    // EDDI's own rule, prefix-matched: only a reference is ever inherited.
+    const authRef = body?.authHeaderRef;
+    if (
+      authRef &&
+      !["${vault:", "${eddivault:", "${vars:", "${caller:"].some((p) => authRef.startsWith(p))
+    ) {
+      return HttpResponse.json(
+        { error: "authHeaderRef must be a ${vault:…}, ${vars:…} or ${caller:…} reference, not a literal credential." },
+        { status: 400 },
+      );
+    }
+    return HttpResponse.json({
+      title: "Petstore API",
+      baseUrl: "https://petstore.example.com/v1",
+      endpointCount: 5,
+      groups: {
+        pets: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "listPets",
+              description: "List all pets",
+              actions: ["api_get_pets"],
+              saveResponse: true,
+              responseObjectName: "listPets_response",
+              request: { path: "/pets", method: "get", headers: {}, queryParams: { limit: "{limit}" }, contentType: "application/json", body: "" },
+              parameters: { limit: "Max items to return" },
+            },
+            {
+              name: "createPet",
+              description: "Create a pet",
+              actions: ["api_post_pets"],
+              saveResponse: true,
+              responseObjectName: "createPet_response",
+              request: { path: "/pets", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "name": "{name}",\n  "age": {age}\n}' },
+              parameters: { name: "Pet name", age: "Pet age" },
+            },
+            {
+              name: "getPet",
+              description: "Get a pet by ID",
+              actions: ["api_get_pets_petid"],
+              saveResponse: true,
+              responseObjectName: "getPet_response",
+              request: { path: "/pets/{petId}", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+              parameters: { petId: "The pet ID" },
+            },
+          ],
+        },
+        store: {
+          targetServerUrl: "https://petstore.example.com/v1",
+          httpCalls: [
+            {
+              name: "getInventory",
+              description: "Returns pet inventories",
+              actions: ["api_get_store_inventory"],
+              saveResponse: true,
+              responseObjectName: "getInventory_response",
+              request: { path: "/store/inventory", method: "get", headers: {}, queryParams: {}, contentType: "application/json", body: "" },
+            },
+            {
+              name: "placeOrder",
+              description: "Place an order",
+              actions: ["api_post_store_order"],
+              saveResponse: true,
+              responseObjectName: "placeOrder_response",
+              request: { path: "/store/order", method: "post", headers: {}, queryParams: {}, contentType: "application/json", body: '{\n  "petId": "{petId}",\n  "quantity": {quantity}\n}' },
+              parameters: { petId: "Pet ID to order", quantity: "Number to order" },
+            },
+          ],
+        },
+      },
+    });
+  }),
+
+  http.get("*/apicallstore/apicalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) {
+      return;
+    }
+    return HttpResponse.json({
+      targetServerUrl: "https://api.example.com",
+      httpCalls: [
+        {
+          name: "get_weather",
+          description: "Fetch current weather data for a city including temperature, humidity, and forecast",
+          parameters: { city: "City name to look up", units: "Temperature units (metric or imperial)" },
+          actions: ["get_weather"],
+          saveResponse: true,
+          responseObjectName: "weatherData",
+          fireAndForget: false,
+          request: {
+            path: "/v2/weather/current",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer [[${apiKey}]]",
+              "X-Request-ID": "[[${conversationId}]]",
+            },
+            queryParams: { city: "[[${city}]]", units: "[[${units}]]" },
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "units", valueString: "metric", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "current_temp", valueString: "[[${weatherData.temperature}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "lookup_order",
+          description: "Retrieve order details from the e-commerce backend by order ID",
+          parameters: { orderId: "The order ID (e.g. ORD-2024-78542)" },
+          actions: ["lookup_order"],
+          saveResponse: true,
+          responseObjectName: "orderDetails",
+          fireAndForget: false,
+          request: {
+            path: "/v1/orders/[[${orderId}]]",
+            method: "GET",
+            headers: {
+              Authorization: "Bearer ${vault:ecommerce-api-key}",
+              Accept: "application/json",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: "",
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [
+              { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", override: true },
+              { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "create_support_ticket",
+          description: "Create a Jira support ticket for issues that require human follow-up",
+          parameters: { summary: "Ticket summary", priority: "Priority level (low, medium, high, critical)" },
+          actions: ["escalate", "create_ticket"],
+          saveResponse: true,
+          responseObjectName: "ticketResult",
+          fireAndForget: false,
+          request: {
+            path: "/v2/issues",
+            method: "POST",
+            headers: {
+              Authorization: "Basic ${vault:jira-api-token}",
+              Accept: "application/json",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "fields": {\n    "project": { "key": "SUP" },\n    "summary": "[[${summary}]]",\n    "description": "Auto-created by EDDI agent from conversation [[${conversationId}]]",\n    "issuetype": { "name": "Support Request" },\n    "priority": { "name": "[[${priority}]]" }\n  }\n}',
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "priority", valueString: "medium", scope: "step", override: false },
+            ],
+          },
+          postResponse: {
+            propertyInstructions: [
+              { name: "ticket_key", valueString: "[[${ticketResult.key}]]", scope: "conversation", override: true },
+            ],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+        {
+          name: "send_notification_email",
+          description: "Send a transactional notification email to the customer via SendGrid",
+          parameters: {},
+          actions: ["notify_customer"],
+          saveResponse: false,
+          responseObjectName: "",
+          fireAndForget: true,
+          request: {
+            path: "/v3/mail/send",
+            method: "POST",
+            headers: {
+              Authorization: "Bearer ${vault:sendgrid-api-key}",
+            },
+            queryParams: {},
+            contentType: "application/json",
+            body: '{\n  "personalizations": [{ "to": [{ "email": "[[${properties.email}]]" }] }],\n  "from": { "email": "noreply@example.com", "name": "Support Team" },\n  "subject": "Update on your request",\n  "content": [{ "type": "text/plain", "value": "[[${notification_body}]]" }]\n}',
+          },
+          preRequest: { propertyInstructions: [] },
+          postResponse: {
+            propertyInstructions: [],
+            outputBuildInstructions: [],
+            qrBuildInstructions: [],
+          },
+        },
+      ],
+    });
+  }),
+
+  // LangChain mock data
+  http.get("*/llmstore/llms/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      tasks: [
+        {
+          actions: ["help", "chat"],
+          id: "main-chat",
+          type: "openai",
+          description: "Main AI assistant task",
+          parameters: {
+            systemMessage: "You are a helpful assistant.",
+            addToOutput: "true",
+            logSizeLimit: "20",
+          },
+          enableBuiltInTools: true,
+          builtInToolsWhitelist: ["calculator", "datetime"],
+          tools: [
+            "eddi://ai.labs.apicalls/apicallstore/apicalls/weather?version=1",
+          ],
+          enableHttpCallTools: true,
+          enableMcpCallTools: true,
+          conversationHistoryLimit: 10,
+          maxBudgetPerConversation: 1.0,
+          enableCostTracking: true,
+          enableToolCaching: true,
+          enableRateLimiting: true,
+          defaultRateLimit: 100,
+          a2aAgents: [
+            {
+              url: "https://remote.example.com/a2a/agents/support",
+              name: "Support Agent",
+              timeoutMs: 30000,
+            },
+          ],
+          modelCascade: {
+            enabled: true,
+            strategy: "cascade",
+            evaluationStrategy: "structured_output",
+            enableInAgentMode: true,
+            steps: [
+              { type: "openai", parameters: { model: "gpt-5.4-mini" }, confidenceThreshold: 0.7, timeoutMs: 10000 },
+              { type: "openai", parameters: { model: "gpt-5.4" }, confidenceThreshold: null, timeoutMs: 30000 },
+            ],
+          },
+          retry: {
+            maxAttempts: 3,
+            backoffDelayMs: 1000,
+            backoffMultiplier: 2.0,
+            maxBackoffDelayMs: 10000,
+          },
+          preRequest: {
+            propertyInstructions: [
+              { name: "userContext", valueString: "[[${memory.current.input}]]", scope: "step", override: true },
+            ],
+          },
+          postResponse: {
+            outputBuildInstructions: [
+              {
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                outputType: "text",
+                outputValue: "{aiOutput.htmlResponseText}",
+                httpCodeValidator: {},
+              },
+            ],
+            qrBuildInstructions: [
+              {
+                pathToTargetArray: "aiOutput.quickReplies",
+                iterationObjectName: "obj",
+                templateFilterExpression: "",
+                quickReplyValue: "{obj.value}",
+                quickReplyExpressions: "{obj.expressions}",
+                httpCodeValidator: {},
+              },
+            ],
+          },
+          // Agentic improvements
+          counterweight: {
+            enabled: true,
+            level: "cautious",
+            placement: "suffix",
+            customInstructions: [],
+          },
+          identityMasking: {
+            enabled: false,
+            rules: [],
+          },
+          toolResponseLimits: {
+            defaultMaxChars: 50000,
+            truncationStrategy: "truncate",
+            perToolLimits: { webscraper: 2000 },
+          },
+        },
+      ],
+    });
+  }),
+
+  // Output mock data
+  http.get("*/outputstore/outputsets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      outputSet: [
+        {
+          action: "greet",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Hello! 👋 Welcome to our support. How can I help you today?", delay: 0 },
+                { type: "text", text: "Hi there! I'm your virtual assistant. What can I do for you?", delay: 0 },
+                { type: "text", text: "Good day! I'm here to help with orders, returns, or general questions. What do you need?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Track my order", expressions: "order_tracking", isDefault: false },
+            { value: "Start a return", expressions: "return_request", isDefault: false },
+            { value: "Billing question", expressions: "billing_inquiry", isDefault: false },
+            { value: "Something else", expressions: "other", isDefault: false },
+          ],
+        },
+        {
+          action: "farewell",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Thank you for reaching out! Have a great day. 😊", delay: 0 },
+                { type: "text", text: "Glad I could help! Don't hesitate to come back if you need anything.", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "fallback",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I'm not sure I understood that. Could you rephrase your question?", delay: 0 },
+                { type: "text", text: "Hmm, I didn't quite catch that. Can you try asking in a different way?", delay: 0 },
+                { type: "text", text: "I want to make sure I help you correctly — could you provide more details?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Talk to a human", expressions: "escalate", isDefault: false },
+            { value: "Main menu", expressions: "restart", isDefault: true },
+          ],
+        },
+        {
+          action: "order_status",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Here's the status of your order [[${properties.order_id}]]: It is currently **[[${properties.order_status}]]** and expected to arrive by [[${properties.delivery_date}]].", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Track another order", expressions: "order_tracking", isDefault: false },
+            { value: "Return this order", expressions: "return_request", isDefault: false },
+            { value: "That's all, thanks", expressions: "bye", isDefault: false },
+          ],
+        },
+        {
+          action: "escalate",
+          timesOccurred: 0,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "I understand this needs personal attention. I'm connecting you with a support specialist now. Your reference number is [[${properties.ticket_key}]].", delay: 500 },
+              ],
+            },
+          ],
+          quickReplies: [],
+        },
+        {
+          action: "greet",
+          timesOccurred: 1,
+          outputs: [
+            {
+              valueAlternatives: [
+                { type: "text", text: "Welcome back! Is there something else I can help you with?", delay: 0 },
+              ],
+            },
+          ],
+          quickReplies: [
+            { value: "Continue previous topic", expressions: "continue", isDefault: false },
+            { value: "New question", expressions: "restart", isDefault: false },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Property setter mock data
+  http.get("*/propertysetterstore/propertysetters/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      setOnActions: [
+        {
+          actions: ["greet"],
+          setProperties: [
+            { name: "user_greeted", valueString: "true", scope: "conversation", override: true },
+            { name: "greeting_count", valueString: "[[${greeting_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "session_start", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+          ],
+        },
+        {
+          actions: ["lookup_order"],
+          setProperties: [
+            { name: "last_order_id", valueString: "[[${orderDetails.orderId}]]", scope: "longTerm", fromObjectPath: "", override: true },
+            { name: "order_status", valueString: "[[${orderDetails.status}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "delivery_date", valueString: "[[${orderDetails.estimatedDelivery}]]", scope: "conversation", fromObjectPath: "", override: true },
+            { name: "order_total", valueString: "[[${orderDetails.total}]]", scope: "conversation", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["escalate"],
+          setProperties: [
+            { name: "escalation_reason", valueString: "[[${memory.current.input}]]", scope: "conversation", override: true },
+            { name: "escalated_at", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "conversation", override: true },
+            { name: "escalation_count", valueString: "[[${escalation_count}]] + 1", scope: "longTerm", fromObjectPath: "", override: true },
+          ],
+        },
+        {
+          actions: ["farewell"],
+          setProperties: [
+            { name: "last_interaction", valueString: "[[${new java.util.Date().toISOString()}]]", scope: "longTerm", override: true },
+            { name: "satisfaction_prompted", valueString: "false", scope: "conversation", override: true },
+          ],
+        },
+      ],
+    });
+  }),
+
+  // Dictionary mock data
+  http.get("*/dictionarystore/dictionaries/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      lang: "en",
+      words: [
+        { word: "hello", expressions: "greeting(hello)", frequency: 10 },
+        { word: "hi", expressions: "greeting(hi)", frequency: 10 },
+        { word: "hey", expressions: "greeting(hey)", frequency: 8 },
+        { word: "goodbye", expressions: "farewell(goodbye)", frequency: 5 },
+        { word: "bye", expressions: "farewell(bye)", frequency: 5 },
+        { word: "thanks", expressions: "gratitude(thanks)", frequency: 7 },
+        { word: "order", expressions: "topic(order)", frequency: 9 },
+        { word: "return", expressions: "intent(return_request)", frequency: 6 },
+        { word: "refund", expressions: "intent(refund_request)", frequency: 6 },
+        { word: "help", expressions: "intent(help)", frequency: 8 },
+        { word: "cancel", expressions: "intent(cancel)", frequency: 4 },
+        { word: "status", expressions: "intent(check_status)", frequency: 7 },
+      ],
+      phrases: [
+        { phrase: "good morning", expressions: "greeting(good_morning)" },
+        { phrase: "good evening", expressions: "greeting(good_evening)" },
+        { phrase: "see you later", expressions: "farewell(see_you)" },
+        { phrase: "track my order", expressions: "intent(order_tracking)" },
+        { phrase: "I want to return", expressions: "intent(return_request)" },
+        { phrase: "talk to a human", expressions: "intent(escalate)" },
+        { phrase: "billing question", expressions: "intent(billing_inquiry)" },
+        { phrase: "change my address", expressions: "intent(address_change)" },
+      ],
+      regExs: [
+        { regEx: "ORD-\\d{4}-\\d{5}", expressions: "entity(order_id)" },
+        { regEx: "\\d{5}(-\\d{4})?", expressions: "entity(zipcode)" },
+        { regEx: "[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\\.[A-Z]{2,}", expressions: "entity(email)" },
+        { regEx: "\\+?\\d{1,3}[-.\\s]?\\(?\\d{1,4}\\)?[-.\\s]?\\d{1,4}[-.\\s]?\\d{1,9}", expressions: "entity(phone_number)" },
+      ],
+    });
+  }),
+
+  // MCP tool discovery endpoint.
+  //
+  // POST with the probed server's key in `X-Mcp-Authorization`, mirroring EDDI.
+  // No GET handler, deliberately: `onUnhandledRequest: "error"` then turns a
+  // regression back to `?apiKey=` into a failing test rather than a silent pass.
+  http.post("*/mcpcallsstore/mcpcalls/discover-tools", async ({ request }) => {
+    const body = (await request.json().catch(() => null)) as { url?: string } | null;
+    const serverUrl = body?.url;
+    if (!serverUrl) {
+      return HttpResponse.json({ error: "a request body with a 'url' is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      tools: [
+        { name: "search_documents", description: "Search indexed documents by query" },
+        { name: "index_document", description: "Index a new document into the knowledge base" },
+        { name: "delete_document", description: "Delete a document by its unique ID" },
+      ],
+      count: 3,
+    });
+  }),
+
+  // MCP Calls mock data
+  http.get("*/mcpcallsstore/mcpcalls/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "Enterprise Document Tools Server",
+      mcpServerUrl: "https://mcp.internal.example.com/v1",
+      transport: "http",
+      apiKey: "${vault:mcp-doc-key}",
+      timeoutMs: 30000,
+      toolsWhitelist: ["search_documents", "index_document", "get_document_metadata"],
+      toolsBlacklist: ["delete_document"],
+      mcpCalls: [
+        {
+          name: "searchDocs",
+          description: "Search internal knowledge base using semantic similarity matching",
+          actions: ["search", "find_info"],
+          toolName: "search_documents",
+          toolArguments: { query: "[[${memory.current.input}]]", maxResults: "5", minScore: "0.7" },
+          saveResponse: true,
+          responseObjectName: "searchResults",
+        },
+        {
+          name: "indexNewDoc",
+          description: "Index a new document from a conversation attachment into the knowledge base",
+          actions: ["index_attachment"],
+          toolName: "index_document",
+          toolArguments: { content: "[[${attachment.text}]]", title: "[[${attachment.fileName}]]", metadata: '{"source": "conversation", "conversationId": "[[${conversationId}]]"}' },
+          saveResponse: true,
+          responseObjectName: "indexResult",
+        },
+        {
+          name: "getDocMeta",
+          description: "Retrieve metadata for a specific document by its ID",
+          actions: ["get_doc_details"],
+          toolName: "get_document_metadata",
+          toolArguments: { documentId: "[[${searchResults[0].id}]]" },
+          saveResponse: true,
+          responseObjectName: "docMetadata",
+        },
+      ],
+    });
+  }),
+
+  // Cron preview (RagSourceIngestionService.previewCron). Before the KB handler.
+  http.get("*/ragstore/rags/cron/preview", ({ request }) => {
+    const cron = new URL(request.url).searchParams.get("cron") ?? "";
+    if (cron.trim().split(/\s+/).length !== 5) {
+      return HttpResponse.json({
+        cron,
+        valid: false,
+        error: "Cron expression must have exactly 5 fields (min hour dom month dow), got " +
+          cron.trim().split(/\s+/).filter(Boolean).length,
+        timeZone: "UTC",
+        nextFires: [],
+      });
+    }
+    return HttpResponse.json({
+      cron,
+      valid: true,
+      error: null,
+      timeZone: "UTC",
+      nextFires: ["2026-10-16T02:00:00Z", "2026-10-17T02:00:00Z", "2026-10-18T02:00:00Z"],
+    });
+  }),
+
+  // RAG Knowledge Base mock data (BEFORE generic handlers)
+  http.get("*/ragstore/rags/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "product-docs",
+      embeddingProvider: "openai",
+      embeddingParameters: {
+        model: "text-embedding-3-small",
+        apiKey: "${vault:openai-key}",
+      },
+      storeType: "pgvector",
+      storeParameters: {
+        host: "localhost",
+        port: "5432",
+        database: "eddi",
+        table: "embeddings",
+        user: "${vault:pg-user}",
+        password: "${vault:pg-password}",
+      },
+      chunkStrategy: "recursive",
+      chunkSize: 512,
+      chunkOverlap: 64,
+      maxResults: 5,
+      minScore: 0.6,
+      sources: [
+        {
+          id: "src-1",
+          name: "public-docs",
+          type: "web",
+          enabled: true,
+          cron: "0 2 * * *",
+          web: {
+            startUrl: "https://example.com/docs/",
+            sameSiteOnly: true,
+            includeSubdomains: false,
+            pathPrefix: "/docs/",
+            maxDepth: 3,
+            maxPages: 200,
+            excludePatterns: ["*.pdf"],
+            sitemapUrls: ["https://example.com/docs/sitemap.xml"],
+            requestDelayMs: 500,
+            respectRobots: true,
+          },
+          settings: {
+            tombstoneAfterMissedRuns: 2,
+            maxSegmentsPerRun: 20000,
+            timeBudgetMinutes: 10,
+          },
+        },
+      ],
+    });
+  }),
+
+  // RAG ingestion endpoints (mock)
+  http.post("*/ragstore/rags/:id/ingest", ({ request }) => {
+    // The id records whether the client asked to replace, so the status below can
+    // answer the way a store that cannot delete by metadata does.
+    const replace = new URL(request.url).searchParams.get("replace") === "true";
+    return HttpResponse.json({
+      ingestionId: `ingest-${replace ? "replace-" : ""}${Date.now()}`,
+    });
+  }),
+
+  http.get("*/ragstore/rags/:id/ingestion/:ingestionId/status", ({ params }) => {
+    const replaced = String(params.ingestionId).startsWith("ingest-replace-");
+    return HttpResponse.json({
+      status: "completed",
+      ...(replaced ? { warning: MOCK_REPLACE_WARNING } : {}),
+    });
+  }),
+
+  // Ingestion source endpoints (mock)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () => {
+    return HttpResponse.json([
+      {
+        runId: "run-1",
+        sourceId: "src-1",
+        status: "COMPLETED",
+        startedAt: "2026-09-17T02:00:00Z",
+        finishedAt: "2026-09-17T02:04:12Z",
+        documentsSeen: 42,
+        documentsIngested: 3,
+        documentsUnchanged: 39,
+        documentsFailed: 0,
+        documentsTombstoned: 1,
+        segmentsStored: 57,
+        costUsd: 0.0,
+        error: null,
+        documentsSkipped: 2,
+        stopReason: "COMPLETED",
+        trigger: "SCHEDULED",
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/run", () => {
+    return HttpResponse.json({ status: "started", sourceId: "src-1" }, { status: 202 });
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/preview", () => {
+    return HttpResponse.json({
+      runId: "preview",
+      sourceId: "src-1",
+      outcome: "PREVIEW",
+      documentsSeen: 42,
+      documentsIngested: 3,
+      documentsUnchanged: 39,
+      documentsSkipped: 0,
+      documentsFailed: 0,
+      documentsTombstoned: 0,
+      segmentsStored: 0,
+      costUsd: 0,
+      replaceUnsupported: false,
+      tombstoningSkipped: false,
+      stopReason: "COMPLETED",
+      message: null,
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/documents", () => {
+    return HttpResponse.json({ status: "purged", sourceId: "src-1" });
+  }),
+
+  // Uploaded files of an ingestion source of type "upload".
+  http.get("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json([
+      {
+        fileId: "3f2a91c4e5b6d7089a1b2c3d4e5f6071",
+        fileName: "employee-handbook.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 1048576,
+        contentHash: "a1b2c3",
+        uploadedAt: "2026-09-18T09:12:00Z",
+        indexState: "INDEXED",
+      },
+    ]);
+  }),
+
+  http.post("*/ragstore/rags/:id/sources/:sourceId/files", () => {
+    return HttpResponse.json({
+      stored: [
+        {
+          fileId: "aa11bb22cc33dd44ee55ff6677889900",
+          fileName: "notes.md",
+          mimeType: "text/markdown",
+          sizeBytes: 64,
+          contentHash: "d4e5f6",
+          uploadedAt: "2026-09-18T09:20:00Z",
+          indexState: "NOT_INDEXED",
+        },
+      ],
+      rejected: [],
+    });
+  }),
+
+  http.delete("*/ragstore/rags/:id/sources/:sourceId/files/:fileId", ({ params }) => {
+    return HttpResponse.json({ status: "deleted", fileId: params.fileId });
+  }),
+
+  // A source's schedule (RestRagIngestion.readSourceSchedule)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/schedule", () => {
+    return HttpResponse.json({
+      scheduled: true,
+      scheduleId: "sched-rag-1",
+      cron: "0 2 * * *",
+      timeZone: "UTC",
+      enabled: true,
+      disabledReason: null,
+      nextFire: "2026-10-16T02:00:00Z",
+      lastFired: "2026-10-15T02:00:00Z",
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      nextRetryAt: null,
+      recentFires: [
+        {
+          fireTime: "2026-10-15T02:00:00Z",
+          completedAt: "2026-10-15T02:00:01Z",
+          status: "COMPLETED",
+          errorMessage: null,
+          attemptNumber: 1,
+        },
+      ],
+    });
+  }),
+
+  // What a source has ingested (RestRagIngestion.readSourceDocuments)
+  http.get("*/ragstore/rags/:id/sources/:sourceId/documents", ({ request }) => {
+    const q = new URL(request.url).searchParams.get("q")?.toLowerCase() ?? "";
+    const documents = [
+      {
+        documentId: "https://example.com/docs/intro",
+        label: "https://example.com/docs/intro",
+        url: "https://example.com/docs/intro",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-10-15T02:01:00Z",
+        missedRuns: 0,
+        tombstoned: false,
+      },
+      {
+        documentId: "https://example.com/docs/old-page",
+        label: "https://example.com/docs/old-page",
+        url: "https://example.com/docs/old-page",
+        firstIngestedAt: "2026-09-17T02:01:00Z",
+        lastIngestedAt: "2026-09-17T02:01:00Z",
+        missedRuns: 2,
+        tombstoned: true,
+      },
+    ].filter((document) => !q || document.label.toLowerCase().includes(q));
+    return HttpResponse.json({ total: documents.length, truncated: false, documents });
+  }),
+
+  http.get("*/ragstore/rags/:id/sources/:sourceId/chunks", ({ request }) => {
+    const documentId = new URL(request.url).searchParams.get("documentId");
+    return HttpResponse.json({
+      documentId,
+      chunks: [
+        {
+          index: 0,
+          score: null,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "0" },
+        },
+        {
+          index: 1,
+          score: null,
+          text: "Agents are assembled from workflows of JSON configurations.",
+          metadata: { documentId, url: documentId, title: "Introduction", index: "1" },
+        },
+      ],
+    });
+  }),
+
+  // A test retrieval (RestRagIngestion.searchKnowledgeBase)
+  http.post("*/ragstore/rags/:id/search", async ({ request }) => {
+    const body = (await request.json()) as { maxResults?: number; minScore?: number };
+    return HttpResponse.json({
+      maxResults: body.maxResults ?? 5,
+      minScore: body.minScore ?? 0.6,
+      results: [
+        {
+          index: 0,
+          score: 0.873,
+          text: "EDDI is a config-driven engine for conversational AI.",
+          metadata: {
+            documentId: "https://example.com/docs/intro",
+            url: "https://example.com/docs/intro",
+            title: "Introduction",
+            sourceName: "public-docs",
+          },
+        },
+      ],
+    });
+  }),
+
+  // --- Group Store Mock Handlers ---
+  http.get("*/groupstore/groups/descriptors", () => {
+    const groups = [
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp1?version=1",
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now(),
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp2?version=1",
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        createdOn: Date.now() - 172800000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp3?version=2",
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        createdOn: Date.now() - 259200000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp4?version=1",
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        createdOn: Date.now() - 432000000,
+        lastModifiedOn: Date.now() - 14400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp5?version=3",
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        createdOn: Date.now() - 604800000,
+        lastModifiedOn: Date.now() - 43200000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp6?version=1",
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        createdOn: Date.now() - 345600000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp7?version=2",
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        createdOn: Date.now() - 518400000,
+        lastModifiedOn: Date.now() - 86400000,
+      },
+      {
+        resource: "eddi://ai.labs.group/groupstore/groups/grp8?version=1",
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        createdOn: Date.now() - 691200000,
+        lastModifiedOn: Date.now() - 172800000,
+      },
+    ];
+    return HttpResponse.json(groups);
+  }),
+
+  // Mirrors `RestAgentGroupStore.readDiscussionStyles`: a JSON ARRAY of
+  // {style, phases, description}, one entry per DiscussionStyle the backend
+  // knows. Not a map keyed by the enum, and no display label — the mock claimed
+  // both, which let a hook that could never match the real payload look correct.
+  http.get("*/groupstore/groups/styles", () => {
+    return HttpResponse.json([
+      { style: "ROUND_TABLE", phases: ["Initial Opinions", "Discussion", "Synthesis"], description: "Open discussion with multiple opinion rounds and moderator synthesis" },
+      { style: "PEER_REVIEW", phases: ["Initial Opinions", "Peer Critique", "Revision", "Synthesis"], description: "Each member gives an opinion, then critiques every peer, then revises" },
+      { style: "DEVIL_ADVOCATE", phases: ["Initial Opinions", "Devil's Challenge", "Defense", "Synthesis"], description: "One designated challenger argues against the group consensus" },
+      { style: "DELPHI", phases: ["Round 1 (Independent)", "Round 2 (Anonymous)", "Synthesis"], description: "Anonymous opinion rounds to reduce groupthink and achieve convergence" },
+      { style: "DEBATE", phases: ["Opening Arguments (Pro)", "Opening Arguments (Con)", "Rebuttal (Pro)", "Rebuttal (Con)", "Judgment"], description: "Structured pro/con argumentation with rebuttal and judge" },
+      { style: "TASK_FORCE", phases: ["Task Planning", "Task Execution", "Result Verification", "Final Synthesis"], description: "Collaborative task accomplishment: plan, execute in parallel, verify, synthesize" },
+      { style: "NEGOTIATION", phases: ["Positions & Interests", "Opening Proposals", "Bargaining", "Arbitration", "Synthesis"], description: "Trade, not win/lose: positions, opening proposals, bargaining with a concession ledger, arbitration only if no agreement, synthesis" },
+      { style: "CUSTOM", phases: [], description: "User-defined phases for full control over the discussion flow" },
+    ]);
+  }),
+
+  http.get("*/groupstore/groups/:id", ({ params }) => {
+    const groupConfigs: Record<string, object> = {
+      grp1: {
+        name: "Product Review Panel",
+        description: "Peer-review discussion for product decisions",
+        members: [
+          { agentId: "agent1", displayName: "Support Agent", speakingOrder: 1, role: "Reviewer", memberType: "AGENT" },
+          { agentId: "agent2", displayName: "FAQ Agent", speakingOrder: 2, role: "Critic", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent1",
+        style: "PEER_REVIEW",
+        maxRounds: 3,
+        phases: [
+          { name: "Initial Opinions", type: "OPINION", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "NONE", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+          { name: "Critique", type: "CRITIQUE", participants: "*", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: true, inputTemplate: null, repeats: 1 },
+          { name: "Synthesis", type: "SYNTHESIS", participants: "moderator", turnOrder: "SEQUENTIAL", contextScope: "FULL", targetEachPeer: false, inputTemplate: null, repeats: 1 },
+        ],
+        protocol: {
+          agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP",
+          // EDDI I1 — a dollar ceiling on the whole discussion.
+          maxCostPerDiscussion: 2.5, onCostExceeded: "SYNTHESIZE_NOW",
+        },
+        dynamicAgents: {
+          enabled: false, allowCreation: false, allowRecruitment: false, allowDelegation: true,
+          maxCreatedAgentsPerDiscussion: 5, maxRecruitedAgentsPerDiscussion: 10,
+          maxDelegationsPerTask: 3, maxDelegationDepth: 3, delegationTimeoutSeconds: 120,
+          allowedDelegationTargets: [], allowedProviders: [], allowedModels: {},
+          inheritParentModel: true,
+          // Hyphenated and lower-case, exactly as Jackson's @JsonValue writes it
+          // on AgentGroupConfiguration.LifecyclePolicy. A mock that returned the
+          // canonical constant would hide the mismatch this format caused.
+          lifecyclePolicy: "keep-deployed",
+        },
+        recordDissents: true,
+        taskListConfig: { allowAgentTaskCreation: true, maxAgentAddedTasksPerDiscussion: 20, maxPerTurn: 3 },
+      },
+      grp2: {
+        name: "Strategy Debate",
+        description: "Devil's advocate debate on business strategy",
+        members: [
+          { agentId: "agent3", displayName: "Market Analyst", speakingOrder: 1, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent4", displayName: "Growth Strategist", speakingOrder: 2, role: "Domain", memberType: "AGENT" },
+          { agentId: "agent5", displayName: "Contrarian", speakingOrder: 3, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent3",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp3: {
+        name: "Research Round Table",
+        description: "Open discussion for research synthesis",
+        members: [
+          { agentId: "agent6", displayName: "Data Scientist", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent7", displayName: "Domain Expert", speakingOrder: 2, role: "Context", memberType: "AGENT" },
+          { agentId: "agent8", displayName: "Research Lead", speakingOrder: 3, role: "Synthesis", memberType: "AGENT" },
+          { agentId: "agent9", displayName: "Peer Reviewer", speakingOrder: 4, role: "Validation", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent8",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp4: {
+        name: "Market Forecast Panel",
+        description: "Delphi-style anonymous forecasting for quarterly predictions",
+        members: [
+          { agentId: "agent10", displayName: "Economist A", speakingOrder: 1, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent11", displayName: "Economist B", speakingOrder: 2, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent12", displayName: "Industry Analyst", speakingOrder: 3, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent13", displayName: "Risk Modeler", speakingOrder: 4, role: "Forecasting", memberType: "AGENT" },
+          { agentId: "agent14", displayName: "Trend Spotter", speakingOrder: 5, role: "Forecasting", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent10",
+        style: "DELPHI",
+        maxRounds: 3,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 90, onAgentFailure: "SKIP", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp5: {
+        name: "Feature Prioritization Debate",
+        description: "Pro/con debate on which features to prioritize for next release",
+        members: [
+          { agentId: "agent15", displayName: "Product Advocate", speakingOrder: 1, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent16", displayName: "UX Champion", speakingOrder: 2, role: "PRO", memberType: "AGENT" },
+          { agentId: "agent17", displayName: "Tech Debt Guardian", speakingOrder: 3, role: "CON", memberType: "AGENT" },
+          { agentId: "agent18", displayName: "Budget Hawk", speakingOrder: 4, role: "CON", memberType: "AGENT" },
+        ],
+        moderatorAgentId: null,
+        style: "DEBATE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp6: {
+        name: "Security Audit Task Force",
+        description: "Coordinated task force to plan and execute a full security audit",
+        members: [
+          { agentId: "agent19", displayName: "Security Lead", speakingOrder: 1, role: "Lead", memberType: "AGENT" },
+          { agentId: "agent20", displayName: "Penetration Tester", speakingOrder: 2, role: "Research", memberType: "AGENT" },
+          { agentId: "agent21", displayName: "Infrastructure Eng", speakingOrder: 3, role: "Implementation", memberType: "AGENT" },
+          { agentId: "agent22", displayName: "Compliance Officer", speakingOrder: 4, role: "QA", memberType: "AGENT" },
+        ],
+        moderatorAgentId: "agent19",
+        style: "TASK_FORCE",
+        maxRounds: 1,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 120, onAgentFailure: "RETRY", maxRetries: 3, onMemberUnavailable: "SKIP" },
+      },
+      grp7: {
+        name: "Customer Feedback Analysis",
+        description: "Round table review of customer feedback themes and action items",
+        members: [
+          { agentId: "agent23", displayName: "CX Analyst", speakingOrder: 1, role: "Analysis", memberType: "AGENT" },
+          { agentId: "agent24", displayName: "Product Manager", speakingOrder: 2, role: "Prioritization", memberType: "AGENT" },
+          { agentId: "grp4", displayName: "Market Forecast Panel", speakingOrder: 3, role: "Context", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent24",
+        style: "ROUND_TABLE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+      grp8: {
+        name: "Compliance Risk Review",
+        description: "Devil's advocate challenge of compliance assumptions across departments",
+        members: [
+          { agentId: "agent25", displayName: "Legal Advisor", speakingOrder: 1, role: "Compliance", memberType: "AGENT" },
+          { agentId: "agent26", displayName: "Risk Manager", speakingOrder: 2, role: "Risk", memberType: "AGENT" },
+          { agentId: "agent27", displayName: "Operations Head", speakingOrder: 3, role: "Operations", memberType: "AGENT" },
+          { agentId: "agent28", displayName: "External Auditor", speakingOrder: 4, role: "DEVIL_ADVOCATE", memberType: "AGENT" },
+          { agentId: "grp2", displayName: "Strategy Debate", speakingOrder: 5, role: "Strategy", memberType: "GROUP" },
+        ],
+        moderatorAgentId: "agent25",
+        style: "DEVIL_ADVOCATE",
+        maxRounds: 2,
+        phases: null,
+        protocol: { agentTimeoutSeconds: 60, onAgentFailure: "SKIP", maxRetries: 2, onMemberUnavailable: "SKIP" },
+      },
+    };
+    const id = params.id as string;
+    const config = groupConfigs[id] ?? groupConfigs.grp1;
+    return HttpResponse.json(config);
+  }),
+
+  http.post("*/groupstore/groups", () => {
+    const newId = `grp-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/groupstore/groups/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    const currentVersion = parseInt(url.searchParams.get("version") ?? "1", 10);
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/${params.id}?version=${currentVersion + 1}`,
+      },
+    });
+  }),
+
+  // ── I13 — standing-team workspace ──
+
+  http.get("*/groupstore/groups/:groupId/workspace", ({ params }) => {
+    return HttpResponse.json({
+      id: `ws-${params.groupId}`, schemaVersion: 1, groupId: params.groupId,
+      // awardedBids is a Record<taskId, AwardedBid>, not an array — an empty
+      // object is the real empty shape.
+      backlog: { tasks: [], awardedBids: {} },
+      metrics: { discussions: 0, tasksVerified: 0, totalCost: 0, lastRunAt: null, perMemberStats: {} },
+      cadences: [],
+      runningDiscussionId: "",
+      pulledTaskIds: [],
+      created: "2026-06-01T00:00:00Z", lastModified: "2026-06-01T00:00:00Z", revision: "0",
+    });
+  }),
+
+  http.post("*/groupstore/groups/:groupId/workspace/backlog", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      subject?: string; description?: string; priority?: number; hypothesis?: string; metric?: string; target?: string; reviewDate?: string;
+    };
+    if (!body?.subject?.trim()) {
+      return HttpResponse.json({ error: "subject is required" }, { status: 400 });
+    }
+    // The server refuses a partial bet the way Bet.of does.
+    if ((body.hypothesis || body.metric || body.reviewDate) && !(body.hypothesis && body.metric && body.reviewDate)) {
+      return HttpResponse.json({ error: "A bet needs a hypothesis, a metric and a reviewDate (target is optional)" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: `task-${Date.now()}`, subject: body.subject, description: body.description ?? "",
+      bet: body.hypothesis
+        ? { hypothesis: body.hypothesis, metric: body.metric, target: body.target ?? null, reviewDate: new Date(body.reviewDate!).toISOString(), reviewedAt: null }
+        : null,
+      status: "PENDING", assignedAgentId: null, assignedDisplayName: null, dependsOnIds: [],
+      result: null, verificationNote: null, verified: false, priority: body.priority ?? 0,
+      createdAt: new Date().toISOString(), completedAt: null,
+    }, { status: 201 });
+  }),
+
+  // Team learning loop: nothing due, no outcomes, no approvals analytics by default.
+  http.get("*/groupstore/groups/:groupId/workspace/backlog/due-reviews", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/outcomes", () => HttpResponse.json([])),
+  // Team lessons: none, nothing shared, consolidation unconfigured by default.
+  http.get("*/groupstore/groups/:groupId/lessons", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/shared", ({ params }) =>
+    HttpResponse.json({ readerGroupId: params.groupId, groups: [], notShared: [] }),
+  ),
+  http.get("*/groupstore/groups/:groupId/lessons/history", () => HttpResponse.json([])),
+  http.get("*/groupstore/groups/:groupId/lessons/consolidation", () =>
+    HttpResponse.json({ configured: false, hasModel: false, scheduled: false }),
+  ),
+  http.get("*/hitl/analytics/outcomes", ({ request }) =>
+    HttpResponse.json({ groupId: new URL(request.url).searchParams.get("groupId"), decisions: 0, outcomes: 0, truncated: false, categories: [] }),
+  ),
+
+  http.post("*/groupstore/groups/:groupId/workspace/cadences", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { cronExpression?: string };
+    if (!body?.cronExpression?.trim()) {
+      return HttpResponse.json({ error: "cronExpression is required" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      cadenceId: `cad-${Date.now()}`, scheduleRef: `sched-${Date.now()}`,
+      inputTemplate: null, maxBacklogTasksPerRun: 5, maxCostPerRun: null, createdBy: "manager-user",
+    }, { status: 201 });
+  }),
+
+  http.delete("*/groupstore/groups/:groupId/workspace/cadences/:cadenceId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+  ...teamHandoffHandlers,
+
+  // ── I10 — packaged group templates ──
+
+  http.get("*/groupstore/templates", () => {
+    return HttpResponse.json([
+      {
+        templateId: "research-pod", title: "Research Pod",
+        description: "Three independent researchers converge on findings, synthesized by a moderator.",
+        requiredRoles: [
+          { role: "researcher1", description: "First independent researcher" },
+          { role: "researcher2", description: "Second independent researcher" },
+          { role: "researcher3", description: "Third independent researcher" },
+          { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+        ],
+      },
+      {
+        templateId: "decision-board", title: "Decision Board",
+        description: "A board with a human director votes on options a chair distills.",
+        requiredRoles: [
+          { role: "advisor1", description: "First board advisor" },
+          { role: "advisor2", description: "Second board advisor" },
+          { role: "humanDirector", description: "Human board member — their principal id" },
+          { role: "chair", description: "Chairs the board" },
+        ],
+      },
+    ]);
+  }),
+
+  http.get("*/groupstore/templates/:templateId", ({ params }) => {
+    if (params.templateId === "research-pod") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "research-pod", title: "Research Pod",
+          description: "Three independent researchers converge on findings, synthesized by a moderator.",
+          requiredRoles: [
+            { role: "researcher1", description: "First independent researcher" },
+            { role: "researcher2", description: "Second independent researcher" },
+            { role: "researcher3", description: "Third independent researcher" },
+            { role: "moderator", description: "Synthesizes the pod's findings and judges convergence" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$moderator",
+          members: [
+            { agentId: "$researcher1", displayName: "Researcher 1", speakingOrder: 1 },
+            { agentId: "$researcher2", displayName: "Researcher 2", speakingOrder: 2 },
+            { agentId: "$researcher3", displayName: "Researcher 3", speakingOrder: 3 },
+          ],
+        },
+      });
+    }
+    if (params.templateId === "decision-board") {
+      return HttpResponse.json({
+        manifest: {
+          templateId: "decision-board", title: "Decision Board",
+          description: "A board with a human director votes on options a chair distills.",
+          requiredRoles: [
+            { role: "advisor1", description: "First board advisor" },
+            { role: "advisor2", description: "Second board advisor" },
+            { role: "humanDirector", description: "Human board member — their principal id" },
+            { role: "chair", description: "Chairs the board" },
+          ],
+        },
+        config: {
+          style: "CUSTOM", moderatorAgentId: "$chair",
+          members: [
+            { agentId: "$advisor1", displayName: "Advisor 1", speakingOrder: 1 },
+            { agentId: "$advisor2", displayName: "Advisor 2", speakingOrder: 2 },
+            { agentId: "$humanDirector", displayName: "Director", speakingOrder: 3, memberType: "HUMAN" },
+          ],
+        },
+      });
+    }
+    return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 404 });
+  }),
+
+  http.post("*/groupstore/templates/:templateId/instantiate", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      name?: string; roleAssignments?: Record<string, string>;
+    };
+    const assignments = body?.roleAssignments ?? {};
+    const knownRoles: Record<string, string[]> = {
+      "research-pod": ["researcher1", "researcher2", "researcher3", "moderator"],
+      "decision-board": ["advisor1", "advisor2", "humanDirector", "chair"],
+    };
+    const required = knownRoles[String(params.templateId)];
+    if (!required) {
+      return HttpResponse.json({ error: `No such template: ${params.templateId}` }, { status: 400 });
+    }
+    const missing = required.filter((r) => !assignments[r]?.trim());
+    if (missing.length > 0) {
+      return HttpResponse.json(
+        { error: `Missing role assignment(s): ${missing.join(", ")}` },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `eddi://ai.labs.group/groupstore/groups/grp-from-tmpl?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/groupstore/groups/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Group conversations
+  http.get("*/groups/:groupId/conversations", ({ params, request }) => {
+    const now = Date.now();
+    const groupConversations: Record<string, object[]> = {
+      grp1: [
+        { id: "gc-1a", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Review the new onboarding flow — is it production-ready?", created: new Date(now - 86400000).toISOString(), lastModified: new Date(now - 82800000).toISOString() },
+        { id: "gc-1b", groupId: "grp1", userId: "admin", state: "COMPLETED", originalQuestion: "Assess the mobile checkout redesign for UX consistency", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-1c", groupId: "grp1", userId: "admin", state: "FAILED", originalQuestion: "Evaluate the new API rate limiting strategy", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp2: [
+        { id: "gc-2a", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Should we pivot to a product-led growth strategy?", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 255600000).toISOString() },
+        { id: "gc-2b", groupId: "grp2", userId: "admin", state: "COMPLETED", originalQuestion: "Is expanding into the enterprise segment worth the R&D cost?", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+      ],
+      grp3: [
+        { id: "gc-3a", groupId: "grp3", userId: "admin", state: "COMPLETED", originalQuestion: "What are the key findings from last quarter's user research?", created: new Date(now - 345600000).toISOString(), lastModified: new Date(now - 342000000).toISOString() },
+        { id: "gc-3b", groupId: "grp3", userId: "admin", state: "IN_PROGRESS", originalQuestion: "Synthesize competitor analysis data from the 3 latest reports", created: new Date(now - 3600000).toISOString(), lastModified: new Date(now - 1800000).toISOString() },
+      ],
+      grp4: [
+        { id: "gc-4a", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Forecast Q3 revenue across our three business lines", created: new Date(now - 518400000).toISOString(), lastModified: new Date(now - 514800000).toISOString() },
+        { id: "gc-4b", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "What is the probability of a market correction in the next 6 months?", created: new Date(now - 691200000).toISOString(), lastModified: new Date(now - 687600000).toISOString() },
+        { id: "gc-4c", groupId: "grp4", userId: "admin", state: "COMPLETED", originalQuestion: "Estimate customer churn rate for enterprise tier in Q4", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+      ],
+      grp5: [
+        { id: "gc-5a", groupId: "grp5", userId: "admin", state: "COMPLETED", originalQuestion: "Should we prioritize real-time collaboration or offline mode?", created: new Date(now - 172800000).toISOString(), lastModified: new Date(now - 169200000).toISOString() },
+      ],
+      grp6: [
+        { id: "gc-6a", groupId: "grp6", userId: "admin", state: "COMPLETED", originalQuestion: "Plan and execute a comprehensive security audit of our auth system", created: new Date(now - 259200000).toISOString(), lastModified: new Date(now - 252000000).toISOString() },
+        { id: "gc-6b", groupId: "grp6", userId: "admin", state: "AWAITING_APPROVAL", originalQuestion: "Audit the new payment processing microservice for PCI compliance", created: new Date(now - 43200000).toISOString(), lastModified: new Date(now - 36000000).toISOString() },
+      ],
+      grp7: [
+        { id: "gc-7a", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "What are the top 5 customer pain points from this month's feedback?", created: new Date(now - 604800000).toISOString(), lastModified: new Date(now - 601200000).toISOString() },
+        { id: "gc-7b", groupId: "grp7", userId: "admin", state: "COMPLETED", originalQuestion: "Analyze NPS trends and identify actionable improvements", created: new Date(now - 1209600000).toISOString(), lastModified: new Date(now - 1206000000).toISOString() },
+      ],
+      grp8: [
+        { id: "gc-8a", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Challenge our GDPR compliance assumptions for the new analytics pipeline", created: new Date(now - 432000000).toISOString(), lastModified: new Date(now - 428400000).toISOString() },
+        { id: "gc-8b", groupId: "grp8", userId: "admin", state: "COMPLETED", originalQuestion: "Review SOC 2 readiness across all departments", created: new Date(now - 864000000).toISOString(), lastModified: new Date(now - 860400000).toISOString() },
+        { id: "gc-8c", groupId: "grp8", userId: "admin", state: "CREATED", originalQuestion: "Assess data retention policy compliance with new EU regulations", created: new Date(now - 7200000).toISOString(), lastModified: new Date(now - 7200000).toISOString() },
+      ],
+    };
+    const id = params.groupId as string;
+    // The backend's `index` is a ROW offset here (GroupConversationStore hands it
+    // to findResources as `skip`), unlike the descriptor stores' page index.
+    const url = new URL(request.url);
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json((groupConversations[id] ?? []).slice(index, index + limit));
+  }),
+
+  http.post("*/groups/:groupId/conversations", ({ params }) => {
+    return HttpResponse.json({
+      id: `gc-${Date.now()}`,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "IN_PROGRESS",
+      originalQuestion: "What should we prioritize for Q2?",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: "Initial Opinions",
+      synthesizedAnswer: null,
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+    });
+  }),
+
+  // --- Schedule Store Mock Handlers ---
+  http.get("*/schedulestore/schedules", () => {
+    return HttpResponse.json([
+      {
+        id: "sched-1",
+        name: "Daily Health Check",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 9 * * MON-FRI",
+        cronDescription: "At 09:00 AM, Monday through Friday",
+        message: "Run daily health check",
+        conversationStrategy: "new",
+        enabled: true,
+        nextFire: nextWeekday9amUtc(),
+        lastFired: Date.now() - 43200000,
+        fireStatus: "COMPLETED",
+        failCount: 0,
+        timeZone: "UTC",
+        createdAt: Date.now() - 604800000,
+        updatedAt: Date.now() - 43200000,
+      },
+      {
+        id: "sched-2",
+        name: "Heartbeat Monitor",
+        triggerType: "HEARTBEAT",
+        agentId: "agent2",
+        agentVersion: 1,
+        environment: "production",
+        heartbeatIntervalSeconds: 300,
+        message: "Heartbeat ping",
+        conversationStrategy: "persistent",
+        persistentConversationId: "conv-heartbeat-001",
+        enabled: true,
+        nextFire: Date.now() + 1800000,
+        lastFired: Date.now() - 1800000,
+        fireStatus: "PENDING",
+        failCount: 0,
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 1800000,
+      },
+      {
+        id: "sched-3",
+        name: "Failed Report",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 8 * * 1",
+        cronDescription: "Every Monday at 8:00 AM",
+        message: "Generate weekly summary report",
+        conversationStrategy: "new",
+        enabled: false,
+        lastFired: Date.now() - 604800000,
+        fireStatus: "DEAD_LETTERED",
+        failCount: 3,
+        timeZone: "Europe/Vienna",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 604800000,
+      },
+      // EDDI 6.6 `disabledReason`: switched off by the system, not a person.
+      {
+        id: "sched-4",
+        name: "Weekly Digest",
+        triggerType: "CRON",
+        agentId: "agent2",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "0 7 * * MON",
+        message: "Send the weekly digest",
+        conversationStrategy: "new",
+        enabled: false,
+        disabledReason: "agent-undeployed",
+        lastFired: Date.now() - 604800000,
+        fireStatus: "COMPLETED",
+        failCount: 0,
+        timeZone: "UTC",
+        createdBy: "alice",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 86400000,
+      },
+      {
+        id: "sched-5",
+        name: "Partner Sync",
+        triggerType: "CRON",
+        agentId: "agent1",
+        agentVersion: 0,
+        environment: "production",
+        cronExpression: "30 6 * * *",
+        message: "Sync partner records",
+        conversationStrategy: "new",
+        enabled: false,
+        disabledReason: "access-revoked",
+        lastFired: Date.now() - 86400000,
+        fireStatus: "FAILED",
+        failCount: 1,
+        timeZone: "UTC",
+        createdBy: "bob",
+        createdAt: Date.now() - 2592000000,
+        updatedAt: Date.now() - 86400000,
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/admin/failed", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        id: "fire-fail-1",
+        scheduleId: "sched-3",
+        fireId: "f-3-1",
+        fireTime: new Date(now - 604800000).toISOString(),
+        startedAt: new Date(now - 604800000).toISOString(),
+        completedAt: new Date(now - 604799000).toISOString(),
+        status: "DEAD_LETTERED",
+        conversationId: null,
+        errorMessage: "Agent not deployed in production environment",
+        attemptNumber: 3,
+        cost: 0,
+      },
+    ]);
+  }),
+
+  http.get("*/schedulestore/schedules/:id", () => {
+    return HttpResponse.json({
+      id: "sched-1",
+      name: "Daily Health Check",
+      triggerType: "CRON",
+      agentId: "agent1",
+      agentVersion: 0,
+      environment: "production",
+      cronExpression: "0 9 * * MON-FRI",
+      cronDescription: "At 09:00 AM, Monday through Friday",
+      message: "Run daily health check",
+      conversationStrategy: "new",
+      enabled: true,
+      nextFire: nextWeekday9amUtc(),
+      lastFired: Date.now() - 43200000,
+      fireStatus: "COMPLETED",
+      failCount: 0,
+      timeZone: "UTC",
+      createdAt: Date.now() - 604800000,
+      updatedAt: Date.now() - 43200000,
+    });
+  }),
+
+  http.post("*/schedulestore/schedules", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/schedulestore/schedules/sched-${Date.now()}` },
+    });
+  }),
+
+  http.put("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/schedulestore/schedules/:id", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/enable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/disable", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/fire", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/retry", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/schedulestore/schedules/:id/dismiss", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/schedulestore/schedules/:id/fires", () => {
+    const now = Date.now();
+    return HttpResponse.json([
+      {
+        id: "fire-1",
+        scheduleId: "sched-1",
+        fireId: "f-1-1",
+        fireTime: new Date(now - 43200000).toISOString(),
+        startedAt: new Date(now - 43200000).toISOString(),
+        completedAt: new Date(now - 43195000).toISOString(),
+        status: "COMPLETED",
+        conversationId: "conv-fire-001",
+        attemptNumber: 1,
+        cost: 0.0012,
+      },
+      {
+        id: "fire-2",
+        scheduleId: "sched-1",
+        fireId: "f-1-2",
+        fireTime: new Date(now - 129600000).toISOString(),
+        startedAt: new Date(now - 129600000).toISOString(),
+        completedAt: new Date(now - 129594000).toISOString(),
+        status: "COMPLETED",
+        conversationId: "conv-fire-002",
+        attemptNumber: 1,
+        cost: 0.0015,
+      },
+    ]);
+  }),
+
+  // Prompt Snippets mock data
+  http.get("*/snippetstore/snippets/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      name: "cautious_mode",
+      category: "governance",
+      description: "Makes the agent more careful and hedging in responses — recommended for production agents handling regulated domains",
+      content: "## Response Guidelines\n\nYou must follow these rules at all times:\n\n1. **Accuracy First**: When uncertain about facts, explicitly state your uncertainty. Say \"I believe\" or \"Based on available information\" rather than making definitive claims.\n2. **No Financial/Legal Advice**: Never provide specific financial, legal, or medical recommendations. Instead, direct users to qualified professionals.\n3. **Source Attribution**: When citing data, reference the source document or knowledge base entry.\n4. **Hedging Language**: Use phrases like \"typically\", \"in most cases\", \"generally speaking\" for statements that may not apply universally.\n5. **Escalation Trigger**: If confidence drops below 70% on a user question, offer to connect with a human specialist.\n\n{#if properties.regulated_domain}\n⚠️ This conversation involves a regulated domain ({properties.regulated_domain}). Apply maximum caution.\n{/if}",
+      tags: ["safety", "production", "enterprise", "compliance", "regulated"],
+      templateEnabled: true,
+    });
+  }),
+
+  // Parser config mock data (BEFORE generic handlers)
+  http.get("*/parserstore/parsers/:id", ({ request }) => {
+    const url = new URL(request.url);
+    const includePrevious = url.searchParams.get("includePreviousVersions");
+    if (isNotAnId(url.pathname) || includePrevious) return;
+    return HttpResponse.json({
+      config: {
+        appendExpressions: true,
+        includeUnused: true,
+        includeUnknown: true,
+      },
+      extensions: {
+        dictionaries: [
+          { type: "eddi://ai.labs.parser.dictionaries.integer" },
+          { type: "eddi://ai.labs.parser.dictionaries.decimal" },
+          { type: "eddi://ai.labs.parser.dictionaries.punctuation" },
+          { type: "eddi://ai.labs.parser.dictionaries.email" },
+          { type: "eddi://ai.labs.parser.dictionaries.time" },
+          { type: "eddi://ai.labs.parser.dictionaries.ordinalNumber" },
+          {
+            type: "eddi://ai.labs.parser.dictionaries.regular",
+            config: { uri: "eddi://ai.labs.dictionary/dictionarystore/dictionaries/dict1?version=1" },
+          },
+        ],
+        corrections: [
+          { type: "eddi://ai.labs.parser.corrections.levenshtein", config: { distance: "2" } },
+          { type: "eddi://ai.labs.parser.corrections.mergedTerms" },
+        ],
+        normalizer: [],
+      },
+    });
+  }),
+
+  // Generic descriptor handlers for all resource types
+  ...createResourceHandlers("rulestore", "rulesets", "rules"),
+  ...createResourceHandlers("apicallstore", "apicalls", "apicalls"),
+  ...createResourceHandlers("outputstore", "outputsets", "output"),
+  ...createResourceHandlers(
+    "dictionarystore",
+    "dictionaries",
+    "dictionary"
+  ),
+  ...createResourceHandlers("llmstore", "llms", "llm"),
+  ...createResourceHandlers(
+    "propertysetterstore",
+    "propertysetters",
+    "propertysetter"
+  ),
+  ...createResourceHandlers("mcpcallsstore", "mcpcalls", "mcpcalls"),
+  ...createResourceHandlers("ragstore", "rags", "rag"),
+  ...createResourceHandlers("parserstore", "parsers", "parser"),
+  ...createResourceHandlers("snippetstore", "snippets", "snippets"),
+];
+
+function createResourceHandlers(
+  store: string,
+  plural: string,
+  label: string
+) {
+  // No `/descriptors` handler here: the generic `*/:store/:plural/descriptors`
+  // registered earlier answers every one of these stores, so a copy here was
+  // unreachable (it once carried an `includePreviousVersions` branch no test
+  // could ever hit).
+  return [
+    // JSON Schema endpoint
+    http.get(`*/${store}/${plural}/jsonSchema`, () => {
+      const schema = RESOURCE_SCHEMAS[label];
+      if (schema) {
+        return HttpResponse.json(schema);
+      }
+      return HttpResponse.json({
+        $schema: "https://json-schema.org/draft/2020-12/schema",
+        type: "object",
+        title: `${label}Configuration`,
+        properties: {},
+      });
+    }),
+    http.get(`*/${store}/${plural}/:id`, () => {
+      return HttpResponse.json(EMPTY_CONFIGS[label] ?? {});
+    }),
+    http.post(`*/${store}/${plural}`, () => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/new-res?version=1`,
+        },
+      });
+    }),
+    http.put(`*/${store}/${plural}/:id`, ({ request, params }) => {
+      const url = new URL(request.url);
+      const currentVersion = parseInt(
+        url.searchParams.get("version") ?? "1",
+        10
+      );
+      const newVersion = currentVersion + 1;
+      return new HttpResponse(null, {
+        status: 200,
+        headers: {
+          Location: `eddi://ai.labs.${label}/${store}/${plural}/${params.id}?version=${newVersion}`,
+        },
+      });
+    }),
+    http.delete(`*/${store}/${plural}/:id`, () => {
+      return new HttpResponse(null, { status: 204 });
+    }),
+    // Duplicate resource (POST with :id)
+    http.post(`*/${store}/${plural}/:id`, ({ params }) => {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: {
+          Location: `/${store}/${plural}/dup-${params.id}?version=1`,
+        },
+      });
+    }),
+  ];
+}
+
+// --- Coordinator Admin Mock Data ---
+const COORDINATOR_STATUS_MOCK = {
+  coordinatorType: "nats",
+  connected: true,
+  connectionStatus: "CONNECTED — nats://eddi-nats:4222 (cluster: eddi-prod, 3 nodes)",
+  activeConversations: 24,
+  totalProcessed: 142_897,
+  totalDeadLettered: 7,
+  queueDepths: {
+    "conv-abc123": 3,
+    "conv-def456": 1,
+    "conv-ghi789": 2,
+    "conv-jkl012": 4,
+    "conv-mno345": 1,
+    "conv-pqr678": 2,
+    "conv-stu901": 1,
+    "conv-vwx234": 3,
+    "conv-yza567": 2,
+    "conv-bcd890": 1,
+    "conv-efg123": 2,
+    "conv-hij456": 1,
+  },
+};
+
+const DEAD_LETTERS_MOCK = [
+  {
+    id: "1",
+    conversationId: "conv-fail-001",
+    error: "Connection timeout to external API",
+    timestamp: Date.now() - 3600000,
+    payload: '{"conversationId":"conv-fail-001","error":"Connection timeout to external API","timestamp":' + (Date.now() - 3600000) + '}',
+  },
+  {
+    id: "2",
+    conversationId: "conv-fail-002",
+    error: "LLM rate limit exceeded",
+    timestamp: Date.now() - 7200000,
+    payload: '{"conversationId":"conv-fail-002","error":"LLM rate limit exceeded","timestamp":' + (Date.now() - 7200000) + '}',
+  },
+  {
+    id: "3",
+    conversationId: "conv-fail-003",
+    error: "NullPointerException in BehaviorRulesEvaluationTask",
+    timestamp: Date.now() - 86400000,
+    payload: '{"conversationId":"conv-fail-003","error":"NullPointerException in BehaviorRulesEvaluationTask","timestamp":' + (Date.now() - 86400000) + '}',
+  },
+];
+
+export const coordinatorHandlers = [
+  // The cluster console (/administration/cluster/*): fixtures and handlers in
+  // cluster-handlers.ts.
+  ...clusterHandlers,
+  http.get("*/administration/coordinator/status", () => {
+    return HttpResponse.json(COORDINATOR_STATUS_MOCK);
+  }),
+
+  http.get("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(DEAD_LETTERS_MOCK);
+  }),
+
+  http.post("*/administration/coordinator/dead-letters/:entryId/replay", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/administration/coordinator/dead-letters", () => {
+    return HttpResponse.json(0);
+  }),
+];
+
+// ─── Orphan Admin Handlers ───────────────────────────────────────────────────
+
+const ORPHAN_REPORT_MOCK = {
+  totalOrphans: 5,
+  deletedCount: 0,
+  // A scan that finished, which is what makes the list actionable. EDDI refuses
+  // to purge when this is false, so a fixture omitting it would leave the
+  // page's incomplete-scan branch untested against the real shape.
+  scanComplete: true,
+  scanWarning: null,
+  orphans: [
+    {
+      resourceUri: "eddi://ai.labs.workflow/workflowstore/workflows/orphan1?version=1",
+      type: "eddi://ai.labs.workflow",
+      name: "Legacy Support Workflow (v1)",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.rules/rulestore/rulesets/orphan2?version=1",
+      type: "eddi://ai.labs.rules",
+      name: "Deprecated Greeting Rules",
+      deleted: true,
+    },
+    {
+      resourceUri: "eddi://ai.labs.output/outputstore/outputsets/orphan3?version=2",
+      type: "eddi://ai.labs.output",
+      name: "Archived French Responses",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.parser/parserstore/parsers/orphan4?version=1",
+      type: "eddi://ai.labs.parser",
+      name: "Test Intent Dictionary",
+      deleted: false,
+    },
+    {
+      resourceUri: "eddi://ai.labs.langchain/llmstore/llms/orphan5?version=1",
+      type: "eddi://ai.labs.langchain",
+      name: "Old GPT-3.5 Config",
+      deleted: true,
+    },
+  ],
+};
+
+export const orphanHandlers = [
+  http.get("*/administration/orphans", () => {
+    return HttpResponse.json(ORPHAN_REPORT_MOCK);
+  }),
+
+  http.delete("*/administration/orphans", () => {
+    return HttpResponse.json({
+      ...ORPHAN_REPORT_MOCK,
+      deletedCount: ORPHAN_REPORT_MOCK.totalOrphans,
+    });
+  }),
+];
+
+// ─── Log Admin Handlers ──────────────────────────────────────────────────────
+
+const MOCK_LOG_ENTRIES = [
+  {
+    timestamp: Date.now() - 12000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.runtime.AgentEngine",
+    message: "Processing conversation conv-abc123 for agent agent1 (v3, production)",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-abc123",
+    userId: "user-42",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 10000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.modules.llm.impl.LlmTask",
+    message: "LLM call completed: model=gpt-5.4, tokens_in=142, tokens_out=89, duration=1240ms, cost=$0.0032",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-abc123",
+    userId: "user-42",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 8000,
+    level: "WARNING",
+    loggerName: "ai.labs.eddi.modules.llm.impl.LlmTask",
+    message: "LLM response took 8200ms, exceeding soft timeout of 5000ms. Consider switching to a faster model.",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: "conv-def456",
+    userId: "user-15",
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 6000,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.schedule.ScheduleFireExecutor",
+    message: "Scheduled fire completed: sched-1 'Daily Health Check' → agent1 (strategy=new, cost=$0.0018)",
+    environment: "production",
+    agentId: "agent1",
+    agentVersion: 3,
+    conversationId: "conv-sched-001",
+    userId: "system:scheduler",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 4500,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.lifecycle.LifecycleManager",
+    message: "Workflow pipeline completed: 4 tasks executed in 1842ms (parser→rules→llm→output)",
+    environment: "production",
+    agentId: "agent5",
+    agentVersion: 1,
+    conversationId: "conv-ghi789",
+    userId: "user-78",
+    instanceId: "eddi-prod-node1",
+  },
+  {
+    timestamp: Date.now() - 3000,
+    level: "WARNING",
+    loggerName: "ai.labs.eddi.secrets.SecretResolver",
+    message: "Secret 'stripe-secret-key' for agent4 has not been rotated in 90+ days",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: null,
+    userId: null,
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 1500,
+    level: "SEVERE",
+    loggerName: "ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask",
+    message:
+      "Failed to execute HTTP call 'crm-lookup'\n\tat ai.labs.eddi.modules.httpcalls.impl.HttpCallsTask.executeTask(HttpCallsTask.java:85)\n\tat ai.labs.eddi.engine.lifecycle.LifecycleManager.executeComponent(LifecycleManager.java:120)\nCaused by: java.net.ConnectException: Connection refused (Connection refused)\n\tat java.net.http/jdk.internal.net.http.HttpClientImpl.send(HttpClientImpl.java:565)",
+    environment: "production",
+    agentId: "agent4",
+    agentVersion: 2,
+    conversationId: "conv-jkl012",
+    userId: "user-33",
+    instanceId: "eddi-prod-node2",
+  },
+  {
+    timestamp: Date.now() - 500,
+    level: "INFO",
+    loggerName: "ai.labs.eddi.engine.audit.AuditLedgerService",
+    message: "Audit ledger flushed: 12 entries persisted (batch integrity verified, HMAC OK)",
+    environment: "production",
+    agentId: null,
+    agentVersion: null,
+    conversationId: null,
+    userId: null,
+    instanceId: "eddi-prod-node1",
+  },
+];
+
+export const logAdminHandlers = [
+  http.get("*/administration/logs", () => {
+    return HttpResponse.json(MOCK_LOG_ENTRIES);
+  }),
+
+  http.get("*/administration/logs/history", () => {
+    return HttpResponse.json(
+      MOCK_LOG_ENTRIES.map((e) => ({
+        ...e,
+        timestamp: new Date(e.timestamp).toISOString(),
+      }))
+    );
+  }),
+
+  http.get("*/administration/logs/instance-id", () => {
+    return HttpResponse.json({ instanceId: "eddi-host-a1b2" });
+  }),
+];
+
+// --- Secrets Vault Mock ---
+type MockSecret = {
+  tenantId: string;
+  keyName: string;
+  createdAt: string;
+  lastAccessedAt: string | null;
+  lastRotatedAt: string | null;
+  checksum: string;
+  description: string;
+  allowedAgents: string[];
+  /** Omitted when unrestricted, as EDDI's mapper drops null fields. */
+  allowedHosts?: string[];
+};
+
+/** The seed. Never mutated: the handlers work on `secretsState` below. */
+const MOCK_SECRETS: readonly MockSecret[] = [
+  {
+    tenantId: "default",
+    keyName: "openai-api-key",
+    createdAt: new Date(Date.now() - 45 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 120000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+    checksum: "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2",
+    description: "OpenAI API key for GPT-5.4 production agents",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "anthropic-api-key",
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 3600000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    checksum: "c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4",
+    description: "Anthropic Claude Opus / Sonnet API key",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "google-gemini-key",
+    createdAt: new Date(Date.now() - 20 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 7200000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6",
+    description: "Google Gemini 2.5 Flash API key",
+    allowedAgents: ["agent5", "agent7"],
+    allowedHosts: ["generativelanguage.googleapis.com"],
+  },
+  {
+    tenantId: "default",
+    keyName: "sendgrid-api-key",
+    createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 2 * 3600000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5d4c3b2a1f6e5",
+    description: "SendGrid transactional email service key",
+    allowedAgents: ["agent1", "agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "stripe-secret-key",
+    createdAt: new Date(Date.now() - 18 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 86400000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    checksum: "d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5",
+    description: "Stripe payment processing secret (PCI-compliant)",
+    allowedAgents: ["agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "pg-connection-string",
+    createdAt: new Date(Date.now() - 40 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 1800000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    checksum: "b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3",
+    description: "PostgreSQL pgvector store connection string",
+    allowedAgents: ["*"],
+  },
+  {
+    tenantId: "default",
+    keyName: "salesforce-oauth-token",
+    createdAt: new Date(Date.now() - 15 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 4 * 3600000).toISOString(),
+    lastRotatedAt: new Date(Date.now() - 3 * 86400000).toISOString(),
+    checksum: "a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3c4d5e6f7a2b3",
+    description: "Salesforce CRM OAuth refresh token",
+    allowedAgents: ["agent1", "agent4"],
+  },
+  {
+    tenantId: "default",
+    keyName: "mcp-doc-server-key",
+    createdAt: new Date(Date.now() - 8 * 86400000).toISOString(),
+    lastAccessedAt: new Date(Date.now() - 900000).toISOString(),
+    lastRotatedAt: null,
+    checksum: "f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2d3c4b5a6f1e2",
+    description: "MCP document search server API key",
+    allowedAgents: ["agent7"],
+  },
+];
+
+// ─── Global Variables Mock Data ────────────────────────────────────────────────
+
+const MOCK_VARIABLES = [
+  {
+    key: "default-model",
+    value: "gpt-4.1",
+    description: "Primary LLM model for all agents — cascades to gpt-4.1-mini on budget overflow",
+    exportable: true,
+  },
+  {
+    key: "fallback-model",
+    value: "gpt-4.1-mini",
+    description: "Cost-effective fallback when primary model quota is exhausted",
+    exportable: true,
+  },
+  {
+    key: "llm.temperature",
+    value: "0.7",
+    description: "Default temperature for all LLM tasks (0.0–2.0)",
+    exportable: true,
+  },
+  {
+    key: "llm.max-tokens",
+    value: "4096",
+    description: "Maximum output tokens per LLM completion",
+    exportable: true,
+  },
+  {
+    key: "api.base-url",
+    value: "https://api.openai.com/v1",
+    description: "OpenAI-compatible API base URL — change to use Azure, LiteLLM, or local proxy",
+    exportable: false,
+  },
+  {
+    key: "rag.chunk-size",
+    value: "512",
+    description: "RAG document chunk size in tokens for vector embedding",
+    exportable: true,
+  },
+  {
+    key: "rag.top-k",
+    value: "5",
+    description: "Number of top matching chunks to retrieve per RAG query",
+    exportable: true,
+  },
+  {
+    key: "feature.cascade-enabled",
+    value: "true",
+    description: "Enable automatic model cascading on confidence threshold failure",
+    exportable: true,
+  },
+  {
+    key: "branding.bot-name",
+    value: "EDDI Assistant",
+    description: "Display name shown in chat UI and system prompts",
+    exportable: true,
+  },
+  {
+    key: "rate-limit.rpm",
+    value: "60",
+    description: "Global rate limit — max requests per minute to external LLM providers",
+    exportable: false,
+  },
+  {
+    key: "mcp.timeout-ms",
+    value: "30000",
+    description: "MCP tool call timeout in milliseconds before fallback",
+    exportable: false,
+  },
+  {
+    key: "environment",
+    value: "production",
+    description: null,
+    exportable: false,
+  },
+];
+
+export const variablesHandlers = [
+  // List all global variables for a tenant
+  http.get("*/variablestore/variables/:tenantId", ({ request }) => {
+    const url = new URL(request.url);
+    // Only match /variablestore/variables/:tenantId (no trailing key segment)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
+    return HttpResponse.json(MOCK_VARIABLES);
+  }),
+
+  // Get a single variable by key
+  http.get("*/variablestore/variables/:tenantId/:key", ({ params }) => {
+    const key = params.key as string;
+    const found = MOCK_VARIABLES.find((v) => v.key === key);
+    if (!found) {
+      return new HttpResponse(null, { status: 404 });
+    }
+    return HttpResponse.json(found);
+  }),
+
+  // Create or update a variable
+  http.put("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Delete a variable
+  http.delete("*/variablestore/variables/:tenantId/:key", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+/**
+ * **These handlers hold state.** The list, metadata GET, store PUT, grant PUT
+ * and DELETE all read and write this one array, so a key created through the
+ * mocked Add flow is found by the next lookup (and a second create of it is
+ * refused as a duplicate), and a deleted key is gone. A fixed array the writes
+ * never touched let a lookup contradict a write that had just succeeded.
+ * `server.resetHandlers()` does not reset module state, so `src/test/setup.ts`
+ * calls {@link resetSecretsMockState} after every test.
+ */
+let secretsState: MockSecret[] = [];
+
+/** Restore the seed secrets; called after every test. */
+export function resetSecretsMockState(): void {
+  secretsState = MOCK_SECRETS.map((s) => ({ ...s, allowedAgents: [...s.allowedAgents] }));
+}
+resetSecretsMockState();
+
+function findMockSecret(tenantId: unknown, keyName: unknown): MockSecret | undefined {
+  return secretsState.find((s) => s.tenantId === tenantId && s.keyName === keyName);
+}
+
+export const secretsHandlers = [
+  // List secrets (tenant-scoped, no agentId)
+  http.get("*/secretstore/secrets/:tenantId", ({ params, request }) => {
+    // Skip the health endpoint
+    if (params.tenantId === "health") return;
+    const url = new URL(request.url);
+    // Skip paths like /tenantId/keyName (those are getMetadata)
+    const segments = url.pathname.split("/").filter(Boolean);
+    if (segments.length > 3) return;
+    const filtered = secretsState.filter(
+      (s) => s.tenantId === params.tenantId,
+    );
+    return HttpResponse.json(filtered);
+  }),
+
+  // One key's metadata (never its value); 404 when the key does not exist.
+  http.get("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const found = findMockSecret(params.tenantId, params.keyName);
+    return found
+      ? HttpResponse.json(found)
+      : HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+  }),
+
+  // Update a secret's agent grant. Registered BEFORE the generic secret PUT so
+  // the more specific path wins; it echoes the requested list back and reports no
+  // affected agents, which is the "widening a grant" case. A test that needs the
+  // "these deployed agents lose access" warning overrides this via server.use().
+  http.put(
+    "*/secretstore/secrets/:tenantId/:keyName/grant",
+    async ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const body = (await request.json()) as {
+        allowedAgents?: string[];
+        description?: string;
+        allowedHosts?: string[];
+      };
+      const existing = findMockSecret(tenantId, keyName);
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      // An empty array is truthy, so a bare falsiness check accepted `[]` — which
+      // the backend rejects, because everywhere else an empty list means "every
+      // agent". A mock that accepts it hides exactly the regression that matters.
+      if (!Array.isArray(body.allowedAgents) || body.allowedAgents.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedAgents is required and must not be empty" },
+          { status: 400 },
+        );
+      }
+      const url = new URL(request.url);
+      const dryRun = url.searchParams.get("dryRun") === "true";
+      const previousAllowedAgents = existing.allowedAgents;
+      if (!dryRun) {
+        existing.allowedAgents = [...body.allowedAgents];
+        if (body.description !== undefined) existing.description = body.description;
+        // Present means "replace"; `[]` or `["*"]` lifts the restriction, as on the backend.
+        if (body.allowedHosts !== undefined) {
+          const lifts =
+            body.allowedHosts.length === 0 || (body.allowedHosts.length === 1 && body.allowedHosts[0] === "*");
+          existing.allowedHosts = lifts ? undefined : [...body.allowedHosts];
+        }
+      }
+      const allowedHosts = body.allowedHosts ?? existing.allowedHosts;
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun,
+        allowedAgents: body.allowedAgents,
+        previousAllowedAgents,
+        grantsAllAgents: body.allowedAgents.includes("*"),
+        description: body.description ?? existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+        ...(allowedHosts && allowedHosts.length > 0 ? { allowedHosts } : {}),
+      });
+    },
+  ),
+
+  // Append ONE agent to a secret's grant (POST …/grant/agents/{agentId}).
+  // Idempotent like the backend: an agent already on the list, or a secret that
+  // already grants every agent, is answered with changed:false and not written.
+  http.post(
+    "*/secretstore/secrets/:tenantId/:keyName/grant/agents/:agentId",
+    ({ params, request }) => {
+      const tenantId = params.tenantId as string;
+      const keyName = params.keyName as string;
+      const agentId = params.agentId as string;
+      const existing = findMockSecret(tenantId, keyName);
+      if (!existing) {
+        return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+      }
+      const dryRun = new URL(request.url).searchParams.get("dryRun") === "true";
+      const previousAllowedAgents = [...existing.allowedAgents];
+      const open =
+        previousAllowedAgents.length === 0 || previousAllowedAgents.includes("*");
+      const changed = !open && !previousAllowedAgents.includes(agentId);
+      const allowedAgents = changed
+        ? [...previousAllowedAgents, agentId]
+        : previousAllowedAgents;
+      if (changed && !dryRun) existing.allowedAgents = allowedAgents;
+      return HttpResponse.json({
+        reference:
+          tenantId === "default"
+            ? `\${vault:${keyName}}`
+            : `\${vault:${tenantId}/${keyName}}`,
+        tenantId,
+        keyName,
+        dryRun,
+        changed,
+        allowedAgents,
+        previousAllowedAgents,
+        grantsAllAgents: open,
+        description: existing.description,
+        createdAt: existing.createdAt,
+        lastRotatedAt: existing.lastRotatedAt,
+        agentsLosingAccess: [],
+      });
+    },
+  ),
+
+  // Store secret (tenant-scoped): create, or replace the value of an existing
+  // key. The value itself is never kept — only the metadata a lookup returns.
+  http.put("*/secretstore/secrets/:tenantId/:keyName", async ({ params, request }) => {
+    const tenantId = params.tenantId as string;
+    const keyName = params.keyName as string;
+    const body = (await request.json().catch(() => ({}))) as {
+      description?: string;
+      allowedAgents?: string[];
+      allowedHosts?: string[];
+    };
+    const now = new Date().toISOString();
+    const existing = findMockSecret(tenantId, keyName);
+    // `["*"]` is the explicit "no restriction", stored as no list at all.
+    const storedHosts = (hosts: string[]) => (hosts.length === 1 && hosts[0] === "*" ? undefined : [...hosts]);
+    if (existing) {
+      existing.lastRotatedAt = now;
+      if (body.description !== undefined) existing.description = body.description;
+      if (body.allowedAgents) existing.allowedAgents = [...body.allowedAgents];
+      // Omitted on an update keeps the stored list, as on the backend.
+      if (body.allowedHosts) existing.allowedHosts = storedHosts(body.allowedHosts);
+    } else {
+      // Under grant-enforcement=enforce (the shipped default) a create must say
+      // where the secret may go: hosts, or the explicit ["*"]. An empty list is
+      // refused too — it would read as "anywhere" without anybody saying so.
+      if (!Array.isArray(body.allowedHosts) || body.allowedHosts.length === 0) {
+        return HttpResponse.json(
+          { error: "allowedHosts is required on create: list the hosts, or [\"*\"] for any host" },
+          { status: 400 },
+        );
+      }
+      secretsState.push({
+        tenantId,
+        keyName,
+        createdAt: now,
+        lastAccessedAt: null,
+        lastRotatedAt: null,
+        checksum: "0".repeat(64),
+        description: body.description ?? "",
+        allowedAgents: body.allowedAgents ? [...body.allowedAgents] : ["*"],
+        allowedHosts: storedHosts(body.allowedHosts),
+      });
+    }
+    const ref = tenantId === "default"
+      ? `\${vault:${keyName}}`
+      : `\${vault:${tenantId}/${keyName}}`;
+    return HttpResponse.json(
+      {
+        reference: ref,
+        tenantId,
+        keyName,
+      },
+      { status: 201 },
+    );
+  }),
+
+  // Delete secret (tenant-scoped)
+  http.delete("*/secretstore/secrets/:tenantId/:keyName", ({ params }) => {
+    const index = secretsState.findIndex(
+      (s) => s.tenantId === params.tenantId && s.keyName === params.keyName,
+    );
+    if (index < 0) {
+      return HttpResponse.json({ error: "Secret not found" }, { status: 404 });
+    }
+    secretsState.splice(index, 1);
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // Health check
+  http.get("*/secretstore/secrets/health", () =>
+    HttpResponse.json({ status: "UP", provider: "VaultSecretProvider", available: true }),
+  ),
+
+  // No rotate handler: EDDI has no rotate endpoint. A rotation is a PUT of the
+  // new value with the current grant (see `rotateSecret`), answered above.
+];
+
+// ─── Audit Trail Handlers ────────────────────────────────────────────────────
+
+const MOCK_AUDIT_ENTRIES = [
+  {
+    id: "audit-1",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.parser",
+    taskType: "expressions",
+    taskIndex: 0,
+    durationMs: 12,
+    input: { "input:initial": "Hello there" },
+    output: { "expressions:parsed": ["greeting(hello)"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: null,
+    cost: 0,
+    timestamp: new Date(Date.now() - 60000).toISOString(),
+    hmac: "a1b2c3d4e5f6789012345678901234567890abcdef1234567890abcdef12345678",
+    // The backend's form: "v<key version>:<Base64 Ed25519 signature>".
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0xLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTEtYWdlbnQtc2lnbg==",
+  },
+  {
+    id: "audit-2",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.rules",
+    taskType: "behavior",
+    taskIndex: 1,
+    durationMs: 3,
+    input: { "expressions:parsed": ["greeting(hello)"] },
+    output: { "actions:triggered": ["greet", "chat"] },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 59000).toISOString(),
+    hmac: "b2c3d4e5f6a1789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0yLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTItYWdlbnQtc2lnbg==",
+  },
+  {
+    id: "audit-3",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.llm",
+    taskType: "langchain",
+    taskIndex: 2,
+    durationMs: 1850,
+    input: { "user:message": "Hello there", "conversation:history": 3 },
+    output: { "llm:response": "Hi there! How can I help you today?" },
+    llmDetail: {
+      compiledPrompt: "System: You are a helpful assistant.\n\nUser: Hello there",
+      modelResponse: "Hi there! How can I help you today?",
+      modelName: "gpt-5.4-mini",
+      tokenUsage: {
+        inputTokens: 42,
+        outputTokens: 12,
+      },
+      temperature: 0.7,
+    },
+    // AuditEntry.toolCalls is a MAP on the wire: trace events under `calls`.
+    toolCalls: {
+      calls: [
+        { type: "tool_call", tool: "get_weather", arguments: "{\"city\":\"Vienna\"}" },
+        { type: "tool_result", tool: "get_weather", result: "sunny, 22°C" },
+      ],
+    },
+    actions: ["greet", "chat"],
+    cost: 0.003,
+    timestamp: new Date(Date.now() - 57000).toISOString(),
+    hmac: "c3d4e5f6a1b2789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS0zLWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTMtYWdlbnQtc2lnbg==",
+  },
+  {
+    id: "audit-4",
+    conversationId: "conv1",
+    agentId: "agent1",
+    agentVersion: 1,
+    userId: "user-1",
+    environment: "production",
+    stepIndex: 0,
+    taskId: "ai.labs.output",
+    taskType: "output",
+    taskIndex: 3,
+    durationMs: 2,
+    input: { "actions": ["greet", "chat"] },
+    output: { "output:text": "Hi there! How can I help you today?" },
+    llmDetail: null,
+    toolCalls: null,
+    actions: ["greet", "chat"],
+    cost: 0,
+    timestamp: new Date(Date.now() - 55000).toISOString(),
+    hmac: "d4e5f6a1b2c3789012345678901234567890abcdef1234567890abcdef12345678",
+    agentSignature: "v1:dGVzdC1hdWRpdC1lbnRyeS00LWFnZW50LXNpZ25hdHVyZS10ZXN0LWF1ZGl0LWVudHJ5LTQtYWdlbnQtc2lnbg==",
+  },
+];
+
+/** A clean `AuditVerificationReport` for the mock entries — every signature recomputes. */
+function mockAuditVerification(scope: "conversation" | "agent", scopeId: string) {
+  return {
+    scope,
+    scopeId,
+    signingEnabled: true,
+    entriesChecked: MOCK_AUDIT_ENTRIES.length,
+    valid: MOCK_AUDIT_ENTRIES.length,
+    recovered: 0,
+    recoverySkipped: 0,
+    invalid: 0,
+    unsigned: 0,
+    agentSignatureUnproven: 0,
+    chainStatus: scope === "conversation" ? "INTACT" : "NOT_APPLICABLE",
+    missingSequences: [],
+    undeliveredSequences: [],
+    duplicateSequences: [],
+    problems: [],
+    verifiedAt: new Date().toISOString(),
+  };
+}
+
+/**
+ * Administrative-action rows exactly as `AdminActionAuditFilter` writes them:
+ * taskId `ai.labs.admin`, taskType `admin`, the caller in `userId`, method /
+ * path / endpoint in `input`, the status in `output`, no conversation or agent.
+ */
+function adminActionEntry(
+  id: string,
+  actor: string,
+  method: string,
+  path: string,
+  resource: string,
+  status: number,
+  minutesAgo: number,
+) {
+  return {
+    id,
+    conversationId: null,
+    agentId: null,
+    agentVersion: null,
+    userId: actor,
+    environment: null,
+    stepIndex: 0,
+    taskId: "ai.labs.admin",
+    taskType: "admin",
+    taskIndex: 0,
+    durationMs: 0,
+    input: { method, path, resource },
+    output: { status },
+    llmDetail: null,
+    toolCalls: null,
+    actions: [`ADMIN_${method}`],
+    cost: 0,
+    timestamp: new Date(Date.now() - minutesAgo * 60_000).toISOString(),
+    hmac: "hmac-placeholder",
+    agentSignature: null,
+  };
+}
+
+export const MOCK_ADMIN_ACTIONS = [
+  adminActionEntry("adm-1", "alice", "POST", "/administration/production/deploy/agent1", "RestAgentAdministration#deployAgent", 202, 5),
+  adminActionEntry("adm-2", "bob", "PUT", "/llmstore/llms/llm-1", "RestLlmStore#updateLlm", 200, 90),
+  adminActionEntry("adm-3", "alice", "DELETE", "/admin/gdpr/u-6f1c2a", "RestGdprAdmin#deleteUserData", 200, 60 * 30),
+  adminActionEntry("adm-4", "mallory", "POST", "/administration/production/deploy/agent2", "RestAgentAdministration#deployAgent", 403, 60 * 24 * 3),
+  adminActionEntry("adm-5", "bob", "PATCH", "/descriptorstore/descriptors/agent1", "RestDocumentDescriptorStore#patchDescriptor", 500, 60 * 24 * 10),
+];
+
+export const auditHandlers = [
+  // Integrity verification — registered before `/:conversationId`, which would
+  // otherwise never see these two-segment paths anyway, but keeps the intent plain.
+  http.get("*/auditstore/verify/agent/:agentId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("agent", params.agentId as string)),
+  ),
+  http.get("*/auditstore/verify/:conversationId", ({ params }) =>
+    HttpResponse.json(mockAuditVerification("conversation", params.conversationId as string)),
+  ),
+
+  http.get("*/auditstore/agent/:agentId", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+
+  // Administrative actions (EDDI 6.6+) — before `/:conversationId`, which would
+  // otherwise match the literal segment. `actor` is the server's only filter.
+  http.get("*/auditstore/admin-actions", ({ request }) => {
+    const url = new URL(request.url);
+    const actor = url.searchParams.get("actor");
+    const skip = Number(url.searchParams.get("skip") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 100);
+    const rows = MOCK_ADMIN_ACTIONS.filter((e) => !actor || e.userId === actor);
+    return HttpResponse.json(rows.slice(skip, skip + limit));
+  }),
+
+  http.get("*/auditstore/:conversationId", () => {
+    return HttpResponse.json(MOCK_AUDIT_ENTRIES);
+  }),
+];
+
+// --- Tenant Quota Mock Data ---
+
+const MOCK_QUOTA = {
+  tenantId: "default",
+  maxConversationsPerDay: 5000,
+  maxAgentsPerTenant: 100,
+  maxApiCallsPerMinute: 500,
+  maxMonthlyCostUsd: 2500.00,
+  enabled: true,
+};
+
+const MOCK_USAGE = {
+  tenantId: "default",
+  conversationsToday: 3842,
+  apiCallsThisMinute: 312,
+  monthlyCostUsd: 1847.63,
+  minuteWindowStart: new Date().toISOString(),
+  dayStart: new Date(new Date().setHours(0, 0, 0, 0)).toISOString(),
+};
+
+export const quotaHandlers = [
+
+  http.get("*/administration/quotas/:tenantId/usage", () => {
+    return HttpResponse.json(MOCK_USAGE);
+  }),
+
+  http.get("*/administration/quotas/:tenantId", () => {
+    return HttpResponse.json(MOCK_QUOTA);
+  }),
+
+  http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+    const body = await request.json();
+    return HttpResponse.json(body);
+  }),
+
+  http.post("*/administration/quotas/:tenantId/usage/reset", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+];
+
+// ─── Misc handlers (exported as `scheduleHandlers`) ─────────────────────────
+
+// Despite the name, this block no longer holds schedule handlers: those, and the
+// setup / vault-health / coordinator / audit / quota / currentversion /
+// descriptor copies that used to sit here, were exact duplicates of handlers
+// registered EARLIER (in `handlers` or their own export). MSW answers with the
+// first match, so every one of them was dead fixture that looked authoritative —
+// `descriptor-handlers.test.ts` now fails if a handler is shadowed again.
+export const scheduleHandlers = [
+  // Coordinator SSE stream
+  http.get("*/administration/coordinator/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+  // ==========================================
+  // === Group Conversation Mocks ===
+  // ==========================================
+  // NOTE: Group config handlers (descriptors, detail, styles, schema, CRUD) are
+  // in the main `handlers` export. Only group *conversation* handlers are here.
+
+  // Cross-group HITL inbox (GET /groups/pending-approvals). Group summaries
+  // carry a groupId (that drives the "Group" badge / View link on the queue).
+  http.get("*/groups/pending-approvals", () => {
+    return HttpResponse.json([
+      {
+        conversationId: "gconv-awaiting-1",
+        agentId: null,
+        groupId: "group1",
+        userId: "manager-user",
+        pausedAt: new Date(Date.now() - 90_000).toISOString(),
+        pauseReason: "Group discussion needs sign-off before synthesis",
+        timeoutPolicy: "WAIT_INDEFINITELY",
+        approvalTimeout: null,
+      },
+    ]);
+  }),
+
+  // List this group's pending HITL approvals. MUST be registered before the
+  // ":convId" catch-all below, or MSW (first-match-wins) would treat
+  // "pending-approvals" as a conversation id and return a single object.
+  http.get("*/groups/:groupId/conversations/pending-approvals", () => {
+    return HttpResponse.json([]);
+  }),
+
+  // Get single group conversation (detailed transcript)
+  http.get("*/groups/:groupId/conversations/:convId", ({ params }) => {
+    if (params.convId === VERDICT_CONVERSATION_ID) return HttpResponse.json(verdictConversation());
+    const now = new Date();
+    return HttpResponse.json({
+      id: "gconv1",
+      groupId: "group1",
+      userId: "manager-user",
+      state: "COMPLETED",
+      // The backend computes this from `state` and always serializes it
+      // (GroupConversation.getAvailableActions, READ_ONLY). Omitting it here made
+      // the Manager read `[]` and disable the composer, so a fixture-backed test
+      // could not tell "continue this discussion" from "this discussion is over".
+      availableActions: ["followup", "continue", "close"],
+      originalQuestion: "Should we expand into the European market this quarter?",
+      transcript: [
+        { speakerAgentId: "user", speakerDisplayName: "User", content: "Should we expand into the European market this quarter?", phaseIndex: -1, phaseName: null, type: "QUESTION", timestamp: new Date(now.getTime() - 600000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "From a marketing perspective, Europe presents significant opportunities. Brand awareness campaigns could leverage our existing digital presence. However, we need to consider GDPR compliance and localization of marketing materials.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 540000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent2", speakerDisplayName: "Sales Strategist", content: "The sales pipeline data suggests strong demand in Germany and France. I recommend starting with these markets due to existing partner relationships. Timeline should be 6–8 months for meaningful traction.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 480000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent3", speakerDisplayName: "Product Manager", content: "Our product needs localization work for European markets — currency support, language packs, and compliance features. I estimate 3 months of engineering effort before we can launch.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 420000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent4", speakerDisplayName: "Tech Lead", content: "Infrastructure-wise, we'd need EU-based data centers for GDPR. AWS eu-west-1 is ready, but we need to provision new clusters. Budget estimate: $50k/month additional hosting.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 360000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "GDPR compliance is mandatory and non-trivial. We need a DPO appointment, privacy impact assessments, and updated Terms of Service. I strongly advise against rushing this.", phaseIndex: 0, phaseName: "Initial Opinions", type: "OPINION", timestamp: new Date(now.getTime() - 300000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent1", speakerDisplayName: "Marketing Expert", content: "I agree with Sales on starting with Germany and France. Marketing can run preliminary campaigns while Legal handles compliance. Let's plan for a Q3 soft launch.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 240000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent5", speakerDisplayName: "Legal Counsel", content: "A Q3 timeline is realistic for compliance if we start immediately. I'd recommend engaging a European law firm for local expertise.", phaseIndex: 1, phaseName: "Discussion", type: "ARGUMENT", timestamp: new Date(now.getTime() - 180000).toISOString(), errorReason: null, targetAgentId: null },
+        { speakerAgentId: "agent-mod", speakerDisplayName: "Moderator", content: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.", phaseIndex: 2, phaseName: "Synthesis", type: "SYNTHESIS", timestamp: new Date(now.getTime() - 120000).toISOString(), errorReason: null, targetAgentId: null },
+      ],
+      memberConversationIds: { agent1: "mc1", agent2: "mc2", agent3: "mc3", agent4: "mc4", agent5: "mc5" },
+      currentPhaseIndex: 2,
+      currentPhaseName: "Synthesis",
+      synthesizedAnswer: "After careful consideration, the panel recommends a phased European market expansion starting in Q3, with Germany and France as initial targets. Key prerequisites: (1) GDPR compliance and DPO appointment — start immediately, (2) Product localization — 3 month engineering sprint, (3) EU infrastructure provisioning — $50k/month incremental, (4) Local legal counsel engagement. The consensus is to proceed, but not to rush. A well-prepared Q3 soft launch balances opportunity with risk management.",
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date(now.getTime() - 600000).toISOString(),
+      lastModified: new Date(now.getTime() - 120000).toISOString(),
+      // Wave-3 read-side state (I17/I11/I9). Only the SINGLE-conversation GET
+      // carries `artifacts` — the list/stream responses deliberately do not, so
+      // demo mode mirrors the real backend's shape rather than showing the
+      // panel everywhere.
+      artifacts: [
+        {
+          id: "art-1",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "eu-expansion-brief.md",
+          type: "MARKDOWN",
+          content:
+            "# EU Expansion Brief\n\n## Target markets\n- Germany (existing partners)\n- France (strong pipeline)\n\n## Blockers\n1. GDPR compliance — DPO appointment outstanding\n2. Product localization — ~3 months engineering\n",
+          version: 3,
+          lastEditorAgentId: "agent3",
+          status: "DRAFT",
+          history: [
+            { content: "# EU Expansion Brief\n\nDraft.", editorAgentId: "agent1", version: 1, at: new Date(now.getTime() - 500000).toISOString() },
+            { content: "# EU Expansion Brief\n\n## Target markets\n- Germany\n", editorAgentId: "agent2", version: 2, at: new Date(now.getTime() - 400000).toISOString() },
+          ],
+          createdAt: new Date(now.getTime() - 520000).toISOString(),
+          updatedAt: new Date(now.getTime() - 200000).toISOString(),
+        },
+        {
+          id: "art-2",
+          groupConversationId: "gconv1",
+          ownerUserId: "manager-user",
+          name: "cost-model.json",
+          type: "JSON",
+          content: '{"infrastructureMonthlyUsd":50000,"localizationOneOffUsd":180000,"targetLaunch":"Q3"}',
+          version: 1,
+          lastEditorAgentId: "agent4",
+          status: "FINAL",
+          history: [],
+          createdAt: new Date(now.getTime() - 300000).toISOString(),
+          updatedAt: new Date(now.getTime() - 300000).toISOString(),
+        },
+      ],
+      negotiation: {
+        proposals: [
+          { id: "p1", byAgentId: "agent2", round: 1, terms: "Launch in Q2 across DACH + France simultaneously.", status: "SUPERSEDED", acceptedBy: [], acceptanceEntryIndices: {} },
+          { id: "p2", byAgentId: "agent2", round: 2, terms: "Q3 soft launch, Germany first, France 6 weeks later.", status: "OPEN", acceptedBy: ["agent2", "agent5"], acceptanceEntryIndices: { agent2: 6, agent5: 8 } },
+        ],
+        concessions: [
+          { byAgentId: "agent2", round: 2, gaveUp: "a simultaneous two-market launch", inReturnFor: "Legal dropping its objection to a Q3 date", refProposalId: "p2" },
+          { byAgentId: "agent5", round: 2, gaveUp: "the demand for a full DPIA before any launch", inReturnFor: "a staged rollout with a DPO appointed up front", refProposalId: "p2" },
+        ],
+      },
+      summaryUpToIndex: 4,
+      transcriptSummary:
+        "The panel opened with independent positions: Marketing saw brand opportunity but flagged GDPR; Sales pointed to demand in Germany and France; Product estimated three months of localization; Tech priced EU hosting at ~$50k/month; Legal warned against rushing compliance.",
+    });
+  }),
+
+  // SSE stream group discussion
+  http.post("*/groups/:groupId/conversations/stream", ({ params }) => {
+    const groupId = String(params.groupId);
+    const convId = `gconv-stream-${Date.now()}`;
+
+    // Build SSE event string helper
+    const sseEvent = (name: string, data: object) =>
+      `event: ${name}\ndata: ${JSON.stringify(data)}\n\n`;
+
+    // Simulate a multi-phase discussion with delays
+    const events = [
+      sseEvent("group_start", {
+        conversationId: convId,
+        groupId,
+        question: "What are the key benefits of AI agents?",
+        style: "ROUND_TABLE",
+        phaseCount: 2,
+        agentIds: ["agent1", "agent2"],
+      }),
+      sseEvent("phase_start", { phaseIndex: 0, phaseName: "Initial Opinions", phaseType: "OPINION", participants: "ALL_MEMBERS" }),
+      sseEvent("speaker_start", { agentId: "agent1", displayName: "Support Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("member_tool_call", { agentId: "agent1", displayName: "Support Agent", tool: "search_knowledge_base" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent1",
+        displayName: "Support Agent",
+        content: "AI agents provide 24/7 availability, consistent response quality, and can handle multiple conversations simultaneously. They reduce operational costs while improving customer satisfaction through instant responses.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("speaker_start", { agentId: "agent2", displayName: "FAQ Agent", phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("speaker_complete", {
+        agentId: "agent2",
+        displayName: "FAQ Agent",
+        content: "From an information management perspective, AI agents excel at maintaining up-to-date knowledge bases, providing consistent answers across all channels, and learning from user interactions to improve over time.",
+        phaseIndex: 0,
+        phaseName: "Initial Opinions",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 0, phaseName: "Initial Opinions" }),
+      sseEvent("phase_start", { phaseIndex: 1, phaseName: "Synthesis", phaseType: "SYNTHESIS", participants: "MODERATOR_ONLY" }),
+      sseEvent("synthesis_start", { moderatorAgentId: "moderator-agent" }),
+      sseEvent("speaker_start", { agentId: "moderator-agent", displayName: "Moderator", phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("speaker_complete", {
+        agentId: "moderator-agent",
+        displayName: "Moderator",
+        content: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+        phaseIndex: 1,
+        phaseName: "Synthesis",
+      }),
+      sseEvent("phase_complete", { phaseIndex: 1, phaseName: "Synthesis" }),
+      sseEvent("group_complete", {
+        state: "COMPLETED",
+        synthesizedAnswer: "Both agents highlight complementary benefits: operational efficiency (24/7 availability, cost reduction, scalability) and knowledge management (consistent answers, continuous learning, multi-channel support). Together, these benefits make AI agents a compelling solution for modern customer engagement.",
+      }),
+    ];
+
+    // Stream events with simulated delays
+    const stream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        for (const event of events) {
+          await new Promise((r) => setTimeout(r, 500 + Math.random() * 1000));
+          controller.enqueue(encoder.encode(event));
+          // Hold after a tool call so the member card's "using <tool>…" is visible.
+          if (event.startsWith("event: member_tool_call")) await new Promise((r) => setTimeout(r, 4000));
+        }
+        controller.close();
+      },
+    });
+
+    return new HttpResponse(stream, {
+      headers: {
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache",
+        Connection: "keep-alive",
+      },
+    });
+  }),
+
+  // Delete group conversation
+  http.delete("*/groups/:groupId/conversations/:convId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  // --- Phase 13: Tool Metrics & Debug Endpoints ---
+
+  // Conversation costs
+  http.get("*/llm/tools/costs/conversation/:convId", () => {
+    return HttpResponse.json({
+      conversationId: "conv-mock",
+      totalCost: 0.015,
+      toolCallCount: 7,
+      toolUsage: {
+        websearch: 3,
+        fetch_weather: 4,
+      },
+    });
+  }),
+
+  // Rerun last conversation step (replay) — handler at end of file uses /rerun path
+
+  // Log SSE stream (log viewer) — return empty stream
+  http.get("*/logs/stream", () => {
+    return new HttpResponse(null, { status: 200, headers: { "Content-Type": "text/event-stream" } });
+  }),
+
+];
+
+// ─── GDPR Admin Handlers ────────────────────────────────────────────────────
+
+export const gdprHandlers = [
+  // Art. 17 — Delete user data (cascade)
+  // A clean cascade: 200, every counter reported, nothing failed.
+  //
+  // `logsPseudonymized` is the name EDDI has always used. The fixture said
+  // `logEntriesPseudonymized`, matching the page's typo rather than the
+  // backend, which is why the blank tile survived every test.
+  http.delete("*/admin/gdpr/:userId", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memoriesDeleted: 14,
+      conversationsDeleted: 7,
+      conversationMappingsDeleted: 2,
+      logsPseudonymized: 89,
+      auditEntriesPseudonymized: 23,
+      // EDDI 6.6: the rows are kept, their content replaced by a redaction marker.
+      auditEntriesRedacted: 23,
+      attachmentsDeleted: 4,
+      journalEntriesDeleted: 1,
+      checkpointsDeleted: 0,
+      groupConversationsDeleted: 3,
+      sharedArtifactsDeleted: 0,
+      schedulesDeleted: 1,
+      failedSteps: [],
+      complete: true,
+      completedAt: new Date().toISOString(),
+    });
+  }),
+
+  // Art. 15/20 — Export user data
+  http.get("*/admin/gdpr/:userId/export", ({ params }) => {
+    return HttpResponse.json({
+      userId: params.userId as string,
+      memories: [
+        { key: "preferred_language", value: "en", createdAt: new Date(Date.now() - 86400000).toISOString() },
+        { key: "name", value: "Jane Doe", createdAt: new Date(Date.now() - 172800000).toISOString() },
+      ],
+      conversations: [
+        { id: "conv-1", agentId: "agent1", state: "ENDED", steps: 12, created: new Date(Date.now() - 86400000).toISOString() },
+        { id: "conv-2", agentId: "agent2", state: "IN_PROGRESS", steps: 3, created: new Date(Date.now() - 3600000).toISOString() },
+      ],
+      managedConversations: [],
+      auditEntries: [],
+      attachments: [],
+      totalConversations: 2,
+      conversationsTruncated: false,
+      failedConversationIds: [],
+      // 207, not 200, and `complete: false` — which is what EDDI answers on
+      // EVERY export today, because four personal-data categories it erases as
+      // this user's data have no exporter yet. A fixture that answered 200
+      // would test a response the backend cannot currently produce.
+      omittedCategories: ["groupConversations", "sharedArtifacts", "schedules", "journalEntries"],
+      complete: false,
+    }, { status: 207 });
+  }),
+
+  // Art. 18 — Restrict processing
+  http.post("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Unrestrict processing
+  http.delete("*/admin/gdpr/:userId/restrict", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Art. 18 — Check restriction status
+  http.get("*/admin/gdpr/:userId/restrict", () => {
+    return HttpResponse.json(false);
+  }),
+];
+
+// ─── User Memory Handlers ───────────────────────────────────────────────────
+
+const MOCK_MEMORIES = [
+  {
+    id: "mem-1",
+    userId: "user-123",
+    key: "preferred_language",
+    value: "en",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 47,
+    createdAt: new Date(Date.now() - 21 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: "mem-2",
+    userId: "user-123",
+    key: "timezone",
+    value: "Europe/Vienna",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 31,
+    createdAt: new Date(Date.now() - 18 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 86400000).toISOString(),
+  },
+  {
+    id: "mem-3",
+    userId: "user-123",
+    key: "account_type",
+    value: "enterprise",
+    category: "fact",
+    visibility: "global",
+    sourceAgentId: "agent2",
+    conflicted: false,
+    accessCount: 128,
+    createdAt: new Date(Date.now() - 30 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 7200000).toISOString(),
+  },
+  {
+    id: "mem-4",
+    userId: "user-123",
+    key: "last_order_id",
+    value: "ORD-2026-91247",
+    category: "context",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    sourceConversationId: "conv-42",
+    conflicted: false,
+    accessCount: 6,
+    createdAt: new Date(Date.now() - 2 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 1800000).toISOString(),
+  },
+  {
+    id: "mem-5",
+    userId: "user-123",
+    key: "shipping_address",
+    value: "123 Oak Street, Suite 4B, Portland OR 97201",
+    category: "fact",
+    visibility: "self",
+    sourceAgentId: "agent1",
+    conflicted: false,
+    accessCount: 15,
+    createdAt: new Date(Date.now() - 14 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 5 * 86400000).toISOString(),
+  },
+  {
+    id: "mem-6",
+    userId: "user-123",
+    key: "preferred_contact",
+    value: "email",
+    category: "preference",
+    visibility: "self",
+    sourceAgentId: "agent3",
+    conflicted: false,
+    accessCount: 9,
+    createdAt: new Date(Date.now() - 10 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 4 * 86400000).toISOString(),
+  },
+  {
+    id: "mem-7",
+    userId: "user-123",
+    key: "satisfaction_score",
+    value: "4.8",
+    category: "metric",
+    visibility: "global",
+    sourceAgentId: "agent1",
+    conflicted: true,
+    accessCount: 42,
+    createdAt: new Date(Date.now() - 7 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 3600000).toISOString(),
+  },
+  {
+    id: "mem-8",
+    userId: "user-123",
+    key: "company_name",
+    value: "Acme Corp",
+    category: "fact",
+    visibility: "global",
+    sourceAgentId: "agent4",
+    conflicted: false,
+    accessCount: 67,
+    createdAt: new Date(Date.now() - 25 * 86400000).toISOString(),
+    updatedAt: new Date(Date.now() - 12 * 3600000).toISOString(),
+  },
+];
+
+export const userMemoryHandlers = [
+  http.get("*/usermemorystore/memories/:userId", () => {
+    return HttpResponse.json(MOCK_MEMORIES);
+  }),
+
+  http.delete("*/usermemorystore/memories/entry/:entryId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.delete("*/usermemorystore/memories/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Properties Handlers ────────────────────────────────────────────────────
+
+// RAW values, keyed by property name — what MongoUserMemoryStore.readProperties
+// returns (the `value` of each global user-memory entry). The previous fixture
+// used `Property` wrappers (`valueString`, `valueInt`, …) the endpoint never
+// sends, so the page's type column was verified against a shape that only
+// existed here.
+const MOCK_PROPERTIES = {
+  user_name: "Jane Doe",
+  email: "jane.doe@acme-corp.com",
+  age: 32,
+  is_vip: true,
+  company: "Acme Corp",
+  department: "Engineering",
+  preferences: { theme: "dark", lang: "en", notifications: true, timezone: "Europe/Vienna" },
+  tags: ["loyal", "premium", "early-adopter"],
+  last_login: new Date(Date.now() - 3600000).toISOString(),
+  session_count: 147,
+};
+
+/** A user id the mock treats as having no properties — the backend answers 204. */
+export const MOCK_PROPERTIES_EMPTY_USER = "user-without-properties";
+
+export const propertiesHandlers = [
+  http.get("*/propertiesstore/properties/:userId", ({ params }) => {
+    if (params.userId === MOCK_PROPERTIES_EMPTY_USER) {
+      return new HttpResponse(null, { status: 204 });
+    }
+    return HttpResponse.json(MOCK_PROPERTIES);
+  }),
+
+  http.post("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/propertiesstore/properties/:userId", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Agent Trigger Handlers ─────────────────────────────────────────────────
+
+const MOCK_TRIGGERS = [
+  {
+    intent: "booking_request",
+    agentDeployments: [
+      { environment: "production", agentId: "agent3" },
+      { environment: "test", agentId: "agent3" },
+    ],
+  },
+  {
+    intent: "faq_query",
+    agentDeployments: [
+      { environment: "production", agentId: "agent2" },
+    ],
+  },
+  {
+    intent: "escalation",
+    agentDeployments: [
+      { environment: "production", agentId: "agent1" },
+      { environment: "production", agentId: "agent8" },
+    ],
+  },
+  {
+    intent: "payment_issue",
+    agentDeployments: [
+      { environment: "production", agentId: "agent4" },
+    ],
+  },
+  {
+    intent: "product_recommendation",
+    agentDeployments: [
+      { environment: "production", agentId: "agent5" },
+      { environment: "test", agentId: "agent5" },
+    ],
+  },
+  {
+    intent: "contract_review",
+    agentDeployments: [
+      { environment: "production", agentId: "agent7" },
+    ],
+  },
+  {
+    intent: "onboarding_start",
+    agentDeployments: [
+      { environment: "production", agentId: "agent6" },
+      { environment: "test", agentId: "agent6" },
+    ],
+  },
+  {
+    intent: "password_reset",
+    agentDeployments: [
+      { environment: "production", agentId: "agent8" },
+    ],
+  },
+];
+
+export const triggerHandlers = [
+  http.get("*/AgentTriggerStore/agenttriggers", () => {
+    return HttpResponse.json(MOCK_TRIGGERS);
+  }),
+
+  http.post("*/AgentTriggerStore/agenttriggers", () => {
+    return new HttpResponse(null, { status: 201 });
+  }),
+
+  http.put("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.delete("*/AgentTriggerStore/agenttriggers/:intent", () => {
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ─── Capability Registry Handlers ────────────────────────────────────────────
+
+const MOCK_CAPABILITIES = [
+  { agentId: "agent1", skill: "customer-support", attributes: { language: "en", tier: "enterprise" }, confidence: "high" },
+  { agentId: "agent1", skill: "order-tracking", attributes: { carriers: "fedex,ups,dhl" }, confidence: "high" },
+  { agentId: "agent1", skill: "return-processing", attributes: {}, confidence: "high" },
+  { agentId: "agent2", skill: "faq", attributes: { domain: "product", articles: "2.4k" }, confidence: "high" },
+  { agentId: "agent2", skill: "knowledge-search", attributes: { domain: "product" }, confidence: "medium" },
+  { agentId: "agent3", skill: "appointment-scheduling", attributes: { calendar: "google" }, confidence: "high" },
+  { agentId: "agent4", skill: "invoice-parsing", attributes: { formats: "pdf,image" }, confidence: "high" },
+  { agentId: "agent4", skill: "data-validation", attributes: {}, confidence: "high" },
+  { agentId: "agent5", skill: "product-recommendation", attributes: { catalog: "12k items" }, confidence: "medium" },
+  { agentId: "agent6", skill: "onboarding", attributes: { steps: "12" }, confidence: "high" },
+  { agentId: "agent7", skill: "contract-analysis", attributes: { corpus: "legal" }, confidence: "high" },
+  { agentId: "agent7", skill: "risk-assessment", attributes: {}, confidence: "medium" },
+  { agentId: "agent8", skill: "it-troubleshooting", attributes: { integrations: "jira,slack" }, confidence: "high" },
+  { agentId: "agent8", skill: "password-reset", attributes: {}, confidence: "high" },
+];
+
+const ALL_SKILLS = ["customer-support", "order-tracking", "return-processing", "faq", "knowledge-search", "appointment-scheduling", "invoice-parsing", "data-validation", "product-recommendation", "onboarding", "contract-analysis", "risk-assessment", "it-troubleshooting", "password-reset"];
+
+export const capabilityHandlers = [
+  // Skills list — must come BEFORE the query-param search handler
+  http.get("*/capabilities/skills", () => {
+    return HttpResponse.json(ALL_SKILLS);
+  }),
+
+  // Skill search with query params (?skill=...&strategy=...)
+  http.get("*/capabilities", ({ request }) => {
+    const url = new URL(request.url);
+    const skill = url.searchParams.get("skill") ?? "";
+    if (!skill) return HttpResponse.json(MOCK_CAPABILITIES);
+    const filtered = MOCK_CAPABILITIES.filter((c) =>
+      c.skill.toLowerCase().includes(skill.toLowerCase()),
+    );
+    return HttpResponse.json(filtered);
+  }),
+];
+
+// ─── Backup / Sync Handlers ──────────────────────────────────────────────────
+
+const MOCK_EXPORT_PREVIEW = {
+  agentId: "agent1",
+  agentName: "Support Agent",
+  agentVersion: 3,
+  resources: [
+    { resourceId: "agent1", resourceVersion: 3, resourceType: "agent", name: "Support Agent", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "wf1", resourceVersion: 2, resourceType: "workflow", name: "Support Ticket Pipeline", parentWorkflowId: null, workflowIndex: 0, required: true },
+    { resourceId: "beh1", resourceVersion: 1, resourceType: "behavior", name: "Support Rules", parentWorkflowId: "wf1", workflowIndex: 0, required: false },
+    { resourceId: "llm1", resourceVersion: 1, resourceType: "langchain", name: "GPT-4 Task", parentWorkflowId: "wf1", workflowIndex: 1, required: false },
+    { resourceId: "out1", resourceVersion: 1, resourceType: "output", name: "Support Outputs", parentWorkflowId: "wf1", workflowIndex: 2, required: false },
+    { resourceId: "ps1", resourceVersion: 1, resourceType: "property", name: "Props", parentWorkflowId: "wf1", workflowIndex: 3, required: false },
+    { resourceId: "dict1", resourceVersion: 1, resourceType: "regulardictionary", name: "Support Dict", parentWorkflowId: "wf1", workflowIndex: 4, required: false },
+    { resourceId: "snip1", resourceVersion: 1, resourceType: "snippet", name: "System Prompt Base", parentWorkflowId: null, workflowIndex: 0, required: false },
+  ],
+};
+
+/**
+ * What EDDI's `UpgradeResult` looks like on the wire: a per-resource tally and
+ * the failures, if any. `hasFailures`/`wroteAnything` are derived methods on the
+ * Java record, not components, so they are deliberately absent here.
+ */
+const MOCK_UPGRADE_RESULT = {
+  agentUri: "eddi://ai.labs.agent/agentstore/agents/agent1?version=2",
+  agentUpdated: true,
+  updated: 2,
+  created: 0,
+  skipped: 3,
+  failures: [] as Array<{
+    sourceId: string;
+    resourceType: string;
+    name: string | null;
+    reason: string;
+  }>,
+};
+
+/**
+ * What `RestAgentAdministration.previewNextVersion` answers: the impact of the
+ * next version under BOTH declarations. 12 conversations are open; 9 would follow
+ * a compatible version, none a breaking one.
+ */
+const MOCK_CONVERSATION_IMPACT = {
+  currentVersion: 4,
+  currentGeneration: 2,
+  generationIfCompatible: 2,
+  generationIfBreaking: 3,
+  startsNewChain: false,
+  activeConversations: 12,
+  followingIfCompatible: 9,
+  generations: [
+    { generation: 2, activeConversations: 9, followsIfCompatible: true },
+    { generation: 1, activeConversations: 3, followsIfCompatible: false },
+  ],
+};
+
+const MOCK_IMPORT_PREVIEW = {
+  sourceAgentId: "agent1",
+  sourceAgentName: "Support Agent",
+  targetAgentId: "agent1",
+  targetAgentName: "Support Agent",
+  conversationImpact: MOCK_CONVERSATION_IMPACT as typeof MOCK_CONVERSATION_IMPACT | null,
+  resources: [
+    { sourceId: "beh1", resourceType: "behavior", name: "Support Rules", action: "UPDATE", targetId: "beh1-local", targetVersion: 1, matchStrategy: "type", sourceContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["greet"]}]}]}', targetContent: '{"behaviorGroups":[{"name":"main","rules":[{"name":"greet","actions":["hello"]}]}]}', workflowIndex: 0 },
+    { sourceId: "llm1", resourceType: "langchain", name: "GPT-4 Task", action: "SKIP", targetId: "llm1-local", targetVersion: 1, matchStrategy: "type", sourceContent: null, targetContent: null, workflowIndex: 1 },
+    { sourceId: "out1", resourceType: "output", name: "Support Outputs", action: "UPDATE", targetId: "out1-local", targetVersion: 1, matchStrategy: "name", sourceContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hello!"}]}]}]}', targetContent: '{"outputSet":[{"action":"greet","outputs":[{"valueAlternatives":[{"type":"text","text":"Hi!"}]}]}]}', workflowIndex: 2 },
+    { sourceId: "snip-new", resourceType: "snippet", name: "New Snippet", action: "CREATE", targetId: null, targetVersion: null, matchStrategy: null, sourceContent: '{"content":"You are a helpful assistant."}', targetContent: null, workflowIndex: 0 },
+  ],
+};
+
+const MOCK_REMOTE_AGENTS = [
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent1?version=5", name: "Support Agent", description: "Support bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent2?version=3", name: "FAQ Agent", description: "FAQ bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent3?version=1", name: "Sales Agent", description: "Sales bot", lastModifiedOn: new Date().toISOString() },
+  { resource: "eddi://ai.labs.agent/agentstore/agents/remote-agent4?version=2", name: "Onboarding Agent", description: "New hire guide", lastModifiedOn: new Date().toISOString() },
+];
+
+export const backupSyncHandlers = [
+  // Export preview
+  http.post("*/backup/export/:agentId/preview", () => {
+    return HttpResponse.json(MOCK_EXPORT_PREVIEW);
+  }),
+
+  // Selective export — returns Location header
+  http.post("*/backup/export/:agentId", () => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: "/backup/export/agent-export.zip" },
+    });
+  }),
+
+  // Export file download
+  http.get("*/backup/export/:filename", () => {
+    return new HttpResponse(new Blob(["fake-zip-content"]), {
+      status: 200,
+      headers: { "Content-Type": "application/zip" },
+    });
+  }),
+
+  // Import preview (merge or upgrade)
+  http.post("*/backup/import/preview", ({ request }) => {
+    const url = new URL(request.url);
+    const targetAgentId = url.searchParams.get("targetAgentId");
+    if (targetAgentId) {
+      // Upgrade preview
+      return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+    }
+    // Merge preview
+    return HttpResponse.json({
+      ...MOCK_IMPORT_PREVIEW,
+      targetAgentId: null,
+      targetAgentName: null,
+      conversationImpact: null,
+    });
+  }),
+
+  // Import execute (create, merge, or upgrade)
+  // RestImportService.importAgentZipFile answers 201 Created with the agent's
+  // URI in Location. A merge lands on the existing agent as a new version.
+  http.post("*/backup/import", ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get("strategy") === "merge") {
+      return new HttpResponse(null, {
+        status: 201,
+        headers: { Location: "/agentstore/agents/agent1?version=2" },
+      });
+    }
+    const newId = `imported-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/agentstore/agents/${newId}?version=1` },
+    });
+  }),
+
+  // List remote agents
+  http.get("*/backup/import/sync/agents", () => {
+    return HttpResponse.json(MOCK_REMOTE_AGENTS);
+  }),
+
+  // Sync preview (single)
+  http.post("*/backup/import/sync/preview", () => {
+    return HttpResponse.json(MOCK_IMPORT_PREVIEW);
+  }),
+
+  // Sync preview (batch)
+  http.post("*/backup/import/sync/preview/batch", async ({ request }) => {
+    const mappings = (await request.json()) as Array<{ sourceAgentId: string }>;
+    return HttpResponse.json(
+      mappings.map((m) => ({
+        ...MOCK_IMPORT_PREVIEW,
+        sourceAgentId: m.sourceAgentId,
+      }))
+    );
+  }),
+
+  // Sync execute (single) — 201 and an UpgradeResult, as EDDI answers when a
+  // sync wrote something. The status is what the client branches on: 200 means
+  // the two instances already agreed, 207 that some resources failed.
+  http.post("*/backup/import/sync", () => {
+    return HttpResponse.json(MOCK_UPGRADE_RESULT, {
+      status: 201,
+      headers: { Location: MOCK_UPGRADE_RESULT.agentUri },
+    });
+  }),
+
+  // Sync execute (batch) — one BatchSyncResult per request, in request order.
+  // This used to answer 202 with no body at all, a shape the backend never
+  // produces, so every assertion about what a sync *did* was really an
+  // assertion about an empty response.
+  http.post("*/backup/import/sync/batch", async ({ request }) => {
+    const requests = (await request.json()) as Array<{
+      sourceAgentId: string;
+      targetAgentId: string | null;
+    }>;
+    return HttpResponse.json(
+      requests.map((r) => ({
+        sourceAgentId: r.sourceAgentId,
+        targetAgentId: r.targetAgentId,
+        result: MOCK_UPGRADE_RESULT,
+        error: null,
+      }))
+    );
+  }),
+
+  // ── User Conversation Store ──
+
+  http.get("*/userconversationstore/userconversations/:intent/:userId", ({ params }) => {
+    return HttpResponse.json({
+      intent: params.intent,
+      userId: params.userId,
+      environment: "production",
+      agentId: "agent1",
+      conversationId: "conv1",
+    });
+  }),
+
+  http.post("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: "/userconversationstore/userconversations/test/user1" },
+    });
+  }),
+
+  http.delete("*/userconversationstore/userconversations/:intent/:userId", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Conversation Attachments ──
+
+  http.post("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json(
+      {
+        storageRef: `attachment-${Date.now()}`,
+        fileName: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+        forwardableInline: true,
+      },
+      { status: 201 },
+    );
+  }),
+
+  http.get("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json([
+      {
+        storageRef: "attachment-1",
+        filename: "document.pdf",
+        mimeType: "application/pdf",
+        sizeBytes: 102400,
+        conversationId: params.conversationId,
+      },
+    ]);
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments/:storageRef", ({ params }) => {
+    return HttpResponse.json({ storageRef: params.storageRef, deleted: true });
+  }),
+
+  http.delete("*/conversations/:conversationId/attachments", ({ params }) => {
+    return HttpResponse.json({ conversationId: params.conversationId, deletedCount: 1 });
+  }),
+
+  // ── Channel Integration Store ──
+
+  http.get("*/channelstore/channels/descriptors", () => {
+    return HttpResponse.json([
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch1?version=1",
+        name: "Engineering Slack",
+        description: "AI-powered engineering support channel",
+        createdOn: Date.now() - 5 * 86400000,
+        lastModifiedOn: Date.now() - 3600000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch2?version=2",
+        name: "Customer Support Slack",
+        description: "External customer support integration",
+        createdOn: Date.now() - 10 * 86400000,
+        lastModifiedOn: Date.now() - 7200000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch3?version=1",
+        name: "HR Onboarding Slack",
+        description: "New hire onboarding channel",
+        createdOn: Date.now() - 2 * 86400000,
+        lastModifiedOn: Date.now() - 1800000,
+      },
+      {
+        resource: "eddi://ai.labs.channel/channelstore/channels/ch4?version=1",
+        name: "Billing Webhook",
+        description: "Signed inbound events from the billing system",
+        createdOn: Date.now() - 86400000,
+        lastModifiedOn: Date.now() - 900000,
+      },
+    ]);
+  }),
+
+  http.get("*/channelstore/channels/:id", ({ params }) => {
+    const channelId = params.id as string;
+    const configs: Record<string, object> = {
+      ch4: {
+        name: "Billing Webhook",
+        channelType: "webhook",
+        platformConfig: {
+          signingSecret: "${vault:billing-webhook-secret}",
+          signatureScheme: "eddi-v1",
+          conversationStrategy: "new",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "invoices",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["com.billing.invoice.*"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
+      ch1: {
+        name: "Engineering Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0123ABCDEF",
+          botToken: "${vault:eng-slack-bot-token}",
+          signingSecret: "${vault:eng-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "default",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "faq-bot",
+            type: "AGENT",
+            targetId: "agent2",
+            triggers: ["faq", "help-me"],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "default",
+      },
+      ch2: {
+        name: "Customer Support Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0456GHIJKL",
+          botToken: "${vault:support-slack-bot-token}",
+          signingSecret: "${vault:support-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "support",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "review-panel",
+            type: "GROUP",
+            targetId: "group1",
+            triggers: ["review", "panel"],
+            observeMode: false,
+            observeConfig: null,
+          },
+          {
+            name: "observer",
+            type: "AGENT",
+            targetId: "agent4",
+            triggers: [],
+            observeMode: true,
+            observeConfig: {
+              triggerKeywords: ["invoice", "payment"],
+              triggerMimeTypes: ["application/pdf"],
+              cooldownSeconds: 120,
+              maxDailyResponses: 25,
+              maxCostPerDay: 3.5,
+            },
+          },
+        ],
+        defaultTargetName: "support",
+      },
+      ch3: {
+        name: "HR Onboarding Slack",
+        channelType: "slack",
+        platformConfig: {
+          channelId: "C0789MNOPQR",
+          botToken: "${vault:hr-slack-bot-token}",
+          signingSecret: "${vault:hr-slack-signing-secret}",
+        },
+        targets: [
+          {
+            name: "onboarding",
+            type: "AGENT",
+            targetId: "agent6",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "onboarding",
+      },
+    };
+    return HttpResponse.json(
+      configs[channelId] ?? configs["ch1"],
+    );
+  }),
+
+  http.post("*/channelstore/channels", () => {
+    const newId = `ch-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${newId}?version=1`,
+      },
+    });
+  }),
+
+  http.put("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/channelstore/channels/${id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/channelstore/channels/:id", ({ params }) => {
+    const id = params.id as string;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/channelstore/channels/${id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/channelstore/channels/:id", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Conversation Rerun ──
+
+  http.post("*/agents/:conversationId/rerun", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── HITL — Human-in-the-Loop ──
+  // (GET */agents/pending-approvals is registered earlier, before the
+  //  ":conversationId" catch-all, so it isn't shadowed.)
+
+  http.post("*/agents/:conversationId/resume", async ({ params, request }) => {
+    const editable = await editableResumeFor(params.conversationId, request);
+    if (editable) return editable;
+    const body = (await request.json().catch(() => ({}))) as { note?: string };
+    if (body?.note && body.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.post("*/agents/:conversationId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Operator canary/gate metrics relay — best-effort by contract (see
+  // reportOperatorCanaryResult/reportOperatorGateStatus), but tests that
+  // don't care about it still trigger it as a side effect of gate
+  // verification and the write canary. Without a default, every one of them
+  // logs an MSW "unhandled request" warning that drowns out real ones.
+  // The address EDDI reports it can reach ITSELF at — what the operator's tools
+  // must target. Deliberately DIFFERENT from the test origin, so a test that
+  // accidentally provisions the browser's origin fails instead of passing by
+  // coincidence: that coincidence is precisely how the bug shipped.
+  http.get("*/administration/operator/self-url", () =>
+    HttpResponse.json({ baseUrl: "http://127.0.0.1:7070", source: "loopback" }),
+  ),
+  http.post("*/administration/operator/canary-result", () => new HttpResponse(null, { status: 204 })),
+  http.post("*/administration/operator/gate-status", () => new HttpResponse(null, { status: 204 })),
+
+  http.get("*/agents/:conversationId/approval-status", ({ params }) => {
+    const editable = editableApprovalStatusFor(params.conversationId);
+    if (editable) return editable;
+    return HttpResponse.json({
+      conversationId: "conv-awaiting-1",
+      state: "AWAITING_HUMAN",
+      pausedAt: new Date(Date.now() - 300_000).toISOString(),
+      pauseReason: "High-value transaction requires human review",
+    });
+  }),
+
+  // Non-streaming approve (programmatic binding). Validates the note cap.
+  http.post("*/groups/:groupId/conversations/:gcId/approve", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { decision?: { note?: string } };
+    if (body?.decision?.note && body.decision.note.length > 4096) {
+      return HttpResponse.json(
+        { message: "Decision note exceeds the maximum length of 4096 characters" },
+        { status: 400 },
+      );
+    }
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // Streaming approve/resume — emits hitl_resume then group_complete over SSE.
+  http.post("*/groups/:groupId/conversations/:gcId/approve/stream", () => {
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            'event: hitl_resume\ndata: {"verdict":"APPROVED","decidedBy":"manager-user"}\n\n',
+          ),
+        );
+        controller.enqueue(
+          encoder.encode(
+            'event: group_complete\ndata: {"state":"COMPLETED","synthesizedAnswer":"Resumed and completed."}\n\n',
+          ),
+        );
+        controller.close();
+      },
+    });
+    return new HttpResponse(stream, {
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }),
+
+  http.post("*/groups/:groupId/conversations/:gcId/cancel", () => {
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  http.get("*/groups/:groupId/conversations/:gcId/approval-status", () => {
+    // A fixed pause start, so a group page's decision (bound to the stored
+    // conversation's pause) can match it: a group fixture that is paused uses
+    // the same instant. PHASE is the default granularity.
+    return HttpResponse.json({
+      state: "AWAITING_APPROVAL",
+      pausedAt: "2026-07-01T10:00:00.000Z",
+      pauseType: "PHASE",
+    });
+  }),
+
+  // I6 — submit a HUMAN group member's pending turn. Synchronous (no
+  // streaming variant exists on the backend): resolves to the settled
+  // GroupConversation directly.
+  http.post("*/groups/:groupId/conversations/:gcId/human-input", async ({ request, params }) => {
+    const body = (await request.json().catch(() => ({}))) as { memberId?: string; content?: string };
+    if (!body?.memberId?.trim() || !body?.content?.trim()) {
+      return HttpResponse.json({ error: "'memberId' and 'content' must not be blank" }, { status: 400 });
+    }
+    return HttpResponse.json({
+      id: params.gcId,
+      groupId: params.groupId,
+      userId: "manager-user",
+      state: "COMPLETED",
+      originalQuestion: "q",
+      transcript: [],
+      memberConversationIds: {},
+      currentPhaseIndex: 0,
+      currentPhaseName: null,
+      synthesizedAnswer: "Resumed after the human turn.",
+      depth: 0,
+      taskList: null,
+      dynamicMembers: [],
+      createdAgentIds: [],
+      retainedAgentIds: [],
+      created: new Date().toISOString(),
+      lastModified: new Date().toISOString(),
+      availableActions: ["followup", "continue", "close"],
+    });
+  }),
+];
+
+/* ─── Connections ────────────────────────────────────────────────────────────
+ *
+ * Two route groups with different audiences, mocked together because they are
+ * one feature: `/connectionstore/connections` is the admin config store, and
+ * `/connections` is the per-user grant lifecycle.
+ *
+ * **These handlers hold state.** `linkedAccounts` below is mutated by the
+ * authorize and disconnect mocks so that the one genuinely new flow in the app
+ * — leave for a provider, come back with a query parameter, refetch — actually
+ * round-trips in demo mode instead of pretending to. `server.resetHandlers()`
+ * does not reset module state, so a test that depends on a particular set of
+ * grants should say so with its own `server.use()` override rather than rely on
+ * the seed.
+ *
+ * The authorize mock returns a **same-origin** URL that lands back on the
+ * caller's own `returnTo` with `?connected=…`, standing in for the provider and
+ * the backend callback. A real provider URL here would navigate the demo out of
+ * the app to a third party, which is neither useful nor something the mocks
+ * should ever do.
+ */
+
+interface MockLinkedAccount {
+  connection: string;
+  status: "ACTIVE" | "EXPIRED" | "REVOKED" | "REFRESH_FAILED";
+  expiresAt: string | null;
+  scopes: string[] | null;
+  connectedAt: string | null;
+}
+
+const linkedAccounts = new Map<string, MockLinkedAccount>([
+  [
+    "jira",
+    {
+      connection: "jira",
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 40 * 60_000).toISOString(),
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      connectedAt: new Date(Date.now() - 9 * 86400000).toISOString(),
+    },
+  ],
+  [
+    "google-drive",
+    {
+      connection: "google-drive",
+      status: "REFRESH_FAILED",
+      expiresAt: null,
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      connectedAt: new Date(Date.now() - 60 * 86400000).toISOString(),
+    },
+  ],
+]);
+
+const mockConnections: Record<string, Record<string, unknown>> = {
+  conn1: {
+    name: "jira",
+    description: "Atlassian Jira, as the person asking",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://auth.atlassian.com/authorize",
+      tokenUrl: "https://auth.atlassian.com/oauth/token",
+      clientId: "0Xy1abcDEF",
+      clientSecret: "${vault:jira-client-secret}",
+      scopes: ["read:jira-work", "write:jira-work", "offline_access"],
+      extraAuthParams: { audience: "api.atlassian.com", prompt: "consent" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.atlassian.com"],
+    timeoutMs: null,
+  },
+  conn2: {
+    name: "google-drive",
+    description: "Each person's own Drive",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "PER_USER",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "1234.apps.googleusercontent.com",
+      clientSecret: "${vault:google-client-secret}",
+      scopes: ["https://www.googleapis.com/auth/drive.readonly"],
+      extraAuthParams: { access_type: "offline" },
+      usePkce: true,
+      clientAuthMethod: "client_secret_post",
+      discoveryUrl: "https://accounts.google.com/.well-known/openid-configuration",
+    },
+    staticAuth: null,
+    baseUrlAllowlist: [
+      "https://www.googleapis.com",
+      "https://drive.googleapis.com",
+    ],
+    timeoutMs: 8000,
+  },
+  conn3: {
+    name: "amplitude",
+    description: "Organisation-wide analytics key",
+    authType: "STATIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: "Bearer ${vault:amplitude-key}",
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://amplitude.com"],
+    timeoutMs: null,
+  },
+  conn4: {
+    name: "billing-api",
+    description: "Service account for the billing system",
+    authType: "OAUTH2_CLIENT_CREDENTIALS",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: {
+      authorizationUrl: null,
+      tokenUrl: "https://auth.billing.example.com/oauth/token",
+      clientId: "eddi-billing",
+      clientSecret: "${vault:billing-client-secret}",
+      scopes: ["invoices.read"],
+      extraAuthParams: {},
+      usePkce: true,
+      clientAuthMethod: "client_secret_basic",
+      discoveryUrl: null,
+    },
+    staticAuth: null,
+    baseUrlAllowlist: ["https://api.billing.example.com"],
+    timeoutMs: null,
+  },
+  conn5: {
+    name: "legacy-crm",
+    description: "HTTP Basic against the old CRM",
+    authType: "BASIC",
+    binding: "SERVICE",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "Authorization",
+      valueTemplate: null,
+      username: "eddi-service",
+      passwordRef: "${vault:legacy-crm-password}",
+    },
+    baseUrlAllowlist: ["https://crm.internal.example.com:8443"],
+    timeoutMs: null,
+  },
+  // EDDI stores nothing for this one: the calling system attaches each user's
+  // own key per request, so the document carries a header name and nowhere to
+  // send it — and no valueTemplate, which the backend refuses on this binding.
+  conn6: {
+    name: "acme",
+    description: "Each caller brings their own Acme key",
+    authType: "STATIC",
+    binding: "CALLER_SUPPLIED",
+    allowUnverifiedPrincipal: false,
+    oauth: null,
+    staticAuth: {
+      headerName: "x-api-key",
+      valueTemplate: null,
+      username: null,
+      passwordRef: null,
+    },
+    baseUrlAllowlist: ["https://api.example.com"],
+    timeoutMs: null,
+  },
+};
+
+export const connectionHandlers = [
+  http.get("*/connectionstore/connections/descriptors", () => {
+    return HttpResponse.json(
+      Object.entries(mockConnections).map(([id, config], i) => ({
+        resource: `eddi://ai.labs.connection/connectionstore/connections/${id}?version=1`,
+        name: config.name as string,
+        description: (config.description as string) ?? "",
+        createdOn: Date.now() - (i + 3) * 86400000,
+        lastModifiedOn: Date.now() - (i + 1) * 3600000,
+      })),
+    );
+  }),
+
+  http.get("*/connectionstore/connections/jsonSchema", () => {
+    return HttpResponse.json({
+      $schema: "https://json-schema.org/draft/2020-12/schema",
+      type: "object",
+      title: "ConnectionConfiguration",
+      properties: {
+        name: { type: "string" },
+        authType: {
+          type: "string",
+          enum: [
+            "STATIC",
+            "BASIC",
+            "OAUTH2_CLIENT_CREDENTIALS",
+            "OAUTH2_AUTHORIZATION_CODE",
+          ],
+        },
+        binding: {
+          type: "string",
+          enum: ["SERVICE", "PER_USER", "CALLER_SUPPLIED"],
+        },
+        baseUrlAllowlist: { type: "array", items: { type: "string" } },
+      },
+    });
+  }),
+
+  http.get("*/connectionstore/connections/:id", ({ params, request }) => {
+    const url = new URL(request.url);
+    // `/descriptors` and `/jsonSchema` are not ids. The two routes above are
+    // registered first and win, but this stands aside explicitly the way the
+    // resource stores do — a `server.use()` override that re-registers this one
+    // would otherwise answer both of them with a config document.
+    if (isNotAnId(url.pathname)) return;
+    const config = mockConnections[params.id as string];
+    if (!config) {
+      return new HttpResponse("No such connection", { status: 404 });
+    }
+    return HttpResponse.json(config);
+  }),
+
+  http.post("*/connectionstore/connections", () => {
+    const newId = `conn-${Date.now()}`;
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/connectionstore/connections/${newId}?version=1` },
+    });
+  }),
+
+  http.put("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 200,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}?version=2`,
+      },
+    });
+  }),
+
+  http.post("*/connectionstore/connections/:id", ({ params }) => {
+    return new HttpResponse(null, {
+      status: 201,
+      headers: {
+        Location: `/connectionstore/connections/${params.id}-copy?version=1`,
+      },
+    });
+  }),
+
+  http.delete("*/connectionstore/connections/:id", ({ params }) => {
+    // The backend deletes a connection's grants along with it — tokens must not
+    // outlive the connection that produced them — so the mock does too.
+    const config = mockConnections[params.id as string];
+    if (config) linkedAccounts.delete(config.name as string);
+    return new HttpResponse(null, { status: 200 });
+  }),
+
+  // ── Per-user grants ──
+
+  http.get("*/connections/mine", () => {
+    return HttpResponse.json([...linkedAccounts.values()]);
+  }),
+
+  http.post("*/connections/:name/authorize", ({ params, request }) => {
+    const url = new URL(request.url);
+    const name = params.name as string;
+    const returnTo = url.searchParams.get("returnTo") || "/manage/connections";
+    linkedAccounts.set(name, {
+      connection: name,
+      status: "ACTIVE",
+      expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
+      scopes: null,
+      connectedAt: new Date().toISOString(),
+    });
+    return HttpResponse.json({
+      authorizationUrl: `${returnTo}?connected=${encodeURIComponent(name)}`,
+    });
+  }),
+
+  http.delete("*/connections/:name/grant", ({ params }) => {
+    linkedAccounts.delete(params.name as string);
+    // 204 whether or not a grant existed — whether a given user had linked a
+    // given connection is not something a caller learns by probing.
+    return new HttpResponse(null, { status: 204 });
+  }),
+];
+
+// ---------------------------------------------------------------------------
+// Agent regression harness — test suites (`/testsuitestore/testsuites`) and runs
+// (`/agenttests/runs`). Its own group rather than `createResourceHandlers`
+// because that factory also mocks `jsonSchema` and `POST /{id}` (duplicate),
+// which this store does not have — see ResourceTypeConfig.duplicable/jsonSchema.
+// ---------------------------------------------------------------------------
+
+/** Runs started through the mock, by id. A RUNNING run turns PASSED after `MOCK_RUN_DURATION_MS`. */
+const startedMockRuns = new Map<string, ReturnType<typeof buildRunningRun>>();
+/** Started runs a cancel was asked for: they settle as CANCELLED. */
+const cancelledMockRuns = new Set<string>();
+export const MOCK_RUN_DURATION_MS = 4000;
+
+function settleMockRun(run: ReturnType<typeof buildRunningRun>) {
+  if (cancelledMockRuns.has(run.id)) {
+    return {
+      ...run,
+      status: "CANCELLED",
+      finishedAt: run.startedAt + 1000,
+      durationMs: 1000,
+      error: "Cancelled by mock-user before it finished; the cases that did not run to the end are failed.",
+    };
+  }
+  if (Date.now() - run.startedAt < MOCK_RUN_DURATION_MS) return run;
+  const [, passed] = buildMockRuns(run.agentId);
+  return {
+    ...passed!,
+    id: run.id,
+    suiteId: run.suiteId,
+    suiteVersion: run.suiteVersion ?? passed!.suiteVersion,
+    agentVersion: run.agentVersion,
+    startedAt: run.startedAt,
+    finishedAt: run.startedAt + MOCK_RUN_DURATION_MS,
+    durationMs: MOCK_RUN_DURATION_MS,
+  };
+}
+
+/**
+ * The suite store: id -> every saved version (index 0 is version 1). The list,
+ * a read, a create, a save and a delete all go through it, so a suite created or
+ * edited in mock mode is the one the list and the run picker then show.
+ */
+const suiteStore = new Map<string, { docs: unknown[]; createdOn: number; lastModifiedOn: number }>();
+function seedSuites() {
+  suiteStore.clear();
+  const t = Date.now();
+  suiteStore.set("res1", { docs: [MOCK_SUITE], createdOn: t - 86400000, lastModifiedOn: t - 3600000 });
+}
+seedSuites();
+/** Restores the seeded suite; tests that save or create suites call it in afterEach. */
+export function resetAgentTestMockState(): void {
+  seedSuites();
+  startedMockRuns.clear();
+  cancelledMockRuns.clear();
+}
+
+export const agentTestHandlers = [
+  http.get("*/testsuitestore/testsuites/descriptors", () => {
+    return HttpResponse.json(
+      [...suiteStore.entries()].map(([id, s]) => ({
+        resource: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${s.docs.length}`,
+        name: ((s.docs[s.docs.length - 1] as { name?: string }).name ?? "") || id,
+        description: ((s.docs[s.docs.length - 1] as { description?: string }).description ?? ""),
+        createdOn: s.createdOn,
+        lastModifiedOn: s.lastModifiedOn,
+        deleted: false,
+      }))
+    );
+  }),
+  http.get("*/testsuitestore/testsuites/:id", ({ request, params }) => {
+    const url = new URL(request.url);
+    if (isNotAnId(url.pathname)) return;
+    const stored = suiteStore.get(String(params.id));
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    const version = Number(url.searchParams.get("version") ?? stored.docs.length);
+    return HttpResponse.json((stored.docs[version - 1] ?? stored.docs[stored.docs.length - 1]) as Record<string, unknown>);
+  }),
+  http.post("*/testsuitestore/testsuites", async ({ request }) => {
+    const id = `suite${String(suiteStore.size + 1).padStart(20, "0")}`;
+    const t = Date.now();
+    suiteStore.set(id, { docs: [await request.json()], createdOn: t, lastModifiedOn: t });
+    return new HttpResponse(null, {
+      status: 201,
+      headers: { Location: `/testsuitestore/testsuites/${id}?version=1` },
+    });
+  }),
+  http.put("*/testsuitestore/testsuites/:id", async ({ request, params }) => {
+    const id = String(params.id);
+    const stored = suiteStore.get(id);
+    if (!stored) return HttpResponse.json({ error: "Not found" }, { status: 404 });
+    stored.docs.push(await request.json());
+    stored.lastModifiedOn = Date.now();
+    return new HttpResponse(null, {
+      status: 200,
+      headers: { Location: `eddi://ai.labs.testsuite/testsuitestore/testsuites/${id}?version=${stored.docs.length}` },
+    });
+  }),
+  http.delete("*/testsuitestore/testsuites/:id", ({ params }) => {
+    suiteStore.delete(String(params.id));
+    return new HttpResponse(null, { status: 204 });
+  }),
+
+  http.get("*/agenttests/runs", ({ request }) => {
+    const url = new URL(request.url);
+    const agentId = url.searchParams.get("agentId") ?? "";
+    const started = [...startedMockRuns.values()].filter((r) => r.agentId === agentId).map(settleMockRun);
+    const all = [...started.reverse(), ...buildMockRuns(agentId)];
+    const index = Number(url.searchParams.get("index") ?? 0);
+    const limit = Number(url.searchParams.get("limit") ?? 20);
+    return HttpResponse.json(all.slice(index * limit, index * limit + limit));
+  }),
+  http.get("*/agenttests/runs/:runId", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (started) return HttpResponse.json(settleMockRun(started));
+    // Fixture runs carry an agent id of their own; the id is all the lookup needs.
+    const found = buildMockRuns("agent1").find((r) => r.id === runId);
+    return found ? HttpResponse.json(found) : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+  }),
+  http.post("*/agenttests/runs/:runId/cancel", ({ params }) => {
+    const runId = String(params.runId);
+    const started = startedMockRuns.get(runId);
+    if (!started) {
+      const found = buildMockRuns("agent1").find((r) => r.id === runId);
+      return found
+        ? HttpResponse.json({ error: `Agent test run ${runId} has already finished (${found.status}).` }, { status: 409 })
+        : HttpResponse.json({ error: "Run not found" }, { status: 404 });
+    }
+    const current = settleMockRun(started);
+    if (current.status !== "RUNNING") {
+      return HttpResponse.json({ error: `Agent test run ${runId} has already finished (${current.status}).` }, { status: 409 });
+    }
+    cancelledMockRuns.add(runId);
+    return HttpResponse.json(started, { status: 202 });
+  }),
+  http.post("*/agenttests/runs", async ({ request }) => {
+    const body = (await request.json()) as {
+      suiteId: string;
+      agentId: string;
+      suiteVersion?: number;
+      agentVersion?: number;
+    };
+    const run = buildRunningRun(`run-${Date.now()}`, body.agentId, Date.now(), body.suiteId, body.suiteVersion, body.agentVersion);
+    startedMockRuns.set(run.id, run);
+    return HttpResponse.json(run, { status: 202 });
+  }),
+];

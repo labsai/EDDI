@@ -28,7 +28,12 @@ class AgentOriginatedRequestFilterTest {
 
     @ParameterizedTest
     @CsvSource({"PATCH,hitl/samples/s1", "POST,/hitl/autonomy/a1/apply", "POST,hitl/analytics/rebuild", "post,hitl/autonomy/a1/lift",
-            "DELETE,hitl/samples/s1"})
+            "DELETE,hitl/samples/s1", "POST,administration/spend-control-changes/c1/approve",
+            "POST,/administration/spend-control-changes/c1/reject",
+            // matrix parameters do not change the route, so they must not change the
+            // verdict
+            "POST,administration/spend-control-changes;x=1/c1/approve", "POST,administration;a=b/spend-control-changes/c1/approve",
+            "PATCH,hitl;v=1/samples/s1", "POST,hitl/autonomy;x/a1/apply"})
     @DisplayName("a marked write to a guarded path is refused")
     void refused(String method, String path) {
         assertTrue(AgentOriginatedRequestFilter.refused(method, path, "true"));
@@ -36,7 +41,8 @@ class AgentOriginatedRequestFilterTest {
 
     @ParameterizedTest
     @CsvSource(value = {"GET,hitl/samples,true", "HEAD,hitl/autonomy,true", "PATCH,hitl/samples/s1,", "POST,hitl/analytics/summary,true",
-            "POST,agentstore/agents,true", "POST,hitl/samplesx,true"}, nullValues = "")
+            "POST,agentstore/agents,true", "POST,hitl/samplesx,true",
+            "GET,administration/spend-control-changes,true", "PUT,administration/model-prices,true"}, nullValues = "")
     @DisplayName("reads, unmarked requests and other paths pass")
     void passes(String method, String path, String marker) {
         assertFalse(AgentOriginatedRequestFilter.refused(method, path, marker));

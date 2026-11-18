@@ -35,7 +35,7 @@ import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.Executio
  * <pre>
  * {
  *   "type": "contentTypeMatcher",
- *   "config": {
+ *   "configs": {
  *     "mimeType": "image/*",
  *     "minCount": "1"
  *   }

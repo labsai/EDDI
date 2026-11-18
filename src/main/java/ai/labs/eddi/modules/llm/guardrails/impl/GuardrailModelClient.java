@@ -19,6 +19,7 @@ import ai.labs.eddi.modules.llm.pricing.PriceOverride;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.TextContent;
@@ -239,6 +240,14 @@ final class GuardrailModelClient {
             throw new GuardrailUndecidedException(reasonUnavailable, 0.0);
         } catch (GuardrailUndecidedException e) {
             throw e;
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // The key of the guardrail's model is withheld from this agent by its vault
+            // grant (#1179). Undecided like any unreachable model, so failMode applies;
+            // but said in full (the message names the secret and the fix, never a
+            // value), because with failMode=open the guardrail is otherwise silently off.
+            providerTag = "secret_refused";
+            LOGGER.warnf("%s of task '%s' cannot use its model: %s", name, context.taskId(), e.getMessage());
+            throw new GuardrailUndecidedException(reasonUnavailable, 0.0);
         } catch (RuntimeException e) {
             // Never the provider's message: it can echo the request, i.e. the screened
             // text.

@@ -23,6 +23,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -76,6 +77,11 @@ class SecretResolverGrantTest {
     class ClusterGaps {
 
         /**
+         * Neither gap can be reproduced in a unit test, and neither needs to be: the
+         * resolver reads no deployment record and no runtime registry, so what any scan
+         * saw cannot matter to it. These tests pin that down: a scan that reports a
+         * complete, empty answer, and a refusal anyway.
+         * <p>
          * The scan sees no deployment of agent B — B passed the deploy gate on another
          * node after the scan read the records, or was deployed there with
          * autoDeploy=false and so has no record — and reports a complete, empty answer.
@@ -146,6 +152,20 @@ class SecretResolverGrantTest {
             resolver.resolveValue(REF, SecretAccess.agent(AGENT_A));
             resolver.resolveValue(REF, SecretAccess.agent(AGENT_A));
             verify(provider, times(1)).getMetadata(KEY);
+        }
+
+        @Test
+        @DisplayName("a grant read that races a grant write is not kept: the next resolution reads the grant again")
+        void grantReadRacingAWriteIsNotCached() throws Exception {
+            when(provider.getMetadata(KEY)).thenAnswer(invocation -> {
+                // The write lands while this node is still reading the old grant.
+                resolver.invalidateCache(KEY);
+                return new SecretMetadata("default", "openai-key", Instant.now(), null, null, "c", null, List.of(AGENT_A, AGENT_B));
+            });
+            resolver.resolveValue(REF, SecretAccess.agent(AGENT_B));
+            grant(List.of(AGENT_A));
+            assertThrows(SecretResolver.SecretNotGrantedException.class, () -> resolver.resolveValue(REF, SecretAccess.agent(AGENT_B)),
+                    "the stale grant read during the write must not have been cached");
         }
 
         @Test
@@ -256,12 +276,39 @@ class SecretResolverGrantTest {
         }
 
         @Test
-        @DisplayName("a missing secret is refused: a cached client may still carry its old value")
+        @DisplayName("a missing secret is refused, as a configuration error: a cached client may still carry its old value")
         void missingSecretRefused() throws Exception {
             when(provider.getMetadata(KEY)).thenThrow(new ISecretProvider.SecretNotFoundException("gone"));
-            var e = assertThrows(SecretResolver.SecretNotGrantedException.class,
+            var e = assertThrows(SecretResolver.SecretMissingException.class,
                     () -> resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "MCP server 'x'"));
             assertTrue(e.getMessage().contains("does not exist"), e.getMessage());
+            assertEquals(0.0, refusals(), "a missing secret is not a grant refusal");
+        }
+
+        @Test
+        @DisplayName("warn mode admits an agent the grant leaves out, without counting a refusal")
+        void warnModeAdmits() {
+            var warn = resolver("warn");
+            assertDoesNotThrow(() -> warn.requireGranted(List.of(REF), SecretAccess.agent(AGENT_B), "x"));
+            assertEquals(0.0, refusals());
+        }
+
+        @Test
+        @DisplayName("warn mode still refuses a missing secret, which has nothing to admit")
+        void warnModeRefusesAMissingSecret() throws Exception {
+            when(provider.getMetadata(KEY)).thenThrow(new ISecretProvider.SecretNotFoundException("gone"));
+            var warn = resolver("warn");
+            assertThrows(SecretResolver.SecretMissingException.class, () -> warn.requireGranted(List.of(REF), SecretAccess.agent(AGENT_A), "x"));
+            assertEquals(0.0, refusals());
+        }
+
+        @Test
+        @DisplayName("a refusal is a SecretNotGrantedException but not a SecretMissingException, and is counted")
+        void refusalIsCounted() {
+            var e = assertThrows(SecretResolver.SecretNotGrantedException.class,
+                    () -> resolver.requireGranted(List.of(REF), SecretAccess.agent(AGENT_B), "x"));
+            assertFalse(e instanceof SecretResolver.SecretMissingException);
+            assertEquals(1.0, refusals());
         }
 
         @Test

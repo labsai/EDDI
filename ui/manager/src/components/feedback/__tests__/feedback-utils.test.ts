@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { allRatingsQuery, attentionQuery, countDelta, percent, periodRange, pointDelta, readFilters, writeFilter } from "../feedback-utils";
-import { ratingQueryString } from "@/lib/api/ratings";
+import { ratingQueryString } from "@eddi/app-kit/lib/api/ratings";
 
 const NOW = Date.parse("2026-10-24T12:00:00Z");
 

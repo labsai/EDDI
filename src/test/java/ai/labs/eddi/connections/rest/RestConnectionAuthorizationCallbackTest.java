@@ -28,6 +28,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tag;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
+import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Cookie;
@@ -55,6 +56,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -522,6 +524,26 @@ class RestConnectionAuthorizationCallbackTest {
 
         assertThrows(NotFoundException.class, () -> resource.authorize(CONNECTION_NAME, "/manage/connections"));
         verify(stateStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("authorize refuses an authorization-code connection that is not bound PER_USER, and issues no state")
+    void authorizeRefusesAConnectionThatTakesNoPerUserGrant() throws Exception {
+        // Validation runs on writes only, so a connection stored before 6.4.0 with
+        // the default SERVICE binding still loads. The callback refuses it before
+        // redeeming the code; letting authorize through sent the user across the
+        // provider's consent screen only to come back to exchange_failed.
+        ConnectionConfiguration legacy = connection();
+        legacy.setBinding(Binding.SERVICE);
+        doReturn(legacy).when(connectionStore).read(CONNECTION_ID, 1);
+        var registry = new SimpleMeterRegistry();
+
+        var refused = assertThrows(BadRequestException.class, () -> resource(registry).authorize(CONNECTION_NAME, "/manage/connections"));
+
+        assertTrue(refused.getMessage().contains("binding SERVICE") && refused.getMessage().contains("PER_USER"),
+                "the refusal must name the binding and the fix: " + refused.getMessage());
+        verify(stateStore, never()).create(any());
+        assertNull(registry.find("eddi.connection.oauth.authorize.count").counter(), "nothing was issued, so nothing is counted");
     }
 
     @Test

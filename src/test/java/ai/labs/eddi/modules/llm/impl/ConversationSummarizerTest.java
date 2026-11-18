@@ -529,7 +529,7 @@ class ConversationSummarizerTest {
     void updateIfNeeded_refusedSpendCheck_makesNoCall() {
         var memory = createMockMemory(7);
 
-        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> false);
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, pending -> false);
 
         verifyNoInteractions(summarizationService);
         assertTrue(usage.isEmpty());
@@ -542,7 +542,7 @@ class ConversationSummarizerTest {
         when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(new SummarizationService.SummarizationResult("Summary", 1200, 300));
 
-        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, () -> true);
+        var usage = summarizer.updateIfNeeded(memory, createConfig(5), null, null, null, pending -> true);
 
         assertEquals(1200, usage.get("inputTokens"));
         assertEquals(300, usage.get("outputTokens"));

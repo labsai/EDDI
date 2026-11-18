@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { QueryClient } from "@tanstack/react-query";
-import { agentKeys, agentWriteInvalidations, chatKeys, groupKeys } from "../query-keys";
+import { agentKeys, agentWriteInvalidations, chatKeys, groupKeys } from "@eddi/app-kit/lib/query-keys";
 
 describe("agentKeys", () => {
   it("nests under the agents root so a broad invalidate sweeps the lists", () => {

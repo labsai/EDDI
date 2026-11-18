@@ -48,10 +48,12 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.OptionalDouble;
+import java.util.function.Predicate;
 
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
@@ -529,5 +531,35 @@ class LlmTaskSpendGateTest {
         run(task);
 
         verify(dataFactory).createData(eq(AUDIT_COST), doubleThat(d -> Math.abs(d - 0.01) < 1e-12));
+    }
+
+    @Test
+    @DisplayName("a summary retry's spend check counts the first summary call, which is not recorded yet: refused when it would cross the ceiling")
+    void summaryRetryCheckCountsTheFirstCall() throws Exception {
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(new CountingModel());
+        // $1.00 ceiling, $0.90 recorded; at $1 per 1M input tokens the first summary
+        // call costs $0.20 (crosses) or $0.05 (does not)
+        conversation(1.00, 0.90);
+        var task = task();
+        task.setInputPricePer1M(1.0);
+        var summary = new LlmConfiguration.ConversationSummaryConfig();
+        summary.setEnabled(true);
+        task.setConversationSummary(summary);
+        var answers = new ArrayList<Boolean>();
+        when(conversationSummarizer.updateIfNeeded(any(), any(), any(), any(), any(), any())).thenAnswer(inv -> {
+            Predicate<Map<String, Object>> admit = inv.getArgument(5);
+            answers.add(admit.test(Map.of()));
+            answers.add(admit.test(Map.of("inputTokens", 200_000, "outputTokens", 0)));
+            answers.add(admit.test(Map.of("inputTokens", 50_000, "outputTokens", 0)));
+            return Map.of("inputTokens", 250_000, "outputTokens", 0);
+        });
+
+        run(task);
+
+        assertEquals(List.of(true, false, true), answers,
+                "first call admitted; a retry after a $0.20 first call refused ($1.10), after a $0.05 one admitted ($0.95)");
+        // the update's usage (both calls) is recorded once, at its own price: the
+        // admission only checked the first call's cost, it did not record it
+        verify(dataFactory, times(1)).createData(eq(AUDIT_COST), doubleThat(d -> Math.abs(d - 0.25) < 1e-9));
     }
 }

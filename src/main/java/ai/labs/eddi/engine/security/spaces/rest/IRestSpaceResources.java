@@ -115,7 +115,8 @@ public interface IRestSpaceResources {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "The tenant id of one of my spaces", description = "What references to the space's secrets and variables use.")
     @APIResponse(responseCode = "200", description = "The tenant.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     SpaceTenant readTenant(@QueryParam("space") String space);
 
     @GET
@@ -123,7 +124,8 @@ public interface IRestSpaceResources {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List a space's secrets", description = "Names, descriptions and grants — never values.")
     @APIResponse(responseCode = "200", description = "The space's secrets.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     @APIResponse(responseCode = "503", description = "The vault is not configured.")
     List<SpaceSecret> listSecrets(@QueryParam("space") String space);
 
@@ -139,14 +141,16 @@ public interface IRestSpaceResources {
     @APIResponse(responseCode = "400", description = "No value, an invalid list, or a create without allowedAgents or allowedHosts under enforce.")
     @APIResponse(responseCode = "409", description = "Under enforce, a create whose allowedAgents leaves out an agent already deployed with a "
             + "reference to the secret.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     Response storeSecret(@QueryParam("space") String space, @PathParam("keyName") String keyName, SecretWrite body);
 
     @DELETE
     @Path("/secrets/{keyName}")
     @Operation(summary = "Delete a secret from a space")
     @APIResponse(responseCode = "204", description = "Deleted.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     @APIResponse(responseCode = "404", description = "No such secret.")
     Response deleteSecret(@QueryParam("space") String space, @PathParam("keyName") String keyName);
 
@@ -155,7 +159,8 @@ public interface IRestSpaceResources {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "List a space's variables")
     @APIResponse(responseCode = "200", description = "The space's variables.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     List<SpaceVariable> listVariables(@QueryParam("space") String space);
 
     @PUT
@@ -164,13 +169,15 @@ public interface IRestSpaceResources {
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "Set a variable in a space")
     @APIResponse(responseCode = "200", description = "Stored.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     Response storeVariable(@QueryParam("space") String space, @PathParam("key") String key, VariableWrite body);
 
     @DELETE
     @Path("/variables/{key}")
     @Operation(summary = "Delete a variable from a space")
     @APIResponse(responseCode = "204", description = "Deleted.")
-    @APIResponse(responseCode = "403", description = "The caller is not a member of the space.")
+    @APIResponse(responseCode = "403",
+                 description = "The space id matches none of the caller's spaces (send it URL-encoded, exactly as GET /workspaces lists it).")
     Response deleteVariable(@QueryParam("space") String space, @PathParam("key") String key);
 }

@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { Sidebar } from "@/components/layout/sidebar";
 
 const row = (conversationId: string, extra: Record<string, unknown> = {}) => ({

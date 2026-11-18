@@ -1,8 +1,8 @@
 import { StrictMode } from "react";
 import { render, screen } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
-import { AuthProvider } from "../auth-provider";
-import { useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "@eddi/app-kit/components/auth/auth-provider";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 
 /**
  * keycloak-js throws on a second `init()` of one instance, and StrictMode runs

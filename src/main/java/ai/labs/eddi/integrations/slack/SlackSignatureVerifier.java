@@ -55,7 +55,8 @@ public class SlackSignatureVerifier {
      * @param signature
      *            the {@code X-Slack-Signature} header value
      * @param signingSecrets
-     *            the set of signing secrets to try (from all configured agents)
+     *            the set of signing secrets to try (from all configured
+     *            integrations and legacy connectors)
      * @return true if the signature matches any of the provided secrets and the
      *         timestamp is fresh
      */

@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.JsonSerialization;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
@@ -39,7 +40,9 @@ import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -49,6 +52,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -447,6 +451,48 @@ class ApiCallExecutorConfigReferenceTest {
     }
 
     @Test
+    @DisplayName("a reference that names no secret is a configuration refusal naming the call and the tenant looked up")
+    void missingVaultSecretIsAConfigurationRefusal() throws Exception {
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.NOT_FOUND);
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
+
+        var refusal = assertInstanceOf(SecretResolver.MisconfiguredVaultReferenceException.class, AgentConfigurationRefusal.find(failure));
+        assertTrue(refusal.getMessage().startsWith("API call 'downstream': header 'X-Api-Key' references ${vault:api-key} "
+                + "(no tenant given, so tenant 'default')"), refusal.getMessage());
+        assertTrue(refusal.getMessage().contains("no secret named 'api-key' exists in tenant 'default'"), refusal.getMessage());
+        verify(request, never()).send();
+    }
+
+    @Test
+    @DisplayName("redacting a secret out of a refusal keeps the refusal marker and drops the cause")
+    void redactedRefusalStaysARefusal() {
+        var refusal = new SecretResolver.MisconfiguredVaultReferenceException("host 'alice.example.org' is not allowed", null);
+
+        RuntimeException safe = ApiCallExecutor.withoutSecrets(refusal, Set.of("alice"));
+
+        assertNotNull(safe);
+        assertNotNull(AgentConfigurationRefusal.find(safe));
+        assertNull(safe.getCause());
+        assertFalse(safe.getMessage().contains("alice"), safe.getMessage());
+    }
+
+    @Test
+    @DisplayName("a vault that could not be read is not a configuration refusal")
+    void vaultOutageIsNotAConfigurationRefusal() throws Exception {
+        when(secretResolver.resolveValue(any(), any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.diagnoseUnresolved(any())).thenReturn(SecretResolver.UnresolvedReason.PROVIDER_FAILED);
+
+        var failure = assertThrows(LifecycleException.class,
+                () -> executor.execute(call(Map.of("X-Api-Key", "${vault:api-key}"), "{}"), memory, data("hi"), SERVER));
+
+        assertNull(AgentConfigurationRefusal.find(failure));
+        assertTrue(failure.getMessage().contains("the vault could not read it"), failure.getMessage());
+    }
+
+    @Test
     @DisplayName("the plaintext that is sent is the one recorded for redaction, even if the secret rotates mid-build")
     void rotationCannotOutrunTheRedactionSet() throws Exception {
         // The bookkeeping pass and the substitution pass used to resolve separately. A
@@ -518,6 +564,19 @@ class ApiCallExecutorConfigReferenceTest {
                 assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
             }
             assertTrue(String.valueOf(templateData.get("responseError")).contains("invalid api key"), "the failure reason survives");
+        }
+
+        @Test
+        @DisplayName("an empty error body falls back to a status message whose base64 echo of the key is redacted")
+        void statusMessageEncodedEchoRedacted() throws Exception {
+            String encoded = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
+            IResponse echo = respond(401, "");
+            when(echo.getHttpCodeMessage()).thenReturn("rejected " + encoded);
+
+            var result = executor.execute(savingCall(), memory, data("hi"), SERVER);
+
+            assertFalse(String.valueOf(result).contains(encoded), "tool result: " + result);
+            assertTrue(String.valueOf(result).contains("rejected"), "tool result: " + result);
         }
 
         @Test
@@ -641,6 +700,26 @@ class ApiCallExecutorConfigReferenceTest {
             for (Object value : stored.getAllValues()) {
                 assertFalse(String.valueOf(value).contains(SECRET), "memory entry: " + value);
             }
+        }
+
+        @Test
+        @DisplayName("B11: a base64 echo of the key is redacted from a success body, a response header and an error body")
+        void base64EchoRedacted() throws Exception {
+            String encoded = Base64.getEncoder().encodeToString(SECRET.getBytes(StandardCharsets.UTF_8));
+            IResponse echo = respond(200, "you sent " + encoded);
+            when(echo.getHttpHeader()).thenReturn(new HashMap<>(Map.of("Content-Type", "text/plain", "X-Echo", "key=" + encoded)));
+            var templateData = data("hi");
+
+            var result = executor.execute(savingCall(), memory, templateData, SERVER);
+
+            assertFalse(String.valueOf(result).contains(encoded), "tool result: " + result);
+            assertEquals("you sent " + RequestRedactor.REDACTED, templateData.get("response"));
+            assertFalse(String.valueOf(templateData.get("responseHeaders")).contains(encoded), "headers: " + templateData.get("responseHeaders"));
+
+            respond(401, "{\"error\":\"invalid key " + encoded + "\"}");
+            var errorData = data("hi");
+            executor.execute(savingCall(), memory, errorData, SERVER);
+            assertFalse(String.valueOf(errorData.get("responseError")).contains(encoded), "error: " + errorData.get("responseError"));
         }
     }
 

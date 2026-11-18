@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.openai;
 
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.Deployment.Status;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -194,15 +195,13 @@ public class AgentModelResolver {
 
     /**
      * Whether the current caller may converse with this agent. Non-throwing: a
-     * listing omits what it may not offer rather than failing wholesale.
+     * listing omits what it may not offer rather than failing wholesale. Asked
+     * through {@code hasAccess}, not by catching {@code requireAgentUseAccess}: the
+     * throwing check logs a WARN and builds an exception for every hidden agent,
+     * and {@code GET /v1/models} is polled.
      */
     private boolean mayUse(String agentId) {
-        try {
-            resourceAccessGuard.requireAgentUseAccess(agentId);
-            return true;
-        } catch (RuntimeException e) {
-            return false;
-        }
+        return resourceAccessGuard.hasAccess(agentId, AccessLevel.USE);
     }
     /**
      * Resolve a client-supplied {@code model} value to a deployed agent.
@@ -321,14 +320,27 @@ public class AgentModelResolver {
                 requestedModel, canonical, entry.createdEpochSeconds(), stateless);
     }
 
+    /**
+     * The cached catalogue, or an empty one for this call only when the agent set
+     * could not be listed. The failure is not cached: a one-off store error would
+     * otherwise make every model unknown for {@code model-cache-seconds}.
+     */
     private Catalogue catalogue() {
-        return cache.get(CATALOGUE_KEY, key -> buildCatalogue());
+        Catalogue catalogue = cache.get(CATALOGUE_KEY, key -> buildCatalogue());
+        return catalogue != null ? catalogue : emptyCatalogue();
+    }
+
+    private static Catalogue emptyCatalogue() {
+        return new Catalogue(Map.of(), Map.of(), Map.of(), Map.of(), Map.of());
     }
 
     /**
      * Build the model catalogue from the deployed-agent set. Agents whose
      * descriptor cannot be read are skipped rather than failing the whole listing —
      * one broken descriptor must not make every model disappear.
+     *
+     * @return the catalogue, or {@code null} when the agent set cannot be listed,
+     *         which the cache does not store
      */
     private Catalogue buildCatalogue() {
         Map<String, Entry> byModelId = new LinkedHashMap<>();
@@ -342,7 +354,7 @@ public class AgentModelResolver {
             agents = agentFactory.getAllLatestAgents(config.getEnvironment());
         } catch (Exception e) {
             LOGGER.errorf("Could not list deployed agents for the OpenAI model catalogue: %s", e.getMessage());
-            return new Catalogue(byModelId, byAgentId, byName, bySlug, byCollidingId);
+            return null;
         }
 
         // Short id (lower-cased) -> the agents that would carry it, so collisions are

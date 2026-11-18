@@ -26,6 +26,7 @@ import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
 import ai.labs.eddi.modules.llm.tools.RecruitAgentTool;
 import ai.labs.eddi.modules.llm.tools.TeardownAgentTool;
+import ai.labs.eddi.modules.llm.tools.TurnCounter;
 import ai.labs.eddi.modules.llm.tools.spi.ToolAssemblyContext;
 import ai.labs.eddi.modules.llm.tools.spi.ToolContribution;
 import ai.labs.eddi.modules.llm.tools.spi.ToolSourceProvider;
@@ -50,8 +51,8 @@ import java.util.stream.Collectors;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
- * Builds the four dynamic-agent tools — create / converse / discover-by-
- * capability / teardown — with their shared per-conversation tracking lists and
+ * Builds the dynamic-agent tools — create / converse / discover-by-capability /
+ * recruit / teardown — with their shared per-conversation tracking lists and
  * the guardrails ({@code allowRecruitment}, delegation depth,
  * {@code maxCreatedAgentsPerDiscussion} seeding) that bound them (R2 step 2).
  * Extracted from the anonymous block inside
@@ -70,11 +71,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code enableBuiltInTools=true}, no whitelist and {@code
  * dynamicAgents.enabled=true} got none of them — the no-whitelist branch of
  * {@code collectAllBuiltInTools} never called this provider, while
- * {@code docs/langchain.md} states twice that omitting the whitelist enables
- * all built-in tools. {@code collectAllBuiltInTools} now calls this provider
- * unconditionally, and {@link #addDynamicAgentTools} honours an omitted
- * whitelist <em>only under a governing group policy</em> — see the reasoning
- * there for why a standalone conversation still requires the explicit entry.
+ * {@code docs/langchain.md} says that omitting the whitelist enables all
+ * available built-in tools. {@code collectAllBuiltInTools} now calls this
+ * provider unconditionally, and {@link #addDynamicAgentTools} honours an
+ * omitted whitelist <em>only under a governing group policy</em> — see the
+ * reasoning there for why a standalone conversation still requires the explicit
+ * entry.
  */
 class DynamicAgentToolsProvider implements ToolSourceProvider {
 
@@ -124,6 +126,13 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * tracking them too.
      */
     static final String KEY_DYNAMIC_TORN_DOWN_AGENT_IDS = MemoryKeys.DYNAMIC_TORN_DOWN_AGENT_IDS;
+
+    /**
+     * Step-data key prefix of an LLM task's delegation count this turn
+     * ({@code maxDelegationsPerTask}); the task id follows. A task without an id
+     * counts under {@code default}, as {@code LlmTask} names it elsewhere.
+     */
+    static final String KEY_DELEGATIONS_PREFIX = "tools:delegations:";
 
     private final AgentSetupService agentSetupService;
     private final CapabilityRegistryService capabilityRegistryService;
@@ -232,7 +241,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         List<Object> tools = new ArrayList<>();
-        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId());
+        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId(), ctx.task().getId());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }
@@ -256,10 +265,21 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     }
 
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId) {
+        addDynamicAgentTools(tools, whitelist, memory, groupConversationId, null);
+    }
+
+    /**
+     * @param taskId
+     *            the id of the LLM task the tools serve; its delegations this turn
+     *            are counted under it, so {@code maxDelegationsPerTask} holds
+     *            across every assembly of the task's tools in the turn
+     */
+    void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId,
+                              String taskId) {
         // V7. An omitted whitelist means "all built-in tools" everywhere else —
-        // docs/langchain.md states it twice ("(all if not specified)", "Omitting
-        // builtInToolsWhitelist enables all available built-in tools") and
-        // BuiltinToolsProvider implements exactly that for the nine plain beans.
+        // docs/langchain.md says so ("Omitting builtInToolsWhitelist enables all
+        // available built-in tools") and BuiltinToolsProvider implements exactly
+        // that for the nine plain beans.
         // This method alone returned early, so an agent with enableBuiltInTools=true,
         // no whitelist and dynamicAgents.enabled=true silently got none of them.
         //
@@ -328,8 +348,11 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
                     : (agentId, principal) -> (sharedCreatedIds.contains(agentId)
                             && createdHere(agentId, callerConversationId, groupConversationId))
                             || useCheck.test(agentId, principal);
+            // Counted on the step: this method runs once per tool assembly, and a turn
+            // assembles once per cascade step and again on a HITL resume.
+            TurnCounter delegations = TurnCounter.onStep(memory, KEY_DELEGATIONS_PREFIX + (taskId != null ? taskId : "default"));
             tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
-                    resolveDelegationCeiling(memory)));
+                    resolveDelegationCeiling(memory), delegations));
             LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
                     sanitize(parentAgentId), delegationDepth);
         }
@@ -730,7 +753,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * M-T2: the retained set as the most recent turn that recorded one left it.
      * <p>
      * The latest entry, not the union over all steps like the created list: a
-     * retain flag can be <em>removed</em> ({@code unretain_agent}), and a union
+     * retain flag can be <em>removed</em> ({@code unretainAgent}), and a union
      * would resurrect it from the turn that set it. Each turn stores the full set
      * it was seeded with plus its own changes, so the latest entry is the whole
      * state. Narrowed to agents still tracked as created — which excludes torn-down

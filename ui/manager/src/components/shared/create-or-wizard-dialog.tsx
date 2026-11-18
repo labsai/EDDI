@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { Plus, Wand2 } from "lucide-react";
-import { AccessibleDialog } from "@/components/ui/accessible-dialog";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 
 interface CreateOrWizardDialogProps {
   open: boolean;

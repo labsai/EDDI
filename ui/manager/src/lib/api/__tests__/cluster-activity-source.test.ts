@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { api } from "@/lib/api-client";
-import { createClusterActivitySource } from "@/lib/api/cluster";
+import { api } from "@eddi/app-kit/lib/api-client";
+import { createClusterActivitySource } from "@eddi/app-kit/lib/api/cluster";
 
 afterEach(() => {
   vi.useRealTimers();

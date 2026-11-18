@@ -51,6 +51,20 @@ public interface IRestHtmlChatResource {
     @Operation(hidden = true)
     Response fetchChatConfig();
 
+    /**
+     * The embed launcher ({@code ui/chat/src/embed}): one standalone script a host
+     * page includes with {@code <script src="/chat/embed.js" data-agent-id="…">} to
+     * draw a button that opens this widget in an iframe
+     * (docs/chat-ui-embedding.md). A literal path, so it wins over the SPA
+     * catch-all below. Not content-hashed — host pages hard-code the URL — so it is
+     * cached for an hour, not immutably.
+     */
+    @GET
+    @Path("embed.js")
+    @Produces("application/javascript")
+    @Operation(hidden = true)
+    Response fetchEmbedScript();
+
     @GET
     @Cache(noCache = true, mustRevalidate = true)
     @Path("{path:.*}")

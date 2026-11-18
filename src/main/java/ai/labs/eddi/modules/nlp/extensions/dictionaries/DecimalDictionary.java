@@ -15,6 +15,10 @@ import java.util.Collections;
 import java.util.List;
 
 /**
+ * Recognises a decimal number with exactly one {@code .} or {@code ,} separator
+ * (an integer is not one) and emits a {@code decimal} expression whose value
+ * uses {@code .} as the separator.
+ *
  * @author ginccc
  */
 public class DecimalDictionary implements IDictionary {

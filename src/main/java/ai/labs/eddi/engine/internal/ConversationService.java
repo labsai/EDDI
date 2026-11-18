@@ -148,6 +148,11 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     public static final Duration CONVERSATION_STATE_CACHE_TTL = Duration.ofSeconds(30);
     private static final String USER_ID = "userId";
+    /**
+     * The context key a group discussion starts a member's conversation with
+     * ({@code MemberTurnExecutor}); recorded on the descriptor as a listing hint.
+     */
+    private static final String GROUP_CONVERSATION_ID = "groupConversationId";
 
     private final IAgentFactory agentFactory;
     private final IConversationMemoryStore conversationMemoryStore;
@@ -229,6 +234,14 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @Inject
     AgentConfigurationCache agentConfigurationCache;
+
+    /**
+     * Titles each conversation from its first usable message (see
+     * {@link ConversationTitleService}). Field-injected for the same reason as
+     * {@link #attachmentStore}; {@code null} means no titles are written.
+     */
+    @Inject
+    ConversationTitleService conversationTitleService;
 
     /**
      * Idempotent turns ({@code Idempotency-Key}). Field-injected for the same
@@ -349,6 +362,16 @@ public class ConversationService implements IConversationService, UserErasurePar
     boolean captureDeadLetterInput = true;
 
     /**
+     * Strict plan binding for the whole deployment: a human HITL decision on a
+     * pause that has a plan hash must carry it ({@code HitlPlanBinding}). Off by
+     * default so clients that predate plan hashing keep working; an agent can still
+     * require it for itself with {@code hitlConfig.requirePlanHash}. Field-injected
+     * with its default for the directly constructed tests.
+     */
+    @ConfigProperty(name = "eddi.hitl.plan-hash.strict", defaultValue = "false")
+    boolean planHashStrict = false;
+
+    /**
      * Turns this node runs at once, queued or executing; one more is refused with
      * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
      * pool no longer bounds them — this does, and it is what keeps memory per
@@ -413,8 +436,9 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Live memories of conversations currently executing on THIS pod, keyed by
      * conversationId. Lets {@link #cancelConversation} set the cooperative
      * {@code cancelled} flag that {@code LifecycleManager} checks at task
-     * boundaries. Cross-pod cancellation of an actively-executing turn is not
-     * supported — the DB CAS handles the paused/persisted states.
+     * boundaries. A turn running on another node is reached in cluster mode through
+     * {@link #signalRemoteInFlight}; the DB CAS handles the paused/persisted
+     * states.
      */
     private final ConcurrentHashMap<String, IConversationMemory> inFlightConversations = new ConcurrentHashMap<>();
 
@@ -639,6 +663,12 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
     }
 
+    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
+    final ConversationHitlService conversationHitlService;
+
+    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
+    private final ConversationStepRunner conversationStepRunner;
+
     /**
      * Rejects new work once {@link GracefulShutdownService} has observed a
      * {@code ShutdownEvent} (B3). Turns already queued or in flight are drained by
@@ -651,12 +681,6 @@ public class ConversationService implements IConversationService, UserErasurePar
      * A {@code null} gate means the bean was constructed outside CDI (only the
      * direct-construction unit tests do that) and never rejects.
      */
-    /** The HITL half, extracted to {@link ConversationHitlService} (R3 step 1). */
-    final ConversationHitlService conversationHitlService;
-
-    /** Turn execution, extracted to {@link ConversationStepRunner} (R3 step 2). */
-    private final ConversationStepRunner conversationStepRunner;
-
     void rejectIfShuttingDown() {
         if (gracefulShutdownService != null && gracefulShutdownService.isShuttingDown()) {
             throw new RejectedExecutionException(
@@ -774,7 +798,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
             var conversationUri = createURI(RESOURCE_URI, conversationId);
 
-            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri);
+            createDescriptorOrDiscard(agentId, latestAgent, userId, conversationId, conversationUri,
+                    groupConversationIdOf(context));
             armContinuation(conversationId, conversationMemory, environment);
             // Announced only once the conversation is final: a failed descriptor write
             // discards it again, and an observer (the email notifier) must not have
@@ -808,10 +833,12 @@ public class ConversationService implements IConversationService, UserErasurePar
      * {@code ConversationAccessGuard} relies on to deny everyone but admins access
      * to a conversation without one.
      */
-    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri)
+    private void createDescriptorOrDiscard(String agentId, IAgent latestAgent, String userId, String conversationId, URI conversationUri,
+                                           String groupConversationId)
             throws ResourceStoreException, ResourceNotFoundException {
         try {
-            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri);
+            conversationSetup.createConversationDescriptor(agentId, latestAgent, userId, conversationId, conversationUri,
+                    groupConversationId);
         } catch (ResourceStoreException | ResourceNotFoundException | RuntimeException e) {
             LOGGER.errorf("Could not write the descriptor of new conversation %s — discarding its memory: %s",
                     sanitize(conversationId), e.getMessage());
@@ -826,6 +853,20 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
             throw e;
         }
+    }
+
+    /**
+     * The group conversation a member's conversation is started for, from its start
+     * context; {@code null} for a conversation of its own. Only a listing hint (the
+     * owner's own chats leave member threads out), so a caller who sets the key on
+     * a conversation of their own only hides it from their own sidebar.
+     */
+    static String groupConversationIdOf(Map<String, Context> context) {
+        Context value = context == null ? null : context.get(GROUP_CONVERSATION_ID);
+        if (value == null || !(value.getValue() instanceof String id) || id.isBlank()) {
+            return null;
+        }
+        return id;
     }
 
     /**
@@ -1060,9 +1101,9 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
         // Disarm the timeout UNCONDITIONALLY (idempotent, no-ops when absent): a resume
         // in flight may have already flipped AWAITING_HUMAN->IN_PROGRESS and deferred
-        // its
-        // own schedule delete, so gating this on AWAITING_HUMAN would miss that window
-        // and leave a stale one-shot timer armed against the now-ended conversation.
+        // its own schedule delete, so gating this on AWAITING_HUMAN would miss that
+        // window and leave a stale one-shot timer armed against the now-ended
+        // conversation.
         conversationHitlService.deleteHitlTimeoutSchedule(conversationId);
         // An ended conversation runs no more turns: withdraw a pending continuation
         // (its fire would refuse an ENDED conversation anyway; this is the prompt
@@ -1106,8 +1147,8 @@ public class ConversationService implements IConversationService, UserErasurePar
         contextLogger.setLoggingContext(loggingContext);
 
         try {
-            // The current step needs no history: read only the tail (see readConversation
-            // below).
+            // The current step needs no history: read only the tail (see the
+            // conversationId-only readConversation below).
             var tail = Boolean.TRUE.equals(returnCurrentStepOnly) ? requireTail(conversationId) : null;
             var conversationMemorySnapshot = tail != null ? tail.snapshot() : requireSnapshot(conversationId);
             loggingContext.put(USER_ID, conversationMemorySnapshot.getUserId());
@@ -1411,6 +1452,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             }
 
             @Override
+            public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+                streamingHandler.onToolResult(toolName, callId, status, durationMs, summary);
+            }
+
+            @Override
             public void onTaskComplete(TaskId taskId, String taskType, long durationMs, Map<String, Object> summary) {
                 streamingHandler.onTaskComplete(taskId, taskType, durationMs, summary);
             }
@@ -1639,6 +1685,11 @@ public class ConversationService implements IConversationService, UserErasurePar
                             reportCancelledTurnAsInterrupted(conversationId, returnConversationMemory, memorySnapshot);
                             recordTurnOutcome(returnConversationMemory, memorySnapshot, inputData);
                             conversationDescriptorStore.updateTimeStamp(conversationId);
+                            // Titles the conversation on the turn of its first usable message;
+                            // a model-written title is generated in the background. Never throws.
+                            if (conversationTitleService != null) {
+                                conversationTitleService.afterTurn(returnConversationMemory, rerunOnly);
+                            }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
@@ -1681,7 +1732,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             conversationCoordinator.submitInOrder(conversationId, processUserInput);
         } catch (ProcessingRestrictedException | ProcessingRestrictionUnavailableException | QuotaExceededException
                 | QuotaAccountingUnavailableException | ConversationAwaitingApprovalException | TurnCapacityExceededException e) {
-            // All five are thrown before the turn is admitted, and none is an internal
+            // All of these are thrown before the turn is admitted, and none is an internal
             // fault of this class: the generic handler below logs a full ERROR stack
             // trace, which for the restriction-unavailable case meant every turn of
             // every user wrote two of them (here and again in RestAgentEngine) for the
@@ -2471,6 +2522,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         }
 
         @Override
+        public void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            delegate.onToolResult(toolName, callId, status, durationMs, summary);
+        }
+
+        @Override
         public void onSkipped(SimpleConversationMemorySnapshot snapshot) {
             idempotency.complete(conversationId, key, new TurnIdempotencyService.Outcome(snapshot, true));
             delegate.onSkipped(snapshot);
@@ -2643,10 +2699,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     List<String> groups = visibility == Visibility.group ? groupIds : List.of();
                     boolean sameIdentity = (visibility == Visibility.global) == (current.visibility() == Visibility.global);
                     if (sameIdentity) {
+                        // The row keeps its owner, but the value is the one this
+                        // conversation held, so its agent is the writer — on a global
+                        // row the owner may be another agent.
                         Object value = UserMemoryEntry.fromProperty(target, userId, agentId, null, Visibility.self).value();
                         userMemoryStore.upsert(new UserMemoryEntry(current.id(), userId, key, value, current.category(), visibility,
                                 current.sourceAgentId(), groups, conversationId, false, current.accessCount(), current.createdAt(),
-                                current.updatedAt()));
+                                current.updatedAt(), agentId));
                     } else if (sameKey.stream().noneMatch(e -> (e.visibility() == Visibility.global) == (visibility == Visibility.global))) {
                         // The entry moves between the shared global row and this agent's
                         // row, which are different documents.
@@ -3348,10 +3407,9 @@ public class ConversationService implements IConversationService, UserErasurePar
     //
     // Bodies moved to ConversationHitlService (R3 step 1). These stay as declared
     // delegators: cancelConversation, resumeConversation,
-    // getConversationMemorySnapshot
-    // and listPendingApprovals are IConversationService contract methods, and the
-    // cluster's internals are reached by characterization tests through
-    // getDeclaredMethod on this class.
+    // getConversationMemorySnapshot and listPendingApprovals are
+    // IConversationService contract methods, and the cluster's internals are
+    // reached by characterization tests through getDeclaredMethod on this class.
 
     @Override
     public CancelOutcome cancelConversation(String conversationId,

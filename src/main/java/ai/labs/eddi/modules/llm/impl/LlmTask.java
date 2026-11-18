@@ -54,6 +54,7 @@ import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceGuard;
 import ai.labs.eddi.modules.llm.tools.impl.*;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.utils.EndpointParameters;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
 import ai.labs.eddi.engine.lifecycle.model.HitlRevisionRequest;
@@ -78,7 +79,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.BooleanSupplier;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
@@ -775,7 +776,15 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var cascadeConfig = task.getModelCascade();
         boolean cascadeConfigured = cascadeConfig != null && cascadeConfig.isEnabled() && cascadeConfig.getSteps() != null
                 && !cascadeConfig.getSteps().isEmpty();
-        boolean skipCascade = cascadeConfigured && task.isAgentMode() && !cascadeConfig.isEnableInAgentMode();
+        // Whether the task has a tool this turn other than the answerMode reply tool.
+        // The task's configuration answers for its own tools, built-ins and a2aAgents;
+        // the tools a workflow's httpcalls / mcpcalls contribute only show in the
+        // assembly the tool loop runs on, so the orchestrator is asked — and only when
+        // the answer changes the plan: a cascade's tool decision or the reservation's
+        // round count.
+        boolean reservationOn = spendGate != null && spendGate.reservationEnabled();
+        boolean taskHasTools = task.isAgentMode() || ((cascadeConfigured || reservationOn) && agentOrchestrator.offersTools(task, memory));
+        boolean skipCascade = cascadeConfigured && taskHasTools && !cascadeConfig.isEnableInAgentMode();
         boolean cascadeActive = cascadeConfigured && !skipCascade;
 
         // Detect streaming mode — event sink is set when SSE endpoint is used
@@ -838,9 +847,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
         // Hard tenant ceiling (opt-in): hold the most this model phase can cost
         // against the monthly budget before it starts. Off, this reads one flag.
-        if (spendRefusal == null && spendGate != null && spendGate.reservationEnabled()) {
-            spendRefusal = spendGate.holdModelPhase(memory, ModelCallBound.phaseMaxUsd(task, cascadeActive, messages, processedParams,
-                    resolvedType, resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
+        if (spendRefusal == null && reservationOn) {
+            spendRefusal = spendGate.holdModelPhase(memory,
+                    ModelCallBound.phaseMaxUsd(task, cascadeActive, taskHasTools || AnswerTool.enabled(task), messages, processedParams, resolvedType,
+                            resolveModelNameOf(processedParams, resolvedType), spendGate.reservationDefaultMaxOutputTokens()));
         }
         // R8: the circuit of the task's single model. A cascade guards each of its
         // steps itself, so this is only for the non-cascade paths. Not acquired when
@@ -880,7 +890,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 var cascadeResult = cascadingModelExecutor.execute(cascadeConfig, messages, agentSystemMessage, processedParams, task, memory,
                         agentOrchestrator, templateDataObjects, jsonMode, convertToObject, allowLiveStreaming,
                         effectiveToolApprovals, llmTaskIndex, toolTranscriptMaxBytes, contextShrinker,
-                        turnBudget(memory.getTurnDeadline()), reaskSpend,
+                        turnBudget(memory.getTurnDeadline()), reaskSpend, taskHasTools,
                         (stepType, stepParams) -> promptForCascadeStep(promptWithoutAttachments, promptBeforeScreening, memory, task, resolvedType,
                                 processedParams,
                                 stepType, stepParams, screenedInput, currentStep, stepTextVerdicts));
@@ -1079,7 +1089,10 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             responseContent = fallbackServed.content();
             responseMetadata = new HashMap<>();
             toolTrace = new ArrayList<>();
-            usedToolMode = task.isAgentMode();
+            // The fallback is shown where the tool loop's answer would have been. When the
+            // plan above did not need to ask whether the task has tools, a refusal — rare
+            // — asks now.
+            usedToolMode = taskHasTools || (!cascadeConfigured && !reservationOn && agentOrchestrator.offersTools(task, memory));
             cascadeAuditModel = null;
         } catch (Exception e) {
             settleCircuit(circuitTicket, e);
@@ -1318,11 +1331,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 // guardrails are re-applied to the turns it condenses. It is a paid call
                 // like any other — asked of the spend gate first, and priced and recorded
                 // on the step afterwards.
-                Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
-                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
-                        historicInputScreen(memory, task), summaryAdmission(memory));
                 ModelPrices summaryPrices = ModelPrices.forSummary(task, resolvedType, resolveModelNameOf(processedParams, resolvedType),
                         effectiveSummaryConfig.getLlmProvider(), effectiveSummaryConfig.getLlmModel());
+                Map<String, Object> summaryUsage = conversationSummarizer.updateIfNeeded(memory, effectiveSummaryConfig, propertiesContext,
+                        resolveInheritedSummaryParameters(processedParams, resolvedType, effectiveSummaryConfig.getLlmProvider()),
+                        historicInputScreen(memory, task), summaryAdmission(memory, summaryPrices));
+                // Recorded once, both calls of a retry_once update together: the
+                // admission only priced the first call's usage into its check.
                 recordSpend(currentStep, summaryUsage, summaryPrices.cost(summaryUsage), summaryPrices);
             } catch (Exception e) {
                 LOGGER.warnf(e, "[SUMMARY] Rolling summary update failed for conversation '%s'. Will retry next turn.",
@@ -1349,14 +1364,18 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     /**
      * The spend check of a rolling-summary call: the conversation's ceiling and the
      * tenant budget, as for any other paid call of the turn. The answer's own cost
-     * is already on the step.
+     * is already on the step; what the update itself has spent so far (the first
+     * call, before a {@code retry_once} call) is not, so it is priced with
+     * {@code prices} and passed as pending. It is only checked here, not recorded:
+     * the caller records the update's whole usage once, afterwards.
      */
-    private BooleanSupplier summaryAdmission(IConversationMemory memory) {
+    private Predicate<Map<String, Object>> summaryAdmission(IConversationMemory memory, ModelPrices prices) {
         if (spendGate == null) {
             return null;
         }
-        return () -> {
-            try (LlmSpendGate.Admission admission = spendGate.admit(memory, 0.0, 0.0)) {
+        return pendingUsage -> {
+            double pendingUsd = pendingUsage == null || pendingUsage.isEmpty() ? 0.0 : prices.cost(pendingUsage);
+            try (LlmSpendGate.Admission admission = spendGate.admit(memory, pendingUsd, 0.0)) {
                 return admission.allowed();
             }
         };
@@ -2231,8 +2250,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * This is the RESUME mirror of {@link #executeTask}: it rebuilds the chat model
      * for the paused task, hands the frozen batch + human decision to
      * {@link AgentOrchestrator#resumeToolLoop} (which replays the transcript and
-     * applies the verdicts — implemented in Task 9), then stores the final result
-     * EXACTLY like the normal path and runs {@code postResponse}.
+     * applies the verdicts), then stores the final result EXACTLY like the normal
+     * path and runs {@code postResponse}.
      * <p>
      * <strong>Pre-LLM bypass:</strong> unlike {@code executeTask}, this method
      * deliberately skips every side-effecting step that already ran before the
@@ -2312,7 +2331,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         Map<String, IData<?>> dataBefore = fallbackOnError ? snapshotStepData(currentStep) : Map.of();
         LlmFallbackHandler.Fallback fallbackServed = null;
 
-        // === Hand off to the resume loop (Task 9) ===
+        // === Hand off to the resume loop ===
         // Pass the cluster-wide kill-switch so the continuation's gate resolution
         // matches the live path (executeTask) — a disabled gate stays inert on resume.
         // Same JSON policy the live loop would have applied — a resumed continuation
@@ -3031,7 +3050,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * regex replacement also read {@code $} and {@code \} inside one as group
      * references).
      */
-    static String escapeConfigReferenceMentions(String value) {
+    public static String escapeConfigReferenceMentions(String value) {
         if (value == null || CONFIG_REF_NAMESPACES.stream().noneMatch(value::contains)) {
             return value;
         }
@@ -3195,6 +3214,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         effective.setMaxTurnsPerUpdate(configured.getMaxTurnsPerUpdate());
         effective.setMaxCharsPerUpdate(configured.getMaxCharsPerUpdate());
         effective.setSummarizationPrompt(configured.getSummarizationPrompt());
+        effective.setCiteSources(configured.isCiteSources());
+        effective.setOnValidationFailure(configured.getOnValidationFailure());
         return effective;
     }
 
@@ -3236,15 +3257,16 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
     /**
      * Parameter keys that belong to the provider that issued them: credentials, the
-     * endpoint coordinates that address that provider's account, and the model keys
+     * account coordinates of that provider, and the model keys
      * ({@link ModelParameterKeys#MODEL_KEYS}) — a model id means nothing to another
      * vendor, and an inherited {@code modelName} would override the summary
-     * provider's own default. Everything else (temperature, maxTokens, timeout, …)
-     * is vendor-neutral and safe to carry across a provider boundary.
+     * provider's own default. Every endpoint parameter
+     * ({@link EndpointParameters#isEndpointKey}) is provider-bound as well, and is
+     * not listed here. Everything else (temperature, maxTokens, timeout, …) is
+     * vendor-neutral and safe to carry across a provider boundary.
      */
     private static final Set<String> PROVIDER_BOUND_PARAMETERS = Stream.concat(Stream.of(
             "apiKey", "accessToken", "authToken", "nonAzureApiKey", "signingSecret", "appPassword", "botToken",
-            "baseUrl", "endpoint", "apiEndpoint",
             "compartmentId", "configProfile", "projectId", "region", "location",
             "organizationId", "deploymentName", "serviceVersion",
             // Request-override containers: a custom header routinely carries a
@@ -3295,7 +3317,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         var safeParameters = new LinkedHashMap<String, String>();
         var dropped = new ArrayList<String>();
         parentParameters.forEach((key, value) -> {
-            if (key != null && PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase)) {
+            if (key != null && (EndpointParameters.isEndpointKey(key) || PROVIDER_BOUND_PARAMETERS.stream().anyMatch(key::equalsIgnoreCase))) {
                 dropped.add(key);
             } else {
                 safeParameters.put(key, value);
@@ -3760,7 +3782,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             return null;
         }
         return new ToolLoopStreamingChatModel(streamingModel, eventSink,
-                StreamingLegacyChatExecutor.resolveTimeoutSeconds(task), resolvedType);
+                streamingLegacyChatExecutor.backstopSeconds(task), resolvedType);
     }
 
     /**
@@ -3799,7 +3821,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * @param context
      *            the retrieved context (may be null)
      * @param maxChars
-     *            character ceiling; {@code -1} = unbounded
+     *            character ceiling; {@code <= 0} = unbounded
      * @param source
      *            human-readable source name, used in the warning
      * @return the context, truncated with an explanatory marker when it exceeded

@@ -1,9 +1,9 @@
 import { useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Plus, X } from "lucide-react";
-import { NumberInput } from "../number-input";
+import { NumberInput } from "@eddi/app-kit/components/editors/number-input";
 import type { TaskSectionProps } from "./task-section-props";
-import type { LlmTask } from "./types";
+import type { LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 type ToolQuotas = NonNullable<LlmTask["toolQuotas"]>;
 type QuotaRule = ToolQuotas["tools"][string];

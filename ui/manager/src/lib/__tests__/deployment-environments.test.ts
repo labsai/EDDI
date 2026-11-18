@@ -5,8 +5,8 @@ import {
   preferredChatEnvironment,
   withAnyDeployedVersion,
   isLiveAtRequestedVersion,
-} from "../deployment-environments";
-import type { EnvironmentStatus } from "@/lib/api/agents";
+} from "@eddi/app-kit/lib/deployment-environments";
+import type { EnvironmentStatus } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * The bug these exist for: the agents list, the chat picker and every chat

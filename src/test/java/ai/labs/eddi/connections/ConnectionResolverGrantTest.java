@@ -32,6 +32,7 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -63,7 +64,7 @@ class ConnectionResolverGrantTest {
         when(tokens.accessToken(any(), any())).thenReturn("cached-access-token");
         provider = mock(ISecretProvider.class);
         when(provider.isAvailable()).thenReturn(true);
-        for (String key : List.of("client-secret", "token")) {
+        for (String key : List.of("client-secret", "token", "signing-key")) {
             var ref = new SecretReference("default", key);
             when(provider.resolve(ref)).thenReturn("plain-" + key);
             when(provider.getMetadata(ref)).thenReturn(new SecretMetadata("default", key, Instant.now(), null, null, "c", null, List.of(AGENT_A)));
@@ -130,7 +131,34 @@ class ConnectionResolverGrantTest {
     @Test
     void bareTokenPathChecksToo() {
         register(oauthService());
-        assertThrows(ConnectionException.class, () -> resolver.resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_B)));
+        var e = assertThrows(ConnectionException.class,
+                () -> resolver.resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_B)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
+        verify(tokens, never()).accessToken(any(), any());
+    }
+
+    @Test
+    @DisplayName("a JWT bearer connection is checked against its private key, the credential that mints its token")
+    void jwtBearerChecksThePrivateKey() {
+        var connection = oauthService();
+        connection.setAuthType(AuthType.OAUTH2_JWT_BEARER);
+        connection.getOauth().setClientSecret(null);
+        connection.getOauth().setPrivateKey("${vault:signing-key}");
+        register(connection);
+        var e = assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_B)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
+        assertTrue(e.getMessage().contains("signing-key"), e.getMessage());
+        verify(tokens, never()).accessToken(any(), any());
+    }
+
+    @Test
+    @DisplayName("a deleted client secret refuses the cached token as a configuration error, not a grant refusal")
+    void missingSecretIsAConfigurationError() throws Exception {
+        var ref = new SecretReference("default", "client-secret");
+        when(provider.getMetadata(ref)).thenThrow(new ISecretProvider.SecretNotFoundException("gone"));
+        register(oauthService());
+        var e = assertThrows(ConnectionException.class, () -> resolver.resolve("${connection:exo}", GRAPH, null, SecretAccess.agent(AGENT_A)));
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, e.getReason());
         verify(tokens, never()).accessToken(any(), any());
     }
 
@@ -146,7 +174,8 @@ class ConnectionResolverGrantTest {
     @DisplayName("requireGranted, for an MCP or A2A session cached per server")
     void requireGrantedWithoutResolving() throws Exception {
         register(oauthService());
-        assertThrows(ConnectionException.class, () -> resolver.requireGranted("${connection:exo}", SecretAccess.agent(AGENT_B)));
+        var e = assertThrows(ConnectionException.class, () -> resolver.requireGranted("${connection:exo}", SecretAccess.agent(AGENT_B)));
+        assertEquals(ConnectionException.Reason.SECRET_NOT_GRANTED, e.getReason());
         assertDoesNotThrow(() -> resolver.requireGranted("${connection:exo}", SecretAccess.agent(AGENT_A)));
         verify(provider, never()).resolve(any());
     }

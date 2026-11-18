@@ -5,6 +5,12 @@
 package ai.labs.eddi.modules.rag;
 
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.engine.caching.CacheFactory;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.caching.SharedKvCache;
+import ai.labs.eddi.engine.cluster.ISharedKv;
+import ai.labs.eddi.engine.cluster.InMemorySharedKv;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
@@ -20,8 +26,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.time.Duration;
 import java.util.List;
+import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -37,6 +46,9 @@ import static org.mockito.MockitoAnnotations.openMocks;
 
 class RagIngestionServiceTest {
 
+    /** The RAG configuration id the tests ingest into unless they say otherwise. */
+    private static final String KB = "test-kb";
+
     @Mock
     private EmbeddingModelFactory embeddingModelFactory;
     @Mock
@@ -51,7 +63,7 @@ class RagIngestionServiceTest {
     @BeforeEach
     void setUp() {
         openMocks(this);
-        service = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory);
+        service = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, new CacheFactory());
     }
 
     @Test
@@ -108,14 +120,14 @@ class RagIngestionServiceTest {
 
         // Status should be either pending or processing (virtual thread may have
         // started)
-        String status = service.getStatus(ingestionId);
+        String status = service.getStatus(KB, ingestionId);
         assertTrue(status.equals("pending") || status.equals("processing") || status.equals("completed") || status.startsWith("failed"),
                 "Status should be a valid state, got: " + status);
     }
 
     @Test
     void getStatus_unknownId_shouldReturnUnknown() {
-        String status = service.getStatus("non-existent-id");
+        String status = service.getStatus(KB, "non-existent-id");
         assertEquals("unknown", status);
     }
 
@@ -173,7 +185,7 @@ class RagIngestionServiceTest {
         String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
         awaitCompleted(id);
 
-        assertNotNull(service.getWarning(id), "the operator is told the old version is still retrievable");
+        assertNotNull(service.getWarning(KB, id), "the operator is told the old version is still retrievable");
         verify(embeddingStore).addAll(anyList(), anyList());
     }
 
@@ -184,13 +196,88 @@ class RagIngestionServiceTest {
 
         String id = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
         long deadline = System.currentTimeMillis() + 5000;
-        while (service.getStatus(id).equals("pending") || service.getStatus(id).equals("processing")) {
+        while (service.getStatus(KB, id).equals("pending") || service.getStatus(KB, id).equals("processing")) {
             assertTrue(System.currentTimeMillis() < deadline, "ingestion did not finish");
             Thread.onSpinWait();
         }
 
-        assertTrue(service.getStatus(id).startsWith("failed"), service.getStatus(id));
-        assertNotNull(service.getWarning(id), "the status must say the new version is stored alongside the old");
+        assertTrue(service.getStatus(KB, id).startsWith("failed"), service.getStatus(KB, id));
+        assertNotNull(service.getWarning(KB, id), "the status must say the new version is stored alongside the old");
+    }
+
+    /**
+     * POST /ingest answers 202 on one node, and the poll that follows can land on
+     * any other: with the status in a node-local cache, N-1 of N polls in a cluster
+     * answered 404 for an ingestion that was running or done.
+     */
+    @Test
+    void statusAndWarning_writtenOnOneNode_areReadOnAnother() {
+        ISharedKv bucket = new InMemorySharedKv("RAG_INGESTION", Duration.ofHours(1));
+        var nodeA = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        var nodeB = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        wireRealStore(embeddingStore);
+        doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
+
+        String id = nodeA.ingest("test-kb", "Refunds within 47 days.", "policy.txt", createConfig(), true);
+        assertNotEquals(RagIngestionService.STATUS_UNKNOWN, nodeB.getStatus(KB, id), "the poll on the other node finds the ingestion");
+        long deadline = System.currentTimeMillis() + 5000;
+        while (!"completed".equals(nodeA.getStatus(KB, id)) && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        // Status and warning share one bucket: neither may overwrite the other.
+        assertEquals("completed", nodeB.getStatus(KB, id));
+        assertEquals(nodeA.getWarning(KB, id), nodeB.getWarning(KB, id));
+        assertNotNull(nodeB.getWarning(KB, id), "the warning travels with the status");
+        assertNull(nodeB.getWarning(KB, "another-id"));
+        assertEquals(RagIngestionService.STATUS_UNKNOWN, nodeB.getStatus(KB, "warning:" + id), "a warning is never read as a status");
+    }
+
+    /**
+     * The status endpoint checks access on the knowledge base in its path, while an
+     * ingestion id is global: a caller with access to knowledge base B who holds an
+     * ingestion id of A must not read A's status (a document name, or a failure
+     * message) by polling it through B — on any node of a cluster.
+     */
+    @Test
+    void statusAndWarning_ofOneKnowledgeBase_areUnknownThroughAnother() {
+        ISharedKv bucket = new InMemorySharedKv("RAG_INGESTION", Duration.ofHours(1));
+        var nodeA = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        var nodeB = new RagIngestionService(embeddingModelFactory, embeddingStoreFactory, sharedThrough(bucket));
+        wireRealStore(embeddingStore);
+        doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
+
+        String id = nodeA.ingest(ALPHA_ID, "Refunds within 47 days.", "secret-policy.txt", createConfig(), true);
+        long deadline = System.currentTimeMillis() + 5000;
+        while (!"completed".equals(nodeA.getStatus(ALPHA_ID, id)) && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+        }
+
+        assertEquals("completed", nodeB.getStatus(ALPHA_ID, id), "the owning knowledge base still reads it, on another node");
+        assertNotNull(nodeB.getWarning(ALPHA_ID, id));
+        for (RagIngestionService node : List.of(nodeA, nodeB)) {
+            assertEquals(RagIngestionService.STATUS_UNKNOWN, node.getStatus(BETA_ID, id), "polled through another knowledge base");
+            assertNull(node.getWarning(BETA_ID, id), "a warning is not read through another knowledge base either");
+        }
+    }
+
+    /**
+     * A node's cache factory in cluster mode: its own node-local cache, written
+     * through to the bucket every node shares.
+     */
+    private static ICacheFactory sharedThrough(ISharedKv bucket) {
+        var local = new CacheFactory();
+        return new ICacheFactory() {
+            @Override
+            public <K, V> ICache<K, V> getCache(String cacheName) {
+                return new SharedKvCache<>(local.getCache(cacheName), bucket, false);
+            }
+
+            @Override
+            public <K, V> ICache<K, V> getCache(String cacheName, Duration ttl) {
+                return new SharedKvCache<>(local.getCache(cacheName, ttl), bucket, false);
+            }
+        };
     }
 
     @Test
@@ -201,7 +288,7 @@ class RagIngestionServiceTest {
         awaitCompleted(id);
 
         verify(embeddingStore, never()).removeAll(any(Filter.class));
-        assertNull(service.getWarning(id));
+        assertNull(service.getWarning(KB, id));
     }
 
     /**
@@ -255,8 +342,8 @@ class RagIngestionServiceTest {
         beta.setName("same-name");
         beta.setStoreNamespace("id");
 
-        awaitCompleted(service.ingest(ALPHA_ID, "ALPHA policy text.", "policy.txt", alpha, false));
-        awaitCompleted(service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, true));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "ALPHA policy text.", "policy.txt", alpha, false));
+        awaitCompleted(BETA_ID, service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, true));
 
         assertEquals(List.of("ALPHA policy text.", "BETA policy text."), storedTexts(shared),
                 "beta's replace=true must not delete alpha's document of the same name");
@@ -272,9 +359,124 @@ class RagIngestionServiceTest {
         var config = createConfig();
         config.setStoreNamespace("id");
 
-        awaitCompleted(service.ingest(ALPHA_ID, "text", "doc", config, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "text", "doc", config, false));
 
         verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config), any());
+    }
+
+    // --- delete ---
+
+    /**
+     * Against the real in-memory store: the named document goes — every version of
+     * it, including chunks written before chunks carried an ingestion id — and
+     * nothing else does, not another document, not another knowledge base's
+     * document of the same name, and not an ingestion source's chunks.
+     */
+    @Test
+    void delete_removesOnlyTheNamedDocumentOfThisKnowledgeBase() {
+        var shared = new InMemoryEmbeddingStore<TextSegment>();
+        wireRealStore(shared);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(shared);
+        var alpha = createConfig();
+        alpha.setStoreNamespace("id");
+        var beta = createConfig();
+        beta.setStoreNamespace("id");
+
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Refunds within 30 days.", "policy.txt", alpha, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Refunds within 47 days.", "policy.txt", alpha, false));
+        awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "Shipping takes 5 days.", "shipping.txt", alpha, false));
+        awaitCompleted(BETA_ID, service.ingest(BETA_ID, "BETA policy text.", "policy.txt", beta, false));
+        shared.add(Embedding.from(new float[]{1f, 0f}),
+                TextSegment.from("Legacy policy.", Metadata.from("source", "policy.txt").put("kbId", ALPHA_ID)));
+        // What an ingestion source writes: its name as sourceName, never "source".
+        shared.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Crawled policy page.",
+                Metadata.from("documentId", "policy.txt").put("sourceName", "policy.txt").put("sourceKey", ALPHA_ID + ":web")
+                        .put("kbId", ALPHA_ID)));
+        clearInvocations(embeddingStoreFactory);
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete(ALPHA_ID, "policy.txt", alpha));
+
+        assertEquals(List.of("BETA policy text.", "Crawled policy page.", "Shipping takes 5 days."), storedTexts(shared));
+        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(alpha), any());
+        verify(embeddingStoreFactory, never()).getOrCreateForIngestion(eq(ALPHA_ID), any(), any());
+    }
+
+    @Test
+    void delete_ofANameNothingWasIngestedUnder_isNotAnError() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(new InMemoryEmbeddingStore<>());
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete("test-kb", "nothing.txt", createConfig()));
+    }
+
+    @Test
+    void delete_withoutAName_isRefused() {
+        assertThrows(IllegalArgumentException.class, () -> service.delete("test-kb", " ", createConfig()));
+        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any(), any());
+    }
+
+    @Test
+    void delete_onAStoreThatCannotDeleteByMetadata_saysSo() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(embeddingStore);
+        doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
+
+        assertEquals(RagIngestionService.DeleteOutcome.UNSUPPORTED, service.delete("test-kb", "policy.txt", createConfig()));
+    }
+
+    @Test
+    void delete_whoseStoreFails_throwsAndReleasesTheLock() {
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(embeddingStore);
+        doThrow(new RuntimeException("connection reset")).when(embeddingStore).removeAll(any(Filter.class));
+        var config = createConfig();
+
+        assertThrows(RuntimeException.class, () -> service.delete("test-kb", "policy.txt", config));
+
+        var lock = service.documentLock("test-kb", "test-kb", "policy.txt");
+        assertFalse(lock.isLocked(), "a failed delete must not keep the document locked");
+    }
+
+    /**
+     * A delete waits for a replacement of the same name: run between the
+     * replacement's store and its cleanup, it would take the new chunks too. The
+     * replacement below is held inside its write; the delete must not get through
+     * until it finishes, and then removes the replacement's chunks as well.
+     */
+    @Test
+    void delete_waitsForAReplacementOfTheSameName() throws Exception {
+        var writing = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var store = new InMemoryEmbeddingStore<TextSegment>() {
+            @Override
+            public void addAll(List<String> ids, List<Embedding> embeddings, List<TextSegment> embedded) {
+                writing.countDown();
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                }
+                super.addAll(ids, embeddings, embedded);
+            }
+        };
+        wireRealStore(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(store);
+        var config = createConfig();
+
+        String replacing = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config, true);
+        assertTrue(writing.await(5, TimeUnit.SECONDS), "the replacement did not start writing");
+
+        service.deleteLockTimeout = Duration.ofMillis(100);
+        assertEquals(RagIngestionService.DeleteOutcome.BUSY, service.delete("test-kb", "policy.txt", config),
+                "a delete must not run while a replacement of the same name holds the document");
+        // Another name is not held up.
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete("test-kb", "other.txt", config));
+
+        service.deleteLockTimeout = Duration.ofSeconds(5);
+        var deleted = new CompletableFuture<RagIngestionService.DeleteOutcome>();
+        Thread.startVirtualThread(() -> deleted.complete(service.delete("test-kb", "policy.txt", config)));
+        release.countDown();
+
+        assertEquals(RagIngestionService.DeleteOutcome.DELETED, deleted.get(5, TimeUnit.SECONDS));
+        awaitCompleted(replacing);
+        assertEquals(List.of(), storedTexts(store), "the delete ran after the replacement and removed its chunks");
     }
 
     private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
@@ -292,11 +494,15 @@ class RagIngestionServiceTest {
     }
 
     private void awaitCompleted(String ingestionId) {
+        awaitCompleted(KB, ingestionId);
+    }
+
+    private void awaitCompleted(String ragConfigId, String ingestionId) {
         long deadline = System.currentTimeMillis() + 5000;
-        String status = service.getStatus(ingestionId);
+        String status = service.getStatus(ragConfigId, ingestionId);
         while (("pending".equals(status) || "processing".equals(status)) && System.currentTimeMillis() < deadline) {
             Thread.onSpinWait();
-            status = service.getStatus(ingestionId);
+            status = service.getStatus(ragConfigId, ingestionId);
         }
         assertEquals("completed", status);
     }

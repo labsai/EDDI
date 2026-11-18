@@ -2,14 +2,14 @@ import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { ArrowUpCircle, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { AlertDialog } from "@/components/ui/alert-dialog";
+import { Button } from "@eddi/ui";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import type {
   InstructionsChoice,
   OperatorUpgradeAssessment,
 } from "@/lib/operator/operator-revision";
 import { diffLines, summarizeDiff } from "@/lib/operator/prompt-diff";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 interface OperatorUpgradeNoticeProps {
   assessment: OperatorUpgradeAssessment;

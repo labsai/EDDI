@@ -1,0 +1,230 @@
+import { api } from "../api-client";
+import type { AgentDescriptor } from "./agents";
+import { getDescriptorVersions } from "./descriptors";
+import { seg } from "./path-segment";
+
+export { parseResourceUri } from "./agents";
+export type { AgentDescriptor as ResourceDescriptor };
+
+/** Configuration for a resource type slug → store path + plural path */
+export interface ResourceTypeConfig {
+  slug: string;
+  store: string;
+  plural: string;
+  /** The backend extension type used in eddi:// URI schemes (e.g. "ai.labs.property") */
+  extension: string;
+  labelKey: string;
+  /** `false` when the store has no `POST /{id}` duplicate operation (test suites). */
+  duplicable?: false;
+  /** `false` when the store serves no `GET /jsonSchema` (test suites). */
+  jsonSchema?: false;
+  // No icon here: resolve it with getResourceTypeIcon(slug) from
+  // lib/resource-type-icons.ts, the one table every surface shares.
+}
+
+/** All supported resource types */
+export const RESOURCE_TYPES: ResourceTypeConfig[] = [
+  {
+    slug: "rules",
+    store: "rulestore",
+    plural: "rulesets",
+    extension: "ai.labs.rules",
+    labelKey: "resources.types.rules",
+  },
+  {
+    slug: "apicalls",
+    store: "apicallstore",
+    plural: "apicalls",
+    extension: "ai.labs.apicalls",
+    labelKey: "resources.types.apicalls",
+  },
+  {
+    slug: "output",
+    store: "outputstore",
+    plural: "outputsets",
+    extension: "ai.labs.output",
+    labelKey: "resources.types.output",
+  },
+  {
+    slug: "dictionary",
+    store: "dictionarystore",
+    plural: "dictionaries",
+    extension: "ai.labs.dictionary",
+    labelKey: "resources.types.dictionary",
+  },
+  {
+    slug: "llm",
+    store: "llmstore",
+    plural: "llms",
+    extension: "ai.labs.llm",
+    labelKey: "resources.types.llm",
+  },
+  {
+    slug: "propertysetter",
+    store: "propertysetterstore",
+    plural: "propertysetters",
+    extension: "ai.labs.property",
+    labelKey: "resources.types.propertysetter",
+  },
+  {
+    slug: "mcpcalls",
+    store: "mcpcallsstore",
+    plural: "mcpcalls",
+    extension: "ai.labs.mcpcalls",
+    labelKey: "resources.types.mcpcalls",
+  },
+  {
+    slug: "rag",
+    store: "ragstore",
+    plural: "rags",
+    extension: "ai.labs.rag",
+    labelKey: "resources.types.rag",
+  },
+  {
+    slug: "snippets",
+    store: "snippetstore",
+    plural: "snippets",
+    extension: "ai.labs.snippet",
+    labelKey: "resources.types.snippets",
+  },
+  {
+    slug: "parser",
+    store: "parserstore",
+    plural: "parsers",
+    extension: "ai.labs.parser",
+    labelKey: "resources.types.parser",
+  },
+  {
+    slug: "testsuite",
+    store: "testsuitestore",
+    plural: "testsuites",
+    extension: "ai.labs.testsuite",
+    labelKey: "resources.types.testsuite",
+    duplicable: false,
+    jsonSchema: false,
+  },
+];
+
+/** Look up a resource type config by slug */
+export function getResourceType(slug: string): ResourceTypeConfig | undefined {
+  return RESOURCE_TYPES.find((rt) => rt.slug === slug);
+}
+
+/**
+ * Look up a resource type config by its store segment (`apicallstore`,
+ * `llmstore`, …) — the first path segment of an `eddi://` config URI.
+ */
+export function getResourceTypeByStore(store: string): ResourceTypeConfig | undefined {
+  return RESOURCE_TYPES.find((rt) => rt.store === store);
+}
+
+/** Build the base path for a resource type */
+function basePath(rt: ResourceTypeConfig): string {
+  return `/${rt.store}/${rt.plural}`;
+}
+
+// --- Generic CRUD API functions ---
+
+export function getResourceDescriptors(
+  rt: ResourceTypeConfig,
+  limit = 100,
+  index = 0,
+  filter = ""
+): Promise<AgentDescriptor[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+    index: String(index),
+  });
+  if (filter) params.set("filter", filter);
+  return api.get<AgentDescriptor[]>(
+    `${basePath(rt)}/descriptors?${params.toString()}`
+  );
+}
+
+export function getResource<T = unknown>(
+  rt: ResourceTypeConfig,
+  id: string,
+  version: number
+): Promise<T> {
+  return api.get<T>(`${basePath(rt)}/${seg(id)}?version=${version}`);
+}
+
+export function createResource(
+  rt: ResourceTypeConfig,
+  body: unknown = {}
+): Promise<{ location: string }> {
+  return api.post<{ location: string }>(basePath(rt), body);
+}
+
+export function updateResource(
+  rt: ResourceTypeConfig,
+  id: string,
+  version: number,
+  body: unknown
+): Promise<{ location: string }> {
+  return api.put(`${basePath(rt)}/${seg(id)}?version=${version}`, body);
+}
+
+export function deleteResource(
+  rt: ResourceTypeConfig,
+  id: string,
+  version: number,
+  options?: { permanent?: boolean }
+): Promise<void> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (options?.permanent) params.set("permanent", "true");
+  return api.delete(`${basePath(rt)}/${seg(id)}?${params}`);
+}
+
+export function duplicateResource(
+  rt: ResourceTypeConfig,
+  id: string,
+  version: number
+): Promise<{ location: string }> {
+  return api.post<{ location: string }>(
+    `${basePath(rt)}/${seg(id)}?version=${version}`
+  );
+}
+
+/**
+ * Get all versions of a specific resource.
+ *
+ * The GET descriptors endpoint does NOT support includePreviousVersions (that
+ * parameter only works on POST, for the containingResourceUri lookup) and has no
+ * `version` parameter at all. So we resolve the current (latest) version via the
+ * backend's `currentversion` endpoint and read each version's descriptor by id
+ * and version — see `getDescriptorVersions`.
+ */
+export async function getResourceVersions(
+  rt: ResourceTypeConfig,
+  id: string
+): Promise<AgentDescriptor[]> {
+  // Try to resolve the latest version number via the dedicated endpoint
+  let latest: number | null = null;
+  try {
+    const currentVersion = await api.get<number>(
+      `${basePath(rt)}/${seg(id)}/currentversion`
+    );
+    latest = currentVersion ?? null;
+  } catch {
+    // currentversion endpoint may fail (404 on unmigrated data, missing resource, etc.)
+    // Fall through to descriptor-based resolution below
+  }
+
+  if (latest !== null && latest > 0) {
+    const flat = await getDescriptorVersions(id, latest);
+    if (flat.length > 0) {
+      return flat;
+    }
+  }
+
+  // Fallback: query descriptors directly (unversioned) and deduce versions from URIs
+  const fallback = await api.get<AgentDescriptor[]>(
+    `${basePath(rt)}/descriptors?filter=${id}`
+  );
+
+  // Filter to only descriptors whose resource URI contains this exact ID
+  return fallback.filter(
+    (d) => d.resource?.includes(`/${id}`)
+  );
+}

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.net.BoundedHostResolver;
 import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.configs.apicalls.model.*;
@@ -20,12 +21,14 @@ import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.SecretEncodings;
 import ai.labs.eddi.engine.memory.SecretValueScrubber;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.BoundedFanOut;
@@ -45,9 +48,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
+import java.net.InetAddress;
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URLDecoder;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -198,6 +205,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     @Inject
     AgentCallMarker agentCallMarker;
+
+    /**
+     * Deadline of one DNS lookup made to check a target (deploy and per call).
+     * Field-injected for the same reason as above; the default applies in
+     * direct-construction tests.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.security.ssrf-protection.dns-timeout", defaultValue = "5s")
+    Duration dnsTimeout = Duration.ofMillis(BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+
+    /**
+     * The JDK resolver, bounded so a black-holed name server cannot hold a thread.
+     */
+    private UrlValidationUtils.HostResolver boundedResolver() {
+        return BoundedHostResolver.jdk(dnsTimeout != null ? dnsTimeout.toMillis() : BoundedHostResolver.DEFAULT_TIMEOUT_MILLIS);
+    }
     private final ConnectionResolver connectionResolver;
     private final boolean ssrfProtectionEnabled;
     private final Set<String> ssrfAllowedHosts;
@@ -334,6 +357,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // call failed. The store refuses that config at save time now; one stored
                 // before the check skips the save and says so, instead of failing the turn.
                 boolean saveResponse = effectiveSaveResponse(call);
+                // A failed attempt's {name}Error / {name}HttpCode. The template data holds
+                // the CURRENT attempt's, so a responseValuePathMatcher judges the response
+                // it is deciding about; memory gets the FINAL attempt's, once, after the loop.
+                String errorObjectName = call.getResponseObjectName() + "Error";
+                String httpCodeObjectName = call.getResponseObjectName() + "HttpCode";
+                boolean failureInTemplateData = false;
+                String failureBody = null;
 
                 do {
                     // Final attempt wins, entirely: a retried failure populated
@@ -342,6 +372,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // otherwise inherit the failed attempt's error body next to
                     // its own 2xx code — a self-contradictory tool result.
                     result.clear();
+                    // The same for the failure keys: a retry that succeeds, or fails with
+                    // a blank body, must not leave the previous attempt's code or error
+                    // body next to its own result.
+                    if (failureInTemplateData) {
+                        templateDataObjects.remove(errorObjectName);
+                        templateDataObjects.remove(httpCodeObjectName);
+                        failureInTemplateData = false;
+                    }
+                    failureBody = null;
                     // Agent test harness: with a mock (chosen above, BEFORE the request is
                     // built) everything below — saveResponse, postResponse property
                     // instructions, retries — runs on it unchanged. Building resolves ${vault:},
@@ -393,14 +432,15 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     if (!isResponseSuccessful) {
                         String message = "ApiCall (%s) didn't return http code 2xx, instead %s.";
                         LOGGER.warn(format(message, call.getName(), response.getHttpCode()));
-                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
+                        String httpCodeMessage = RequestRedactor.redactResolvedSecrets(response.getHttpCodeMessage(),
+                                SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
                         LOGGER.warn("Error Msg:" + httpCodeMessage);
 
                         // A server that rejects a credential routinely echoes it ("invalid
                         // api key sk-…"). The executor knows exactly which plaintexts it
                         // sent, so those are removed by value before the body goes
                         // anywhere — memory, template data, the tool result or a log.
-                        String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), resolvedSecrets);
+                        String errorBody = redactErrorBody(response.getContentAsString(), resolvedSecrets);
                         String truncatedError = errorBody != null && errorBody.length() > 2000
                                 ? errorBody.substring(0, 2000)
                                 : errorBody;
@@ -431,16 +471,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
                                 : SecretRedactionFilter.redact(httpCodeMessage);
                         result.put("body", toolErrorBody);
 
-                        // Store error body in memory so downstream templates / rules can inspect it
+                        // Keep the error body so downstream templates / rules can inspect it
                         if (saveResponse) {
-                            String errorObjectName = call.getResponseObjectName() + "Error";
                             if (truncatedError != null && !truncatedError.isBlank()) {
-                                prePostUtils.createMemoryEntry(currentStep, truncatedError, errorObjectName, KEY_HTTP_CALLS);
                                 templateDataObjects.put(errorObjectName, truncatedError);
+                                failureBody = truncatedError;
                             }
-                            prePostUtils.createMemoryEntry(currentStep, response.getHttpCode(),
-                                    call.getResponseObjectName() + "HttpCode", KEY_HTTP_CALLS);
-                            templateDataObjects.put(call.getResponseObjectName() + "HttpCode", response.getHttpCode());
+                            templateDataObjects.put(httpCodeObjectName, response.getHttpCode());
+                            failureInTemplateData = true;
                         }
                     }
 
@@ -499,9 +537,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     // Headers go in LAST, on purpose, and `result` is a LinkedHashMap
                     // so that ordering survives serialization.
                     //
-                    // The tool result is truncated from the FRONT
-                    // (ToolResponseTruncator cuts `result.substring(0, maxChars)`),
-                    // so whatever serializes first is what survives. With a plain
+                    // The tool result is kept from the FRONT (ToolResponseTruncator's
+                    // `truncate` strategy cuts `result.substring(0, maxChars)`; the
+                    // default `headTail` keeps the start and the end and drops the
+                    // middle), so whatever serializes first is what survives. With a plain
                     // HashMap "headers" hashed ahead of "body" on both the success and
                     // the error path regardless of insertion order — so a per-tool
                     // limit, or the always-on tool-context budget, would spend the
@@ -513,7 +552,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                     }
 
                     amountOfExecutions++;
-                    retryCall = retryCall(call.getPostResponse(), templateDataObjects, amountOfExecutions, response.getHttpCode(),
+                    // A failed attempt reaches memory only after the loop, so a matcher on
+                    // memory.current.httpCalls.{name}HttpCode / …Error is given this
+                    // attempt's values in a view of its own.
+                    Map<String, Object> retryDecisionData = failureInTemplateData
+                            ? withAttemptFailure(templateDataObjects, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode())
+                            : templateDataObjects;
+                    retryCall = retryCall(call.getPostResponse(), retryDecisionData, amountOfExecutions, response.getHttpCode(),
                             response.getContentAsString());
                     if (retryCall && memory.getTurnDeadline() != null
                             && !retryFitsDeadline(call, amountOfExecutions, memory.getTurnDeadline())) {
@@ -523,6 +568,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         retryCall = false;
                     }
                 } while (retryCall);
+
+                if (failureInTemplateData) {
+                    recordFailure(currentStep, errorObjectName, failureBody, httpCodeObjectName, response.getHttpCode());
+                }
 
                 // This executor has no response-validation stage, so a post-response
                 // property instruction never sees a validation error. Passing the flag
@@ -566,6 +615,56 @@ public class ApiCallExecutor implements IApiCallExecutor {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new LifecycleException(e.getLocalizedMessage(), e);
         }
+    }
+
+    /**
+     * Stores the final attempt's failure in conversation memory: its error body
+     * (when it had one) and its code. Once per call, however many attempts it took,
+     * as the forEach path does.
+     */
+    private void recordFailure(IWritableConversationStep currentStep, String errorObjectName, String errorBody, String httpCodeObjectName,
+                               int httpCode) {
+        if (errorBody != null) {
+            prePostUtils.createMemoryEntry(currentStep, errorBody, errorObjectName, KEY_HTTP_CALLS);
+        }
+        prePostUtils.createMemoryEntry(currentStep, httpCode, httpCodeObjectName, KEY_HTTP_CALLS);
+    }
+
+    /**
+     * The template data a retry condition judges a failed attempt by: the same map,
+     * except that {@code memory.current.httpCalls} also holds this attempt's
+     * {@code {name}Error} (when it had a body) and {@code {name}HttpCode}. Every
+     * attempt used to write those to memory, and {@code memory.current} is the live
+     * step output, so a matcher on that path saw the current attempt; now only the
+     * final attempt is stored, after the loop. The maps on the way are copied, so
+     * neither the step nor the shared template data changes.
+     */
+    static Map<String, Object> withAttemptFailure(Map<String, Object> templateData, String errorObjectName, String errorBody,
+                                                  String httpCodeObjectName, int httpCode) {
+        Map<String, Object> httpCalls = copyOfMap(nestedMap(nestedMap(templateData.get("memory"), "current"), KEY_HTTP_CALLS));
+        if (errorBody != null) {
+            httpCalls.put(errorObjectName, errorBody);
+        }
+        httpCalls.put(httpCodeObjectName, httpCode);
+        Map<String, Object> current = copyOfMap(nestedMap(templateData.get("memory"), "current"));
+        current.put(KEY_HTTP_CALLS, httpCalls);
+        Map<String, Object> memoryView = copyOfMap(templateData.get("memory"));
+        memoryView.put("current", current);
+        Map<String, Object> view = new LinkedHashMap<>(templateData);
+        view.put("memory", memoryView);
+        return view;
+    }
+
+    private static Object nestedMap(Object map, String key) {
+        return map instanceof Map<?, ?> m ? m.get(key) : null;
+    }
+
+    private static Map<String, Object> copyOfMap(Object map) {
+        Map<String, Object> copy = new LinkedHashMap<>();
+        if (map instanceof Map<?, ?> m) {
+            m.forEach((k, v) -> copy.put(String.valueOf(k), v));
+        }
+        return copy;
     }
 
     /**
@@ -662,6 +761,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // Built here, in order, on the turn's thread — see the method comment.
         List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
+        // The first configuration refusal behind an item whose request was not built:
+        // a "fail" step carries it, so a conversation start answers 422, not 500.
+        Exception itemRefusal = null;
         for (ForEachItems.Element element : elements) {
             Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
             itemData.put(iterationName, element.value());
@@ -678,6 +780,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // that does not render): nothing of it is sent, and the others still are.
                 String reason = "request not built: " + ForEachItems.describe(e, Set.of(), MAX_ITEM_ERROR_CHARS);
                 LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(callName), element.index(), reason);
+                if (itemRefusal == null && AgentConfigurationRefusal.find(e) instanceof Exception refusal) {
+                    itemRefusal = refusal;
+                }
                 work.add(() -> ForEachItemResult.notSent(element.index(), reason));
                 continue;
             }
@@ -753,7 +858,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // After the results are stored: the work that succeeded (and was paid
             // for) stays readable; only the step reports failure.
             throw new LifecycleException("http call '" + LogSanitizer.sanitize(callName) + "': " + failureSummary
-                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'");
+                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'", itemRefusal);
         }
 
         Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, stepCode, false);
@@ -845,7 +950,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         } else {
             error = "the call returned http " + code;
             if (saveResponse) {
-                String errorBody = RequestRedactor.redactResolvedSecrets(response.getContentAsString(), secrets);
+                String errorBody = redactErrorBody(response.getContentAsString(), secrets);
                 if (errorBody != null && !errorBody.isBlank()) {
                     body = SecretRedactionFilter.redact(errorBody.length() > MAX_ITEM_ERROR_BODY_CHARS
                             ? errorBody.substring(0, MAX_ITEM_ERROR_BODY_CHARS)
@@ -989,10 +1094,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * <li><b>An empty-but-present {@code propertyInstructions} list.</b>
      * {@code isNullOrEmpty} treated it as absent, but
      * {@code PrePostUtils#executePreRequestPropertyInstructions} guards on
-     * {@code != null} — so it still re-runs {@code memoryItemConverter.convert},
-     * discarding the model arguments merged in for this call. Every {@code {arg}}
-     * then renders empty at execution and non-empty in the preview. Hence
-     * {@code != null}, matching the code that actually runs.</li>
+     * {@code != null}, so the pre-request step runs in {@code execute} and never in
+     * {@code resolve}. Its instructions exist to change the properties the request
+     * templates, so the request sent can differ from the one previewed. (It also
+     * used to rebuild the template data from memory, dropping the model arguments,
+     * which made even an empty list diverge.) Hence {@code != null}, the predicate
+     * of the code that actually runs.</li>
      * <li><b>{@code fireAndForget} with {@code preRequest.batchRequests}.</b>
      * {@code execute} routes to {@code executeFireAndForgetCalls}, which calls
      * {@code buildRequest} once PER iteration object — N distinct requests, none of
@@ -1023,8 +1130,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Same argument, different loop: buildRequest sits INSIDE execute()'s
         // retry do-while, and between attempts the shared templateDataObjects
-        // map gains {responseObjectName}, …Error, …HttpCode and the response
-        // headers. A call whose path, body or headers template any of those
+        // map gains {responseObjectName} and the response headers (a failed
+        // attempt's …Error and …HttpCode are removed again before the next
+        // attempt is built). A call whose path, body or headers template any of those
         // sends attempts 2..N as requests that were never resolved, never
         // previewed and never fingerprinted — while the approver saw only
         // attempt 1. Keyed on the instruction being present and actually able
@@ -1110,22 +1218,54 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // The sending runs on a thread of its own; propagate() keeps the turn's
             // bindings available there for anything the send itself resolves.
             runtime.submitCallable(callerIdentityContext.propagate(() -> {
-                for (BuiltRequest built : requests) {
-                    IRequest request = built.request();
-                    if (executeCallsSequentially) {
-                        long executionStart = currentTimeMillis();
-                        LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
-                        IResponse response = request.send();
-                        logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
-                    } else {
-                        executeFireAndForgetCall(built, callName);
-                    }
-                }
+                sendBatch(requests, callName, executeCallsSequentially);
                 return null;
             }), null);
         } else {
             executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, access, conversationProperties, secretContext),
                     callName);
+        }
+    }
+
+    /**
+     * Sends a fire-and-forget batch on the batch's own thread, in order: each
+     * request in turn, or, concurrently, each dispatched in turn without waiting
+     * for its response. A request that fails — a timeout, a refused connection — is
+     * logged with its position and the rest are still sent: the batch used to be
+     * one task that a single exception ended, dropping every later request without
+     * a word while the turn had long reported success. A concurrent request that
+     * fails asynchronously never stopped the others; now one whose dispatch throws
+     * does not either. An interrupted thread stops sending: the runtime is shutting
+     * the task down.
+     */
+    private static void sendBatch(List<BuiltRequest> requests, String callName, boolean sequentially) {
+        int total = requests.size();
+        int failed = 0;
+        for (int i = 0; i < total; i++) {
+            if (Thread.currentThread().isInterrupted()) {
+                LOGGER.warnf("fire-and-forget batch of http call '%s' interrupted: %d of %d requests not sent", LogSanitizer.sanitize(callName),
+                        total - i, total);
+                break;
+            }
+            BuiltRequest built = requests.get(i);
+            try {
+                if (sequentially) {
+                    IRequest request = built.request();
+                    long executionStart = currentTimeMillis();
+                    LOGGER.info(callName + " Batch Request: " + RequestRedactor.safeRequestLog(request, built.resolvedSecrets()));
+                    IResponse response = request.send();
+                    logExecutionResponse(response, built.resolvedSecrets(), callName, executionStart, currentTimeMillis(), false);
+                } else {
+                    executeFireAndForgetCall(built, callName);
+                }
+            } catch (IRequest.HttpRequestException | RuntimeException e) {
+                failed++;
+                LOGGER.warnf("fire-and-forget batch of http call '%s': request %d of %d failed, continuing with the rest: %s",
+                        LogSanitizer.sanitize(callName), i + 1, total, ForEachItems.describe(e, built.resolvedSecrets(), MAX_ITEM_ERROR_CHARS));
+            }
+        }
+        if (failed > 0) {
+            LOGGER.warnf("fire-and-forget batch of http call '%s': %d of %d requests failed", LogSanitizer.sanitize(callName), failed, total);
         }
     }
 
@@ -1252,13 +1392,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Cut an over-long response body down to the configured cap before it is
-     * written to conversation memory. The cap is a byte budget applied to the
-     * character count, which is a conservative approximation for multi-byte
-     * content.
-     */
-    // Package-private for unit testing.
-    /**
      * An application/json success body, redacted and capped.
      * <p>
      * The whole body is parsed and scrubbed as a tree FIRST — from the unredacted
@@ -1296,6 +1429,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * Cut an over-long response body down to the configured cap before it is
+     * written to conversation memory. The cap is a byte budget applied to the
+     * character count, which is a conservative approximation for multi-byte
+     * content.
+     */
+    // Package-private for unit testing.
     static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
         if (responseBody == null || responseBody.length() <= maxResponseSize) {
             return responseBody;
@@ -1358,25 +1498,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * A request ready to send, together with the names of the headers a connection
-     * filled.
-     * <p>
-     * The names travel with the request because the request itself cannot say: by
-     * the time {@link IRequest#toMap()} is read back, a connection-supplied
-     * {@code X-Amp-Id} is indistinguishable from a plain one, and neither its name
-     * nor its value need match any credential heuristic. Both consumers of the
-     * built request — the debug record persisted to memory and the HITL approval
-     * preview — hand this set to {@link RequestRedactor}, so a credential is
-     * redacted because the executor <em>knows</em> it is one rather than because it
-     * happens to look like one.
-     *
-     * @param request
-     *            the request, still carrying every live credential
-     * @param connectionOwnedHeaders
-     *            header names written from a {@code ${connection:…}} reference;
-     *            never null, empty when none was
-     */
-    /**
      * The plaintexts substituted into one request (the set every redaction reads)
      * plus the references they came from, which the destination check needs after
      * the target URL is known.
@@ -1399,7 +1520,33 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * A request ready to send, together with the names of the headers a connection
+     * filled.
+     * <p>
+     * The names travel with the request because the request itself cannot say: by
+     * the time {@link IRequest#toMap()} is read back, a connection-supplied
+     * {@code X-Amp-Id} is indistinguishable from a plain one, and neither its name
+     * nor its value need match any credential heuristic. Both consumers of the
+     * built request — the debug record persisted to memory and the HITL approval
+     * preview — hand this set to {@link RequestRedactor}, so a credential is
+     * redacted because the executor <em>knows</em> it is one rather than because it
+     * happens to look like one.
+     *
+     * @param request
+     *            the request, still carrying every live credential
+     * @param connectionOwnedHeaders
+     *            header names written from a {@code ${connection:…}} reference;
+     *            never null, empty when none was
+     * @param resolvedSecrets
+     *            the secret plaintexts substituted into this request, which every
+     *            redaction of its debug record, errors and response masks
+     */
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
+    }
+
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
     }
 
     /**
@@ -1412,10 +1559,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
-    private static String stringOf(Object value) {
-        return value == null ? null : value.toString();
-    }
-
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects, SecretAccess access,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
@@ -1431,6 +1574,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         stringOf(outgoing.get(IRequest.KEY_BODY)));
             }
             return built;
+        } catch (SecretResolver.MisconfiguredVaultReferenceException e) {
+            // Shown to the caller of a refused conversation start: say which call it is.
+            // Built from reference names only, so there is no plaintext to redact.
+            throw new SecretResolver.MisconfiguredVaultReferenceException("API call '" + call.getName() + "': " + e.getMessage(), e);
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1463,8 +1610,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return null;
         }
         String redacted = RequestRedactor.redactResolvedSecrets(String.valueOf(failure.getMessage()), secrets);
-        return new IllegalArgumentException(failure.getClass().getSimpleName() + ": " + redacted
-                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)");
+        String message = failure.getClass().getSimpleName() + ": " + redacted
+                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)";
+        // The cause chain is dropped, so a configuration refusal in it must be
+        // re-marked on the copy or a conversation start would answer 500, not 422.
+        return AgentConfigurationRefusal.find(failure) != null ? new RedactedRefusalException(message) : new IllegalArgumentException(message);
+    }
+
+    /**
+     * The secret-free copy of an exception that carried an
+     * {@link AgentConfigurationRefusal}: same marker, no cause, redacted message.
+     */
+    static final class RedactedRefusalException extends IllegalArgumentException implements AgentConfigurationRefusal {
+        private static final long serialVersionUID = 1L;
+
+        RedactedRefusalException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -1475,6 +1637,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * every length: there the value is the failure reason, not data.
      */
     static final int MIN_SUCCESS_BODY_REDACTION_LENGTH = 8;
+
+    /**
+     * A non-2xx body, redacted the same way for a single call and for every forEach
+     * item: each resolved secret verbatim, plus the encoded forms of those long
+     * enough to be unambiguous (a Basic-auth header echoed as base64, a key echoed
+     * URL-encoded). Both paths call this so they cannot diverge again.
+     */
+    static String redactErrorBody(String body, Set<String> resolvedSecrets) {
+        return RequestRedactor.redactResolvedSecrets(body, SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH));
+    }
 
     /**
      * A success body treated as text: only secrets long enough to be unambiguous.
@@ -1496,7 +1668,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         shortOnes.removeAll(longOnes);
         Object cleaned = longOnes.isEmpty() ? null : SecretValueScrubber.scrubDeep(tree, longOnes, RequestRedactor.REDACTED);
         Object current = cleaned != null ? cleaned : tree;
-        Object exactCleaned = shortOnes.isEmpty() ? null : SecretValueScrubber.scrubDeepExact(current, shortOnes, RequestRedactor.REDACTED);
+        Object exactCleaned = shortOnes.isEmpty()
+                ? null
+                : SecretValueScrubber.scrubDeepExact(current,
+                        SecretEncodings.withEncodedForms(shortOnes, SecretValueScrubber.MIN_SEARCHED_SECRET_INPUT_LENGTH), RequestRedactor.REDACTED);
         return exactCleaned != null ? exactCleaned : current;
     }
 
@@ -1510,7 +1685,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 longOnes.add(secret);
             }
         }
-        return longOnes;
+        return SecretEncodings.withEncodedForms(longOnes, MIN_SUCCESS_BODY_REDACTION_LENGTH);
     }
 
     /**
@@ -1552,8 +1727,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return headers;
         }
         var redacted = new TreeMap<String, String>(String.CASE_INSENSITIVE_ORDER);
-        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, resolvedSecrets)));
+        Set<String> needles = SecretEncodings.withEncodedForms(resolvedSecrets, MIN_SUCCESS_BODY_REDACTION_LENGTH);
+        headers.forEach((name, value) -> redacted.put(name, RequestRedactor.redactResolvedSecrets(value, needles)));
         return redacted;
+    }
+
+    /**
+     * The request URL before templating: an absolute {@code http...} path as is,
+     * otherwise the path joined to {@code targetServerUrl} with one slash. Shared
+     * with the save-time reference check of approved-result actions, so both read
+     * the same URL.
+     */
+    public static String targetDestination(String targetServerUrl, String rawPath) {
+        String path = rawPath == null ? "" : rawPath.trim();
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
+            path = SLASH_CHAR + path;
+        }
+        return path.startsWith("http") ? path : (targetServerUrl == null ? "" : targetServerUrl) + path;
     }
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
@@ -1562,11 +1752,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
-        String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
-            path = SLASH_CHAR + path;
-        }
-        var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        var targetDestination = targetDestination(targetServerUrl, requestConfig.getPath().trim());
         rejectTemplatedAuthority(targetDestination);
         // The only host a ${context:…} header may go to: the configuration's own
         // target, with deployment-wide variables (never conversation data) applied.
@@ -1590,24 +1776,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // SSRF protection (opt-in): validate the fully-resolved target and disable
         // redirect-following so a 3xx cannot bounce the request to an internal host.
-        // Off by default to preserve calls to internal/private APIs. A host on the
-        // operator's allow-list skips the address check (it is an internal API the
-        // operator named on purpose) but never the metadata check.
-        if (ssrfProtectionEnabled) {
-            if (isAllowListed(targetUri)) {
-                UrlValidationUtils.validateUrlSyntax(targetUri.toString());
-                UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-            } else {
-                UrlValidationUtils.validateUrl(targetUri.toString());
-            }
-        } else {
-            // Opting out of SSRF protection keeps private and loopback targets
-            // reachable (configured internal APIs), but never the cloud instance-
-            // metadata service: that is a credential endpoint, not an API anyone
-            // configures on purpose. Redirects stay followed here; the client itself
-            // refuses any hop onto the metadata service (HttpClientModule).
-            UrlValidationUtils.rejectCloudMetadataTarget(targetUri.toString());
-        }
+        // Off by default to preserve calls to internal/private APIs. The decision
+        // itself is checkOutboundTarget, which the deploy-time check shares.
+        checkOutboundTarget(targetUri, boundedResolver());
 
         // Locale.ROOT is defensive rather than a live fix: no current Method
         // constant contains an 'i', so no locale changes the result today. It would
@@ -1767,8 +1938,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
             request.setFollowRedirects(false);
         }
         Map<String, String> queryParams = requestConfig.getQueryParams();
+        List<String> optionalQueryParams = requestConfig.getOptionalQueryParams() != null ? requestConfig.getOptionalQueryParams() : List.of();
         for (String queryParam : queryParams.keySet()) {
             var qpValue = prePostUtils.templateValues(queryParams.get(queryParam), templateDataObjects);
+            // An optional parameter the caller left out: send nothing, so the server
+            // applies its own default (see Request#getOptionalQueryParams). Judged on
+            // the rendered template, before any reference resolution, so a value that
+            // is a reference is never dropped.
+            if (optionalQueryParams.contains(queryParam) && (qpValue == null || qpValue.isEmpty())) {
+                continue;
+            }
             // Resolve global variable references, then vault references in query params
             qpValue = resolveGuardedVariables(queryParams.get(queryParam), qpValue, "query parameter '" + queryParam + "'",
                     templateDataObjects, conversationProperties);
@@ -1941,9 +2120,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         resolved.append(value, copied, value.length());
         if (unresolved != null) {
-            throw new IllegalArgumentException(location + " references " + unresolved
-                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
-                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+            // Diagnosed only now, on the failure path: it names the tenant looked up and
+            // tells a configuration error (answered 422 at conversation start) from a
+            // vault outage (still a 500).
+            throw SecretResolver.unresolvedReferenceFailure(location, unresolved,
+                    secretResolver.diagnoseUnresolved(SecretReference.parse(unresolved)));
         }
         return resolved.toString();
     }
@@ -2037,6 +2218,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "plain header, or give it a name the connection does not claim.");
     }
 
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     /**
      * Bytes that may appear un-encoded in a substituted path value: RFC 3986
      * "unreserved", minus {@code .} — everything else is percent-encoded, including
@@ -2049,9 +2233,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
-    /** What a substituted value may keep when it lands in a URL's host:port. */
-    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
-
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -2164,6 +2345,129 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
+     * The SSRF decision for one target, and the only definition of it: applied to
+     * the fully resolved URL of every request ({@code buildRequest}) and to the
+     * literal targets of a configuration at deploy
+     * ({@link #rejectRefusedLiteralTarget}), so the two cannot drift.
+     * <p>
+     * With protection on, a host on the operator's allow-list skips the address
+     * check (it is an internal API the operator named on purpose) but never the
+     * metadata check; any other host must resolve, and to public addresses only.
+     * There is deliberately <b>no exception for EDDI's own address</b>, unlike
+     * {@code OutboundTargetPolicy}: an httpcall to EDDI itself (the Platform
+     * Operator's self calls, for one) must be on the allow-list.
+     * <p>
+     * With protection off, private and loopback targets stay reachable (configured
+     * internal APIs), but never the cloud instance-metadata service: that is a
+     * credential endpoint, not an API anyone configures on purpose. Redirects stay
+     * followed then; the client itself refuses any hop onto the metadata service
+     * ({@code HttpClientModule}).
+     *
+     * @throws IllegalArgumentException
+     *             when the target is refused
+     */
+    void checkOutboundTarget(URI targetUri, UrlValidationUtils.HostResolver resolver) {
+        String target = targetUri.toString();
+        if (ssrfProtectionEnabled) {
+            if (isAllowListed(targetUri)) {
+                UrlValidationUtils.validateUrlSyntax(target);
+                UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+            } else {
+                UrlValidationUtils.validateUrl(target, resolver);
+            }
+        } else {
+            UrlValidationUtils.rejectCloudMetadataTarget(target, resolver);
+        }
+    }
+
+    @Override
+    public void rejectRefusedLiteralTarget(String targetDestination) {
+        rejectRefusedLiteralTarget(targetDestination, boundedResolver());
+    }
+
+    /**
+     * {@link #rejectRefusedLiteralTarget(String)} with an injectable resolver.
+     * <p>
+     * Only the scheme and authority are judged — the part
+     * {@link #checkOutboundTarget} decides on — so a templated path does not get in
+     * the way. A host that is a template, or a {@code ${vars:...}} /
+     * {@code ${vault:...}} reference, is skipped: its value is only known per call,
+     * where the same check runs on it ({@link #rejectTemplatedAuthority} covers the
+     * template case at deploy).
+     * <p>
+     * <b>A host that does not resolve is not refused here.</b> The execution path
+     * refuses it with protection on, and still will; but a failed lookup at deploy
+     * is as likely a transient DNS problem (a resolver not yet up when agents are
+     * auto-deployed at startup) as a wrong name, and failing the deployment for it
+     * would take down an agent that would have worked a minute later. A name that
+     * does not resolve cannot be reached either, so deferring exposes nothing; it
+     * is logged instead.
+     */
+    void rejectRefusedLiteralTarget(String targetDestination, UrlValidationUtils.HostResolver resolver) {
+        if (targetDestination == null) {
+            return;
+        }
+        String target = targetDestination.trim();
+        int end = authorityEnd(target);
+        if (end < 0) {
+            return;
+        }
+        String origin = target.substring(0, end);
+        if (origin.indexOf('{') >= 0) {
+            return;
+        }
+        URI originUri;
+        try {
+            originUri = new URI(origin);
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("The httpcall target '" + LogSanitizer.sanitize(origin) + "' is not a valid URL: " + e.getMessage(),
+                    e);
+        }
+        // Metadata first, on its own: it is refused whatever the flag and the
+        // allow-list say, so the advice below would be wrong for it.
+        UrlValidationUtils.rejectCloudMetadataTarget(origin, resolver);
+        var lookup = new FailureRecordingResolver(resolver);
+        try {
+            checkOutboundTarget(originUri, lookup);
+        } catch (IllegalArgumentException e) {
+            if (!ssrfProtectionEnabled) {
+                throw e;
+            }
+            String host = originUri.getHost() != null ? originUri.getHost().toLowerCase(Locale.ROOT) : origin;
+            if (lookup.failed) {
+                LOGGER.warnf("httpcall target host '%s' does not resolve at deploy; with eddi.security.ssrf-protection.enabled=true "
+                        + "each call to it is refused until it does.", LogSanitizer.sanitize(host));
+                return;
+            }
+            String entry = originUri.getPort() >= 0 ? host + ":" + originUri.getPort() : host;
+            throw new IllegalArgumentException("The httpcall target host '" + LogSanitizer.sanitize(host)
+                    + "' is refused by the SSRF check (eddi.security.ssrf-protection.enabled=true): " + e.getMessage()
+                    + ". If it is an internal API you mean to call, add '" + LogSanitizer.sanitize(entry)
+                    + "' to eddi.security.ssrf-protection.allowed-hosts; otherwise use a public address.", e);
+        }
+    }
+
+    /** Remembers whether a lookup failed, so a DNS failure can be told apart. */
+    private static final class FailureRecordingResolver implements UrlValidationUtils.HostResolver {
+        private final UrlValidationUtils.HostResolver delegate;
+        private boolean failed;
+
+        FailureRecordingResolver(UrlValidationUtils.HostResolver delegate) {
+            this.delegate = delegate;
+        }
+
+        @Override
+        public InetAddress[] resolveAll(String host) throws UnknownHostException {
+            try {
+                return delegate.resolveAll(host);
+            } catch (UnknownHostException e) {
+                failed = true;
+                throw e;
+            }
+        }
+    }
+
+    /**
      * Whether the scheme, host or port of {@code url} contains a template
      * expression ({@code {...}} not preceded by {@code $}). A URL that does not
      * start with a literal {@code http://} or {@code https://} is checked up to its
@@ -2261,7 +2565,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /**
      * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
-     * the bound exists and why exceeding it passes the value through.
+     * the bound exists and why a map or list past it is replaced by an empty one.
      */
     static final int MAX_PATH_VIEW_DEPTH = 10;
 

@@ -12,6 +12,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -21,8 +22,8 @@ import java.util.Map;
  * <p>
  * <strong>Important:</strong> These are prompt-level presets, not engine-level
  * guarantees. The LLM may or may not follow the injected instructions. For
- * engine-enforced controls (tool iteration caps), see {@code AgentOrchestrator}
- * strict-mode handling.
+ * engine-enforced controls (tool iteration caps), see the strict-mode handling
+ * in {@code ToolLoopRunner}.
  * <p>
  * Preset text is resolved from {@link PromptSnippetService} first (snippet
  * names: {@code counterweight_cautious}, {@code counterweight_strict}). If no
@@ -140,19 +141,29 @@ public class CounterweightService {
             level = "cautious";
         }
 
-        String injection = resolveInjection(config, level, agentId);
+        // Classify the level before resolving: an unknown level resolves no preset, so
+        // deciding it after the "no injection" return counted every typo as normal.
+        String normalizedLevel = level.toLowerCase(Locale.ROOT);
+        boolean knownLevel = "normal".equals(normalizedLevel) || "cautious".equals(normalizedLevel) || "strict".equals(normalizedLevel);
+        if (!knownLevel) {
+            LOGGER.warnf("Unknown counterweight level '%s' — treating as normal (no preset)", level);
+            activationUnknownCounter.increment();
+        }
+
+        String injection = resolveInjection(config, normalizedLevel, agentId);
         if (injection == null || injection.isBlank()) {
-            activationNormalCounter.increment();
+            if (knownLevel) {
+                activationNormalCounter.increment();
+            }
             return systemMessage;
         }
 
-        // Track activation
-        switch (level.toLowerCase()) {
+        // Track activation (an unknown level was counted above)
+        switch (normalizedLevel) {
             case "cautious" -> activationCautiousCounter.increment();
             case "strict" -> activationStrictCounter.increment();
+            case "normal" -> activationNormalCounter.increment();
             default -> {
-                LOGGER.warnf("Unknown counterweight level '%s' — treating as normal (no injection)", level);
-                activationUnknownCounter.increment();
             }
         }
 
@@ -184,7 +195,7 @@ public class CounterweightService {
             return sb.toString().trim();
         }
 
-        return switch (level.toLowerCase()) {
+        return switch (level.toLowerCase(Locale.ROOT)) {
             case "cautious" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_CAUTIOUS, CAUTIOUS_FALLBACK, agentId);
             case "strict" -> resolveFromSnippetsOrFallback(SNIPPET_KEY_STRICT, STRICT_FALLBACK, agentId);
             default -> null; // normal = no injection

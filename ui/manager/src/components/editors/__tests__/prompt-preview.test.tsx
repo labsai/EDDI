@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { PromptPreview } from "@/components/editors/prompt-preview";
 
 // ── Shared mock state ──────────────────────────────────────────────────────
@@ -17,7 +17,7 @@ vi.mock("@/hooks/use-template-preview", () => ({
   useTemplatePreview: () => mockHookReturn,
 }));
 
-vi.mock("@/lib/api/conversations", () => ({
+vi.mock("@eddi/app-kit/lib/api/conversations", () => ({
   getConversationDescriptors: vi.fn().mockResolvedValue([]),
   parseConversationUri: vi.fn((uri: string) => uri.split("/").pop() ?? uri),
 }));

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.apicalls.impl;
 
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.memory.SecretEncodings;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import ai.labs.eddi.secrets.sanitize.UriRedactor;
@@ -21,7 +22,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 
 /**
- * Removes credential material from a resolved request — headers, query
+ * Removes credential material from a resolved request — URI, headers, query
  * parameters and body alike.
  * <p>
  * One definition, two consumers: the debug record written to conversation
@@ -359,15 +360,16 @@ public class RequestRedactor {
         if (response == null) {
             return "null";
         }
-        String message = redactResolvedSecrets(response.getHttpCodeMessage(), resolvedSecrets);
-        String body = truncateAndClean(redactResolvedSecrets(response.getContentAsString(), resolvedSecrets));
+        Set<String> needles = SecretEncodings.withEncodedForms(resolvedSecrets, ApiCallExecutor.MIN_SUCCESS_BODY_REDACTION_LENGTH);
+        String message = redactResolvedSecrets(response.getHttpCodeMessage(), needles);
+        String body = truncateAndClean(redactResolvedSecrets(response.getContentAsString(), needles));
         Map<String, String> headers = null;
         if (response.getHttpHeader() != null) {
             headers = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
             for (var header : response.getHttpHeader().entrySet()) {
                 String value = isSensitiveHeaderName(header.getKey()) || "set-cookie".equalsIgnoreCase(header.getKey())
                         ? REDACTED
-                        : redactResolvedSecrets(header.getValue(), resolvedSecrets);
+                        : redactResolvedSecrets(header.getValue(), needles);
                 headers.put(header.getKey(), value);
             }
         }

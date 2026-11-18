@@ -1,13 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "@/test/test-utils";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
 import { VersionPicker } from "@/components/editors/version-picker";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { ResourceDetailPage } from "@/pages/resource-detail";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { render } from "@testing-library/react";
 
 // Monaco doesn't render in JSDOM, so we mock it

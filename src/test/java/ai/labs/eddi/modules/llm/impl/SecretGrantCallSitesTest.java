@@ -182,8 +182,10 @@ class SecretGrantCallSitesTest {
         @DisplayName("ingestion runs for no agent: a key granted to one agent only is refused")
         void ingestionNeedsTheWildcard() throws Exception {
             var factory = new EmbeddingModelFactory(variables, secretResolver);
-            assertThrows(SecretResolver.SecretNotGrantedException.class,
+            var e = assertThrows(SecretResolver.SecretNotGrantedException.class,
                     () -> factory.getOrCreate(knowledgeBase(), EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION));
+            // Named by the pre-cache check, not by the resolution inside build().
+            assertTrue(e.getMessage().contains("embedding model 'openai'"), e.getMessage());
             verify(provider, never()).resolve(KEY);
         }
 
@@ -194,8 +196,9 @@ class SecretGrantCallSitesTest {
             var e = assertThrows(SecretResolver.SecretNotGrantedException.class,
                     () -> factory.getOrCreate("0123456789abcdef01234567", knowledgeBase(), SecretAccess.agent(AGENT_B)));
             assertTrue(e.getMessage().contains("vector store 'pgvector'"), e.getMessage());
-            assertThrows(SecretResolver.SecretNotGrantedException.class,
+            var ingestion = assertThrows(SecretResolver.SecretNotGrantedException.class,
                     () -> factory.getOrCreateForIngestion("0123456789abcdef01234567", knowledgeBase(), SecretAccess.withoutAgent("ingestion")));
+            assertTrue(ingestion.getMessage().contains("vector store 'pgvector'"), ingestion.getMessage());
             verify(provider, never()).resolve(KEY);
         }
     }
@@ -229,6 +232,9 @@ class SecretGrantCallSitesTest {
             assertTrue(result.toolSpecs().isEmpty());
             assertEquals(1, result.failures().size());
             assertEquals(McpToolProviderManager.McpFailureKind.INVALID_CONFIGURATION, result.failures().getFirst().kind());
+            // The grant, not the URL (a sandbox without DNS fails the URL check the same
+            // way).
+            assertTrue(result.failures().getFirst().message().contains("allowedAgents"), result.failures().getFirst().message());
             verify(provider, never()).resolve(KEY);
         }
 
@@ -240,7 +246,6 @@ class SecretGrantCallSitesTest {
             config.setApiKey(REF);
             assertThrows(SecretResolver.SecretNotGrantedException.class, () -> manager.requireSecretGranted(config, SecretAccess.agent(AGENT_B)));
             assertDoesNotThrow(() -> manager.requireSecretGranted(config, SecretAccess.agent(AGENT_A)));
-            assertTrue(manager.discoverTools(List.of(config), SecretAccess.agent(AGENT_B)).toolSpecs().isEmpty());
         }
     }
 }
