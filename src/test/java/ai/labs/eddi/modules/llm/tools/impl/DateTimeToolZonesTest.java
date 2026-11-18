@@ -60,6 +60,42 @@ class DateTimeToolZonesTest {
     }
 
     @Test
+    void anHourAcrossSpringForwardIsInstantArithmetic() {
+        // Europe/Vienna: 2025-03-30 02:00 CET -> 03:00 CEST. 01:30 + 1h is 03:30 CEST.
+        assertEquals("2025-03-30 03:30:00 CEST", tool.addTime("2025-03-30T01:30:00", 1, "hours", "Europe/Vienna"));
+        assertEquals("2025-03-30 03:15:00 CEST", tool.addTime("2025-03-30T01:45:00", 30, "minutes", "Europe/Vienna"));
+    }
+
+    @Test
+    void anHourAcrossFallBackCountsTheRepeatedHour() {
+        // Europe/Vienna: 2025-10-26 03:00 CEST -> 02:00 CET. 01:30 CEST + 1h is 02:30
+        // CEST,
+        // + 2h is 02:30 CET — the repeated hour is real time.
+        assertEquals("2025-10-26 02:30:00 CEST", tool.addTime("2025-10-26T01:30:00", 1, "hours", "Europe/Vienna"));
+        assertEquals("2025-10-26 02:30:00 CET", tool.addTime("2025-10-26T01:30:00", 2, "hours", "Europe/Vienna"));
+        // An ambiguous local input takes the earlier offset (CEST), so + 1h is 02:30
+        // CET.
+        assertEquals("2025-10-26 02:30:00 CET", tool.addTime("2025-10-26T02:30:00", 1, "hours", "Europe/Vienna"));
+    }
+
+    @Test
+    void anInputCarryingTheLaterOffsetOfTheRepeatedHourKeepsIt() {
+        assertEquals("2025-10-26 03:30:00 CET", tool.addTime("2025-10-26T02:30:00+01:00", 1, "hours", "Europe/Vienna"));
+        assertEquals("2025-10-26 02:30:00 CET", tool.addTime("2025-10-26T02:30:00+01:00", 0, "days", "Europe/Vienna"));
+    }
+
+    @Test
+    void aDayIntoTheRepeatedHourKeepsTheStartsOffset() {
+        assertEquals("2025-10-26 02:30:00 CEST", tool.addTime("2025-10-25T02:30:00", 1, "days", "Europe/Vienna"));
+        assertEquals("2025-10-26 02:30:00 CET", tool.addTime("2025-10-27T02:30:00", -1, "days", "Europe/Vienna"));
+    }
+
+    @Test
+    void listTimezonesReportsTheCurrentTimeAndIsNeverCached() throws Exception {
+        assertTrue(DateTimeTool.class.getMethod("listTimezones").isAnnotationPresent(NeverCached.class));
+    }
+
+    @Test
     void differenceBetweenInstantsWithOffsets() {
         assertEquals("Difference: 2 hours", tool.calculateDateDifference("2025-11-03T10:00:00Z", "2025-11-03T14:00:00+02:00", "hours"));
         assertTrue(tool.calculateDateDifference("2025-11-03T10:00:00Z", "2025-11-03T14:00:00", "hours").startsWith("Error:"));

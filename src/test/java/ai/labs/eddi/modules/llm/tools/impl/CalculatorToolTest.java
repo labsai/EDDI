@@ -392,6 +392,8 @@ class CalculatorToolTest {
     void roundDoesNotSaturateAtLongRange() {
         assertEquals("100000000000000000000", calculatorTool.calculate("round(10^20)"));
         assertEquals("-2", calculatorTool.calculate("round(-2.5)"));
+        // floor(v + 0.5) rounded this up: the addition itself rounds to 1.0
+        assertEquals("0", calculatorTool.calculate("round(0.49999999999999994)"));
     }
 
     @Test

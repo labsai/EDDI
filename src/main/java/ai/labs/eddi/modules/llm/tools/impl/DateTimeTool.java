@@ -126,36 +126,41 @@ public class DateTimeTool {
 
         try {
             ZoneId zoneId = ZoneId.of(timezone);
-            LocalDateTime localDateTime = place(parse(dateTime), zoneId).toLocalDateTime();
+            // The start keeps its own offset: an input that names the later offset of
+            // a repeated (fall-back) hour stays on it.
+            ZonedDateTime start = place(parse(dateTime), zoneId);
 
-            LocalDateTime result;
+            // Date units move the wall clock (a day later is the same local time; one
+            // that lands in a skipped hour is reported, as for an input). Time units
+            // move the instant: an hour after 01:30 on the spring-forward night is
+            // 03:30, and across fall-back the repeated hour is counted.
+            ZonedDateTime zonedResult;
             switch (unit.toLowerCase()) {
                 case "years" :
-                    result = localDateTime.plusYears(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusYears(amount));
                     break;
                 case "months" :
-                    result = localDateTime.plusMonths(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusMonths(amount));
                     break;
                 case "weeks" :
-                    result = localDateTime.plusWeeks(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusWeeks(amount));
                     break;
                 case "days" :
-                    result = localDateTime.plusDays(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusDays(amount));
                     break;
                 case "hours" :
-                    result = localDateTime.plusHours(amount);
+                    zonedResult = start.plusHours(amount);
                     break;
                 case "minutes" :
-                    result = localDateTime.plusMinutes(amount);
+                    zonedResult = start.plusMinutes(amount);
                     break;
                 case "seconds" :
-                    result = localDateTime.plusSeconds(amount);
+                    zonedResult = start.plusSeconds(amount);
                     break;
                 default :
                     return "Error: Invalid unit. Use 'years', 'months', 'weeks', 'days', 'hours', 'minutes', or 'seconds'.";
             }
 
-            ZonedDateTime zonedResult = place(new Parsed(result, null), zoneId);
             String formatted = zonedResult.format(READABLE_FORMATTER);
             LOGGER.debugf("Added %d %s to %s: %s", amount, sanitize(unit), sanitize(dateTime), formatted);
             return formatted;
@@ -164,6 +169,15 @@ public class DateTimeTool {
             LOGGER.debugf("Date calculation rejected: %s", sanitize(e.getMessage()));
             return "Error: " + e.getMessage();
         }
+    }
+
+    /**
+     * {@code local} in the start's zone: refused in a skipped hour, and in a
+     * repeated hour on the start's own offset when that offset is one of the two.
+     */
+    private static ZonedDateTime onWallClock(ZonedDateTime start, LocalDateTime local) {
+        place(new Parsed(local, null), start.getZone());
+        return ZonedDateTime.ofLocal(local, start.getZone(), start.getOffset());
     }
 
     @Tool("Formats a date/time string into a different format")
@@ -221,6 +235,9 @@ public class DateTimeTool {
         return ZonedDateTime.of(parsed.local(), zone);
     }
 
+    // Reports the current local time, and takes no arguments: a cached answer would
+    // be served unchanged for the whole TTL.
+    @NeverCached
     @Tool("Lists common IANA timezone names with their current local time")
     public String listTimezones() {
         StringBuilder sb = new StringBuilder("Available timezones:\n");

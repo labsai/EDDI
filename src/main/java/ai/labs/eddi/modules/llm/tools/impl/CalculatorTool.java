@@ -331,13 +331,15 @@ public class CalculatorTool {
 
         /**
          * Round half up without {@link Math#round}'s saturation at the {@code long}
-         * range: from 2^52 on every double is already an integer.
+         * range: from 2^52 on every double is already an integer. Below it,
+         * {@link Math#round} itself — {@code floor(v + 0.5)} is wrong where the
+         * addition rounds ({@code 0.49999999999999994 + 0.5} is {@code 1.0}).
          */
         static double roundHalfUp(double v) {
             if (Double.isNaN(v) || Double.isInfinite(v) || Math.abs(v) >= 4503599627370496.0) {
                 return v;
             }
-            return Math.floor(v + 0.5);
+            return Math.round(v);
         }
 
         /** Refuses NaN and infinities so they cannot propagate into an answer. */
