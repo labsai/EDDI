@@ -78,6 +78,16 @@ public interface IRestScheduleStore {
     Response disableSchedule(@PathParam("scheduleId") String scheduleId);
 
     @POST
+    @Path("/{scheduleId}/reset-conversation")
+    @Operation(description = "Start over with a fresh persistent conversation: the schedule forgets its persistent conversation, "
+            + "and the next fire creates a new one. The old conversation is ended when it is idle (READY, ERROR or interrupted); "
+            + "one that is running or awaiting a human is left as it is. Use it when a persistent conversation has outgrown the "
+            + "document limit and every fire fails. The schedule's own settings, schedule state and fire history are untouched.")
+    @APIResponse(responseCode = "200", description = "The schedule no longer points at a conversation.")
+    @APIResponse(responseCode = "404", description = "No schedule with this id.")
+    Response resetPersistentConversation(@PathParam("scheduleId") String scheduleId);
+
+    @POST
     @Path("/{scheduleId}/fire")
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Manually trigger a schedule fire immediately.")

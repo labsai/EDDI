@@ -2136,6 +2136,159 @@ class RestScheduleStoreTest {
         verify(scheduleStore).deleteSchedule("s2");
     }
 
+    // --- Schedule caps, warnings, reset and delete of the persistent conversation
+    // ---
+
+    private static ScheduleConfiguration newCronBody() {
+        var schedule = new ScheduleConfiguration();
+        schedule.setAgentId("agent-1");
+        schedule.setCronExpression("0 9 * * *");
+        schedule.setMessage("Good morning");
+        schedule.setName("Morning check");
+        return schedule;
+    }
+
+    @Test
+    void create_overThePerOwnerCap_isRefusedWith429AndWritesNothing() throws Exception {
+        setField(rest, "maxSchedulesPerOwner", 3);
+        when(scheduleStore.countEnabledSchedulesCreatedBy(anyString())).thenReturn(3);
+
+        Response response = rest.createSchedule(newCronBody());
+
+        assertEquals(429, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("eddi.schedule.max-per-owner"), String.valueOf(response.getEntity()));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void create_underThePerOwnerCap_isCreated() throws Exception {
+        setField(rest, "maxSchedulesPerOwner", 3);
+        when(scheduleStore.countEnabledSchedulesCreatedBy(anyString())).thenReturn(2);
+        when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+
+        assertEquals(201, rest.createSchedule(newCronBody()).getStatus());
+    }
+
+    @Test
+    void create_overTheDeploymentCap_isRefusedWith429() throws Exception {
+        setField(rest, "maxSchedulesTotal", 10);
+        when(scheduleStore.countEnabledSchedulesCreatedBy(isNull())).thenReturn(10);
+
+        Response response = rest.createSchedule(newCronBody());
+
+        assertEquals(429, response.getStatus());
+        assertTrue(String.valueOf(response.getEntity()).contains("eddi.schedule.max-total"), String.valueOf(response.getEntity()));
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void create_aDisabledSchedule_isNotCounted() throws Exception {
+        setField(rest, "maxSchedulesPerOwner", 1);
+        when(scheduleStore.countEnabledSchedulesCreatedBy(any())).thenReturn(50);
+        when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+        var body = newCronBody();
+        body.setEnabled(false);
+
+        assertEquals(201, rest.createSchedule(body).getStatus());
+    }
+
+    @Test
+    void enable_aDisabledScheduleOverTheCap_isRefused() throws Exception {
+        setField(rest, "maxSchedulesPerOwner", 2);
+        var stored = makeCronSchedule("off-1");
+        stored.setEnabled(false);
+        stored.setCreatedBy("alice");
+        when(scheduleStore.readSchedule("off-1")).thenReturn(stored);
+        when(scheduleStore.countEnabledSchedulesCreatedBy("alice")).thenReturn(2);
+
+        assertEquals(429, rest.enableSchedule("off-1").getStatus());
+        verify(scheduleStore, never()).setScheduleEnabled(anyString(), eq(true), any());
+    }
+
+    @Test
+    void create_aRecurringScheduleWithNoCostCapOrRollover_carriesWarnings() throws Exception {
+        when(scheduleStore.createSchedule(any())).thenReturn("hb-id");
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setHeartbeatIntervalSeconds(300L);
+        body.setName("Heartbeat");
+
+        var created = (ScheduleConfiguration) rest.createSchedule(body).getEntity();
+
+        assertNotNull(created.getWarnings());
+        assertEquals(2, created.getWarnings().size());
+        assertTrue(created.getWarnings().get(0).contains("maxCostPerFire"));
+        assertTrue(created.getWarnings().get(1).contains("reset-conversation"));
+    }
+
+    @Test
+    void create_withACostCapAndARollover_carriesNoWarnings() throws Exception {
+        setField(rest, "persistentConversationMaxSteps", 500);
+        when(scheduleStore.createSchedule(any())).thenReturn("hb-id");
+        var body = new ScheduleConfiguration();
+        body.setAgentId("agent-1");
+        body.setHeartbeatIntervalSeconds(300L);
+        body.setName("Heartbeat");
+        body.setMaxCostPerFire(0.5);
+
+        var created = (ScheduleConfiguration) rest.createSchedule(body).getEntity();
+
+        assertNull(created.getWarnings());
+    }
+
+    @Test
+    void resetConversation_detachesAndEndsThePersistentConversation() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("r-1");
+        stored.setUserId("editor-1");
+        stored.setPersistentConversationId("conv-big");
+        when(scheduleStore.readSchedule("r-1")).thenReturn(stored);
+
+        assertEquals(200, rest.resetPersistentConversation("r-1").getStatus());
+
+        verify(scheduleStore).setPersistentConversationId("r-1", null);
+        verify(fireExecutor).endPersistentConversation(stored);
+    }
+
+    @Test
+    void resetConversation_withoutAPersistentConversation_changesNothing() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("r-2");
+        stored.setUserId("editor-1");
+        when(scheduleStore.readSchedule("r-2")).thenReturn(stored);
+
+        assertEquals(200, rest.resetPersistentConversation("r-2").getStatus());
+
+        verify(scheduleStore, never()).setPersistentConversationId(anyString(), any());
+        verify(fireExecutor, never()).endPersistentConversation(any());
+    }
+
+    @Test
+    void resetConversation_ofAnotherUsersSchedule_isForbidden() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("r-3");
+        stored.setUserId("victim-42");
+        stored.setPersistentConversationId("conv-x");
+        when(scheduleStore.readSchedule("r-3")).thenReturn(stored);
+
+        assertEquals(403, rest.resetPersistentConversation("r-3").getStatus());
+        verify(scheduleStore, never()).setPersistentConversationId(anyString(), any());
+    }
+
+    @Test
+    void deleteSchedule_endsItsPersistentConversation() throws Exception {
+        asEditor("editor-1");
+        var stored = makeCronSchedule("d-1");
+        stored.setUserId("editor-1");
+        stored.setPersistentConversationId("conv-1");
+        when(scheduleStore.readSchedule("d-1")).thenReturn(stored);
+
+        assertEquals(204, rest.deleteSchedule("d-1").getStatus());
+
+        verify(scheduleStore).deleteSchedule("d-1");
+        verify(fireExecutor).endPersistentConversation(stored);
+    }
+
     @Test
     void deleteSchedule_downstreamStatusIsPreserved_notFlattenedTo500() throws Exception {
         asEditor("editor-1");

@@ -113,6 +113,25 @@ public class RestScheduleStore implements IRestScheduleStore {
     @ConfigProperty(name = "eddi.schedule.min-interval-seconds", defaultValue = "60")
     long minIntervalSeconds;
 
+    /**
+     * Most enabled schedules one creator may have; {@code <= 0} for no limit.
+     */
+    @ConfigProperty(name = "eddi.schedule.max-per-owner", defaultValue = "200")
+    int maxSchedulesPerOwner;
+
+    /**
+     * Most enabled schedules created through the API in the whole deployment;
+     * {@code <= 0} for no limit.
+     */
+    @ConfigProperty(name = "eddi.schedule.max-total", defaultValue = "10000")
+    int maxSchedulesTotal;
+
+    /**
+     * Read only to warn on create when a persistent conversation never rolls over.
+     */
+    @ConfigProperty(name = "eddi.schedule.persistent-conversation-max-steps", defaultValue = "0")
+    int persistentConversationMaxSteps;
+
     @Override
     public List<ScheduleConfiguration> readAllSchedules(String agentId, int limit, int offset) {
         try {
@@ -273,9 +292,19 @@ public class RestScheduleStore implements IRestScheduleStore {
             // Compute initial nextFire
             computeInitialNextFire(schedule);
 
+            // Counted AFTER the schedule is fully formed and BEFORE it is written: a
+            // refused create leaves nothing behind.
+            if (schedule.isEnabled()) {
+                Response capGuard = requireWithinScheduleCaps(schedule.getCreatedBy());
+                if (capGuard != null) {
+                    return capGuard;
+                }
+            }
+
             String id = scheduleStore.createSchedule(schedule);
             schedule.setId(id);
             enrichCronDescription(schedule);
+            schedule.setWarnings(creationWarnings(schedule));
 
             return Response.created(URI.create("/schedulestore/schedules/" + id)).entity(schedule).build();
         } catch (IllegalArgumentException e) {
@@ -466,7 +495,14 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (guard != null) {
                 return guard;
             }
+            ScheduleConfiguration stored = readOrNull(scheduleId);
             scheduleStore.deleteSchedule(scheduleId);
+            if (stored != null) {
+                // The schedule is gone for good, so nothing will ever fire into its
+                // persistent conversation again; leaving it READY kept it open (and,
+                // for a heartbeat, a long document) with no owner to end it.
+                fireExecutor.endPersistentConversation(stored);
+            }
             return Response.noContent().build();
         } catch (ForbiddenException | WebApplicationException e) {
             // Keep a downstream 403/404 (or any other mapped status) as-is instead of
@@ -1527,6 +1563,98 @@ public class RestScheduleStore implements IRestScheduleStore {
         return null;
     }
 
+    @Override
+    public Response resetPersistentConversation(String scheduleId) {
+        try {
+            Response guard = requireMutableSchedule(scheduleId, "reset the conversation of");
+            if (guard != null) {
+                return guard;
+            }
+            ScheduleConfiguration stored = scheduleStore.readSchedule(scheduleId);
+            if (stored.getPersistentConversationId() == null || stored.getPersistentConversationId().isBlank()) {
+                return Response.ok().build();
+            }
+            // Detach first: the next fire must not meet the old conversation whatever
+            // happens to it. A fire already in flight keeps the one it resolved.
+            scheduleStore.setPersistentConversationId(scheduleId, null);
+            fireExecutor.endPersistentConversation(stored);
+            return Response.ok().build();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("Schedule not found: " + scheduleId);
+        } catch (ForbiddenException | WebApplicationException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.error("Failed to reset the persistent conversation of schedule " + sanitize(scheduleId), e);
+            throw new InternalServerErrorException("Failed to reset the persistent conversation");
+        }
+    }
+
+    /** The stored schedule, or {@code null} when it is absent or unreadable. */
+    private ScheduleConfiguration readOrNull(String scheduleId) {
+        try {
+            return scheduleStore.readSchedule(scheduleId);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    /**
+     * Refuses (429) a new or re-enabled schedule that would exceed the per-creator
+     * or the overall cap on enabled schedules, or {@code null} when it fits. A
+     * limit {@code <= 0} is off. A count the store could not answer is not a reason
+     * to refuse.
+     */
+    private Response requireWithinScheduleCaps(String createdBy) {
+        try {
+            if (maxSchedulesPerOwner > 0 && createdBy != null && scheduleStore.countEnabledSchedulesCreatedBy(createdBy) >= maxSchedulesPerOwner) {
+                LOGGER.warnf("Refused a schedule for %s: it already has %d enabled schedules (eddi.schedule.max-per-owner)", sanitize(createdBy),
+                        maxSchedulesPerOwner);
+                return scheduleLimit("You already have " + maxSchedulesPerOwner
+                        + " enabled schedules, the limit per user. Disable or delete one first, or ask an administrator to raise "
+                        + "eddi.schedule.max-per-owner.");
+            }
+            if (maxSchedulesTotal > 0 && scheduleStore.countEnabledSchedulesCreatedBy(null) >= maxSchedulesTotal) {
+                LOGGER.warnf("Refused a schedule: the deployment already has %d enabled schedules (eddi.schedule.max-total)", maxSchedulesTotal);
+                return scheduleLimit("This deployment already has " + maxSchedulesTotal
+                        + " enabled schedules, its limit. Disable or delete one first, or ask an administrator to raise "
+                        + "eddi.schedule.max-total.");
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Could not count the enabled schedules: %s", e.getMessage());
+        }
+        return null;
+    }
+
+    private static Response scheduleLimit(String message) {
+        return Response.status(Response.Status.TOO_MANY_REQUESTS).type(MediaType.APPLICATION_JSON)
+                .entity(ErrorResponses.body(SCHEDULE_LIMIT, message)).build();
+    }
+
+    /** Error code of a create or enable refused by a schedule cap. */
+    public static final String SCHEDULE_LIMIT = "SCHEDULE_LIMIT";
+
+    /**
+     * What the creator should know about a recurring schedule that cannot stop
+     * itself: no {@code maxCostPerFire}, and (for a persistent conversation) no
+     * rollover. Advice only — nothing here refuses the schedule.
+     */
+    List<String> creationWarnings(ScheduleConfiguration schedule) {
+        boolean recurring = schedule.getOneTimeAt() == null || schedule.getOneTimeAt().isBlank();
+        if (!recurring) {
+            return null;
+        }
+        List<String> warnings = new ArrayList<>();
+        if (schedule.getMaxCostPerFire() <= 0) {
+            warnings.add("No maxCostPerFire is set, so every fire may spend without limit. Set maxCostPerFire to cap what one fire may cost.");
+        }
+        if ("persistent".equals(schedule.getConversationStrategy()) && persistentConversationMaxSteps <= 0) {
+            warnings.add("Every fire adds to one persistent conversation that never rolls over; once its document exceeds the store's size "
+                    + "limit every fire fails. Ask an administrator to set eddi.schedule.persistent-conversation-max-steps, or use "
+                    + "POST /schedulestore/schedules/{id}/reset-conversation to start over.");
+        }
+        return warnings.isEmpty() ? null : warnings;
+    }
+
     // Fix #3: Atomic enable/disable instead of read-then-write race
     private Response setEnabled(String scheduleId, boolean enabled) {
         try {
@@ -1534,6 +1662,12 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (enabled) {
                 // Need to read schedule to compute nextFire
                 ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
+                if (!schedule.isEnabled() && schedule.getCreatedBy() != null) {
+                    Response capGuard = requireWithinScheduleCaps(schedule.getCreatedBy());
+                    if (capGuard != null) {
+                        return capGuard;
+                    }
+                }
                 nextFire = computeRearmNextFire(schedule);
             }
             scheduleStore.setScheduleEnabled(scheduleId, enabled, nextFire);
@@ -1635,7 +1769,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return CronParser.computeNextFire(schedule.getCronExpression(), Instant.now(), zoneOf(schedule));
         } catch (IllegalStateException e) {
             throw new IllegalArgumentException(
-                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time within the next two years", e);
+                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time: it can never fire", e);
         }
     }
 
@@ -1645,7 +1779,7 @@ public class RestScheduleStore implements IRestScheduleStore {
             return CronParser.computeMinIntervalSeconds(schedule.getCronExpression(), zoneOf(schedule));
         } catch (IllegalStateException e) {
             throw new IllegalArgumentException(
-                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time within the next two years", e);
+                    "cronExpression '" + schedule.getCronExpression() + "' has no matching fire time: it can never fire", e);
         }
     }
 

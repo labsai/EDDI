@@ -130,6 +130,14 @@ EDDI uses **standard 5-field cron expressions**:
 | `0 */4 * * *` | Every 4 hours |
 | `0 9 * * 1-5` | Weekdays at 9:00 AM |
 | `0 0 1 * *` | First day of each month at midnight |
+| `0 9 29 2 *` | 09:00 on 29 February — every fourth year, and every eighth across 2100 |
+
+An expression that can never match (`0 0 30 2 *`, `* * 31 4 *`) is refused when you save
+it. EDDI looks 9 years ahead for the next fire, which covers the longest gap a valid
+expression can have (29 February across a non-leap century year). If a fire completes and
+no next fire exists any more (a stored expression that stopped matching), the schedule is
+**disabled** with `disabledReason: "no-next-fire"` and the fire stays recorded as completed;
+it is never left claimed and fired again.
 
 ### Heartbeat Configuration
 
@@ -252,6 +260,36 @@ Two consequences worth knowing:
 The Manager's schedule editor sends no `enabled` on an edit; the row's toggle
 calls `/enable` or `/disable`.
 
+### Limits
+
+Two limits bound how many schedules the API accepts. They count **enabled** schedules
+created through an authenticated caller (`createdBy` set) — schedules the engine arms
+itself (HITL timeouts, continuations, Dream) are not counted:
+
+| Property | Default | Refuses |
+|---|---|---|
+| `eddi.schedule.max-per-owner` | `200` | A create or enable that would give one user more enabled schedules |
+| `eddi.schedule.max-total` | `10000` | A create or enable that would exceed the deployment-wide figure |
+
+A refusal is `429` with error `SCHEDULE_LIMIT`; disable or delete a schedule first. `0`
+switches a limit off. Creating a schedule already disabled is never refused.
+
+There is deliberately no default `maxCostPerFire`. A recurring schedule that has no cost cap
+(or is persistent with `eddi.schedule.persistent-conversation-max-steps` off) gets a
+`warnings` list in the **create** response (`201`) saying so; the field is not stored and
+is not part of later reads.
+
+### Starting a persistent conversation over
+
+`POST /schedulestore/schedules/{id}/reset-conversation` makes a `persistent` schedule forget
+its conversation: the next fire creates a new one. The old conversation is ended when it is
+idle (`READY`, `ERROR`, `EXECUTION_INTERRUPTED`); a running or `AWAITING_HUMAN` one is left
+as it is. Use it when a conversation outgrew the document limit and every fire fails — a
+`PUT` cannot do that, because it carries `persistentConversationId` over. Settings, schedule
+state and fire history are untouched. Same permission as editing the schedule.
+
+Deleting a schedule ends its persistent conversation under the same rule.
+
 ### Who Can See and Manage a Schedule
 
 With authorization on, schedule access follows who the schedule **runs as**:
@@ -291,6 +329,7 @@ With authorization on, schedule access follows who the schedule **runs as**:
 | `GET` | `/schedulestore/schedules/{id}/fires` | Read fire history, newest first (`?limit=` default 20, must be > 0, capped at 500) |
 | `GET` | `/schedulestore/schedules/admin/failed` | List failed/dead-lettered fires (`?limit=` default 50, must be > 0, capped at 500); non-admins get only the entries of schedules they can see |
 | `POST` | `/schedulestore/schedules/{id}/retry` | Re-queue a dead-lettered schedule |
+| `POST` | `/schedulestore/schedules/{id}/reset-conversation` | Forget the persistent conversation; the next fire starts a new one — see [Starting a persistent conversation over](#starting-a-persistent-conversation-over) |
 | `POST` | `/schedulestore/schedules/{id}/dismiss` | Reset dead-letter without immediate retry, re-armed at its next regular fire. It does **not** change `enabled`: a schedule that was disabled (by `/disable`, or because its agent was undeployed) stays disabled — use `/enable` to re-arm it. `409` unless the schedule is currently `DEAD_LETTERED` — the write itself is conditional on that state, so it can never reset a running fire |
 
 ## Dream Consolidation
@@ -534,6 +573,8 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.fire-timeout` | `5m` | How long one fire — a conversation turn, a Dream run, a team-cadence pull — may run before it is interrupted and recorded `FAILED` with "the fire exceeded eddi.schedule.fire-timeout", then retried with backoff. Raise it for long Dream runs; `lease-timeout` follows |
 | `eddi.schedule.hitl-timeout-retry-interval` | `2m` | When a HITL approval timeout cannot be applied yet (store blip, node draining, a decision still in flight), how long until it is tried again. These are re-armed, never dead-lettered — see [hitl.md](hitl.md) |
 | `eddi.schedule.persistent-conversation-max-steps` | `0` (off) | Steps after which a `persistent` schedule ends its conversation and starts a new one — see [Long-running persistent schedules](#long-running-persistent-schedules) |
+| `eddi.schedule.max-per-owner` | `200` | Most enabled schedules one creator may have; `0` = no limit — see [Limits](#limits) |
+| `eddi.schedule.max-total` | `10000` | Most enabled API-created schedules in the deployment; `0` = no limit |
 | `eddi.schedule.fire-log-retention` | `90d` | Fire logs older than this are deleted by a periodic sweep. `0` keeps everything — note that a 60-second heartbeat alone writes ~525,600 rows a year |
 | `eddi.schedule.fire-log-prune-interval` | `1h` | How often that sweep runs. The DELETE is by timestamp and therefore idempotent, so it needs no cluster claim |
 
@@ -572,10 +613,21 @@ agent) or has `ENDED`. A store that cannot be read fails the fire instead, and t
 runs against the same conversation — a brief outage does not cost the schedule its
 history.
 
+### Fire timeouts
+
+When a fire exceeds `eddi.schedule.fire-timeout`, it is recorded `FAILED` and the turn it
+started is cancelled through the conversation's own cancel (cooperative: it stops at the
+next task boundary, so a call already in flight finishes first). Every turn of one due fire,
+retries included, carries the same `Idempotency-Key` (`schedule:<scheduleId>@<lastFired>`):
+a retry queued behind a first turn that committed after all is answered as skipped instead
+of running the message twice. A `conversationStrategy: new` retry opens a new conversation,
+so for those the cancel is what stops the first turn.
+
 ### Observability
 
 | Metric | Type | Read it for |
 |---|---|---|
+| `eddi.schedule.nextfire.exhausted` | Counter | Fires that completed with no next fire to arm; each disabled its schedule (`no-next-fire`) |
 | `eddi.schedule.poll.count` | Counter | Poller liveness. Flat means the poller is not running — check `eddi.schedule.enabled` |
 | `eddi.schedule.fire.count` | Counter | Fires executed |
 | `eddi.schedule.fire.failed` | Counter | Fires that raised. Compare against `fire.count` for a failure rate |
