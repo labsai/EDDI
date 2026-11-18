@@ -129,12 +129,9 @@ public final class UriRedactor {
     }
 
     /**
-     * The lowercased words of a name, split on anything that is not a letter or
-     * digit and on each camel-case hump, so {@code X-Api-Token},
+     * The words in a field or header name, lower-cased: split on anything that is
+     * not a letter or digit and on each camel-case hump, so {@code X-Api-Token},
      * {@code x_api_token} and {@code xApiToken} all yield the same three words.
-     */
-    /**
-     * The words in a field or header name, lower-cased.
      * <p>
      * Package-private because {@code SecretScrubber} needs the SAME split: it
      * decides whether a name's first word is a quantity qualifier, and a name that

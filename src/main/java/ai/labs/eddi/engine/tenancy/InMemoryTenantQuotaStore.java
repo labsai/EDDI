@@ -29,9 +29,10 @@ import java.util.concurrent.ConcurrentHashMap;
  * deployments, replace with a DB-backed store that uses storage-level atomicity
  * (e.g., PostgreSQL {@code UPDATE ... WHERE count < limit RETURNING}).
  * <p>
- * <strong>Lock granularity:</strong> all five mutating operations
- * ({@code tryIncrementConversations}, {@code tryIncrementApiCalls},
- * {@code tryAddCost}, {@code getUsage}, {@code getMonthlyCost}) share the same
+ * <strong>Lock granularity:</strong> every operation that touches a tenant's
+ * counters ({@code tryIncrementConversations}, {@code tryIncrementApiCalls},
+ * {@code tryAddCost}, {@code tryReserveCost}, {@code releaseCost},
+ * {@code getUsage}, {@code getMonthlyCost}, {@code resetUsage}) shares the same
  * per-tenant lock. In a default single-tenant deployment, "per-tenant" is
  * effectively a global lock. This is acceptable because the critical section is
  * microseconds (a few field reads, one integer increment, one timestamp
@@ -98,6 +99,14 @@ public class InMemoryTenantQuotaStore implements ITenantQuotaStore {
     @Override
     public void setQuota(TenantQuota quota) {
         quotas.put(quota.tenantId(), quota);
+    }
+
+    @Override
+    public boolean compareAndSetQuota(TenantQuota expected, TenantQuota next) {
+        if (expected == null) {
+            return quotas.putIfAbsent(next.tenantId(), next) == null;
+        }
+        return quotas.replace(next.tenantId(), expected, next);
     }
 
     @Override

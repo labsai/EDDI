@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { isValidNotifyAddress, parseNotifyRecipients } from "@/lib/hitl-notify";
-import { MAX_NOTIFY_RECIPIENTS } from "@/lib/api/hitl";
+import { MAX_NOTIFY_RECIPIENTS } from "@eddi/app-kit/lib/api/hitl";
 
 describe("parseNotifyRecipients — mirrors HitlConfigValidation.validateNotify", () => {
   it("splits on commas, semicolons, spaces and new lines", () => {

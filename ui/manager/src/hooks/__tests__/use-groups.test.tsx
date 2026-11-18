@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { renderHook, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { type ReactNode } from "react";
 import { http, HttpResponse } from "msw";
-import { DISCUSSION_STYLES } from "@/lib/api/groups";
+import { DISCUSSION_STYLES } from "@eddi/app-kit/lib/api/groups";
 import {
   useGroupDescriptors,
   useEnrichedGroupDescriptors,
@@ -20,7 +20,7 @@ import {
   useGroupConversation,
   useDeleteGroupConversation,
   useDeleteGroupWithMembers,
-} from "@/hooks/use-groups";
+} from "@eddi/app-kit/hooks/use-groups";
 
 function createWrapper() {
   const queryClient = new QueryClient({
@@ -362,7 +362,7 @@ describe("useDeleteGroupWithMembers", () => {
 
 describe("isAwaitingHumanConversationState", () => {
   it("is true for the two states that wait on a human, false otherwise", async () => {
-    const { isAwaitingHumanConversationState } = await import("@/hooks/use-groups");
+    const { isAwaitingHumanConversationState } = await import("@eddi/app-kit/hooks/use-groups");
     expect(isAwaitingHumanConversationState("AWAITING_APPROVAL")).toBe(true);
     expect(isAwaitingHumanConversationState("AWAITING_HUMAN_INPUT")).toBe(true);
     for (const s of ["IN_PROGRESS", "COMPLETED", "REJECTED", undefined] as const) {

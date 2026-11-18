@@ -35,6 +35,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>/regulardictionarystore/regulardictionaries →
  * /dictionarystore/dictionaries</li>
  * <li>/bottriggerstore/bottriggers → /AgentTriggerStore/agenttriggers</li>
+ * <li>/langchain/tools → /llm/tools</li>
  * <li>/administration/{unrestricted|restricted}/… →
  * /administration/production/…</li>
  * </ul>
@@ -46,11 +47,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * into an erasure of user {@code production}, and a secret key or tenant named
  * {@code restricted} into the key {@code production}.
  * <p>
- * The environment rewrites mirror {@code Deployment.Environment.fromString},
- * which still maps the v5 names {@code unrestricted} and {@code restricted}
- * onto {@code production}. Target paths must match the declared {@code @Path}
- * values exactly — JAX-RS matching is case-sensitive, so
- * {@code /AgentTriggerStore/agenttriggers} keeps its capitalisation.
+ * The environment rewrites mirror {@code Deployment.Environment.parseStrict}
+ * (which {@code fromString} delegates to), and which still maps the v5 names
+ * {@code unrestricted} and {@code restricted} onto {@code production}. Target
+ * paths must match the declared {@code @Path} values exactly — JAX-RS matching
+ * is case-sensitive, so {@code /AgentTriggerStore/agenttriggers} keeps its
+ * capitalisation.
  */
 @PreMatching
 @Provider

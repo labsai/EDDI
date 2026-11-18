@@ -157,9 +157,10 @@ public class ToolCacheService {
     }
 
     /**
-     * Tool sources whose calls reach systems EDDI does not control — an agent's
-     * HTTP calls, MCP servers, A2A peers. Their results are not cached unless the
-     * agent opts the individual tool in (see {@link #mayCache}).
+     * Tool sources whose calls reach systems EDDI does not control, or act on other
+     * agents' work — an agent's HTTP calls, MCP servers, A2A peers, team handoffs.
+     * Their results are not cached unless the agent opts the individual tool in
+     * (see {@link #mayCache}).
      * <p>
      * They used to be cached by default: a POST, an MCP write or an A2A request
      * repeated with identical arguments within the TTL was answered from the cache
@@ -170,9 +171,10 @@ public class ToolCacheService {
 
     /**
      * Whether a call from this source may use the cache at all. Built-in tools may
-     * (unless {@link #isConversationBound conversation-bound}); HTTP, MCP and A2A
-     * tools only when the task names the tool in {@code toolCacheScopes} — naming
-     * it is the explicit statement that repeating the call is safe to skip.
+     * (unless {@link #isConversationBound conversation-bound}); HTTP, MCP, A2A and
+     * team-handoff tools only when the task names the tool in
+     * {@code toolCacheScopes} — naming it is the explicit statement that repeating
+     * the call is safe to skip.
      *
      * @param source
      *            the tool's source tag ({@code builtin}, {@code http}, {@code mcp},
@@ -407,15 +409,14 @@ public class ToolCacheService {
      *
      * <p>
      * The TTL is resolved from the dispatch name first and only then from the
-     * canonical slug — the same precedence
-     * {@code AgentOrchestrator.resolveRateLimit} uses, and for the same reason: an
-     * entry that describes a single operation is more specific than one describing
-     * the whole tool. Slug-only resolution made the {@code news} bucket
-     * unreachable, because {@code searchNews} canonicalises to {@code websearch}
-     * and matched its 30-minute entry before the 10-minute news entry could ever be
-     * considered. The slug fallback stays, because it is the only way a built-in
-     * whose dispatch name resembles nothing in the table ({@code calculate} →
-     * {@code calculator}) matches at all.
+     * canonical slug — the same precedence {@code ToolLoopRunner.resolveRateLimit}
+     * uses, and for the same reason: an entry that describes a single operation is
+     * more specific than one describing the whole tool. Slug-only resolution made
+     * the {@code news} bucket unreachable, because {@code searchNews} canonicalises
+     * to {@code websearch} and matched its 30-minute entry before the 10-minute
+     * news entry could ever be considered. The slug fallback stays, because it is
+     * the only way a built-in whose dispatch name resembles nothing in the table
+     * ({@code calculate} → {@code calculator}) matches at all.
      * </p>
      *
      * <p>

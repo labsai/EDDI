@@ -2,10 +2,10 @@ import { describe, it, expect } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { http, HttpResponse } from "msw";
-import { renderPage, renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage, renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { ConversationDetailPage } from "@/pages/conversation-detail";
-import { MemoryInspector } from "@/components/debugger/memory-inspector";
+import { MemoryInspector } from "@eddi/app-kit/components/debugger/memory-inspector";
 
 /**
  * Version following: a conversation may move to a compatible newer version of

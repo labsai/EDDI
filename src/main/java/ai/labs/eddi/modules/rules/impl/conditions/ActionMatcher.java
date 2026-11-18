@@ -19,6 +19,13 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static ai.labs.eddi.modules.rules.impl.conditions.IRuleCondition.ExecutionState.*;
 
 /**
+ * Matches the actions emitted in a conversation step. The comma-separated
+ * {@code actions} config is an ordered, adjacent sublist of the step's actions,
+ * so a list means AND, not OR (use a shared action or an {@code OR} connector
+ * for alternatives). The value {@code empty} alone matches a step that emitted
+ * no actions. {@code occurrence} selects the step: {@code currentStep}
+ * (default), {@code lastStep}, {@code anyStep} or {@code never}.
+ *
  * @author ginccc
  */
 public class ActionMatcher extends BaseMatcher {

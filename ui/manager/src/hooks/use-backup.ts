@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { agentKeys } from "@/lib/query-keys";
+import { agentKeys } from "@eddi/app-kit/lib/query-keys";
 import {
   exportAgentSelective,
   importAgent,

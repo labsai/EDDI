@@ -23,6 +23,16 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+/**
+ * Creates and registers the named caches. Every cache is a size-bounded
+ * Caffeine cache wrapped in {@link CacheImpl}: {@link #getCache(String)} has no
+ * default expiry, {@link #getCache(String, Duration)} expires entries a TTL
+ * after their last write, and either kind honours a per-entry lifespan. A
+ * {@code null} cache name selects the cache {@code local}. In cluster mode
+ * ({@code eddi.messaging.type=nats}) a few caches are wrapped to be shared
+ * ({@link #SHARED_BUCKETS}) or to announce their changes to the other nodes
+ * ({@link #INVALIDATED}); every other cache stays node-local.
+ */
 @ApplicationScoped
 public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Announcer {
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
@@ -36,22 +46,21 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack event de-duplication, channel thread locks,
-     * and RAG ingestion statuses and warnings (an upload is accepted by one node
-     * and polled on whichever the load balancer picks).
+     * paginated tool responses, Slack and webhook event de-duplication, channel
+     * thread locks, and knowledge-base ingestion statuses, which a poll may ask any
+     * node for.
      */
-    static final Map<String, String> SHARED_BUCKETS = Map.ofEntries(
-            Map.entry("nonce-replay-protection", "NONCES"),
-            Map.entry("a2aTaskMapping", "A2A_TASKS"),
-            Map.entry("a2aTaskMapping:context", "A2A_CONTEXTS"),
-            Map.entry("a2aTaskMapping:erasing", "A2A_ERASING"),
-            Map.entry("a2aTaskMapping:index", "A2A_INDEX"),
-            Map.entry("paginated-tool-responses", "TOOL_PAGES"),
-            Map.entry("slack-event-dedup", "DEDUP"),
-            Map.entry("webhook-event-dedup", "DEDUP"),
-            Map.entry("channel-thread-locks", "CHANNEL"),
-            Map.entry("rag-ingestion-status", "RAG_STATUS"),
-            Map.entry("rag-ingestion-warnings", "RAG_WARNINGS"));
+    static final Map<String, String> SHARED_BUCKETS = Map.of(
+            "nonce-replay-protection", "NONCES",
+            "a2aTaskMapping", "A2A_TASKS",
+            "a2aTaskMapping:context", "A2A_CONTEXTS",
+            "a2aTaskMapping:erasing", "A2A_ERASING",
+            "a2aTaskMapping:index", "A2A_INDEX",
+            "paginated-tool-responses", "TOOL_PAGES",
+            "slack-event-dedup", "DEDUP",
+            "webhook-event-dedup", "DEDUP",
+            "channel-thread-locks", "CHANNEL",
+            "rag-ingestion-status", "RAG_INGESTION");
 
     /**
      * Node-local copies of database state that the other nodes must drop when this
@@ -266,10 +275,11 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // to the per-user caches above.
             Map.entry("tenantQuotas", 1_000L),
 
-            // One status (and at most one warning) per document upload, kept an hour —
-            // the bound the Caffeine caches RagIngestionService held them in had.
-            Map.entry("rag-ingestion-status", 10_000L),
-            Map.entry("rag-ingestion-warnings", 10_000L),
+            // RagIngestionService: a status and at most one warning per ingestion of
+            // the last hour, under two keys. The two caches this replaced held 10_000
+            // each; at the 1_000 default a busy hour would forget ingestions still
+            // being polled, and the poll would answer 404.
+            Map.entry("rag-ingestion-status", 20_000L),
 
             // Floor only — the real capacity is derived from the TTL the cache is
             // asked for, see RATE_SIZED_CACHES. This entry applies solely if something

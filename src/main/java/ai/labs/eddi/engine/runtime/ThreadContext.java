@@ -37,7 +37,7 @@ import java.util.Map;
  * <p>If the desired behavior is to ensure that bound data is not shared across
  * threads in a pooled or reusable threaded environment, the application (or more likely a framework) must
  * bind and remove any necessary values at the beginning and end of stack
- * execution, respectively (i.e. individually explicitly or all via the <tt>clear</tt> method).</p>
+ * execution, respectively (i.e. individually explicitly or all via the <tt>remove()</tt> method).</p>
  *
  * @author Les Hazlewood
  * @author Kalle Korhonen
@@ -72,7 +72,9 @@ public abstract class ThreadContext {
      * Allows a caller to explicitly set the entire resource map. This operation
      * overwrites everything that existed previously in the ThreadContext - if you
      * need to retain what was on the thread prior to calling this method, call the
-     * {@link #getResources()} method, which will give you the existing state.
+     * {@link #getResources()} method, which will give you the existing state. A
+     * {@code null} or empty map is ignored and leaves the existing resources
+     * untouched.
      *
      * @param newResources
      *            the resources to replace the existing {@link #getResources()

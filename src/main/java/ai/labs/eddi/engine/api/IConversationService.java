@@ -69,9 +69,10 @@ public interface IConversationService {
     void endConversation(String conversationId);
 
     /**
-     * Reset the state of a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to
-     * READY — only while it is still in {@code expectedState}, as one
-     * compare-and-set, and the cache follows the store. Admin-only operation.
+     * Reset the state of a stuck conversation (ERROR, EXECUTION_INTERRUPTED or
+     * AWAITING_HUMAN) to READY — only while it is still in {@code expectedState},
+     * as one compare-and-set, and the cache follows the store. Admin-only
+     * operation.
      * <p>
      * The caller reads the state to decide whether a reset is allowed; without the
      * compare-and-set a turn that started, or an end that landed, between that read
@@ -141,8 +142,9 @@ public interface IConversationService {
      * accepted call — {@code onComplete} when the turn executed (the snapshot may
      * carry state {@code AWAITING_HUMAN} if THIS turn paused the conversation), or
      * {@code onSkipped} when the turn was dropped without consuming the input
-     * (conversation paused or busy at execution time). Calls rejected up-front
-     * throw instead and never invoke the handler.
+     * (conversation paused or busy at execution time) or {@code onCallerGone} when
+     * the caller's own deadline had passed while the turn was still queued. Calls
+     * rejected up-front throw instead and never invoke the handler.
      *
      * @throws AgentMismatchException
      *             if agentId doesn't match the conversation's agent
@@ -289,6 +291,14 @@ public interface IConversationService {
 
         /** One tool call finished — see ConversationEventSink#onToolResult. */
         default void onToolResult(String toolName, String callId, String status, long durationMs) {
+        }
+
+        /**
+         * As the status-only form, with the redacted summary — see
+         * ConversationEventSink#onToolResult(String, String, String, long, String).
+         */
+        default void onToolResult(String toolName, String callId, String status, long durationMs, String summary) {
+            onToolResult(toolName, callId, status, durationMs);
         }
 
         /**
@@ -706,6 +716,21 @@ public interface IConversationService {
      */
     class PauseMismatchException extends IllegalStateException {
         public PauseMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
+     * A decision named a plan ({@code HitlDecision.planHash}) that is not the
+     * current pause's, or the stored plan no longer hashes to the value it was
+     * committed with. Nothing ran; the pause is left untouched. A
+     * {@link PauseMismatchException}, so every surface that maps a changed pause to
+     * a conflict maps this one too; a surface that can say more catches it first.
+     *
+     * @since 6.8.0
+     */
+    class PlanMismatchException extends PauseMismatchException {
+        public PlanMismatchException(String message) {
             super(message);
         }
     }

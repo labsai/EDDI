@@ -16,12 +16,12 @@ import {
   Hand,
   Users,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { Button } from "@/components/ui/button";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { Button } from "@eddi/ui";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {
@@ -34,13 +34,13 @@ import {
   useApproveGroupPhase,
   useCancelGroupDiscussion,
   useApprovalStatus,
-} from "@/hooks/use-hitl";
-import { useGroup, useGroupDescriptors } from "@/hooks/use-groups";
-import { useAgentDescriptors } from "@/hooks/use-agents";
-import { parseResourceUri } from "@/lib/api/agents";
-import { getGroupConversation, groupGroupsByName } from "@/lib/api/groups";
-import { timeoutPolicyLabel } from "@/lib/hitl-labels";
-import { useHasRole } from "@/hooks/use-auth";
+} from "@eddi/app-kit/hooks/use-hitl";
+import { useGroup, useGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
+import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
+import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
+import { getGroupConversation, groupGroupsByName } from "@eddi/app-kit/lib/api/groups";
+import { timeoutPolicyLabel } from "@eddi/app-kit/lib/hitl-labels";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import type {
   ApprovalStatusSummary,
   PendingApprovalSummary,
@@ -48,8 +48,9 @@ import type {
   ToolCallDecision,
   DecisionReview,
   PendingToolCallView,
-} from "@/lib/api/hitl";
-import { isPauseChanged, shownPauseOf, type ShownPause } from "@/lib/hitl-pause-binding";
+} from "@eddi/app-kit/lib/api/hitl";
+import { isPauseChanged, shownPauseOf, type ShownPause } from "@eddi/app-kit/lib/hitl-pause-binding";
+import { humanizeToolName } from "@eddi/app-kit/lib/tool-labels";
 
 /**
  * The redacted-preview render prop shared by every `ApprovalBanner` consumer.
@@ -272,7 +273,7 @@ function ApprovalQueueRow({
             </span>
           )}
           {item.pauseType === "TOOL_CALL" && item.toolNames && item.toolNames.length > 0
-            ? item.toolNames.join(", ")
+            ? Array.from(new Set(item.toolNames.map((name) => humanizeToolName(name) || name))).join(", ")
             : isHumanTurn
               ? (
                   <span
@@ -754,7 +755,8 @@ export function ApprovalsPage() {
       nameFor(a)?.toLowerCase().includes(q) ||
       a.pendingMemberId?.toLowerCase().includes(q) ||
       a.pauseReason?.toLowerCase().includes(q) ||
-      a.toolNames?.some((n) => n.toLowerCase().includes(q)) ||
+      // The list shows tools in words, so a search for what is on screen must match too.
+      a.toolNames?.some((n) => n.toLowerCase().includes(q) || humanizeToolName(n).toLowerCase().includes(q)) ||
       a.userId?.toLowerCase().includes(q)
     );
   });

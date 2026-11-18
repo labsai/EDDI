@@ -37,8 +37,9 @@ import java.util.Set;
  * storing it would be the same corruption.
  * <p>
  * Throws rather than returning a response, like
- * {@code CallerTokenAuthorPolicy}: the import path treats a non-200 update as
- * "create it directly instead", and the direct create runs this check too.
+ * {@code CallerTokenAuthorPolicy}: the import's direct create bypasses the REST
+ * stores and has no response to return, and runs this check too
+ * ({@link #requireNoneIfRedactedType}).
  */
 public final class RedactionMarkerGuard {
 

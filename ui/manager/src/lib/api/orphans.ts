@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api } from "@eddi/app-kit/lib/api-client";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

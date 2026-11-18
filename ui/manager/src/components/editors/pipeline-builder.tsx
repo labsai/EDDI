@@ -17,9 +17,9 @@ import {
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Link } from "react-router-dom";
-import type { WorkflowExtension } from "@/lib/api/workflows";
+import type { WorkflowExtension } from "@eddi/app-kit/lib/api/workflows";
 import { ArrowUpCircle, ExternalLink, GripVertical, Pencil, Trash2, Workflow } from "lucide-react";
-import { getExtensionIcon, getExtensionLabel } from "@/lib/api/extensions";
+import { getExtensionIcon, getExtensionLabel } from "@eddi/app-kit/lib/api/extensions";
 import {
   buildStepResourceLink,
   extensionUriVersion,

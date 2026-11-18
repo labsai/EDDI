@@ -63,7 +63,7 @@ import static org.mockito.Mockito.when;
  * or Chroma; what the test proves is the coordination, which runs entirely
  * through NATS: the document lease in {@code LEASES} (acquired, renewed by the
  * heartbeat while a replacement embeds for longer than the lease TTL, lost when
- * its holder is cut off) and the status in {@code RAG_STATUS}.
+ * its holder is cut off) and the status in {@code RAG_INGESTION}.
  */
 @DisplayName("RAG document lease across two instances on real NATS")
 class RagDocumentLeaseIT {
@@ -146,18 +146,17 @@ class RagDocumentLeaseIT {
                         }
                     }, new SimpleMeterRegistry());
             leases.start();
-            service = new RagIngestionService(models(), stores(), leases, sharedCaches());
+            service = new RagIngestionService(models(), stores(), sharedCaches(), leases);
             shared.provisionAll();
         }
 
         /**
-         * What {@code CacheFactory} builds in NATS mode for the two RAG caches: this
-         * instance's own local cache, written through to the shared bucket.
+         * What {@code CacheFactory} builds in NATS mode for the RAG ingestion cache:
+         * this instance's own local cache, written through to the shared bucket.
          */
         private ICacheFactory sharedCaches() {
             CacheFactory local = new CacheFactory();
-            Map<String, String> buckets = Map.of(RagIngestionService.STATUS_CACHE, "RAG_STATUS", RagIngestionService.WARNING_CACHE,
-                    "RAG_WARNINGS");
+            Map<String, String> buckets = Map.of(RagIngestionService.INGESTION_CACHE_NAME, "RAG_INGESTION");
             return new ICacheFactory() {
                 @Override
                 public <K, V> ICache<K, V> getCache(String cacheName) {
@@ -242,7 +241,7 @@ class RagDocumentLeaseIT {
         // taken it over by now.
         Thread.sleep(LEASE_TTL.toMillis() * 2);
         assertFalse(delete.isDone(), "B deleted while A's replacement was still embedding");
-        assertEquals("processing", b.service.getStatus(replacing), "B reads the status A writes");
+        assertEquals("processing", b.service.getStatus(RAG_ID, replacing), "B reads the status A writes");
 
         embeddingGate.countDown();
         delete.get(30, TimeUnit.SECONDS);
@@ -292,10 +291,10 @@ class RagDocumentLeaseIT {
 
     private static String awaitFinished(RagIngestionService service, String id) throws InterruptedException {
         long deadline = System.currentTimeMillis() + 30_000;
-        String status = service.getStatus(id);
+        String status = service.getStatus(RAG_ID, id);
         while (("pending".equals(status) || "processing".equals(status)) && System.currentTimeMillis() < deadline) {
             Thread.sleep(20);
-            status = service.getStatus(id);
+            status = service.getStatus(RAG_ID, id);
         }
         return status;
     }

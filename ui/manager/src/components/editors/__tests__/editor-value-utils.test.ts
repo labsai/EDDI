@@ -6,7 +6,7 @@ import {
   parseJsonArgument,
   renameKey,
   toolArgumentKind,
-} from "@/components/editors/editor-value-utils";
+} from "@eddi/app-kit/components/editors/editor-value-utils";
 
 describe("parseHttpCodeList", () => {
   it("parses a comma-separated list", () => {

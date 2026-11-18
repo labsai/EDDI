@@ -20,7 +20,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /**
- * MongoDB-backed store for MCP Calls configurations.
+ * Versioned store for MCP Calls configurations, over whichever backend
+ * {@link IResourceStorageFactory} is configured (MongoDB or PostgreSQL).
  */
 @ApplicationScoped
 public class McpCallsStore extends AbstractResourceStore<McpCallsConfiguration> implements IMcpCallsStore {

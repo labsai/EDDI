@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.configs.agents.IRestAgentStore;
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -64,6 +63,7 @@ class McpConversationToolsReservedContextTest {
         var jsonSerialization = mock(IJsonSerialization.class);
         var triggerStore = mock(IRestAgentTriggerStore.class);
         var userConversationStore = mock(IUserConversationStore.class);
+        when(userConversationStore.createOrAdopt(any())).thenCallRealMethod();
         lenient().when(jsonSerialization.serialize(any())).thenReturn("{}");
         var identity = mock(SecurityIdentity.class);
         lenient().when(identity.isAnonymous()).thenReturn(true);
@@ -75,7 +75,7 @@ class McpConversationToolsReservedContextTest {
                 mock(ResourceAccessGuard.class), false);
 
         when(userConversationStore.readUserConversation("support", "user1"))
-                .thenThrow(new IResourceStore.ResourceStoreException("not found"));
+                .thenReturn(null);
         Map<String, Context> initialContext = new HashMap<>();
         initialContext.put("groupId", new Context(Context.ContextType.string, "6a1b2c3d4e5f60718293a4d7"));
         initialContext.put("dynamicAgentConfig", new Context(Context.ContextType.object, Map.of("enabled", true)));

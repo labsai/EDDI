@@ -96,6 +96,14 @@ services:
       # missing again" — which is the regression that spec exists to catch. The
       # flag-off 404 is covered by RestA2AEndpointTest.
       EDDI_A2A_CAPABILITIES_PUBLIC: "true"
+      # The OpenAI-compatible adapter in its default http-policy=permit, with a
+      # shared key, which is what an Open WebUI connection sends. With OIDC on,
+      # every request carrying that key used to get 401 from the OIDC layer before
+      # the adapter could check it; e2e/auth/openai-compat.spec.ts proves the key
+      # now reaches the adapter and that every other path is still OIDC's. The
+      # value is a test fixture, not a secret, and is repeated in that spec.
+      EDDI_OPENAI_COMPAT_ENABLED: "true"
+      EDDI_OPENAI_COMPAT_API_KEY: "e2e-shared-key"
 
   mongodb:
     image: mongo:7.0.43

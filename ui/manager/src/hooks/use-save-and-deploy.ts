@@ -3,10 +3,10 @@ import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { useTranslation } from "react-i18next";
 import { useChatDrawerStore } from "./use-chat-drawer";
-import { useChatStore, useStartConversation } from "./use-chat";
-import { runDeployWithGrants } from "./use-deploy-with-grants";
-import { deployFailureMessage, reportDeployOutcome } from "@/lib/deploy-outcome";
-import { chatKeys } from "@/lib/query-keys";
+import { useChatStore, useStartConversation } from "@eddi/app-kit/hooks/use-chat";
+import { runDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
+import { deployFailureMessage, reportDeployOutcome } from "@eddi/app-kit/lib/deploy-outcome";
+import { chatKeys } from "@eddi/app-kit/lib/query-keys";
 
 /**
  * Hook that provides a `saveAndDeploy` function.

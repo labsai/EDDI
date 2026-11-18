@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import {
   getWholeAuditTrail,
   mergeById,
   refreshAuditTrail,
-} from "@/lib/audit-pages";
-import type { AuditEntry } from "@/lib/api/audit";
+} from "@eddi/app-kit/lib/audit-pages";
+import type { AuditEntry } from "@eddi/app-kit/lib/api/audit";
 
 const row = (id: string, cost = 0.01) =>
   ({ id, stepIndex: 0, cost }) as unknown as AuditEntry;

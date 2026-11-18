@@ -87,11 +87,13 @@ public class ComplianceStartupChecks {
     /**
      * Surface an unsigned audit ledger.
      * <p>
-     * {@code eddi.vault.master-key} ships empty, so out of the box
-     * {@code AuditLedgerService} derives no HMAC key and writes every entry
-     * unsigned — while the documentation presents the ledger as evidence-grade and
-     * the EU AI Act Art. 12/19 obligations it is sold against assume tamper
-     * evidence. Nothing warned about that until now.
+     * {@code eddi.vault.master-key} ships empty (and so does
+     * {@code eddi.audit.hmac-key}), so out of the box {@code AuditLedgerService}
+     * derives no HMAC key and writes every entry unsigned — while the documentation
+     * presents the ledger as evidence-grade and the EU AI Act Art. 12/19
+     * obligations it is sold against assume tamper evidence. This check is what
+     * warns about that. It does nothing when the ledger is disabled or either key
+     * is set.
      * <p>
      * Advisory by default (an unsigned ledger is still a useful log). Deployments
      * that actually rely on the ledger as evidence set
@@ -106,7 +108,8 @@ public class ComplianceStartupChecks {
         }
 
         if (auditSigningRequired) {
-            throw new IllegalStateException("COMPLIANCE: eddi.compliance.audit-signing-required=true but no vault master key is configured. "
+            throw new IllegalStateException("COMPLIANCE: eddi.compliance.audit-signing-required=true but neither a vault master key nor "
+                    + "eddi.audit.hmac-key is configured. "
                     + "Audit ledger entries would be written WITHOUT an HMAC integrity signature and tampering would be undetectable. "
                     + "Set EDDI_VAULT_MASTER_KEY (or the independent EDDI_AUDIT_HMAC_KEY), or disable the requirement.");
         }
@@ -117,14 +120,16 @@ public class ComplianceStartupChecks {
                 |  COMPLIANCE: Audit ledger is UNSIGNED                            |
                 +------------------------------------------------------------------+
                 |                                                                  |
-                |  No vault master key is configured, so audit entries are written |
-                |  without an HMAC integrity signature. Tampering with the ledger  |
+                |  Neither a vault master key nor an audit HMAC key is configured, |
+                |  so audit entries are written without an HMAC integrity          |
+                |  signature. Tampering with the ledger                            |
                 |  — editing or deleting entries — cannot be detected, and the     |
                 |  /auditstore/verify endpoints can prove nothing.                 |
                 |                                                                  |
                 |  EU AI Act Arts. 12/19 traceability assumes a tamper-evident     |
-                |  record. To enable signing:                                      |
+                |  record. To enable signing, set either:                          |
                 |    EDDI_VAULT_MASTER_KEY=<your-32-char-passphrase>               |
+                |    EDDI_AUDIT_HMAC_KEY=<a secret for the ledger alone>           |
                 |                                                                  |
                 |  To make this a hard startup failure instead of a warning:       |
                 |    eddi.compliance.audit-signing-required=true                   |

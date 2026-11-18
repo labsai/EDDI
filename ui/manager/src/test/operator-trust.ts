@@ -1,5 +1,5 @@
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { OPERATOR_DESCRIPTOR_DESCRIPTION } from "@/lib/api/operator-marker";
 import { buildToolApprovals } from "@/lib/operator/tool-scopes";
 

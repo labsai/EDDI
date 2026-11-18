@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" href="/branding/icon" />
+    <!-- viewport-fit=cover: the layout pads itself by the safe-area insets (notch,
+         home indicator); interactive-widget: the on-screen keyboard shrinks the
+         layout instead of covering the composer (T1.11). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content" />
+    <!-- Installable (T1.11): EDDI renders the manifest in the deployment's brand. -->
+    <link rel="manifest" href="/workforce/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/branding/icon" />
+    <meta name="theme-color" content="%BRAND_THEME_COLOR%" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="description" content="%BRAND_PRODUCT_NAME% Workforce — AI teams that solve complex challenges together" />
+    <title>%BRAND_PRODUCT_NAME% Workforce</title>
+    <!-- The dev-server entry (deep links under `npm run dev`). Like the build shell it
+         loads the brand before the bundle; ui/scripts/vite-plugin-brand.mjs fills in the
+         placeholders and serves /branding/*. Not a build input (vite.config.ts). -->
+    <script src="/branding/__brand__.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </head>
+  <body class="min-h-screen bg-background text-foreground antialiased">
+    <!-- First in <body>, after the stylesheet Vite injects, so the brand's tokens win. -->
+    <link rel="stylesheet" href="/branding/brand.css" />
+    <div id="root"></div>
+  </body>
+</html>

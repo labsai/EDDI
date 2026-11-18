@@ -5,10 +5,10 @@ import {
   parseGroupResourceUri,
   type GroupConversation,
   type GroupDescriptor,
-} from "../groups";
+} from "@eddi/app-kit/lib/api/groups";
 
 // We need to mock the api module
-vi.mock("../../api-client", () => ({
+vi.mock("@eddi/app-kit/lib/api-client", () => ({
   api: {
     get: vi.fn(),
     post: vi.fn(),
@@ -150,8 +150,8 @@ describe("groupGroupsByName", () => {
 
 describe("deleteGroupWithMembers", () => {
   it("resolves current version before deleting each member", async () => {
-    const { api } = await import("../../api-client");
-    const { deleteGroupWithMembers } = await import("../groups");
+    const { api } = await import("@eddi/app-kit/lib/api-client");
+    const { deleteGroupWithMembers } = await import("@eddi/app-kit/lib/api/groups");
 
     // Mock currentversion endpoint → returns 5 for all agents
     vi.mocked(api.get).mockResolvedValue(5);
@@ -195,8 +195,8 @@ describe("deleteGroupWithMembers", () => {
   it("touches no member agent when the group delete is refused", async () => {
     // A page still on a superseded version gets a 409 for the group. That delete
     // used to run last, after every member had already been soft-deleted.
-    const { api } = await import("../../api-client");
-    const { deleteGroupWithMembers } = await import("../groups");
+    const { api } = await import("@eddi/app-kit/lib/api-client");
+    const { deleteGroupWithMembers } = await import("@eddi/app-kit/lib/api/groups");
     vi.mocked(api.get).mockReset().mockResolvedValue(5);
     vi.mocked(api.delete)
       .mockReset()
@@ -231,8 +231,8 @@ describe("deleteGroupWithMembers", () => {
 
 describe("deleteGroup — soft by default (review 2026-10-02 #7)", () => {
   it("sends permanent=false when the caller does not ask for a hard delete", async () => {
-    const { api } = await import("../../api-client");
-    const { deleteGroup } = await import("../groups");
+    const { api } = await import("@eddi/app-kit/lib/api-client");
+    const { deleteGroup } = await import("@eddi/app-kit/lib/api/groups");
     vi.mocked(api.delete).mockClear();
     vi.mocked(api.delete).mockResolvedValue(undefined);
 
@@ -242,8 +242,8 @@ describe("deleteGroup — soft by default (review 2026-10-02 #7)", () => {
   });
 
   it("sends permanent=true only when asked", async () => {
-    const { api } = await import("../../api-client");
-    const { deleteGroup } = await import("../groups");
+    const { api } = await import("@eddi/app-kit/lib/api-client");
+    const { deleteGroup } = await import("@eddi/app-kit/lib/api/groups");
     vi.mocked(api.delete).mockClear();
     vi.mocked(api.delete).mockResolvedValue(undefined);
 
@@ -255,7 +255,7 @@ describe("deleteGroup — soft by default (review 2026-10-02 #7)", () => {
 
 describe("parseIdFromLocation", () => {
   it("drops the version query — the Workforce duplicate built /{id}?version=1/settings from it", async () => {
-    const { parseIdFromLocation } = await import("../location-version");
+    const { parseIdFromLocation } = await import("@eddi/app-kit/lib/api/location-version");
     expect(parseIdFromLocation("/groupstore/groups/abc123?version=1")).toBe("abc123");
     expect(parseIdFromLocation("eddi://ai.labs.group/groupstore/groups/abc123?version=7")).toBe("abc123");
     expect(parseIdFromLocation("http://h/groupstore/groups/abc123")).toBe("abc123");
@@ -280,8 +280,8 @@ describe("deleteGroupWithMembers — failures are reported, and a permanent dele
   };
 
   async function setup(opts: { groupCurrent?: number; failAgent?: { id: string; status: number } }) {
-    const { api } = await import("../../api-client");
-    const groups = await import("../groups");
+    const { api } = await import("@eddi/app-kit/lib/api-client");
+    const groups = await import("@eddi/app-kit/lib/api/groups");
     vi.mocked(api.get).mockReset().mockImplementation(async (path: string) =>
       path.includes("groupstore/groups/") ? (opts.groupCurrent ?? 3) : 7,
     );

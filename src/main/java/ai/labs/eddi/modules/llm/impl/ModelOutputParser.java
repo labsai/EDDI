@@ -89,7 +89,7 @@ public final class ModelOutputParser {
      * Result of {@link #parse}.
      *
      * @param kind
-     *            VALID, INVALID or EMPTY
+     *            VALID, INVALID, EMPTY or SCHEMA_MISMATCH
      * @param value
      *            the parsed Map/List when VALID or SCHEMA_MISMATCH; the raw reply
      *            otherwise (today's observable behaviour: the raw string is what
@@ -159,9 +159,9 @@ public final class ModelOutputParser {
      * {@code fieldAliases} and the plain-text {@code wrap}. This is the one path
      * every caller shares, so a reply that one caller (live turn, resume, the
      * format-retry runner's detection, the circuit breaker) sees as usable is
-     * usable for all of them. The order is: fence strip / object extraction,
-     * {@code \'} repair, double-escape repair, parse, aliases, shape validation,
-     * and only for a reply that is still not JSON, {@code wrap}.
+     * usable for all of them. The order is: fence strip, {@code \'} repair,
+     * whole-reply parse, double-escape repair, object extraction, aliases, shape
+     * validation, and only for a reply that is still not JSON, {@code wrap}.
      */
     public JsonOutcome parse(String raw, boolean convertToObject, String responseSchema, List<String> nonBlankFields, String taskId,
                              RescueOptions rescue) {

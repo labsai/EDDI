@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.cluster.lease.LeaseInfo;
 import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.rag.RagIngestionService.DeleteOutcome;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -42,7 +43,6 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.modules.rag.RagIngestionService.METADATA_KB_ID;
 import static ai.labs.eddi.modules.rag.RagIngestionService.METADATA_SOURCE;
-import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -50,7 +50,9 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -99,8 +101,9 @@ class RagIngestionServiceClusterTest {
         };
         when(models.getOrCreate(any(), any())).thenReturn(model);
         when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(store);
-        instanceA = new RagIngestionService(models, stores, cluster, sharedCaches);
-        instanceB = new RagIngestionService(models, stores, cluster, sharedCaches);
+        when(stores.getOrCreate(anyString(), any())).thenReturn(store);
+        instanceA = new RagIngestionService(models, stores, sharedCaches, cluster);
+        instanceB = new RagIngestionService(models, stores, sharedCaches, cluster);
         config = new RagConfiguration();
         config.setName("kb");
         config.setEmbeddingProvider("openai");
@@ -118,38 +121,69 @@ class RagIngestionServiceClusterTest {
         String replacing = instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
         assertTrue(embedding.await(5, TimeUnit.SECONDS), "A never started embedding");
 
-        CompletableFuture<Void> delete = CompletableFuture.runAsync(() -> instanceB.underDocumentLease(RAG_ID, kbId, DOC,
-                Duration.ofSeconds(10), lease -> {
-                    store.removeAll(byName());
-                    return null;
-                }));
+        CompletableFuture<DeleteOutcome> delete = CompletableFuture.supplyAsync(() -> instanceB.delete(RAG_ID, DOC, config));
         Thread.sleep(200);
         assertFalse(delete.isDone(), "the delete answered while the replacement was still embedding");
 
         embeddingGate.countDown();
-        delete.get(10, TimeUnit.SECONDS);
+        assertEquals(DeleteOutcome.DELETED, delete.get(10, TimeUnit.SECONDS));
         awaitStatus(instanceA, replacing, "completed");
 
         assertEquals(List.of(), storedTexts(), "the replacement's chunks came back after the delete");
     }
 
     @Test
-    @DisplayName("a delete that cannot wait out the replacement gives up with TIMEOUT and removes nothing")
+    @DisplayName("a delete that cannot wait out the replacement on another instance answers BUSY and removes nothing")
     void deleteGivesUpWhileTheReplacementHoldsTheDocument() throws Exception {
         embeddingGate = new CountDownLatch(1);
+        instanceB.deleteLockTimeout = Duration.ofMillis(200);
         try {
             instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
             assertTrue(embedding.await(5, TimeUnit.SECONDS));
 
-            AtomicBoolean ran = new AtomicBoolean();
-            var refused = assertThrows(LeaseUnavailableException.class,
-                    () -> instanceB.underDocumentLease(RAG_ID, kbId, DOC, Duration.ofMillis(200), lease -> ran.getAndSet(true)));
-
-            assertEquals(LeaseUnavailableException.Reason.TIMEOUT, refused.reason());
-            assertFalse(ran.get(), "the delete ran without the lease");
+            assertEquals(DeleteOutcome.BUSY, instanceB.delete(RAG_ID, DOC, config));
+            verify(stores, never()).getOrCreate(anyString(), any());
         } finally {
             embeddingGate.countDown();
         }
+    }
+
+    @Test
+    @DisplayName("a delete whose cluster lease cannot be had answers BUSY and leaves the document alone")
+    void deleteWithoutALeaseIsBusy() {
+        store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
+                Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
+        cluster.unavailable.set(LeaseUnavailableException.Reason.DEGRADED);
+
+        assertEquals(DeleteOutcome.BUSY, instanceA.delete(RAG_ID, DOC, config));
+
+        assertEquals(List.of("Refunds within 30 days."), storedTexts());
+    }
+
+    @Test
+    @DisplayName("a delete whose lease was lost before it starts answers BUSY and leaves the document alone")
+    void deleteOnALostLeaseIsBusy() {
+        store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
+                Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
+        cluster.loseEveryLease.set(true);
+
+        assertEquals(DeleteOutcome.BUSY, instanceA.delete(RAG_ID, DOC, config));
+
+        assertEquals(List.of("Refunds within 30 days."), storedTexts());
+        assertEquals(1, cluster.released.get(), "the lost lease is still released");
+    }
+
+    @Test
+    @DisplayName("a delete removes the document under the lease and releases it")
+    void deleteRemovesTheDocumentUnderTheLease() {
+        store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
+                Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
+
+        assertEquals(DeleteOutcome.DELETED, instanceA.delete(RAG_ID, DOC, config));
+
+        assertEquals(List.of(), storedTexts());
+        assertEquals(1, cluster.acquired.size());
+        assertEquals(1, cluster.released.get());
     }
 
     @Test
@@ -197,7 +231,7 @@ class RagIngestionServiceClusterTest {
         String status = awaitFinished(instanceA, id);
 
         assertTrue(status.startsWith("failed"), status);
-        assertNotNull(instanceA.getWarning(id));
+        assertNotNull(instanceA.getWarning(RAG_ID, id));
         assertEquals(List.of("Refunds within 30 days.", "Refunds within 47 days."), storedTexts(),
                 "the cleanup ran without the lease");
     }
@@ -257,11 +291,7 @@ class RagIngestionServiceClusterTest {
         String id = instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
 
         awaitStatus(instanceB, id, "completed");
-        assertNotNull(instanceB.getWarning(id), "B must see the warning A wrote");
-    }
-
-    private Filter byName() {
-        return metadataKey(METADATA_SOURCE).isEqualTo(DOC).and(metadataKey(METADATA_KB_ID).isEqualTo(kbId));
+        assertNotNull(instanceB.getWarning(RAG_ID, id), "B must see the warning A wrote");
     }
 
     private List<String> storedTexts() {
@@ -271,10 +301,10 @@ class RagIngestionServiceClusterTest {
 
     private static String awaitFinished(RagIngestionService service, String id) {
         long deadline = System.currentTimeMillis() + 10_000;
-        String status = service.getStatus(id);
+        String status = service.getStatus(RAG_ID, id);
         while (("pending".equals(status) || "processing".equals(status)) && System.currentTimeMillis() < deadline) {
             Thread.onSpinWait();
-            status = service.getStatus(id);
+            status = service.getStatus(RAG_ID, id);
         }
         return status;
     }
