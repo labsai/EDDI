@@ -1,4 +1,5 @@
 import { AppLink } from "@eddi/app-kit/components/shared/app-link";
+import { lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ChevronLeft, Menu, Sparkles } from "lucide-react";
@@ -6,7 +7,14 @@ import { Button } from "@eddi/ui";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { ApprovalsIndicator } from "@/components/workforce/approvals-indicator";
-import { WorkforceUserMenu } from "@/components/workforce/workforce-user-menu";
+
+// The menu is the only thing in the first load that needs the dropdown
+// primitives (Radix menu, popper, focus scope: about 30 KB gz), and it is a
+// 2rem avatar. Load it after first paint; the fallback keeps its footprint so
+// the bar does not shift.
+const WorkforceUserMenu = lazy(() =>
+  import("@/components/workforce/workforce-user-menu").then((m) => ({ default: m.WorkforceUserMenu })),
+);
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -92,7 +100,9 @@ export function WorkforceTopbar({
           </Button>
         )}
         {/* Who is signed in, and sign-out (nothing with authentication off). */}
-        <WorkforceUserMenu />
+        <Suspense fallback={<span className="h-8 w-8 shrink-0" aria-hidden="true" />}>
+          <WorkforceUserMenu />
+        </Suspense>
       </div>
     </header>
   );
