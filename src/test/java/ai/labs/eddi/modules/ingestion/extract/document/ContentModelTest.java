@@ -101,6 +101,9 @@ class ContentModelTest {
             rows.add(List.of());
 
             assertEquals(List.of(List.of(Cell.of("a"))), table.rows());
+            List<List<Cell>> withAGap = new ArrayList<>();
+            withAGap.add(null);
+            assertEquals(List.of(List.of()), new TableBlock(1, 0f, 0, "t", withAGap, 1f, 1, 1).rows());
             assertThrows(UnsupportedOperationException.class, () -> table.rows().get(0).add(Cell.of("c")));
 
             List<String> warnings = new ArrayList<>(List.of("w"));

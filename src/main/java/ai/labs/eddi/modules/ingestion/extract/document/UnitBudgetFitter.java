@@ -265,7 +265,9 @@ public final class UnitBudgetFitter {
                     if (part[0] == part[1] && tokens(part[0], part[1]) > config.maxUnitTokens()) {
                         pagesOverBudget++;
                     }
-                    node.children.add(Node.leaf(title + " (part " + (k + 1) + " of " + parts.size() + ")",
+                    // The suffix is what tells the parts apart, so the title gives way to it.
+                    String suffix = " (part " + (k + 1) + " of " + parts.size() + ")";
+                    node.children.add(Node.leaf(capped(title, MAX_TITLE_CODE_POINTS - suffix.length()) + suffix,
                             part[0], part[1]));
                 }
             }
@@ -370,14 +372,15 @@ public final class UnitBudgetFitter {
             } else {
                 title = first + " – " + last;
             }
-            return capped(title);
+            return capped(title, MAX_TITLE_CODE_POINTS);
         }
 
-        private static String capped(String title) {
-            if (title.codePointCount(0, title.length()) <= MAX_TITLE_CODE_POINTS) {
+        /** At most {@code max} code points, the last an ellipsis when it was cut. */
+        private static String capped(String title, int max) {
+            if (title.codePointCount(0, title.length()) <= max) {
                 return title;
             }
-            return title.substring(0, title.offsetByCodePoints(0, MAX_TITLE_CODE_POINTS - 1)) + "…";
+            return title.substring(0, title.offsetByCodePoints(0, max - 1)) + "…";
         }
     }
 }

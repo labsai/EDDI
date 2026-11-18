@@ -246,9 +246,19 @@ public class PdfTextExtractor implements DocumentTextExtractor {
          * {@link PDFTextStripper#processPage} is startPage, the page's program,
          * writePage, endPage; the program is what {@link PageTooLong} leaves, so the
          * remaining two are done here on what was collected.
+         *
+         * <p>
+         * PDFTextStripper calls this for every page that has content, in or out of the
+         * requested range, and lays out only those in range. A page outside it is
+         * skipped before its content is decoded or charged: reading a document one page
+         * at a time otherwise charged every page on every pass, and the square of the
+         * page count refused ordinary long documents as decompression bombs.
          */
         @Override
         public void processPage(PDPage page) throws IOException {
+            if (getCurrentPageNo() < getStartPage() || getCurrentPageNo() > getEndPage()) {
+                return;
+            }
             chargePageContents(page);
             try {
                 super.processPage(page);

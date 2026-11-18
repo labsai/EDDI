@@ -24,6 +24,6 @@ public record TableBlock(int page, float y, int order, String tableId, List<List
         int firstPage, int lastPage) implements Block {
 
     public TableBlock {
-        rows = rows == null ? List.of() : rows.stream().map(List::copyOf).toList();
+        rows = rows == null ? List.of() : rows.stream().map(row -> row == null ? List.<Cell>of() : List.copyOf(row)).toList();
     }
 }

@@ -156,10 +156,10 @@ public class PdfStructureExtractor {
         if (preFilter) {
             PdfStreamBudget.requireWithin(pdf, bounds.maxUncompressedBytes(), deadline);
         }
+        Structure structure;
         try (var budget = PdfDecodeBudget.open(bounds.maxDecodedBytes())) {
-            DocumentManifest manifest;
             try {
-                manifest = read(pdf, rootRef, config, bounds, deadline);
+                structure = read(pdf, config, bounds, deadline);
             } catch (UnreadableDocumentException e) {
                 if (budget.exceeded()) {
                     throw tooMuchToDecode(budget);
@@ -169,8 +169,21 @@ public class PdfStructureExtractor {
             if (budget.exceeded()) {
                 throw tooMuchToDecode(budget);
             }
-            return manifest;
         }
+        // Outside the read, with the document closed: the fitting is pure, and a fault
+        // in it is this code's, not the file's — it must not be reported as an
+        // unreadable PDF.
+        UnitBudgetFitter.Result fitted = UnitBudgetFitter.fit(structure.sections(), structure.tokens(), config);
+        Set<String> warnings = new LinkedHashSet<>(structure.warnings());
+        warnings.addAll(fitted.warnings());
+        return new DocumentManifest(rootRef, sha256(pdf), structure.tokens().length, structure.used(),
+                fitted.units(), List.of(), List.copyOf(warnings));
+    }
+
+    /**
+     * What reading the document found: the sections to fit and the page estimates.
+     */
+    private record Structure(List<Section> sections, int[] tokens, SplitStrategy used, Set<String> warnings) {
     }
 
     private static UnreadableDocumentException tooMuchToDecode(PdfDecodeBudget.Budget budget) {
@@ -179,8 +192,7 @@ public class PdfStructureExtractor {
                 + "split it, or save a copy without embedded attachments.");
     }
 
-    private DocumentManifest read(byte[] pdf, String rootRef, SplitConfig split, ExtractionLimits limits,
-                                  Instant deadline) {
+    private Structure read(byte[] pdf, SplitConfig split, ExtractionLimits limits, Instant deadline) {
         try (PDDocument document = Loader.loadPDF(pdf, "", null, null,
                 MemoryUsageSetting.setupMainMemoryOnly(limits.maxUncompressedBytes()).streamCache)) {
             if (document.isEncrypted()) {
@@ -212,11 +224,7 @@ public class PdfStructureExtractor {
             if (sections == null) {
                 sections = pageWindows(pageCount, split.pagesPerUnit());
             }
-
-            UnitBudgetFitter.Result fitted = UnitBudgetFitter.fit(sections, tokens, split);
-            warnings.addAll(fitted.warnings());
-            return new DocumentManifest(rootRef, sha256(pdf), pageCount, used, fitted.units(), List.of(),
-                    List.copyOf(warnings));
+            return new Structure(sections, tokens, used, warnings);
         } catch (InvalidPasswordException e) {
             throw new UnreadableDocumentException("This PDF is encrypted. Upload a copy without a password.", e);
         } catch (UnreadableDocumentException e) {
@@ -306,8 +314,10 @@ public class PdfStructureExtractor {
 
     /**
      * An outline title as a unit title: control and formatting characters (line
-     * breaks, bidirectional overrides) become spaces, runs of space one, and it is
-     * cut to {@link UnitBudgetFitter}'s title length. Null when nothing is left.
+     * breaks, bidirectional overrides) become spaces, runs of space one, and no
+     * more than 256 code points are kept — a little above the 200
+     * {@link UnitBudgetFitter} shows, so that its cut, and the ellipsis that marks
+     * it, is the one a reader sees. Null when nothing is left.
      */
     static String cleanTitle(String raw) {
         if (raw == null) {

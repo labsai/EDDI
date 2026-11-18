@@ -251,6 +251,21 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @Timeout(120)
+        @DisplayName("measures a long ordinary document within the decode budget")
+        void longDocument() {
+            // Each page is measured on its own. Charging every page's content on every
+            // page's pass made the cost the square of the page count, and refused an
+            // ordinary 400-page text document as a decompression bomb.
+            var tightBudget = new ExtractionLimits(200_000, 500, 5_000, 64, 8L * 1024 * 1024);
+
+            DocumentManifest manifest = extractor.manifest(PdfFixtures.plain(400), "ref-1",
+                    SplitConfig.defaults(), tightBudget);
+
+            assertEquals(400, manifest.pageCount());
+        }
+
+        @Test
         @DisplayName("measures only maxParts pages and gives the rest the average, saying so")
         void beyondMaxParts() {
             var fewPages = new ExtractionLimits(200_000, 4, 5_000, 64, 64L * 1024 * 1024);
@@ -455,6 +470,20 @@ class PdfStructureExtractorTest {
 
             var failure = assertThrows(UnreadableDocumentException.class, () -> extractor.manifest(pdf, "ref-1",
                     SplitConfig.defaults(), limits.withMaxDuration(Duration.ofNanos(1))));
+
+            assertTrue(failure.getMessage().contains("too long"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("checks the deadline itself, also on pages with nothing for the text engine to run")
+        void deadlineOnEmptyPages() {
+            // Blank pages have no content stream, so the stripper's own operator check
+            // never runs; only the extractor's checks can stop this read. The raw-byte
+            // scan, which checks the deadline too, is off so that it cannot stop it first.
+            byte[] pdf = PdfFixtures.blank(300);
+
+            var failure = assertThrows(UnreadableDocumentException.class, () -> extractor.manifest(pdf, "ref-1",
+                    SplitConfig.defaults(), limits.withMaxDuration(Duration.ofNanos(1)), false));
 
             assertTrue(failure.getMessage().contains("too long"), failure.getMessage());
         }

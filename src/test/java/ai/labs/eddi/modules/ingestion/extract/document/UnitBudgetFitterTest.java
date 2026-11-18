@@ -250,6 +250,22 @@ class UnitBudgetFitterTest {
         }
 
         @Test
+        @DisplayName("keeps the part number when a long title is cut, so parts stay distinguishable")
+        void longTitlesKeepTheirPartNumber() {
+            Result result = UnitBudgetFitter.fit(List.of(Section.of("y".repeat(300), 1, 3)), tokens(3, 800),
+                    config(1_000, 0, 60));
+
+            List<String> parts = result.units().stream().filter(u -> u.parentId() != null)
+                    .map(DocumentUnit::title).toList();
+            assertEquals(3, parts.size());
+            for (int k = 0; k < parts.size(); k++) {
+                String title = parts.get(k);
+                assertTrue(title.endsWith("… (part " + (k + 1) + " of 3)"), title);
+                assertEquals(UnitBudgetFitter.MAX_TITLE_CODE_POINTS, title.codePointCount(0, title.length()));
+            }
+        }
+
+        @Test
         @DisplayName("refuses sections that leave a page out, overlap, or run past the end")
         void refusesBadCover() {
             int[] five = tokens(5, 1);
