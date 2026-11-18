@@ -2195,6 +2195,7 @@ class RestScheduleStoreTest {
 
     @Test
     void create_aDisabledSchedule_isNotCounted() throws Exception {
+        asEditor("alice");
         setField(rest, "maxSchedulesPerOwner", 1);
         when(scheduleStore.countEnabledSchedulesCreatedBy(any())).thenReturn(50);
         when(scheduleStore.createSchedule(any())).thenReturn("new-id");

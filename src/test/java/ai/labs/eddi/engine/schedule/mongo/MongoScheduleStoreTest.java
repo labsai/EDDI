@@ -763,6 +763,7 @@ class MongoScheduleStoreTest {
         assertTrue(at >= 0, "missing index: " + options.getAllValues().stream().map(IndexOptions::getName).toList());
         var rendered = keys.getAllValues().get(at)
                 .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.contains("fireStatus") && rendered.contains("nextFire"), rendered);
         assertTrue(rendered.indexOf("fireStatus") < rendered.indexOf("nextFire"), rendered);
     }
 
