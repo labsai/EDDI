@@ -114,6 +114,26 @@ class AlertMaintenanceScheduleTest {
     }
 
     @Test
+    @DisplayName("an enabled, healthy copy survives a disabled or dead-lettered older one")
+    void prefersAHealthySurvivor() throws Exception {
+        ScheduleConfiguration disabledOlder = row("old-disabled", AlertSchedules.maintenanceMetadata());
+        disabledOlder.setCreatedAt(Instant.parse("2026-11-18T10:00:01Z"));
+        disabledOlder.setEnabled(false);
+        ScheduleConfiguration deadOlder = row("old-dead", AlertSchedules.maintenanceMetadata());
+        deadOlder.setCreatedAt(Instant.parse("2026-11-18T10:00:02Z"));
+        deadOlder.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
+        ScheduleConfiguration healthy = row("young-healthy", AlertSchedules.maintenanceMetadata());
+        healthy.setCreatedAt(Instant.parse("2026-11-18T10:00:09Z"));
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(disabledOlder, deadOlder, healthy));
+
+        schedule.removeDuplicates();
+
+        verify(store).deleteSchedule("old-disabled");
+        verify(store).deleteSchedule("old-dead");
+        verify(store, never()).deleteSchedule("young-healthy");
+    }
+
+    @Test
     @DisplayName("a single maintenance schedule is never deleted")
     void aSingleScheduleIsKept() throws Exception {
         when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean()))

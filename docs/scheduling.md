@@ -137,7 +137,8 @@ it. EDDI looks 9 years ahead for the next fire, which covers the longest gap a v
 expression can have (29 February across a non-leap century year). If a fire completes and
 no next fire exists any more (a stored expression that stopped matching), the schedule is
 **disabled** with `disabledReason: "no-next-fire"` and the fire stays recorded as completed;
-it is never left claimed and fired again.
+it is not left claimed to be fired again. (The completion write is retried three times; if
+the poller is interrupted in the middle of those retries, the claim is left to its lease.)
 
 ### Heartbeat Configuration
 
@@ -263,8 +264,11 @@ calls `/enable` or `/disable`.
 ### Limits
 
 Two limits bound how many schedules the API accepts. They count **enabled** schedules
-created through an authenticated caller (`createdBy` set) — schedules the engine arms
-itself (HITL timeouts, continuations, Dream) are not counted:
+that carry a `createdBy`: the ones created through the schedule API or the MCP tools, and also
+the team cadences, lesson consolidations and follow-ups created on a user's behalf. Those
+last three count but are never refused by the limit themselves (they are created by their own
+endpoints). Schedules the engine arms itself (HITL timeouts, continuations, Dream) have no
+`createdBy` and are not counted:
 
 | Property | Default | Refuses |
 |---|---|---|
@@ -273,6 +277,11 @@ itself (HITL timeouts, continuations, Dream) are not counted:
 
 A refusal is `429` with error `SCHEDULE_LIMIT`; disable or delete a schedule first. `0`
 switches a limit off. Creating a schedule already disabled is never refused.
+
+With authorization off every caller is the same placeholder user, so the per-owner limit is
+not applied and only the deployment-wide limit counts. The limits are soft: the count and the
+write are not one atomic step, so concurrent creates can overshoot by a few. If the count
+itself cannot be read, the request is not refused.
 
 There is deliberately no default `maxCostPerFire`. A recurring schedule that has no cost cap
 (or is persistent with `eddi.schedule.persistent-conversation-max-steps` off) gets a
@@ -288,7 +297,9 @@ as it is. Use it when a conversation outgrew the document limit and every fire f
 `PUT` cannot do that, because it carries `persistentConversationId` over. Settings, schedule
 state and fire history are untouched. Same permission as editing the schedule.
 
-Deleting a schedule ends its persistent conversation under the same rule.
+Deleting a schedule ends its persistent conversation under the same rule. The end is a
+compare-and-set from the state that was read, so a conversation that became busy in between
+is left as it is.
 
 ### Who Can See and Manage a Schedule
 
@@ -505,6 +516,12 @@ Re-arming is deliberately conservative, because a skip delivered nothing:
 - **A one-shot whose moment has passed** has no cadence to re-arm to, so it does
   go through retry/backoff — its single delivery genuinely never happened.
 
+Dead-lettered schedules keep `enabled` and their old due time (so retry and dismiss work) but
+are excluded from the due query by an index. On first start after the upgrade PostgreSQL builds
+the new partial index `idx_schedules_due_live` with a plain, non-concurrent `CREATE INDEX`
+(writes to `eddi_schedules` wait for the build; negligible for the usual table size), and
+MongoDB builds `idx_schedules_due_by_status`.
+
 ## Cluster Awareness
 
 The `SchedulePollerService` is cluster-aware — in multi-instance deployments, only one instance executes each scheduled fire. This is achieved via atomic claim operations (`tryClaim`), preventing duplicate execution when running EDDI behind a load balancer.
@@ -615,13 +632,30 @@ history.
 
 ### Fire timeouts
 
-When a fire exceeds `eddi.schedule.fire-timeout`, it is recorded `FAILED` and the turn it
-started is cancelled through the conversation's own cancel (cooperative: it stops at the
-next task boundary, so a call already in flight finishes first). Every turn of one due fire,
-retries included, carries the same `Idempotency-Key` (`schedule:<scheduleId>@<lastFired>`):
-a retry queued behind a first turn that committed after all is answered as skipped instead
-of running the message twice. A `conversationStrategy: new` retry opens a new conversation,
-so for those the cancel is what stops the first turn.
+When a fire gives up on a turn it dispatched, it is recorded `FAILED` and **only its own turn**
+is stopped (cooperatively: at the next task boundary, so a call already in flight finishes
+first). This happens on the fire timeout (`eddi.schedule.fire-timeout`), on a manual "fire now"
+that times out, and when the poller's watchdog interrupts the fire.
+
+- `conversationStrategy: new`: the conversation was created for this fire, so its in-flight
+  turn is cancelled.
+- `persistent`: the conversation is shared with people, other channels and continuations. Only an
+  in-flight turn that carries this fire's run id is signalled; a human's turn, a pending approval
+  and a self-continuing job are untouched. A turn of the fire that is still queued behind
+  another is dropped when it reaches the front, because it carries a give-up time
+  (`eddi.conversation.skip-turns-of-timed-out-callers`, on by default; off, a late turn
+  still runs).
+- A **shutdown drain** cancels nothing: that turn may still complete, and its retry is
+  protected by the lease and the idempotency key. Turns running on another cluster node are
+  not signalled either.
+
+Every turn of one due occurrence carries the same `Idempotency-Key`,
+`schedule:<scheduleId>@<due time of the occurrence>`. A failed attempt keeps its due time, so
+its retries share the key and a retry queued behind a first turn that committed after all is
+treated as a completed fire (the message was delivered) instead of running twice. Completed,
+skipped, dismissed and dead-lettered-then-requeued occurrences get a new due time, so the
+next one always runs. A manual "fire now" has a key of its own per click. The same run id
+scopes `window: "RUN"` tool quotas.
 
 ### Observability
 

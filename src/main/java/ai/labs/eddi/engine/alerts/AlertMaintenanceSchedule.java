@@ -50,13 +50,20 @@ public class AlertMaintenanceSchedule {
         removeDuplicates();
     }
 
+    private static int unhealthyRank(ScheduleConfiguration schedule) {
+        return schedule.isEnabled() && schedule.getFireStatus() != ScheduleConfiguration.FireStatus.DEAD_LETTERED ? 0 : 1;
+    }
+
     /**
-     * Keeps exactly one marked maintenance schedule: the oldest ({@code createdAt},
-     * then id). Nodes that start at once can each create one — the REST API then
-     * refuses to delete the extra, as it does for the system schedule — and two
-     * copies would run every retry and digest pass twice. Every node applies the
-     * same rule, so they agree on the survivor and the deletes are idempotent.
-     * Never throws.
+     * Keeps exactly one marked maintenance schedule: an enabled, not dead-lettered
+     * one if any, then the oldest ({@code createdAt}, then id). Nodes that start at
+     * once can each create one — the REST API then refuses to delete the extra, as
+     * it does for the system schedule — and two copies would run every retry and
+     * digest pass twice. Every node applies the same rule, so they agree on the
+     * survivor and the deletes are idempotent. Not airtight: two nodes can each
+     * scan before the other's insert, leaving two copies until the next startup or
+     * the next time one is created. (A periodic pass would rescan every schedule
+     * each minute for a rare race, so there is none.) Never throws.
      */
     void removeDuplicates() {
         if (!settings.enabled()) {
@@ -74,7 +81,11 @@ public class AlertMaintenanceSchedule {
             if (marked.size() < 2) {
                 return;
             }
-            marked.sort(Comparator.comparing(ScheduleConfiguration::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
+            // The survivor is an enabled, not dead-lettered copy if there is one (a
+            // healthy younger copy must not be deleted for a disabled older one), then
+            // the oldest. Every node applies the same order, so they agree.
+            marked.sort(Comparator.comparingInt(AlertMaintenanceSchedule::unhealthyRank)
+                    .thenComparing(ScheduleConfiguration::getCreatedAt, Comparator.nullsLast(Comparator.naturalOrder()))
                     .thenComparing(ScheduleConfiguration::getId, Comparator.nullsLast(Comparator.naturalOrder())));
             for (ScheduleConfiguration duplicate : marked.subList(1, marked.size())) {
                 scheduleStore.deleteSchedule(duplicate.getId());

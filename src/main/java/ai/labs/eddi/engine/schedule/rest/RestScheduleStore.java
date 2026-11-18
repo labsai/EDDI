@@ -1606,7 +1606,11 @@ public class RestScheduleStore implements IRestScheduleStore {
      */
     private Response requireWithinScheduleCaps(String createdBy) {
         try {
-            if (maxSchedulesPerOwner > 0 && createdBy != null && scheduleStore.countEnabledSchedulesCreatedBy(createdBy) >= maxSchedulesPerOwner) {
+            // With authorization off every caller is the one placeholder principal, so a
+            // per-owner limit would be a second deployment-wide bucket: only the total
+            // applies.
+            if (maxSchedulesPerOwner > 0 && createdBy != null && !SCHEDULER_USER_ID.equals(createdBy)
+                    && scheduleStore.countEnabledSchedulesCreatedBy(createdBy) >= maxSchedulesPerOwner) {
                 LOGGER.warnf("Refused a schedule for %s: it already has %d enabled schedules (eddi.schedule.max-per-owner)", sanitize(createdBy),
                         maxSchedulesPerOwner);
                 return scheduleLimit("You already have " + maxSchedulesPerOwner

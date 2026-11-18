@@ -16,6 +16,14 @@ Findings L1-L6 and the confirmed parts of L8 of the November 2026 code review (s
 
 **Files:** [`ConversationStepRunner.java`](../../src/main/java/ai/labs/eddi/engine/internal/ConversationStepRunner.java), [`OutputMatchHook.java`](../../src/main/java/ai/labs/eddi/engine/alerts/OutputMatchHook.java), [`SchedulePollerService.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/SchedulePollerService.java), [`CronParser.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/CronParser.java), [`ScheduleFireExecutor.java`](../../src/main/java/ai/labs/eddi/engine/runtime/internal/ScheduleFireExecutor.java), [`RestScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/rest/RestScheduleStore.java), [`MongoScheduleStore.java`](../../src/main/java/ai/labs/eddi/engine/schedule/mongo/MongoScheduleStore.java), [`PostgresScheduleStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresScheduleStore.java), [`AlertMaintenanceSchedule.java`](../../src/main/java/ai/labs/eddi/engine/alerts/AlertMaintenanceSchedule.java), [`scheduling.md`](../scheduling.md)
 
+### Review follow-up (same branch)
+
+- The timeout cancel now stops only the fire's own turn. A `new`-strategy fire cancels its own conversation; a `persistent` fire calls the new `IConversationService.cancelInFlightTurn(conversationId, "scheduleFireId", runId)`, which signals the in-flight turn only when it carries that run id (no state change, no pause cancelled, no continuation disarmed, no approval audit). A turn still queued carries `callerGivesUpAtEpochMs` and is dropped at the front of the queue. The watchdog interrupt and a manual fire that times out cancel too; a shutdown drain (`ScheduleFireExecutor.beginShutdown`) does not.
+- The run id and idempotency key derive from the occurrence's due time (`nextFire` at claim) instead of `lastFired`, so a skipped fire no longer makes the next regular fire reuse the key and be swallowed; a manual fire gets a key per click; a requeued dead letter is a new occurrence. A "skip" that is really an already-committed earlier attempt now completes the occurrence. The `window: "RUN"` tool-quota scope follows the same id.
+- Delete and reset end the old conversation with a compare-and-set from the state read, not an unconditional end.
+- `removeDuplicates` keeps an enabled, not dead-lettered copy in preference to an older broken one.
+- Caps: with authorization off only the total limit applies; the docs state which schedules count and that the limit is soft.
+
 ### Design decisions
 
 - Test conversations are excluded at the two turn hooks, not by adding an environment to alert rules (the finding's alternative); rules keep no notion of environment.

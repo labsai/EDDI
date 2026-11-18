@@ -621,8 +621,10 @@ public class MongoScheduleStore implements IScheduleStore {
             // Most overdue first, _id breaking ties. With more due rows than one poll
             // batch, an unsorted limit hands back whichever rows the storage engine
             // meets first — the same subset every poll — so the rest wait for that
-            // subset to drain regardless of how long they have been due. The
-            // (enabled, nextFire, fireStatus) index serves this sort.
+            // subset to drain regardless of how long they have been due. The sort has
+            // _id as its tie-break, which no index carries, so MongoDB sorts the due rows
+            // in memory (bounded by the limit); the index only narrows which rows those
+            // are — see idx_schedules_due_by_status.
             List<ScheduleConfiguration> result = new ArrayList<>();
             for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
                 result.add(fromDocument(doc));

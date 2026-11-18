@@ -2150,6 +2150,7 @@ class RestScheduleStoreTest {
 
     @Test
     void create_overThePerOwnerCap_isRefusedWith429AndWritesNothing() throws Exception {
+        asEditor("alice");
         setField(rest, "maxSchedulesPerOwner", 3);
         when(scheduleStore.countEnabledSchedulesCreatedBy(anyString())).thenReturn(3);
 
@@ -2161,7 +2162,18 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void create_withAuthorizationOff_theSharedPlaceholderOwnerIsNotCappedPerOwner() throws Exception {
+        // no authenticated principal: every caller is "system:scheduler", one bucket
+        setField(rest, "maxSchedulesPerOwner", 3);
+        when(scheduleStore.countEnabledSchedulesCreatedBy(anyString())).thenReturn(50);
+        when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+
+        assertEquals(201, rest.createSchedule(newCronBody()).getStatus());
+    }
+
+    @Test
     void create_underThePerOwnerCap_isCreated() throws Exception {
+        asEditor("alice");
         setField(rest, "maxSchedulesPerOwner", 3);
         when(scheduleStore.countEnabledSchedulesCreatedBy(anyString())).thenReturn(2);
         when(scheduleStore.createSchedule(any())).thenReturn("new-id");
