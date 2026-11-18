@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.lifecycle.ILifecycleTask;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
+import org.jboss.logging.Logger;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationProperties;
 import ai.labs.eddi.engine.memory.IConversationMemory.IConversationStepStack;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
@@ -42,6 +43,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static ai.labs.eddi.engine.memory.ContextUtilities.retrieveContextLanguageFromLongTermMemory;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 
 /**
@@ -49,6 +51,7 @@ import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
  */
 @ApplicationScoped
 public class OutputGenerationTask implements ILifecycleTask {
+    private static final Logger log = Logger.getLogger(OutputGenerationTask.class);
     public static final String ID = "ai.labs.output";
     public static final TaskId TASK_ID = new TaskId(ID);
 
@@ -94,7 +97,9 @@ public class OutputGenerationTask implements ILifecycleTask {
         storeContextQuickReplies(currentStep, contextDataList);
 
         if (outputGeneration != null) {
-            if (checkLanguage(outputGeneration.getLanguage(), memory.getConversationProperties())) {
+            if (!checkLanguage(outputGeneration.getLanguage(), memory.getConversationProperties())) {
+                warnLanguageMismatch(outputGeneration, memory);
+            } else {
 
                 IData<List<String>> latestData = currentStep.getLatestData(ACTIONS);
                 if (latestData == null) {
@@ -110,6 +115,20 @@ public class OutputGenerationTask implements ILifecycleTask {
                     storeQuickReplies(currentStep, outputEntry.getQuickReplies(), outputEntry.getAction(), false);
                 }));
             }
+        }
+    }
+
+    /**
+     * An output set that declares {@code lang} produces nothing for a conversation
+     * whose {@code lang} property is another one, or absent. Matching is unchanged;
+     * this only makes the silence visible, once per deployed configuration.
+     */
+    private void warnLanguageMismatch(IOutputGeneration outputGeneration, IConversationMemory memory) {
+        if (outputGeneration.claimLanguageMismatchLog()) {
+            log.warnf("Output set with lang '%s' produced no output for conversation %s of agent %s: the conversation's 'lang' property is '%s'. "
+                    + "A set that declares lang is used only when the conversation's lang property equals it (logged once per deployed configuration).",
+                    sanitize(outputGeneration.getLanguage()), memory.getConversationId(), memory.getAgentId(),
+                    sanitize(retrieveContextLanguageFromLongTermMemory(memory.getConversationProperties())));
         }
     }
 

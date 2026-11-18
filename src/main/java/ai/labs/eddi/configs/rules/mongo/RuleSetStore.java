@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rules.mongo;
 
 import ai.labs.eddi.configs.rules.IRuleSetStore;
+import ai.labs.eddi.configs.rules.RuleSetSaveValidator;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleGroupConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
@@ -94,6 +95,10 @@ public class RuleSetStore extends AbstractResourceStore<RuleSetConfiguration> im
         } catch (DeserializationException e) {
             throw new IllegalArgumentException("Invalid ruleset: " + e.getMessage(), e);
         }
+
+        // The graph checks (dependency cycle, dangling dependency, duplicate rule names
+        // in a group) refuse on save only; a stored ruleset still loads and deploys.
+        RuleSetSaveValidator.validate(behaviorConfiguration);
     }
 
     /**

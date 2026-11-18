@@ -23,6 +23,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -127,6 +128,37 @@ class RuleSetStoreSaveTimeValidationTest {
 
         assertTrue(thrown.getMessage().contains("actionmatchr"), "the unknown type must be quoted back: " + thrown.getMessage());
         verify(resourceStorage, never()).newResource(any());
+    }
+
+    @Test
+    @DisplayName("a dependency cycle is refused at save time and never reaches storage")
+    void dependencyCycleIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "B"));
+        var b = new RuleConfiguration();
+        b.setName("B");
+        b.setActions(List.of("do_other"));
+        var back = new RuleConditionConfiguration();
+        back.setType("dependency");
+        back.setConfigs(Map.of("reference", "A"));
+        b.setConditions(List.of(back));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(b);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("cycle"), thrown.getMessage());
+        verify(resourceStorage, never()).newResource(any());
+    }
+
+    @Test
+    @DisplayName("a dangling dependency reference is refused at save time")
+    void danglingDependencyIsRefusedOnCreate() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "nope"));
+
+        var thrown = assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertTrue(thrown.getMessage().contains("nope"), thrown.getMessage());
     }
 
     @Test

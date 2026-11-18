@@ -37,6 +37,7 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> i
     @Override
     public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet) throws IResourceStore.ResourceStoreException {
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        requireValidTimesOccurred(outputConfigurationSet);
         return super.create(outputConfigurationSet);
     }
 
@@ -46,7 +47,28 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> i
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
 
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        requireValidTimesOccurred(outputConfigurationSet);
         return super.update(id, version, outputConfigurationSet);
+    }
+
+    /**
+     * {@code timesOccurred} counts from 0 (the first time an action occurred); -1
+     * is accepted as the lowest. A smaller value can never be selected — the output
+     * generation used to loop forever on an action whose entries were all below -1
+     * — so it is refused on save, naming the entry.
+     */
+    private static void requireValidTimesOccurred(OutputConfigurationSet outputConfigurationSet) {
+        var outputSet = outputConfigurationSet.getOutputSet();
+        if (outputSet == null) {
+            return;
+        }
+        for (int i = 0; i < outputSet.size(); i++) {
+            var entry = outputSet.get(i);
+            if (entry != null && entry.getTimesOccurred() < -1) {
+                throw new IllegalArgumentException("Invalid output set: outputSet[" + i + "] (action '" + entry.getAction()
+                        + "') has timesOccurred " + entry.getTimesOccurred() + "; it must not be below -1 (0 is the first time the action occurs).");
+            }
+        }
     }
 
     @Override

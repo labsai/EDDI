@@ -49,3 +49,19 @@ New parser config keys: `preserveInput` and `passThrough` (both default to autom
 
 Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, `ExpressionProvider`, `StoredExpressions`, `InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`; docs in `semantic-parser.md` and `security.md`.
 
+## 🐛 fix(rules,output): save-time validation of rule graphs and `timesOccurred`; no endless loop in output selection (2026-11-18)
+
+**Repo:** EDDI (`fix/pipeline-trust-and-robustness`)
+
+### What changed and why
+
+- A ruleset with a `dependency` cycle saved, deployed READY and then made `POST /agents/{id}/start` answer an empty HTTP 500. `RuleSetSaveValidator` (called from `RuleSetStore.validate`) now refuses on save a dependency cycle (rules are told apart by name, as the loop guard does), a `dependency` on a name no rule has, and two rules of one group with the same name. Unnamed rules cannot be referenced, so they only matter as a dangling target. Stored rulesets still load and deploy: the checks run on save only.
+- At runtime a failing `CONVERSATION_START` turn no longer propagates out of `Conversation.init`: the conversation is created in state `ERROR` with the reason in the step's `taskErrors`, as a failed `say` turn is, instead of a bare HTTP 500.
+- `OutputGeneration.getOutputs` looped forever when every entry of an action had `timesOccurred` below -1 (or the entry list was empty). The loop now stops when there is nothing left to select, and `OutputStore` refuses `timesOccurred < -1` on create and update.
+- An output set whose `lang` does not match the conversation's still produces nothing (matching is unchanged), but the task now logs a WARN once per deployed configuration (`IOutputGeneration.claimLanguageMismatchLog`).
+
+### Behaviour changes for upgraders
+
+- Saving a ruleset with a dependency cycle, a dangling dependency or duplicate rule names in a group is refused (HTTP 400, rule named). This includes import and sync: an exported agent whose ruleset has such a defect is refused on import until it is fixed. (#1417 changes the same validator for legacy configs: its `ExistingRuleSetWrite` scope should also skip `RuleSetSaveValidator`.)
+- An output set with `timesOccurred` below -1 is refused on save.
+

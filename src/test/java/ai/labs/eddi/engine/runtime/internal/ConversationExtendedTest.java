@@ -725,4 +725,34 @@ class ConversationExtendedTest {
             verify(currentStep, never()).addConversationOutputString(eq("input"), anyString());
         }
     }
+
+    @Nested
+    @DisplayName("init — a failing CONVERSATION_START turn")
+    class InitTaskFailure {
+
+        @Test
+        @DisplayName("a task failure leaves the conversation in state ERROR instead of failing the start")
+        void taskFailureOnStartLeavesErrorState() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+            doThrow(new LifecycleException("reached infinite loop")).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+
+            assertDoesNotThrow(() -> conv.init(new HashMap<>()));
+            verify(memory).setConversationState(ConversationState.ERROR);
+        }
+
+        @Test
+        @DisplayName("an interrupted start is still propagated")
+        void interruptedStartIsPropagated() throws Exception {
+            when(memory.getConversationState()).thenReturn(ConversationState.READY);
+            when(propertiesHandler.getUserMemoryStore()).thenReturn(null);
+            doThrow(new LifecycleException.LifecycleInterruptedException("interrupted")).when(lifecycleManager).executeLifecycle(any(), any());
+
+            var conv = createConversation();
+
+            assertThrows(LifecycleException.LifecycleInterruptedException.class, () -> conv.init(new HashMap<>()));
+        }
+    }
 }

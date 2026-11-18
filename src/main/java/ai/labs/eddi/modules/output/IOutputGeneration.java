@@ -16,6 +16,15 @@ public interface IOutputGeneration {
 
     String getLanguage();
 
+    /**
+     * Whether the caller should log that this output set's language did not match
+     * the conversation's. True once per instance — that is, once per deployed
+     * configuration; the default never asks for a log.
+     */
+    default boolean claimLanguageMismatchLog() {
+        return false;
+    }
+
     void addOutputEntry(OutputEntry outputEntry);
 
     Map<String, List<OutputEntry>> getOutputs(List<IOutputFilter> outputFilter);

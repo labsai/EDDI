@@ -297,7 +297,7 @@ Defines the occurrence/frequency of an action in a `Behavior Rule`.
 
 ### Dependency
 
-Check if another `Behavior Rule` has met it's condition or not in the same `conversationStep`. Sometimes you need to know if a rule has succeeded , `dependency` evaluates the rule with that name (once per evaluation, whichever group it is in) and succeeds if that rule does. Circular references are rejected.
+Check if another `Behavior Rule` has met it's condition or not in the same `conversationStep`. Sometimes you need to know if a rule has succeeded , `dependency` evaluates the rule with that name (once per evaluation, whichever group it is in) and succeeds if that rule does. When you save a ruleset (REST, MCP or the Manager) it is refused, with the rule named, if a `dependency` names no rule of the set, if the dependencies form a cycle (rules are told apart by name, so two rules with the same name count as one), or if two rules of one group share a name. Rules without a name cannot be referenced. A ruleset that was stored before these checks still loads and deploys; a cycle in it fails the turn that reaches it with a task error (a start turn leaves the conversation in state `ERROR`) instead of answering the request with HTTP 500.
 
 ```javascript
 (...)

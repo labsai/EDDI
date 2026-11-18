@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.output.impl;
 
+import java.time.Duration;
 import ai.labs.eddi.modules.output.IOutputFilter;
 import ai.labs.eddi.modules.output.model.OutputEntry;
 import ai.labs.eddi.modules.output.model.OutputValue;
@@ -186,5 +187,51 @@ class OutputGenerationTest {
         var item = new TextOutputItem(text);
         var outputValue = new OutputValue(List.of(item));
         return new OutputEntry(action, occurred, List.of(outputValue), List.of());
+    }
+
+    @Nested
+    @DisplayName("termination")
+    class Termination {
+
+        @Test
+        @DisplayName("entries that all have timesOccurred below -1 yield no output instead of looping forever")
+        void allBelowMinusOne() {
+            outputGeneration.addOutputEntry(createEntry("greet", -2));
+            outputGeneration.addOutputEntry(createEntry("greet", -5));
+
+            var outputs = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> outputGeneration.getOutputs(List.of(new OutputFilter("greet", 0))));
+
+            assertTrue(outputs.getOrDefault("greet", List.of()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("an action with an empty entry list terminates")
+        void emptyEntryList() {
+            outputGeneration.getOutputMapper().put("greet", new LinkedList<>());
+
+            var outputs = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> outputGeneration.getOutputs(List.of(new OutputFilter("greet", 3))));
+
+            assertTrue(outputs.getOrDefault("greet", List.of()).isEmpty());
+        }
+
+        @Test
+        @DisplayName("an entry at -1 is still found for a first occurrence")
+        void minusOneStillWorks() {
+            outputGeneration.addOutputEntry(createEntry("greet", -1));
+
+            var outputs = assertTimeoutPreemptively(Duration.ofSeconds(5),
+                    () -> outputGeneration.getOutputs(List.of(new OutputFilter("greet", 0))));
+
+            assertEquals(1, outputs.get("greet").size());
+        }
+
+        @Test
+        @DisplayName("the language mismatch is claimed for logging once")
+        void languageMismatchLoggedOnce() {
+            assertTrue(outputGeneration.claimLanguageMismatchLog());
+            assertFalse(outputGeneration.claimLanguageMismatchLog());
+        }
     }
 }
