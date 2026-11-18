@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
+import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
@@ -361,15 +362,19 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources.")
+    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources. "
+            + "A deployed agent with open conversations is NOT deleted (the error says how many): set endAllActiveConversations=true "
+            + "to end them and delete it.")
     public String deleteAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "Permanently delete? (default: false)", required = false,
                                        defaultValue = "false") Boolean permanent,
                               @ToolArg(description = "Cascade-delete workflows and resources? (default: false)", required = false,
-                                       defaultValue = "false") Boolean cascade) {
+                                       defaultValue = "false") Boolean cascade,
+                              @ToolArg(description = "End the agent's open conversations and delete it anyway? (default: false)", required = false,
+                                       defaultValue = "false") Boolean endAllActiveConversations) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
-        try {
+        try (var ending = Boolean.TRUE.equals(endAllActiveConversations) ? ResourceInUseGuard.endingConversations() : null) {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             boolean isCascade = cascade != null ? cascade : false;
@@ -379,6 +384,11 @@ public class McpAdminTools {
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_agent", "Failed to delete agent", e);
         }
+    }
+
+    /** {@link #deleteAgent} without ending open conversations. */
+    public String deleteAgent(String agentId, Integer version, Boolean permanent, Boolean cascade) {
+        return deleteAgent(agentId, version, permanent, cascade, null);
     }
 
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
@@ -615,6 +625,8 @@ public class McpAdminTools {
 
     @Tool(name = "delete_resource", description = "Delete an EDDI resource configuration. "
             + "Soft-deletes by default; set permanent=true for permanent removal. "
+            + "A resource that a workflow (or, for workflows, an agent) still uses is NOT deleted: the error names the users; "
+            + "set force=true to delete it anyway. "
             + "Supported types: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', 'propertysetter', 'dictionaries'.")
     public String deleteResource(
                                  @ToolArg(description = "Resource type: 'behavior', 'langchain', 'httpcalls', 'mcpcalls', 'output', "
@@ -622,7 +634,9 @@ public class McpAdminTools {
                                  @ToolArg(description = "Resource ID (required)") String resourceId,
                                  @ToolArg(description = "Current version number (required)") Integer version,
                                  @ToolArg(description = "Permanently delete? (default: false)", required = false,
-                                          defaultValue = "false") Boolean permanent) {
+                                          defaultValue = "false") Boolean permanent,
+                                 @ToolArg(description = "Delete even though a workflow still uses it? (default: false)", required = false,
+                                          defaultValue = "false") Boolean force) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceType == null || resourceType.isBlank())
             return errorJson("resourceType is required");
@@ -632,13 +646,21 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             String type = resourceType.trim().toLowerCase();
-            Response response = deleteResourceByType(type, resourceId, ver, isPermanent);
+            Response response;
+            try (var forced = Boolean.TRUE.equals(force) ? ResourceInUseGuard.forced() : null) {
+                response = deleteResourceByType(type, resourceId, ver, isPermanent);
+            }
 
             return resultJson("deleted",
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_resource", "Failed to delete resource", e);
         }
+    }
+
+    /** {@link #deleteResource} without {@code force}. */
+    public String deleteResource(String resourceType, String resourceId, Integer version, Boolean permanent) {
+        return deleteResource(resourceType, resourceId, version, permanent, null);
     }
 
     @Tool(name = "apply_agent_changes", description = "Batch-cascade multiple resource URI changes through "

@@ -126,11 +126,13 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
             + "The version must be the workflow's current one whenever cascade=true or permanent=true, otherwise the "
             + "request is refused with 409 before anything is deleted. An already soft-deleted workflow has no current "
             + "version to be stale against: permanent=true still purges its history, and the cascade is skipped rather "
-            + "than refused.")
+            + "than refused. A workflow an agent still lists is not deleted: 409 with code RESOURCE_IN_USE naming up to 10 "
+            + "agents, unless the request carries force=true (a permanent delete looks at every version).")
     @APIResponse(responseCode = "200", description = "Workflow deleted successfully.")
     @APIResponse(responseCode = "404", description = "Workflow not found.")
     @APIResponse(responseCode = "409",
-                 description = "cascade=true or permanent=true against a version that is not the current one; nothing was deleted.")
+                 description = "cascade=true or permanent=true against a version that is not the current one, or an agent still "
+                         + "uses the workflow (JSON body: error, code RESOURCE_IN_USE, usedBy, usedByCount, override); nothing was deleted.")
     // @formatter:off
     Response deleteWorkflow(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",

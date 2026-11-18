@@ -318,6 +318,10 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
     public Response delete(String id, Integer version, boolean permanent) {
         accessGuard.requireAccess(id, AccessLevel.OWN, resourceTypeLabel);
         version = validateParameters(id, version);
+        // 409 while an agent still lists this workflow or a workflow step still points
+        // at this configuration, unless ?force=true. Refused before anything is
+        // touched.
+        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, version, permanent);
 
         try {
             if (permanent) {

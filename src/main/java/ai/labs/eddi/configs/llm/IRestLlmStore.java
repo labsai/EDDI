@@ -79,7 +79,9 @@ public interface IRestLlmStore extends IRestVersionInfo {
 
     @DELETE
     @Path("/{id}")
-    @Operation(description = "Delete LLM config.")
+    @Operation(description = "Delete LLM config. A config that a workflow still uses is not deleted: 409 with code RESOURCE_IN_USE "
+            + "naming up to 10 workflows, unless the request carries force=true. The same rule applies to every workflow "
+            + "step resource (behavior, httpcalls, mcpcalls, output, property, dictionary, rag, parser).")
     Response deleteLlm(@PathParam("id") String id,
                        @Parameter(name = "version", required = true, example = "1")
                        @QueryParam("version") Integer version,

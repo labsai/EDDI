@@ -61,7 +61,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `get_deployment_status` | Get deployment status of a specific agent version                               |
 | `list_workflows`        | List all workflows (pipeline configurations)                                     |
 | `create_agent`          | Create a new agent                                                              |
-| `delete_agent`          | Delete an agent (with optional cascade)                                          |
+| `delete_agent`          | Delete an agent (with optional cascade). A deployed agent with open conversations is refused; `endAllActiveConversations=true` ends them first |
 | `update_agent`          | Update an agent's name/description and optionally redeploy                       |
 | `read_workflow`         | Read a workflow's full pipeline configuration                                    |
 | `read_resource`         | Read any resource config by type (behavior, langchain, httpcalls, output, rag, etc.) — read only; `rag` has no create/update/delete case |
@@ -76,7 +76,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | ---------------------- | ----------------------------------------------------------------------------------- |
 | `update_resource`      | Update any resource config by type and ID. Returns the new version URI              |
 | `create_resource`      | Create a new resource. Returns the new resource ID and URI                          |
-| `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete)        |
+| `delete_resource`      | Delete a resource (soft-delete by default, `permanent=true` for hard delete). A resource a workflow still uses is refused with the users named; `force=true` deletes anyway |
 | `apply_agent_changes`  | Batch-cascade URI changes through workflow → agent in ONE pass, optionally redeploy. `compatible: true` declares the new agent version compatible, so running conversations follow it; the default is a breaking change. An `oldUri` the agent does not hold, or a pair naming different kinds of resource, is refused and nothing is written. The same operation is available over REST as `POST /agentstore/agents/{id}/cascade` ([details](deployment-management-of-agents.md#landing-resource-changes-in-one-pass))  |
 | `list_agent_resources` | Walk agent → workflows → extensions to get a complete resource inventory in one call |
 

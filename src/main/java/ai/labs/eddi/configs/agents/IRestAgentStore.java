@@ -264,11 +264,15 @@ public interface IRestAgentStore extends IRestVersionInfo {
             + "The version must be the Agent's current one whenever cascade=true or permanent=true, otherwise the "
             + "request is refused with 409 before anything is deleted. An Agent that is already soft-deleted has no "
             + "current version to be stale against: permanent=true still purges its history and its vault keys, and "
-            + "the cascade is skipped rather than refused.")
+            + "the cascade is skipped rather than refused. An Agent that is deployed and has open conversations is not "
+            + "deleted: 409 with code AGENT_HAS_OPEN_CONVERSATIONS, as for undeploy, unless the request carries "
+            + "endAllActiveConversations=true, which ends them first.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     @APIResponse(responseCode = "409",
-                 description = "cascade=true or permanent=true against a version that is not the current one; nothing was deleted.")
+                 description = "cascade=true or permanent=true against a version that is not the current one, or the deployed agent "
+                         + "has open conversations (JSON body: error, code AGENT_HAS_OPEN_CONVERSATIONS, openConversations, override); "
+                         + "nothing was deleted.")
     // @formatter:off
     Response deleteAgent(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",

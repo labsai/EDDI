@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.agents.model.AgentCascadeResult;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
@@ -82,6 +83,11 @@ public class RestAgentStore implements IRestAgentStore {
     private final String defaultTenantId;
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
+
+    // Field-injected so the direct constructions in tests keep compiling; null
+    // there, which skips the check.
+    @Inject
+    ResourceInUseGuard inUseGuard;
 
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
@@ -461,6 +467,12 @@ public class RestAgentStore implements IRestAgentStore {
         // removed below, and afterwards nothing names the versions still running.
         List<DeploymentInfo> liveDeployments = liveDeploymentsOf(id);
 
+        // 409 while a deployed version has open conversations, as undeploy does —
+        // unless endAllActiveConversations=true. Before anything is deleted.
+        if (inUseGuard != null) {
+            inUseGuard.requireNoOpenConversations(id, liveDeployments.stream().map(DeploymentInfo::getAgentVersion).distinct().toList());
+        }
+
         // DECIDED before the delete, EXECUTED after it — the same split, and for the
         // same reason, as RestWorkflowStore.deleteWorkflow.
         //
@@ -521,7 +533,11 @@ public class RestAgentStore implements IRestAgentStore {
                     // every history row. Soft-deleting the current version keeps the two
                     // scopes in agreement; permanently removing a shared resource stays
                     // an explicit, non-cascading request against that resource.
-                    restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true);
+                    // The agent that named this workflow is gone by now, which is the
+                    // reason it is being deleted: the in-use guard has nothing to add.
+                    try (var ignored = ResourceInUseGuard.bypass()) {
+                        restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true);
+                    }
                     log.infof("Cascade-deleted package %s (v%d) for Agent %s", sanitize(target.getId()), target.getVersion(),
                             sanitize(id));
                 } catch (Exception e) {
