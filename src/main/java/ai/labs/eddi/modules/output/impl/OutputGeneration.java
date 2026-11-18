@@ -50,17 +50,11 @@ public class OutputGeneration implements IOutputGeneration {
 
             List<OutputEntry> tmpOutputEntries = new LinkedList<>(entryList);
 
-            List<OutputEntry> outputEntries;
-            int occurred = filter.getOccurred();
-            // Stops when nothing is left to find: extracting removes every entry that is
-            // not the one it picks, so an empty candidate list can never yield a result.
-            // The loop used to spin forever for an action whose entries all had a
-            // timesOccurred below -1 (or none at all), because the result stayed empty
-            // however far "occurred" counted down.
-            do {
-                outputEntries = extractOutputEntryOfSameOccurrence(tmpOutputEntries, occurred);
-                occurred--;
-            } while (outputEntries.isEmpty() && !tmpOutputEntries.isEmpty() && occurred > Integer.MIN_VALUE);
+            // One extraction is enough: it picks the entry set whose occurrence equals the
+            // filter's, or else the highest one, and an empty result means there is no
+            // entry to pick (none at all, or only legacy entries below -1, which are never
+            // selectable). A loop that counted "occurred" down used to spin forever there.
+            List<OutputEntry> outputEntries = extractOutputEntryOfSameOccurrence(tmpOutputEntries, filter.getOccurred());
 
             outputs.put(filter.getAction(), outputEntries);
         }

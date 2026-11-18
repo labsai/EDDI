@@ -126,6 +126,7 @@ class LanguageUtilitiesTest {
     @Test
     void isTimeExpression_24ColonOnlyWhenTheWholeValueIs2400() {
         assertEquals(Time.valueOf("00:00:00"), LanguageUtilities.isTimeExpression("24:00"));
+        assertEquals(Time.valueOf("00:00:00"), LanguageUtilities.isTimeExpression("24:00:00"));
         assertEquals(Time.valueOf("12:24:00"), LanguageUtilities.isTimeExpression("12:24:00"));
         assertEquals(Time.valueOf("13:24:00"), LanguageUtilities.isTimeExpression("13:24:00"));
     }
