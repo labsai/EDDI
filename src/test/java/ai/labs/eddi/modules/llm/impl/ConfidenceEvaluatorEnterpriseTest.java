@@ -73,10 +73,37 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("confidence is clamped to [0,1]")
-    void confidence_clamped() {
-        assertEquals(1.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 5.0}", null).confidence(), 0.001);
-        assertEquals(0.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": -2.0}", null).confidence(), 0.001);
+    @DisplayName("confidence above 1 is a percentage, anything else out of range is no confidence (heuristic)")
+    void confidence_outOfRange() {
+        // 5.0 reads as 5%: the step escalates, it is not accepted as certain.
+        var five = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 5.0}", null);
+        assertEquals(0.05, five.confidence(), 0.001);
+        assertEquals("x", five.response());
+        // Negative: unusable, so the unwrapped answer is scored by the heuristic (short
+        // -> 0.3).
+        var negative = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": -2.0}", null);
+        assertEquals(0.3, negative.confidence(), 0.001);
+        assertEquals("x", negative.response());
+        // Above 100 is unusable too.
+        assertEquals(0.3, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 250}", null).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("an 85 means 85 percent, not certain")
+    void confidence_percentage() {
+        assertEquals(0.85, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 85}", null).confidence(), 0.001);
+        assertEquals(1.0, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 100}", null).confidence(), 0.001);
+    }
+
+    @Test
+    @DisplayName("malformed wrapper with an out-of-range confidence — the regex path gives the same answers")
+    void confidence_outOfRange_regexPath() {
+        // Missing comma: Jackson rejects it, the regex fallback reads the number.
+        var percent = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 85}", null);
+        assertEquals(0.85, percent.confidence(), 0.001);
+        var unusable = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 400}", null);
+        assertEquals(0.3, unusable.confidence(), 0.001);
+        assertEquals("x", unusable.response());
     }
 
     @Test
@@ -173,10 +200,26 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("null judge — falls back to heuristic")
-    void judge_nullFallsBack() {
+    @DisplayName("no judge — fails towards escalation (0.0), not the heuristic's accepting default")
+    void judge_nullEscalates() {
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null, null);
+        assertEquals(0.0, r.confidence(), 0.001);
+        assertEquals("A confident, complete, well-formed answer to the user's question.", r.response());
+    }
+
+    @Test
+    @DisplayName("no judge — the heuristic only when the author opts in")
+    void judge_nullFallsBackWhenOptedIn() {
+        var heuristic = new HeuristicConfig();
+        heuristic.setFallbackWhenJudgeUnavailable(true);
+        EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null,
+                heuristic);
         assertEquals(0.8, r.confidence(), 0.001);
+
+        var explicitlyOff = new HeuristicConfig();
+        explicitlyOff.setFallbackWhenJudgeUnavailable(false);
+        assertEquals(0.0, ConfidenceEvaluator.evaluateWithJudge("A confident, complete, well-formed answer to the user's question.", null,
+                explicitlyOff).confidence(), 0.001);
     }
 
     @Test

@@ -2919,6 +2919,23 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         public void setDefaultScore(Double defaultScore) {
             this.defaultScore = defaultScore;
         }
+
+        /**
+         * What a {@code judge_model} cascade does when it has no usable judge (none
+         * configured, no {@code type}, or it failed to build). Default {@code false}:
+         * the answer scores 0.0, so the step escalates — the heuristic's default score
+         * accepts, and falling back to it would let every answer through unjudged.
+         * {@code true} scores it with this heuristic instead.
+         */
+        private Boolean fallbackWhenJudgeUnavailable;
+
+        public Boolean getFallbackWhenJudgeUnavailable() {
+            return fallbackWhenJudgeUnavailable;
+        }
+
+        public void setFallbackWhenJudgeUnavailable(Boolean fallbackWhenJudgeUnavailable) {
+            this.fallbackWhenJudgeUnavailable = fallbackWhenJudgeUnavailable;
+        }
     }
 
     /**

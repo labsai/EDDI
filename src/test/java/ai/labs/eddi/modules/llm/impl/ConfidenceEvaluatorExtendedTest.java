@@ -44,17 +44,21 @@ class ConfidenceEvaluatorExtendedTest {
         }
 
         @Test
-        @DisplayName("should clamp judge confidence to 0.0-1.0")
-        void clampsJudgeConfidence() {
+        @DisplayName("a judge confidence of 85 is 85 percent; an unusable one falls back to the heuristic")
+        void judgeConfidenceAboveOne() {
+            assertEquals(0.85, judgeSays("{\"confidence\": 85}").confidence(), 0.001);
+            assertEquals(0.015, judgeSays("{\"confidence\": 1.5}").confidence(), 0.0001);
+            // 400 and -3 are no confidence: "Some response" is short, so the heuristic
+            // gives 0.3
+            assertEquals(0.3, judgeSays("{\"confidence\": 400}").confidence(), 0.001);
+            assertEquals(0.3, judgeSays("{\"confidence\": -3}").confidence(), 0.001);
+        }
+
+        private ConfidenceEvaluator.EvaluationResult judgeSays(String reply) {
             ChatModel judgeModel = mock(ChatModel.class);
-            var aiMessage = AiMessage.from("{\"confidence\": 1.5}");
-            var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
+            var chatResponse = ChatResponse.builder().aiMessage(AiMessage.from(reply)).build();
             when(judgeModel.chat(any(List.class))).thenReturn(chatResponse);
-
-            var result = ConfidenceEvaluator.evaluateWithJudge(
-                    "Some response", judgeModel);
-
-            assertEquals(1.0, result.confidence(), 0.01);
+            return ConfidenceEvaluator.evaluateWithJudge("Some response", judgeModel);
         }
 
         @Test

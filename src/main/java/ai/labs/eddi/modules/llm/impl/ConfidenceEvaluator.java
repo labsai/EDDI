@@ -190,11 +190,17 @@ class ConfidenceEvaluator {
             try {
                 Matcher confidenceMatcher = CONFIDENCE_JSON_PATTERN.matcher(candidate);
                 if (confidenceMatcher.find()) {
-                    double confidence = clamp(Double.parseDouble(confidenceMatcher.group(1)));
+                    Double confidence = usableConfidence(Double.parseDouble(confidenceMatcher.group(1)));
                     String rawResponse = JsonStringField.firstRawValue(candidate, RESPONSE_KEY);
                     // Use the fence-stripped candidate (not the raw response) so a fenced wrapper
                     // does not leak markdown fences into the extracted answer.
                     String actualResponse = rawResponse != null ? unescapeJsonString(rawResponse) : stripJsonWrapper(candidate);
+                    if (confidence == null) {
+                        // Neither a 0..1 score nor a percentage: no usable confidence, so the
+                        // unwrapped answer is scored by the heuristic like any unwrapped text.
+                        LOGGER.debugf("Unusable confidence %s in structured output, falling back to heuristic", confidenceMatcher.group(1));
+                        return evaluateHeuristic(actualResponse, heuristicConfig);
+                    }
                     return new EvaluationResult(actualResponse, confidence);
                 }
             } catch (NumberFormatException e) {
@@ -215,7 +221,13 @@ class ConfidenceEvaluator {
         try {
             JsonNode node = MAPPER.readTree(json);
             if (node != null && node.isObject() && node.has("confidence") && node.get("confidence").isNumber()) {
-                double confidence = clamp(node.get("confidence").asDouble());
+                Double confidence = usableConfidence(node.get("confidence").asDouble());
+                if (confidence == null) {
+                    // A value that is neither a 0..1 score nor a percentage: no usable
+                    // confidence, which takes the same fallback as a wrapper without one.
+                    LOGGER.debugf("Unusable confidence %s in structured output", node.get("confidence").asText());
+                    return null;
+                }
                 JsonNode responseNode = node.get("response");
                 String actualResponse;
                 if (responseNode == null || responseNode.isNull()) {
@@ -322,8 +334,16 @@ class ConfidenceEvaluator {
      */
     static EvaluationResult evaluateWithJudge(String response, ChatModel judgeModel, HeuristicConfig heuristicConfig, JudgeRequest judgeRequest) {
         if (judgeModel == null) {
-            LOGGER.warn("judge_model strategy requested but no judge model available, falling back to heuristic");
-            return evaluateHeuristic(response, heuristicConfig);
+            // No judge (none configured, no type, or it failed to build). The heuristic's
+            // default score accepts, so falling back to it would let every answer through
+            // unjudged: fail towards escalation unless the author opted in.
+            if (heuristicConfig != null && Boolean.TRUE.equals(heuristicConfig.getFallbackWhenJudgeUnavailable())) {
+                LOGGER.warn("judge_model strategy requested but no judge model available, falling back to heuristic (fallbackWhenJudgeUnavailable)");
+                return evaluateHeuristic(response, heuristicConfig);
+            }
+            LOGGER.warn("judge_model strategy requested but no judge model available — confidence 0.0, so the step escalates. "
+                    + "Fix the judgeModel, or set heuristic.fallbackWhenJudgeUnavailable=true to score with the heuristic instead.");
+            return new EvaluationResult(response, 0.0);
         }
 
         Map<String, Object> judgeUsage = null;
@@ -346,7 +366,13 @@ class ConfidenceEvaluator {
                     try {
                         JsonNode node = MAPPER.readTree(balanced);
                         if (node != null && node.has("confidence") && node.get("confidence").isNumber()) {
-                            return new EvaluationResult(response, clamp(node.get("confidence").asDouble()), judgeUsage);
+                            Double usable = usableConfidence(node.get("confidence").asDouble());
+                            if (usable != null) {
+                                return new EvaluationResult(response, usable, judgeUsage);
+                            }
+                            LOGGER.warnf("Judge returned an unusable confidence %s (expected 0.0-1.0); falling back to heuristic",
+                                    node.get("confidence").asText());
+                            return heuristicWithUsage(response, heuristicConfig, judgeUsage);
                         }
                     } catch (Exception ignored) {
                         // fall through to regex
@@ -359,13 +385,25 @@ class ConfidenceEvaluator {
                 // grade is a quality signal and not a security boundary.
                 Matcher matcher = CONFIDENCE_JSON_PATTERN.matcher(judgeText);
                 if (matcher.find()) {
-                    return new EvaluationResult(response, clamp(Double.parseDouble(matcher.group(1))), judgeUsage);
+                    Double usable = usableConfidence(Double.parseDouble(matcher.group(1)));
+                    if (usable != null) {
+                        return new EvaluationResult(response, usable, judgeUsage);
+                    }
+                    LOGGER.warnf("Judge returned an unusable confidence %s (expected 0.0-1.0); falling back to heuristic", matcher.group(1));
                 }
             }
         } catch (Exception e) {
             LOGGER.warn("Judge model evaluation failed: " + e.getMessage() + ", falling back to heuristic");
         }
 
+        return heuristicWithUsage(response, heuristicConfig, judgeUsage);
+    }
+
+    /**
+     * The heuristic's score, carrying the judge call's token usage (the tokens were
+     * spent).
+     */
+    private static EvaluationResult heuristicWithUsage(String response, HeuristicConfig heuristicConfig, Map<String, Object> judgeUsage) {
         var heuristic = evaluateHeuristic(response, heuristicConfig);
         return judgeUsage == null ? heuristic : new EvaluationResult(heuristic.response(), heuristic.confidence(), judgeUsage);
     }
@@ -543,6 +581,24 @@ class ConfidenceEvaluator {
 
     private static double clamp(double v) {
         return Math.max(0.0, Math.min(1.0, v));
+    }
+
+    /**
+     * A confidence a model reported, as a 0.0-1.0 score; {@code null} when it is
+     * unusable. The documented range is 0.0-1.0. A value in (1, 100] is read as a
+     * percentage (a model asked for a probability that answers {@code 85} means
+     * 85%) rather than clamped to 1.0, which would count it as certain; anything
+     * else — negative, above 100, NaN, infinite — is no confidence at all, and the
+     * caller takes its fallback (heuristic scoring).
+     */
+    static Double usableConfidence(double reported) {
+        if (Double.isNaN(reported) || Double.isInfinite(reported) || reported < 0) {
+            return null;
+        }
+        if (reported <= 1.0) {
+            return reported;
+        }
+        return reported <= 100.0 ? Double.valueOf(reported / 100.0) : null;
     }
 
     private static double value(Double configured, double fallback) {

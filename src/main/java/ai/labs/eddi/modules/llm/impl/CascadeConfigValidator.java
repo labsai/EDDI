@@ -98,7 +98,8 @@ final class CascadeConfigValidator {
         if (EvaluationStrategy.fromConfig(evalStrategy) == EvaluationStrategy.JUDGE_MODEL) {
             var judge = cascade.getJudgeModel();
             if (judge == null || isBlank(judge.getType())) {
-                warn(taskId, "evaluationStrategy 'judge_model' has no judgeModel with a 'type' — confidence will fall back to heuristic");
+                warn(taskId, "evaluationStrategy 'judge_model' has no judgeModel with a 'type' — every step will escalate "
+                        + "(set heuristic.fallbackWhenJudgeUnavailable=true to score with the heuristic instead)");
             }
         }
 

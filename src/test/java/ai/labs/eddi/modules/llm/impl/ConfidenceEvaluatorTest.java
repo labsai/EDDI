@@ -42,21 +42,23 @@ class ConfidenceEvaluatorTest {
         }
 
         @Test
-        @DisplayName("should clamp confidence above 1.0")
-        void testClampAbove() {
+        @DisplayName("a confidence above 1.0 is read as a percentage, never accepted as certain")
+        void testAboveOneIsAPercentage() {
             String response = "{\"response\": \"Sure!\", \"confidence\": 1.5}";
             var result = ConfidenceEvaluator.evaluateStructuredOutput(response);
 
-            assertEquals(1.0, result.confidence(), 0.001);
+            assertEquals(0.015, result.confidence(), 0.0001);
         }
 
         @Test
-        @DisplayName("should clamp negative confidence to 0.0")
-        void testClampBelow() {
+        @DisplayName("a negative confidence is no confidence: the answer is scored by the heuristic")
+        void testNegativeIsUnusable() {
             String response = "{\"response\": \"Hmm\", \"confidence\": -0.5}";
             var result = ConfidenceEvaluator.evaluateStructuredOutput(response);
 
-            assertEquals(0.0, result.confidence(), 0.001);
+            // "Hmm" is short -> the heuristic's short score
+            assertEquals(0.3, result.confidence(), 0.001);
+            assertEquals("Hmm", result.response());
         }
 
         @Test
@@ -195,11 +197,10 @@ class ConfidenceEvaluatorTest {
         }
 
         @Test
-        @DisplayName("judge_model without model should fall back to heuristic")
+        @DisplayName("judge_model without a model escalates (0.0) instead of accepting on the heuristic's default")
         void testJudgeWithoutModel() {
             var result = ConfidenceEvaluator.evaluate("judge_model", "A confident answer that is long enough to pass heuristic checks.", null);
-            // Should fall back to heuristic since no judge model provided
-            assertEquals(0.8, result.confidence(), 0.001);
+            assertEquals(0.0, result.confidence(), 0.001);
         }
     }
 
