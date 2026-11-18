@@ -1058,14 +1058,11 @@ jobs:
             --set eddi.datastore.externalJdbcUrl=jdbc:postgresql://db.example.com:5432/eddi \
             --set eddi.datastore.externalJdbcUsername=eddi \
             --set eddi.datastore.externalJdbcPassword=ci-placeholder-pg
-          # Mixed case. EDDI compares EDDI_DATASTORE_TYPE exactly — isPostgres()
-          # is `"postgres".equals(datastoreType)` — so a guard that lowercased
-          # the declared type before comparing was case-INSENSITIVE against a
-          # case-SENSITIVE reader: this shape passed it, rendered
-          # EDDI_DATASTORE_TYPE "Postgres", matched neither Java branch and
-          # booted the MongoDB store against mongodb://mongodb:27017/eddi. Every
-          # other case here spells the type the way the chart's own docs do, so
-          # only this one can see that.
+          # Mixed case. EDDI itself reads EDDI_DATASTORE_TYPE through DatastoreType, which is
+          # trimmed and not case-sensitive and also accepts "postgresql"; the chart is
+          # deliberately stricter and renders only the lower-case "mongodb" or "postgres"
+          # (a guard may be stricter than its reader, never looser). This shape stays a
+          # failure so a value the chart does not document never reaches the ConfigMap.
           expect_failure "a mixed-case datastore type EDDI would not match" \
             --set eddi.vaultMasterKey=$key --set eddi.datastoreType=Postgres \
             --set mongodb.enabled=false --set postgres.enabled=true \
