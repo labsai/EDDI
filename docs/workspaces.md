@@ -217,7 +217,7 @@ the property existed.
 A person whose last recorded sign-in is older than the window counts as a member
 of **no** team in the directory:
 
-- they are no longer suggested to anyone in the share box — the team-scoped
+- they are no longer suggested to non-administrators in the share box — the team-scoped
   search applies the window in the database query
   (`IUserDirectoryStore.searchWithinTeams`), so a page of results is never
   filled with people who are then dropped;
@@ -228,7 +228,10 @@ of **no** team in the directory:
 The boundary is inclusive: somebody seen exactly `stale-after` ago still counts.
 
 **The entry is hidden, not deleted.** Their next sign-in re-records it from the
-token they then carry, and everything comes back. Meanwhile a share typed by
+token they then carry and refreshes `lastSeen`: they come back for the teams
+that token still lists — not for one they have since left. Another EDDI
+instance may keep showing its cached copy of the entry in grant lists for up to
+two minutes. Meanwhile a share typed by
 their exact username or verified email still resolves to them, their grants
 still show their name, and a grant to them is not flagged as "matches no
 recorded user".
@@ -239,14 +242,17 @@ person with a stale entry keeps every grant their token still qualifies for,
 and a removed team member loses team access as soon as the token they present
 no longer carries the team, whether or not a window is set.
 
-**Administrators still see everybody.** `eddi-admin`'s search is not windowed,
-and shows a stale person with their email as before — the directory is theirs
-to manage — and stale entries are not marked as such in the suggestions.
+**Administrators still see everybody.** `eddi-admin`'s search is not windowed
+and shows a stale person exactly as before — with their email, unless
+`expose-email` is off — since the directory is theirs to manage. Stale entries
+are not marked as such in the suggestions.
 
 The window is honoured from one hour up: `lastSeen` is refreshed only about
 every ten minutes while somebody is active, so a shorter value would hide
-people who are signed in right now. A shorter value is raised to an hour, and a
-zero or negative one is read as "never", each with a warning in the log.
+people who are signed in right now. A shorter positive value is raised to an
+hour, one longer than a century is lowered to a century (the cutoff would
+otherwise fall outside what the database can store), and a zero or negative one
+is read as "never" — each with a warning in the log.
 
 Not covered by the window: the team-member lists used to fan out
 [notifications](#notifications-and-access-requests) and to warn that a shared-with team has no

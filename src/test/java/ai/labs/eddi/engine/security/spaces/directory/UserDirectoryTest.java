@@ -22,6 +22,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collection;
@@ -581,14 +582,19 @@ class UserDirectoryTest {
         }
 
         @Test
-        @DisplayName("hidden is not gone: a stale person still resolves by exact name and still labels their grants")
+        @DisplayName("hidden is not gone: a stale person still resolves by principal, username and verified email, and still labels their grants")
         void staleStillResolvesAndLabels() {
             var directory = windowed();
-            var stale = seenAt("bob", CUTOFF.minusSeconds(3600));
+            var stale = new DirectoryUser("bob", "sub-bob", "bob.smith", "bob.smith@example.com", true, "BOB",
+                    List.of(Subjects.team("engineering")), Instant.EPOCH, CUTOFF.minusSeconds(3600));
             when(store.find("bob")).thenReturn(Optional.of(stale));
+            when(store.findByUsername("bob.smith")).thenReturn(List.of(stale));
+            when(store.findByVerifiedEmail("bob.smith@example.com")).thenReturn(List.of(stale));
             when(store.findAll(any())).thenReturn(Map.of("bob", stale));
 
             assertEquals(Subjects.user("bob"), directory.resolveSubject("bob", ALICE, false));
+            assertEquals(Subjects.user("bob"), directory.resolveSubject("bob.smith", ALICE, false), "by username");
+            assertEquals(Subjects.user("bob"), directory.resolveSubject("bob.smith@example.com", ALICE, false), "by verified email");
             assertEquals("BOB", directory.labelFor("bob"));
         }
 
@@ -599,6 +605,64 @@ class UserDirectoryTest {
             assertNull(windowed(Duration.ofDays(-1)).visibleSince());
             assertEquals(NOW.minus(Duration.ofHours(1)), windowed(Duration.ofMinutes(5)).visibleSince());
             assertEquals(NOW.minus(Duration.ofHours(1)), windowed(Duration.ofHours(1)).visibleSince());
+            assertEquals(NOW.minus(UserDirectory.MAX_STALE_AFTER), windowed(Duration.ofSeconds(40_000_000_000_000_000L)).visibleSince(),
+                    "a window past what the stores (or Instant) can hold is lowered to a century, not a failed search");
+        }
+
+        @Test
+        @DisplayName("an administrator's search computes no cutoff at all")
+        void adminSearchNeedsNoCutoff() {
+            Clock broken = new Clock() {
+                @Override
+                public ZoneId getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    throw new IllegalStateException("no cutoff should be needed");
+                }
+            };
+            var directory = new UserDirectory(store, identity, spaceContext, settings, executor, true, true, WINDOW, broken);
+            when(store.search("bob", 9)).thenReturn(List.of(seenAt("bob", CUTOFF.minusSeconds(3600))));
+
+            assertEquals("bob@example.com", directory.search("bob", 8, ALICE, true).get(0).detail());
+        }
+
+        @Test
+        @DisplayName("a suggestion's detail uses the search's cutoff, not one taken a moment later")
+        void detailUsesTheSearchCutoff() {
+            Clock ticking = new Clock() {
+                private Instant next = NOW;
+
+                @Override
+                public ZoneId getZone() {
+                    return ZoneOffset.UTC;
+                }
+
+                @Override
+                public Clock withZone(ZoneId zone) {
+                    return this;
+                }
+
+                @Override
+                public Instant instant() {
+                    Instant now = next;
+                    next = next.plusMillis(1);
+                    return now;
+                }
+            };
+            var directory = new UserDirectory(store, identity, spaceContext, settings, executor, true, true, WINDOW, ticking);
+            when(store.searchWithinTeams(eq("bob"), any(), any(), anyInt())).thenReturn(List.of(seenAt("bobby", CUTOFF)));
+
+            var matches = directory.search("bob", 8, ALICE, false);
+
+            assertEquals("bobby@example.com", matches.get(0).detail(), "suggested as a teammate, so shown as one");
         }
 
         @Test

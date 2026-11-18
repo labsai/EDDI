@@ -113,6 +113,14 @@ public class UserDirectory {
      */
     static final Duration MIN_STALE_AFTER = Duration.ofHours(1);
 
+    /**
+     * Longest {@value #STALE_AFTER_PROPERTY} honoured — a century. Longer values
+     * would put the cutoff before what the stores can hold (PostgreSQL's
+     * {@code timestamptz} starts in 4713 BC) or overflow {@link Instant} itself,
+     * and mean "never" in practice anyway.
+     */
+    static final Duration MAX_STALE_AFTER = Duration.ofDays(36_500);
+
     private final IUserDirectoryStore store;
     private final SecurityIdentity identity;
     private final SpaceContext spaceContext;
@@ -170,8 +178,9 @@ public class UserDirectory {
     }
 
     /**
-     * A zero or negative window is read as "never" and one shorter than
-     * {@link #MIN_STALE_AFTER} is raised to it, each with a warning — rather than
+     * A * zero or negative window is read as "never", one shorter than
+     * {@link #MIN_STALE_AFTER} is raised to it and one longer than
+     * {@link #MAX_STALE_AFTER} lowered to it, each with a warning — rather than
      * failing, because this bean is created lazily and a refusal would surface as a
      * failed request, not a failed boot.
      */
@@ -189,6 +198,11 @@ public class UserDirectory {
                     + "(the directory refreshes a sign-in about every %s); using %s.", STALE_AFTER_PROPERTY, configured, MIN_STALE_AFTER,
                     RECORD_INTERVAL, MIN_STALE_AFTER);
             return MIN_STALE_AFTER;
+        }
+        if (configured.compareTo(MAX_STALE_AFTER) > 0) {
+            LOGGER.warnf("[WORKSPACES] %s=%s is longer than the maximum %s; using %s.", STALE_AFTER_PROPERTY, configured, MAX_STALE_AFTER,
+                    MAX_STALE_AFTER);
+            return MAX_STALE_AFTER;
         }
         return configured;
     }
@@ -489,10 +503,17 @@ public class UserDirectory {
      * to read the address of whoever one has heard the name of.
      */
     public String detailFor(DirectoryUser user, CallerSpaces caller, boolean callerIsAdmin) {
+        return detailFor(user, caller, callerIsAdmin, callerIsAdmin ? null : visibleSince());
+    }
+
+    /**
+     * {@link #detailFor(DirectoryUser, CallerSpaces, boolean)} at a given cutoff.
+     */
+    private String detailFor(DirectoryUser user, CallerSpaces caller, boolean callerIsAdmin, Instant since) {
         if (user == null) {
             return null;
         }
-        if (callerIsAdmin || sharesTeam(user, caller)) {
+        if (callerIsAdmin || sharesTeam(user, caller, since)) {
             return detailFor(user);
         }
         return usernameDetail(user, false);
@@ -621,8 +642,9 @@ public class UserDirectory {
         if (isActive() && !q.startsWith(Subjects.TEAM_PREFIX) && userQuery.length() >= MIN_USER_QUERY) {
             Set<String> self = caller == null ? Set.of() : caller.selfPrincipals();
             Set<String> callerTeams = teamsOf(caller);
-            // One cutoff for the query and the re-check, so both draw the same line.
-            Instant since = visibleSince();
+            // One cutoff for the query, the re-check and the detail, so all three draw
+            // the same line. An administrator's search is not windowed and needs none.
+            Instant since = callerIsAdmin ? null : visibleSince();
             try {
                 List<DirectoryUser> found;
                 if (callerIsAdmin) {
@@ -641,7 +663,7 @@ public class UserDirectory {
                         continue;
                     }
                     String subject = Subjects.user(user.principal());
-                    matches.putIfAbsent(subject, new Match(subject, "user", user.label(), detailFor(user, caller, callerIsAdmin)));
+                    matches.putIfAbsent(subject, new Match(subject, "user", user.label(), detailFor(user, caller, callerIsAdmin, since)));
                 }
             } catch (RuntimeException e) {
                 LOGGER.debugf(e, "Could not search the user directory");
