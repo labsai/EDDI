@@ -30,9 +30,15 @@
   therefore survives (it can only be among the rows read once that pause is current, and the re-check then stops
   the sweep), and so does a row under the name that is not a HITL timeout. A row created by a sweep for a pause
   that ended meanwhile is withdrawn by its id; a withdrawal that fails is logged at `WARN` and leaves a row bound to
-  the ended pause, whose fire is refused. A read that fails writes nothing (`WARN`; the next pass reads again). A
-  row the store cannot decode is skipped by `readSchedulesByName` and logged at `WARN` with its id, so it no longer
-  blocks the repair of its readable siblings. When 100 rows or more share the name, the stale ones read are
+  the ended pause, whose fire is refused. A read that fails is retried twice within the pass (after 1 s and 4 s,
+  `readRetryDelays`); if it still fails nothing is written — on the restore path too, which used to create a row
+  then and so could put an enabled twin next to a row a person had disabled. For an approval gate the safe failure
+  is the pause waiting for a human: the failure counts in `eddi_hitl_timeout_arm_failures_total{surface}` and logs
+  at `WARN` in a cluster (the next sweep reads again) or at `ERROR` on a single node (the pause waits without a
+  re-armed timeout until the next start or a person's decision). A row the store cannot decode is skipped by
+  `readSchedulesByName` and logged at `WARN` with its id, so it no longer blocks the repair of its readable
+  siblings; the store reads past such rows until it has `limit` decodable ones (at most 100 more raw rows), so a
+  result shorter than the limit is complete, and fails the read beyond that allowance. When 100 rows or more share the name, the stale ones read are
   removed and nothing is created until a later pass has seen them all. A pause the startup pass restores from
   `IN_PROGRESS` after a lost resume replaces a spent row at once (no backoff) but keeps a row of its own that can
   still fire or that a person disabled. Files: `engine/hitl/HitlCrashRecoveryObserver.java`,
@@ -51,9 +57,12 @@
   `system:timeout`; the conversation ends `EXECUTION_INTERRUPTED`), logs at `ERROR` and counts
   `eddi_hitl_timeout_undecidable_total{surface="regular",reason="plan_changed"}`. A timeout row that names no pause
   (armed by an older build) never ends one — the unbound cancel would skip the pause-identity check: it logs at
-  `ERROR`, counts `reason="unbound_plan_changed"` and completes; the pause keeps waiting until a recovery pass arms a
-  timeout bound to it (about an hour later on a cluster, at the next start on a single node), which then cancels it,
-  unless a person cancels first. A cancel that finds nothing to cancel while a decision on the same pause is in
+  `ERROR`, counts `reason="unbound_plan_changed"` and completes; the pause keeps waiting. Under a finite policy
+  (older builds armed rows only for those, so normally the pause the row was armed for) a recovery pass arms a
+  timeout bound to it (about an hour later on a cluster, at the next start on a single node), which then cancels
+  it. Under `WAIT_INDEFINITELY` (the row is a leftover of an earlier, finite pause; a pause's policy is fixed when
+  it pauses) recovery never arms a timeout, so nothing automatic ends it and no approval can apply: a person
+  cancels it, or `eddi.hitl.pending.max-age` retention does when configured. A cancel that finds nothing to cancel while a decision on the same pause is in
   flight (`IN_PROGRESS`) or while this very pause is back in `AWAITING_HUMAN` — read from the store, not the state
   cache, and bound to the pause id — or that fails while the pause waits, is retried; a conversation paused again on
   another request completes the fire. The regular `ABORT` follows the same rule (it used to retry only on
@@ -71,8 +80,9 @@
   `eddi_hitl_timeout_arm_failures_total{surface}` (`regular`, `group`, `group-human`). The cluster sweep re-creates
   the missing schedule on a sweep that reaches the pause (best effort: at most 10,000 paused conversations per pass); a single node does so at its next start.
 - **Docs.** `docs/hitl.md` → Crash Recovery describes what the sweep keeps, re-creates and re-arms, the undecidable
-  outcome, the single-node limit, the startup grace (only for re-created rows: a surviving overdue row fires at the
-  first poll, so `AUTO_APPROVE` decides right after an outage longer than the timeout) and the earlier cluster
+  outcome, the single-node limit, the startup grace (only for re-created rows: a surviving overdue row keeps its due
+  time and fires once its retry time, claim and batch conditions allow, so `AUTO_APPROVE` decides soon after an
+  outage longer than the timeout, with no grace) and the earlier cluster
   behaviour. Both metrics are in `docs/metrics.md` and on the "Approval timeouts by surface" panel of the Full
   Metrics Reference dashboard (Kubernetes copies regenerated with `scripts/sync-monitoring-assets.py`).
 
@@ -85,7 +95,13 @@
   no further `IScheduleStore` method (another open PR adds methods there), and a pause is committed before its
   timeout row is created, so a newer pause's row that the read returned is always caught by the re-check.
 - An undecodable row is skipped by the read rather than returned flagged: the poller cannot fire it either, so it is
-  no timeout of the pause, and the interface keeps its shape.
+  no timeout of the pause, and the interface keeps its method set (only its Javadoc changed). The store reads past
+  skipped rows up to a fixed allowance and fails beyond it, so `rows.size() >= limit` stays a truthful "maybe more".
+- A failed read writes nothing on every path, including the restore after a lost resume: the alternative (create
+  anyway) can arm an automatic decision next to a row a person disabled. The retry for a single node, which has no
+  later sweep, is two short re-reads inside the pass rather than a deferred re-run: no new scheduling machinery,
+  and a longer outage would fail a deferred run just the same — it ends loud (ERROR plus the arm-failure counter)
+  with the pause waiting for a human.
 - A spent row of a still-waiting pause is re-armed after an hour rather than never (it could hide a pause forever) or
   at once (a decision that keeps failing would fire every sweep). The cases that can never succeed end the pause in
   the handler instead, so the hour is a safety net.
@@ -133,7 +149,11 @@
   `EXECUTION_INTERRUPTED`.
 - `MongoScheduleStoreTest`, `PostgresScheduleStoreUnitTest`: `readSchedulesByName` — the exact name filter and limit,
   a zero limit reads nothing, MongoDB reads the primary (two distinct views), an undecodable row is skipped and its
-  sibling returned.
+  sibling returned, the read goes past an undecodable row in the first 100 to a protected row at raw #101, and too
+  many undecodable rows fail the read. `HitlTimeoutRearmSweepTest` (store fake with the same contract): the same
+  undecodable-plus-protected layout creates nothing; on the restore path a read that keeps failing creates nothing,
+  leaves the hand-disabled row as it is and counts the failure, and a read that succeeds on the retry is judged
+  normally.
 - `ConversationServiceHitlCoverageTest`, `GroupHitlCoordinatorTest`: the arm-failure counter (the group one also
   without a registry).
 
@@ -142,10 +162,11 @@
 - On a single node a timeout that could not be scheduled stays missing until the next restart (no periodic repair
   without a cluster).
 - `readSchedulesByName` has no ordering and the sweep reads at most 100 rows per name; with more it removes the
-  stale rows it read and waits for a later pass. A skipped undecodable row does not count toward that bound, so a
-  page of 100 that contains one is judged as complete. Harmless in practice: timeout names are unique per
-  conversation or discussion, and an undecodable row stays (logged on every pass that reads the name) until someone
-  deletes it.
+  stale rows it read and waits for a later pass. An undecodable row stays (logged on every pass that reads the name)
+  until someone deletes it.
+- A single node whose schedule store stays unreadable through the in-pass retries of its startup pass leaves the
+  affected pauses without a re-armed timeout until the next start (ERROR log plus the arm-failure counter); there is
+  no periodic repair without a cluster.
 - The pre-write re-check counts a pause whose state cannot be read as still current (as the post-create one always
   did), so the sweep then proceeds as before this change.
 - The resume and cancel paths (`ConversationHitlService.deleteHitlTimeoutSchedule`, the group equivalents) still

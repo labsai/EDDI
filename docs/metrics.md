@@ -753,8 +753,8 @@ Full guide: [hitl.md](hitl.md).
 eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
 eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
 eddi_hitl_timeout_count_total               # Approvals that expired unanswered
-eddi_hitl_timeout_arm_failures_total        # Timeouts that could not be scheduled at pause time; tag: surface (regular, group, group-human) — crash recovery re-creates them
-eddi_hitl_timeout_undecidable_total         # Timeout decisions that can never apply (the stored plan changed); tags: surface (regular), reason (plan_changed: the pause was cancelled; unbound_plan_changed: an older build's row names no pause, so it was NOT cancelled — recovery arms a bound timeout about an hour later, a single node at its next start)
+eddi_hitl_timeout_arm_failures_total        # Timeouts that could not be scheduled at pause time, or that crash recovery could not re-arm because reading the pause's timeout rows kept failing (nothing written; the pause waits for a human); tag: surface (regular, group, group-human) — a later recovery pass re-creates them
+eddi_hitl_timeout_undecidable_total         # Timeout decisions that can never apply (the stored plan changed); tags: surface (regular), reason (plan_changed: the pause was cancelled; unbound_plan_changed: an older build's row names no pause, so it was NOT cancelled — under a finite policy recovery arms a bound timeout about an hour later, a single node at its next start; under WAIT_INDEFINITELY nothing automatic ends it, a person must cancel it)
 eddi_hitl_timeout_rearmed_spent_total       # Timeouts that fired and completed while their pause still waits, re-armed an hour later by crash recovery; tag: surface
 eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
 eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict

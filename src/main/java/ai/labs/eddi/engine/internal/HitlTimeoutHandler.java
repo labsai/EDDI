@@ -213,11 +213,21 @@ public class HitlTimeoutHandler {
      * (IN_PROGRESS) may fail and restore it, and only this fire would then end it.
      * <p>
      * A row armed by an older build names no pause and is not allowed to end one:
-     * its fire is counted ({@code reason=unbound_plan_changed}) and completes. The
-     * pause keeps waiting; the next recovery pass finds the spent row and arms a
-     * timeout bound to the pause {@code SPENT_REARM_BACKOFF} after this fire, and
-     * that one ends it — on a cluster about an hour later, on a single node at its
-     * next start, unless a person cancels the conversation first.
+     * its fire is counted ({@code reason=unbound_plan_changed}) and completes, and
+     * the pause keeps waiting. What ends it depends on the policy stored with the
+     * current pause (fixed when it paused; a config change later does not alter
+     * it). Older builds armed timeout rows only for finite policies, so:
+     * <ul>
+     * <li>finite (normally the pause the row was armed for): the next recovery pass
+     * finds the spent row and arms a timeout bound to the pause
+     * {@code SPENT_REARM_BACKOFF} after this fire, and that one cancels it — on a
+     * cluster about an hour later, on a single node at its next start;</li>
+     * <li>{@code WAIT_INDEFINITELY} (the row is a leftover of an earlier, finite
+     * pause): recovery never arms a timeout for such a pause, so nothing automatic
+     * ends it — and since its plan changed, no approval can either. A person
+     * cancels it, or the pending-approval retention
+     * ({@code eddi.hitl.pending.max-age}) does when configured.</li>
+     * </ul>
      */
     private void endUndecidableRegularPause(String conversationId, HitlDecision decision, String reason, Exception cause) {
         if (decision.getPauseId() == null) {
@@ -225,8 +235,9 @@ public class HitlTimeoutHandler {
             // current, so it has no standing to END one — the cancel would skip the
             // pause-identity check and could end a newer pause nobody timed out on.
             LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) but it names no pause — "
-                    + "not cancelling the current pause: recovery arms a timeout bound to it about an hour after this fire "
-                    + "(on a single node: at its next start); cancel the conversation to end it now",
+                    + "not cancelling the current pause. With a finite timeout policy, recovery arms a timeout bound to it "
+                    + "about an hour after this fire (a single node: at its next start); under WAIT_INDEFINITELY nothing "
+                    + "automatic ends it and no approval can apply — cancel the conversation",
                     decision.getVerdict(), conversationId, reason, cause.getMessage());
             countUndecidable(HitlSchedules.SURFACE_REGULAR, REASON_UNBOUND);
             return;
