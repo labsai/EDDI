@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen } from "@testing-library/react";
+import { MemoryRouter, Routes, Route } from "react-router-dom";
+import { AuthContext, GUEST_CONTEXT } from "@eddi/app-kit/components/auth/auth-context";
 import { renderAs } from "@eddi/app-kit/test/test-utils";
 import { RouteGate } from "../route-gate";
 
@@ -36,6 +38,37 @@ describe("RouteGate", () => {
     renderAs(["eddi-editor"], "/manage/agents/wizard", routes);
     expect(screen.getByTestId("no-access-guided-setup")).toBeInTheDocument();
     expect(screen.getByTestId("no-access-quick-create")).toHaveAttribute("href", "/manage/agents");
+  });
+
+  it("moves focus to the heading of the no-access page", () => {
+    renderAs(["eddi-editor"], "/manage/gdpr", routes);
+    expect(screen.getByTestId("no-access-title")).toHaveFocus();
+  });
+
+  it("gates a differently spelled path the same way", () => {
+    renderAs(["eddi-editor"], "/manage/GDPR", routes);
+    expect(screen.getByTestId("no-access")).toBeInTheDocument();
+  });
+
+  it("sends a viewer-and-user token (the realistic realm viewer) to the cluster console, not Workforce", () => {
+    renderAs(["eddi-viewer", "eddi-user", "default-roles-eddi"], "/manage/gdpr", routes);
+    expect(screen.getByTestId("no-access-home")).toHaveAttribute("href", "/manage/coordinator");
+    expect(screen.getByTestId("no-access-workforce")).toBeInTheDocument();
+  });
+
+  it("re-evaluates the current route when the roles change (a refreshed token)", () => {
+    const { rerender } = renderAs(["eddi-editor"], "/manage/gdpr", routes);
+    expect(screen.getByTestId("no-access")).toBeInTheDocument();
+    rerender(
+      <AuthContext.Provider value={{ ...GUEST_CONTEXT, method: "keycloak", roles: ["eddi-editor", "eddi-admin"] }}>
+        <MemoryRouter initialEntries={["/manage/gdpr"]}>
+          <Routes>
+            <Route path="/manage/*" element={page} />
+          </Routes>
+        </MemoryRouter>
+      </AuthContext.Provider>,
+    );
+    expect(screen.getByTestId("page")).toBeInTheDocument();
   });
 
   it("shows nothing different for an admin", () => {

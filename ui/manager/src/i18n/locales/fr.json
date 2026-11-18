@@ -3468,7 +3468,9 @@
     "presetsNote": "Ce sont des préréglages qui remplissent cet assistant. Pour utiliser une discussion prête à l'emploi et affecter vos agents existants à ses rôles, consultez",
     "presetsLink": "Modèles de groupe",
     "agentNotDeployed": "Agent créé mais non déployé",
-    "deployingAgents": "Déploiement des agents..."
+    "deployingAgents": "Déploiement des agents...",
+    "blockerCreateNeedsAdmin": "{{member}} : la création d'un nouvel agent nécessite un administrateur. Choisissez plutôt un agent existant.",
+    "createNewAdminOnly": "La création d'un nouvel agent nécessite un administrateur. Utilisez un agent existant."
   },
   "groupTemplates": {
     "assignRoles": "Attribuer les rôles",

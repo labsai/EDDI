@@ -3174,7 +3174,9 @@
     "presetsNote": "Das sind Starter-Vorlagen, die diesen Assistenten ausfüllen. Wenn du stattdessen eine vorgefertigte, abgestimmte Diskussion nutzen und deine vorhandenen Agenten ihren Rollen zuweisen möchtest, siehe",
     "presetsLink": "Gruppenvorlagen",
     "agentNotDeployed": "Agent erstellt, aber nicht bereitgestellt",
-    "deployingAgents": "Agenten werden bereitgestellt ..."
+    "deployingAgents": "Agenten werden bereitgestellt ...",
+    "blockerCreateNeedsAdmin": "{{member}}: Ein neuer Agent kann nur von einem Administrator erstellt werden. Wählen Sie stattdessen einen vorhandenen Agenten.",
+    "createNewAdminOnly": "Ein neuer Agent kann nur von einem Administrator erstellt werden. Nutzen Sie einen vorhandenen Agenten."
   },
   "groupTemplates": {
     "assignRoles": "Rollen zuweisen",

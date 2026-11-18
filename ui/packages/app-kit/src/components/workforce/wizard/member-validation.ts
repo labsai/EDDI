@@ -124,19 +124,29 @@ export function providerLabel(provider: string): string {
   return LLM_PROVIDERS.find((p) => p.id === id)?.name ?? id;
 }
 
-export type MemberIssue = "name" | "agent" | "prompt" | "apiKey";
+export type MemberIssue = "name" | "agent" | "prompt" | "apiKey" | "admin";
 
 /**
  * The first required field a member slot is still missing, or null when it is
  * complete. Ordered the way the backend validates, so fixing issues top-down
  * never surfaces one the server would have raised earlier.
  */
-export function memberIssue(member: MemberSlot, defaults: LlmDefaults): MemberIssue | null {
+export function memberIssue(
+  member: MemberSlot,
+  defaults: LlmDefaults,
+  /**
+   * False for a role that cannot call `POST /administration/agents/setup`
+   * (eddi-admin only): a new advisor would fail with a 403 after the earlier
+   * ones were already created, so it is reported here instead.
+   */
+  mayCreateAgents = true,
+): MemberIssue | null {
   if (!member.displayName.trim()) return "name";
   if (member.mode === "existing") return member.agentId.trim() ? null : "agent";
   // Already provisioned by an earlier, partially failed attempt — nothing to
   // validate; it will be reused as is.
   if (member.createdAgentId) return null;
+  if (!mayCreateAgents) return "admin";
   if (!member.systemPrompt.trim()) return "prompt";
   const llm = effectiveLlm(member, defaults);
   if (providerNeedsKey(llm.provider) && !llm.apiKey.trim()) return "apiKey";

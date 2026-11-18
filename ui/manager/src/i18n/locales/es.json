@@ -3468,7 +3468,9 @@
     "presetsNote": "Son plantillas de inicio que rellenan este asistente. Para usar una discusión preconfigurada y asignar tus agentes existentes a sus roles, consulta",
     "presetsLink": "Plantillas de grupo",
     "agentNotDeployed": "Agente creado pero no desplegado",
-    "deployingAgents": "Desplegando los agentes..."
+    "deployingAgents": "Desplegando los agentes...",
+    "blockerCreateNeedsAdmin": "{{member}}: crear un agente nuevo requiere un administrador. Elija un agente existente.",
+    "createNewAdminOnly": "Crear un agente nuevo requiere un administrador. Use un agente existente."
   },
   "groupTemplates": {
     "assignRoles": "Asignar roles",

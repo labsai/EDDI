@@ -257,6 +257,33 @@ describe("BearerEventSource", () => {
     es.close();
   });
 
+  it("cancels the 403 response body and releases the controller", async () => {
+    const response = new Response(createSSEStream(["data: x\n\n"]), { status: 403 });
+    const cancel = vi.spyOn(response.body!, "cancel");
+    fetchSpy.mockResolvedValue(response);
+    const es = new BearerEventSource("http://test/sse");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalled();
+    expect((es as unknown as { abortController: unknown }).abortController).toBeNull();
+    es.close();
+  });
+
+  it("still retries a 401, with the headers read again (a refreshed token)", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    let token = "old";
+    const es = new BearerEventSource("http://test/sse", () => ({ Authorization: "Bearer " + token }));
+    await vi.advanceTimersByTimeAsync(0);
+    token = "fresh";
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const second = fetchSpy.mock.calls[1]![1] as RequestInit;
+    expect((second.headers as Record<string, string>).Authorization).toBe("Bearer fresh");
+    expect(es.forbidden).toBe(false);
+    es.close();
+  });
+
   it("gives up after the attempt budget and fires onexhausted", async () => {
     // Regression: reconnection was unbounded, so a stream that keeps failing
     // was re-requested every five seconds for the lifetime of the session.

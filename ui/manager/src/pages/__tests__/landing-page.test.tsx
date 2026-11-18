@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderPage } from "@eddi/app-kit/test/test-utils";
+import { renderPage, renderAs } from "@eddi/app-kit/test/test-utils";
 import { LandingPage } from "@/pages/landing-page";
 
 /**
@@ -92,5 +92,17 @@ describe("LandingPage", () => {
     } finally {
       spy.mockRestore();
     }
+  });
+});
+
+describe("LandingPage — where each realistic realm token lands", () => {
+  // Every realm account also holds eddi-user (the realm's default composite), so
+  // the explicit role has to win over it.
+  it.each([
+    [["eddi-viewer", "eddi-user", "default-roles-eddi"], "/manage/coordinator"],
+    [["eddi-approver", "eddi-user", "default-roles-eddi"], "/manage/approvals"],
+  ])("%j goes to %s", (roles, expected) => {
+    renderAs(roles, "/welcome", [["/welcome", <LandingPage />]]);
+    expect(screen.getByTestId("where")).toHaveTextContent(expected);
   });
 });

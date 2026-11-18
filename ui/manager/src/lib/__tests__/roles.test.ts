@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   CAPABILITY_ROLES,
+  homePathForRoles,
   capabilityForScreen,
   mayDo,
   mayUse,
@@ -134,6 +135,25 @@ describe("the permission map, one role at a time", () => {
 
   it("grants everything for a token that carries no EDDI role", () => {
     expect(ALL.every((c) => mayDo(c, ["default-roles-eddi"], false))).toBe(true);
+  });
+});
+
+describe("homePathForRoles — the explicit role wins over the realm's default eddi-user", () => {
+  it.each([
+    [["eddi-viewer", "eddi-user", "default-roles-eddi"], "/manage/coordinator"],
+    [["eddi-approver", "eddi-user", "default-roles-eddi"], "/manage/approvals"],
+    [["eddi-user", "default-roles-eddi"], "/workforce"],
+    [["eddi-editor", "eddi-user"], "/manage"],
+    [["eddi-admin", "eddi-editor", "eddi-viewer", "eddi-user"], "/manage"],
+    [[], "/manage"],
+  ])("%j -> %s", (roles, path) => {
+    expect(homePathForRoles(roles)).toBe(path);
+  });
+
+  it("the realistic viewer token holds the cluster console and nothing else of the Manager", () => {
+    const viewer = ["eddi-viewer", "eddi-user", "default-roles-eddi"];
+    const held = (Object.keys(CAPABILITY_ROLES) as Capability[]).filter((c) => mayDo(c, viewer, false));
+    expect(held).toEqual(["approvals.decide", "cluster.read", "userdata.own"]);
   });
 });
 

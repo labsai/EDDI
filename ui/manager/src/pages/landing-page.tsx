@@ -11,8 +11,8 @@ import { cn } from "@eddi/app-kit/lib/utils";
 import { useTheme } from "@eddi/ui";
 import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
-import { useMayUse } from "@eddi/app-kit/hooks/use-auth";
-import { ROLE_APPROVER, ROLE_USER, ROLE_VIEWER } from "@eddi/app-kit/lib/roles";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { homePathForRoles } from "@eddi/app-kit/lib/roles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -135,7 +135,7 @@ export function LandingPage() {
   const [searchParams] = useSearchParams();
   const forceChooser = searchParams.has("choose");
   const { canAuthor } = useWorkforceAccess();
-  const may = useMayUse();
+  const { roles } = useAuth();
 
   // An end user (`eddi-user` without `eddi-editor` / `eddi-admin`) has one
   // place to go: Workforce (decision D6). The chooser offers the Manager, whose
@@ -148,14 +148,13 @@ export function LandingPage() {
   // dedicated `eddi-viewer` or `eddi-approver` would get nothing but 403s
   // there, so they go to the Manager instead: an approver to the approvals
   // inbox (their whole job, and an endpoint that admits them), a viewer to the
-  // cluster console (its one screen). Workforce is another app (ui/workforce), so getting there
-  // is a page load, not a router redirect: AppNavigate picks the right one.
+  // cluster console (its one screen). Every realm account also holds
+  // `eddi-user`, so that explicit role is tested first (homePathForRoles).
+  // Workforce is another app (ui/workforce), so getting there is a page load,
+  // not a router redirect: AppNavigate picks the right one.
   if (!canAuthor) {
-    if (may([ROLE_USER])) return <AppNavigate to="/workforce" />;
-    if (may([ROLE_APPROVER])) return <AppNavigate to="/manage/approvals" />;
-    // The viewer opens exactly one Manager screen: the cluster console.
-    if (may([ROLE_VIEWER])) return <AppNavigate to="/manage/coordinator" />;
-    return <AppNavigate to="/manage" />;
+    // The explicit role wins over the realm's default `eddi-user`: see homePathForRoles.
+    return <AppNavigate to={homePathForRoles(roles)} />;
   }
 
   // Synchronous redirect — no flash

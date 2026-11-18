@@ -951,7 +951,8 @@
       "useDefaultKey": "워크포스 기본 키",
       "useExisting": "기존 에이전트 사용",
       "useStarterPrompt": "시작 프롬프트 삽입",
-      "yourAdvisors": "내 자문"
+      "yourAdvisors": "내 자문",
+      "createNeedsAdmin": "새 어드바이저를 만들려면 관리자가 필요합니다. 대신 기존 에이전트를 사용하세요."
     }
   },
   "connections": {

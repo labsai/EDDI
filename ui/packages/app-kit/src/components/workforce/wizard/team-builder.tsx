@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { ChevronDown, ChevronUp, Plus, Sparkles, X } from "lucide-react";
 import { cn } from "../../../lib/utils";
+import { useCan } from "../../../hooks/use-auth";
 import { Button } from "@eddi/ui";
 import { Badge } from "@eddi/ui";
 import { AdvisorAvatar } from "../advisor-avatar";
@@ -187,6 +188,7 @@ function MemberCard({
   takenAgentIds?: ReadonlySet<string>;
 }) {
   const { t } = useTranslation();
+  const mayCreateAgents = useCan("setup.guided");
   const [expanded, setExpanded] = useState(false);
   const invalid = showErrors && issue !== null;
   /** Provisioned by an earlier, partially failed attempt — reused as is. */
@@ -218,6 +220,11 @@ function MemberCard({
   const errorText =
     issue === "name"
       ? t("Workforce.wizard.nameRequired", "Give this advisor a name.")
+      : issue === "admin"
+        ? t(
+            "Workforce.wizard.createNeedsAdmin",
+            "Creating a new advisor needs an administrator. Use an existing agent instead.",
+          )
       : issue === "agent"
         ? t("Workforce.wizard.agentRequired", "Pick the existing agent this advisor should use.")
         : issue === "apiKey"
@@ -359,6 +366,12 @@ function MemberCard({
               type="button"
               aria-pressed={member.mode === "new"}
               onClick={() => update({ mode: "new" })}
+              disabled={!mayCreateAgents}
+              title={
+                mayCreateAgents
+                  ? undefined
+                  : t("Workforce.wizard.createNeedsAdmin", "Creating a new advisor needs an administrator. Use an existing agent instead.")
+              }
               className={cn(
                 "rounded-lg ps-3 pe-3 py-1.5 text-xs font-medium transition-colors",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -487,6 +500,7 @@ function TeamBuilder({
   showErrors = false,
 }: TeamBuilderProps) {
   const { t } = useTranslation();
+  const mayCreateAgents = useCan("setup.guided");
   const boardNameMissing = showErrors && boardName.trim().length === 0;
   const hasNewMembers = members.some((m) => m.mode === "new" && !m.createdAgentId);
   // Flag the shared key block itself when advisors are waiting on it — it
@@ -634,7 +648,7 @@ function TeamBuilder({
             key={member.id}
             member={member}
             canRemove={members.length > 2}
-            issue={memberIssue(member, llmDefaults)}
+            issue={memberIssue(member, llmDefaults, mayCreateAgents)}
             showErrors={showErrors}
             llmDefaults={llmDefaults}
             onUpdate={(updated) => updateMember(index, updated)}

@@ -959,7 +959,8 @@
       "useDefaultKey": "Chave predefinida da equipa",
       "useExisting": "Usar um agente existente",
       "useStarterPrompt": "Inserir um prompt inicial",
-      "yourAdvisors": "Seus consultores"
+      "yourAdvisors": "Seus consultores",
+      "createNeedsAdmin": "Criar um conselheiro novo exige um administrador. Use um agente existente."
     }
   },
   "connections": {

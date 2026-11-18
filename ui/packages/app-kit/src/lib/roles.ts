@@ -62,7 +62,8 @@ export const EDDI_ROLES: readonly string[] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_USER
  *   `IRestAuditSamples`, `IRestAutonomy`.
  * - `approvals.decide`: admin, editor, user, approver — `IRestAgentEngine`'s
  *   approval methods.
- * - `userdata.own`: admin + user — `IRestUserMemoryStore`, `IRestPropertiesStore`.
+ * - `userdata.own`: admin + user — `IRestUserMemoryStore`, `IRestPropertiesStore`;
+ *   `userdata.conversations`: admin only — `IRestUserConversationStore`.
  *
  * So `eddi-viewer` opens ONE Manager screen: the cluster console. It also reads
  * documentation, agent usage, workspace info and team budgets, which have no
@@ -117,6 +118,8 @@ export const CAPABILITY_ROLES = {
   "cluster.read": [ROLE_ADMIN, ROLE_VIEWER],
   "cluster.act": [ROLE_ADMIN],
   "userdata.own": [ROLE_ADMIN, ROLE_USER],
+  // `IRestUserConversationStore` is class-level admin only (the other two tabs admit eddi-user).
+  "userdata.conversations": [ROLE_ADMIN],
 } as const satisfies Record<string, readonly string[]>;
 
 export type Capability = keyof typeof CAPABILITY_ROLES;
@@ -176,7 +179,9 @@ const SCREENS: ReadonlyArray<{ path: string; capability: Capability; exact?: boo
 
 /** The capability the screen at `path` needs, or `null` when any role may open it. */
 export function capabilityForScreen(path: string): Capability | null {
-  const bare = path.split(/[?#]/, 1)[0] ?? path;
+  // React Router matches case-insensitively and tolerates repeated slashes, so
+  // /manage/Logs and /manage//logs must find the same entry as /manage/logs.
+  const bare = (path.split(/[?#]/, 1)[0] ?? path).toLowerCase().replace(/\/{2,}/g, "/");
   const trimmed = bare.length > 1 ? bare.replace(/\/+$/, "") : bare;
   const hit = SCREENS.find((s) =>
     s.exact ? trimmed === s.path : trimmed === s.path || trimmed.startsWith(`${s.path}/`),
@@ -203,6 +208,24 @@ export function realmRolesOf(tokenParsed: unknown): string[] {
 /** The EDDI roles among `roles`, most privileged first. */
 export function eddiRolesOf(roles: readonly string[]): string[] {
   return EDDI_ROLES.filter((r) => roles.includes(r));
+}
+
+/**
+ * Where a signed-in person lands, by role: the one place their role is for.
+ *
+ * Every realm user also holds `eddi-user` (the realm's default composite), so
+ * a viewer's real token is `[eddi-viewer, eddi-user, …]` and an approver's
+ * `[eddi-approver, eddi-user, …]`. The explicit role wins over that default:
+ * a viewer lands on the cluster console, an approver on the approvals inbox —
+ * both can still open Workforce as a user from the no-access page and the
+ * landing chooser. Authors (admin, editor) land on the dashboard.
+ */
+export function homePathForRoles(roles: readonly string[]): string {
+  if (roles.includes(ROLE_ADMIN) || roles.includes(ROLE_EDITOR)) return "/manage";
+  if (roles.includes(ROLE_VIEWER)) return "/manage/coordinator";
+  if (roles.includes(ROLE_APPROVER)) return "/manage/approvals";
+  if (roles.includes(ROLE_USER)) return "/workforce";
+  return "/manage";
 }
 
 /**

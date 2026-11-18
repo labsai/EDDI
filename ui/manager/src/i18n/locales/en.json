@@ -3227,7 +3227,9 @@
     "presetsNote": "These are starter presets that fill in this wizard. To use a packaged, pre-tuned discussion and assign your existing agents to its roles instead, see",
     "presetsLink": "Group Templates",
     "agentNotDeployed": "Agent created but not deployed",
-    "deployingAgents": "Deploying the agents..."
+    "deployingAgents": "Deploying the agents...",
+    "blockerCreateNeedsAdmin": "{{member}}: creating a new agent needs an administrator. Pick an existing agent instead.",
+    "createNewAdminOnly": "Creating a new agent needs an administrator. Use an existing agent."
   },
   "groupTemplates": {
     "title": "Group Templates",

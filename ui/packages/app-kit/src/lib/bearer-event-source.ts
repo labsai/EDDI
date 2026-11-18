@@ -106,6 +106,8 @@ export class BearerEventSource {
         // and stop. (A 401 is still retried: the next attempt carries a
         // refreshed token.)
         this.forbidden = true;
+        void response.body?.cancel().catch(() => {});
+        this.abortController = null;
         this.onerror?.();
         this.onexhausted?.();
         return;

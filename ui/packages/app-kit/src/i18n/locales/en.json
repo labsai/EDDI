@@ -951,7 +951,8 @@
       "useDefaultKey": "Workforce default key",
       "useExisting": "Use existing agent",
       "useStarterPrompt": "Insert a starter prompt",
-      "yourAdvisors": "Your Advisors"
+      "yourAdvisors": "Your Advisors",
+      "createNeedsAdmin": "Creating a new advisor needs an administrator. Use an existing agent instead."
     }
   },
   "connections": {

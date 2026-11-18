@@ -40,7 +40,7 @@ import { useAgentDescriptors } from "@eddi/app-kit/hooks/use-agents";
 import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 import { getGroupConversation, groupGroupsByName } from "@eddi/app-kit/lib/api/groups";
 import { timeoutPolicyLabel } from "@eddi/app-kit/lib/hitl-labels";
-import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
+import { useCan, useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import type {
   ApprovalStatusSummary,
   PendingApprovalSummary,
@@ -669,7 +669,11 @@ export function ApprovalsPage() {
   // distinct groups, and a group outside the window gets no link at all. A
   // wider window rather than a per-row fetch: this list is already bounded and
   // one call is cheaper than one per queued approval.
-  const { data: groupDescriptors } = useGroupDescriptors(500);
+  // Both stores are eddi-admin / eddi-editor only; an approver or user still
+  // sees the queue, with ids where the names would be.
+  const mayReadGroups = useCan("groups.read");
+  const mayReadAgents = useCan("agents.read");
+  const { data: groupDescriptors } = useGroupDescriptors(500, 0, "", mayReadGroups);
   const groupVersions = useMemo(() => {
     const map = new Map<string, number>();
     for (const group of groupGroupsByName(groupDescriptors ?? [])) {
@@ -680,7 +684,7 @@ export function ApprovalsPage() {
   // Names for the rows. A conversation id says nothing about who it belongs to,
   // and two rows used to read identically. Best effort: a row whose agent or
   // group is outside the window (or the list is still loading) shows its id.
-  const { data: agentDescriptors } = useAgentDescriptors(500);
+  const { data: agentDescriptors } = useAgentDescriptors(500, 0, "", mayReadAgents);
   const agentNames = useMemo(() => {
     const map = new Map<string, string>();
     for (const d of agentDescriptors ?? []) {

@@ -3437,7 +3437,9 @@
     "presetsNote": "这些是用于填充本向导的入门预设。如要使用经过调优的打包讨论，并把现有智能体分配到其角色，请参阅",
     "presetsLink": "群组模板",
     "agentNotDeployed": "智能体已创建但未部署",
-    "deployingAgents": "正在部署智能体..."
+    "deployingAgents": "正在部署智能体...",
+    "blockerCreateNeedsAdmin": "{{member}}：创建新智能体需要管理员。请改选现有智能体。",
+    "createNewAdminOnly": "创建新智能体需要管理员。请使用现有智能体。"
   },
   "groupTemplates": {
     "assignRoles": "分配角色",

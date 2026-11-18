@@ -959,7 +959,8 @@
       "useDefaultKey": "Clave predeterminada del grupo de trabajo",
       "useExisting": "Usar un agente existente",
       "useStarterPrompt": "Insertar un prompt inicial",
-      "yourAdvisors": "Tus asesores"
+      "yourAdvisors": "Tus asesores",
+      "createNeedsAdmin": "Crear un asesor nuevo requiere un administrador. Use un agente existente."
     }
   },
   "connections": {

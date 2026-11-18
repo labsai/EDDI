@@ -3437,7 +3437,9 @@
     "presetsNote": "이 마법사를 채워 주는 스타터 프리셋입니다. 조정된 패키지 토론을 사용하고 기존 에이전트를 해당 역할에 지정하려면 다음을 참고하세요:",
     "presetsLink": "그룹 템플릿",
     "agentNotDeployed": "에이전트가 생성되었지만 배포되지 않았습니다",
-    "deployingAgents": "에이전트를 배포하는 중..."
+    "deployingAgents": "에이전트를 배포하는 중...",
+    "blockerCreateNeedsAdmin": "{{member}}: 새 에이전트를 만들려면 관리자가 필요합니다. 기존 에이전트를 선택하세요.",
+    "createNewAdminOnly": "새 에이전트를 만들려면 관리자가 필요합니다. 기존 에이전트를 사용하세요."
   },
   "groupTemplates": {
     "assignRoles": "역할 할당",

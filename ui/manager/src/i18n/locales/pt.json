@@ -3468,7 +3468,9 @@
     "presetsNote": "São modelos iniciais que preenchem este assistente. Para usar uma discussão pré-ajustada e atribuir seus agentes existentes às funções dela, veja",
     "presetsLink": "Modelos de grupo",
     "agentNotDeployed": "Agente criado, mas não implantado",
-    "deployingAgents": "Implantando os agentes..."
+    "deployingAgents": "Implantando os agentes...",
+    "blockerCreateNeedsAdmin": "{{member}}: criar um agente novo exige um administrador. Escolha um agente existente.",
+    "createNewAdminOnly": "Criar um agente novo exige um administrador. Use um agente existente."
   },
   "groupTemplates": {
     "assignRoles": "Atribuir funções",

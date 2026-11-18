@@ -8,6 +8,7 @@ import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { groupSaveProblems } from "@eddi/app-kit/lib/group-config";
 import { Button } from "@eddi/ui";
 import { useSetupAgent } from "@eddi/app-kit/hooks/use-agent-setup";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { useDeployWithGrants } from "@eddi/app-kit/hooks/use-deploy-with-grants";
 import { resolveSetupVersion } from "@eddi/app-kit/lib/api/agent-setup";
 import { deployFailureMessage, describeUndeployed } from "@eddi/app-kit/lib/deploy-outcome";
@@ -76,6 +77,7 @@ function emptySlot(
 function WorkforceWizard() {
   const { t } = useTranslation();
   const setupAgent = useSetupAgent();
+  const mayCreateAgents = useCan("setup.guided");
   const { deployMany } = useDeployWithGrants();
   const createGroup = useCreateGroup();
   const creatingRef = useRef(false);
@@ -176,8 +178,8 @@ function WorkforceWizard() {
     () =>
       boardName.trim().length > 0 &&
       members.length > 0 &&
-      members.every((m) => memberIssue(m, llmDefaults) === null),
-    [boardName, members, llmDefaults],
+      members.every((m) => memberIssue(m, llmDefaults, mayCreateAgents) === null),
+    [boardName, members, llmDefaults, mayCreateAgents],
   );
 
   // Step 1's Next stays clickable even when the team is incomplete: a disabled

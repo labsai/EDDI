@@ -951,7 +951,8 @@
       "useDefaultKey": "คีย์เริ่มต้นของทีมงาน",
       "useExisting": "ใช้เอเจนต์ที่มีอยู่",
       "useStarterPrompt": "แทรก prompt เริ่มต้น",
-      "yourAdvisors": "ที่ปรึกษาของคุณ"
+      "yourAdvisors": "ที่ปรึกษาของคุณ",
+      "createNeedsAdmin": "การสร้างที่ปรึกษาใหม่ต้องใช้ผู้ดูแลระบบ ใช้เอเจนต์ที่มีอยู่แทน"
     }
   },
   "connections": {

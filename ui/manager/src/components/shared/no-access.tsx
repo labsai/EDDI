@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { ShieldOff } from "lucide-react";
 import { Button } from "@eddi/ui";
@@ -11,6 +12,7 @@ import {
   ROLE_USER,
   ROLE_VIEWER,
   eddiRolesOf,
+  homePathForRoles,
   type Capability,
 } from "@eddi/app-kit/lib/roles";
 import { NAV_SECTIONS, pageLabel } from "@/lib/route-registry";
@@ -49,6 +51,12 @@ interface NoAccessProps {
 export function NoAccess({ needed, capability }: NoAccessProps) {
   const { t } = useTranslation();
   const { roles } = useAuth();
+  // A screen reader hears where it landed: focus moves to the heading when the
+  // page appears (a whole-panel role="alert" re-announced everything on re-render).
+  const headingRef = useRef<HTMLHeadingElement>(null);
+  useEffect(() => {
+    headingRef.current?.focus();
+  }, []);
   const roleName = useRoleName();
   const mayOpen = useMayOpenScreen();
   const { canAuthor } = useWorkforceAccess();
@@ -58,18 +66,26 @@ export function NoAccess({ needed, capability }: NoAccessProps) {
   const heldText = held.length > 0 ? list(held) : t("access.role.none", "no role");
   const neededText = list(needed.map(roleName));
 
-  const home = NAV_SECTIONS.flatMap((s) => s.items).find((item) => mayOpen(item.path));
+  // The same per-role landing as the chooser (homePathForRoles), so a viewer is
+  // sent to the cluster console and an approver to approvals, not to whatever the
+  // first open entry of the sidebar happens to be.
+  const homePath = homePathForRoles(roles);
+  const home = NAV_SECTIONS.flatMap((s) => s.items).find((item) => item.path === homePath && mayOpen(item.path));
   const mayUseWorkforce = canAuthor || roles.includes(ROLE_USER);
   const homeLabel = home ? pageLabel(t, home) : "";
 
   return (
     <div
       data-testid="no-access"
-      role="alert"
       className="mx-auto flex max-w-xl flex-col items-center rounded-xl border-2 border-dashed border-border px-6 py-16 text-center"
     >
       <ShieldOff className="h-12 w-12 text-muted-foreground/50" aria-hidden="true" />
-      <h1 className="mt-4 text-lg font-medium text-foreground">
+      <h1
+        ref={headingRef}
+        tabIndex={-1}
+        data-testid="no-access-title"
+        className="mt-4 text-lg font-medium text-foreground outline-none"
+      >
         {t("access.title", "Not available for your role")}
       </h1>
       <p className="mt-2 text-sm text-muted-foreground" data-testid="no-access-roles">

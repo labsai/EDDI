@@ -46,10 +46,11 @@ export function isAwaitingHumanConversationState(
 
 // ─── Group Config Hooks ──────────────────────────────────────────
 
-export function useGroupDescriptors(limit = 20, index = 0, filter = "") {
+export function useGroupDescriptors(limit = 20, index = 0, filter = "", enabled = true) {
   return useQuery({
     queryKey: [...GROUPS_KEY, "descriptors", { limit, index, filter }],
     queryFn: () => getGroupDescriptors(limit, index, filter),
+    enabled,
   });
 }
 
