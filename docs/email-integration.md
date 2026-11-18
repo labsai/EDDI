@@ -97,7 +97,7 @@ Gmail's IMAP and SMTP take OAuth through SASL `XOAUTH2`, and a Workspace user ma
 authorization-code grant — somebody has to sign in to Google **as the mailbox** once. A connection bound
 [`MAILBOX`](connections.md#dedicated-mailboxes-mailbox) holds one such grant per dedicated mailbox, linked by an
 `eddi-admin`; the mail transport is the only thing that can use it. Only **dedicated** mailboxes
-(`support@company.com`), never a person's own: domain-wide delegation stays out.
+(`eddi@eddi.solutions`), never a person's own: domain-wide delegation stays out.
 
 **Prerequisites** are those of the [Google Workspace recipe](google-workspace.md#prerequisites) for connections:
 connection settings `enabled`, `publicBaseUrl`, `credentialEndpointAllowlist` with `https://accounts.google.com` and
@@ -133,7 +133,7 @@ connection is refused at save (400) while `authorization.enabled=false`.
 
 5. **Link the mailbox:** Manager → Connections → the connection → **Mailbox grants** → address → **Link mailbox**, and
    sign in to Google **as the dedicated account**. (REST: `POST /connections/{name}/mailbox-grants/authorize` with
-   `{"address": "support@company.com"}`, then follow the returned URL in a browser.) The callback stores the grant only
+   `{"address": "eddi@eddi.solutions"}`, then follow the returned URL in a browser.) The callback stores the grant only
    when the Gmail profile (`users.getProfile`) of the new token is that address and the address is not the linking
    administrator's own; either refusal comes back as `?error=mailbox_account_mismatch` or `?error=mailbox_is_own`, and
    nothing is stored.

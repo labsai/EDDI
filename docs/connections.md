@@ -853,17 +853,17 @@ no way to revoke it. Unlinking must never be harder than linking was.
 
 ## Dedicated mailboxes (`MAILBOX`)
 
-A Google Workspace **dedicated mailbox** (`support@company.com`) can only be read over IMAP
+A Google Workspace **dedicated mailbox** (`eddi@eddi.solutions`) can only be read over IMAP
 with an authorization-code grant: somebody signs in to Google as that mailbox once. That
 somebody is an `eddi-admin` acting for the mailbox — not a person linking their own account —
 so it is its own binding rather than `PER_USER`. The setup is in
 [email-integration.md → Google Workspace](email-integration.md#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator).
 
 ```
-POST /connections/{name}/mailbox-grants/authorize?returnTo=…  {"address": "support@company.com"}   → {"authorizationUrl": "…"}
+POST /connections/{name}/mailbox-grants/authorize?returnTo=…  {"address": "eddi@eddi.solutions"}   → {"authorizationUrl": "…"}
 GET  /connections/callback?code=…&state=…                                                     (the same callback)
 GET  /connections/{name}/mailbox-grants                                                       → address, status, timestamps
-POST /connections/{name}/mailbox-grants/unlink                {"address": "support@company.com"}   → 204
+POST /connections/{name}/mailbox-grants/unlink                {"address": "eddi@eddi.solutions"}   → 204
 ```
 
 All three are `eddi-admin` only, checked in code as well as by annotation. **There is one
