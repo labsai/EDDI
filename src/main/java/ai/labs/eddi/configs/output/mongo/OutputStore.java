@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.output.mongo;
 
 import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -18,7 +19,9 @@ import jakarta.inject.Inject;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.*;
 
 /**
@@ -27,6 +30,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
 @ApplicationScoped
 public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> implements IOutputStore {
 
+    private static final Logger LOGGER = Logger.getLogger(OutputStore.class);
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
@@ -65,8 +69,14 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> i
         for (int i = 0; i < outputSet.size(); i++) {
             var entry = outputSet.get(i);
             if (entry != null && entry.getTimesOccurred() < -1) {
-                throw new IllegalArgumentException("Invalid output set: outputSet[" + i + "] (action '" + entry.getAction()
-                        + "') has timesOccurred " + entry.getTimesOccurred() + "; it must not be below -1 (0 is the first time the action occurs).");
+                String problem = "Invalid output set: outputSet[" + i + "] (action '" + entry.getAction() + "') has timesOccurred "
+                        + entry.getTimesOccurred() + "; it must not be below -1 (0 is the first time the action occurs).";
+                if (!LenientConfigWrite.isActive()) {
+                    throw new IllegalArgumentException(problem);
+                }
+                // An import, sync or copy: the entry can never be selected, but the
+                // document is accepted as it was written.
+                LOGGER.warn("output set import, sync or copy: " + sanitize(problem));
             }
         }
     }

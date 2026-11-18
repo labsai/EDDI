@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.rest;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.output.IOutputStore;
@@ -138,7 +139,7 @@ public class RestOutputStore implements IRestOutputStore {
         restVersionInfo.validateParameters(id, version);
         try {
             var outputConfigurationSet = outputStore.read(id, version);
-            return restVersionInfo.create(outputConfigurationSet);
+            return LenientConfigWrite.call(() -> restVersionInfo.create(outputConfigurationSet));
         } catch (IResourceStore.ResourceNotFoundException | IResourceStore.ResourceStoreException e) {
             throw sneakyThrow(e);
         }

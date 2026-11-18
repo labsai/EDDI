@@ -114,4 +114,16 @@ class RuleSetSaveValidatorTest {
         assertDoesNotThrow(() -> RuleSetSaveValidator.validate(null));
         assertDoesNotThrow(() -> RuleSetSaveValidator.validate(new RuleSetConfiguration()));
     }
+
+    @Test
+    @DisplayName("findProblems lists every problem, validate throws the first")
+    void findProblemsListsAll() {
+        var ruleSet = set(rule("A", dependency("nope")), rule("A"), rule("B", dependency("C")), rule("C", dependency("B")));
+
+        var problems = RuleSetSaveValidator.findProblems(ruleSet);
+
+        assertTrue(problems.size() >= 3, problems.toString());
+        var thrown = assertThrows(IllegalArgumentException.class, () -> RuleSetSaveValidator.validate(ruleSet));
+        assertTrue(thrown.getMessage().equals(problems.getFirst()));
+    }
 }

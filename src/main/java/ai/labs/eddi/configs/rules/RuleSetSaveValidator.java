@@ -50,12 +50,25 @@ public final class RuleSetSaveValidator {
 
     /**
      * @throws IllegalArgumentException
-     *             naming the rule, with a message that tells the author what to
-     *             change
+     *             with the first problem found, naming the rule, in a message that
+     *             tells the author what to change
      */
     public static void validate(RuleSetConfiguration ruleSet) {
+        List<String> problems = findProblems(ruleSet);
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(problems.getFirst());
+        }
+    }
+
+    /**
+     * Every problem of the rule graph, each as a sentence that names the rule:
+     * empty when the ruleset is sound. An import, a sync or a duplicate logs these
+     * instead of refusing the document.
+     */
+    public static List<String> findProblems(RuleSetConfiguration ruleSet) {
+        List<String> problems = new ArrayList<>();
         if (ruleSet == null || ruleSet.getBehaviorGroups() == null) {
-            return;
+            return problems;
         }
 
         Set<String> allNames = new LinkedHashSet<>();
@@ -79,7 +92,7 @@ public final class RuleSetSaveValidator {
                     continue;
                 }
                 if (!namesInGroup.add(name)) {
-                    throw new IllegalArgumentException("Invalid ruleset: rule name '" + name + "' is used more than once in group '"
+                    problems.add("Invalid ruleset: rule name '" + name + "' is used more than once in group '"
                             + (group.getName() == null ? "" : group.getName())
                             + "'. Rules are told apart by name when dependencies are followed, so give each rule of a group its own name.");
                 }
@@ -92,7 +105,7 @@ public final class RuleSetSaveValidator {
 
         for (String[] reference : references) {
             if (!allNames.contains(reference[1])) {
-                throw new IllegalArgumentException("Invalid ruleset: rule '" + reference[0] + "' has a dependency on '" + reference[1]
+                problems.add("Invalid ruleset: rule '" + reference[0] + "' has a dependency on '" + reference[1]
                         + "', but no rule of this ruleset has that name. The condition could never match; fix the reference or add the rule "
                         + "(rules without a name cannot be referenced).");
             }
@@ -102,13 +115,15 @@ public final class RuleSetSaveValidator {
         try {
             cycle = findCycle(dependencies);
         } catch (StackOverflowError e) {
-            throw new IllegalArgumentException("Invalid ruleset: the rule dependencies are chained too deeply to be checked; "
+            problems.add("Invalid ruleset: the rule dependencies are chained too deeply to be checked; "
                     + "flatten the chain of dependency conditions.");
+            return problems;
         }
         if (cycle != null) {
-            throw new IllegalArgumentException("Invalid ruleset: the rule dependencies form a cycle (" + String.join(" -> ", cycle)
+            problems.add("Invalid ruleset: the rule dependencies form a cycle (" + String.join(" -> ", cycle)
                     + "). A turn that reaches it fails, so break the cycle by removing one of the dependency conditions.");
         }
+        return problems;
     }
 
     private static void collectReferences(List<RuleConditionConfiguration> conditions, List<String> into, String ownerName, List<String[]> all) {

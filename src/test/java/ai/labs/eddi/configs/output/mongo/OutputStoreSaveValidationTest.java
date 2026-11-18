@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.output.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.datastore.IResourceStorage;
@@ -65,5 +66,13 @@ class OutputStoreSaveValidationTest {
         outputStore.create(setWith(0));
         outputStore.create(setWith(-1));
         verify(resourceStorage, times(2)).newResource(any());
+    }
+
+    @Test
+    @DisplayName("an import, sync or copy (lenient write) accepts timesOccurred below -1 and only warns")
+    void lenientWriteAccepts() throws Exception {
+        LenientConfigWrite.call(() -> outputStore.create(setWith(-2)));
+
+        verify(resourceStorage).newResource(any());
     }
 }

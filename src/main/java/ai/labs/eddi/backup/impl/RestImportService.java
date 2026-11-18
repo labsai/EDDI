@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
@@ -1999,7 +2000,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewBehaviors(List<RuleSetConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI, transaction)).toList();
+        // An imported ruleset exists already: the graph checks of a save only warn
+        // here.
+        return configs.stream()
+                .map(c -> LenientConfigWrite.call(() -> createResourceDirect(IRuleSetStore.class, c, IRestRuleSetStore.resourceURI, transaction)))
+                .toList();
     }
 
     private List<URI> createNewApiCalls(List<ApiCallsConfiguration> configs, ImportTransaction transaction) {
@@ -2016,7 +2021,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewOutputs(List<OutputConfigurationSet> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI, transaction)).toList();
+        return configs.stream()
+                .map(c -> LenientConfigWrite.call(() -> createResourceDirect(IOutputStore.class, c, IRestOutputStore.resourceURI, transaction)))
+                .toList();
     }
 
     // ==================== Resource Update (merge logic) ====================
@@ -2029,8 +2036,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateBehavior(RuleSetConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestRuleSetStore store = getRestResourceStore(IRestRuleSetStore.class);
-        return updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config, store::updateRuleSet,
-                transaction);
+        // The scope is entered inside the callback: updateTracked also calls it for the
+        // compensation, which runs after this method has returned.
+        return updateTracked(IRuleSetStore.class, IRestRuleSetStore.resourceURI, localId, localVersion, config,
+                (id, version, document) -> LenientConfigWrite.call(() -> store.updateRuleSet(id, version, document)), transaction);
     }
 
     private URI updateApiCalls(ApiCallsConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
@@ -2052,8 +2061,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateOutput(OutputConfigurationSet config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestOutputStore store = getRestResourceStore(IRestOutputStore.class);
-        return updateTracked(IOutputStore.class, IRestOutputStore.resourceURI, localId, localVersion, config, store::updateOutputSet,
-                transaction);
+        return updateTracked(IOutputStore.class, IRestOutputStore.resourceURI, localId, localVersion, config,
+                (id, version, document) -> LenientConfigWrite.call(() -> store.updateOutputSet(id, version, document)), transaction);
     }
 
     private List<URI> createNewMcpCalls(List<McpCallsConfiguration> configs, ImportTransaction transaction) {

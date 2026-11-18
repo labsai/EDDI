@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.rules.mongo;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.agents.CapabilityRegistryService;
 import ai.labs.eddi.configs.rules.model.RuleConditionConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleConfiguration;
@@ -183,5 +185,30 @@ class RuleSetStoreSaveTimeValidationTest {
 
         verify(resourceStorage).newResource(ruleSet);
         verify(resourceStorage).store(createdResource);
+    }
+
+    @Test
+    @DisplayName("an import, sync or copy (lenient write) is not refused for a cycle, a dangling dependency or duplicate names")
+    void graphProblemsOnlyWarnInALenientWrite() throws Exception {
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "nope"));
+        var duplicate = new RuleConfiguration();
+        duplicate.setName("A");
+        duplicate.setActions(List.of("x"));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(duplicate);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        assertThrows(IllegalArgumentException.class, () -> ruleSetStore.create(ruleSet));
+
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
+        verify(resourceStorage).newResource(any());
+    }
+
+    @Test
+    @DisplayName("the lenient write does not excuse a broken condition")
+    void lenientWriteStillRefusesBrokenConditions() {
+        var ruleSet = ruleSetWith("Start over", "actionmatcher", Map.of("actions", "confirm_creation", "occurrence", "lastSteps"));
+
+        assertThrows(IllegalArgumentException.class, () -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
     }
 }
