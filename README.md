@@ -82,7 +82,7 @@ The [Manager guide](docs/agent-manager-gui.md) and the [Workforce guide](docs/wo
 
 ## How it works
 
-An agent is mostly one document: the model, its prompt, and what it may use. This one answers with OpenAI and may call three of the built-in tools:
+An agent is mostly one document: the model, its prompt, and what it may use. This one answers with Claude and may call three of the built-in tools:
 
 ```json
 {
@@ -90,11 +90,11 @@ An agent is mostly one document: the model, its prompt, and what it may use. Thi
     {
       "actions": ["help"],
       "id": "aiAgent",
-      "type": "openai",
+      "type": "anthropic",
       "description": "AI agent with calculator and web search",
       "parameters": {
-        "apiKey": "${vault:openai-key}",
-        "modelName": "gpt-4o",
+        "apiKey": "${vault:anthropic-key}",
+        "modelName": "claude-sonnet-5-5",
         "systemMessage": "You are a helpful assistant with access to tools."
       },
       "enableBuiltInTools": true,
@@ -105,7 +105,7 @@ An agent is mostly one document: the model, its prompt, and what it may use. Thi
 }
 ```
 
-The key is a reference into the secrets vault, never the key itself. The same document is where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
+Swap `type` and `modelName` for any of the other providers (`openai`, `gemini`, `bedrock`, `ollama` and more). The key is a reference into the secrets vault, never the key itself. The same document is where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
 
 You rarely write it by hand. The Manager's wizard, the Platform Operator and the MCP server (from Claude Desktop, Cursor or any other MCP client) create and change agents for you, and every save is a new version you can diff and export.
 

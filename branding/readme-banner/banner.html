@@ -98,7 +98,7 @@
     font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
     font-size: 14.5px; line-height: 1.65; color: #d6d3d1;
   }
-  .k { color: #7dd3fc; } .s { color: var(--amber-soft); } .p { color: #78716c; }
+  .c { color: #78716c; font-style: italic; } .k { color: #7dd3fc; } .s { color: var(--amber-soft); } .p { color: #78716c; }
 </style>
 </head>
 <body>
@@ -114,8 +114,8 @@
   <div class="right">
     <div class="card">
       <div class="card-title">An agent is a JSON document</div>
-<pre><span class="k">"type"</span><span class="p">:</span> <span class="s">"openai"</span><span class="p">,</span>
-<span class="k">"modelName"</span><span class="p">:</span> <span class="s">"gpt-4o"</span><span class="p">,</span>
+<pre><span class="k">"type"</span><span class="p">:</span> <span class="s">"anthropic"</span><span class="p">,</span>   <span class="c">// or openai, gemini, ollama …</span>
+<span class="k">"modelName"</span><span class="p">:</span> <span class="s">"claude-sonnet-5-5"</span><span class="p">,</span>
 <span class="k">"systemMessage"</span><span class="p">:</span> <span class="s">"You are a helpful assistant…"</span><span class="p">,</span>
 <span class="k">"builtInToolsWhitelist"</span><span class="p">:</span> <span class="p">[</span><span class="s">"calculator"</span><span class="p">,</span> <span class="s">"websearch"</span><span class="p">]</span></pre>
       <div class="steps">

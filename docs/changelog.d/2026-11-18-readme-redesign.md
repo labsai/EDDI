@@ -29,7 +29,7 @@ where are the docs, how do I build it. Sections:
 4. **What it looks like**: three screenshots instead of eleven.
 5. **How it works**: an LLM agent's configuration (model, prompt, built-in
    tools), copied from [`langchain.md`](../langchain.md#agent-mode-enhanced-features)
-   with the key as a vault reference, then who writes such documents and a short
+   with the key as a vault reference and Claude Sonnet 5.5 as the model, then who writes such documents and a short
    paragraph on the pipeline. Behaviour rules get one sentence: most agents are
    an LLM task with tools, and a first draft that led with a rule gave them far
    more room than their use warrants.
