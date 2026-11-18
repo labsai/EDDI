@@ -116,7 +116,10 @@ principal, not a user: erasing or exporting it is refused with 400.
    under one of those ids fails, step 8 **keeps** the discussion documents (reported
    as `groupConversations`, "kept until their attachments are erased"): they are the
    only record of the ids the blobs are stored under, so deleting them would leave a
-   re-run unable to reach the blobs. Re-run the erasure once the store is back
+   re-run unable to reach the blobs. Re-run the erasure once the store is back.
+   The same per-conversation delete removes the read grants on those blobs, and the
+   grants those conversations held on other users' blobs (in `attachment_grants`
+   and in the legacy per-blob list), so no grant keeps the erased conversation's id
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**

@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.engine.attachments.AttachmentQuotas;
+import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import com.mongodb.ErrorCategory;
@@ -18,7 +19,11 @@ import com.mongodb.client.gridfs.GridFSBuckets;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -33,7 +38,10 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.function.LongSupplier;
@@ -46,8 +54,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Files are stored in the {@code attachments} GridFS bucket. The public
  * {@code storageRef} is a random UUID kept in the file metadata (not the raw
  * ObjectId), so references are unguessable; legacy blobs referenced by their
- * plain ObjectId hex still resolve. Access grants are stored as a
- * {@code metadata.grants} array and die with the blob.
+ * plain ObjectId hex still resolve.
+ * <p>
+ * <b>Grants</b> live in their own collection, {@value #GRANTS_COLLECTION}
+ * ({@code storageRef, conversationId, createdAt}), keyed by the blob's
+ * canonical reference. For one release they are also written to the legacy
+ * {@code metadata.grants} array and read from both, so a node of the previous
+ * release in a rolling upgrade still authorizes a grant made here, and the
+ * reverse; {@code AttachmentGrantBackfill} copies the legacy array over.
+ * Deleting a blob deletes the grants on it; deleting a conversation's
+ * attachments also deletes the grants that conversation <em>held</em> on other
+ * blobs, in both shapes.
  * <p>
  * <b>Quotas.</b> A GridFS upload is not one atomic write, so the quota check
  * and the upload run under a lease lock per quota scope — a document in
@@ -60,7 +77,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  */
 @ApplicationScoped
 @DefaultBean
-public class GridFsAttachmentStore implements IAttachmentStore {
+public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrantMigration {
 
     private static final Logger LOGGER = Logger.getLogger(GridFsAttachmentStore.class);
     private static final String BUCKET_NAME = "attachments";
@@ -70,6 +87,10 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     private static final String META_GRANTS = "grants";
     private static final String META_USER_ID = "userId";
     static final String LOCKS_COLLECTION = BUCKET_NAME + ".quota_locks";
+    static final String GRANTS_COLLECTION = "attachment_grants";
+    static final String GRANT_STORAGE_REF = "storageRef";
+    static final String GRANT_CONVERSATION_ID = "conversationId";
+    static final String GRANT_CREATED_AT = "createdAt";
     /**
      * How long a quota lock is held at most before another upload may take it over.
      */
@@ -90,6 +111,12 @@ public class GridFsAttachmentStore implements IAttachmentStore {
     private final GridFSBucket primaryReadBucket;
     private final MongoCollection<Document> filesCollection;
     private final MongoCollection<Document> locksCollection;
+    /**
+     * Read from the PRIMARY, like the quota usage: a member's first read follows
+     * the grant that admitted it by milliseconds, and a lagging secondary would
+     * refuse it.
+     */
+    private final MongoCollection<Document> grantsCollection;
 
     @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520") // 20 MB
     long maxSizeBytes;
@@ -112,6 +139,7 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         this.primaryReadBucket = gridFSBucket.withReadPreference(ReadPreference.primary());
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
+        this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
     }
 
     /**
@@ -123,7 +151,37 @@ public class GridFsAttachmentStore implements IAttachmentStore {
      * request.
      */
     public void ensureIndexes() {
-        ensureIndexes(filesCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS);
+        ensureIndexes(filesCollection, deadline, System::nanoTime);
+        ensureGrantIndexes(grantsCollection, deadline, System::nanoTime);
+    }
+
+    /**
+     * The grant indexes, within what is left of the same budget: a unique one on
+     * {@code (storageRef, conversationId)} — every authorization and the idempotent
+     * grant — and one on {@code conversationId}, for listing and for pruning the
+     * grants a deleted conversation held. A failure is logged, as for the metadata
+     * indexes; nothing here relies on the unique index for correctness.
+     */
+    static void ensureGrantIndexes(MongoCollection<Document> grantsCollection, long deadlineNanos, LongSupplier nanoClock) {
+        List<Map.Entry<Bson, IndexOptions>> indexes = List.of(
+                Map.entry(Indexes.ascending(GRANT_STORAGE_REF, GRANT_CONVERSATION_ID), new IndexOptions().unique(true)),
+                Map.entry(Indexes.ascending(GRANT_CONVERSATION_ID), new IndexOptions()));
+        for (Map.Entry<Bson, IndexOptions> index : indexes) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - nanoClock.getAsLong());
+            if (remainingMillis <= 0) {
+                LOGGER.warn("Ran out of time creating the attachment grant indexes; grant lookups fall back to a scan");
+                return;
+            }
+            try {
+                grantsCollection.withTimeout(remainingMillis, TimeUnit.MILLISECONDS).createIndex(index.getKey(), index.getValue());
+            } catch (MongoTimeoutException e) {
+                LOGGER.warnf("Timed out creating an attachment grant index; grant lookups fall back to a scan: %s", sanitize(e.getMessage()));
+                return;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment grant index; grant lookups fall back to a scan: %s", sanitize(e.getMessage()));
+            }
+        }
     }
 
     /**
@@ -278,13 +336,64 @@ public class GridFsAttachmentStore implements IAttachmentStore {
 
     @Override
     public void grantAccess(String storageRef, String conversationId) throws AttachmentStoreException {
-        var result = filesCollection.updateOne(refFilter(storageRef),
-                Updates.addToSet("metadata." + META_GRANTS, conversationId));
-        if (result.getMatchedCount() == 0) {
+        GridFSFile file = findFileByRef(storageRef);
+        if (file == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        String canonicalRef = canonicalRef(file);
+        upsertGrant(canonicalRef, conversationId);
+        // The legacy shape too, for one release: a node of the previous release
+        // reads only this array.
+        filesCollection.updateOne(Filters.eq("_id", file.getObjectId()), Updates.addToSet("metadata." + META_GRANTS, conversationId));
+        // A delete that ran between the lookup and the grant row leaves a row with
+        // no blob; take it back, so a grant never outlives its blob.
+        if (primaryReadBucket.find(Filters.eq("_id", file.getObjectId())).first() == null) {
+            grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef));
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
         LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                 sanitize(conversationId), storageRef);
+    }
+
+    /**
+     * One grant row, idempotently: an upsert on the pair, and a duplicate key from
+     * a concurrent upsert of the same pair counts as success.
+     *
+     * @return whether a row was added
+     */
+    private boolean upsertGrant(String canonicalRef, String conversationId) {
+        try {
+            var result = grantsCollection.updateOne(
+                    Filters.and(Filters.eq(GRANT_STORAGE_REF, canonicalRef), Filters.eq(GRANT_CONVERSATION_ID, conversationId)),
+                    Updates.setOnInsert(GRANT_CREATED_AT, new Date()), new UpdateOptions().upsert(true));
+            return result.getUpsertedId() != null;
+        } catch (MongoWriteException e) {
+            if (e.getError().getCategory() == ErrorCategory.DUPLICATE_KEY) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public Page readLegacyGrants(String afterCursor, int limit) {
+        // "grants.0 exists" = a non-empty array; blobs carry an empty one from birth.
+        Bson hasGrants = Filters.exists("metadata." + META_GRANTS + ".0");
+        Bson filter = afterCursor == null ? hasGrants : Filters.and(hasGrants, Filters.gt("_id", new ObjectId(afterCursor)));
+        List<LegacyGrants> blobs = new ArrayList<>();
+        ObjectId last = null;
+        for (GridFSFile file : primaryReadBucket.find(filter).sort(Sorts.ascending("_id")).limit(limit)) {
+            Document metadata = file.getMetadata();
+            List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;
+            blobs.add(new LegacyGrants(canonicalRef(file), grants != null ? List.copyOf(grants) : List.of()));
+            last = file.getObjectId();
+        }
+        return new Page(blobs, blobs.size() < limit || last == null ? null : last.toHexString());
+    }
+
+    @Override
+    public boolean copyGrant(String storageRef, String conversationId) {
+        return upsertGrant(storageRef, conversationId);
     }
 
     @Override
@@ -304,18 +413,28 @@ public class GridFsAttachmentStore implements IAttachmentStore {
                             .formatted(owner, requestingConversationId));
         }
         gridFSBucket.delete(file.getObjectId());
+        grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef(file)));
         return true;
     }
 
     @Override
     public long deleteByConversation(String conversationId) {
         long count = 0;
+        List<String> deletedRefs = new ArrayList<>();
         for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
             gridFSBucket.delete(file.getObjectId());
+            deletedRefs.add(canonicalRef(file));
             count++;
         }
-        if (count > 0) {
-            LOGGER.debugf("Deleted %d attachments for conversation '%s'", count, sanitize(conversationId));
+        // The grants on the blobs just deleted, and the grants this conversation held
+        // on other blobs — in both shapes, or they would grow without bound.
+        if (!deletedRefs.isEmpty()) {
+            grantsCollection.deleteMany(Filters.in(GRANT_STORAGE_REF, deletedRefs));
+        }
+        long held = grantsCollection.deleteMany(Filters.eq(GRANT_CONVERSATION_ID, conversationId)).getDeletedCount();
+        filesCollection.updateMany(Filters.eq("metadata." + META_GRANTS, conversationId), Updates.pull("metadata." + META_GRANTS, conversationId));
+        if (count > 0 || held > 0) {
+            LOGGER.debugf("Deleted %d attachments and %d held grants for conversation '%s'", count, held, sanitize(conversationId));
         }
         return count;
     }
@@ -327,11 +446,31 @@ public class GridFsAttachmentStore implements IAttachmentStore {
 
     @Override
     public List<Attachment> listAccessible(String conversationId) {
-        // Owned by the conversation OR granted to it. Filters.eq on the array field
-        // matches documents whose grants array contains the value (Mongo semantics).
-        return listMatching(Filters.or(
+        // Two round trips: the refs granted in the grants collection, then ONE files
+        // query for owned OR legacy-granted OR granted — so a blob granted in both
+        // shapes is listed once, and a grant row whose blob is gone lists nothing.
+        // Filters.eq on the array field matches documents whose grants array
+        // contains the value (Mongo semantics).
+        Set<String> grantedRefs = new LinkedHashSet<>();
+        for (Document grant : grantsCollection.find(Filters.eq(GRANT_CONVERSATION_ID, conversationId))
+                .projection(Projections.include(GRANT_STORAGE_REF))) {
+            String ref = grant.getString(GRANT_STORAGE_REF);
+            if (ref != null) {
+                grantedRefs.add(ref);
+            }
+        }
+        List<Bson> clauses = new ArrayList<>(List.of(
                 Filters.eq("metadata." + META_CONVERSATION_ID, conversationId),
                 Filters.eq("metadata." + META_GRANTS, conversationId)));
+        if (!grantedRefs.isEmpty()) {
+            clauses.add(Filters.in("metadata." + META_STORAGE_REF, grantedRefs));
+            // A blob stored before storageRef existed is keyed by its ObjectId hex.
+            List<ObjectId> legacyIds = grantedRefs.stream().filter(ObjectId::isValid).map(ObjectId::new).toList();
+            if (!legacyIds.isEmpty()) {
+                clauses.add(Filters.in("_id", legacyIds));
+            }
+        }
+        return listMatching(Filters.or(clauses));
     }
 
     private List<Attachment> listMatching(Bson filter) {
@@ -431,6 +570,19 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         return Filters.eq("metadata." + META_STORAGE_REF, storageRef);
     }
 
+    /**
+     * The reference grant rows are keyed by: {@code metadata.storageRef}, or the
+     * ObjectId hex of a blob stored before it existed.
+     */
+    private static String canonicalRef(GridFSFile file) {
+        Document metadata = file.getMetadata();
+        String ref = metadata != null ? metadata.getString(META_STORAGE_REF) : null;
+        if (ref != null) {
+            return ref;
+        }
+        return file.getObjectId() != null ? file.getObjectId().toHexString() : null;
+    }
+
     private void authorize(GridFSFile file, String requester) throws AttachmentStoreException {
         Document metadata = file.getMetadata();
         // Fails closed, as the PostgreSQL store does: a blob with no recorded owner
@@ -442,6 +594,11 @@ public class GridFsAttachmentStore implements IAttachmentStore {
         }
         List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;
         if (grants != null && grants.contains(requester)) {
+            return;
+        }
+        String ref = canonicalRef(file);
+        if (requester != null && ref != null && grantsCollection.countDocuments(
+                Filters.and(Filters.eq(GRANT_STORAGE_REF, ref), Filters.eq(GRANT_CONVERSATION_ID, requester))) > 0) {
             return;
         }
         throw new AttachmentAccessDeniedException(

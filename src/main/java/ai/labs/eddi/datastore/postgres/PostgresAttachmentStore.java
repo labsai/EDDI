@@ -5,6 +5,7 @@
 package ai.labs.eddi.datastore.postgres;
 
 import ai.labs.eddi.engine.attachments.AttachmentQuotas;
+import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import io.quarkus.arc.DefaultBean;
@@ -26,8 +27,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * PostgreSQL implementation of {@link IAttachmentStore}.
  * <p>
  * Stores attachment data in an {@code attachments} table using {@code BYTEA}
- * columns. The {@code storage_ref} is a random UUID (unguessable). Access
- * grants are held in a {@code grants TEXT[]} column and die with the row.
+ * columns. The {@code storage_ref} is a random UUID (unguessable).
+ * <p>
+ * <b>Grants</b> live in their own table, {@code attachment_grants}
+ * {@code (storage_ref, conversation_id, created_at)}. For one release they are
+ * also written to the legacy {@code attachments.grants TEXT[]} column and read
+ * from both, so a node of the previous release in a rolling upgrade still
+ * authorizes a grant made here, and the reverse;
+ * {@code AttachmentGrantBackfill} copies the legacy column over. Deleting a
+ * blob deletes the grants on it, in the same transaction; deleting a
+ * conversation's attachments also deletes the grants that conversation
+ * <em>held</em> on other blobs, in both shapes.
  * <p>
  * Quotas are checked and the row inserted in one transaction holding a
  * transaction-scoped advisory lock per quota scope (conversation, then user),
@@ -37,7 +47,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  */
 @ApplicationScoped
 @DefaultBean
-public class PostgresAttachmentStore implements IAttachmentStore {
+public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGrantMigration {
 
     private static final Logger LOGGER = Logger.getLogger(PostgresAttachmentStore.class);
 
@@ -59,6 +69,24 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     private static final String CREATE_INDEX_TENANT = "CREATE INDEX IF NOT EXISTS idx_attach_tenant ON attachments (tenant_id)";
     private static final String ADD_USER_COLUMN = "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS user_id TEXT";
     private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_attach_user ON attachments (user_id)";
+    /** Lets pruning find the legacy grants a deleted conversation held. */
+    private static final String CREATE_INDEX_LEGACY_GRANTS = "CREATE INDEX IF NOT EXISTS idx_attach_grants ON attachments USING GIN (grants)";
+    private static final String CREATE_GRANTS_TABLE = """
+            CREATE TABLE IF NOT EXISTS attachment_grants (
+                storage_ref TEXT NOT NULL,
+                conversation_id TEXT NOT NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (storage_ref, conversation_id)
+            )
+            """;
+    private static final String CREATE_INDEX_GRANTS_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_grants_conv ON attachment_grants (conversation_id)";
+    /**
+     * The requester holds a grant in the new shape — one column of the same read.
+     */
+    private static final String GRANTED = "EXISTS (SELECT 1 FROM attachment_grants g WHERE g.storage_ref = attachments.storage_ref "
+            + "AND g.conversation_id = ?) AS granted";
+    private static final String INSERT_GRANT = "INSERT INTO attachment_grants (storage_ref, conversation_id) VALUES (?, ?) "
+            + "ON CONFLICT DO NOTHING";
     private static final String ADVISORY_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended(?, 0))";
     private static final String LOCK_KEY_PREFIX = "eddi-attachments-quota:";
 
@@ -95,6 +123,9 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             stmt.execute(CREATE_INDEX_TENANT);
             stmt.execute(ADD_USER_COLUMN);
             stmt.execute(CREATE_INDEX_USER);
+            stmt.execute(CREATE_INDEX_LEGACY_GRANTS);
+            stmt.execute(CREATE_GRANTS_TABLE);
+            stmt.execute(CREATE_INDEX_GRANTS_CONV);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -148,9 +179,10 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     @Override
     public byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         ensureSchema();
-        String sql = "SELECT data, conversation_id, grants FROM attachments WHERE storage_ref = ?";
+        String sql = "SELECT data, conversation_id, grants, " + GRANTED + " FROM attachments WHERE storage_ref = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, storageRef);
+            ps.setString(1, requestingConversationId);
+            ps.setString(2, storageRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
@@ -166,10 +198,11 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     @Override
     public Attachment getMetadata(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         ensureSchema();
-        String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id, grants "
-                + "FROM attachments WHERE storage_ref = ?";
+        String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id, grants, " + GRANTED
+                + " FROM attachments WHERE storage_ref = ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, storageRef);
+            ps.setString(1, requestingConversationId);
+            ps.setString(2, storageRef);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
@@ -190,24 +223,93 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     @Override
     public void grantAccess(String storageRef, String conversationId) throws AttachmentStoreException {
         ensureSchema();
-        String sql = "UPDATE attachments SET grants = "
+        // One transaction, both shapes. The legacy UPDATE goes first: it locks the
+        // blob's row, so a concurrent delete either finished before (no row: not
+        // found) or waits for this commit and then deletes the grant row with it.
+        String legacy = "UPDATE attachments SET grants = "
                 + "CASE WHEN ? = ANY(COALESCE(grants, '{}')) THEN grants "
                 + "ELSE array_append(COALESCE(grants, '{}'), ?) END "
                 + "WHERE storage_ref = ?";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, conversationId);
-            ps.setString(2, conversationId);
-            ps.setString(3, storageRef);
-            int updated = ps.executeUpdate();
-            if (updated == 0) {
-                // The same subtype the MongoDB store throws, so a caller telling "gone"
-                // from "the store failed" gets the same answer on both backends.
-                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            boolean autoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            try {
+                int updated;
+                try (PreparedStatement ps = conn.prepareStatement(legacy)) {
+                    ps.setString(1, conversationId);
+                    ps.setString(2, conversationId);
+                    ps.setString(3, storageRef);
+                    updated = ps.executeUpdate();
+                }
+                if (updated == 0) {
+                    // The same subtype the MongoDB store throws, so a caller telling "gone"
+                    // from "the store failed" gets the same answer on both backends.
+                    throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+                }
+                insertGrant(conn, storageRef, conversationId);
+                conn.commit();
+            } catch (SQLException | AttachmentStoreException | RuntimeException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(autoCommit);
             }
             LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                     sanitize(conversationId), storageRef);
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to grant attachment access", e);
+        }
+    }
+
+    private static boolean insertGrant(Connection conn, String storageRef, String conversationId) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(INSERT_GRANT)) {
+            ps.setString(1, storageRef);
+            ps.setString(2, conversationId);
+            return ps.executeUpdate() > 0;
+        }
+    }
+
+    @Override
+    public Page readLegacyGrants(String afterCursor, int limit) {
+        ensureSchema();
+        String sql = "SELECT storage_ref, grants FROM attachments WHERE cardinality(grants) > 0"
+                + (afterCursor != null ? " AND storage_ref > ?" : "") + " ORDER BY storage_ref LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            int i = 1;
+            if (afterCursor != null) {
+                ps.setString(i++, afterCursor);
+            }
+            ps.setInt(i, limit);
+            List<LegacyGrants> blobs = new ArrayList<>();
+            String last = null;
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    last = rs.getString("storage_ref");
+                    List<String> grantees = new ArrayList<>();
+                    Array arr = rs.getArray("grants");
+                    if (arr != null && arr.getArray() instanceof Object[] elements) {
+                        for (Object element : elements) {
+                            if (element != null) {
+                                grantees.add(String.valueOf(element));
+                            }
+                        }
+                    }
+                    blobs.add(new LegacyGrants(last, grantees));
+                }
+            }
+            return new Page(blobs, blobs.size() < limit ? null : last);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read legacy attachment grants", e);
+        }
+    }
+
+    @Override
+    public boolean copyGrant(String storageRef, String conversationId) {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            return insertGrant(conn, storageRef, conversationId);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to copy an attachment grant", e);
         }
     }
 
@@ -233,27 +335,85 @@ public class PostgresAttachmentStore implements IAttachmentStore {
                         "Delete denied: attachment belongs to '%s', requested from '%s'"
                                 .formatted(owner, requestingConversationId));
             }
-            try (PreparedStatement ps = conn.prepareStatement(
-                    "DELETE FROM attachments WHERE storage_ref = ?")) {
-                ps.setString(1, storageRef);
-                return ps.executeUpdate() > 0;
+            // The blob and the grants on it in one transaction: a grant never outlives
+            // its blob.
+            boolean autoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            try {
+                boolean deleted;
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM attachments WHERE storage_ref = ?")) {
+                    ps.setString(1, storageRef);
+                    deleted = ps.executeUpdate() > 0;
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM attachment_grants WHERE storage_ref = ?")) {
+                    ps.setString(1, storageRef);
+                    ps.executeUpdate();
+                }
+                conn.commit();
+                return deleted;
+            } catch (SQLException | RuntimeException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(autoCommit);
             }
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to delete attachment", e);
         }
     }
 
+    /**
+     * Deletes the conversation's blobs, the grants on them, and the grants the
+     * conversation <em>held</em> on other blobs in both shapes — in one
+     * transaction. The blobs go first: their DELETE waits for a concurrent
+     * {@link #grantAccess} on one of them to commit, so the grant deletes that
+     * follow see its row.
+     *
+     * @return the number of blobs deleted
+     */
     @Override
     public long deleteByConversation(String conversationId) {
         ensureSchema();
-        String sql = "DELETE FROM attachments WHERE conversation_id = ?";
-        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, conversationId);
-            int deleted = ps.executeUpdate();
-            if (deleted > 0) {
-                LOGGER.debugf("Deleted %d attachments for conversation '%s'", (Object) deleted, sanitize(conversationId));
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            boolean autoCommit = conn.getAutoCommit();
+            conn.setAutoCommit(false);
+            try {
+                List<String> refs = new ArrayList<>();
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM attachments WHERE conversation_id = ? RETURNING storage_ref")) {
+                    ps.setString(1, conversationId);
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            refs.add(rs.getString(1));
+                        }
+                    }
+                }
+                int held;
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "DELETE FROM attachment_grants WHERE conversation_id = ? OR storage_ref = ANY(?)")) {
+                    ps.setString(1, conversationId);
+                    ps.setArray(2, conn.createArrayOf("text", refs.toArray()));
+                    held = ps.executeUpdate();
+                }
+                try (PreparedStatement ps = conn.prepareStatement(
+                        "UPDATE attachments SET grants = array_remove(grants, ?) WHERE grants @> ARRAY[?]::text[]")) {
+                    ps.setString(1, conversationId);
+                    ps.setString(2, conversationId);
+                    ps.executeUpdate();
+                }
+                conn.commit();
+                if (!refs.isEmpty() || held > 0) {
+                    LOGGER.debugf("Deleted %d attachments and %d grant rows for conversation '%s'", refs.size(), held, sanitize(conversationId));
+                }
+                return refs.size();
+            } catch (SQLException | RuntimeException e) {
+                conn.rollback();
+                throw e;
+            } finally {
+                conn.setAutoCommit(autoCommit);
             }
-            return deleted;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to delete attachments", e);
         }
@@ -261,24 +421,27 @@ public class PostgresAttachmentStore implements IAttachmentStore {
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
-        return listWhere("conversation_id = ?", conversationId, null);
+        return listWhere("conversation_id = ?", conversationId);
     }
 
     @Override
     public List<Attachment> listAccessible(String conversationId) {
-        // Owned by the conversation OR granted to it.
-        return listWhere("conversation_id = ? OR ? = ANY(COALESCE(grants, '{}'))", conversationId, conversationId);
+        // Owned, OR granted in the legacy shape, OR granted in the new one — one
+        // query over the blobs, so a blob granted in both shapes is listed once and a
+        // grant row whose blob is gone lists nothing.
+        return listWhere("conversation_id = ? OR grants @> ARRAY[?]::text[] "
+                + "OR storage_ref IN (SELECT storage_ref FROM attachment_grants WHERE conversation_id = ?)",
+                conversationId, conversationId, conversationId);
     }
 
-    private List<Attachment> listWhere(String whereClause, String param1, String param2) {
+    private List<Attachment> listWhere(String whereClause, String... params) {
         ensureSchema();
         String sql = "SELECT storage_ref, filename, mime_type, size_bytes, conversation_id "
                 + "FROM attachments WHERE " + whereClause + " ORDER BY created_at";
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, param1);
-            if (param2 != null) {
-                ps.setString(2, param2);
+            for (int i = 0; i < params.length; i++) {
+                ps.setString(i + 1, params[i]);
             }
             try (ResultSet rs = ps.executeQuery()) {
                 List<Attachment> results = new ArrayList<>();
@@ -382,6 +545,9 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             return;
         }
         if (grantsContain(rs, requester)) {
+            return;
+        }
+        if (rs.getBoolean("granted")) {
             return;
         }
         throw new AttachmentAccessDeniedException(

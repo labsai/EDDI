@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentStoreException;
 import com.mongodb.MongoOperationTimeoutException;
@@ -14,7 +15,7 @@ import com.mongodb.client.gridfs.GridFSFindIterable;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
 import com.mongodb.client.model.Indexes;
-import com.mongodb.client.result.UpdateResult;
+import com.mongodb.client.model.UpdateOptions;
 import org.bson.Document;
 import org.bson.conversions.Bson;
 import org.bson.types.ObjectId;
@@ -43,13 +44,15 @@ class GridFsAttachmentStoreTest {
 
     private GridFSBucket gridFSBucket;
     private MongoCollection<Document> filesCollection;
+    private MongoCollection<Document> grantsCollection;
     private GridFsAttachmentStore sut;
 
     @BeforeEach
     void setUp() throws Exception {
         gridFSBucket = mock(GridFSBucket.class);
         filesCollection = mock(MongoCollection.class);
-        sut = createWithMocks(gridFSBucket, filesCollection);
+        grantsCollection = mock(MongoCollection.class, RETURNS_DEEP_STUBS);
+        sut = createWithMocks(gridFSBucket, filesCollection, grantsCollection);
 
         setLong("maxSizeBytes", 20_971_520L);
         // Unlimited quotas by default so store() skips the usage query.
@@ -63,7 +66,8 @@ class GridFsAttachmentStoreTest {
         f.setLong(sut, value);
     }
 
-    private static GridFsAttachmentStore createWithMocks(GridFSBucket bucket, MongoCollection<Document> files)
+    private static GridFsAttachmentStore createWithMocks(GridFSBucket bucket, MongoCollection<Document> files,
+                                                         MongoCollection<Document> grantsCollection)
             throws Exception {
         var objenesis = new org.objenesis.ObjenesisStd();
         GridFsAttachmentStore store = objenesis.newInstance(GridFsAttachmentStore.class);
@@ -79,6 +83,9 @@ class GridFsAttachmentStoreTest {
         Field locksField = GridFsAttachmentStore.class.getDeclaredField("locksCollection");
         locksField.setAccessible(true);
         locksField.set(store, mock(MongoCollection.class));
+        Field grantsField = GridFsAttachmentStore.class.getDeclaredField("grantsCollection");
+        grantsField.setAccessible(true);
+        grantsField.set(store, grantsCollection);
         return store;
     }
 
@@ -376,22 +383,20 @@ class GridFsAttachmentStoreTest {
     // ─── grantAccess() ──────────────────────────────────────────
 
     @Test
-    void grantAccess_updatesMetadata() throws Exception {
-        UpdateResult result = mock(UpdateResult.class);
-        when(result.getMatchedCount()).thenReturn(1L);
-        when(filesCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+    void grantAccess_writesTheGrantRowAndTheLegacyArray() throws Exception {
+        whenFindFirst(mockFile(new ObjectId(), "conv-owner", "application/pdf", List.of(), "uuid-1"));
 
         assertDoesNotThrow(() -> sut.grantAccess("uuid-1", "conv-guest"));
+        verify(grantsCollection).updateOne(any(Bson.class), any(Bson.class), any(UpdateOptions.class));
         verify(filesCollection).updateOne(any(Bson.class), any(Bson.class));
     }
 
     @Test
     void grantAccess_notFound_throws() {
-        UpdateResult result = mock(UpdateResult.class);
-        when(result.getMatchedCount()).thenReturn(0L);
-        when(filesCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(result);
+        whenFindFirst(null);
 
-        assertThrows(AttachmentStoreException.class, () -> sut.grantAccess("missing", "conv-guest"));
+        assertThrows(IAttachmentStore.AttachmentNotFoundException.class, () -> sut.grantAccess("missing", "conv-guest"));
+        verifyNoInteractions(grantsCollection);
     }
 
     // ─── delete() ───────────────────────────────────────────────

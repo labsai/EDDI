@@ -18,6 +18,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.*;
 
 /**
@@ -201,16 +202,30 @@ class PostgresAttachmentStoreTest {
     // ─── deleteByConversation() ─────────────────────────────────
 
     @Test
-    void deleteByConversation_returnsCount() throws Exception {
-        // given
-        when(preparedStatement.executeUpdate()).thenReturn(3);
+    void deleteByConversation_returnsTheBlobCountNotTheGrantRows() throws Exception {
+        // given — three blobs come back from DELETE ... RETURNING; the grant deletes
+        // report rows of their own, which are not blobs
+        when(resultSet.next()).thenReturn(true, true, true, false);
+        when(resultSet.getString(1)).thenReturn("ref-1", "ref-2", "ref-3");
+        when(preparedStatement.executeUpdate()).thenReturn(7);
 
         // when
         long deleted = sut.deleteByConversation("conv-1");
 
         // then
         assertEquals(3, deleted);
-        verify(preparedStatement).setString(1, "conv-1");
+        verify(preparedStatement, atLeastOnce()).setString(1, "conv-1");
+        verify(connection).commit();
+    }
+
+    @Test
+    void deleteByConversation_prunesTheGrantsTheConversationHeldInBothShapes() throws Exception {
+        when(resultSet.next()).thenReturn(false);
+
+        sut.deleteByConversation("conv-grantee");
+
+        verify(connection).prepareStatement(contains("DELETE FROM attachment_grants WHERE conversation_id = ?"));
+        verify(connection).prepareStatement(contains("array_remove(grants, ?)"));
     }
 
     @Test
@@ -228,11 +243,12 @@ class PostgresAttachmentStoreTest {
     @Test
     void deleteByConversation_sqlException_throwsRuntimeException() throws Exception {
         // given
-        when(preparedStatement.executeUpdate()).thenThrow(new SQLException("DB error"));
+        when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 
         // when/then
         assertThrows(RuntimeException.class,
                 () -> sut.deleteByConversation("conv"));
+        verify(connection).rollback();
     }
 
     // ─── listByConversation() ───────────────────────────────────
@@ -328,7 +344,9 @@ class PostgresAttachmentStoreTest {
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
         assertTrue(sut.delete("legacy-ref", "conv-1"));
-        verify(preparedStatement).executeUpdate();
+        // the row, then the grants on it — one transaction
+        verify(preparedStatement, times(2)).executeUpdate();
+        verify(connection).commit();
     }
 
     @Test
