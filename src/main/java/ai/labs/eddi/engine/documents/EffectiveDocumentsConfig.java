@@ -298,7 +298,7 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             try {
                 T parsed = parse.apply(configured.get());
                 if (parsed == null) {
-                    ignoredDefault(path, "has an unknown value");
+                    ignoredDefault(path, "is not a valid value");
                 }
                 return parsed;
             } catch (RuntimeException e) {
@@ -308,12 +308,12 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         }
 
         int intValue(String path, Integer designer, int builtIn) {
-            Integer v = pick(path, designer, null, s -> Integer.valueOf(s));
+            Integer v = pick(path, designer, null, Resolver::parseInteger);
             return (int) clamp(path, v != null ? v : builtIn, builtIn);
         }
 
         Integer nullableIntValue(String path, Integer designer) {
-            Integer v = pick(path, designer, null, s -> Integer.valueOf(s));
+            Integer v = pick(path, designer, null, Resolver::parseInteger);
             if (v == null) {
                 return null;
             }
@@ -325,12 +325,12 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         }
 
         long longValue(String path, Long designer, long builtIn) {
-            Long v = pick(path, designer, null, s -> Long.valueOf(s));
+            Long v = pick(path, designer, null, Resolver::parseLong);
             return (long) clamp(path, v != null ? v : builtIn, builtIn);
         }
 
         double doubleValue(String path, Double designer, double builtIn) {
-            Double v = pick(path, designer, null, s -> Double.valueOf(s));
+            Double v = pick(path, designer, null, Resolver::parseDouble);
             return clamp(path, v != null ? v : builtIn, builtIn);
         }
 
@@ -438,6 +438,31 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             } catch (RuntimeException e) {
                 ignoredDefault(path, "cannot be read");
                 return Optional.empty();
+            }
+        }
+
+        /** An operator-default number, or null when the text is not one. */
+        private static Integer parseInteger(String text) {
+            try {
+                return Integer.valueOf(text.strip());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        private static Long parseLong(String text) {
+            try {
+                return Long.valueOf(text.strip());
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        private static Double parseDouble(String text) {
+            try {
+                return Double.valueOf(text.strip());
+            } catch (NumberFormatException e) {
+                return null;
             }
         }
 
