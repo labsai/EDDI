@@ -1079,7 +1079,7 @@ function WorkforceThread() {
     } catch {
       // No welcome message — that's fine
     }
-  }, [boardId, memberId, setConversationId, setMessages, controller]);
+  }, [boardId, memberId, setConversationId, setMessages, controller, turnRef]);
 
   const startFreshRef = useRef(startFreshConversation);
   startFreshRef.current = startFreshConversation;
@@ -1158,7 +1158,7 @@ function WorkforceThread() {
     }
 
     init();
-  }, [boardId, memberId, initAttempt, controller, setConversationId, setMessages]);
+  }, [boardId, memberId, initAttempt, controller, turnRef, setConversationId, setMessages]);
 
   /**
    * "New Conversation" — every other chat surface in the Manager has one
@@ -1245,14 +1245,14 @@ function WorkforceThread() {
       }
       if (result.outcome !== "ignored") updateActivityRef.current(boardId, memberId);
     },
-    [conversationId, isLoading, inputPrefill, memberId, boardId, t, controller],
+    [conversationId, isLoading, inputPrefill, memberId, boardId, t, controller, hooksRef, turnRef],
   );
 
   /** Stop generating — the stream ends, what arrived is kept, the server stops the turn. */
   const handleStop = useCallback(() => {
     if (turnRef.current) turnRef.current.stopped = true;
     void controller.stop();
-  }, [controller]);
+  }, [controller, turnRef]);
 
   /**
    * Re-send the turn that failed.

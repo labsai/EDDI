@@ -29,8 +29,8 @@ describe("calls that used to be a bare fetch", () => {
       return true;
     });
     unauthorized = vi.fn();
-    api.setTokenRefresher(refresher);
-    api.setUnauthorizedHandler(unauthorized);
+    api.setTokenRefresher(refresher as never);
+    api.setUnauthorizedHandler(unauthorized as never);
     fetchMock = vi.fn(async (_url: string, init?: RequestInit) => {
       const auth = new Headers(init?.headers).get("Authorization") ?? "";
       tokens.push(auth);

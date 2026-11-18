@@ -27,7 +27,7 @@ import {
 export type AuthApp = "manager" | "workforce";
 
 /** Where each app's sign-out returns to: a path that serves its shell without a session. */
-export const POST_LOGOUT_PATH: Record<AuthApp, string> = { manager: "/manage", workforce: "/workforce" };
+const POST_LOGOUT_PATH: Record<AuthApp, string> = { manager: "/manage", workforce: "/workforce" };
 
 interface AuthProviderProps {
   children: ReactNode;
