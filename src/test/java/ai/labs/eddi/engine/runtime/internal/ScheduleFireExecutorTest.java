@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.engine.internal.TurnIdempotencyService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -517,6 +519,54 @@ class ScheduleFireExecutorTest {
         assertNotNull(result.errorMessage());
         assertTrue(result.errorMessage().contains("PT0.05S"),
                 "the configured bound must be the one enforced, and the message must name it: " + result.errorMessage());
+    }
+
+    /**
+     * A turn that outlives the fire timeout is recorded FAILED and retried after 15
+     * s while it still runs. The fire now cancels it through the conversation
+     * layer, and every turn of one due fire carries the same Idempotency-Key, so a
+     * retry queued behind a first turn that committed anyway is not run again.
+     */
+    @Test
+    @Timeout(30)
+    void fire_timeout_cancelsTheRunningTurn_andRetriesCarryTheSameIdempotencyKey() throws Exception {
+        var schedule = makeCronSchedule("sched-slow", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-slow", null));
+        var keys = new ArrayList<String>();
+        doAnswer(inv -> {
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            return null; // the handler is never called: the turn outlives the timeout
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 2).status());
+
+        verify(conversationService, times(2)).cancelConversation("conv-slow", ControlSignal.CANCEL_GRACEFUL, "system:scheduler");
+        assertEquals(2, keys.size());
+        assertNotNull(keys.get(0));
+        assertTrue(keys.get(0).startsWith("schedule:sched-slow@"), keys.get(0));
+        assertEquals(keys.get(0), keys.get(1), "the retries of one due fire must share one key");
+    }
+
+    @Test
+    void fire_timeout_aFailingCancelDoesNotChangeTheOutcome() throws Exception {
+        var schedule = makeCronSchedule("sched-slow2", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(20));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-slow2", null));
+        when(conversationService.cancelConversation(any(), any(), any())).thenThrow(new IllegalStateException("store down"));
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    @Test
+    void idempotencyKeyOf_staysWithinTheKeyLimit() {
+        assertEquals("schedule:abc@first", ScheduleFireExecutor.idempotencyKeyOf("abc@first"));
+        String key = ScheduleFireExecutor.idempotencyKeyOf("x".repeat(300));
+        assertTrue(key.length() <= TurnIdempotencyService.MAX_KEY_LENGTH, key);
+        assertEquals(key, ScheduleFireExecutor.idempotencyKeyOf("x".repeat(300)), "the hashed key must be deterministic");
     }
 
     /**

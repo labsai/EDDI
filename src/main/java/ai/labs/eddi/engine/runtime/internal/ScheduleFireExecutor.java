@@ -30,6 +30,8 @@ import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.engine.internal.TurnIdempotencyService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -47,6 +49,7 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.*;
@@ -350,6 +353,10 @@ public class ScheduleFireExecutor {
             // 2. Build InputData with scheduled context
             InputData inputData = buildInputData(schedule);
             addFireId(inputData, runId);
+            // Stable across the retries of one due fire: a retry queued behind a first
+            // turn that committed after all finds its key recorded and is answered as
+            // skipped instead of running the message a second time.
+            inputData.setIdempotencyKey(idempotencyKeyOf(runId));
             // A conversation this fire started already ran its startup workflow under
             // the allowance (createNewConversation); the turn gets what is left, so
             // startup and turn share ONE maxCostPerFire instead of each getting it.
@@ -400,6 +407,10 @@ public class ScheduleFireExecutor {
 
             Duration timeout = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
             if (!latch.await(timeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                // The turn is still running. Recording FAILED and retrying while it runs
+                // started a second turn (in a persistent conversation, queued behind the
+                // first; otherwise in a second conversation). Stop the first one.
+                cancelTimedOutTurn(schedule, conversationId);
                 throw new RuntimeException("Schedule fire timed out after " + timeout);
             }
 
@@ -482,6 +493,34 @@ public class ScheduleFireExecutor {
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
         return recordFire(fireLogId, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, cost, "conversation",
                 interrupted);
+    }
+
+    /**
+     * Signals the turn of a timed-out fire to stop at its next task boundary,
+     * through the conversation layer's own cancel. Cooperative: a call already in
+     * flight (an LLM request) finishes first. Never throws — the fire is recorded
+     * FAILED either way.
+     */
+    private void cancelTimedOutTurn(ScheduleConfiguration schedule, String conversationId) {
+        try {
+            conversationService.cancelConversation(conversationId, ControlSignal.CANCEL_GRACEFUL, "system:scheduler");
+            LOGGER.warnf("[SCHEDULE] Fire of schedule '%s' (id=%s) timed out: cancelled the running turn of conversation %s", schedule.getName(),
+                    sanitize(schedule.getId()), sanitize(conversationId));
+        } catch (Exception e) {
+            LOGGER.warnf("[SCHEDULE] Could not cancel the timed-out turn of conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+    }
+
+    /**
+     * The {@code Idempotency-Key} of the turn of one due fire: {@code schedule:}
+     * plus the run id, hashed when it would exceed the key limit.
+     */
+    static String idempotencyKeyOf(String runId) {
+        String key = "schedule:" + runId;
+        if (key.length() <= TurnIdempotencyService.MAX_KEY_LENGTH) {
+            return key;
+        }
+        return "schedule:" + UUID.nameUUIDFromBytes(runId.getBytes(StandardCharsets.UTF_8));
     }
 
     /**
@@ -1271,6 +1310,33 @@ public class ScheduleFireExecutor {
         }
         LOGGER.infof("[SCHEDULE] Persistent conversation %s no longer valid for schedule %s, creating new", conversationId, schedule.getId());
         return null;
+    }
+
+    /**
+     * Ends the persistent conversation of a schedule that is being deleted or
+     * reset, when it is idle ({@link #ROLLOVER_STATES}); returns whether it did.
+     * One that is running or paused on a human is left as it is, for the same
+     * reason a rollover leaves it, and so is one the schedule does not own (another
+     * agent's, another user's, or gone). Never throws.
+     */
+    public boolean endPersistentConversation(ScheduleConfiguration schedule) {
+        String conversationId = schedule != null ? schedule.getPersistentConversationId() : null;
+        if (conversationId == null || conversationId.isBlank()) {
+            return false;
+        }
+        try {
+            ConversationMemorySnapshot existing = loadPersistentConversation(schedule, conversationId);
+            if (existing == null || ownedByAnotherUser(existing, schedule) || !ROLLOVER_STATES.contains(existing.getConversationState())) {
+                return false;
+            }
+            conversationService.endConversation(conversationId, "system:scheduler");
+            LOGGER.infof("[SCHEDULE] Ended persistent conversation %s of schedule %s", sanitize(conversationId), sanitize(schedule.getId()));
+            return true;
+        } catch (Exception e) {
+            LOGGER.warnf("[SCHEDULE] Could not end persistent conversation %s of schedule %s: %s", sanitize(conversationId),
+                    sanitize(schedule.getId()), e.getMessage());
+            return false;
+        }
     }
 
     /**
