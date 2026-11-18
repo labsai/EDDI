@@ -132,13 +132,20 @@ EDDI uses **standard 5-field cron expressions**:
 | `0 0 1 * *` | First day of each month at midnight |
 | `0 9 29 2 *` | 09:00 on 29 February — every fourth year, and every eighth across 2100 |
 
-An expression that can never match (`0 0 30 2 *`, `* * 31 4 *`) is refused when you save
-it. EDDI looks 400 years ahead for the next fire, one full Gregorian cycle, which covers the
-longest gap a valid expression can have (for example `0 9 29 2 */7`, a 29 February that is
-also a Sunday, fires every 28 years or more). If a fire completes and
+An expression that can never match is refused when you save it, and the cron preview says
+so. That is exactly an expression naming only dates that do not exist (`0 0 30 2 *`,
+`* * 31 4 *`, `0 0 31 2,4,6,9,11 *`); it is decided from the fields, without searching.
+Every other expression has a next fire, however far away: the longest gap is 40 years, for
+29 February combined with a weekday (`0 9 29 2 */7`, a 29 February that is also a Sunday,
+fires in 2032, 2060, 2088 and then 2128, because 2100 is not a leap year), and EDDI looks
+81 years ahead. (A starred day-of-week field such as `*/7` combines with the day of month by
+AND; a restricted one such as `0` or `SUN` by OR, which fires every Sunday as well.) If a
+fire completes and
 no next fire exists any more (a stored expression that stopped matching), the schedule is
 **disabled** with `disabledReason: "no-next-fire"` and the fire stays recorded as completed;
-it is not left claimed to be fired again. (The completion write is retried three times; if
+it is not left claimed to be fired again. The completion and the disable are one write that
+applies only while the fire still holds its claim, so it cannot overwrite an operator who
+enabled the schedule again in the meantime. (The completion write is retried three times; if
 the poller is interrupted in the middle of those retries, the claim is left to its lease.)
 
 ### Heartbeat Configuration
@@ -638,25 +645,46 @@ is stopped (cooperatively: at the next task boundary, so a call already in fligh
 first). This happens on the fire timeout (`eddi.schedule.fire-timeout`), on a manual "fire now"
 that times out, and when the poller's watchdog interrupts the fire.
 
-- `conversationStrategy: new`: the conversation was created for this fire, so its in-flight
-  turn is cancelled.
+- `conversationStrategy: new`: the conversation was created for this occurrence, so its
+  in-flight turn is cancelled.
 - `persistent`: the conversation is shared with people, other channels and continuations. Only an
   in-flight turn that carries this fire's run id is signalled; a human's turn, a pending approval
-  and a self-continuing job are untouched. A turn of the fire that is still queued behind
-  another is dropped when it reaches the front, because it carries a give-up time
+  and a self-continuing job are untouched.
+- A turn of the fire that is still **queued** (behind another turn) is dropped when it reaches
+  the front, because it carries a give-up time
   (`eddi.conversation.skip-turns-of-timed-out-callers`, on by default; off, a late turn
-  still runs).
+  still runs). The give-up time is counted from the moment the poller dispatched the fire —
+  where its watchdog starts — plus `eddi.schedule.fire-timeout`, so it always falls before
+  the watchdog's interrupt (which adds a 30 s grace), however long creating the conversation
+  took; the fire stops waiting for its turn at that same moment.
 - A **shutdown drain** cancels nothing: that turn may still complete, and its retry is
   protected by the lease and the idempotency key. Turns running on another cluster node are
   not signalled either.
 
-Every turn of one due occurrence carries the same `Idempotency-Key`,
-`schedule:<scheduleId>@<due time of the occurrence>`. A failed attempt keeps its due time, so
-its retries share the key and a retry queued behind a first turn that committed after all is
-treated as a completed fire (the message was delivered) instead of running twice. Completed,
-skipped, dismissed and dead-lettered-then-requeued occurrences get a new due time, so the
-next one always runs. A manual "fire now" has a key of its own per click. The same run id
-scopes `window: "RUN"` tool quotas.
+A cancel is cooperative, so a turn that was already running may still commit after its
+fire was recorded `FAILED`. That is why a retry never runs it again:
+
+- Every turn of one due occurrence carries the same `Idempotency-Key`,
+  `schedule:<scheduleId>@<due time of the occurrence>`. A failed attempt keeps its due time,
+  so its retries share the key. Completed, skipped, dismissed and dead-lettered-then-requeued
+  occurrences get a new due time, so the next one always runs. A manual "fire now" has a key
+  of its own per click. The same run id scopes `window: "RUN"` tool quotas.
+- Every attempt of an occurrence sends its turn to the **same conversation**. For
+  `persistent` that is the schedule's conversation. For `new`, the conversation the first
+  attempt started is recorded on the schedule before its turn is sent, and each retry of
+  that occurrence continues it instead of starting another (a recorded conversation that is
+  gone, belongs to someone else, or has ended without the turn is replaced). If the record
+  cannot be written, the attempt fails before sending anything.
+- The turn is admitted like any request carrying an `Idempotency-Key`: a retry that finds the
+  key stored in the conversation is completed with that turn's answer (the message was
+  delivered); one that finds the turn still running on the same node waits for it; one
+  queued behind it on another node is dropped when it reaches the front and finds the key,
+  and the fire is completed. A retry whose own conversation (`new`) is still busy with an
+  earlier attempt is recorded `FAILED` and tried again later, never skipped past.
+
+The key is kept for `eddi.turns.idempotency.ttl-seconds` (default 600) and among the
+conversation's last 50 steps; setting the TTL to `0` switches idempotent turns off, and with
+them this protection.
 
 ### Observability
 
