@@ -17,6 +17,7 @@ import org.jboss.logging.Logger;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -149,10 +150,20 @@ public class AttachmentGrantBackfill {
                 // Existence is cached for one page only, so a pass of many pages does
                 // not act on an answer from long ago.
                 Map<String, Boolean> known = new HashMap<>();
+                // Grants already copied need no lookup: after the first pass that is
+                // nearly all of them, and every start runs a pass.
+                Map<String, Set<String>> existing = page.blobs().isEmpty()
+                        ? Map.of()
+                        : migration.existingGrants(page.blobs().stream().map(IAttachmentGrantMigration.LegacyGrants::storageRef).toList());
                 for (IAttachmentGrantMigration.LegacyGrants blob : page.blobs()) {
                     read++;
+                    Set<String> alreadyCopied = existing.getOrDefault(blob.storageRef(), Set.of());
                     for (String grantee : blob.conversationIds()) {
                         if (grantee == null || grantee.isBlank()) {
+                            continue;
+                        }
+                        if (alreadyCopied.contains(grantee)) {
+                            present++;
                             continue;
                         }
                         Boolean exists = known.get(grantee);
@@ -184,7 +195,8 @@ public class AttachmentGrantBackfill {
                     break;
                 }
             }
-            if (complete) {
+            // Once: every start runs a pass, and the MongoDB log has no unique key.
+            if (complete && migrationLogStore.readMigrationLog(MIGRATION_KEY) == null) {
                 migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
             }
             LOGGER.infof("Attachment grant backfill: read %d blobs with legacy grants, copied %d grants, %d already present, skipped %d"

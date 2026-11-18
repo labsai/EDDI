@@ -4,7 +4,10 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import java.util.Collection;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 
 /**
  * What {@link AttachmentGrantBackfill} needs from an attachment store to copy
@@ -66,6 +69,16 @@ public interface IAttachmentGrantMigration {
      *         blob is gone
      */
     boolean copyGrant(String storageRef, String conversationId);
+
+    /**
+     * The grant rows already present in the new shape on the given blobs, one query
+     * for a whole page — so a catch-up pass that finds a grant already copied asks
+     * nothing more about it.
+     *
+     * @return per canonical reference, the conversations holding a row; a blob with
+     *         none is absent
+     */
+    Map<String, Set<String>> existingGrants(Collection<String> storageRefs);
 
     /** Removes one grant row in the new shape. */
     void removeGrant(String storageRef, String conversationId);

@@ -365,9 +365,13 @@ public interface AttachmentStoreContract {
         assertEquals(1, second.grantsCopied());
         assertEquals(5, grantRowsHeldBy(GRANTEE));
 
-        // And the start after that runs the whole catch-up again: nothing new.
-        AttachmentGrantBackfill.Result again = backfill().run(id -> true, 2, 10);
-        assertTrue(again.complete());
+        // And the start after that runs the whole catch-up again: nothing new, and
+        // no grantee lookup for a grant already copied — a lookup here would fail.
+        AttachmentGrantBackfill.Result again = backfill().run(id -> {
+            throw new IllegalStateException("no lookup expected for a copied grant");
+        }, 2, 10);
+        assertTrue(again.complete(), again.toString());
+        assertEquals(0, again.lookupsFailed());
         assertEquals(0, again.grantsCopied());
         assertEquals(5, again.grantsAlreadyPresent());
         for (String ref : refs) {

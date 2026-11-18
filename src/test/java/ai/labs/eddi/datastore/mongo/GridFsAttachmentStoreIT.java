@@ -154,6 +154,19 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
     }
 
     @Test
+    void theCompletionMarkerIsWrittenOnceAcrossStarts() throws Exception {
+        // The MongoDB migration log has no unique key, and every start runs a pass.
+        String ref = store.store("marked".getBytes(StandardCharsets.UTF_8), "text/plain", "m.txt", OWNER, "default", null).storageRef();
+        seedLegacyGrant(ref, GRANTEE);
+        AttachmentGrantBackfill backfill = new AttachmentGrantBackfill(store, migrationLog, null, null);
+
+        assertTrue(backfill.run(id -> true, 500, 10).complete());
+        assertTrue(backfill.run(id -> true, 500, 10).complete());
+
+        assertEquals(1, getDatabase().getCollection("migrationlog").countDocuments(Filters.eq("name", "attachment-grants-backfill-complete")));
+    }
+
+    @Test
     void aBlobStoredBeforeStorageRefExistedIsGrantedListedAndPrunedByItsObjectId() throws Exception {
         IAttachmentStore.Attachment stored = store.store("old blob".getBytes(StandardCharsets.UTF_8), "text/plain", "old.txt", OWNER, "default",
                 null);

@@ -18,7 +18,12 @@ import org.jboss.logging.Logger;
 import javax.sql.DataSource;
 import java.sql.*;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -322,6 +327,28 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     }
 
     @Override
+    public Map<String, Set<String>> existingGrants(Collection<String> storageRefs) {
+        Map<String, Set<String>> existing = new HashMap<>();
+        if (storageRefs.isEmpty()) {
+            return existing;
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT storage_ref, conversation_id FROM attachment_grants WHERE storage_ref = ANY(?)")) {
+            ps.setArray(1, conn.createArrayOf("text", storageRefs.toArray()));
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    existing.computeIfAbsent(rs.getString(1), k -> new HashSet<>()).add(rs.getString(2));
+                }
+            }
+            return existing;
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read attachment grant rows", e);
+        }
+    }
+
+    @Override
     public void removeGrant(String storageRef, String conversationId) {
         ensureSchema();
         executeUpdate("DELETE FROM attachment_grants WHERE storage_ref = ? AND conversation_id = ?", storageRef, conversationId);
@@ -491,10 +518,20 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             conn.commit();
             return result;
         } catch (SQLException | AttachmentStoreException | RuntimeException e) {
-            conn.rollback();
+            // A rollback that fails too (the connection broke) must not replace the
+            // error that caused it.
+            try {
+                conn.rollback();
+            } catch (SQLException rollbackFailure) {
+                e.addSuppressed(rollbackFailure);
+            }
             throw e;
         } finally {
-            conn.setAutoCommit(autoCommit);
+            try {
+                conn.setAutoCommit(autoCommit);
+            } catch (SQLException resetFailure) {
+                LOGGER.debugf("Could not restore auto-commit on an attachment store connection: %s", resetFailure.getMessage());
+            }
         }
     }
 

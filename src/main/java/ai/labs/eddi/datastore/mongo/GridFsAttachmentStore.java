@@ -39,7 +39,10 @@ import org.jboss.logging.Logger;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Date;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -412,6 +415,23 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             return false;
         }
         return added;
+    }
+
+    @Override
+    public Map<String, Set<String>> existingGrants(Collection<String> storageRefs) {
+        Map<String, Set<String>> existing = new HashMap<>();
+        if (storageRefs.isEmpty()) {
+            return existing;
+        }
+        for (Document grant : grantsCollection.find(Filters.in(GRANT_STORAGE_REF, storageRefs))
+                .projection(Projections.include(GRANT_STORAGE_REF, GRANT_CONVERSATION_ID))) {
+            String ref = grant.getString(GRANT_STORAGE_REF);
+            String conversationId = grant.getString(GRANT_CONVERSATION_ID);
+            if (ref != null && conversationId != null) {
+                existing.computeIfAbsent(ref, k -> new HashSet<>()).add(conversationId);
+            }
+        }
+        return existing;
     }
 
     @Override
