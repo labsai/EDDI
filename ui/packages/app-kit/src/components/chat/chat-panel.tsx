@@ -1158,6 +1158,7 @@ export function ChatPanel({
                     rating={ratingStep !== null ? ratings.stepRatings[ratingStep] : undefined}
                     ratingProfile={ratings.profile}
                     onRateStep={ratings.rateReply}
+                    enableRawHtml={controls.rawHtml}
                     actions={
                       action ? (
                         <span className="inline-flex items-center gap-1.5">

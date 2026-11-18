@@ -23,3 +23,27 @@ describe("MarkdownContent — escapeRawHtml", () => {
     expect(container.textContent).not.toContain("<b>");
   });
 });
+
+describe("MarkdownContent — raw HTML is off unless a host enables it", () => {
+  it("drops raw HTML by default", () => {
+    const { container } = render(<MarkdownContent>{"a <b>b</b> c"}</MarkdownContent>);
+    expect(container.querySelector("b")).toBeNull();
+  });
+
+  it("renders it, sanitised, when the host enables it", async () => {
+    const { container, findByText } = render(
+      <MarkdownContent enableRawHtml>{"a <b>b</b> <script>alert(1)</script> c"}</MarkdownContent>,
+    );
+    expect((await findByText("b", { selector: "b" })).tagName).toBe("B");
+    expect(container.querySelector("script")).toBeNull();
+  });
+});
+
+describe("MarkdownContent — protocol-relative links", () => {
+  it("shows the text of a //host link instead of linking it", () => {
+    const { container } = render(<MarkdownContent>{"[click](//evil.example/x) and [ok](https://ok.example/)"}</MarkdownContent>);
+    expect(container.textContent).toContain("click");
+    expect(container.querySelector('a[href^="//"]')).toBeNull();
+    expect(container.querySelector('a[href="https://ok.example/"]')).not.toBeNull();
+  });
+});

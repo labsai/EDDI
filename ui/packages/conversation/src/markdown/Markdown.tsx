@@ -136,6 +136,10 @@ const REMARK_ESCAPED: PluggableList = [remarkGfm, remarkHtmlAsText];
  * `node` is react-markdown's AST node, not an attribute.
  */
 function MarkdownLink({ node: _node, ...props }: ComponentPropsWithoutRef<"a"> & { node?: unknown }) {
+  // A protocol-relative `//host/…` is an off-site link whose scheme the
+  // sanitizer's allow-list never sees (it is a relative URL to it): show the
+  // text, not a link.
+  if (props.href?.startsWith("//")) return <span>{props.children}</span>;
   if (props.href?.startsWith("#")) {
     // rehype-sanitize prefixes every id (clobber protection) but leaves hrefs
     // alone, so a GFM footnote's `#user-content-fn-1` pointed at nothing once
@@ -189,8 +193,9 @@ export interface MarkdownContentProps {
   /** highlight.js for fenced code. Default on. */
   enableCodeHighlight?: boolean;
   /**
-   * Sanitised raw HTML. Default on here; `Message` passes the agent's
-   * `conversationControls.rawHtml` (D9), off unless the agent enables it.
+   * Sanitised raw HTML. Default OFF: the HTML is dropped. A host passes the
+   * agent's `conversationControls.rawHtml` (D9) — `Message` and the Manager and
+   * Workforce chat do — so HTML renders only for an agent that enabled it.
    */
   enableRawHtml?: boolean;
   /**
@@ -206,7 +211,7 @@ export const MarkdownContent = memo(function MarkdownContent({
   children,
   enableMath = true,
   enableCodeHighlight = true,
-  enableRawHtml = true,
+  enableRawHtml = false,
   escapeRawHtml = false,
 }: MarkdownContentProps) {
   const rich = useRichPlugins(children, enableMath, enableCodeHighlight, enableRawHtml && !escapeRawHtml);

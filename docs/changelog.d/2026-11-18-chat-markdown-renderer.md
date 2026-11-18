@@ -37,6 +37,19 @@ also ran, together with a full Markdown parse, on every streamed token.
 A model reply that glued a heading to a word (`Schluss## Titel`), wrote `#Header` without a space,
 or `Speichern,Dann` is shown as written instead of being "fixed". Correct text is never altered.
 
-### Next
+### Raw HTML (second commit)
 
-Raw HTML policy of the shared renderer (separate commit, same branch).
+`ui/manager/AGENTS.md` said the Manager never renders raw HTML, but the shared `MarkdownContent`
+defaulted `enableRawHtml` to on and the Manager chat ignored `conversationControls.rawHtml`.
+
+- `MarkdownContent` now defaults `enableRawHtml` to **off** (the HTML is dropped). `Message` (Chat
+  UI widget, Workforce) already passed the agent's setting explicitly and is unchanged.
+- `ChatMessage` takes `enableRawHtml`, and `ChatPanel` passes `controls.rawHtml`: HTML in an agent's
+  reply is rendered (sanitised, as before) only for an agent with `"rawHtml": true`, and is shown as
+  text for every other agent. The Manager's chat drawer, which has no profile, shows it as text.
+- A protocol-relative `//host` link in Markdown is shown as its text, not as a link (one line in
+  `MarkdownLink`; the sanitizer treats `//host` as a relative URL and let it through).
+- `ui/manager/AGENTS.md` and `ui/packages/conversation/README.md` describe the policy.
+
+Upgraders: a Manager chat with an agent that emits HTML but does not set `rawHtml: true` now shows
+the tags as text, as the Chat UI widget has since 6.7.0.

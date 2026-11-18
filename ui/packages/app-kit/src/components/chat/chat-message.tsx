@@ -70,6 +70,11 @@ interface ChatMessageProps {
    * the last message the person sent, Regenerate on the last reply.
    */
   actions?: ReactNode;
+  /**
+   * The agent's `conversationControls.rawHtml`: HTML in its replies is rendered
+   * (sanitised) only when true. Off by default; otherwise it is shown as text.
+   */
+  enableRawHtml?: boolean;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -79,6 +84,7 @@ export const ChatMessage = memo(function ChatMessage({
   ratingProfile,
   onRateStep,
   actions,
+  enableRawHtml = false,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -182,7 +188,9 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className="flex flex-col gap-3" data-testid="chat-verdict">
                   <DecisionRecordCard decision={verdictToDecision(verdict)} className="not-prose" />
                   {verdict.reasoning && (
-                    <FormattedConversationMarkdown>{verdict.reasoning}</FormattedConversationMarkdown>
+                    <FormattedConversationMarkdown enableRawHtml={enableRawHtml} escapeRawHtml={!enableRawHtml}>
+                      {verdict.reasoning}
+                    </FormattedConversationMarkdown>
                   )}
                 </div>
               ) : structured && isStructuredBody(structured) ? (
@@ -194,9 +202,15 @@ export const ChatMessage = memo(function ChatMessage({
                    HTML only ever passes rehype-sanitize (no iframe, script,
                    handler or live image survives it), and images become links. */
                 structured?.kind === "markdown" ? (
-                  <ConversationMarkdown>{structured.text}</ConversationMarkdown>
+                  <ConversationMarkdown enableRawHtml={enableRawHtml} escapeRawHtml={!enableRawHtml}>
+                    {structured.text}
+                  </ConversationMarkdown>
                 ) : (
-                  <FormattedConversationMarkdown streaming={message.isStreaming}>
+                  <FormattedConversationMarkdown
+                    streaming={message.isStreaming}
+                    enableRawHtml={enableRawHtml}
+                    escapeRawHtml={!enableRawHtml}
+                  >
                     {message.content}
                   </FormattedConversationMarkdown>
                 )

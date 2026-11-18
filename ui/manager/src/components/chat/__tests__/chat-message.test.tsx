@@ -40,6 +40,7 @@ describe("ChatMessage — untrusted HTML", () => {
     // every image into a link.
     const { container } = renderWithProviders(
       <ChatMessage
+        enableRawHtml
         message={{
           ...agentMessage,
           content:
@@ -53,6 +54,15 @@ describe("ChatMessage — untrusted HTML", () => {
     await waitFor(() => expect(container.querySelector("kbd")).not.toBeNull());
     expect(container.querySelector("iframe")).toBeNull();
     expect(container.querySelector('img[src*="evil.example"]')).toBeNull();
+  });
+
+  it("shows HTML as text unless the agent's rawHtml control turned it on", () => {
+    const { container } = renderWithProviders(
+      <ChatMessage message={{ ...agentMessage, content: "**hi** <kbd>parsed</kbd>" }} />
+    );
+    expect(container.querySelector("kbd")).toBeNull();
+    expect(container.querySelector("strong")?.textContent).toBe("hi");
+    expect(container).toHaveTextContent("<kbd>parsed</kbd>");
   });
 });
 
