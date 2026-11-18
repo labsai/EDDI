@@ -1,11 +1,10 @@
 import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
-import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import { ConversationMarkdown, FormattedConversationMarkdown } from "@eddi/conversation/i18next";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "../../lib/api/chat";
 import type { DecisionRecord } from "../../lib/api/groups";
 import {
-  formatMarkdownText,
   parseVerdictJson,
   type VerdictJson,
 } from "@eddi/conversation/team";
@@ -183,7 +182,7 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className="flex flex-col gap-3" data-testid="chat-verdict">
                   <DecisionRecordCard decision={verdictToDecision(verdict)} className="not-prose" />
                   {verdict.reasoning && (
-                    <ConversationMarkdown>{formatMarkdownText(verdict.reasoning)}</ConversationMarkdown>
+                    <FormattedConversationMarkdown>{verdict.reasoning}</FormattedConversationMarkdown>
                   )}
                 </div>
               ) : structured && isStructuredBody(structured) ? (
@@ -194,11 +193,13 @@ export const ChatMessage = memo(function ChatMessage({
                 /* The one markdown renderer: bot/LLM output is untrusted, so raw
                    HTML only ever passes rehype-sanitize (no iframe, script,
                    handler or live image survives it), and images become links. */
-                <ConversationMarkdown>
-                  {structured?.kind === "markdown"
-                    ? structured.text
-                    : formatMarkdownText(message.content)}
-                </ConversationMarkdown>
+                structured?.kind === "markdown" ? (
+                  <ConversationMarkdown>{structured.text}</ConversationMarkdown>
+                ) : (
+                  <FormattedConversationMarkdown streaming={message.isStreaming}>
+                    {message.content}
+                  </FormattedConversationMarkdown>
+                )
               ) : message.isStreaming ? (
                 <TypingIndicator />
               ) : message.images?.length ? null : (

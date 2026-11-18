@@ -31,7 +31,7 @@ import {
   Square,
   MessageSquarePlus,
 } from "lucide-react";
-import { parseTranscriptContent, formatMarkdownText } from "@eddi/conversation/team";
+import { parseTranscriptContent } from "@eddi/conversation/team";
 import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 import { useWorkforceGroup } from "@/hooks/use-workforce-group";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
@@ -88,7 +88,7 @@ import { AgentEditorSheet } from "@/components/workforce/agent-editor-sheet";
 import { Button } from "@eddi/ui";
 import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { cn } from "@eddi/app-kit/lib/utils";
-import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import { FormattedConversationMarkdown } from "@eddi/conversation/i18next";
 import { ChatNotice } from "@eddi/app-kit/components/chat/chat-message";
 
 // ─── Types ───────────────────────────────────────────────────────
@@ -1482,9 +1482,9 @@ function WorkforceThread() {
                       );
                     return (
                       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground [&_pre]:rounded-lg [&_pre]:bg-muted [&_pre]:p-3 [&_code]:rounded [&_code]:bg-muted [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                        <ConversationMarkdown escapeRawHtml>
-                          {formatMarkdownText(parsed)}
-                        </ConversationMarkdown>
+                        <FormattedConversationMarkdown escapeRawHtml streaming={msg.isStreaming}>
+                          {parsed}
+                        </FormattedConversationMarkdown>
                       </div>
                     );
                   })() : (

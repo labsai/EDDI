@@ -27,3 +27,4 @@ export { StepRating } from "./components/StepRating";
 export { ScrollToBottom } from "./components/ScrollToBottom";
 export { ReplyAnnouncer, nextAnnouncement, speakable, type AnnouncedMessage, type ReplyAnnouncerProps } from "./components/ReplyAnnouncer";
 export { isImeComposing } from "./components/ime";
+export { useThrottledValue, STREAM_RENDER_INTERVAL_MS } from "./react/use-throttled-value";

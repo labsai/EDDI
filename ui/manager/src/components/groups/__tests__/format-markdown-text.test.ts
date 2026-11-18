@@ -42,16 +42,8 @@ describe("formatMarkdownText", () => {
       expect(formatMarkdownText(input)).toBe(input);
     });
 
-    /**
-     * Known, accepted boundary: masking keys off real constructs (URLs, code,
-     * link destinations). A bare query fragment in prose is not one, so the
-     * punctuation rule still applies to it. Pinned so a future change to the
-     * masking patterns is a deliberate decision rather than a surprise.
-     */
-    it("does NOT protect a bare query fragment that is not part of a URL", () => {
-      expect(formatMarkdownText("Query with ?filter=a,Bar")).toBe(
-        "Query with ?filter=a, Bar"
-      );
+    it("leaves a bare query fragment alone (no punctuation rewriting any more)", () => {
+      expect(formatMarkdownText("Query with ?filter=a,Bar")).toBe("Query with ?filter=a,Bar");
     });
   });
 
@@ -73,7 +65,7 @@ describe("formatMarkdownText", () => {
 
     it("repairs a 4-space list continuation paragraph", () => {
       expect(
-        formatMarkdownText("1. Erster\n\n    Fortsetzung mit ** Fett ** hier"),
+        formatMarkdownText("1. Erster\n\n    Fortsetzung mit **Fett **hier"),
       ).toBe("1. Erster\n\n    Fortsetzung mit **Fett** hier");
     });
 
@@ -105,23 +97,21 @@ describe("formatMarkdownText", () => {
   describe("a bare fence marker in prose does not disable the rest", () => {
     // Unanchored, /```[\s\S]*$/ matched an inline mention and suppressed every
     // rule for the remainder of the message.
-    it("still splits a heading after an inline ``` mention", () => {
-      expect(formatMarkdownText("Nutze ``` um Code.## Titel")).toBe(
-        "Nutze ``` um Code.\n\n## Titel",
-      );
+    it("still repairs bold after an inline ``` mention", () => {
+      expect(formatMarkdownText("Nutze ``` um **Titel **x")).toBe("Nutze ``` um **Titel** x");
     });
 
-    it("still repairs punctuation after adjacent strikethroughs", () => {
-      expect(formatMarkdownText("Alt ~~entfernt~~~~neu~~ und dann,Dann")).toBe(
-        "Alt ~~entfernt~~~~neu~~ und dann, Dann",
+    it("still repairs bold after adjacent strikethroughs", () => {
+      expect(formatMarkdownText("Alt ~~entfernt~~~~neu~~ und **dann **x")).toBe(
+        "Alt ~~entfernt~~~~neu~~ und **dann** x",
       );
     });
 
     it("a stray backtick on an earlier line no longer suppresses that line", () => {
       // The unterminated-span guard is anchored to end of input, not end of each
       // line, so only the final line can be treated as a streaming frontier.
-      expect(formatMarkdownText("Kosten 5` pro Stueck,Dann\nZweite Zeile.")).toBe(
-        "Kosten 5` pro Stueck, Dann\nZweite Zeile.",
+      expect(formatMarkdownText("Kosten 5` pro **Stueck **x\nZweite Zeile.")).toBe(
+        "Kosten 5` pro **Stueck** x\nZweite Zeile.",
       );
     });
 
@@ -141,28 +131,17 @@ describe("formatMarkdownText", () => {
     });
   });
 
-  describe("still repairs prose", () => {
-    it("adds the missing space after a comma before a capital", () => {
-      expect(formatMarkdownText("Klick auf Speichern,Dann weiter.")).toBe(
-        "Klick auf Speichern, Dann weiter."
-      );
+  describe("still repairs bold delimiters with whitespace inside", () => {
+    it("moves a closing space out of the delimiter", () => {
+      expect(formatMarkdownText("real **business **x")).toBe("real **business** x");
     });
 
-    it("adds the space after an ATX heading marker", () => {
-      expect(formatMarkdownText("#Header")).toBe("# Header");
+    it("moves an opening space out of the delimiter", () => {
+      expect(formatMarkdownText("real ** business**, ok")).toBe("real **business**, ok");
     });
 
-    it("strips illegal whitespace inside bold delimiters", () => {
+    it("repairs a span that opens the line on both edges", () => {
       expect(formatMarkdownText("** von der Strategie **")).toBe("**von der Strategie**");
-    });
-
-    // The operator's group-overview reply rendered literal asterisks all over
-    // a table — every cell was `**Name **` (trailing space inside the closing
-    // delimiter, which CommonMark refuses to parse as emphasis).
-    it("repairs the trailing-space bold inside a table cell without eating the cell separator", () => {
-      expect(formatMarkdownText("| **SMC Recruitment Panel ** | PEER_REVIEW |")).toBe(
-        "| **SMC Recruitment Panel** | PEER_REVIEW |",
-      );
     });
 
     it("re-inserts a separator when dropping the inner space would glue the bold to the next word", () => {
@@ -171,35 +150,9 @@ describe("formatMarkdownText", () => {
       );
     });
 
-    // The repair itself was the vandal here: rule 6 (space before a glued
-    // OPENING **) also fired on closing delimiters glued to punctuation,
-    // turning every valid "**label**:" into the un-parseable "**label **:".
-    // The operator's capability list rendered as literal asterisks with the
-    // bold landing on the descriptions instead of the labels.
-    it("leaves a valid bold label glued to a colon alone", () => {
-      const line = "- **Agents & workflows**: list and inspect agent configs.";
-      expect(formatMarkdownText(line)).toBe(line);
-    });
-
-    it("leaves a valid bold run glued to sentence punctuation alone", () => {
-      expect(formatMarkdownText("**Disable schedules**.")).toBe("**Disable schedules**.");
-      expect(formatMarkdownText("See **Documentation**: it lists the endpoints.")).toBe(
-        "See **Documentation**: it lists the endpoints.",
-      );
-    });
-
-    it("still spaces a truly glued opener before a word", () => {
-      expect(formatMarkdownText("Das**Logo** ist neu")).toBe("Das **Logo** ist neu");
-    });
-
-    it("repairs a bullet marker glued to its bold opener", () => {
-      expect(formatMarkdownText("-** Create a new agent, or a group.** - Edit an existing agent.")).toBe(
-        "- **Create a new agent, or a group.** - Edit an existing agent.",
-      );
-    });
-
-    it("separates a heading glued to preceding text", () => {
-      expect(formatMarkdownText("Schluss## Titel")).toBe("Schluss\n\n## Titel");
+    it("leaves a table row alone, cells included", () => {
+      const row = "| **SMC Recruitment Panel ** | PEER_REVIEW |";
+      expect(formatMarkdownText(row)).toBe(row);
     });
   });
 
@@ -299,25 +252,28 @@ describe("formatMarkdownText", () => {
  */
 describe("pairing awareness", () => {
   it("leaves a second, already-correct bold span alone", () => {
-    // Observed: "…dead-lettered. **Quotas**: quota is currently** disabled**…"
     const input = "0 dead-lettered.**Quotas**: quota is currently **disabled** for";
-    expect(formatMarkdownText(input)).toBe(
-      "0 dead-lettered. **Quotas**: quota is currently **disabled** for",
-    );
+    expect(formatMarkdownText(input)).toBe(input);
   });
 
   it("does not treat a closer as an opener across two spans", () => {
-    expect(formatMarkdownText("a.**B**: c **d** e")).toBe("a. **B**: c **d** e");
+    expect(formatMarkdownText("a.**B**: c **d** e")).toBe("a.**B**: c **d** e");
   });
 
   it("still repairs the span that genuinely needs it when another follows", () => {
     expect(formatMarkdownText("**first ** and **second** end")).toBe("**first** and **second** end");
   });
 
-  it("leaves an unpaired trailing delimiter's text untouched", () => {
+  it("leaves a line with an unpaired delimiter untouched", () => {
     expect(formatMarkdownText("**bold** then a stray ** and more text")).toBe(
       "**bold** then a stray ** and more text",
     );
+    expect(formatMarkdownText("**bold **x and **unclosed")).toBe("**bold **x and **unclosed");
+  });
+
+  it("never pairs delimiters across lines", () => {
+    const input = "an open ** on one line\nand ** on the next";
+    expect(formatMarkdownText(input)).toBe(input);
   });
 
   it("ignores an empty span rather than inventing a pair around nothing", () => {

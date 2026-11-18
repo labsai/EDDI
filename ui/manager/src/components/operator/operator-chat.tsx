@@ -1,7 +1,6 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { formatMarkdownText } from "@eddi/conversation/team";
 import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
@@ -23,7 +22,7 @@ import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
-import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import { FormattedConversationMarkdown } from "@eddi/conversation/i18next";
 import type { ToolActivity } from "@eddi/app-kit/lib/tool-labels";
 
 export interface OperatorChatProps {
@@ -400,15 +399,15 @@ export function OperatorChat({
             >
               {message.role === "agent" && message.content ? (
                 /* Same rendering contract as chat-message.tsx: markdown via
-                   remark-gfm, through formatMarkdownText to repair the glued
-                   headings/bold LLMs emit, and deliberately NO rehypeRaw —
+                   remark-gfm, through formatMarkdownText (a light bold-spacing
+                   repair, throttled while streaming), and deliberately NO rehypeRaw —
                    operator output is LLM output built from tool results, i.e.
                    untrusted, so raw HTML stays escaped. Previously plain text,
                    which showed status reports as literal ## and ** markers. */
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                  <ConversationMarkdown escapeRawHtml>
-                    {formatMarkdownText(message.content)}
-                  </ConversationMarkdown>
+                  <FormattedConversationMarkdown escapeRawHtml streaming={message.isStreaming}>
+                    {message.content}
+                  </FormattedConversationMarkdown>
                 </div>
               ) : (
                 message.content
