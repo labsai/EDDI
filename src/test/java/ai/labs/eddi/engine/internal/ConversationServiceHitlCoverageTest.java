@@ -511,6 +511,9 @@ class ConversationServiceHitlCoverageTest {
 
             // Must not propagate out of the resume
             assertDoesNotThrow(() -> resumeWithRulePause(hitl, Instant.now()));
+            // ...but the pause waits without its timeout, so the failure is counted
+            assertTrue(meterRegistry.counter("eddi_hitl_timeout_arm_failures", "surface", "regular").count() >= 1.0,
+                    "a timeout that could not be scheduled must be counted");
         }
     }
 

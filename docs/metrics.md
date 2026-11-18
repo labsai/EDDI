@@ -753,6 +753,7 @@ Full guide: [hitl.md](hitl.md).
 eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
 eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
 eddi_hitl_timeout_count_total               # Approvals that expired unanswered
+eddi_hitl_timeout_arm_failures_total        # Approval timeouts that could not be scheduled at pause time; tag: surface (crash recovery re-creates them)
 eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
 eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard

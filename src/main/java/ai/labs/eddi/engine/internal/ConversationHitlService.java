@@ -2360,10 +2360,22 @@ class ConversationHitlService {
             LOGGER.infof("Scheduled HITL timeout for conversation %s at %s (policy: %s)",
                     sanitize(conversationId), fireAt, policy.name());
         } catch (Exception e) {
-            LOGGER.warnf("Failed to schedule HITL timeout for conversation %s: %s",
-                    sanitize(conversationId), e.getMessage());
+            // The pause stands without its timeout until crash recovery re-creates the
+            // missing schedule (the cluster sweep within one interval, a single node at
+            // its next start) — so make the gap visible instead of a routine WARN.
+            LOGGER.errorf("Failed to schedule HITL timeout for conversation %s — the pause waits without its timeout "
+                    + "until crash recovery re-arms it: %s", sanitize(conversationId), sanitize(e.getMessage()));
+            Counter armFailures = meterRegistry != null
+                    ? meterRegistry.counter(METRIC_TIMEOUT_ARM_FAILURES, "surface", HitlSchedules.SURFACE_REGULAR)
+                    : null;
+            if (armFailures != null) {
+                armFailures.increment();
+            }
         }
     }
+
+    /** Counter: an approval timeout that could not be scheduled at pause time. */
+    static final String METRIC_TIMEOUT_ARM_FAILURES = "eddi_hitl_timeout_arm_failures";
 
     /**
      * Deletes any existing HITL timeout schedule for the given conversation. Called
