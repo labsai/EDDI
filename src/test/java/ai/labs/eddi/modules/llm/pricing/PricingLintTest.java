@@ -39,8 +39,23 @@ class PricingLintTest {
     void cataloguedOrExplicitlyPricedModelsAreClean() {
         assertEquals(List.of(), PricingLint.lint(task("openai", "gpt-4o-mini"), catalog(UnpricedPolicy.ALLOW)));
         var priced = task("openai", "my-finetune");
-        priced.setInputPricePer1M(0.0);
+        priced.setInputPricePer1M(1.5);
         assertEquals(List.of(), PricingLint.lint(priced, catalog(UnpricedPolicy.ALLOW)));
+        // A zero on a local provider is the normal case: no warning.
+        var local = task("ollama", "llama3");
+        local.setInputPricePer1M(0.0);
+        local.setOutputPricePer1M(0.0);
+        assertEquals(List.of(), PricingLint.lint(local, catalog(UnpricedPolicy.ALLOW)));
+    }
+
+    @Test
+    void anExplicitZeroOnAHostedProviderIsWarnedAbout() {
+        var free = task("openai", "my-finetune");
+        free.setInputPricePer1M(0.0);
+        free.setOutputPricePer1M(0.0);
+        List<String> warnings = PricingLint.lint(free, catalog(UnpricedPolicy.ALLOW));
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.getFirst().contains("explicit 0"), warnings.getFirst());
     }
 
     @Test
