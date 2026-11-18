@@ -20,8 +20,13 @@ type closed its schema, so this fixes all of them at once.
 - **Left open:** maps (their value types are still walked and closed), `Object`/`JsonNode`
   fields, `@JsonIgnoreProperties(ignoreUnknown = true)` types (`PromptSnippet`, `BrandUpdate`,
   `ModelPricing`), `@JsonAnySetter` types, polymorphic bases such as `OutputItem` (the schema
-  lists only base fields), custom-deserialized types, and any type that *writes* a key its schema
-  omits. That last case matters because the component is also the response schema.
+  lists only base fields), types with `@JsonDeserialize`, and any type that *writes* a key its
+  schema omits, including through `@JsonAnyGetter` or `@JsonUnwrapped`. That last case matters
+  because the component is also the response schema. None of the strict models uses
+  `@JsonAnyGetter`, `@JsonUnwrapped` or `@JsonDeserialize` today; those exits guard future models.
+- Root resolution checks properties even when only one body schema carries the class's name, so a
+  same-named body of another class is never mistaken for it. An unresolved root is logged as a
+  build warning.
 - Bodies outside `configs.*.model` (`AgentTriggerConfiguration`, `ScheduleConfiguration`,
   `AlertRule`, …) are not strict at the boundary and stay open.
 - `ui/manager/src/test/mocks/openapi-operations.json` was regenerated with no diff. It records only
@@ -34,8 +39,9 @@ type closed its schema, so this fixes all of them at once.
   ignored by name still parse on the server, but the closed schema lists only the canonical names.
   This makes the contract narrower than the server, never wider, and only a wider one produces the
   400 this fix exists to prevent. Requiring them would have left exactly the main bodies open:
-  `AgentConfiguration`, `WorkflowConfiguration`, `RuleSetConfiguration`, `ApiCallsConfiguration`
-  and `LlmConfiguration.Task`. A client that validates and still sends a legacy key will now be
+  `AgentConfiguration`, `WorkflowConfiguration`, `RuleSetConfiguration` and its
+  `RuleGroupConfiguration`, `ApiCallsConfiguration` and `DictionaryConfiguration` (all through
+  aliases), and `LlmConfiguration.Task` (through `@JsonIgnore`d derived names). A client that validates and still sends a legacy key will now be
   rejected client-side. Three shipped JSON fixtures use one: two v5 test fixtures and the
   reference agent's `retryHttpCallInstruction`, which `agent-config-authoring.md` already flags.
 - One schema per class: a component reached from a strict body is closed even where a lenient

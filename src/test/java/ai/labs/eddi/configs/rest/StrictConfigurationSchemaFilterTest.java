@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.rest;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.configs.schemafixture.model.SchemaFixtures;
+import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,7 +40,9 @@ class StrictConfigurationSchemaFilterTest {
     /**
      * Shaped like SmallRye's output for {@link SchemaFixtures}: one component per
      * class, maps as {@code additionalProperties}, {@code Object} as an empty
-     * schema. The {@code Nested1} decoy has the name a collision would produce.
+     * schema. {@code StrictConfig1} is the body of an unrelated class that collided
+     * with {@code StrictConfig}: it has the suffixed name, but not the class's
+     * properties.
      */
     private static final String DOCUMENT = """
             {
@@ -48,6 +51,12 @@ class StrictConfigurationSchemaFilterTest {
                 "/fixture/strict": {
                   "post": {
                     "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/StrictConfig"}}}},
+                    "responses": {"204": {"description": "ok"}}
+                  }
+                },
+                "/fixture/other": {
+                  "post": {
+                    "requestBody": {"content": {"application/json": {"schema": {"$ref": "#/components/schemas/StrictConfig1"}}}},
                     "responses": {"204": {"description": "ok"}}
                   }
                 },
@@ -73,16 +82,22 @@ class StrictConfigurationSchemaFilterTest {
                       "anything": {},
                       "withIgnoredName": {"$ref": "#/components/schemas/WithIgnoredName"},
                       "withAlias": {"$ref": "#/components/schemas/WithAlias"},
-                      "emitsUnlistedKey": {"$ref": "#/components/schemas/EmitsUnlistedKey"}
+                      "emitsUnlistedKey": {"$ref": "#/components/schemas/EmitsUnlistedKey"},
+                      "emitsAnyKey": {"$ref": "#/components/schemas/EmitsAnyKey"},
+                      "withUnwrapped": {"$ref": "#/components/schemas/WithUnwrapped"},
+                      "wrapped": {"allOf": [{"$ref": "#/components/schemas/Wrapped"}], "description": "carried beside the $ref"}
                     }
                   },
+                  "StrictConfig1": {"type": "object", "properties": {"other": {"type": "string"}}},
                   "Nested": {"type": "object", "properties": {"value": {"type": "string"}}},
-                  "Nested1": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "Tolerant": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "Polymorphic": {"type": "object", "properties": {"type": {"type": "string"}}},
                   "WithIgnoredName": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "WithAlias": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "EmitsUnlistedKey": {"type": "object", "properties": {"value": {"type": "string"}}},
+                  "EmitsAnyKey": {"type": "object", "properties": {"value": {"type": "string"}}},
+                  "WithUnwrapped": {"type": "object", "properties": {"own": {"type": "string"}, "value": {"type": "string"}}},
+                  "Wrapped": {"type": "object", "properties": {"value": {"type": "string"}}},
                   "TolerantConfig": {"type": "object", "properties": {"value": {"type": "string"}}}
                 }
               }
@@ -163,8 +178,24 @@ class StrictConfigurationSchemaFilterTest {
     }
 
     @Test
-    void schemaNotReachedFromAStrictBodyIsUntouched() {
-        assertOpen("Nested1");
+    void typeWritingArbitraryOrFlattenedKeysStaysOpen() {
+        assertOpen("EmitsAnyKey");
+        assertOpen("WithUnwrapped");
+    }
+
+    @Test
+    void refWrappedInAllOfIsFollowed() {
+        assertClosed("Wrapped");
+        assertFalse(schemas.path("StrictConfig").path("properties").path("wrapped").has("additionalProperties"),
+                "the wrapper itself carries no properties to close");
+    }
+
+    @Test
+    void collidingBodyOfAnotherClassIsLeftAlone() {
+        // Both StrictConfig and StrictConfig1 are request bodies matching the name;
+        // only the one whose properties StrictConfig declares is its schema.
+        assertClosed("StrictConfig");
+        assertOpen("StrictConfig1");
     }
 
     @Test
@@ -181,7 +212,8 @@ class StrictConfigurationSchemaFilterTest {
         assertTrue(roots.contains(LlmConfiguration.class), roots::toString);
         assertTrue(roots.contains(RuleSetConfiguration.class), roots::toString);
         assertTrue(roots.contains(AgentConfiguration.class), roots::toString);
-        assertTrue(roots.stream().allMatch(StrictConfigurationBodyInterceptor::isConfigurationModel), roots::toString);
+        // A request body outside configs.*.model is parsed leniently at the boundary.
+        assertFalse(roots.contains(AgentTriggerConfiguration.class), roots::toString);
     }
 
     private static void assertClosed(String name) {

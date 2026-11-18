@@ -4,13 +4,16 @@
  */
 package ai.labs.eddi.configs.rest;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import com.fasterxml.jackson.databind.AnnotationIntrospector;
 import com.fasterxml.jackson.databind.BeanDescription;
 import com.fasterxml.jackson.databind.DeserializationConfig;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.SerializationConfig;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import com.fasterxml.jackson.databind.introspect.AnnotatedMember;
 import com.fasterxml.jackson.databind.introspect.BeanPropertyDefinition;
 import com.fasterxml.jackson.databind.json.JsonMapper;
@@ -83,10 +86,14 @@ import java.util.regex.Pattern;
  * </p>
  * <ul>
  * <li>{@code @JsonIgnoreProperties(ignoreUnknown = true)} or a
- * {@code @JsonAnySetter} — the server accepts anything there;</li>
+ * {@code @JsonAnySetter} — the server accepts anything there. Set on a property
+ * instead of a class, the walk does not descend into that property;</li>
  * <li>a polymorphic type ({@code @JsonTypeInfo}) — the schema lists only the
  * base properties, so closing it would reject every subtype's fields;</li>
- * <li>a custom deserializer — its tolerance is its own business;</li>
+ * <li>{@code @JsonDeserialize} on the class — a custom deserializer, builder or
+ * target type decides what it accepts, not the schema;</li>
+ * <li>a {@code @JsonAnyGetter} or {@code @JsonUnwrapped} property — the server
+ * writes keys the schema does not list;</li>
  * <li>maps ({@code Map<String, ?>}), {@code Object} and {@code JsonNode} —
  * genuinely open. A map's <em>value</em> type is still walked, because a
  * {@code Map<String, StrictType>} value is parsed strictly.</li>
@@ -96,6 +103,11 @@ import java.util.regex.Pattern;
  * A schema shared with a lenient endpoint is closed too: there is one schema
  * per class, and the strict reading is the one that can turn a valid-looking
  * payload into a 400.
+ * </p>
+ *
+ * <p>
+ * Array bodies ({@code Foo[]}) are strict at the boundary but are not walked:
+ * none exists, and their schema is inline rather than a named component.
  * </p>
  */
 @OpenApiFilter(stages = OpenApiFilter.RunStage.BUILD)
@@ -108,14 +120,16 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
             DotName.createSimple("jakarta.ws.rs.POST"),
             DotName.createSimple("jakarta.ws.rs.PUT"),
             DotName.createSimple("jakarta.ws.rs.PATCH"),
-            DotName.createSimple("jakarta.ws.rs.DELETE"),
-            DotName.createSimple("jakarta.ws.rs.GET"));
+            DotName.createSimple("jakarta.ws.rs.DELETE"));
     private static final DotName OPENAPI_SCHEMA = DotName.createSimple("org.eclipse.microprofile.openapi.annotations.media.Schema");
 
     /**
-     * Introspection only — the strict parser's mapper is a copy of the CDI mapper,
-     * whose customisation (dates, indentation, lenient unknown-property handling)
-     * does not change which properties a class declares.
+     * Introspection only. The strict parser's mapper is a copy of the CDI mapper;
+     * the modules registered here ({@code Jdk8Module},
+     * {@code ParameterNamesModule}, {@code JavaTimeModule}) are the ones that
+     * change how a class's properties are found — {@code Optional} as a reference
+     * type, creator parameters by name. The rest of that customisation (dates,
+     * indentation, lenient unknown-property handling) does not.
      */
     private final DeserializationConfig jackson;
     private final SerializationConfig serialization;
@@ -124,7 +138,7 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
     /** Called by SmallRye, which passes the application index. */
     public StrictConfigurationSchemaFilter(IndexView index) {
         this.index = index;
-        JsonMapper mapper = JsonMapper.builder().build();
+        JsonMapper mapper = JsonMapper.builder().findAndAddModules().build();
         this.jackson = mapper.getDeserializationConfig();
         this.serialization = mapper.getSerializationConfig();
     }
@@ -138,9 +152,14 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
         Set<String> bodySchemas = requestBodySchemaNames(openAPI);
 
         for (Class<?> root : strictRoots()) {
+            if (jackson.constructType(root).isContainerType()) {
+                // A configuration that is itself a map (Properties) is open by definition.
+                continue;
+            }
             String name = resolveRootSchema(root, bodySchemas, walk.components);
             if (name == null) {
-                LOGGER.debugf("No unambiguous request-body schema for strict configuration type %s; left open", root.getName());
+                LOGGER.warnf("No unambiguous request-body schema for strict configuration type %s; its schema is left open",
+                        root.getName());
                 continue;
             }
             walk.ref(jackson.constructType(root), name);
@@ -205,32 +224,29 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
     }
 
     /**
-     * The request-body schema generated for a root class: its schema name, or that
-     * name with SmallRye's collision suffix. Among several candidates the one whose
-     * properties are exactly the class's is taken; anything else is ambiguous and
+     * The request-body schema generated for a root class: a body schema named after
+     * the class, or that name with SmallRye's collision suffix, whose properties
+     * are all ones the class declares. The property check applies even to a single
+     * candidate — the class's own body may be hidden from the document while
+     * another class of the same name is a body. Anything but exactly one match
      * stays open.
      */
     private String resolveRootSchema(Class<?> root, Set<String> bodySchemas, Map<String, Schema> components) {
-        String base = schemaName(root);
-        Pattern candidate = Pattern.compile(Pattern.quote(base) + "\\d*");
+        JavaType type = jackson.constructType(root);
+        Set<String> declared = new HashSet<>();
+        describe(type).findProperties().forEach(property -> declared.add(property.getName()));
+        describeWrite(type).findProperties().forEach(property -> declared.add(property.getName()));
+
+        Pattern candidate = Pattern.compile(Pattern.quote(schemaName(root)) + "\\d*");
         List<String> matches = new ArrayList<>();
         for (String name : bodySchemas) {
-            if (candidate.matcher(name).matches() && components.containsKey(name)) {
+            Schema schema = components.get(name);
+            if (candidate.matcher(name).matches() && schema != null && schema.getProperties() != null
+                    && declared.containsAll(schema.getProperties().keySet())) {
                 matches.add(name);
             }
         }
-        if (matches.size() == 1) {
-            return matches.getFirst();
-        }
-
-        Set<String> propertyNames = new HashSet<>();
-        for (BeanPropertyDefinition property : describe(jackson.constructType(root)).findProperties()) {
-            propertyNames.add(property.getName());
-        }
-        List<String> exact = matches.stream()
-                .filter(name -> propertyNames.equals(propertyNamesOf(components.get(name))))
-                .toList();
-        return exact.size() == 1 ? exact.getFirst() : null;
+        return matches.size() == 1 ? matches.getFirst() : null;
     }
 
     private String schemaName(Class<?> type) {
@@ -242,12 +258,12 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
         return type.getSimpleName();
     }
 
-    private static Set<String> propertyNamesOf(Schema schema) {
-        return schema == null || schema.getProperties() == null ? Set.of() : schema.getProperties().keySet();
-    }
-
     private BeanDescription describe(JavaType type) {
         return jackson.introspect(type);
+    }
+
+    private BeanDescription describeWrite(JavaType type) {
+        return serialization.introspect(type);
     }
 
     private static Class<?> load(String className) {
@@ -281,6 +297,12 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
             if (schema == null) {
                 return;
             }
+            if (!isBean(type)) {
+                // An Object- or Map-typed property rendered as a $ref (say through
+                // @Schema(implementation = ...)): the Java side says nothing about the
+                // component, so it neither claims nor conflicts with it.
+                return;
+            }
             Class<?> raw = type.getRawClass();
             Class<?> previous = visited.putIfAbsent(name, raw);
             if (previous != null) {
@@ -303,6 +325,12 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
                 }
                 return;
             }
+            Schema wrapped = singleAllOfRef(schema);
+            if (wrapped != null) {
+                // {allOf: [{$ref}], description: ...}: how a $ref carries siblings.
+                walk(type, wrapped, null);
+                return;
+            }
             if (type.isReferenceType()) {
                 walk(type.getContentType(), schema, null);
             } else if (type.isArrayType() || type.isCollectionLikeType()) {
@@ -323,7 +351,8 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
             AnnotationIntrospector introspector = jackson.getAnnotationIntrospector();
             var annotatedClass = description.getClassInfo();
 
-            if (annotatedClass.hasAnnotation(JsonTypeInfo.class) || introspector.findDeserializer(annotatedClass) != null) {
+            if (annotatedClass.hasAnnotation(JsonTypeInfo.class) || annotatedClass.hasAnnotation(JsonDeserialize.class)
+                    || introspector.findDeserializer(annotatedClass) != null) {
                 // Polymorphic or custom-deserialised: the schema cannot express what is
                 // accepted, and the subtype schemas are not part of the document.
                 return;
@@ -343,7 +372,10 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
                     break;
                 }
                 AnnotatedMember mutator = property.getMutator() != null ? property.getMutator() : property.getPrimaryMember();
-                if (mutator != null && (mutator.hasAnnotation(JsonTypeInfo.class) || introspector.findDeserializer(mutator) != null)) {
+                if (mutator != null && (mutator.hasAnnotation(JsonTypeInfo.class) || mutator.hasAnnotation(JsonDeserialize.class)
+                        || mutator.hasAnnotation(JsonIgnoreProperties.class) || mutator.hasAnnotation(JsonUnwrapped.class)
+                        || introspector.findDeserializer(mutator) != null)) {
+                    // The property's own annotation changes what is accepted below it.
                     continue;
                 }
                 walk(property.getPrimaryType(), schema.getProperties().get(property.getName()), null);
@@ -369,13 +401,28 @@ public class StrictConfigurationSchemaFilter implements OASFilter {
             // must be listed, or a closed schema would reject EDDI's own output. Keys
             // that are only ever read (legacy aliases, names ignored on input) are
             // deliberately not required: the schema describes the canonical shape.
+            BeanDescription write = describeWrite(type);
+            if (write.findAnyGetter() != null) {
+                return false;
+            }
             Set<String> written = new HashSet<>();
-            for (BeanPropertyDefinition property : serialization.introspect(type).findProperties()) {
+            for (BeanPropertyDefinition property : write.findProperties()) {
+                if (property.getPrimaryMember() != null && property.getPrimaryMember().hasAnnotation(JsonUnwrapped.class)) {
+                    return false;
+                }
                 if (property.couldSerialize()) {
                     written.add(property.getName());
                 }
             }
             return schema.getProperties().keySet().containsAll(written);
+        }
+
+        private static Schema singleAllOfRef(Schema schema) {
+            List<Schema> allOf = schema.getAllOf();
+            if (allOf == null || allOf.size() != 1 || allOf.getFirst().getRef() == null) {
+                return null;
+            }
+            return allOf.getFirst();
         }
 
         private static Set<Schema> identitySet() {

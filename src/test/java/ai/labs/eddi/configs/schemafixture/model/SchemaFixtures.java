@@ -5,12 +5,13 @@
 package ai.labs.eddi.configs.schemafixture.model;
 
 import com.fasterxml.jackson.annotation.JsonAlias;
+import com.fasterxml.jackson.annotation.JsonAnyGetter;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonSubTypes;
 import com.fasterxml.jackson.annotation.JsonTypeInfo;
+import com.fasterxml.jackson.annotation.JsonUnwrapped;
 import jakarta.ws.rs.POST;
-import jakarta.ws.rs.Path;
 import jakarta.ws.rs.PathParam;
 
 import java.util.List;
@@ -39,6 +40,9 @@ public final class SchemaFixtures {
         public WithIgnoredName withIgnoredName;
         public WithAlias withAlias;
         public EmitsUnlistedKey emitsUnlistedKey;
+        public EmitsAnyKey emitsAnyKey;
+        public WithUnwrapped withUnwrapped;
+        public Wrapped wrapped;
     }
 
     public static class Nested {
@@ -82,20 +86,46 @@ public final class SchemaFixtures {
         }
     }
 
+    /** Writes arbitrary keys through an any-getter. */
+    public static class EmitsAnyKey {
+        public String value;
+
+        @JsonAnyGetter
+        public Map<String, Object> extra() {
+            return Map.of("free", "form");
+        }
+    }
+
+    /** Reads and writes the keys of {@code inner} flattened into its own. */
+    public static class WithUnwrapped {
+        public String own;
+        @JsonUnwrapped
+        public Nested inner;
+    }
+
+    /**
+     * Referenced through {@code allOf}, the way a {@code $ref} carries siblings.
+     */
+    public static class Wrapped {
+        public String value;
+    }
+
     /** A configuration body that tolerates unknown keys at its root. */
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class TolerantConfig {
         public String value;
     }
 
-    @Path("/fixture")
+    /**
+     * Resource methods without a {@code @Path}: enough for the Jandex scan, and
+     * never mistaken for an endpoint when a {@code @QuarkusTest} indexes test
+     * classes.
+     */
     public interface FixtureResource {
         @POST
-        @Path("/strict")
         void strict(StrictConfig body);
 
         @POST
-        @Path("/tolerant/{id}")
         void tolerant(@PathParam("id") String id, TolerantConfig body);
     }
 }
