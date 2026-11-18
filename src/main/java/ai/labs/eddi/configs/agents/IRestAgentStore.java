@@ -264,15 +264,18 @@ public interface IRestAgentStore extends IRestVersionInfo {
             + "The version must be the Agent's current one whenever cascade=true or permanent=true, otherwise the "
             + "request is refused with 409 before anything is deleted. An Agent that is already soft-deleted has no "
             + "current version to be stale against: permanent=true still purges its history and its vault keys, and "
-            + "the cascade is skipped rather than refused. An Agent that is deployed and has open conversations is not "
+            + "the cascade is skipped rather than refused. An Agent that is deployed and has active conversations is not "
             + "deleted: 409 with code AGENT_HAS_OPEN_CONVERSATIONS, as for undeploy, unless the request carries "
-            + "endAllActiveConversations=true, which ends them first.")
+            + "endAllActiveConversations=true.")
     @APIResponse(responseCode = "200", description = "Agent deleted successfully.")
     @APIResponse(responseCode = "404", description = "Agent not found.")
     @APIResponse(responseCode = "409",
                  description = "cascade=true or permanent=true against a version that is not the current one, or the deployed agent "
-                         + "has open conversations (JSON body: error, code AGENT_HAS_OPEN_CONVERSATIONS, openConversations, override); "
-                         + "nothing was deleted.")
+                         + "has active conversations (JSON body: error, code AGENT_HAS_OPEN_CONVERSATIONS, openConversations, "
+                         + "openConversationsCount, override); nothing was deleted and no conversation was ended.")
+    @APIResponse(responseCode = "503",
+                 description = "The open conversations could not be counted (JSON body: error, code IN_USE_CHECK_FAILED, retryable; "
+                         + "Retry-After header); nothing was deleted.")
     // @formatter:off
     Response deleteAgent(@PathParam("id") String id,
             @Parameter(name = "version", required = true, example = "1",
@@ -295,6 +298,20 @@ public interface IRestAgentStore extends IRestVersionInfo {
                     + "so a resource shared at a different pinned version can be recovered. "
                     + "The workflow delete this cascades into reports its own skipped extensions in "
                     + "X-Cascade-Skipped; that header is not propagated onto this response.")
-            @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+            @QueryParam("cascade") @DefaultValue("false") Boolean cascade,
+            @Parameter(name = "endAllActiveConversations", description = "If true, end the active conversations of the agent's "
+                    + "deployed versions (end reason agent-deleted) and delete it. They are ended only after every check that "
+                    + "can still refuse the delete has passed. Conversations paused for a human approval are neither counted "
+                    + "nor ended. If false (default), a deployed agent with active conversations is refused with 409 and "
+                    + "code AGENT_HAS_OPEN_CONVERSATIONS.")
+            @QueryParam("endAllActiveConversations") @DefaultValue("false") Boolean endAllActiveConversations);
     // @formatter:on
+
+    /**
+     * {@link #deleteAgent} without ending open conversations: refused while there
+     * are any.
+     */
+    default Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade) {
+        return deleteAgent(id, version, permanent, cascade, false);
+    }
 }

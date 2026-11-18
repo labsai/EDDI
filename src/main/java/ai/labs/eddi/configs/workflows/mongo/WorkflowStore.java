@@ -13,7 +13,9 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.ReferringVersions;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -23,8 +25,10 @@ import jakarta.inject.Inject;
 import jakarta.inject.Provider;
 import java.net.URI;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
@@ -136,6 +140,21 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
             }
         }
         return ret;
+    }
+
+    @Override
+    public ReferringVersions findWorkflowVersionsReferencing(Collection<String> resourceUris) {
+        List<IResourceStore.IResourceId> live = new ArrayList<>();
+        List<IResourceStore.IResourceId> historical = new ArrayList<>();
+        List<String> uris = new ArrayList<>(new LinkedHashSet<>(resourceUris));
+        for (int from = 0; from < uris.size(); from += IAgentStore.REFERENCE_QUERY_CHUNK) {
+            List<String> chunk = uris.subList(from, Math.min(uris.size(), from + IAgentStore.REFERENCE_QUERY_CHUNK));
+            for (String field : List.of(WORKFLOW_EXTENSIONS_CONFIG_URI_FIELD, WORKFLOW_EXTENSIONS_DICTIONARIES_CONFIG_URI_FIELD)) {
+                live.addAll(resourceStorage.findResourceIdsContainingAny(field, chunk));
+                historical.addAll(resourceStorage.findHistoryResourceIdsContainingAny(field, chunk));
+            }
+        }
+        return new ReferringVersions(live, historical);
     }
 
     /** Where a reverse lookup for one resource URI starts. */

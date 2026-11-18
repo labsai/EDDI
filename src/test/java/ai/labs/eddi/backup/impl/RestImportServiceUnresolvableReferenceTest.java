@@ -31,6 +31,7 @@ import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import jakarta.enterprise.inject.Instance;
 import jakarta.enterprise.inject.spi.CDI;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,6 +46,7 @@ import java.io.InputStream;
 import java.net.URI;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
@@ -195,12 +197,12 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            var refused = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+            var refused = assertThrows(WebApplicationException.class,
                     () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null));
 
             assertEquals(422, refused.getResponse().getStatus());
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) refused.getResponse().getEntity();
+            var body = (Map<String, Object>) refused.getResponse().getEntity();
             assertEquals("allowIncomplete=true", body.get("hint"));
             var missing = (List<?>) body.get("missing");
             assertEquals(1, missing.size(), "every missing reference is listed: " + missing);
@@ -209,6 +211,10 @@ class RestImportServiceUnresolvableReferenceTest {
                     || missing.getFirst().toString().contains("file in the archive"), missing.getFirst().toString());
         }
         verify(metrics).importFailed();
+        // S1: refused by the pre-scan, before the first write — not written and then
+        // rolled back.
+        verify(ruleSetStore, never()).create(any());
+        verify(workflowStore, never()).create(any());
     }
 
     @Test
@@ -232,7 +238,7 @@ class RestImportServiceUnresolvableReferenceTest {
             assertEquals(201, response.getStatus());
             assertEquals("1", response.getHeaderString(RestImportService.HEADER_IMPORT_WARNINGS));
             @SuppressWarnings("unchecked")
-            var body = (java.util.Map<String, Object>) response.getEntity();
+            var body = (Map<String, Object>) response.getEntity();
             assertEquals(1, ((List<?>) body.get("dropped")).size());
             assertTrue(body.get("warnings").toString().contains(MISSING_LLM_ID), body.get("warnings").toString());
         }

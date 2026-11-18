@@ -316,12 +316,22 @@ public class RestVersionInfo<T> implements IRestVersionInfo {
      * administrators, whom {@code seesEverything()} admits.
      */
     public Response delete(String id, Integer version, boolean permanent) {
+        return delete(id, version, permanent, false);
+    }
+
+    /**
+     * {@link #delete(String, Integer, boolean)} with the in-use guard's override.
+     *
+     * @param force
+     *            delete a workflow an agent lists, or a configuration a workflow
+     *            uses, anyway (the endpoint's {@code force} query parameter)
+     */
+    public Response delete(String id, Integer version, boolean permanent, boolean force) {
         accessGuard.requireAccess(id, AccessLevel.OWN, resourceTypeLabel);
         version = validateParameters(id, version);
         // 409 while an agent still lists this workflow or a workflow step still points
-        // at this configuration, unless ?force=true. Refused before anything is
-        // touched.
-        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, version, permanent);
+        // at this configuration, unless force. Refused before anything is touched.
+        ResourceInUseGuard.requireUnusedOrForced(resourceURI, id, version, permanent, force);
 
         try {
             if (permanent) {

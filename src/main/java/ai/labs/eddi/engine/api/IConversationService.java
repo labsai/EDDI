@@ -121,6 +121,13 @@ public interface IConversationService {
     String END_REASON_IDLE = "idle";
 
     /**
+     * End reason for a conversation ended because its agent was deleted with
+     * {@code endAllActiveConversations=true}. Unlike a retired version, there is no
+     * newer version of the assistant to start over with.
+     */
+    String END_REASON_AGENT_DELETED = "agent-deleted";
+
+    /**
      * Read conversation log in text or structured format.
      *
      * @throws ResourceStoreException

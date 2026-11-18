@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.configs.workflows;
 
-import ai.labs.eddi.configs.validation.ConfigValidationPolicy;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -26,7 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class WorkflowConfigSaveValidatorTest {
 
     private static final Predicate<String> KNOWN = Set.of("ai.labs.parser", "ai.labs.behavior", "ai.labs.llm", "ai.labs.httpcalls",
-            "ai.labs.output", "ai.labs.property")::contains;
+            "ai.labs.output", "ai.labs.property", "ai.labs.rag", "ai.labs.templating")::contains;
 
     private final ObjectMapper mapper = new ObjectMapper().configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
 
@@ -34,38 +34,64 @@ class WorkflowConfigSaveValidatorTest {
         return mapper.readValue("{\"workflowSteps\":[" + steps + "]}", WorkflowConfiguration.class);
     }
 
+    private List<String> problems(String steps) throws Exception {
+        return WorkflowConfigSaveValidator.findProblems(read(steps), KNOWN);
+    }
+
     @Test
-    @DisplayName("an unknown step type is refused, naming the step (L11)")
+    @DisplayName("an unknown step type is refused (UnrecognizedExtensionException at deploy), naming the step")
     void unknownStepType() throws Exception {
-        List<String> problems = WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.nope\",\"config\":{}}"), KNOWN);
+        List<String> problems = problems("{\"type\":\"eddi://ai.labs.nope\",\"config\":{}}");
         assertEquals(1, problems.size(), problems.toString());
         assertTrue(problems.getFirst().startsWith("workflowSteps[0].type 'eddi://ai.labs.nope' is not a known workflow step"));
     }
 
     @Test
-    @DisplayName("a step without a type, or with a non-eddi scheme, is refused")
+    @DisplayName("a step without a type is refused (deploy dereferences it); another scheme is skipped at deploy and passes")
     void missingOrForeignType() throws Exception {
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"config\":{}}"), KNOWN).getFirst().contains("type is required"));
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"http://ai.labs.llm\",\"config\":{}}"), KNOWN).getFirst()
-                .contains("must be an eddi://"));
+        assertTrue(problems("{\"config\":{}}").getFirst().contains("type is required"));
+        assertTrue(problems("{\"type\":\"http://ai.labs.llm\",\"config\":{}}").isEmpty());
     }
 
     @Test
-    @DisplayName("a step that needs a resource must name one; a malformed reference is refused")
+    @DisplayName("a step whose task needs a resource must name one; a malformed reference is refused")
     void configUri() throws Exception {
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.llm\",\"config\":{}}"), KNOWN).getFirst()
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.llm\",\"config\":{}}").getFirst()
                 .startsWith("workflowSteps[0].config.uri is required for ai.labs.llm"));
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"not a uri\"}}"), KNOWN)
-                .getFirst().contains("is not a valid URI"));
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"eddi://ai.labs.llm\"}}"),
-                KNOWN).getFirst().contains("does not name a resource"));
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.rag\",\"config\":{}}").getFirst()
+                .startsWith("workflowSteps[0].config.uri is required for ai.labs.rag"), "RagTask.configure throws too");
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"not a uri\"}}").getFirst().contains("is not a valid URI"));
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":\"eddi://ai.labs.llm\"}}").getFirst()
+                .contains("does not name a resource"));
+    }
+
+    @Test
+    @DisplayName("M5: an output step without a uri is a context-only output step and passes; a blank uri is refused")
+    void contextOnlyOutputStep() throws Exception {
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.output\",\"config\":{}}").isEmpty());
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.output\"}").isEmpty());
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.output\",\"config\":{\"uri\":\" \"}}").getFirst()
+                .startsWith("workflowSteps[0].config.uri is required for ai.labs.output"));
+    }
+
+    @Test
+    @DisplayName("M5: a uri with surrounding whitespace passes — ResourceUris.require trims it")
+    void uriIsTrimmed() throws Exception {
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":"
+                + "\" eddi://ai.labs.llm/llmstore/llms/000000000000000000000000?version=1 \"}}").isEmpty());
+    }
+
+    @Test
+    @DisplayName("a step whose task does not read config.uri is not checked for it")
+    void unusedUriIsNotChecked() throws Exception {
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.templating\",\"config\":{\"uri\":\"whatever\"}}").isEmpty());
     }
 
     @Test
     @DisplayName("a reference to a resource that does not exist yet is fine: the config may be created next")
     void danglingReferenceIsNotChecked() throws Exception {
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":"
-                + "\"eddi://ai.labs.llm/llmstore/llms/000000000000000000000000?version=1\"}}"), KNOWN).isEmpty());
+        assertTrue(problems("{\"type\":\"eddi://ai.labs.llm\",\"config\":{\"uri\":"
+                + "\"eddi://ai.labs.llm/llmstore/llms/000000000000000000000000?version=1\"}}").isEmpty());
     }
 
     @Test
@@ -73,28 +99,28 @@ class WorkflowConfigSaveValidatorTest {
     void duplicateStepsAreAllowed() throws Exception {
         String step = "{\"type\":\"eddi://ai.labs.httpcalls\",\"config\":{\"uri\":"
                 + "\"eddi://ai.labs.apicalls/apicallstore/apicalls/000000000000000000000001?version=1\"}}";
-        assertTrue(WorkflowConfigSaveValidator.problems(read(step + "," + step), KNOWN).isEmpty());
+        assertTrue(problems(step + "," + step).isEmpty());
     }
 
     @Test
     @DisplayName("without a registry (no container) only the shape is checked")
     void shapeOnlyWithoutRegistry() throws Exception {
-        assertTrue(WorkflowConfigSaveValidator.problems(read("{\"type\":\"eddi://ai.labs.whatever\",\"config\":{}}"), null).isEmpty());
+        assertTrue(WorkflowConfigSaveValidator.findProblems(read("{\"type\":\"eddi://ai.labs.whatever\",\"config\":{}}"), null).isEmpty());
     }
 
     @Test
-    @DisplayName("interactive save refuses with 400-style exception; import only warns")
+    @DisplayName("interactive save refuses with a 400-style exception; inside LenientConfigWrite it only logs")
     void strictVersusLenient() throws Exception {
-        WorkflowConfiguration workflow = read("{\"type\":\"eddi://ai.labs.nope\",\"config\":{}}");
         // No CDI container in a unit test: the type cannot be resolved, so use a shape
         // error.
         WorkflowConfiguration shape = read("{\"config\":{}}");
         assertThrows(IllegalArgumentException.class, () -> WorkflowConfigSaveValidator.validate(shape));
-        try (var scope = ConfigValidationPolicy.lenient()) {
-            assertDoesNotThrow(() -> WorkflowConfigSaveValidator.validate(shape));
-            assertEquals(1, scope.warnings().size());
-        }
-        assertEquals(1, WorkflowConfigSaveValidator.problems(workflow, KNOWN).size());
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> {
+            WorkflowConfigSaveValidator.validate(shape);
+            return null;
+        }));
+        assertEquals(1, WorkflowConfigSaveValidator.problems(shape).size());
+        assertTrue(WorkflowConfigSaveValidator.problems(shape).getFirst().startsWith("workflow: "));
     }
 
     @Test
@@ -104,7 +130,7 @@ class WorkflowConfigSaveValidatorTest {
                 "aaa000000000000000000001.workflow.json");
         WorkflowConfiguration stored = mapper.readValue(Files.readString(fixture), WorkflowConfiguration.class);
         Predicate<String> everything = host -> true;
-        assertTrue(WorkflowConfigSaveValidator.problems(stored, everything).isEmpty(),
-                WorkflowConfigSaveValidator.problems(stored, everything).toString());
+        assertTrue(WorkflowConfigSaveValidator.findProblems(stored, everything).isEmpty(),
+                WorkflowConfigSaveValidator.findProblems(stored, everything).toString());
     }
 }

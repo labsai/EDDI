@@ -6,8 +6,10 @@ package ai.labs.eddi.configs.workflows;
 
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.datastore.ReferringVersions;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -30,4 +32,14 @@ public interface IWorkflowStore extends IResourceStore<WorkflowConfiguration> {
      *            a versioned resource URI ({@code ...?version=<n>})
      */
     List<IResourceStore.IResourceId> getWorkflowVersionsContainingResource(String resourceURI) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * The workflow versions, live and historical, whose steps name any of
+     * {@code resourceUris} exactly — in a step's {@code config.uri} or in its
+     * dictionaries. Ids only — nothing is read — in four indexed queries per 50
+     * URIs (MongoDB: {@code workflowSteps.config.uri} and
+     * {@code workflowSteps.extensions.dictionaries.config.uri}; PostgreSQL: the
+     * {@code jsonb_path_ops} GIN indexes).
+     */
+    ReferringVersions findWorkflowVersionsReferencing(Collection<String> resourceUris);
 }

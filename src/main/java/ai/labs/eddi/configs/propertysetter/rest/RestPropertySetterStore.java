@@ -69,8 +69,8 @@ public class RestPropertySetterStore implements IRestPropertySetterStore {
     }
 
     @Override
-    public Response deletePropertySetter(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+    public Response deletePropertySetter(String id, Integer version, Boolean permanent, Boolean force) {
+        return restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
     }
 
     @Override

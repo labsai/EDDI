@@ -102,7 +102,18 @@ public interface IRestOutputStore extends IRestVersionInfo {
                              @Parameter(name = "version", required = true, example = "1")
                              @QueryParam("version") Integer version,
                              @QueryParam("permanent")
-                             @DefaultValue("false") Boolean permanent);
+                             @DefaultValue("false") Boolean permanent,
+                             @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                             @QueryParam("force")
+                             @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteOutputSet} without {@code force}: refused while the resource is
+     * in use.
+     */
+    default Response deleteOutputSet(String id, Integer version, Boolean permanent) {
+        return deleteOutputSet(id, version, permanent, false);
+    }
 
     @PATCH
     @Path("/{id}")

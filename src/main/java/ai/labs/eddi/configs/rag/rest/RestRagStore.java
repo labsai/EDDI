@@ -498,12 +498,12 @@ public class RestRagStore implements IRestRagStore {
     }
 
     @Override
-    public Response deleteRag(String id, Integer version, Boolean permanent) {
+    public Response deleteRag(String id, Integer version, Boolean permanent, Boolean force) {
         // Read before deleting: afterwards there is nothing left to tell us which
         // schedules belonged to this knowledge base, and an orphaned schedule keeps
         // crawling a third-party site on behalf of a config that no longer exists.
         RagConfiguration deleted = readQuietly(id, version);
-        Response response = restVersionInfo.delete(id, version, permanent);
+        Response response = restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
 
         // Only once no readable version is left. Deleting an OLD version of a
         // knowledge base that is still deployed at a newer one used to remove the

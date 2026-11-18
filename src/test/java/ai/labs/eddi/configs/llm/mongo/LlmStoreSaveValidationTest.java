@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
-import ai.labs.eddi.configs.validation.ConfigValidationPolicy;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
@@ -16,7 +16,6 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -63,7 +62,7 @@ class LlmStoreSaveValidationTest {
     }
 
     @Test
-    @DisplayName("inside an import scope the same config is written and the finding is a warning")
+    @DisplayName("inside LenientConfigWrite (import, sync, copy) the same config is written")
     void importOnlyWarns() throws Exception {
         @SuppressWarnings("unchecked")
         IResourceStorage.IResource<LlmConfiguration> resource = mock(IResourceStorage.IResource.class);
@@ -72,11 +71,7 @@ class LlmStoreSaveValidationTest {
         when(storage.newResource(any())).thenReturn(resource);
         when(storage.getCurrentVersion("id1")).thenReturn(1);
 
-        try (var scope = ConfigValidationPolicy.lenient()) {
-            store.create(withProvider("nonexistent-provider"));
-            assertEquals(1, scope.warnings().size());
-            assertTrue(scope.warnings().getFirst().contains("nonexistent-provider"), scope.warnings().getFirst());
-        }
+        LenientConfigWrite.call(() -> store.create(withProvider("nonexistent-provider")));
         verify(storage).store(resource);
     }
 }

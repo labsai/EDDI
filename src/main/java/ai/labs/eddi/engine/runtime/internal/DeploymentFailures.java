@@ -44,26 +44,32 @@ public final class DeploymentFailures {
     private DeploymentFailures() {
     }
 
-    /** The reason code of a deployment that failed with {@code cause}. */
+    /**
+     * The reason code of a deployment that failed with {@code cause}: that of the
+     * most specific — innermost — classifiable exception in the chain. A task's
+     * {@code WorkflowConfigurationException} wrapping the
+     * {@code ResourceNotFoundException} of a deleted config is a missing reference,
+     * not an invalid config.
+     */
     public static String codeOf(Throwable cause) {
+        String code = DeploymentFailure.DEPLOYMENT_FAILED;
         Throwable current = cause;
         for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++, current = current.getCause()) {
             if (current instanceof UnrecognizedExtensionException) {
-                return STEP_TYPE_UNKNOWN;
-            }
-            if (current instanceof WorkflowConfigurationException || current instanceof IllegalExtensionConfigurationException) {
-                return CONFIG_INVALID;
-            }
-            if (current instanceof IResourceStore.ResourceNotFoundException) {
-                return REFERENCE_MISSING;
-            }
-            if (current instanceof WorkflowInitializationException && current.getCause() == null) {
-                // No deeper cause to classify: an initialisation failure is a bad
+                code = STEP_TYPE_UNKNOWN;
+            } else if (current instanceof IResourceStore.ResourceNotFoundException) {
+                code = REFERENCE_MISSING;
+            } else if (current instanceof WorkflowConfigurationException || current instanceof IllegalExtensionConfigurationException
+                    || current instanceof WorkflowInitializationException) {
+                // An initialisation failure with nothing more specific below it is a bad
                 // configuration far more often than a server fault.
-                return CONFIG_INVALID;
+                code = CONFIG_INVALID;
+            }
+            if (current.getCause() == current) {
+                break;
             }
         }
-        return DeploymentFailure.DEPLOYMENT_FAILED;
+        return code;
     }
 
     /** The failure to record for a deployment that ended with {@code cause}. */

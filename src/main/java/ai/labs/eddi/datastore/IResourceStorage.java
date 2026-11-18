@@ -427,6 +427,25 @@ public interface IResourceStorage<T> {
     }
 
     /**
+     * {@link #findResourceIdsContaining} for several values at once: the ids of
+     * current resources holding any of {@code values} at {@code jsonPath}. MongoDB
+     * and PostgreSQL answer it with one indexed query (the same indexes as the
+     * single-value form); this default asks once per value.
+     */
+    default List<IResourceStore.IResourceId> findResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        List<IResourceStore.IResourceId> ids = new ArrayList<>();
+        values.forEach(value -> ids.addAll(findResourceIdsContaining(jsonPath, value)));
+        return ids;
+    }
+
+    /** {@link #findHistoryResourceIdsContaining} for several values at once. */
+    default List<IResourceStore.IResourceId> findHistoryResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        List<IResourceStore.IResourceId> ids = new ArrayList<>();
+        values.forEach(value -> ids.addAll(findHistoryResourceIdsContaining(jsonPath, value)));
+        return ids;
+    }
+
+    /**
      * Filter and paginate resources by field values, with optional regex matching.
      * Used by DescriptorStore for listing/searching descriptors.
      *

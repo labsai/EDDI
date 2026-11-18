@@ -15,7 +15,6 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.descriptors.IRestDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
-import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
@@ -374,11 +373,13 @@ public class McpAdminTools {
                               @ToolArg(description = "End the agent's open conversations and delete it anyway? (default: false)", required = false,
                                        defaultValue = "false") Boolean endAllActiveConversations) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
-        try (var ending = Boolean.TRUE.equals(endAllActiveConversations) ? ResourceInUseGuard.endingConversations() : null) {
+        try {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             boolean isCascade = cascade != null ? cascade : false;
-            Response response = getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade);
+            Response response = Boolean.TRUE.equals(endAllActiveConversations)
+                    ? getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade, true)
+                    : getRestStore(IRestAgentStore.class).deleteAgent(agentId, ver, isPermanent, isCascade);
             return resultJson("deleted",
                     Map.of("agentId", agentId, "version", ver, "permanent", isPermanent, "cascade", isCascade, "status", response.getStatus()));
         } catch (Exception e) {
@@ -646,10 +647,7 @@ public class McpAdminTools {
             int ver = version != null ? version : 1;
             boolean isPermanent = permanent != null ? permanent : false;
             String type = resourceType.trim().toLowerCase();
-            Response response;
-            try (var forced = Boolean.TRUE.equals(force) ? ResourceInUseGuard.forced() : null) {
-                response = deleteResourceByType(type, resourceId, ver, isPermanent);
-            }
+            Response response = deleteResourceByType(type, resourceId, ver, isPermanent, Boolean.TRUE.equals(force));
 
             return resultJson("deleted",
                     Map.of("resourceType", type, "resourceId", resourceId, "version", ver, "permanent", isPermanent, "status", response.getStatus()));
@@ -868,15 +866,29 @@ public class McpAdminTools {
     /**
      * Dispatch resource delete to the correct REST store based on type.
      */
-    private Response deleteResourceByType(String type, String id, int version, boolean permanent) {
+    private Response deleteResourceByType(String type, String id, int version, boolean permanent, boolean force) {
         return switch (type) {
-            case "behavior" -> getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
-            case "langchain" -> getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
-            case "httpcalls" -> getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
-            case "mcpcalls" -> getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent);
-            case "output" -> getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
-            case "propertysetter" -> getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
-            case "dictionaries" -> getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
+            case "behavior" -> force
+                    ? getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent, true)
+                    : getRestStore(IRestRuleSetStore.class).deleteRuleSet(id, version, permanent);
+            case "langchain" -> force
+                    ? getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent, true)
+                    : getRestStore(IRestLlmStore.class).deleteLlm(id, version, permanent);
+            case "httpcalls" -> force
+                    ? getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent, true)
+                    : getRestStore(IRestApiCallsStore.class).deleteApiCalls(id, version, permanent);
+            case "mcpcalls" -> force
+                    ? getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent, true)
+                    : getRestStore(IRestMcpCallsStore.class).deleteMcpCalls(id, version, permanent);
+            case "output" -> force
+                    ? getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent, true)
+                    : getRestStore(IRestOutputStore.class).deleteOutputSet(id, version, permanent);
+            case "propertysetter" -> force
+                    ? getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent, true)
+                    : getRestStore(IRestPropertySetterStore.class).deletePropertySetter(id, version, permanent);
+            case "dictionaries" -> force
+                    ? getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent, true)
+                    : getRestStore(IRestDictionaryStore.class).deleteRegularDictionary(id, version, permanent);
             default -> throw new IllegalArgumentException(
                     "Unknown resource type: " + type + ". Supported: behavior, langchain, httpcalls, mcpcalls, output, propertysetter, dictionaries");
         };

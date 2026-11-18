@@ -835,9 +835,19 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             } catch (IOException ex) {
                 // An empty string used to go into the archive as the config's content.
                 LOGGER.error(ex.getLocalizedMessage(), ex);
-                throw exportIncomplete("a configuration (" + e.getKey().getId() + ") that could not be serialized");
+                // The stored document itself cannot be written out: a data problem with
+                // that resource, not a server fault.
+                throw exportIncomplete("the configuration " + e.getKey().getId() + ", which could not be serialized", 422);
             }
         }));
+    }
+
+    /**
+     * The failure of an export that could not include something: a 500 (a store or
+     * file system failure).
+     */
+    static WebApplicationException exportIncomplete(String what) {
+        return exportIncomplete(what, Response.Status.INTERNAL_SERVER_ERROR.getStatusCode());
     }
 
     /**
@@ -845,12 +855,16 @@ public class RestExportService extends AbstractBackupService implements IRestExp
      * produced at all: a ZIP that looks complete and is not restores as an agent
      * that cannot answer. The message is stable and carries no exception text; the
      * cause is in the log.
+     *
+     * @param status
+     *            422 when a stored resource is the problem (the message names it),
+     *            500 for a store or file system failure
      */
-    static WebApplicationException exportIncomplete(String what) {
+    static WebApplicationException exportIncomplete(String what, int status) {
         String message = "Export failed: the archive could not include " + what + ", so no archive was produced. "
                 + "See the server log for the cause.";
-        return new WebApplicationException(message, Response.status(Response.Status.INTERNAL_SERVER_ERROR)
-                .entity(Map.of("error", message)).type(MediaType.APPLICATION_JSON).build());
+        return new WebApplicationException(message, Response.status(status).entity(Map.of("error", message)).type(MediaType.APPLICATION_JSON)
+                .build());
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
@@ -861,11 +875,22 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 deleteFileIfExists(filePath);
                 try (BufferedWriter writer = Files.newBufferedWriter(filePath)) {
                     writer.write(value);
-                    writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
                 }
-            } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            } catch (IOException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
                 throw exportIncomplete("the " + fileExtension + " configuration " + resourceId.getId());
+            }
+            try {
+                writeDocumentDescriptor(path, resourceId.getId(), resourceId.getVersion());
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // The descriptor is the config's name and description, not its content:
+                // a config without one (a row lost, a document written around the API)
+                // still exports, as it always did, and imports under a generated name.
+                LOGGER.warnf("Exporting %s configuration %s without a descriptor: none was found", fileExtension,
+                        LogSanitizer.sanitize(resourceId.getId()));
+            } catch (IOException | IResourceStore.ResourceStoreException e) {
+                LOGGER.error(e.getLocalizedMessage(), e);
+                throw exportIncomplete("the descriptor of the " + fileExtension + " configuration " + resourceId.getId());
             }
         });
     }

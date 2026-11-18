@@ -30,6 +30,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -37,7 +38,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.net.URI;
 import java.util.*;
 import java.util.ArrayList;
@@ -220,6 +224,27 @@ class RestExportServiceTest {
             assertNotNull(response.getLocation());
             assertTrue(response.getLocation().toString().contains(".zip"));
             verify(zipArchive).createZip(anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("an export whose schedules cannot be read produces no archive: 500, the ZIP is never built (E9)")
+        void failedPartFailsTheWholeExport() throws Exception {
+            String agentId = "agent123";
+            var agentConfig = new AgentConfiguration();
+            agentConfig.setWorkflows(List.of());
+            when(agentStore.read(agentId, 1)).thenReturn(agentConfig);
+            var agentDescriptor = new DocumentDescriptor();
+            agentDescriptor.setName("Test Agent");
+            when(documentDescriptorStore.readDescriptorWithHistory(agentId, 1)).thenReturn(agentDescriptor);
+            when(jsonSerialization.serialize(any())).thenReturn("{}");
+            when(secretScrubber.scrubJson(anyString())).thenAnswer(inv -> inv.getArgument(0));
+            when(scheduleStore.readSchedulesByAgentId(agentId)).thenThrow(new IllegalStateException("db down"));
+
+            var failure = assertThrows(WebApplicationException.class, () -> exportService.exportAgent(agentId, 1, null, null, null));
+
+            assertEquals(500, failure.getResponse().getStatus());
+            assertFalse(failure.getMessage().contains("db down"), "no exception text reaches the client");
+            verify(zipArchive, never()).createZip(anyString(), anyString(), any());
         }
 
         @Test
@@ -594,10 +619,44 @@ class RestExportServiceTest {
 
             when(jsonSerialization.serialize("bad")).thenThrow(new IOException("fail"));
 
-            Throwable thrown = org.junit.jupiter.api.Assertions.assertThrows(Exception.class, () -> invokeConvert(input));
-            Throwable cause = thrown instanceof java.lang.reflect.InvocationTargetException ? thrown.getCause() : thrown;
-            var failure = org.junit.jupiter.api.Assertions.assertInstanceOf(jakarta.ws.rs.WebApplicationException.class, cause);
-            assertEquals(500, failure.getResponse().getStatus());
+            Throwable thrown = assertThrows(InvocationTargetException.class, () -> invokeConvert(input));
+            var failure = assertInstanceOf(WebApplicationException.class, thrown.getCause());
+            assertEquals(422, failure.getResponse().getStatus(), "the stored resource is the problem, and the message names it");
+            assertTrue(failure.getMessage().contains("r1"), failure.getMessage());
+        }
+    }
+
+    // ─── writeConfigs ────────────────────────────────────────────
+
+    @Nested
+    @DisplayName("writeConfigs")
+    class WriteConfigs {
+
+        private void invokeWrite(Path dir, Map<IResourceId, String> configs) throws Exception {
+            Method method = RestExportService.class.getDeclaredMethod("writeConfigs", Path.class, Map.class, String.class);
+            method.setAccessible(true);
+            method.invoke(exportService, dir, configs, "langchain");
+        }
+
+        @Test
+        @DisplayName("S7: a config without a descriptor row is still exported, as before")
+        void missingDescriptorIsTolerated() throws Exception {
+            Path dir = Files.createTempDirectory("export-configs");
+            when(documentDescriptorStore.readDescriptorWithHistory("r1", 1)).thenThrow(new IResourceStore.ResourceNotFoundException("none"));
+
+            invokeWrite(dir, Map.of(testResourceId("r1", 1), "{}"));
+
+            assertTrue(Files.exists(dir.resolve("r1.langchain.json")));
+        }
+
+        @Test
+        @DisplayName("a descriptor the store cannot read fails the export (500)")
+        void storeFailureFails() throws Exception {
+            Path dir = Files.createTempDirectory("export-configs");
+            when(documentDescriptorStore.readDescriptorWithHistory("r1", 1)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+            Throwable thrown = assertThrows(InvocationTargetException.class, () -> invokeWrite(dir, Map.of(testResourceId("r1", 1), "{}")));
+            assertEquals(500, assertInstanceOf(WebApplicationException.class, thrown.getCause()).getResponse().getStatus());
         }
     }
 

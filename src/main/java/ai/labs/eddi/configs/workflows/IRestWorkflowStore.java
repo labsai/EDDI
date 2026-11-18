@@ -147,6 +147,16 @@ public interface IRestWorkflowStore extends IRestVersionInfo {
                     + "dictionaries), each at its own current version. Extensions still referenced by another workflow "
                     + "are skipped, and cascaded resources are always soft-deleted even when permanent=true, so an "
                     + "extension shared at a different pinned version can be recovered. See X-Cascade-Skipped.")
-            @QueryParam("cascade") @DefaultValue("false") Boolean cascade);
+            @QueryParam("cascade") @DefaultValue("false") Boolean cascade,
+            @Parameter(name = "force", description = FORCE_DESCRIPTION)
+            @QueryParam("force") @DefaultValue("false") Boolean force);
     // @formatter:on
+
+    /**
+     * {@link #deleteWorkflow} without {@code force}: refused while an agent uses
+     * it.
+     */
+    default Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
+        return deleteWorkflow(id, version, permanent, cascade, false);
+    }
 }

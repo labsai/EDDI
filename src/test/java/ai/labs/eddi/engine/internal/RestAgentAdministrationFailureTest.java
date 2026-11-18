@@ -163,10 +163,10 @@ class RestAgentAdministrationFailureTest {
             var body = (Map<String, Object>) admin.getDeploymentStatus(ENV, AGENT_ID, 1, "json").getEntity();
 
             assertEquals("ERROR", body.get("status"));
-            var failure = (ai.labs.eddi.engine.model.DeploymentFailure) body.get("failure");
-            assertEquals(ai.labs.eddi.engine.model.DeploymentFailure.VAULT_GRANT_MISSING, failure.code());
-            org.junit.jupiter.api.Assertions.assertNull(failure.secrets());
-            org.junit.jupiter.api.Assertions.assertNull(failure.fix());
+            var failure = (DeploymentFailure) body.get("failure");
+            assertEquals(DeploymentFailure.VAULT_GRANT_MISSING, failure.code());
+            assertNull(failure.secrets());
+            assertNull(failure.fix());
         }
 
         @Test
@@ -178,10 +178,10 @@ class RestAgentAdministrationFailureTest {
             @SuppressWarnings("unchecked")
             var body = (Map<String, Object>) admin.getDeploymentStatus(ENV, AGENT_ID, 1, "detailed").getEntity();
 
-            var failure = (ai.labs.eddi.engine.model.DeploymentFailure) body.get("failure");
+            var failure = (DeploymentFailure) body.get("failure");
             assertEquals("ERROR", body.get("status"));
-            org.junit.jupiter.api.Assertions.assertNull(failure.secrets());
-            org.junit.jupiter.api.Assertions.assertNull(failure.fix());
+            assertNull(failure.secrets());
+            assertNull(failure.fix());
         }
     }
 

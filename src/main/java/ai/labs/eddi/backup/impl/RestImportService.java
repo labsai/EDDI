@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.parser.IParserStore;
 import ai.labs.eddi.configs.parser.IRestParserStore;
@@ -81,7 +82,8 @@ import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
-import ai.labs.eddi.configs.validation.ConfigValidationPolicy;
+import ai.labs.eddi.configs.workflows.WorkflowConfigSaveValidator;
+import ai.labs.eddi.modules.llm.impl.LlmConfigSaveValidator;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -858,13 +860,17 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         var transaction = new ImportTransaction();
         transaction.allowIncomplete = allowIncomplete;
-        // The stores' save-time checks warn instead of refusing while an archive is
-        // imported: it may come from an older release or another instance.
-        try (var validation = ConfigValidationPolicy.lenient()) {
-            transaction.validation = validation;
-            return unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, compatible, transaction);
+        // Everything an archive carries exists already (another instance, an older
+        // release): the stores' save-time checks only warn — on the import and on its
+        // rollback, which restores documents an earlier release may have stored.
+        try {
+            return LenientConfigWrite.call(() -> unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, compatible,
+                    transaction));
         } catch (Throwable failure) {
-            rollbackCreatedResources(transaction);
+            LenientConfigWrite.call(() -> {
+                rollbackCreatedResources(transaction);
+                return null;
+            });
             throw failure;
         } finally {
             deleteTempDirectoryQuietly(targetDir.toPath());
@@ -877,6 +883,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         unzipArchive(zippedAgentConfigFiles, targetDir);
         var targetDirPath = targetDir.getPath();
+
+        // A create that would be refused for missing configurations is refused here,
+        // before the first write, rather than after everything was written and then
+        // rolled back.
+        if (!isMerge && !transaction.allowIncomplete) {
+            preScanForMissingReferences(Paths.get(targetDirPath), transaction);
+        }
 
         // Import snippets (global resources, not workflow-embedded). They are
         // recorded on the transaction like everything else — a snippet this import
@@ -1506,6 +1519,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (localResId != null) {
                 WorkflowConfiguration workflowConfig = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
                 IRestWorkflowStore restWorkflowStore = getRestResourceStore(IRestWorkflowStore.class);
+                transaction.addFindings(WorkflowConfigSaveValidator.problems(workflowConfig));
                 return updateTracked(IWorkflowStore.class, IRestWorkflowStore.resourceURI, localResId.getId(),
                         localResId.getVersion(), workflowConfig, restWorkflowStore::updateWorkflow, transaction);
             }
@@ -1847,6 +1861,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         // not match, a parser document the archive left out) must not name a
         // configuration the caller could not have named through the API.
         WorkflowReferenceAccess.requireAccessToReferences(resourceAccessGuard, workflowConfig);
+        transaction.addFindings(WorkflowConfigSaveValidator.problems(workflowConfig));
         return createResourceDirect(IWorkflowStore.class, workflowConfig, IRestWorkflowStore.resourceURI, transaction);
     }
 
@@ -2032,7 +2047,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private List<URI> createNewLlm(List<LlmConfiguration> configs, ImportTransaction transaction) {
         return configs.stream().map(c -> {
-            warnOnMissingVaultReferences(c);
+            transaction.addFindings(LlmConfigSaveValidator.problems(c));
+            transaction.addFindings(missingVaultReferences(c));
             return createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction);
         }).toList();
     }
@@ -2068,6 +2084,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
+        transaction.addFindings(LlmConfigSaveValidator.problems(config));
         return updateTracked(ILlmStore.class, IRestLlmStore.resourceURI, localId, localVersion, config, store::updateLlm, transaction);
     }
 
@@ -3058,9 +3075,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         private boolean allowIncomplete;
 
         /**
-         * The save-time findings the stores reported as warnings during this import.
+         * What the stores' save-time checks find in the documents this import writes
+         * (they only log inside {@link LenientConfigWrite}), and the vault references
+         * this instance lacks — collected here, before each write, for the 201 body.
          */
-        private ConfigValidationPolicy.Scope validation;
+        private final List<String> findings = new ArrayList<>();
+
+        void addFindings(List<String> found) {
+            found.stream().filter(finding -> !findings.contains(finding)).forEach(findings::add);
+        }
 
         /**
          * Every reference the archive names but does not contain, as one line each —
@@ -3074,9 +3097,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         List<String> warnings() {
             List<String> all = new ArrayList<>();
             dropped.forEach(line -> all.add("dropped (not in the archive): " + line));
-            if (validation != null) {
-                all.addAll(validation.warnings());
-            }
+            all.addAll(findings);
             return all;
         }
 
@@ -3423,21 +3444,70 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * Warns about vault references in an imported LLM config this instance cannot
-     * resolve.
+     * Reads every workflow the archive's agent names, exactly as the import will
+     * (legacy URIs and vault references normalized), and refuses with 422 when one
+     * names a configuration the archive does not contain — before anything is
+     * written. A workflow the scan cannot read is left to the import itself, which
+     * reports it on its own terms.
      */
-    private void warnOnMissingVaultReferences(LlmConfiguration config) {
+    private void preScanForMissingReferences(Path archiveRoot, ImportTransaction transaction) throws IOException {
+        ImportTransaction scan = new ImportTransaction();
+        for (var agentFilePath : singleAgentFileIn(archiveRoot)) {
+            try {
+                String agentFileString = normalizeVaultReferences(normalizeLegacyUris(readFile(agentFilePath)));
+                AgentConfiguration agentConfig = jsonSerialization.deserialize(agentFileString, AgentConfiguration.class);
+                if (agentConfig == null || agentConfig.getWorkflows() == null) {
+                    continue;
+                }
+                for (URI workflowUri : new LinkedHashSet<>(sameSpellingPerResource(agentConfig.getWorkflows()))) {
+                    IResourceId workflowId = RestUtilities.extractResourceId(workflowUri);
+                    if (workflowId == null) {
+                        continue;
+                    }
+                    var dir = Paths.get(FileUtilities.buildPath(archiveRoot.toString(), workflowId.getId(),
+                            String.valueOf(workflowId.getVersion())));
+                    if (!Files.isDirectory(dir)) {
+                        continue;
+                    }
+                    try (var workflowFiles = Files.newDirectoryStream(dir,
+                            file -> file.toString().endsWith(".workflow.json") || file.toString().endsWith(".package.json"))) {
+                        for (Path workflowFilePath : workflowFiles) {
+                            String workflowFileString = normalizeVaultReferences(normalizeLegacyUris(readFile(workflowFilePath)));
+                            withoutUnresolvableReferences(workflowFileString, workflowFilePath.getParent(), scan);
+                        }
+                    }
+                }
+            } catch (IOException | RuntimeException unreadable) {
+                LOGGER.debugf("Pre-scan of the archive skipped a document: %s", LogSanitizer.sanitize(unreadable.getMessage()));
+            }
+        }
+        if (!scan.dropped.isEmpty()) {
+            transaction.dropped.addAll(scan.dropped);
+            requireCompleteArchive(transaction);
+        }
+    }
+
+    /**
+     * The vault references of an imported LLM config this instance cannot resolve —
+     * told only to a caller who may read secret metadata (an administrator, as for
+     * {@code GET /secretstore}). Anyone else importing would otherwise learn,
+     * reference by reference, whether a secret exists, in any tenant the archive
+     * names.
+     */
+    private List<String> missingVaultReferences(LlmConfiguration config) {
+        if (resourceAccessGuard == null || !resourceAccessGuard.isAdmin()) {
+            return List.of();
+        }
         try {
             var provider = CDI.current().select(ISecretProvider.class);
             if (provider.isUnsatisfied() || !provider.get().isAvailable()) {
-                return;
+                return List.of();
             }
-            ConfigValidationPolicy.report("imported LLM configuration",
-                    ImportVaultReferences.missing(jsonSerialization.serialize(config), ImportVaultReferences.existsIn(provider.get())));
-        } catch (IllegalArgumentException e) {
-            throw e;
+            return ImportVaultReferences.missing(jsonSerialization.serialize(config), ImportVaultReferences.existsIn(provider.get()))
+                    .stream().map(problem -> "imported LLM configuration: " + problem).toList();
         } catch (Exception e) {
             LOGGER.debugf("Could not check vault references of an imported LLM config: %s", LogSanitizer.sanitize(e.getMessage()));
+            return List.of();
         }
     }
 
@@ -4275,7 +4345,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         String targetAgentId = resolveTarget(request.targetAgentId(), request.sourceAgentId(), request.createNew());
         if (targetAgentId == null) {
             return syncNewAgent(sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(), sourceAuth,
-                    request.selectedResources(), false);
+                    request.selectedResources(), Boolean.TRUE.equals(request.allowIncomplete()));
         }
         try (var source = new RemoteApiResourceSource(
                 sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),

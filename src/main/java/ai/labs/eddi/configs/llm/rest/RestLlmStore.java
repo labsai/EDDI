@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.llm.rest;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.llm.ILlmStore;
@@ -179,8 +180,8 @@ public class RestLlmStore implements IRestLlmStore {
     }
 
     @Override
-    public Response deleteLlm(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+    public Response deleteLlm(String id, Integer version, Boolean permanent, Boolean force) {
+        return restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
     }
 
     @Override
@@ -189,7 +190,8 @@ public class RestLlmStore implements IRestLlmStore {
         LlmConfiguration llmConfiguration = restVersionInfo.read(id, version);
         // A copy is a new resource authored by whoever duplicates it.
         requireMayAuthorCallerToken(llmConfiguration);
-        return restVersionInfo.create(llmConfiguration);
+        // A copy of a stored config: the save-time structure checks only warn.
+        return LenientConfigWrite.call(() -> restVersionInfo.create(llmConfiguration));
     }
 
     /**

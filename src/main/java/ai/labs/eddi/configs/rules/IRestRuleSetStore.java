@@ -82,5 +82,16 @@ public interface IRestRuleSetStore extends IRestVersionInfo {
                            @Parameter(name = "version", required = true, example = "1")
                            @QueryParam("version") Integer version,
                            @QueryParam("permanent")
-                           @DefaultValue("false") Boolean permanent);
+                           @DefaultValue("false") Boolean permanent,
+                           @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                           @QueryParam("force")
+                           @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteRuleSet} without {@code force}: refused while the resource is
+     * in use.
+     */
+    default Response deleteRuleSet(String id, Integer version, Boolean permanent) {
+        return deleteRuleSet(id, version, permanent, false);
+    }
 }

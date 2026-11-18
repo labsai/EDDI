@@ -92,7 +92,18 @@ public interface IRestMcpCallsStore extends IRestVersionInfo {
                             @Parameter(name = "version", required = true, example = "1")
                             @QueryParam("version") Integer version,
                             @QueryParam("permanent")
-                            @DefaultValue("false") Boolean permanent);
+                            @DefaultValue("false") Boolean permanent,
+                            @Parameter(name = "force", description = FORCE_DESCRIPTION)
+                            @QueryParam("force")
+                            @DefaultValue("false") Boolean force);
+
+    /**
+     * {@link #deleteMcpCalls} without {@code force}: refused while the resource is
+     * in use.
+     */
+    default Response deleteMcpCalls(String id, Integer version, Boolean permanent) {
+        return deleteMcpCalls(id, version, permanent, false);
+    }
 
     /**
      * Probe a live MCP server for its tool list.

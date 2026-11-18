@@ -37,6 +37,7 @@ import ai.labs.eddi.backup.model.ExportPreview;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -46,6 +47,7 @@ import org.mockito.Mock;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.net.URI;
 import java.nio.file.Files;
@@ -257,13 +259,13 @@ class RestExportServiceExtendedBranchTest {
 
         /**
          * The listing itself failing is the wider case: a snippet store that will not
-         * answer at all costs the snippets and nothing else. The export the operator
-         * asked for is an agent, and it still has to produce one — and no half-built
-         * {@code snippets/} directory to make the archive look like it carried some.
+         * answer at all fails the export (E9) — an archive without the snippets the
+         * agent's prompts use restores as an agent that answers differently — and
+         * leaves no half-built {@code snippets/} directory behind.
          */
         @Test
         @DisplayName("a snippet listing that will not answer fails the export instead of silently leaving the snippets out (E9)")
-        void snippetListingFailureIsNotFatal() throws Exception {
+        void snippetListingFailureFailsTheExport() throws Exception {
             Method method = RestExportService.class.getDeclaredMethod(
                     "exportSnippets", Path.class, Set.class, Set.class);
             method.setAccessible(true);
@@ -277,9 +279,9 @@ class RestExportServiceExtendedBranchTest {
             names.add("greeting");
             Path agentPath = Files.createTempDirectory("test-snippets");
 
-            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+            var failure = assertThrows(InvocationTargetException.class,
                     () -> method.invoke(exportService, agentPath, names, null));
-            assertEquals(500, ((jakarta.ws.rs.WebApplicationException) failure.getCause()).getResponse().getStatus());
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
 
             assertFalse(Files.exists(agentPath.resolve("snippets")),
                     "a listing that never answered must not leave a snippets directory suggesting it did");
@@ -351,9 +353,9 @@ class RestExportServiceExtendedBranchTest {
             when(scheduleStore.readSchedulesByAgentId("agent1"))
                     .thenThrow(new RuntimeException("DB error"));
 
-            var failure = org.junit.jupiter.api.Assertions.assertThrows(java.lang.reflect.InvocationTargetException.class,
+            var failure = assertThrows(InvocationTargetException.class,
                     () -> method.invoke(exportService, "agent1", Files.createTempDirectory("test-sched"), null));
-            assertEquals(500, ((jakarta.ws.rs.WebApplicationException) failure.getCause()).getResponse().getStatus());
+            assertEquals(500, ((WebApplicationException) failure.getCause()).getResponse().getStatus());
         }
 
         @Test

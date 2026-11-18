@@ -965,6 +965,57 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         }
     }
 
+    @Override
+    public List<IResourceStore.IResourceId> findResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        return findContainingAny("resources", jsonPath, values);
+    }
+
+    @Override
+    public List<IResourceStore.IResourceId> findHistoryResourceIdsContainingAny(String jsonPath, Collection<String> values) {
+        return findContainingAny("resources_history", jsonPath, values);
+    }
+
+    /**
+     * One {@code @?} query whose filter ORs the values, answered from the same
+     * {@code jsonb_path_ops} GIN index as the single-value form.
+     */
+    private List<IResourceStore.IResourceId> findContainingAny(String table, String jsonPath, Collection<String> values) {
+        if (values.isEmpty()) {
+            return new LinkedList<>();
+        }
+        String sql = "SELECT id, version FROM " + table + " WHERE collection_name = ?" + JSONPATH_EXISTS;
+        try (Connection conn = dataSource.getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, collectionName);
+            ps.setString(2, toContainmentJsonPathAny(jsonPath, values));
+            return extractResourceIds(ps);
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to find resources containing any of the values", e);
+        }
+    }
+
+    /**
+     * {@link #toContainmentJsonPath} for several values:
+     * {@code $."a"[*] ? (@ == "x" || @ == "y")}.
+     */
+    static String toContainmentJsonPathAny(String jsonPath, Collection<String> values) {
+        StringBuilder path = new StringBuilder("$");
+        for (String segment : sanitizeJsonPath(jsonPath).split("\\.")) {
+            if (!segment.isEmpty()) {
+                path.append(".\"").append(segment).append("\"[*]");
+            }
+        }
+        path.append(" ? (");
+        boolean first = true;
+        for (String value : values) {
+            if (!first) {
+                path.append(" || ");
+            }
+            path.append("@ == ").append(toJsonStringLiteral(value));
+            first = false;
+        }
+        return path.append(')').toString();
+    }
+
     /**
      * Translate a dot-separated field path plus an expected value into a SQL/JSON
      * path expression.

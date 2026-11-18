@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.workflows.rest;
 
 import ai.labs.eddi.engine.runtime.IWorkflowFactory;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -406,7 +407,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
     }
 
     @Override
-    public Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade) {
+    public Response deleteWorkflow(String id, Integer version, Boolean permanent, Boolean cascade, Boolean force) {
         // Before the cascade, not after: restVersionInfo.delete() checks at the end,
         // by which point the referenced resources would already be gone.
         restVersionInfo.requireOwnAccess(id);
@@ -426,7 +427,7 @@ public class RestWorkflowStore implements IRestWorkflowStore {
         // delete is version-checked (HistorizedResourceStore.delete raises
         // ResourceModifiedException), so a workflow that moved on in the meantime
         // now raises before anything it references has been touched.
-        Response response = restVersionInfo.delete(id, version, permanent);
+        Response response = restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
         if (workflowFactory != null) {
             // Forget the deleted version here and — cluster mode — on every node.
             workflowFactory.evict(id, version);
@@ -735,6 +736,12 @@ public class RestWorkflowStore implements IRestWorkflowStore {
 
     @Override
     public Response duplicateWorkflow(String id, Integer version, Boolean deepCopy) {
+        // A copy of stored configurations (the workflow and, for a deep copy, every
+        // config it names): the save-time structure checks only warn.
+        return LenientConfigWrite.call(() -> copyWorkflow(id, version, deepCopy));
+    }
+
+    private Response copyWorkflow(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.requireViewAccess(id);
         // Keep the normalised version — validateParameters maps 0 -> current, and
         // discarding it left workflowStore.read(id, 0) matching nothing, so the

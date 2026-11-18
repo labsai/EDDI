@@ -31,6 +31,19 @@ class DeploymentFailuresTest {
     }
 
     @Test
+    @DisplayName("the most specific cause decides: a config error wrapping a deleted reference is REFERENCE_MISSING")
+    void innermostCauseWins() {
+        var deleted = new IResourceStore.ResourceNotFoundException("gone");
+        var configure = new WorkflowConfigurationException("could not load the LLM config", deleted);
+        assertEquals(DeploymentFailures.REFERENCE_MISSING, DeploymentFailures.codeOf(new RuntimeException(configure)));
+        assertEquals(DeploymentFailures.STEP_TYPE_UNKNOWN,
+                DeploymentFailures.codeOf(new WorkflowConfigurationException("x", new UnrecognizedExtensionException("Extension 'a' not found"))));
+        assertEquals(DeploymentFailures.CONFIG_INVALID,
+                DeploymentFailures.codeOf(new WorkflowConfigurationException("x", new IllegalStateException("not classifiable"))),
+                "an unclassifiable cause below keeps the outer, classifiable one");
+    }
+
+    @Test
     @DisplayName("the message is fixed text per code: nothing of the exception reaches it (no host, key or path)")
     void messageNeverCarriesTheCause() {
         var cause = new WorkflowConfigurationException("baseUrl https://internal-host.corp:8443/v1 apiKey=sk-secret-123 /etc/eddi/x");
