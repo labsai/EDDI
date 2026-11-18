@@ -53,6 +53,11 @@ Fixes for the Manager findings of the November 2026 code review, in three blocks
 - **Retry note.** The POST/PATCH idempotency note reads an incomplete retry policy with the backend's defaults (3 retries on 502/503), so `"retry": {}` raises the alert.
 - **RAG.** Changing the embedding settings of a saved knowledge base with no ingestion history shows a conditional warning instead of none: text ingested by hand in an earlier session leaves no history.
 
+### Third review round (same branch)
+
+- **Versions.** `useResolvedVersion` pins only a lookup that succeeded during this visit: a failed re-run no longer returns the version cached from an earlier visit, so the channel and connection pages show the retry state. Changing the resource id drops the pin (also when the previous lookup never finished), and the lookup ignores the app's global `staleTime`, so returning to a resource that moved on reads its new version. The hook's doc comment lists its states and transitions.
+- **Java regex.** Also "cannot check here" now, each verified against `Pattern.compile` and `new RegExp`: `\c` before a non-letter (`\c[`, `\c(`), a quantifier on an anchor or a lookbehind (`^*`, `$?`, `(?<=a)*`) and a `{n}` stacked on a quantifier (`a{2}{3}`, `a*{2}`).
+
 ### What is left
 
 Not done here: group outcomes, member conversations and cancel state (U2, U3, U5, U6), role gating (U8, I3), the Platform Operator (V1-V4), the lint rule for raw `fetch`. Left open: the RAG vector-space endpoints (`/vector-space`, `/reembed`) and the delete in-use guard parameter, once their backend branches merge; a "reload latest, keep my draft" action after a 409 on save; the editor staying dirty after a save that failed after the server had persisted (cascade partial failure).
