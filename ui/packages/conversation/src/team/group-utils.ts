@@ -199,56 +199,91 @@ function maskProtectedRegions(text: string): {
   return { masked, restore };
 }
 
-/** A GFM table row: optional indent, then a pipe. Never rewritten. */
+/** A GFM table row: optional indent, then a pipe. Repaired cell by cell. */
 const TABLE_ROW = /^[ \t]*\|/;
-/** Where a line's content starts: after indent, a quote marker and one list marker. */
-const LINE_CONTENT_START = /^(?:[ \t]*>)*[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+)?/;
+/** Where a line's content starts: after indent, quote markers, a heading marker or one list marker. */
+const LINE_CONTENT_START = /^(?:[ \t]*>)*[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+)?/;
+/** A `$…$` span: math, whose `**` is an operator. Stashed while a line is repaired. */
+const MATH_SPAN = /\$[^$\n]{1,200}\$/g;
+const MATH_MARK = String.fromCharCode(0xe001);
+
+/** What may directly precede an opening `**` that is emphasis rather than an operator or a code flag. */
+const OPENER_BEFORE = /(?:^|[\s\u00a0|>[{"'])$/;
+/** What may directly follow a closing `**` that was written with a space before it. */
+const CLOSER_AFTER = /^(?:$|[\s\u00a0.,;:!?)\]}|"'([{])/;
 
 /**
- * Repair ONE line's bold delimiters. Only provably safe cases are touched:
+ * Repair the bold delimiters of one stretch of text (a line, or one table
+ * cell). Only plausible emphasis is touched:
  *
- * - the line holds an even number of `**`, so every delimiter has a partner (an
- *   unclosed `**` while streaming, or a stray one, is left exactly as it is);
- * - a span with whitespace on exactly ONE inside edge (`**bold **x`, `** bold**`)
- *   has that whitespace moved outside, which CommonMark needs to see emphasis;
- * - a span with whitespace on BOTH edges is repaired only when its opener starts
- *   the line's content (`** Titel **`). Anywhere else it is indistinguishable from
- *   exponent notation (`x ** 2 and y ** 2`) and stays as written.
+ * - every `**` has a partner (an even count); an unclosed `**` while streaming,
+ *   or a stray one, leaves the stretch exactly as it is;
+ * - the opener sits at a boundary (start, whitespace, `|`, a quote or bracket
+ *   opener), never directly after an identifier, `(` or `,` — so `f(**kwargs,
+ *   **opts)` is not read as bold;
+ * - a span with whitespace inside ONE edge (`**bold **(x`, `** bold**`) has it
+ *   moved outside, which CommonMark needs to see emphasis. When the whitespace
+ *   is before the closer, a letter or digit may not follow it directly
+ *   (`pass **kwargs and **opts` is code talk, not bold);
+ * - a span with whitespace inside BOTH edges is repaired only when its opener
+ *   starts the content (`** Titel **`). Anywhere else it cannot be told from
+ *   exponent notation (`x ** 2 and y ** 2`);
+ * - `$…$` math is never touched.
  */
-function repairBoldLine(line: string): string {
-  if (!line.includes("**") || TABLE_ROW.test(line)) return line;
-  const segments = line.split("**");
+function repairBoldText(text: string, contentStart: number): string {
+  if (!text.includes("**")) return text;
+  const math: string[] = [];
+  const work = text.replace(MATH_SPAN, (m) => {
+    math.push(m);
+    return MATH_MARK;
+  });
+  const segments = work.split("**");
   // segments.length is odd exactly when the delimiter count is even.
-  if (segments.length < 3 || segments.length % 2 === 0) return line;
-  const contentStart = LINE_CONTENT_START.exec(line)?.[0].length ?? 0;
-  // Start of each segment in the ORIGINAL line (the loop below edits the array).
+  if (segments.length < 3 || segments.length % 2 === 0) return text;
+  // Start of each segment in the ORIGINAL text (the loop below edits the array).
   const starts: number[] = [];
   let at = 0;
   for (const segment of segments) {
     starts.push(at);
     at += segment.length + 2;
   }
-  for (let i = 0; i < segments.length; i++) {
-    if (i % 2 === 1) {
-      const inner = segments[i]!;
-      const trimmed = inner.trim();
-      const loose = /^[\s\u00a0]/.test(inner);
-      const trailing = /[\s\u00a0]$/.test(inner);
-      const openerAtStart = (starts[i] ?? 0) - 2 === contentStart;
-      if (trimmed !== "" && (loose || trailing) && (!(loose && trailing) || openerAtStart)) {
-        segments[i] = trimmed;
-        if (loose) {
-          const before = segments[i - 1]!;
-          if (before !== "" && !/[\s\u00a0([{|]$/.test(before)) segments[i - 1] = before + " ";
-        }
-        if (trailing) {
-          const after = segments[i + 1]!;
-          if (after !== "" && !/^[\s\u00a0.,;:!?)\]}|]/.test(after)) segments[i + 1] = " " + after;
-        }
-      }
+  // The text before the opener and after the closer, as written.
+  const original = segments.slice();
+  for (let i = 1; i < segments.length; i += 2) {
+    const inner = original[i]!;
+    const trimmed = inner.trim();
+    const loose = /^[\s\u00a0]/.test(inner);
+    const trailing = /[\s\u00a0]$/.test(inner);
+    if (trimmed === "" || !(loose || trailing)) continue;
+    const openerAtStart = (starts[i] ?? 0) - 2 === contentStart;
+    if (loose && trailing && !openerAtStart) continue;
+    if (!OPENER_BEFORE.test(original[i - 1]!)) continue;
+    // `**kwargs and **opts`: the "closer" is glued to a word.
+    if (trailing && !loose && !CLOSER_AFTER.test(original[i + 1]!)) continue;
+    segments[i] = trimmed;
+    if (loose) {
+      const before = segments[i - 1]!;
+      if (before !== "" && !/[\s\u00a0([{|]$/.test(before)) segments[i - 1] = before + " ";
+    }
+    if (trailing) {
+      const after = segments[i + 1]!;
+      if (after !== "" && !/^[\s\u00a0.,;:!?)\]}|]/.test(after)) segments[i + 1] = " " + after;
     }
   }
-  return segments.join("**");
+  let k = 0;
+  return segments.join("**").replace(new RegExp(MATH_MARK, "g"), () => math[k++] ?? "");
+}
+
+/** Repair ONE line; a table row cell by cell, so a `|` is never crossed. */
+function repairBoldLine(line: string): string {
+  if (!line.includes("**")) return line;
+  if (TABLE_ROW.test(line)) {
+    return line
+      .split("|")
+      .map((cell) => repairBoldText(cell, /^[ \t]*/.exec(cell)?.[0].length ?? 0))
+      .join("|");
+  }
+  return repairBoldText(line, LINE_CONTENT_START.exec(line)?.[0].length ?? 0);
 }
 
 /**
@@ -262,7 +297,7 @@ function repairBoldLine(line: string): string {
  * single repair, the whitespace inside `**` delimiters (see {@link repairBoldLine}).
  *
  * Code spans, fenced and indented code blocks, link text and destinations,
- * autolinks and bare URLs are masked first, and table rows are skipped, so the
+ * autolinks and bare URLs are masked first, and a table row is repaired cell by cell, so the
  * repair applies to prose only. Unterminated constructs while a reply streams are
  * masked too.
  */

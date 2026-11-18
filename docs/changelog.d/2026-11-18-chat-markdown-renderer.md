@@ -18,7 +18,12 @@ also ran, together with a full Markdown parse, on every streamed token.
   outside, because CommonMark does not parse it as emphasis. It works per line and only when every
   `**` on the line has a partner (an unclosed `**` while streaming is left as it is); a span with
   whitespace on both edges is repaired only when it opens the line's content (`** Titel **`), since
-  anywhere else it cannot be told from exponent notation. Table rows are never touched.
+  anywhere else it cannot be told from exponent notation. A table row is repaired cell by cell, so
+  `| **Name ** |` is fixed and a `|` is never crossed. A pair is repaired only when its opener is at a
+  boundary (not after an identifier, `(` or `,`), a closer written with a space before it is not
+  followed directly by a letter or digit, and `$…$` math is skipped, so `f(**kwargs, **opts)`,
+  `pass **kwargs and **opts` and `$2 **n ** m$` stay as written. A heading marker before the span
+  (`## ** Title **`) is allowed.
 - **Masking.** Code spans, fences (also unterminated ones), indented code, link destinations,
   autolinks and bare URLs were already masked; link text (`[text](url)`) is now masked with its
   destination.
@@ -53,3 +58,14 @@ defaulted `enableRawHtml` to on and the Manager chat ignored `conversationContro
 
 Upgraders: a Manager chat with an agent that emits HTML but does not set `rawHtml: true` now shows
 the tags as text, as the Chat UI widget has since 6.7.0.
+
+### Review follow-up
+
+- **Link guard.** The `//host` check is one helper (`isProtocolRelative`) used by `MarkdownLink` and
+  `MarkdownImage`: it drops tabs and newlines, skips leading whitespace and control characters and
+  reads `\` as `/`. An image whose source is protocol-relative renders only its alt text (or
+  "image"), with no link and no address. Markdown destinations arrive percent-encoded
+  (`%5C`, `%20`, `%09`, `%01`), which a browser does not read as `//`; the variants are pinned by
+  tests, and the raw-HTML forms (for an agent with `rawHtml: true`), which keep the attribute as
+  written, are what the helper stops.
+- `useThrottledValue` is no longer exported from the package index; nothing outside the package used it.

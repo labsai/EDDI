@@ -29,11 +29,11 @@ describe("formatMarkdownText leaves correct text unchanged", () => {
     ["heading without space is not ours to fix", "#Header"],
     ["glued heading", "Schluss## Titel"],
     ["inline code", "use `a ** b` and `#fff` and `C#`"],
-    ["inline code with spaced bold inside", "run `**x **y` now"],
+    ["inline code with a spaced delimiter", "run `**x **y` now"],
     ["fenced block", "Text\n\n```js\nlet a = b ** 2; // C#\n#fff\n** x **\n```\n\nAfter"],
     ["tilde fence", "~~~\n** x ** #1\n~~~"],
     ["indented code", "Example:\n\n    ** x ** #1\n    a,B\n"],
-    ["table with bold", "| a | b |\n|---|---|\n| **x ** | **y** |"],
+    ["table with bold", "| a | b |\n|---|---|\n| **x** | **y** |"],
     ["nested bold and italic", "**bold *italic* more** and *it **bold** it* and ***both***"],
     ["bold with punctuation", "**Label**: text, **other**. (**x**)"],
     ["list of bold labels", "- **Agents**: list\n- **Groups**: show"],
@@ -76,20 +76,54 @@ describe("formatMarkdownText mid-stream", () => {
 
 describe("formatMarkdownText the repairs that remain", () => {
   const repaired: Array<[string, string, string]> = [
-    ["closing space", "real **business **x", "real **business** x"],
+    ["closing space", "real **business **(x", "real **business** (x"],
     ["closing space before punctuation", "a **b **, c", "a **b**, c"],
     ["opening space", "a ** b**, c", "a **b**, c"],
     ["both edges, opening the line", "** von der Strategie **", "**von der Strategie**"],
     ["both edges, opening a list item", "- ** Wichtig ** hier", "- **Wichtig** hier"],
     ["nested list item", "- A\n    - ** Wichtig ** hier", "- A\n    - **Wichtig** hier"],
     ["next to a valid span", "**first ** and **second** end", "**first** and **second** end"],
-    ["next to an inline code span", "`x` and **bold **y", "`x` and **bold** y"],
+    ["next to an inline code span", "`x` and **bold **(y", "`x` and **bold** (y"],
   ];
   it.each(repaired)("%s", (_name, input, expected) => {
     expect(formatMarkdownText(input)).toBe(expected);
   });
 
   it("repairs only the line that needs it", () => {
-    expect(formatMarkdownText("x ** 2 and y ** 2\n**bold **z")).toBe("x ** 2 and y ** 2\n**bold** z");
+    expect(formatMarkdownText("x ** 2 and y ** 2\n**bold **(z")).toBe("x ** 2 and y ** 2\n**bold** (z");
+  });
+});
+
+describe("formatMarkdownText leaves flags and operators alone", () => {
+  const unchanged: Array<[string, string]> = [
+    ["python kwargs call", "f(**kwargs, **opts)"],
+    ["python kwargs prose", "pass **kwargs and **opts"],
+    ["kwargs in a sentence", "Use f(**a, **b) to forward both."],
+    ["math exponent span", "the cost is $2 **n ** m$ here"],
+    ["math exponent span after text", "**bold** and $a **b ** c$"],
+    ["identifier before the delimiter", "x**2 and y**3"],
+    ["table cell with exponent", "| x ** 2 and y ** 2 | ok |"],
+  ];
+  it.each(unchanged)("%s", (_name, input) => {
+    expect(formatMarkdownText(input)).toBe(input);
+  });
+});
+
+describe("formatMarkdownText repairs inside structure", () => {
+  const repaired: Array<[string, string, string]> = [
+    ["table cell, the Operator group overview", "| **SMC Recruitment Panel ** | PEER_REVIEW |", "| **SMC Recruitment Panel** | PEER_REVIEW |"],
+    ["every cell of a row", "| **A ** | **B ** | plain |", "| **A** | **B** | plain |"],
+    ["leading space in a cell", "| ** Name** | x |", "| **Name** | x |"],
+    ["both edges, opening a cell", "| ** Name ** | x |", "| **Name** | x |"],
+    ["heading marker before the span", "## ** Title **", "## **Title**"],
+    ["heading with a one-sided span", "### **Title ** (draft)", "### **Title** (draft)"],
+  ];
+  it.each(repaired)("%s", (_name, input, expected) => {
+    expect(formatMarkdownText(input)).toBe(expected);
+  });
+
+  it("never crosses a pipe: a lone delimiter in one cell does not pair with the next cell", () => {
+    const row = "| a ** b | c ** d |";
+    expect(formatMarkdownText(row)).toBe(row);
   });
 });

@@ -65,8 +65,8 @@ describe("formatMarkdownText", () => {
 
     it("repairs a 4-space list continuation paragraph", () => {
       expect(
-        formatMarkdownText("1. Erster\n\n    Fortsetzung mit **Fett **hier"),
-      ).toBe("1. Erster\n\n    Fortsetzung mit **Fett** hier");
+        formatMarkdownText("1. Erster\n\n    Fortsetzung mit **Fett **(hier"),
+      ).toBe("1. Erster\n\n    Fortsetzung mit **Fett** (hier");
     });
 
     it("still protects a genuine indented code block", () => {
@@ -98,20 +98,20 @@ describe("formatMarkdownText", () => {
     // Unanchored, /```[\s\S]*$/ matched an inline mention and suppressed every
     // rule for the remainder of the message.
     it("still repairs bold after an inline ``` mention", () => {
-      expect(formatMarkdownText("Nutze ``` um **Titel **x")).toBe("Nutze ``` um **Titel** x");
+      expect(formatMarkdownText("Nutze ``` um **Titel **(x")).toBe("Nutze ``` um **Titel** (x");
     });
 
     it("still repairs bold after adjacent strikethroughs", () => {
-      expect(formatMarkdownText("Alt ~~entfernt~~~~neu~~ und **dann **x")).toBe(
-        "Alt ~~entfernt~~~~neu~~ und **dann** x",
+      expect(formatMarkdownText("Alt ~~entfernt~~~~neu~~ und **dann **(x")).toBe(
+        "Alt ~~entfernt~~~~neu~~ und **dann** (x",
       );
     });
 
     it("a stray backtick on an earlier line no longer suppresses that line", () => {
       // The unterminated-span guard is anchored to end of input, not end of each
       // line, so only the final line can be treated as a streaming frontier.
-      expect(formatMarkdownText("Kosten 5` pro **Stueck **x\nZweite Zeile.")).toBe(
-        "Kosten 5` pro **Stueck** x\nZweite Zeile.",
+      expect(formatMarkdownText("Kosten 5` pro **Stueck **(x\nZweite Zeile.")).toBe(
+        "Kosten 5` pro **Stueck** (x\nZweite Zeile.",
       );
     });
 
@@ -133,7 +133,7 @@ describe("formatMarkdownText", () => {
 
   describe("still repairs bold delimiters with whitespace inside", () => {
     it("moves a closing space out of the delimiter", () => {
-      expect(formatMarkdownText("real **business **x")).toBe("real **business** x");
+      expect(formatMarkdownText("real **business **(x")).toBe("real **business** (x");
     });
 
     it("moves an opening space out of the delimiter", () => {
@@ -150,9 +150,12 @@ describe("formatMarkdownText", () => {
       );
     });
 
-    it("leaves a table row alone, cells included", () => {
-      const row = "| **SMC Recruitment Panel ** | PEER_REVIEW |";
-      expect(formatMarkdownText(row)).toBe(row);
+    // The operator's group-overview reply rendered literal asterisks all over
+    // a table: every cell was `**Name **` (a space inside the closing delimiter).
+    it("repairs the trailing-space bold inside a table cell without eating the cell separator", () => {
+      expect(formatMarkdownText("| **SMC Recruitment Panel ** | PEER_REVIEW |")).toBe(
+        "| **SMC Recruitment Panel** | PEER_REVIEW |",
+      );
     });
   });
 
