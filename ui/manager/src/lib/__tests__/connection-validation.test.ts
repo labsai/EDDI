@@ -231,9 +231,49 @@ describe("bindingFor — the coupling that runs both ways", () => {
     expect(legalBindings("STATIC")).toEqual(["SERVICE", "CALLER_SUPPLIED"]);
     expect(legalBindings("BASIC")).toEqual(["SERVICE"]);
     expect(legalBindings("OAUTH2_CLIENT_CREDENTIALS")).toEqual(["SERVICE"]);
-    expect(legalBindings("OAUTH2_AUTHORIZATION_CODE")).toEqual(["PER_USER"]);
+    expect(legalBindings("OAUTH2_AUTHORIZATION_CODE")).toEqual(["PER_USER", "MAILBOX"]);
     expect(isLegalBinding("STATIC", "CALLER_SUPPLIED")).toBe(true);
     expect(isLegalBinding("BASIC", "CALLER_SUPPLIED")).toBe(false);
+    expect(isLegalBinding("OAUTH2_CLIENT_CREDENTIALS", "MAILBOX")).toBe(false);
+  });
+
+  it("honours MAILBOX on the authorization-code flow and nowhere else", () => {
+    expect(bindingFor("OAUTH2_AUTHORIZATION_CODE", "MAILBOX")).toBe("MAILBOX");
+    expect(bindingFor("STATIC", "MAILBOX")).toBe("SERVICE");
+  });
+});
+
+describe("MAILBOX — mirrors ConnectionConfiguration.validateAccountCheck", () => {
+  const mailbox = (accountCheck: string | null, allowlist: string[]) => ({
+    name: "gws-support-mailbox",
+    authType: "OAUTH2_AUTHORIZATION_CODE",
+    binding: "MAILBOX",
+    baseUrlAllowlist: allowlist,
+    oauth: {
+      authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      tokenUrl: "https://oauth2.googleapis.com/token",
+      clientId: "client-id",
+      clientSecret: "${vault:gws-mailbox-client-secret}",
+      accountCheck,
+    },
+  });
+  const allowlist = ["imaps://imap.gmail.com", "smtps://smtp.gmail.com", "https://gmail.googleapis.com"];
+
+  it("accepts the documented Google Workspace mailbox", () => {
+    expect(validateConnection(mailbox("google-gmail-profile", allowlist))).toEqual({});
+  });
+
+  it("requires an account check", () => {
+    expect(validateConnection(mailbox(null, allowlist))["oauth.accountCheck"]).toBe("accountCheckRequired");
+    expect(validateConnection(mailbox("https://evil.example/whoami", allowlist))["oauth.accountCheck"]).toBe(
+      "accountCheckRequired",
+    );
+  });
+
+  it("requires the Gmail API on the allowlist for google-gmail-profile", () => {
+    expect(
+      validateConnection(mailbox("google-gmail-profile", ["imaps://imap.gmail.com"]))["oauth.accountCheck"],
+    ).toBe("accountCheckOriginRequired");
   });
 });
 

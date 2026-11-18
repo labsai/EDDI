@@ -61,12 +61,16 @@ export type AuthType = (typeof AUTH_TYPES)[number];
  * - `CALLER_SUPPLIED` — the calling user's own credential, handed to EDDI on
  *   the request itself (`X-EDDI-Connection-Credential: <name> <value>`) and
  *   never stored.
+ * - `MAILBOX` — one grant per dedicated mailbox, linked by an administrator
+ *   signing in as that mailbox and used only by the email channel's IMAP/SMTP
+ *   login (Google Workspace).
  *
  * The backend couples this to `authType`, which leaves exactly one legal value
- * for every type but `STATIC` — where `SERVICE` and `CALLER_SUPPLIED` are a
- * real choice. See `legalBindings` in `connection-validation.ts`.
+ * for every type but `STATIC` (`SERVICE` or `CALLER_SUPPLIED`) and
+ * `OAUTH2_AUTHORIZATION_CODE` (`PER_USER` or `MAILBOX`). See `legalBindings`
+ * in `connection-validation.ts`.
  */
-export const BINDINGS = ["SERVICE", "PER_USER", "CALLER_SUPPLIED"] as const;
+export const BINDINGS = ["SERVICE", "PER_USER", "CALLER_SUPPLIED", "MAILBOX"] as const;
 export type Binding = (typeof BINDINGS)[number];
 
 export const CLIENT_AUTH_METHODS = [
@@ -128,6 +132,11 @@ export interface OAuthConfig {
   certificateThumbprint?: string | null;
   /** `x5t#S256` (default) or `x5t`. */
   certificateThumbprintHeader?: string | null;
+  /**
+   * `MAILBOX` only, and required there: how a linked mailbox's provider account
+   * is proven to be the mailbox address (`google-gmail-profile`).
+   */
+  accountCheck?: string | null;
 }
 
 export interface ConnectionConfiguration {
@@ -198,6 +207,10 @@ export const CONNECTION_ERROR_CODES = [
   "missing_code",
   "connection_removed",
   "exchange_failed",
+  // Mailbox links only (an administrator linking a dedicated mailbox).
+  "mailbox_account_mismatch",
+  "mailbox_account_unverified",
+  "mailbox_is_own",
 ] as const;
 export type ConnectionErrorCode = (typeof CONNECTION_ERROR_CODES)[number];
 
@@ -406,6 +419,64 @@ export async function disconnectConnection(name: string): Promise<void> {
     );
   } catch (error) {
     return asConnectionsError(error, "unlink account");
+  }
+}
+
+// ─── Dedicated-mailbox grants (eddi-admin) ──────────────────────
+
+/**
+ * One dedicated mailbox linked to a `MAILBOX` connection. Never carries token
+ * material: the backend enumerates these fields by hand.
+ */
+export interface MailboxGrant {
+  address: string;
+  status: GrantStatus;
+  /** False once the grant was rejected or revoked: the mailbox must be linked again. */
+  usable: boolean;
+  expiresAt: string | null;
+  lastRefreshAt: string | null;
+  scopes: string[] | null;
+  connectedAt: string | null;
+}
+
+/** The mailboxes linked to one `MAILBOX` connection. `eddi-admin` only. */
+export async function listMailboxGrants(name: string): Promise<MailboxGrant[]> {
+  try {
+    return await api.get<MailboxGrant[]>(`/connections/${nameSeg(name)}/mailbox-grants`);
+  } catch (error) {
+    return asConnectionsError(error, "list linked mailboxes");
+  }
+}
+
+/**
+ * Start linking a dedicated mailbox. As {@link authorizeConnection}, the caller
+ * must then navigate the whole window to the returned URL, and sign in **as
+ * the mailbox**: the callback stores the grant only when the provider account
+ * is the address, and never for the administrator's own address.
+ */
+export async function authorizeMailbox(
+  name: string,
+  address: string,
+  returnTo: string,
+): Promise<{ authorizationUrl: string }> {
+  try {
+    return await api.post<{ authorizationUrl: string }>(
+      `/connections/${nameSeg(name)}/mailbox-grants/authorize?returnTo=${encodeURIComponent(returnTo)}`,
+      { address },
+    );
+  } catch (error) {
+    return asConnectionsError(error, "start linking the mailbox", {
+      notFoundMeansDisabled: false,
+    });
+  }
+}
+
+/** Unlink a dedicated mailbox. 204 whether or not a grant existed. */
+export async function unlinkMailbox(name: string, address: string): Promise<void> {
+  try {
+    await api.post<void>(`/connections/${nameSeg(name)}/mailbox-grants/unlink`, { address });
+  } catch (error) {
+    return asConnectionsError(error, "unlink the mailbox");
   }
 }
 
@@ -631,6 +702,8 @@ export function toStoredConnection(
         // Not switchable: the callback is a public path, and the backend
         // refuses an authorization-code connection without it.
         usePkce: true,
+        // Required for MAILBOX and refused on every other binding.
+        accountCheck: binding === "MAILBOX" ? blankToNull(oauth.accountCheck) : null,
       },
     };
   }

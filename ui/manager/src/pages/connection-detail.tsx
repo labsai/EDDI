@@ -25,6 +25,7 @@ import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-change
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";
+import { MailboxGrantsPanel } from "@/components/connections/mailbox-grants-panel";
 import { OriginAllowlistField } from "@/components/connections/origin-allowlist-field";
 import { ValidationMessage } from "@/components/connections/validation-message";
 import { AuthTypeBadge } from "@/components/connections/connection-badges";
@@ -314,22 +315,40 @@ export function ConnectionDetailPage() {
           : returningToStored
             ? (stored?.allowUnverifiedPrincipal ?? false)
             : prev.allowUnverifiedPrincipal;
+      const oauth = prev.oauth ?? blank.oauth;
       return {
         ...prev,
         authType,
         binding,
         allowUnverifiedPrincipal,
         staticAuth: prev.staticAuth ?? blank.staticAuth,
-        oauth: prev.oauth ?? blank.oauth,
+        // The backend refuses an account check on any binding but MAILBOX.
+        oauth: oauth && binding !== "MAILBOX" ? { ...oauth, accountCheck: null } : oauth,
       };
     });
   }, []);
 
   /** The STATIC-only choice between a shared key and a caller-supplied one. */
   const changeBinding = useCallback((binding: Binding) => {
-    setDraft((prev) =>
-      prev ? { ...prev, binding: bindingFor(prev.authType, binding) } : prev,
-    );
+    setDraft((prev) => {
+      if (!prev) return prev;
+      const next = bindingFor(prev.authType, binding);
+      // A MAILBOX connection needs its account check, and no other binding may
+      // carry one; the proxy-trust flag is PER_USER-only.
+      const oauth = prev.oauth
+        ? {
+            ...prev.oauth,
+            accountCheck:
+              next === "MAILBOX" ? (prev.oauth.accountCheck ?? "google-gmail-profile") : null,
+          }
+        : prev.oauth;
+      return {
+        ...prev,
+        binding: next,
+        oauth,
+        allowUnverifiedPrincipal: next === "PER_USER" ? prev.allowUnverifiedPrincipal : false,
+      };
+    });
   }, []);
 
   /**
@@ -485,7 +504,8 @@ export function ConnectionDetailPage() {
     );
   }
 
-  const perUser = draft.authType === "OAUTH2_AUTHORIZATION_CODE";
+  const mailbox = draft.authType === "OAUTH2_AUTHORIZATION_CODE" && draft.binding === "MAILBOX";
+  const perUser = draft.authType === "OAUTH2_AUTHORIZATION_CODE" && !mailbox;
   const callerSupplied =
     draft.authType === "STATIC" && draft.binding === "CALLER_SUPPLIED";
   const fieldError = (field: keyof typeof errors) =>
@@ -611,7 +631,9 @@ export function ConnectionDetailPage() {
           <Info className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="space-y-1 text-xs">
             <p className="font-medium text-foreground">
-              {perUser
+              {mailbox
+                ? t("connections.bindingMailboxTitle", "Resolves as a dedicated mailbox")
+                : perUser
                 ? t("connections.bindingPerUserTitle", "Resolves as each end user")
                 : callerSupplied
                   ? t(
@@ -621,7 +643,12 @@ export function ConnectionDetailPage() {
                   : t("connections.bindingServiceTitle", "Resolves as one shared account")}
             </p>
             <p className="text-muted-foreground">
-              {perUser
+              {mailbox
+                ? t(
+                    "connections.bindingMailboxBody",
+                    "An administrator links each dedicated mailbox by signing in as it. Only the email channel's IMAP and SMTP login can use these grants — httpcalls, MCP, A2A and tools are refused.",
+                  )
+                : perUser
                 ? t(
                     "connections.bindingPerUserBody",
                     "Everyone links their own account and the agent acts as them. This follows from the authentication type — a user login is the only flow that produces a grant per person.",
@@ -887,6 +914,9 @@ export function ConnectionDetailPage() {
           </div>
         )}
       </section>
+      {config?.binding === "MAILBOX" && config.authType === "OAUTH2_AUTHORIZATION_CODE" && (
+        <MailboxGrantsPanel connectionName={config.name} unsavedChanges={isDirty} />
+      )}
 
       <AlertDialog
         open={deleteOpen}

@@ -980,7 +980,8 @@
     "binding": {
       "perUser": "Par personne",
       "service": "Partagée",
-      "callerSupplied": "Fourni par l'appelant"
+      "callerSupplied": "Fourni par l'appelant",
+      "mailbox": "Boîte aux lettres dédiée"
     },
     "status": {
       "active": "Connecté",

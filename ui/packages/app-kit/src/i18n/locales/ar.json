@@ -1004,7 +1004,8 @@
     "binding": {
       "perUser": "لكل شخص",
       "service": "مشترك",
-      "callerSupplied": "مقدَّم من المتصل"
+      "callerSupplied": "مقدَّم من المتصل",
+      "mailbox": "صندوق بريد مخصص"
     },
     "status": {
       "active": "مرتبط",

@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "Per user",
       "service": "Shared",
-      "callerSupplied": "Caller-supplied"
+      "callerSupplied": "Caller-supplied",
+      "mailbox": "Dedicated mailbox"
     },
     "status": {
       "active": "Connected",

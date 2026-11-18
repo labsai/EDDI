@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "รายบุคคล",
       "service": "ใช้ร่วมกัน",
-      "callerSupplied": "ผู้เรียกเป็นผู้ส่งมา"
+      "callerSupplied": "ผู้เรียกเป็นผู้ส่งมา",
+      "mailbox": "กล่องจดหมายเฉพาะ"
     },
     "status": {
       "active": "เชื่อมแล้ว",

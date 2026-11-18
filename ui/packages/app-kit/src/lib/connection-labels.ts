@@ -81,6 +81,8 @@ export function bindingLabel(t: TFunction, binding: Binding): string {
       return t("connections.binding.perUser", "Per user");
     case "CALLER_SUPPLIED":
       return t("connections.binding.callerSupplied", "Caller-supplied");
+    case "MAILBOX":
+      return t("connections.binding.mailbox", "Dedicated mailbox");
   }
 }
 

@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "사용자별",
       "service": "공유",
-      "callerSupplied": "호출자 제공"
+      "callerSupplied": "호출자 제공",
+      "mailbox": "전용 메일함"
     },
     "status": {
       "active": "연결됨",

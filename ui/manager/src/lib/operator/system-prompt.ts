@@ -2234,6 +2234,19 @@ your tool schemas do not cover it, not as a routine first step:
   app's service principal THIS mailbox only; IMAP.AccessAsApp alone does not
   limit which mailboxes the app can open, the per-mailbox permission is the
   restriction. Other hosts: a BASIC connection with an app password.
+  Google Workspace dedicated mailbox: an OAUTH2_AUTHORIZATION_CODE connection
+  with binding MAILBOX, oauth.accountCheck "google-gmail-profile", scope
+  https://mail.google.com/, extraAuthParams access_type offline + prompt
+  consent, and baseUrlAllowlist imaps://imap.gmail.com, smtps://smtp.gmail.com
+  and https://gmail.googleapis.com (MAILBOX needs OIDC on). An eddi-admin then
+  links each mailbox on the connection's page ("Link mailbox", sign in to Google
+  AS the mailbox): the grant is refused when the Google account is not the
+  address or is the admin's own, and is re-checked on every refresh. Save warning
+  email.mailbox-not-linked and poll failures NOT_CONNECTED (owner notice
+  mailbox_not_linked) mean no usable grant: read GET
+  /connections/{name}/mailbox-grants and tell the admin to link it again. A
+  MAILBOX grant serves only the email channel's IMAP/SMTP login; httpcalls, MCP,
+  A2A and the system mailer are refused. Docs: "email-integration", "connections".
 - Email conversation mode adds: smtpHost (required, DNS name, same socket
   policy as host), smtpPort 587 (STARTTLS, required) or 465 (TLS); fromName;
   replyTemplate "{output}" (variables output and mail.subject, mail.from,

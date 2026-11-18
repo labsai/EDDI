@@ -41,6 +41,7 @@ export type ConnectionField =
   | "oauth.privateKey"
   | "oauth.certificateThumbprint"
   | "oauth.extraAuthParams"
+  | "oauth.accountCheck"
   | "timeoutMs";
 
 /**
@@ -78,6 +79,8 @@ export type ValidationCode =
   | "paramValueReference"
   | "paramValueTooLong"
   | "paramValueCredentialShaped"
+  | "accountCheckRequired"
+  | "accountCheckOriginRequired"
   | "timeoutRange";
 
 export type ConnectionErrors = Partial<Record<ConnectionField, ValidationCode>>;
@@ -335,8 +338,14 @@ export function validateHeaderTemplate(
   return null;
 }
 
-/** The three values the backend's `Binding` enum has. */
-export type ConnectionBinding = "SERVICE" | "PER_USER" | "CALLER_SUPPLIED";
+/** The four values the backend's `Binding` enum has. */
+export type ConnectionBinding = "SERVICE" | "PER_USER" | "CALLER_SUPPLIED" | "MAILBOX";
+
+/** The `oauth.accountCheck` values the backend knows (`OAuthConfig.ACCOUNT_CHECKS`). */
+export const ACCOUNT_CHECKS = ["google-gmail-profile"] as const;
+
+/** The origin the `google-gmail-profile` check reads the account from. */
+export const GMAIL_API_ORIGIN = "https://gmail.googleapis.com";
 
 /**
  * The bindings a given auth type may carry.
@@ -347,12 +356,14 @@ export type ConnectionBinding = "SERVICE" | "PER_USER" | "CALLER_SUPPLIED";
  * a grant nothing can ever create), and `CALLER_SUPPLIED` requires `STATIC`
  * (the caller hands over a finished header value, so there is nothing to
  * encode, exchange or refresh). That leaves exactly one legal value for every
- * type except `STATIC`, which has two — and the only real choice.
+ * type except `STATIC` and `OAUTH2_AUTHORIZATION_CODE`, which have two each:
+ * `SERVICE` or `CALLER_SUPPLIED`, and `PER_USER` or `MAILBOX` — a dedicated
+ * mailbox of an email integration, linked by an administrator.
  */
 export function legalBindings(authType: string): readonly ConnectionBinding[] {
   switch (authType) {
     case "OAUTH2_AUTHORIZATION_CODE":
-      return ["PER_USER"];
+      return ["PER_USER", "MAILBOX"];
     case "STATIC":
       return ["SERVICE", "CALLER_SUPPLIED"];
     default:
@@ -468,6 +479,7 @@ export interface ValidatableConnection {
     certificateThumbprint?: string | null;
     certificateThumbprintHeader?: string | null;
     extraAuthParams?: Record<string, string> | null;
+    accountCheck?: string | null;
   } | null;
   timeoutMs?: number | null;
 }
@@ -594,6 +606,20 @@ export function validateConnection(config: ValidatableConnection): ConnectionErr
     if (authType === "OAUTH2_AUTHORIZATION_CODE") {
       const authorizationUrl = validateCredentialEndpoint(oauth.authorizationUrl, true);
       if (authorizationUrl) errors["oauth.authorizationUrl"] = authorizationUrl;
+    }
+    // A MAILBOX connection must say how the linked account is proven to be the
+    // mailbox, and let the token reach where that proof is read — the backend's
+    // ConnectionConfiguration.validateAccountCheck, mirrored.
+    if (binding === "MAILBOX") {
+      const accountCheck = (oauth.accountCheck ?? "").trim();
+      if (!(ACCOUNT_CHECKS as readonly string[]).includes(accountCheck)) {
+        errors["oauth.accountCheck"] = "accountCheckRequired";
+      } else if (
+        accountCheck === "google-gmail-profile" &&
+        !allowlist.some((origin) => origin.trim().replace(/\/+$/, "").toLowerCase() === GMAIL_API_ORIGIN)
+      ) {
+        errors["oauth.accountCheck"] = "accountCheckOriginRequired";
+      }
     }
     for (const [key, value] of Object.entries(oauth.extraAuthParams ?? {})) {
       const problem = isCredentialParamName(key)

@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "Pro Person",
       "service": "Gemeinsam",
-      "callerSupplied": "Vom Aufrufer mitgegeben"
+      "callerSupplied": "Vom Aufrufer mitgegeben",
+      "mailbox": "Dediziertes Postfach"
     },
     "status": {
       "active": "Verknüpft",

@@ -91,22 +91,75 @@ connection. `headerName` is required by the connection model but not used by a m
 }
 ```
 
-#### Gmail and Google Workspace
+#### Google Workspace (a dedicated mailbox, linked once by an administrator)
 
-**Not supported as an inbound channel today.** Gmail's IMAP takes OAuth through SASL `XOAUTH2`, and the token for a
-mailbox comes from an authorization-code grant: a person consents on Google's screen. EDDI files that grant `PER_USER`
-only — an `OAUTH2_AUTHORIZATION_CODE` connection must be bound `PER_USER`, the model refuses any other binding at save
-time — and a poll runs as no verified user, so it has no principal to look the grant up under. The integration is
-therefore refused at save: `platformConfig.connection` fails the check above with "is bound PER_USER, but a mailbox
-poll runs as no verified user".
+Gmail's IMAP and SMTP take OAuth through SASL `XOAUTH2`, and a Workspace user mailbox's token comes from an
+authorization-code grant — somebody has to sign in to Google **as the mailbox** once. A connection bound
+[`MAILBOX`](connections.md#dedicated-mailboxes-mailbox) holds one such grant per dedicated mailbox, linked by an
+`eddi-admin`; the mail transport is the only thing that can use it. Only **dedicated** mailboxes
+(`support@company.com`), never a person's own: domain-wide delegation stays out.
+
+**Prerequisites** are those of the [Google Workspace recipe](google-workspace.md#prerequisites) for connections:
+connection settings `enabled`, `publicBaseUrl`, `credentialEndpointAllowlist` with `https://accounts.google.com` and
+`https://oauth2.googleapis.com`, an active vault, and the redirect URI from `GET /connectionstore/settings`. The
+mailbox does not sign in to EDDI, so it needs no OIDC account; the **linking administrator** does — a `MAILBOX`
+connection is refused at save (400) while `authorization.enabled=false`.
+
+1. **Google Cloud project and consent screen.** User type **Internal** (no Google verification for an internal app;
+   re-check Google's current policy). Scope `https://mail.google.com/` — IMAP and SMTP need the full-mail scope. Use
+   **a separate OAuth client** from the per-user recipe, so this scope never appears on the consent screen ordinary
+   users see.
+2. **OAuth client** (Web application), authorized redirect URI `<publicBaseUrl>/connections/callback`.
+3. **Workspace admin:** IMAP access enabled for the dedicated user.
+4. **Connection** (vault the client secret first):
+
+```json
+{
+  "name": "gws-support-mailbox",
+  "authType": "OAUTH2_AUTHORIZATION_CODE",
+  "binding": "MAILBOX",
+  "oauth": {
+    "authorizationUrl": "https://accounts.google.com/o/oauth2/v2/auth",
+    "tokenUrl": "https://oauth2.googleapis.com/token",
+    "clientId": "<client-id>",
+    "clientSecret": "${vault:gws-mailbox-client-secret}",
+    "scopes": ["https://mail.google.com/"],
+    "extraAuthParams": { "access_type": "offline", "prompt": "consent" },
+    "accountCheck": "google-gmail-profile"
+  },
+  "baseUrlAllowlist": ["imaps://imap.gmail.com", "smtps://smtp.gmail.com", "https://gmail.googleapis.com"]
+}
+```
+
+5. **Link the mailbox:** Manager → Connections → the connection → **Mailbox grants** → address → **Link mailbox**, and
+   sign in to Google **as the dedicated account**. (REST: `POST /connections/{name}/mailbox-grants/authorize` with
+   `{"address": "support@company.com"}`, then follow the returned URL in a browser.) The callback stores the grant only
+   when the Gmail profile (`users.getProfile`) of the new token is that address and the address is not the linking
+   administrator's own; either refusal comes back as `?error=mailbox_account_mismatch` or `?error=mailbox_is_own`, and
+   nothing is stored.
+6. **Integration:** `connection: gws-support-mailbox`, `host: imap.gmail.com`, `address` the linked mailbox; in
+   conversation mode `smtpHost: smtp.gmail.com`, `smtpPort: 465`. `processedAction` `move:<folder>` is the safer choice
+   until Gmail's handling of the `$EddiProcessed` keyword is verified (see [Limits](#limits-of-this-phase)).
+
+**Saving before linking is allowed:** the save answers with the warning `email.mailbox-not-linked`, and every poll fails
+with category `NOT_CONNECTED` (backing off) until the mailbox is linked. The same happens when Google rejects the
+grant (`invalid_grant` — the password was reset, access was revoked): the integration's owners get one notice a day
+with reason `mailbox_not_linked`, and the Manager's Mailbox grants panel marks the mailbox for re-linking. The account
+is re-checked on **every** token refresh; a grant whose account is no longer the address is deleted and logged
+`[SECURITY]`.
+
+**Deleting the integration does not unlink the mailbox** — the grant belongs to the mailbox, not the integration.
+Unlink it on the connection's page, or `POST /connections/{name}/mailbox-grants/unlink`.
+
+> **Not verified against Google yet.** That `users.getProfile` accepts a token carrying only
+> `https://mail.google.com/`, and that refresh tokens of an Internal app do not expire like a Testing app's, are
+> taken from Google's documentation and must be confirmed on a real Workspace tenant before relying on them.
 
 An **app password** over `BASIC`, with `imaps://imap.gmail.com` in the connection's allowlist (and
-`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not blocked by any code path — but it is **untested** with
-Gmail, and Google Workspace administrators commonly disable app passwords and IMAP access, so do not plan on it.
-
-What is planned: an admin-linked `SERVICE` grant (an administrator consents once for the integration's mailbox) and
-Workspace **domain-wide delegation**. Until then, Gmail and Drive work as **conversation tools** on each signed-in
-user's own account — see [Google Workspace](google-workspace.md).
+`smtps://smtp.gmail.com` or `smtp://smtp.gmail.com:587`, matching `smtpPort`, for conversation-mode replies), is not
+blocked by any code path — but it is **untested** with Gmail, and Google Workspace administrators commonly disable app
+passwords, so prefer the `MAILBOX` connection. A person's own Gmail and Drive work as **conversation tools** on each
+signed-in user's own account — see [Google Workspace](google-workspace.md).
 
 ### 2. The integration
 
@@ -338,6 +391,11 @@ cost); an unpriced model counts as zero.
   addresses, as the plain SHA-256 written before could. Only a deployment with neither a key nor a place to keep the
   salt falls back to an unsalted hash, and then that guarantee does not hold.
 - The mailbox host is a processor of the mail: [compliance-data-flow.md](compliance-data-flow.md#other-outbound-recipients).
+- **A dedicated mailbox is not a person.** Its grant on a `MAILBOX` connection is filed under `mailbox:<address>`, which
+  no erasure reaches: erasing the address as a *sender* deletes that sender's `email:` identities and ledger rows and
+  leaves the grant alone, and an erasure request for the principal `mailbox:<address>` itself is refused as a reserved
+  principal. Unlinking is a deliberate administrator action (`POST /connections/{name}/mailbox-grants/unlink`), so an
+  integration never stops reading mail as a side effect of a GDPR request.
 
 ## The message ledger
 

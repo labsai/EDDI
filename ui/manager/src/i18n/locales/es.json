@@ -4557,7 +4557,10 @@
       "missingCode": "El proveedor no devolvió un código de autorización. No se vinculó nada — empiece de nuevo, por favor.",
       "connectionRemoved": "Esa conexión ya no existe — un administrador la eliminó mientras la vinculaba.",
       "exchangeFailed": "El proveedor no completó la vinculación. Inténtelo otra vez; si sigue fallando, un administrador debe revisar los ajustes de esta conexión.",
-      "unknown": "La vinculación no se completó. No se cambió nada — empiece de nuevo, por favor."
+      "unknown": "La vinculación no se completó. No se cambió nada — empiece de nuevo, por favor.",
+      "mailboxAccountMismatch": "Inició sesión con una cuenta que no es el buzón, así que no se vinculó nada. Empiece de nuevo e inicie sesión como el propio buzón.",
+      "mailboxAccountUnverified": "No se pudo verificar la cuenta del buzón (la API de Gmail no respondió), así que no se vinculó nada. Vuelva a intentarlo en breve.",
+      "mailboxIsOwn": "Ese es su propio buzón. Solo se puede vincular un buzón dedicado, no el de una persona."
     },
     "validation": {
       "nameRequired": "Hace falta un nombre — es a lo que se refiere ${connection:name}.",
@@ -4588,7 +4591,9 @@
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
       "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos.",
       "thumbprintFormat": "No es una huella de la longitud correcta: x5t#S256 necesita la huella SHA-256 y x5t la SHA-1 — en hexadecimal o base64url.",
-      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación."
+      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación.",
+      "accountCheckRequired": "Una conexión de buzón dedicado debe indicar cómo se verifica que la cuenta vinculada es el buzón.",
+      "accountCheckOriginRequired": "Añada https://gmail.googleapis.com a los orígenes permitidos: la cuenta del buzón se lee desde la API de Gmail."
     },
     "backToList": "Volver a Conexiones",
     "headerSecret": "Secreto guardado",
@@ -4600,7 +4605,9 @@
     "bindingChooser": "De dónde procede la clave",
     "bindingChoice": {
       "serviceBody": "Una clave en la bóveda, enviada para todos. Sencillo, pero el agente puede llegar a todo lo que esa clave alcanza.",
-      "callerSuppliedBody": "{{productName}} no almacena nada. El sistema que llama a {{productName}} envía la credencial de cada usuario con cada solicitud, así que el agente solo puede hacer lo que ese usuario puede hacer: los permisos del destino son el límite."
+      "callerSuppliedBody": "{{productName}} no almacena nada. El sistema que llama a {{productName}} envía la credencial de cada usuario con cada solicitud, así que el agente solo puede hacer lo que ese usuario puede hacer: los permisos del destino son el límite.",
+      "perUserBody": "Cada persona conecta su propia cuenta y el agente actúa en su nombre.",
+      "mailboxBody": "Un administrador vincula buzones dedicados (Google Workspace) para integraciones de correo. Solo sirve para leer y responder el correo de ese buzón; nunca lo usan las herramientas."
     },
     "callerSuppliedHeaderTitle": "Lo que envía el sistema que llama",
     "callerSuppliedHeaderBody": "Una cabecera por solicitud: el nombre de la conexión, un espacio y después el valor completo que se enviará como {{header}}, esquema incluido, así que «Bearer abc» no necesita escaparse. La credencial existe solo durante esa solicitud y nunca se almacena.",
@@ -4634,6 +4641,30 @@
         "label": "Cuenta de servicio de Google (clave JSON)",
         "description": "Las API de Google como cuenta de servicio, firmadas con su clave privada (portador JWT, RFC 7523). Guarde el archivo de clave JSON descargado como UNA sola entrada del almacén y haga referencia a ella como clave privada; de ahí se leen el emisor y el ID de clave. Añada https://oauth2.googleapis.com a la lista de permitidos de endpoints de credenciales. Sin delegación en todo el dominio, la cuenta solo ve lo que se comparte con ella."
       }
+    },
+    "bindingChooserOAuth": "Qué cuenta se vincula",
+    "bindingMailboxTitle": "Se resuelve como un buzón dedicado",
+    "bindingMailboxBody": "Un administrador vincula cada buzón dedicado iniciando sesión como él. Solo el inicio de sesión IMAP y SMTP del canal de correo puede usar estas concesiones; httpcalls, MCP, A2A y las herramientas se rechazan.",
+    "accountCheck": "Comprobación de la cuenta",
+    "accountCheckNone": "Elija cómo se verifica el buzón",
+    "accountCheckGoogle": "google-gmail-profile: el perfil de Gmail debe ser el buzón",
+    "accountCheckHint": "Al vincular un buzón, y tras cada renovación del token, {{productName}} lee la cuenta desde la API de Gmail y rechaza una concesión cuya cuenta no sea el buzón. Añada https://gmail.googleapis.com a los orígenes permitidos.",
+    "mailbox": {
+      "title": "Concesiones de buzón",
+      "description": "Cada buzón dedicado que una integración de correo lee mediante esta conexión debe vincularse una vez: inicie sesión en Google como el propio buzón, no como usted. La concesión se rechaza si la cuenta no es la dirección.",
+      "loadFailed": "No se pudieron cargar los buzones vinculados.",
+      "empty": "Aún no hay ningún buzón vinculado.",
+      "relink": "El proveedor rechazó esta concesión. Vuelva a vincular el buzón.",
+      "unlink": "Desvincular",
+      "address": "Dirección del buzón",
+      "link": "Vincular buzón",
+      "saveFirst": "Guarde o descarte primero sus cambios: vincular abandona esta página.",
+      "linkStartFailed": "No se pudo iniciar la vinculación del buzón.",
+      "unlinkFailed": "No se pudo desvincular el buzón.",
+      "unlinked": "{{address}} ya no está vinculado. Su integración de correo deja de leer correo hasta que se vincule de nuevo.",
+      "unlinkTitle": "¿Desvincular este buzón?",
+      "unlinkBody": "{{address}} dejará de poder leerse mediante esta conexión, y su integración de correo fallará como no conectada hasta que se vuelva a vincular.",
+      "linked": "Buzón vinculado a «{{name}}». Su integración de correo lee el correo desde el próximo sondeo."
     }
   },
   "workspaces": {
@@ -5633,7 +5664,8 @@
       "openTrigger": "Guardado, pero cualquiera en internet puede hacer que este agente se ejecute: no hay lista de remitentes permitidos y se procesa el correo no autenticado.",
       "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas.",
       "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
-      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta."
+      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta.",
+      "mailboxNotLinked": "Guardado, pero el buzón aún no está vinculado a su conexión de buzón dedicado, así que no se puede leer. Un administrador lo vincula en Conexiones → Concesiones de buzón."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5666,7 +5698,9 @@
     "replyTemplate": "Plantilla de respuesta",
     "replyTemplateHint": "Envuelve la respuesta del agente, que se inserta como texto y nunca se ejecuta como plantilla. Variables:",
     "noteDkim": "Las respuestas necesitan un servidor de correo que firme el correo saliente con DKIM para el dominio del buzón, y un registro DMARC para ese dominio — {{productName}} no firma. Sin ellos, las respuestas acaban en spam o se rechazan. Exchange Online y la mayoría de los proveedores firman el correo enviado en cuanto DKIM está activado para el dominio.",
-    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "mailboxLinked": "Este buzón está vinculado a la conexión.",
+    "mailboxNotLinked": "Este buzón aún no está vinculado a la conexión, así que no se puede leer. Vincúlelo en Conexiones → Concesiones de buzón."
   },
   "feedback": {
     "title": "Valoraciones",

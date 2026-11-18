@@ -8,6 +8,7 @@
 **Contents:** [Why](#why) · [Quick start](#quick-start) · [The model](#the-model) ·
 [Where a reference may appear](#where-a-reference-may-appear) ·
 [Enabling connections](#enabling-connections) · [Per-user accounts](#per-user-accounts) ·
+[Dedicated mailboxes](#dedicated-mailboxes-mailbox) ·
 [Refresh, and what happens when it fails](#refresh-and-what-happens-when-it-fails) ·
 [Rotating the key that holds them](#rotating-the-key-that-holds-them) ·
 [Export and import](#export-and-import) · [Security rules](#security-rules) · [Metrics](#metrics) ·
@@ -301,13 +302,15 @@ onto everybody after them — the same rule `PER_USER` follows.
 `binding` and `authType` constrain each other in **both** directions, and both
 rules are enforced at save time. `PER_USER` requires
 `OAUTH2_AUTHORIZATION_CODE`, because nothing else produces a grant per end user.
-`OAUTH2_AUTHORIZATION_CODE` equally requires `PER_USER` — the flow files its
+`OAUTH2_AUTHORIZATION_CODE` equally requires `PER_USER` (or `MAILBOX`, below) — the flow files its
 grant under whoever completed the consent screen, so a `SERVICE`-bound one would
 look for a grant under a service principal that nothing can ever create. Since
 `binding` defaults to `SERVICE`, omitting it here used to produce a connection
 that saved, deployed, showed a working consent screen, and then failed every call
 as "not connected". Use `OAUTH2_CLIENT_CREDENTIALS` or `OAUTH2_JWT_BEARER` for a service
-account; `OAUTH2_JWT_BEARER` is likewise `SERVICE`-only.
+account; `OAUTH2_JWT_BEARER` is likewise `SERVICE`-only. The one other legal pairing is
+`MAILBOX` with `OAUTH2_AUTHORIZATION_CODE`: a dedicated mailbox an administrator links for
+the email channel — see [Dedicated mailboxes](#dedicated-mailboxes-mailbox).
 
 ---
 
@@ -318,10 +321,10 @@ account; `OAUTH2_JWT_BEARER` is likewise `SERVICE`-only.
 | `name` | What `${connection:name}` refers to. Must match `^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$` — letters, digits, `.`, `_`, `-`, starting with a letter or digit, at most 64 characters, no surrounding whitespace. Refused otherwise, never trimmed: a space, `/`, `}` or `:` would make the name unreferenceable, and the `X-EDDI-Connection-Credential` header splits at the first space |
 | `description` | Free text shown in the connection list |
 | `authType` | `STATIC` (the default), `BASIC`, `OAUTH2_CLIENT_CREDENTIALS`, `OAUTH2_JWT_BEARER`, `OAUTH2_AUTHORIZATION_CODE` |
-| `binding` | `SERVICE` (the default; one grant for everyone), `PER_USER` (the caller's own, stored), or `CALLER_SUPPLIED` (the caller's own, handed over per request) |
+| `binding` | `SERVICE` (the default; one grant for everyone), `PER_USER` (the caller's own, stored), `CALLER_SUPPLIED` (the caller's own, handed over per request), or `MAILBOX` (one grant per dedicated mailbox, for the email channel only — see [Dedicated mailboxes](#dedicated-mailboxes-mailbox)) |
 | `allowUnverifiedPrincipal` | `PER_USER` only. Accept a user id EDDI never authenticated, on the grounds that a front proxy did. Default `false` — see [Whose identity counts](#whose-identity-counts) |
 | `staticAuth` | Header name plus a reference-only value template |
-| `oauth` | Endpoints, client id, a **vaulted** client secret or private key, scopes |
+| `oauth` | Endpoints, client id, a **vaulted** client secret or private key, scopes; for `MAILBOX` also `accountCheck` (`google-gmail-profile`), required there and refused on every other binding |
 | `baseUrlAllowlist` | The origins this credential may be sent to. **Required.** Bare origins (`scheme://host[:port]`) with an `http`/`https` scheme, or a mail scheme (`smtps://`, `smtp://`, `imaps://`, `imap://`) for a credential that logs in to a mail server — the system mailer's XOAUTH2 or BASIC login (`eddi.mail.smtp.connection`). A mail origin folds the port its TLS mode implies (`smtps` 465, `smtp` 587, `imaps` 993, `imap` 143), and an `https` entry for the same host does not cover it. `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is always accepted. `http://` to any other host sends the credential across the network unencrypted, so it is **refused** unless the deployment allows it — `allowPlaintextRemoteOrigins` in the [connection settings](#enabling-connections), or the `eddi.connections.allow-plaintext-remote-origins` property; see [Plaintext origins](#plaintext-origins) |
 | `timeoutMs` | Token-endpoint timeout in milliseconds, **1–60000**; refused outside that range at save time. Unset means the resolver's default. The token client applies its own lower ceiling at use so the refresh lease always outlasts the request |
 
@@ -385,7 +388,8 @@ characters.
 | httpcall **header** | ✅ Resolved per request |
 | mcpcalls `apiKey` | ✅ Resolved per request (on discovery too, unless `PER_USER` — see below) |
 | A2A `apiKey` | ✅ Resolved per call (same discovery rule) |
-| Mail login — the system mailer (`eddi.mail.smtp.connection`) and an [email channel](email-integration.md)'s mailbox | ✅ A `BASIC` connection logs in with username and password; an OAuth connection supplies a bare access token for XOAUTH2. `CALLER_SUPPLIED`, and `PER_USER` for a mailbox, are refused (`UNSUPPORTED_PLACEMENT`) |
+| Mail login — the system mailer (`eddi.mail.smtp.connection`) and an [email channel](email-integration.md)'s mailbox | ✅ A `BASIC` connection logs in with username and password; an OAuth connection supplies a bare access token for XOAUTH2. `CALLER_SUPPLIED`, and `PER_USER` for a mailbox, are refused (`UNSUPPORTED_PLACEMENT`). A `MAILBOX` connection logs in **only** an email channel's mailbox, with that mailbox's own grant |
+| Anything else with a `MAILBOX` connection — httpcall headers, MCP, A2A, discovery, ingestion, the system mailer | ❌ Refused (`UNSUPPORTED_PLACEMENT`) before any token is fetched |
 | httpcall path / query / body | ❌ Refused at build time |
 | LLM, embedding, vector-store parameters | ❌ Refused — see [Limitations](#limitations) |
 
@@ -576,6 +580,8 @@ console; none of them stops the boot.
 | a `PER_USER` connection while `/v1` is enabled in api-key mode with `eddi.openai-compat.trust-user-headers=true` | Conversations opened through `/v1` carry a caller-supplied user id, so a holder of the shared api key can open a conversation as anyone. Those conversations are refused a `PER_USER` credential — see [Whose identity counts](#whose-identity-counts). |
 | a `CALLER_SUPPLIED` connection with `authorization.enabled=false` | Every call through it is refused as `NO_CALLER_CREDENTIAL`: the credential header is read only from an authenticated caller, and with OIDC off every caller is anonymous. |
 | an OAuth connection with an inert vault | Every grant it would store or read is refused. Grants are envelope-encrypted with the tenant DEK, and this is the one place the `autoVaultSecret` degrade-to-plaintext pattern is unacceptable — these are refresh tokens. |
+| a `MAILBOX` connection with `authorization.enabled=false` | Mailboxes linked before keep working, but no new one can be linked: linking needs an authenticated `eddi-admin`. The write boundary refuses such a connection with a **400**. |
+| a `MAILBOX` connection whose `authType` is not `OAUTH2_AUTHORIZATION_CODE` (only reachable past validation) | No mailbox can ever be linked to it. |
 | a first-release `OAUTH2_AUTHORIZATION_CODE` connection still bound to `SERVICE` | Validation runs on write only, so the document loads — and fails every call as "not connected", because the flow files its grant under the user who consented and a `SERVICE`-bound resolution looks under a principal nothing can create a grant for. Linking an account to it is refused too: `authorize` answers **400** naming the binding, before the user is sent to the provider's consent screen. Re-save it as `PER_USER`. |
 
 A connection whose `baseUrlAllowlist` sends its credential over plaintext `http://`
@@ -845,6 +851,69 @@ no way to revoke it. Unlinking must never be harder than linking was.
 
 ---
 
+## Dedicated mailboxes (`MAILBOX`)
+
+A Google Workspace **dedicated mailbox** (`support@company.com`) can only be read over IMAP
+with an authorization-code grant: somebody signs in to Google as that mailbox once. That
+somebody is an `eddi-admin` acting for the mailbox — not a person linking their own account —
+so it is its own binding rather than `PER_USER`. The setup is in
+[email-integration.md → Google Workspace](email-integration.md#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator).
+
+```
+POST /connections/{name}/mailbox-grants/authorize?returnTo=…  {"address": "support@company.com"}   → {"authorizationUrl": "…"}
+GET  /connections/callback?code=…&state=…                                                     (the same callback)
+GET  /connections/{name}/mailbox-grants                                                       → address, status, timestamps
+POST /connections/{name}/mailbox-grants/unlink                {"address": "support@company.com"}   → 204
+```
+
+All three are `eddi-admin` only, checked in code as well as by annotation. **There is one
+flow, not two**: the authorize route writes the same state row, PKCE verifier and nonce
+cookie a per-user link does, plus the mailbox address and a hash of the administrator's own
+`email` claim, and the one callback branches on the row. The row's principal stays the
+administrator — so erasing them withdraws a pending link like any other — while the grant is
+filed under **`mailbox:<normalised address>`**, a reserved principal no signed-in user, token
+claim or email identity can carry.
+
+Before anything is stored the callback checks two things, and refuses with a redirect error
+code otherwise (nothing stored, the state consumed):
+
+| Check | Refusal |
+| --- | --- |
+| **The account is the mailbox.** `oauth.accountCheck: google-gmail-profile` reads `GET https://gmail.googleapis.com/gmail/v1/users/me/profile` with the new token, through `OutboundHttp` with no redirect; its `emailAddress` must equal the address. The endpoint is a constant, never a document field, and the connection's `baseUrlAllowlist` must name `https://gmail.googleapis.com` — checked at save and again before the token is sent. | `mailbox_account_mismatch`, or `mailbox_account_unverified` when the profile could not be read |
+| **The mailbox is not the administrator's own** (their token's `email` claim). Checked at `authorize` too, answering **400** there. A token without an `email` claim skips this check; the account check still binds the grant to the requested address. | `mailbox_is_own` |
+
+The successful link writes an audit-ledger entry `connection.mailbox.link` (connection,
+address, administrator); an unlink writes `connection.mailbox.unlink`. The browser returns to
+`returnTo` with `?mailboxLinked=<connection>`.
+
+**What a mailbox grant can do.** Only the email channel's IMAP and SMTP login can spend it,
+through `ConnectionResolver.resolveMailboxAccessToken`, which takes the integration's own
+address and reads the grant filed under it. Every other entry point — `resolve` (httpcall
+headers, MCP, A2A, ingestion), `resolveForDiscovery`, `resolveAccessToken` (the system mailer)
+and `resolveBasicLogin` — refuses a `MAILBOX` connection with `UNSUPPORTED_PLACEMENT` before
+any token is fetched. A grant that reads and sends a whole mailbox is not a tool credential.
+
+**Refresh re-checks the account.** Every refresh that mints a new access token runs the
+account check before the token is used. A mismatch deletes the grant, logs `[SECURITY]`,
+counts `eddi.connection.token.refresh.count{outcome="account_mismatch"}`, and the poll fails
+`NOT_CONNECTED`. A profile that cannot be read is not proof of anything: the grant and a
+rotated refresh token are kept, but the new access token is stored already expired, so it is
+never served unverified and the next request refreshes and checks again.
+
+**When the grant goes bad.** A missing grant and one Google rejected (`invalid_grant`, so the
+grant reads `REFRESH_FAILED`) both reach the mail poll as `NOT_CONNECTED`: the poll backs off,
+the integration's owners are told once a day (`mailbox_not_linked`), and the Manager marks the
+mailbox for re-linking. Re-linking replaces the grant.
+
+**What it is not.** Not a person's mailbox, and not domain-wide delegation. Deleting an email
+integration does not unlink its mailbox — the grant belongs to the mailbox. A GDPR erasure of
+the address as a sender leaves the grant alone, and an erasure of the principal
+`mailbox:<address>` is refused as a reserved principal: unlinking is a deliberate
+administrator action. Only `google-gmail-profile` exists as an account check today; the field
+is an enumeration so other providers can be added.
+
+---
+
 ## Refresh, and what happens when it fails
 
 Two conversations hitting an expired grant at once both call the token endpoint.
@@ -999,6 +1068,7 @@ resolves) — which fails the import rather than leaving a connection behind it.
 | `POST`, `PUT`, `DELETE` and the duplicate `POST /{id}` | `eddi-admin` only |
 | `GET /connectionstore/connections/jsonSchema` | `eddi-admin` only |
 | `POST /connections/{name}/authorize`, `GET /connections/mine`, `DELETE /connections/{name}/grant` | any authenticated user — see [Per-user accounts](#per-user-accounts) |
+| `POST /connections/{name}/mailbox-grants/authorize`, `POST …/mailbox-grants/unlink`, `GET /connections/{name}/mailbox-grants` | `eddi-admin` only — see [Dedicated mailboxes](#dedicated-mailboxes-mailbox) |
 
 Writes are admin-only because a connection is an egress channel plus a
 credential — the same class of capability as a vault write. The two reads admit
@@ -1128,8 +1198,8 @@ who can read the endpoint.
 | `eddi.connection.resolve.time` | `authType`, `binding` | — |
 | `eddi.connection.grant.missing.count` | `binding` | — (incremented alongside a `not_connected` resolve: the per-user "not connected yet" signal) |
 | `eddi.connection.oauth.authorize.count` | `outcome`, `authType` | `issued` |
-| `eddi.connection.oauth.callback.count` | `outcome`, `authType` | `success`, `bad_state`, `binding_mismatch`, `provider_error`, `exchange_failed` |
-| `eddi.connection.token.refresh.count` | `outcome` | `success`, `minted`, `invalid_grant`, `transient` |
+| `eddi.connection.oauth.callback.count` | `outcome`, `authType` | `success`, `bad_state`, `binding_mismatch`, `provider_error`, `exchange_failed`, and for mailbox links `account_mismatch`, `account_unverified`, `own_mailbox` |
+| `eddi.connection.token.refresh.count` | `outcome` | `success`, `minted`, `invalid_grant`, `transient`, `account_mismatch` (a refreshed mailbox grant of another account, deleted) |
 | `eddi.connection.token.refresh.claim.count` | `outcome` | `claimed`, `awaited`, `lease_released`, `lease_expired` |
 
 All seven carry the `eddi.` prefix (scraped as `eddi_connection_…_total`), which is

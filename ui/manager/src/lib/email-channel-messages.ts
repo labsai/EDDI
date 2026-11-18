@@ -112,6 +112,11 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.honorReplyTo",
         "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
       );
+    case "email.mailbox-not-linked":
+      return t(
+        "emailChannel.warning.mailboxNotLinked",
+        "Saved, but the mailbox is not linked to its dedicated-mailbox connection yet, so it cannot be read. An administrator links it under Connections → Mailbox grants.",
+      );
     default:
       return code;
   }
