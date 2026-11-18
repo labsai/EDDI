@@ -25,9 +25,9 @@ import java.util.Objects;
  * merging would leave one unit of the whole file.</li>
  * <li><b>Split the large.</b> A section with no parts that is estimated above
  * {@link SplitConfig#maxUnitTokens()} is cut at page boundaries into parts as
- * full as the budget allows. A trailing part below the minimum is merged into
- * the one before when the two fit together. A single page above the budget
- * becomes a part of its own, and the result says so.</li>
+ * full as the budget allows: a part ends only where the next page would not
+ * fit, so a short last part cannot be merged into the one before. A single page
+ * above the budget becomes a part of its own, and the result says so.</li>
  * <li><b>Cap the count.</b> While there are more leaf units than
  * {@link SplitConfig#maxUnits()}, the last leaf is merged into the leaf before
  * it, whatever that does to the budget; the result says so.</li>
@@ -286,15 +286,6 @@ public final class UnitBudgetFitter {
                 sum += pageTokens;
             }
             parts.add(new int[]{start, last});
-            if (parts.size() >= 2) {
-                int[] tail = parts.getLast();
-                int[] before = parts.get(parts.size() - 2);
-                if (tokens(tail[0], tail[1]) < config.minUnitTokens()
-                        && tokens(before[0], tail[1]) <= config.maxUnitTokens()) {
-                    before[1] = tail[1];
-                    parts.removeLast();
-                }
-            }
             return parts;
         }
 

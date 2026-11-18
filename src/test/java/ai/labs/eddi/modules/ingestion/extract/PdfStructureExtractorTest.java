@@ -136,6 +136,16 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @DisplayName("takes the children of a single top-level entry as the chapters")
+        void singleWrapper() {
+            DocumentManifest manifest = manifest(PdfFixtures.wrappedOutline(), unfitted(SplitStrategy.AUTO));
+
+            assertEquals(SplitStrategy.OUTLINE, manifest.splitUsed());
+            assertEquals("u1:1-2 u2:3-4 u3:5-6", shape(manifest));
+            assertEquals(List.of("Chapter 1", "Chapter 2", "Chapter 3"), titles(manifest));
+        }
+
+        @Test
         @DisplayName("treats an outline with one chapter as unusable")
         void singleChapter() {
             DocumentManifest manifest = manifest(PdfFixtures.chapters(5), unfitted(SplitStrategy.AUTO));

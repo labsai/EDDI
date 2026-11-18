@@ -136,8 +136,8 @@ class UnitBudgetFitterTest {
         }
 
         @Test
-        @DisplayName("merges a small last part into the one before when both fit the budget")
-        void mergesASmallTail() {
+        @DisplayName("fills each part before starting the next, so a short last page joins the part before")
+        void fillsEachPart() {
             int[] tokens = {900, 900, 900, 900, 100};
             Result result = UnitBudgetFitter.fit(List.of(Section.of("All", 1, 5)), tokens, config(2_000, 500, 60));
 
@@ -151,6 +151,18 @@ class UnitBudgetFitterTest {
             Result result = UnitBudgetFitter.fit(List.of(Section.of("All", 1, 3)), tokens, config(1_000, 0, 60));
 
             assertEquals("u1:1-3 u1.1:1-1 u1.2:2-2 u1.3:3-3", shape(result));
+            assertEquals(1, result.warnings().size(), result.warnings().toString());
+            assertTrue(result.warnings().get(0).startsWith("1 page is"), result.warnings().get(0));
+        }
+
+        @Test
+        @DisplayName("says so when a one-page unit is above the budget and cannot be cut")
+        void aOnePageUnitAboveTheBudget() {
+            var sections = List.of(Section.of("Small", 1, 1), Section.of("Dense", 2, 2));
+
+            Result result = UnitBudgetFitter.fit(sections, new int[]{100, 5_000}, config(1_000, 0, 60));
+
+            assertEquals("u1:1-1 u2:2-2", shape(result));
             assertEquals(1, result.warnings().size(), result.warnings().toString());
             assertTrue(result.warnings().get(0).startsWith("1 page is"), result.warnings().get(0));
         }

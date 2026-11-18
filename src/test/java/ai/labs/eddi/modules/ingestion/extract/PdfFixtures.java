@@ -271,6 +271,22 @@ public final class PdfFixtures {
         });
     }
 
+    /**
+     * Six text pages under one top-level outline entry "Book" (page 1), with three
+     * chapters below it on pages 1, 3 and 5 — the common shape of an exported book.
+     */
+    public static byte[] wrappedOutline() {
+        return build(document -> {
+            List<PDPage> pages = addTextPages(document, 6);
+            PDDocumentOutline outline = outline(document);
+            PDOutlineItem book = item("Book", pages.get(0));
+            outline.addLast(book);
+            for (int c = 0; c < 3; c++) {
+                book.addLast(item("Chapter " + (c + 1), pages.get(c * 2)));
+            }
+        });
+    }
+
     /** The same document, loaded and saved again by PDFBox: different bytes. */
     public static byte[] resaved(byte[] pdf) {
         try (PDDocument document = Loader.loadPDF(pdf)) {
