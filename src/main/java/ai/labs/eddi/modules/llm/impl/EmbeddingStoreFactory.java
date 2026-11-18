@@ -436,10 +436,13 @@ public class EmbeddingStoreFactory {
      * the check pass for a secret the held store does not use.
      */
     public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
-        if (isInMemory(config) || binding == null) {
+        if (isInMemory(config)) {
             return;
         }
-        secretResolver.requireGranted(binding, access, "vector store '" + config.getStoreType() + "'");
+        // No recorded binding (the cache entry was invalidated before it could be read
+        // back) is never "nothing to check": the current expansion is checked instead.
+        secretResolver.requireGranted(binding != null ? binding : expandedStoreParams(config), access,
+                "vector store '" + config.getStoreType() + "'");
     }
 
     /**

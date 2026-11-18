@@ -1142,6 +1142,10 @@ public class IngestionPipeline {
             // What the store was built with, read from the factory's own cache key: a
             // second expansion could differ from the one the store's credential came from.
             storeBinding = embeddingStoreFactory.bindingOf(store);
+            if (storeBinding == null) {
+                // Invalidated between the lookup and here: the current expansion, never none.
+                storeBinding = embeddingStoreFactory.credentialBinding(knowledgeBase);
+            }
         }
 
         private EmbeddingModel model() {
@@ -1150,6 +1154,9 @@ public class IngestionPipeline {
                 // embeds a document differently from a query, and gets to know which.
                 model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
                 modelBinding = embeddingModelFactory.bindingOf(model);
+                if (modelBinding == null) {
+                    modelBinding = embeddingModelFactory.credentialBinding(knowledgeBase);
+                }
             } else {
                 embeddingModelFactory.requireGranted(knowledgeBase, modelBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }

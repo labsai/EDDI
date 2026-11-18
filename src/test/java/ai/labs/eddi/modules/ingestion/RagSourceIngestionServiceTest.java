@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.modules.ingestion.files.InMemoryIngestedFileStore;
@@ -1034,6 +1035,20 @@ class RagSourceIngestionServiceTest {
             // to is no longer in the configuration.
             verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
             assertTrue(fileStore.list(keyOf(source)).isEmpty());
+        }
+
+        @Test
+        @DisplayName("a cleanup the vault grant refuses keeps the files, since the chunks they produced are still there (#1179)")
+        void refusedCleanupKeepsTheFiles() {
+            var source = uploadSource("src-files");
+            fileStore.store(keyOf(source), "handbook.pdf", "application/pdf", "x".getBytes(UTF_8));
+            // The check before the save passed; the cleanup's own store lookup refuses.
+            when(pipeline.forgetSource(eq(KB_ID), any(), any()))
+                    .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"));
+
+            service.discardRemovedSources(KB_ID, knowledgeBase(source), knowledgeBase());
+
+            assertEquals(1, fileStore.list(keyOf(source)).size(), "deleting them would strand chunks nothing lists");
         }
 
         @Test

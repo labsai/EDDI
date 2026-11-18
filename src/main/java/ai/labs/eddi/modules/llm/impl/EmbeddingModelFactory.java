@@ -217,10 +217,10 @@ public class EmbeddingModelFactory {
      * {@link #credentialBinding}.
      */
     public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
-        if (binding == null) {
-            return;
-        }
-        secretResolver.requireGranted(binding, access, "embedding model '" + config.getEmbeddingProvider() + "'");
+        // No recorded binding (the cache entry was invalidated before it could be read
+        // back) is never "nothing to check": the current expansion is checked instead.
+        secretResolver.requireGranted(binding != null ? binding : credentialBinding(config), access,
+                "embedding model '" + config.getEmbeddingProvider() + "'");
     }
 
     private EmbeddingModel build(RagConfiguration config, Map<String, String> expandedParams, EmbeddingInputType inputType, SecretAccess access) {

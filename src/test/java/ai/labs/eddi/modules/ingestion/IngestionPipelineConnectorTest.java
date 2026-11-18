@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -229,6 +232,42 @@ class IngestionPipelineConnectorTest {
         // key-a.
         assertEquals(1, report.documentsIngested());
         assertTrue(String.valueOf(report.message()).contains("key-a"), report.message());
+    }
+
+    @Test
+    @DisplayName("a held store whose binding could not be read back is checked against the current expansion, never skipped")
+    void missingBindingFallsBackToTheCurrentExpansion() {
+        Map<String, String> current = Map.of("password", "${vault:store-key}");
+        when(storeFactory.bindingOf(any())).thenReturn(null);
+        when(storeFactory.credentialBinding(any())).thenReturn(current);
+        doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                .when(storeFactory).requireGranted(any(RagConfiguration.class), eq(current), any());
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+
+        IngestionReport report = run(connector);
+
+        assertEquals(0, report.documentsIngested());
+        assertTrue(String.valueOf(report.message()).contains("store-key"), report.message());
+    }
+
+    @Test
+    @DisplayName("a grant narrowed while addAll runs stops the delete that follows it")
+    void refusalAfterAddAllStopsTheDelete() {
+        Map<String, String> builtWith = Map.of("password", "${vault:store-key}");
+        when(storeFactory.bindingOf(any())).thenReturn(builtWith);
+        // The re-checks before embedding and before addAll pass; the one before
+        // removeAll, after the vectors were added, refuses.
+        doNothing().doNothing().doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                .when(storeFactory).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+
+        IngestionReport report = run(connector);
+
+        assertTrue(String.valueOf(report.message()).contains("store-key"), report.message());
+        assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "addAll ran before the refusal");
+        verify(storeFactory, times(3)).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
     }
 
     @Test
