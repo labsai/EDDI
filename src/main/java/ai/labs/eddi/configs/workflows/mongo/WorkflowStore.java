@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.workflows.mongo;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.ResourceUtilities;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
+import ai.labs.eddi.configs.workflows.WorkflowConfigSaveValidator;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -72,6 +73,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     @Override
     public IResourceStore.IResourceId create(WorkflowConfiguration workflowConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        WorkflowConfigSaveValidator.validate(workflowConfiguration);
         return super.create(workflowConfiguration);
     }
 
@@ -80,6 +82,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     public Integer update(String id, Integer version, WorkflowConfiguration workflowConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        WorkflowConfigSaveValidator.validate(workflowConfiguration);
         return super.update(id, version, workflowConfiguration);
     }
 
