@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.MandatoryApprovals;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
@@ -645,8 +646,7 @@ class ToolLoopRunner {
                             refuseExhaustedGatedCalls(
                                     admitted.isEmpty()
                                             ? new ToolApprovalGate.GateResult(List.of(), List.of(), Map.of())
-                                            : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                                    effectiveToolApprovals, clearedCalls, setup.mandatoryApprovalRules()),
+                                            : classifyAdmitted(admitted, toolSources, setup, effectiveToolApprovals, clearedCalls),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
                     // A mandatory call this conversation cannot pause for is refused here,
@@ -1209,6 +1209,20 @@ class ToolLoopRunner {
             });
         }
         return new Screened(screenedGate, memoised);
+    }
+
+    /**
+     * Classifies the admitted calls. A turn whose tool sources attached no
+     * mandatory-approval rule takes the pattern-only overload, which is what the
+     * rule-aware one does for an empty rule list anyway.
+     */
+    private ToolApprovalGate.GateResult classifyAdmitted(List<ToolExecutionRequest> admitted, Map<String, String> toolSources,
+                                                         AgentOrchestrator.ToolSetup setup, ToolApprovalsConfig effectiveToolApprovals,
+                                                         ClearedToolCalls clearedCalls) {
+        List<MandatoryApprovalRule> rules = setup.mandatoryApprovalRules();
+        return rules.isEmpty()
+                ? toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(), effectiveToolApprovals, clearedCalls)
+                : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(), effectiveToolApprovals, clearedCalls, rules);
     }
 
     /**
