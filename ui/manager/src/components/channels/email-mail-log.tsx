@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
+import { useQueryClient } from "@tanstack/react-query";
 import { Inbox, Search } from "lucide-react";
 import { Badge, Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
@@ -152,9 +153,23 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   // access again (a cached list under another filter is not that). Other
   // failures (network, a failed next page) keep what is already shown.
   const [deniedAt, setDeniedAt] = useState<number | null>(null);
+  // Watch every mail-log query of this integration, not only the selected one: a
+  // request still in flight when the filter changed can come back 403 after its
+  // query is no longer on screen, and that denial counts all the same.
+  const queryClient = useQueryClient();
   useEffect(() => {
-    if (isApiError(log.error) && log.error.status === 403) setDeniedAt(log.errorUpdatedAt);
-  }, [log.error, log.errorUpdatedAt]);
+    const prefix = JSON.stringify(["channels", channelId, "email-log"]).slice(0, -1);
+    const noteDenial = (error: unknown, at: number) => {
+      if (isApiError(error) && error.status === 403) setDeniedAt((prev) => (prev === null || at > prev ? at : prev));
+    };
+    for (const query of queryClient.getQueryCache().getAll()) {
+      if (JSON.stringify(query.queryKey).startsWith(prefix)) noteDenial(query.state.error, query.state.errorUpdatedAt);
+    }
+    return queryClient.getQueryCache().subscribe((event) => {
+      if (event.type !== "updated" || !JSON.stringify(event.query.queryKey).startsWith(prefix)) return;
+      noteDenial(event.query.state.error, event.query.state.errorUpdatedAt);
+    });
+  }, [queryClient, channelId]);
   const accessConfirmed = deniedAt !== null && log.isSuccess && !log.isError && log.dataUpdatedAt > deniedAt;
   // A read newer than the denial confirms access: lift it for every filter, so a
   // list cached before it shows again (and a later network error keeps it).

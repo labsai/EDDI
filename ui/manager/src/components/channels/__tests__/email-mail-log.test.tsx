@@ -111,11 +111,44 @@ describe("EmailMailLog", () => {
     await userEvent.click(screen.getByTestId("error-state-retry"));
     expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
 
-    // ...so the list cached before the 403 shows again, even if its refetch fails.
+    // ...so the list cached before the 403 shows again, even once its refetch fails.
     mode = "down";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the network error has arrived
+    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
     expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
+  });
+
+  it("counts a 403 that arrives after the filter has already changed", async () => {
+    let refusedFilter: (() => void) | null = null;
+    let listDown = false;
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", async ({ request }) => {
+        if (new URL(request.url).searchParams.has("state")) {
+          await new Promise<void>((resolve) => {
+            refusedFilter = resolve;
+          });
+          return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        }
+        if (listDown) return HttpResponse.error();
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "all" }], nextCursor: null });
+      }),
+    );
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+
+    // A filtered request goes out and is still pending when the user goes back.
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    await waitFor(() => expect(refusedFilter).not.toBeNull());
+    listDown = true;
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the list's refetch failed (network)
+    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+
+    // The off-screen request now comes back 403: the cached rows must go.
+    refusedFilter!();
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
   });
 
   it("loads the next page with the cursor the server returned", async () => {
