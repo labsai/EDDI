@@ -37,8 +37,9 @@ existing mailbox (Exchange Online, Microsoft 365, any IMAP host), like a mail cl
 Credentials never sit in the integration. It names an EDDI [connection](connections.md), and the connection's
 `baseUrlAllowlist` must name the mailbox server's IMAP origin — `imaps://<host>` (port 993) or `imap://<host>:143`
 (STARTTLS). An `https` entry for the same host does not cover it, so a token allowed to call an HTTP API is not
-thereby allowed to log in to a mailbox. The connection must be bound `SERVICE`: a poll runs as no verified user, so a
-`PER_USER` connection is refused at save time.
+thereby allowed to log in to a mailbox. The connection must be bound `SERVICE` — or `MAILBOX` for a
+[Google Workspace dedicated mailbox](#google-workspace-a-dedicated-mailbox-linked-once-by-an-administrator): a poll
+runs as no verified user, so a `PER_USER` connection is refused at save time.
 
 #### Exchange Online (OAuth client credentials)
 
@@ -139,7 +140,7 @@ connection is refused at save (400) while `authorization.enabled=false`.
    nothing is stored.
 6. **Integration:** `connection: gws-support-mailbox`, `host: imap.gmail.com`, `address` the linked mailbox; in
    conversation mode `smtpHost: smtp.gmail.com`, `smtpPort: 465`. `processedAction` `move:<folder>` is the safer choice
-   until Gmail's handling of the `$EddiProcessed` keyword is verified (see [Limits](#limits-of-this-phase)).
+   until Gmail's handling of the `$EddiProcessed` keyword is verified.
 
 **Saving before linking is allowed:** the save answers with the warning `email.mailbox-not-linked`, and every poll fails
 with category `NOT_CONNECTED` (backing off) until the mailbox is linked. The same happens when Google rejects the

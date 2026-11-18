@@ -88,10 +88,11 @@ public class MailboxGrants {
     }
 
     /**
-     * Every mailbox grant of one connection, by address. Filtered from the tenant's
-     * grants rather than read by a store query of its own: a connection holds a
-     * handful of mailboxes, and a second query in both store twins would be one
-     * more thing to keep in step.
+     * Every mailbox grant of one connection, by address. Filtered from all of the
+     * tenant's grants (per-user ones included) rather than read by a store query of
+     * its own: this backs an admin listing, not a hot path, and a second query in
+     * both store twins would be one more thing to keep in step. Add one if a tenant
+     * ever holds enough grants for this read to matter.
      */
     public List<ConnectionGrant> list(String connectionName) {
         return grantStore.findByTenant(ConnectionReference.DEFAULT_TENANT).stream()

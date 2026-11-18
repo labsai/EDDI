@@ -190,7 +190,19 @@ export function CreateConnectionDialog({
    * the binding refuses it.
    */
   const changeBinding = (binding: Binding) =>
-    setDraft((prev) => ({ ...prev, binding }));
+    setDraft((prev) => ({
+      ...prev,
+      binding,
+      // A dedicated-mailbox connection needs its account check; the only one
+      // there is is the default. Other bindings must not carry one.
+      oauth: prev.oauth
+        ? {
+            ...prev.oauth,
+            accountCheck:
+              binding === "MAILBOX" ? (prev.oauth.accountCheck ?? "google-gmail-profile") : null,
+          }
+        : prev.oauth,
+    }));
 
   const patchStatic = (patch: Partial<StaticAuth>) =>
     setDraft((prev) => ({
