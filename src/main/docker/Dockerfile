@@ -108,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:e898c4ad1c8cfb5afee86917906356226956813733ebc27bbf33f762bb3b8f08 AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:dab1be80efb4b8b6e97a314715b367bc9c5ebea3f9c1233b9023910423c45f6c AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -119,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:e898c4ad1c8cfb5afee86917906356226956813733ebc27bbf33f762bb3b8f08
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:dab1be80efb4b8b6e97a314715b367bc9c5ebea3f9c1233b9023910423c45f6c
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.
@@ -144,7 +144,7 @@ LABEL name="labsai/eddi" \
       Ollama, Mistral, Azure OpenAI, Amazon Bedrock, and more) via a unified REST API. \
       Built on Quarkus for cloud-native, high-performance operation." \
       maintainer="LABS.AI GmbH <contact@labs.ai>" \
-      url="https://eddi.labs.ai" \
+      url="https://eddi.technology" \
       org.opencontainers.image.source="https://github.com/labsai/EDDI" \
       org.opencontainers.image.revision="${EDDI_COMMIT}" \
       io.k8s.display-name="EDDI AI Platform" \

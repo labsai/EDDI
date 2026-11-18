@@ -83,8 +83,9 @@ public final class SuspendedGate {
      *            the effective config, or null for none
      * @param suspended
      *            suspended pattern to its category, in a stable order
-     * @return {@code cfg} itself when nothing is suspended, or when it already
-     *         carries an overlay
+     * @return {@code cfg} itself when nothing is suspended, when it is
+     *         {@linkplain ToolApprovalsConfig#isUndetermined undetermined}, or when
+     *         it already carries an overlay
      */
     public static ToolApprovalsConfig overlay(ToolApprovalsConfig cfg, Map<String, String> suspended) {
         if (suspended == null || suspended.isEmpty() || ToolApprovalsConfig.isUndetermined(cfg) || !none(cfg)) {

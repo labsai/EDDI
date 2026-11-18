@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Globe, Loader2, AlertCircle, Eye, EyeOff, CheckCircle2 } from "lucide-react";
 import { useListRemoteAgents } from "@/hooks/use-backup";
 import type { DocumentDescriptor } from "@/lib/api/backup";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 
 interface SyncConfigPanelProps {
   url: string;

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useState } from "react";
 import { screen, within, fireEvent, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import {
   ApiCallsEditor,
   PropertyInstructionsEditor,
@@ -13,7 +13,7 @@ import {
   type OutputBuildingInstruction,
   type QuickRepliesBuildingInstruction,
   type RetryApiCallInstruction,
-} from "@/components/editors/apicalls-editor";
+} from "@eddi/app-kit/components/editors/apicalls-editor";
 
 // Mock monaco
 vi.mock("@monaco-editor/react", () => ({
@@ -32,7 +32,7 @@ vi.mock("@monaco-editor/react", () => ({
 // read before its own declaration runs — `mockDiscoverEndpoints` escapes that
 // only because the arrow function defers the read.
 const mockDiscoverEndpoints = vi.fn();
-vi.mock("@/lib/api/openapi-discover", () => ({
+vi.mock("@eddi/app-kit/lib/api/openapi-discover", () => ({
   discoverEndpoints: (...args: unknown[]) => mockDiscoverEndpoints(...args),
   LiteralCredentialError: class LiteralCredentialError extends Error {
     constructor() {
@@ -574,7 +574,7 @@ describe("ApiCallsEditor", () => {
     // sentence to show. Without this branch the catch fell through to "Could
     // not parse OpenAPI spec", which blames the spec for the user's paste.
     const user = userEvent.setup();
-    const { LiteralCredentialError } = await import("@/lib/api/openapi-discover");
+    const { LiteralCredentialError } = await import("@eddi/app-kit/lib/api/openapi-discover");
     mockDiscoverEndpoints.mockRejectedValue(new LiteralCredentialError());
     renderWithProviders(<ApiCallsEditor data={emptyConfig} onChange={onChange} />);
 

@@ -17,7 +17,7 @@ import {
   resyncCaches,
   type ActivityEvent,
   type DeadLetterFilter,
-} from "@/lib/api/cluster";
+} from "@eddi/app-kit/lib/api/cluster";
 
 export const CLUSTER_KEYS = {
   all: ["cluster"] as const,

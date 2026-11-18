@@ -348,6 +348,20 @@ public interface IGroupConversationService {
     }
 
     /**
+     * A group HITL decision named a plan ({@code HitlDecision.planHash}) that is
+     * not the current pause's: what is awaiting approval is not what the reviewer
+     * saw. A {@link GroupPauseMismatchException}, so it is a conflict everywhere a
+     * changed pause is.
+     *
+     * @since 6.8.0
+     */
+    class GroupPlanMismatchException extends GroupPauseMismatchException {
+        public GroupPlanMismatchException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * The discussion has already spent its configured
      * {@code protocol.maxCostPerDiscussion} — a further paid member turn (a
      * follow-up) is refused rather than run over budget.

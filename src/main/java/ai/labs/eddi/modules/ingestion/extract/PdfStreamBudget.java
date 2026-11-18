@@ -172,9 +172,9 @@ public final class PdfStreamBudget {
     }
 
     /**
-     * Decodes the chain with PDFBox's own filters, keeping at most {@code cap + 1}
+     * Decodes the chain with PDFBox's own filters, keeping at most {@code cap}
      * bytes between stages and none after the last, and returns how many bytes the
-     * last stage produced — or the first stage's size that passed the cap.
+     * last stage produced — or the count of the first stage that passed the cap.
      */
     private static long decodedSize(byte[] pdf, int start, int end, List<String> filters, long cap,
                                     Instant deadline) {

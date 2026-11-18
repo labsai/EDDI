@@ -68,7 +68,7 @@ public class AgentTestRunRecovery {
 
     private static final Logger LOGGER = Logger.getLogger(AgentTestRunRecovery.class);
 
-    /** Runs closed per startup; anything beyond is closed at the next one. */
+    /** Runs closed per sweep; anything beyond is closed at the next one. */
     static final int MAX_RUNS_PER_SWEEP = 500;
 
     static final String ABORT_REASON = "The node executing this run stopped before it finished (restart or crash); "

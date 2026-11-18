@@ -8,7 +8,7 @@ import {
   subscriberCount,
   isStreamOpen,
 } from "@/hooks/session-log-store";
-import * as logsApi from "@/lib/api/logs";
+import * as logsApi from "@eddi/app-kit/lib/api/logs";
 
 /*
  * Read at module scope, which is the only moment that can answer the question.
@@ -19,8 +19,8 @@ import * as logsApi from "@/lib/api/logs";
 const STREAM_OPEN_AT_IMPORT = isStreamOpen();
 const SUBSCRIBERS_AT_IMPORT = subscriberCount();
 
-vi.mock("@/lib/api/logs", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/api/logs")>();
+vi.mock("@eddi/app-kit/lib/api/logs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/lib/api/logs")>();
   return {
     ...actual,
     getRecentLogs: vi.fn().mockResolvedValue([]),
@@ -190,7 +190,7 @@ describe("useSessionLogStore", () => {
   });
 
   it("seeds from REST API on first connect when entries are empty", async () => {
-    const { getRecentLogs } = await import("@/lib/api/logs");
+    const { getRecentLogs } = await import("@eddi/app-kit/lib/api/logs");
     const mockGetRecentLogs = vi.mocked(getRecentLogs);
     mockGetRecentLogs.mockResolvedValueOnce([
       {
@@ -227,7 +227,7 @@ describe("useSessionLogStore", () => {
   });
 
   it("deduplicates entries during REST seed merge", async () => {
-    const { getRecentLogs } = await import("@/lib/api/logs");
+    const { getRecentLogs } = await import("@eddi/app-kit/lib/api/logs");
     const mockGetRecentLogs = vi.mocked(getRecentLogs);
     const sharedEntry = {
       timestamp: 2000,
@@ -267,7 +267,7 @@ describe("useSessionLogStore", () => {
   });
 
   it("sets seeded = true even if REST seed fails", async () => {
-    const { getRecentLogs } = await import("@/lib/api/logs");
+    const { getRecentLogs } = await import("@eddi/app-kit/lib/api/logs");
     const mockGetRecentLogs = vi.mocked(getRecentLogs);
     mockGetRecentLogs.mockRejectedValueOnce(new Error("Network error"));
 
@@ -291,7 +291,7 @@ describe("useSessionLogStore", () => {
   // (last viewer left and came back) or a reconnect after a drop must re-fetch
   // the ring buffer — seeding only an EMPTY buffer left a silent gap.
   it("reseeds on every open and fills the gap without duplicating what is shown", async () => {
-    const { getRecentLogs } = await import("@/lib/api/logs");
+    const { getRecentLogs } = await import("@eddi/app-kit/lib/api/logs");
     const mockGetRecentLogs = vi.mocked(getRecentLogs);
     const shown = logLine(5000, "Pre-existing");
     const missed = logLine(6000, "Logged while the stream was closed");
@@ -342,7 +342,7 @@ describe("useSessionLogStore", () => {
   // A retry loop emits identical lines in one millisecond. De-duplicating by
   // key alone collapsed them to one; only the REPLAYED copies are duplicates.
   it("keeps genuinely repeated lines while dropping their replay", async () => {
-    const { getRecentLogs } = await import("@/lib/api/logs");
+    const { getRecentLogs } = await import("@eddi/app-kit/lib/api/logs");
     const twin = logLine(7000, "retrying");
     vi.mocked(getRecentLogs).mockResolvedValueOnce([twin, { ...twin }]);
 

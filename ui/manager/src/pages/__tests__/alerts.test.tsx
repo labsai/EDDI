@@ -3,15 +3,21 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes, useSearchParams } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
-import { createTestQueryClient, renderPage } from "@/test/test-utils";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { createTestQueryClient, renderPage } from "@eddi/app-kit/test/test-utils";
+import { ThemeProvider } from "@eddi/ui";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { Sidebar } from "@/components/layout/sidebar";
-import { renderWithProviders } from "@/test/test-utils";
-import { FAILING_CHANNEL, alertEventFixtures } from "@/test/mocks/alert-handlers";
-import type { AlertRule } from "@/lib/api/alerts";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { FAILING_CHANNEL, alertEventFixtures } from "@eddi/app-kit/test/mocks/alert-handlers";
+import type { AlertRule } from "@eddi/app-kit/lib/api/alerts";
 import { AlertsPage } from "../alerts";
+
+vi.mock("sonner", async () => {
+  const actual = await vi.importActual<typeof import("sonner")>("sonner");
+  return { ...actual, toast: { ...actual.toast, error: vi.fn(), success: vi.fn() } };
+});
+import { toast } from "sonner";
 
 const editorAuth: AuthContextValue = {
   authenticated: true,
@@ -234,6 +240,20 @@ describe("AlertsPage — rules", () => {
     expect(sent!.condition.errorKinds).toEqual(["TURN_ERROR", "TURN_DEADLINE", "COST_CEILING"]);
     expect(sent!.delivery).toEqual([{ type: "SLACK", channelId: "C0123ABC" }]);
     expect(sent!.throttle).toEqual({ windowMinutes: 60, maxPerWindow: 10 });
+  });
+
+  it("shows the server's sentence when the save is refused for the per-agent rule limit", async () => {
+    const message = "There are already 50 alert rules over every agent; at most 50 (eddi.alerts.max-rules-per-agent)";
+    server.use(
+      http.post("*/alerts/rules", () => HttpResponse.json({ error: "RULE_LIMIT_REACHED", message }, { status: 409 })),
+    );
+    renderAlerts("/manage/alerts?tab=rules");
+    fireEvent.click(await screen.findByTestId("alerts-new-rule"));
+    fireEvent.change(screen.getByTestId("alert-rule-name"), { target: { value: "Failing turns" } });
+    fireEvent.change(screen.getByTestId("alert-rule-source"), { target: { value: "CONVERSATION_ERROR" } });
+    fireEvent.click(screen.getByTestId("alert-rule-save"));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith(message));
+    expect(screen.getByTestId("alert-rule-editor")).toBeInTheDocument();
   });
 
   it("refuses a throttle out of range: inline error on the field, Save and Send test disabled", async () => {

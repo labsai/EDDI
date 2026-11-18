@@ -184,6 +184,14 @@ public class ConversationMemorySnapshot {
      * {@code approvalContext}. Cleared with the bookmark.
      */
     private RenderedApprovalContext hitlApprovalContext;
+    /**
+     * The plan hash of the current pause (see {@code HitlPlanHash}): what an
+     * approval carries to bind to exactly this plan. {@code null} for a pause
+     * committed before plan hashing existed. Cleared with the bookmark.
+     *
+     * @since 6.8.0
+     */
+    private String hitlPlanHash;
     private List<ConversationOutput> conversationOutputs = new LinkedList<>();
     private Map<String, Property> conversationProperties = new LinkedHashMap<>();
     /**
@@ -236,11 +244,12 @@ public class ConversationMemorySnapshot {
      * exactly.
      * <p>
      * Derived from the declared instance fields rather than maintained by hand, so
-     * a new field is covered the moment it is added. The two Jackson renames are
-     * mapped explicitly; {@code ConversationMemorySnapshotTopLevelKeysTest} fails
-     * if a future {@code @JsonProperty} introduces a third one, because
-     * under-inclusion here is what would silently stop a field being cleared.
-     * Over-inclusion is harmless: {@code $unset} of an absent key is a no-op.
+     * a new field is covered the moment it is added. The four Jackson renames
+     * ({@code _id}, {@code _rev}, {@code _histRev}, {@code _fence}) are mapped
+     * explicitly; {@code ConversationMemorySnapshotTopLevelKeysTest} fails if a
+     * future {@code @JsonProperty} introduces a fifth one, because under-inclusion
+     * here is what would silently stop a field being cleared. Over-inclusion is
+     * harmless: {@code $unset} of an absent key is a no-op.
      */
     public static final Set<String> TOP_LEVEL_KEYS = computeTopLevelKeys();
 
@@ -712,6 +721,14 @@ public class ConversationMemorySnapshot {
         this.hitlApprovalContext = hitlApprovalContext;
     }
 
+    public String getHitlPlanHash() {
+        return hitlPlanHash;
+    }
+
+    public void setHitlPlanHash(String hitlPlanHash) {
+        this.hitlPlanHash = hitlPlanHash;
+    }
+
     public List<ConversationOutput> getConversationOutputs() {
         return conversationOutputs;
     }
@@ -769,10 +786,6 @@ public class ConversationMemorySnapshot {
         this.redoCache = redoCache;
     }
 
-    /**
-     * How many steps the document held when this conversation was loaded. See
-     * {@link #persistedStepCount}.
-     */
     @JsonProperty("_fence")
     public Long getFence() {
         return fence;
@@ -807,6 +820,10 @@ public class ConversationMemorySnapshot {
         return fence == null ? fenceToken : Math.max(fence, fenceToken);
     }
 
+    /**
+     * How many steps the document held when this conversation was loaded. See
+     * {@link #persistedStepCount}.
+     */
     @JsonIgnore
     public int getPersistedStepCount() {
         return persistedStepCount;

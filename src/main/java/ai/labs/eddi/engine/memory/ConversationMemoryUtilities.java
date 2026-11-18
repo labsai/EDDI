@@ -125,6 +125,7 @@ public class ConversationMemoryUtilities {
         snapshot.setHitlPauseType(conversationMemory.getHitlPauseType());
         snapshot.setHitlPendingToolCalls(conversationMemory.getHitlPendingToolCalls());
         snapshot.setHitlApprovalContext(conversationMemory.getHitlApprovalContext());
+        snapshot.setHitlPlanHash(conversationMemory.getHitlPlanHash());
         // The continuation outbox record goes into the SAME document write as the step
         // that decided it, so a crash after the commit cannot lose the decision. It is
         // derived from the current step, never carried blindly: a later turn that did
@@ -195,6 +196,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPauseType(snapshot.getHitlPauseType());
         conversationMemory.setHitlPendingToolCalls(snapshot.getHitlPendingToolCalls());
         conversationMemory.setHitlApprovalContext(snapshot.getHitlApprovalContext());
+        conversationMemory.setHitlPlanHash(snapshot.getHitlPlanHash());
         conversationMemory.setPendingContinuation(snapshot.getPendingContinuation());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
@@ -258,12 +260,6 @@ public class ConversationMemoryUtilities {
         return !MemoryKeys.AUDIT_TOKEN_USAGE.equals(key) && SecretRedactionFilter.isCredentialFieldName(key);
     }
 
-    /**
-     * Whether a step/output key must be withheld from the caller-controlled
-     * {@code returnDetailed} projection. Covers audit records (compiled system
-     * prompts), raw model traces and raw error bodies — none of which are meant for
-     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
-     */
     /**
      * Sums {@code audit:cost} over every step of the conversation. The value is per
      * step — {@code LlmTask} accumulates it on the current step, and each new step
@@ -353,6 +349,12 @@ public class ConversationMemoryUtilities {
         return AUDIT_COST.equals(key) || AUDIT_DISCARDED_COST.equals(key);
     }
 
+    /**
+     * Whether a step/output key must be withheld from the caller-controlled
+     * {@code returnDetailed} projection. Covers audit records (compiled system
+     * prompts), raw model traces and raw error bodies — none of which are meant for
+     * a chatting user. Admin/owner debugging uses the gated raw endpoint instead.
+     */
     private static boolean isSensitiveDetailedKey(String key) {
         if (key == null) {
             return false;
@@ -616,8 +618,13 @@ public class ConversationMemoryUtilities {
         return newSnapshot;
     }
 
+    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
+    private static final String CONTEXT_OUTPUT_KEY = "context";
+    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
+
     /**
-     * Read-time masking of a turn the client sent with {@code secretInput}.
+     * Whether an output belongs to a secret turn. The projections use this to apply
+     * read-time masking of a turn the client sent with {@code secretInput}.
      * Conversation scrubs such a turn when it ends, but turns stored before that
      * scrub existed still hold the raw {@code input:initial} and the parser's
      * normalized copy in {@code input} / {@code input:normalized}. Every secret
@@ -630,9 +637,6 @@ public class ConversationMemoryUtilities {
      * Conversation properties and their step mirrors are left as they are. The
      * stored document itself is not changed.
      */
-    private static final String SECRET_INPUT_CONTEXT_KEY = "secretInput";
-    private static final String CONTEXT_OUTPUT_KEY = "context";
-    private static final String CONTEXT_SECRET_INPUT_DATUM = CONTEXT_OUTPUT_KEY + ":" + SECRET_INPUT_CONTEXT_KEY;
 
     static boolean isSecretTurnOutput(Map<String, Object> conversationOutput) {
         return conversationOutput != null && conversationOutput.get(CONTEXT_OUTPUT_KEY) instanceof Map<?, ?> context
@@ -1106,6 +1110,10 @@ public class ConversationMemoryUtilities {
         // which reads the persisted document. Unlike requestFingerprint no boolean is
         // derived from it, so it is dropped rather than replaced with a marker.
         batch.setFingerprint(null);
+        // The plan nonce is the secret that keeps the published plan hash from being
+        // an offline guessing oracle over the raw arguments (see HitlPlanHash) —
+        // served next to the hash it would undo exactly that.
+        batch.setPlanNonce(null);
         if (batch.getCalls() == null) {
             return snapshot;
         }

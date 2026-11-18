@@ -56,7 +56,9 @@ class AgentCompatibilityLintTest {
         var json = mock(IJsonSerialization.class);
         when(json.serialize(any())).thenAnswer(inv -> mapper.writeValueAsString(inv.getArgument(0)));
         when(json.deserialize(anyString(), eq(Map.class))).thenAnswer(inv -> mapper.readValue((String) inv.getArgument(0), Map.class));
-        lint = new AgentCompatibilityLint(agentStore, workflowStore, resources, new TemplatingEngine(Engine.builder().addDefaults().build()),
+        lint = new AgentCompatibilityLint(agentStore, workflowStore, resources,
+                new TemplatingEngine(
+                        Engine.builder().addDefaults().build()),
                 json);
 
         var agent = new AgentConfiguration();
@@ -106,6 +108,42 @@ class AgentCompatibilityLintTest {
         workflowWith(LLM_URI);
         when(resources.getResource(URI.create(LLM_URI), LlmConfiguration.class))
                 .thenReturn(llm("openai", Map.of("systemMessage", "{userInfo.m : 'x') : 'y')}")));
+
+        List<String> warnings = lint.lint(AGENT, 1);
+
+        assertEquals(1, warnings.size(), warnings.toString());
+        assertTrue(warnings.get(0).startsWith("[TEMPLATE_DOES_NOT_PARSE] llm task 'chat'.parameters.systemMessage"), warnings.get(0));
+    }
+
+    @Test
+    @DisplayName("a prompt that mentions a vault reference is checked as it renders, so it is not reported")
+    void vaultMentionInPromptIsNotReported() throws Exception {
+        // The Platform Operator's prompt documents the syntax; LlmTask escapes the
+        // mention before rendering, so every turn renders it. The lint parsed it
+        // raw and reported TEMPLATE_DOES_NOT_PARSE on every deploy.
+        workflowWith(LLM_URI);
+        when(resources.getResource(URI.create(LLM_URI), LlmConfiguration.class)).thenReturn(llm("openai",
+                Map.of("systemMessage", "Store keys as ${vault:key-name}, never in plain text. Hello {properties.name}")));
+
+        assertEquals(List.of(), lint.lint(AGENT, 1));
+    }
+
+    @Test
+    @DisplayName("a system prompt that documents a ${vault:...} reference renders at runtime and is not reported")
+    void promptMentioningVaultReferenceIsClean() throws Exception {
+        workflowWith(LLM_URI);
+        when(resources.getResource(URI.create(LLM_URI), LlmConfiguration.class))
+                .thenReturn(llm("openai", Map.of("systemMessage", "Store it as a `${vault:...}` reference. Hello {properties.name}")));
+
+        assertEquals(List.of(), lint.lint(AGENT, 1));
+    }
+
+    @Test
+    @DisplayName("a prompt with a vault mention AND a broken expression is still reported")
+    void vaultMentionDoesNotHideARealParseError() throws Exception {
+        workflowWith(LLM_URI);
+        when(resources.getResource(URI.create(LLM_URI), LlmConfiguration.class)).thenReturn(llm("openai",
+                Map.of("systemMessage", "Keys as ${vault:key-name}. forEach {pathToTargetArray (a dot path, required), maxItems}")));
 
         List<String> warnings = lint.lint(AGENT, 1);
 

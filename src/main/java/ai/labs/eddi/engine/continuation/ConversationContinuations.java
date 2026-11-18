@@ -26,6 +26,9 @@ import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.security.ClientContextGuard;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -179,6 +182,14 @@ public class ConversationContinuations {
     private final IConversationMemoryStore memoryStore;
     private final MeterRegistry meterRegistry;
     private final Clock clock;
+
+    /**
+     * Tells the owner's tabs when a job's last turn ran ({@code GET /me/events}).
+     * Field-injected so the constructors keep their signatures; {@code null} in
+     * tests that build this class by hand, which then announce nothing.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     @Inject
     public ConversationContinuations(IScheduleStore scheduleStore, IConversationMemoryStore memoryStore, MeterRegistry meterRegistry) {
@@ -418,6 +429,7 @@ public class ConversationContinuations {
                 // The last continuation turn of a job arms nothing: prune here, or the
                 // continuation before it would stay behind for good.
                 pruneUsedUp(conversationId);
+                announceFinished(conversationId, memory, step);
             }
             return false;
         }
@@ -449,7 +461,44 @@ public class ConversationContinuations {
             return true;
         } catch (Exception e) {
             refuse(REASON_SCHEDULE_FAILED, conversationId, "the schedule could not be written: " + e.getMessage());
+            // The job stops here as surely as at its limit: nothing will fire the next
+            // turn, so its owner hears that it ended, and why.
+            announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
             return false;
+        }
+    }
+
+    /**
+     * The job ended: this continuation turn committed and asks for no successor —
+     * it finished its work, reached its limit or its cost ceiling. Raises
+     * {@code job.finished} for the conversation's owner, with the refusal reason as
+     * its state when there is one ({@code limit}, {@code cost_ceiling}, …) and
+     * {@code done} otherwise. A next turn that was decided but whose schedule could
+     * not be written ends the job too, with state {@code schedule_failed}. Never
+     * throws.
+     */
+    private void announceFinished(String conversationId, IConversationMemory memory, IWritableConversationStep step) {
+        String reason;
+        try {
+            IData<Object> refused = step.getData(STEP_REFUSED);
+            reason = refused != null && refused.getResult() instanceof String r && !r.isBlank() ? r : null;
+        } catch (RuntimeException e) {
+            reason = null;
+        }
+        announceFinished(conversationId, memory, reason != null ? reason : "done");
+    }
+
+    private void announceFinished(String conversationId, IConversationMemory memory, String state) {
+        UserEventPublisher publisher = userEventPublisher;
+        if (publisher == null) {
+            return;
+        }
+        try {
+            publisher.publish(UserEvent.of(UserEvent.KIND_JOB_FINISHED).withSurface(UserEvent.SURFACE_REGULAR)
+                    .withConversation(conversationId, memory.getAgentId()).withJob(UserEvent.JOB_CONTINUATION, null).withState(state),
+                    UserEventAudience.principal(memory.getUserId()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not announce the end of the job of conversation %s: %s", sanitize(conversationId), e.getMessage());
         }
     }
 

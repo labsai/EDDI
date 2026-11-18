@@ -7,10 +7,10 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu";
-import { cn } from "@/lib/utils";
+} from "@eddi/app-kit/components/ui/dropdown-menu";
+import { cn } from "@eddi/app-kit/lib/utils";
 import { ALL_SPACES, useSpaces } from "@/hooks/use-spaces";
-import type { Ownership } from "@/lib/api/agents";
+import type { Ownership } from "@eddi/app-kit/lib/api/agents";
 
 /**
  * Chooses which workspace the listings are filtered to, whose resources they

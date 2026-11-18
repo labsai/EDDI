@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { type ReactNode } from "react";
 import {
   useConversationCosts,
-} from "@/hooks/use-tool-metrics";
+} from "@eddi/app-kit/hooks/use-tool-metrics";
 
 function createWrapper() {
   const queryClient = new QueryClient({

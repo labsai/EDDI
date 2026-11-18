@@ -40,8 +40,8 @@ import static com.mongodb.client.model.Filters.regex;
  * V6 Rename Migration — rewrites legacy eddi:// URIs, store paths, environment
  * values, and descriptor type fields across all MongoDB collections.
  * <p>
- * This migration is idempotent: it records completion in the migration_log
- * collection and will not re-run if already applied.
+ * This migration is idempotent: it records completion in the migration log
+ * store and will not re-run if already applied.
  * <p>
  * Controlled by the config property {@code eddi.migration.v6-rename.enabled}
  * (default: false). Set to true when migrating a v5 database to v6.
@@ -556,9 +556,11 @@ public class V6RenameMigration {
             }
 
             if (changed) {
-                var query = eq(ID_FIELD, doc.get(ID_FIELD));
-                collection.replaceOne(query, doc);
-                migrated++;
+                if (saveDocument(collection, doc, false)) {
+                    migrated++;
+                } else {
+                    failed++;
+                }
             }
         }
 
@@ -1591,7 +1593,7 @@ public class V6RenameMigration {
                 }
             }
 
-            // Also rewrite any URIs in the conversation memory
+            // Also rewrite any legacy eddi:// URIs inside the document
             Document uriRewritten = rewriteUrisInDocument(doc);
             changed = changed || uriRewritten != null;
 

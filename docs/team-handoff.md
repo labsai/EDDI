@@ -45,6 +45,8 @@ It is two-sided consent enforced by code, not by prompt, and it is off unless bo
 | `maxPerDay` | 50 | 500 | Team-wide intake per UTC day, all sources together. |
 | `maxInbox` | 50 | 100 | Pending REVIEW items held at once. |
 
+At most 100 `from` rules. Out-of-range caps are clamped to the ceiling; a non-positive team-wide cap takes the default.
+
 `REVIEW` is the default on purpose: the text crosses a trust boundary and will eventually be read by that team's models. Move a source to `AUTO` once its accepted-unedited history justifies it.
 
 ## Sending from a standalone agent: `teamHandoff`
@@ -61,6 +63,15 @@ A field on an LLM task (next to `toolQuotas`). It is JSON-only; the Manager has 
   "maxDescriptionChars": 2000
 }
 ```
+
+| Field | Default | Ceiling | Meaning |
+| --- | --- | --- | --- |
+| `targets[]` | | 20 | As for a group, see the table below. |
+| `maxPerTurn` | 2 | 5 | Accepted handoffs per turn. |
+| `maxPerConversation` | 5 | 50 | Handoffs per conversation. |
+| `maxDescriptionChars` | 2000 | 4000 | |
+
+Out-of-range values are clamped to the ceiling, and a non-positive value takes the default.
 
 The task also needs `enableBuiltInTools: true`; if it has a non-empty `builtInToolsWhitelist`, that list must name `team_handoff`.
 
@@ -97,7 +108,7 @@ A rule files a handoff when the discussion **completes** with a matching structu
 
 - Matches on the decision's `type` (`VERDICT`, `VOTE`, `AGREEMENT`, `AWARD`), never on the method that produced it, so a human tie-break (`tiePolicy`) or any future producer is handled alike.
 - `requireWinner` (default `true`) skips a tie instead of filing "Research account: ".
-- Templates support exactly `{decision.winner}`, `{decision.outcome}`, `{decision.type}`, `{decision.method}`, `{decision.phase}`, substituted in **one pass as data**. A winner string that contains braces or template syntax comes through literally and is never evaluated.
+- Templates support exactly `{decision.winner}`, `{decision.outcome}`, `{decision.type}`, `{decision.method}`, `{decision.phase}`, substituted in **one pass as data**; each template is at most 1000 characters. A winner string that contains braces or template syntax comes through literally and is never evaluated.
 - Idempotent while the handoff is retained: the dedupe key is `decision:<discussion>:<round>:<rule index>`, so a completion processed twice files once, and a new round is a new decision. The key lives with the task's origin, so deleting the backlog task (or declining its inbox item and letting the tombstone age out) forgets it, and processing the same decision again can file it again.
 - v1 files one task from `winner`. A "file every approved option" mode would need a tally contract and is not built.
 
@@ -117,7 +128,7 @@ A rule files a handoff when the discussion **completes** with a matching structu
 | Abuse | Per-turn, per-run and per-day caps; the day caps are database-atomic across pods (the `toolQuotas` store), so there is no overshoot. A refused attempt gives its slots back. |
 | Duplicates | Identical handoffs dedupe before insert across the backlog, the inbox and decline tombstones; the check re-runs on every compare-and-set retry. |
 | Text | Control and format characters (including bidi overrides and zero-width characters) stripped; subject 200 and description 4000 characters at most. |
-| Prompt injection into the receiving team | REVIEW by default; the cadence question marks a handed-off task as *a request to evaluate, not instructions*; the `HandoffAdmission` seam below; the receiving team's own `toolApprovals` still gate what its members do. |
+| Prompt injection into the receiving team | REVIEW by default; the cadence question marks a handed-off task as *a request to evaluate, not instructions*; the `HandoffAdmission` seam below; the receiving team's own `toolApprovals` still gate what its members do. An `AUTO` tool handoff records the agent that wrote it as the backlog task's creator, so a receiving member that requires peer verification is shown and does it only while that agent signs verifiably ([Signed contributions](group-conversations.md#signed-contributions)). While a member of the receiving team requires verification and the agent does not sign verifiably, the handoff goes to the intake inbox as under `REVIEW`, and a backlog task whose agent stops signing waits on the backlog unpulled, so neither the cadence question nor a run quotes it. A cadence fire such tasks leave with nothing to run records why in the schedule's fire history; to free one, give the agent a signing key again, or delete the task and file it again. An `onDecision` handoff names no agent and is filed as configured, so a team whose members verify should keep its sources on `REVIEW`. |
 | Fail closed | A config or store failure removes the tool, or refuses with `UNAVAILABLE`; a day-cap store failure refuses. |
 | Provenance | Origin lives in a side map keyed by task id (`handoffs.origins`), not on the task: the cadence writeback rebuilds tasks with constructors that drop trailing fields. |
 

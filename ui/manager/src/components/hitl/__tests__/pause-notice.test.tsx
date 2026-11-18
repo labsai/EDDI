@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { PauseNotice } from "@/components/hitl/pause-notice";
-import { getApprovalStatus, type ApprovalStatusSummary } from "@/lib/api/hitl";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { PauseNotice } from "@eddi/app-kit/components/hitl/pause-notice";
+import { getApprovalStatus, type ApprovalStatusSummary } from "@eddi/app-kit/lib/api/hitl";
 
-vi.mock("@/lib/api/hitl", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/api/hitl")>()),
+vi.mock("@eddi/app-kit/lib/api/hitl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@eddi/app-kit/lib/api/hitl")>()),
   getApprovalStatus: vi.fn(),
 }));
 
@@ -58,7 +58,7 @@ describe("PauseNotice (read-only pause surface)", () => {
     expect(screen.getByTestId("pause-notice-pending")).toBeInTheDocument();
     expect(screen.queryByTestId("pause-notice-tools")).not.toBeInTheDocument();
     await advance(600);
-    expect(screen.getByTestId("pause-notice-tools")).toHaveTextContent("setupAgent");
+    expect(screen.getByTestId("pause-notice-tools")).toHaveTextContent("Setup agent");
     expect(screen.queryByTestId("pause-notice-pending")).not.toBeInTheDocument();
     expect(screen.getByTestId("pause-notice-review").getAttribute("href")).toBe(
       "/manage/conversationview/c1?awaiting=1",
@@ -116,5 +116,42 @@ describe("PauseNotice (read-only pause surface)", () => {
     expect(onResolved).toHaveBeenCalledTimes(1);
     await advance(5100);
     expect(onResolved).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("PauseNotice — by when (T2.3)", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    mockStatus.mockReset();
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("says what the timeout policy does and when: pausedAt + approvalTimeout", async () => {
+    mockStatus.mockResolvedValue({ ...stored, timeoutPolicy: "AUTO_REJECT", approvalTimeout: "PT15M" });
+    mount();
+    await advance(0);
+    const deadline = screen.getByTestId("pause-notice-deadline");
+    expect(deadline).toHaveTextContent("Rejected automatically at");
+    // 10:00 + 15 min, in the page's locale and time zone (with the date unless it is today).
+    const due = new Date(Date.parse(PAUSED_AT) + 15 * 60_000);
+    const withDate = new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(due);
+    const timeOnly = new Intl.DateTimeFormat("en", { timeStyle: "short" }).format(due);
+    const text = deadline.textContent ?? "";
+    expect(text.includes(withDate) || text.includes(timeOnly)).toBe(true);
+  });
+
+  it("names the approve policy in its own words", async () => {
+    mockStatus.mockResolvedValue({ ...stored, timeoutPolicy: "AUTO_APPROVE", approvalTimeout: "PT1H" });
+    mount();
+    await advance(0);
+    expect(screen.getByTestId("pause-notice-deadline")).toHaveTextContent("Approved automatically at");
+  });
+
+  it("says nothing about a deadline when the pause waits indefinitely", async () => {
+    mockStatus.mockResolvedValue({ ...stored, timeoutPolicy: "WAIT_INDEFINITELY", approvalTimeout: "PT15M" });
+    mount();
+    await advance(0);
+    expect(screen.getByTestId("pause-notice-tools")).toBeInTheDocument();
+    expect(screen.queryByTestId("pause-notice-deadline")).not.toBeInTheDocument();
   });
 });

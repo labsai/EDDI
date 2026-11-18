@@ -8,8 +8,8 @@ import java.util.Optional;
 
 /**
  * The HTML pages EDDI serves with the brand substituted into their
- * {@code <head>}: the three Manager shells, the Chat shell and the root
- * redirect.
+ * {@code <head>}: the Manager's two shells, Workforce's, the Chat shell and the
+ * root redirect.
  * <p>
  * Each carries the EDDI text it showed before branding existed as its defaults,
  * so an unbranded deployment serves exactly the page it always did.

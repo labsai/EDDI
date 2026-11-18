@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { OperatorChat, type OperatorChatProps } from "../operator-chat";
-import type { ToolCallPauseDetails } from "@/lib/api/hitl";
+import type { ToolCallPauseDetails } from "@eddi/app-kit/lib/api/hitl";
 
 beforeEach(() => {
   // jsdom has no scrollIntoView; the chat auto-scroll effect calls it.
@@ -98,7 +98,7 @@ describe("OperatorChat — the card collapses into a summary once decided", () =
 
     expect(screen.getByTestId("approval-decision-summary")).toHaveAttribute("data-verdict", "APPROVED");
     expect(screen.getByTestId("approval-decision-summary-call-c1")).toHaveAttribute("data-outcome", "APPROVED");
-    expect(screen.getByTestId("approval-decision-summary-call-c1")).toHaveTextContent("setupAgent");
+    expect(screen.getByTestId("approval-decision-summary-call-c1")).toHaveTextContent("Setup agent");
     expect(screen.getByTestId("approval-decision-summary-call-c2")).toHaveAttribute("data-outcome", "REJECTED");
     expect(screen.getByTestId("approval-card-slot").className).toContain("hidden");
     expect(screen.getByTestId("operator-chat-resolving")).toBeInTheDocument();

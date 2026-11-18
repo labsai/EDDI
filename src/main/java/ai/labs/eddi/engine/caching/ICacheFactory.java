@@ -34,6 +34,8 @@ public interface ICacheFactory {
      * @param <V>
      *            value type
      * @return the cache instance
+     * @throws IllegalArgumentException
+     *             if {@code ttl} is null
      */
     <K, V> ICache<K, V> getCache(String cacheName, Duration ttl);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatMarkdownText } from "../group-utils";
+import { formatMarkdownText } from "@eddi/conversation/team";
 
 /**
  * `formatMarkdownText` runs on every agent message the app renders (1:1 chat,

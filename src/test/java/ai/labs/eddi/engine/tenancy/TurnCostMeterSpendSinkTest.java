@@ -46,11 +46,19 @@ class TurnCostMeterSpendSinkTest {
         quotaService = mock(TenantQuotaService.class);
         when(quotaService.getDefaultTenantId()).thenReturn("default");
         when(quotaService.recordCost(anyString(), anyDouble())).thenReturn(QuotaCheckResult.OK);
-        meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry());
         ISpendSink failing = event -> {
             throw new IllegalStateException("sink down");
         };
-        meter.spendSinks = new SpendSinks(List.of(failing, events::add));
+        meter = new TurnCostMeter(quotaService, new SimpleMeterRegistry(), new SpendSinks(List.of(failing, events::add)));
+    }
+
+    @Test
+    void withNoSinksTheChargeIsStillRecordedAndReturned() {
+        var registry = new SimpleMeterRegistry();
+        var withoutSinks = new TurnCostMeter(quotaService, registry, SpendSinks.NONE);
+
+        assertEquals(0.10, withoutSinks.meterSettledStep(memoryWithCost(0.10)), 1e-12);
+        assertEquals(1.0, registry.counter(TurnCostMeter.METRIC, "outcome", "recorded").count(), "metered, not counted as an error");
     }
 
     private static IConversationMemory memoryWithCost(double cost) {

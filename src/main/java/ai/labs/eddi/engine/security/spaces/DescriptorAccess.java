@@ -63,10 +63,18 @@ public final class DescriptorAccess {
         AccessLevel best = null;
 
         if (isUnowned(descriptor) && admitLegacy) {
-            // Legacy data: no owner, no space, nothing to compare against. Treated the way
-            // OwnershipValidator.requireOwnerOrAdmin already treats an unowned resource, so
-            // an upgrade does not hide every pre-existing agent — but an operator can close
-            // it by setting eddi.workspaces.legacy-visibility=admin-only.
+            // Legacy data: no owner, no space, nothing to compare against. Admitted so an
+            // upgrade does not hide every pre-existing agent or stop anyone editing it —
+            // an operator closes it by setting
+            // eddi.workspaces.legacy-visibility=admin-only.
+            //
+            // EDIT, never OWN: an absent owner is not a grant of ownership. OWN is delete,
+            // share, revoke, publish and move, and handing those to every caller let anyone
+            // publish a pre-workspace agent to anonymous callers, or move it into their own
+            // space and so take it from everybody else. The no-descriptor case in
+            // ResourceAccessGuard.requireLegacyFallback refuses the same acts for the same
+            // reason. An administrator holds OWN anyway and assigns an owner with the
+            // ownership-transfer endpoint.
             //
             // A contribution rather than a short-circuit, deliberately: buildIndex emits
             // the grant and `all` tokens for an unowned descriptor too, so returning early
@@ -74,7 +82,7 @@ public final class DescriptorAccess {
             // also means an explicit grant on a legacy resource keeps working under
             // legacy-visibility=admin-only, which is what lets an administrator hand out
             // access to pre-existing resources without first transferring ownership.
-            best = AccessLevel.OWN;
+            best = AccessLevel.EDIT;
         }
 
         String ownerId = descriptor.getOwnerId();

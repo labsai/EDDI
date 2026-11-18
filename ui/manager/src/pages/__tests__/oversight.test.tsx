@@ -3,11 +3,11 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import { http, HttpResponse } from "msw";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { QueryClientProvider } from "@tanstack/react-query";
-import { server } from "@/test/mocks/server";
-import { createTestQueryClient, renderPage } from "@/test/test-utils";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { AuthContext, type AuthContextValue } from "@/components/auth/auth-context";
-import { LOOKUP_CATEGORY, NOTES_CATEGORY, REVIEWED_SAMPLE_ID, resetOversightMocks } from "@/test/mocks/oversight-handlers";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { createTestQueryClient, renderPage } from "@eddi/app-kit/test/test-utils";
+import { ThemeProvider } from "@eddi/ui";
+import { AuthContext, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
+import { LOOKUP_CATEGORY, NOTES_CATEGORY, REVIEWED_SAMPLE_ID, resetOversightMocks } from "@eddi/app-kit/test/mocks/oversight-handlers";
 import { OversightPage } from "../oversight";
 
 const editorAuth: AuthContextValue = {

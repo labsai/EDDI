@@ -15,6 +15,9 @@ import java.util.HashMap;
 import java.util.List;
 
 /**
+ * Recognises a single punctuation token ({@code ! ? . , : ;}) and emits a
+ * {@code punctuation} expression named after it, e.g. {@code question_mark}.
+ *
  * @author ginccc
  */
 public class PunctuationDictionary implements IDictionary {

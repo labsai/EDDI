@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.*;
 
 /**
@@ -209,22 +210,99 @@ class RestAgentEngineStreamingKeepAliveTest {
     }
 
     @Test
-    @DisplayName("the interval is bound to eddi.streaming.keepalive-interval-seconds, default 15")
+    @DisplayName("the interval is bound to eddi.streaming.keepalive-interval-seconds, default 15; the backstop to the agent timeout")
     void intervalIsBoundToAConfigProperty() throws Exception {
         var constructor = RestAgentEngineStreaming.class.getDeclaredConstructor(
-                IConversationService.class, ConversationAccessGuard.class, boolean.class, int.class);
+                IConversationService.class, ConversationAccessGuard.class, boolean.class, int.class, int.class);
 
         String defaultValue = null;
+        boolean agentTimeoutBound = false;
         for (Annotation[] parameterAnnotations : constructor.getParameterAnnotations()) {
             for (Annotation annotation : parameterAnnotations) {
                 if (annotation instanceof ConfigProperty configProperty
                         && "eddi.streaming.keepalive-interval-seconds".equals(configProperty.name())) {
                     defaultValue = configProperty.defaultValue();
                 }
+                if (annotation instanceof ConfigProperty configProperty
+                        && "systemRuntime.agentTimeoutInSeconds".equals(configProperty.name())) {
+                    agentTimeoutBound = true;
+                }
             }
         }
 
         assertEquals("15", defaultValue, "operators tune or disable the keep-alive through this property");
+        assertTrue(agentTimeoutBound, "the turn-timeout backstop follows the watchdog's own timeout");
+    }
+
+    // --- RT-2: a turn whose body hung past the watchdog
+    // ---------------------------
+
+    /** The backstop's limit for the default 60 s agent timeout. */
+    private static final long TURN_SILENCE_LIMIT_MS = TimeUnit.SECONDS.toMillis(60) + INTERVAL_MS;
+
+    private List<String> sentEventNames() {
+        var names = ArgumentCaptor.forClass(String.class);
+        verify(eventBuilder, atLeast(0)).name(names.capture());
+        return names.getAllValues();
+    }
+
+    @Test
+    @DisplayName("RT-2: a started turn silent for longer than the agent timeout plus one interval is ended with a turn_timeout error")
+    void silentStartedTurnEndsWithTurnTimeout() throws Exception {
+        var handler = startTurn(streaming(true, INTERVAL_SECONDS));
+        Runnable tick = scheduledTick();
+        handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
+
+        now.addAndGet(TURN_SILENCE_LIMIT_MS + 1);
+        tick.run();
+
+        assertEquals(List.of("task_start", "error"), sentEventNames());
+        var data = ArgumentCaptor.forClass(String.class);
+        verify(eventBuilder, times(2)).data(eq(String.class), data.capture());
+        assertTrue(data.getValue().contains("\"code\":\"" + RestAgentEngineStreaming.TURN_TIMEOUT_CODE + "\""), data.getValue());
+        verify(eventSink).close();
+        verify(future, atLeastOnce()).cancel(false);
+        // The watchdog already abandoned the turn: the backstop only ends the stream.
+        verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+
+        // A terminal frame of the turn that arrives after that writes nothing more.
+        when(eventSink.isClosed()).thenReturn(true);
+        handler.onComplete(mock(SimpleConversationMemorySnapshot.class));
+        assertEquals(List.of("task_start", "error"), sentEventNames());
+    }
+
+    @Test
+    @DisplayName("RT-2: a stream whose turn is still queued is never cut by the backstop, however long it waits")
+    void queuedTurnIsNotCutByTheBackstop() throws Exception {
+        startTurn(streaming(true, INTERVAL_SECONDS));
+        Runnable tick = scheduledTick();
+
+        now.addAndGet(10 * TURN_SILENCE_LIMIT_MS);
+        tick.run();
+
+        assertEquals(List.of(), sentEventNames());
+        verify(eventBuilder).comment(RestAgentEngineStreaming.KEEPALIVE_COMMENT);
+        verify(eventSink, never()).close();
+    }
+
+    @Test
+    @DisplayName("RT-2: the limit counts from the turn's last event; keep-alive comments do not reset it")
+    void limitCountsFromTheLastTurnEvent() throws Exception {
+        var handler = startTurn(streaming(true, INTERVAL_SECONDS));
+        Runnable tick = scheduledTick();
+        handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
+        now.addAndGet(TURN_SILENCE_LIMIT_MS);
+        handler.onToken("still working");
+
+        now.addAndGet(TURN_SILENCE_LIMIT_MS);
+        tick.run();
+        assertEquals(List.of("task_start", "token"), sentEventNames(), "exactly at the limit the stream stays open");
+        verify(eventBuilder).comment(RestAgentEngineStreaming.KEEPALIVE_COMMENT);
+
+        now.addAndGet(1);
+        tick.run();
+        assertEquals(List.of("task_start", "token", "error"), sentEventNames());
+        verify(eventSink).close();
     }
 
     @Test

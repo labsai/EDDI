@@ -16,8 +16,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderPage, userEvent } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { AgentStudioPage } from "@/pages/agent-studio";
 
 // Counts editor mounts: a remount is what discards anything typed meanwhile.
@@ -51,7 +51,7 @@ vi.mock("@/components/editors/config-editor-layout", async () => {
 });
 
 // Keep the right-hand chat out of the way; it has nothing to do with saving.
-vi.mock("@/components/chat/chat-panel", () => ({ ChatPanel: () => null }));
+vi.mock("@eddi/app-kit/components/chat/chat-panel", () => ({ ChatPanel: () => null }));
 
 interface Versioned<T> {
   current: number;

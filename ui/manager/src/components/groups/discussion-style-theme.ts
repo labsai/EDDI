@@ -1,4 +1,4 @@
-import type { DiscussionStyle } from "@/lib/api/groups";
+import type { DiscussionStyle } from "@eddi/app-kit/lib/api/groups";
 
 // Its own module rather than an export of discussion-transcript.tsx: a
 // component file that also exports a constant breaks React Fast Refresh for

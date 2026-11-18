@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders } from "@/test/test-utils";
-import { HumanTurnBanner } from "@/components/groups/human-turn-banner";
-import { pendingHumanTask, type GroupConversation } from "@/lib/api/groups";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { HumanTurnBanner } from "@eddi/conversation/team";
+import { pendingHumanTask, type GroupConversation } from "@eddi/app-kit/lib/api/groups";
 
 describe("HumanTurnBanner — task variant (humans as task-force executors)", () => {
   it("names the task and submits the result as plain content", () => {

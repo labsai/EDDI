@@ -8,9 +8,9 @@ import {
   deleteWorkflow,
   duplicateWorkflow,
   type WorkflowConfiguration,
-} from "@/lib/api/workflows";
-import { parseResourceUri, type AgentDescriptor } from "@/lib/api/agents";
-import { updateDescriptor } from "@/lib/api/descriptors";
+} from "@eddi/app-kit/lib/api/workflows";
+import { parseResourceUri, type AgentDescriptor } from "@eddi/app-kit/lib/api/agents";
+import { updateDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 
 const WORKFLOWS_KEY = ["workflows"] as const;
 const PAGE_SIZE = 50;

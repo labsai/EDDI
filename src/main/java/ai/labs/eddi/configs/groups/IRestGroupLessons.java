@@ -46,7 +46,7 @@ public interface IRestGroupLessons {
     }
 
     @GET
-    @Operation(description = "The team's own retro lessons, newest first.")
+    @Operation(operationId = "listGroupLessons", description = "The team's own retro lessons, newest first.")
     Response list(@PathParam("groupId") String groupId, @QueryParam("limit") Integer limit);
 
     @GET
