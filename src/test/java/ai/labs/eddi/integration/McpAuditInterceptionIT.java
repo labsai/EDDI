@@ -104,16 +104,17 @@ public class McpAuditInterceptionIT extends BaseIntegrationIT {
         String missing = "audit-it-" + UUID.randomUUID();
 
         String result = callTool("delete_schedule", "{\"scheduleId\":\"" + missing + "\"}");
-        assertTrue(result.contains("\"isError\":true"), "the error interceptor ran: " + result);
+        // Deleting a schedule that does not exist is idempotent (REST answers 204), so
+        // the tool reports success; the entry must still carry its target.
+        assertTrue(result.contains("\"isError\":false") && result.contains("schedule_deleted"), "an idempotent delete: " + result);
 
         Map<String, Object> entry = awaitEntry("/mcp/delete_schedule/" + missing);
         Map<String, Object> input = (Map<String, Object>) entry.get("input");
         assertEquals("MCP", input.get("method"));
         assertEquals("McpAdminTools#deleteSchedule", input.get("resource"));
         Object status = ((Map<String, Object>) entry.get("output")).get("status");
-        // An unknown schedule is refused (NOT_FOUND, or a plain refusal), never a
-        // success.
-        assertTrue(Integer.valueOf(404).equals(status) || Integer.valueOf(400).equals(status), entry.toString());
+        // The recorded outcome is the tool's: a success is recorded as 200.
+        assertEquals(Integer.valueOf(200), status, entry.toString());
 
         // The read-only twin, recorded nowhere. Called before the audited one would
         // prove nothing: after it, the ledger has had a flush to show an entry.
