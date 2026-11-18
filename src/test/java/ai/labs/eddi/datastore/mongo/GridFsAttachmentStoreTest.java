@@ -254,6 +254,7 @@ class GridFsAttachmentStoreTest {
         whenFindFirst(mockFile(new ObjectId(), "conv-owner", "text/plain", List.of(), "uuid-1"));
         var ex = assertThrows(AttachmentStoreException.class, () -> sut.load("uuid-1", "conv-other"));
         assertTrue(ex.getMessage().contains("Cross-conversation access denied"));
+        assertFalse(ex.getMessage().contains("conv-owner"), "the denial must not name the owning conversation: " + ex.getMessage());
     }
 
     @Test

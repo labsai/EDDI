@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -285,9 +286,9 @@ public class AttachmentForwarder {
                 if (i > 0) {
                     note.append(", ");
                 }
-                note.append(att.getFileName() != null ? att.getFileName() : "unnamed");
+                note.append(safeName(att.getFileName()));
                 if (att.getMimeType() != null) {
-                    note.append(" (").append(att.getMimeType()).append(')');
+                    note.append(" (").append(safeMime(att.getMimeType())).append(')');
                 }
             }
             if (noteOnly.size() > named) {
@@ -331,7 +332,7 @@ public class AttachmentForwarder {
                             ModelCapabilityService.Support documentsOverride,
                             ModelCapabilityService.Support audioOverride) {
         String mime = att.getMimeType() == null ? "" : att.getMimeType().toLowerCase(Locale.ROOT);
-        String name = att.getFileName() != null ? att.getFileName() : "unnamed";
+        String name = safeName(att.getFileName());
 
         if (att.getContentSource() == Attachment.ContentSource.NONE) {
             errors.add("Attachment '" + name + "' has no content and was not forwarded.");
@@ -399,7 +400,7 @@ public class AttachmentForwarder {
      * running aggregate caps.
      */
     private byte[] resolveBytes(Attachment att, String conversationId, long[] aggregate) throws ForwardSkipException {
-        String name = att.getFileName() != null ? att.getFileName() : "unnamed";
+        String name = safeName(att.getFileName());
         byte[] bytes;
         switch (att.getContentSource()) {
             case STORED -> {
@@ -464,8 +465,12 @@ public class AttachmentForwarder {
             if (text == null || text.isBlank()) {
                 return note(errors, name, mime, bytes.length, "no extractable text");
             }
-            extracts.add(name + ": " + text);
-            return TextContent.from("[Attachment " + name + " (" + mime + ") — " + outcome + "]\n" + text);
+            // The file's text is third-party data: fenced the way retrieved context is,
+            // so a document that says "ignore previous instructions" reads as data. The
+            // fenced form is also what history stitching replays on later turns.
+            String fenced = ToolResultProvenance.markRetrieved("attachment:" + name, text);
+            extracts.add(name + ": " + fenced);
+            return TextContent.from("[Attachment " + name + " (" + safeMime(mime) + ") — " + outcome + "]\n" + fenced);
         } catch (AttachmentExtractionException e) {
             return note(errors, name, mime, bytes.length, "text extraction failed: " + e.getMessage());
         }
@@ -473,9 +478,44 @@ public class AttachmentForwarder {
 
     private Content note(List<String> errors, String name, String mime, long sizeBytes, String reason) {
         String msg = "[Attachment: %s (%s, %d bytes) — not forwarded: %s. Use the readAttachment tool to read it.]"
-                .formatted(name, mime, sizeBytes, reason);
+                .formatted(name, safeMime(mime), sizeBytes, reason);
         errors.add(msg);
         return TextContent.from(msg);
+    }
+
+    /** Longest file name kept in a text the model reads. */
+    private static final int MAX_NAME_CHARS = 100;
+
+    /**
+     * A file name as it may appear in text the model reads: user-chosen, so it
+     * cannot carry line breaks or control characters, brackets (which would forge
+     * the envelope delimiters) or unbounded length.
+     */
+    static String safeName(String fileName) {
+        if (fileName == null || fileName.isBlank()) {
+            return "unnamed";
+        }
+        StringBuilder cleaned = new StringBuilder(Math.min(fileName.length(), MAX_NAME_CHARS));
+        fileName.codePoints().limit(MAX_NAME_CHARS).forEach(cp -> {
+            if (Character.isISOControl(cp) || Character.isWhitespace(cp) && cp != ' ' || cp == ' ' || cp == ' ') {
+                cleaned.append('_');
+            } else if (cp == '[' || cp == ']') {
+                cleaned.append('_');
+            } else {
+                cleaned.appendCodePoint(cp);
+            }
+        });
+        String result = cleaned.toString().strip();
+        return result.isEmpty() ? "unnamed" : result;
+    }
+
+    /** A media type as it may appear in text the model reads. */
+    static String safeMime(String mime) {
+        if (mime == null) {
+            return "";
+        }
+        String cleaned = mime.replaceAll("[^a-zA-Z0-9.+/_;=\\- ]", "_");
+        return cleaned.length() > MAX_NAME_CHARS ? cleaned.substring(0, MAX_NAME_CHARS) : cleaned;
     }
 
     private List<Attachment> readAttachments(IConversationMemory memory) {
