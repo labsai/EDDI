@@ -762,6 +762,10 @@ public class ConversationMemorySnapshot {
         this.pendingLongTermWrites = pendingLongTermWrites == null ? new LinkedHashSet<>() : pendingLongTermWrites;
     }
 
+    /**
+     * Same aliasing contract as {@link #getPendingLongTermWrites()}: the snapshot
+     * is filled through this getter, see its Javadoc.
+     */
     public Map<String, Long> getPendingLongTermWritesSince() {
         return pendingLongTermWritesSince;
     }

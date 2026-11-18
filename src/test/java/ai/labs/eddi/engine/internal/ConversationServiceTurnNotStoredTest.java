@@ -186,7 +186,7 @@ class ConversationServiceTurnNotStoredTest {
         when(agent.continueConversation(any(), any(), any())).thenAnswer(inv -> {
             IConversationMemory memory = inv.getArgument(0);
             IConversationOutputRenderer renderer = inv.getArgument(2);
-            doAnswer(say -> {
+            doAnswer(ignored -> {
                 memory.setConversationState(ConversationState.READY);
                 memory.getCurrentStep().addConversationOutputString("output", "the answer");
                 pipelineWork.accept(memory);
