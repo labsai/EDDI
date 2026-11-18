@@ -1,4 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AGENT_MUTATION_INVALIDATIONS, invalidateAll } from "../lib/query-keys";
 import {
   setupAgent,
   createApiAgent,
@@ -12,7 +13,7 @@ export function useSetupAgent() {
   return useMutation<SetupResult, Error, SetupAgentRequest>({
     mutationFn: setupAgent,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      invalidateAll(queryClient, AGENT_MUTATION_INVALIDATIONS);
     },
   });
 }
@@ -22,7 +23,7 @@ export function useCreateApiAgent() {
   return useMutation<SetupResult, Error, CreateApiAgentRequest>({
     mutationFn: createApiAgent,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["agents"] });
+      invalidateAll(queryClient, AGENT_MUTATION_INVALIDATIONS);
     },
   });
 }

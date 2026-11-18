@@ -75,7 +75,7 @@ import { toolResultListener } from "@eddi/core/tool-events";
 import { useDebugStore, type ToolTraceEntry } from "./use-debug-events";
 import { getErrorMessage } from "../lib/api-client";
 import { toast } from "sonner";
-import { chatKeys } from "../lib/query-keys";
+import { chatKeys, invalidateAll, CONVERSATION_MUTATION_INVALIDATIONS } from "../lib/query-keys";
 import { parseToolCallEvent, toolCallActivity, type ToolActivity } from "../lib/tool-labels";
 
 /**
@@ -559,7 +559,10 @@ export function useDeployedAgents() {
  */
 export function useStartConversation() {
   const store = useChatStore;
+  const queryClient = useQueryClient();
   return useMutation({
+    // A started conversation is in the history and the dashboard's recent list.
+    onSuccess: () => invalidateAll(queryClient, CONVERSATION_MUTATION_INVALIDATIONS),
     mutationFn: async ({
       agentId,
       environment,

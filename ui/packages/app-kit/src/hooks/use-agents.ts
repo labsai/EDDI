@@ -3,7 +3,13 @@ import { useQuery, useQueries, useInfiniteQuery, useMutation, useQueryClient, ke
 import { ENVIRONMENTS, type Environment } from "../lib/constants";
 import { withAnyDeployedVersion } from "../lib/deployment-environments";
 import { updateDescriptor } from "../lib/api/descriptors";
-import { agentKeys, agentDeploymentQueries, chatKeys } from "../lib/query-keys";
+import {
+  agentKeys,
+  agentDeploymentQueries,
+  chatKeys,
+  invalidateAll,
+  AGENT_MUTATION_INVALIDATIONS,
+} from "../lib/query-keys";
 import { parseVersionFromLocation } from "../lib/api/location-version";
 import {
   getAgentDescriptors,
@@ -350,7 +356,7 @@ export function useUpdateAgentDescriptor() {
       description: string;
     }) => updateDescriptor(id, version, { name, description }),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAll(queryClient, AGENT_MUTATION_INVALIDATIONS);
       queryClient.invalidateQueries({ queryKey: ["studio", "descriptors"] });
     },
   });
@@ -362,7 +368,7 @@ export function useDeleteAgent() {
     mutationFn: ({ id, version }: { id: string; version: number }) =>
       deleteAgent(id, version),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAll(queryClient, AGENT_MUTATION_INVALIDATIONS);
     },
   });
 }
@@ -380,7 +386,7 @@ export function useDuplicateAgent() {
       deepCopy?: boolean;
     }) => duplicateAgent(id, version, deepCopy),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      invalidateAll(queryClient, AGENT_MUTATION_INVALIDATIONS);
     },
   });
 }

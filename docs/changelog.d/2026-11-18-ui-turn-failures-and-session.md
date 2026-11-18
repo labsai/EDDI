@@ -54,6 +54,15 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   Files: `ui/workforce/src/components/workforce/workforce-user-menu.tsx`, `hooks/use-workforce-threads.ts`,
   `ui/packages/app-kit/src/components/auth/auth-provider.tsx`, `lib/workforce-threads-storage.ts`.
 
+- **Stale caches (I4).** Deleting, duplicating or setting up an agent now also refreshes the chat's deployed-agents
+  list and the dashboard counts (`AGENT_MUTATION_INVALIDATIONS`); deleting or starting a conversation refreshes the
+  dashboard's recent-conversations card and counts as well as the history (`CONVERSATION_MUTATION_INVALIDATIONS`).
+- **`BearerEventSource` (I10).** A new connection ends the previous one (which no longer reconnects on its abort); a
+  throwing listener neither skips the other listeners nor leaks the reader, which is released however the read ends; an
+  unterminated block is never dispatched when the connection ends; the retry budget refills after the first COMPLETE
+  event (a heartbeat comment counts), not after the first bytes, so a server that sends a few bytes and drops is given
+  up on instead of retried every five seconds for good. Kept apart from the 403 hunk of `fix/manager-role-gating`.
+
 ### Behaviour changes an upgrader will notice
 
 - The three UIs send an `Idempotency-Key` header. They run on the EDDI origin, so no CORS rule is involved; a widget
@@ -64,3 +73,9 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   advisor thread starts a new conversation once (the old conversations stay in the history).
 - Signing out of Workforce lands on `/workforce`; the Keycloak client must allow that post-logout redirect (the
   shipped realm uses `/*`).
+
+### Not done
+
+- `Last-Event-ID` for `BearerEventSource` (named in I10): the log and cluster streams do not send event ids.
+- The group board's streams (`GroupDiscussion`) have no leave guard or grace of their own.
+- Q7 beyond the `localStorage` item (phone chat list, board session scoping, ENDED display in the thread, …).
