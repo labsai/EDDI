@@ -33,6 +33,22 @@
     "license": "EDDI es software de código abierto, con licencia Apache 2.0.",
     "licenseLink": "Leer la licencia"
   },
+  "access": {
+    "title": "No disponible para su rol",
+    "body": "Ha iniciado sesión como {{held}}. Esta página requiere el rol {{needed}}.",
+    "role": {
+      "admin": "administrador",
+      "editor": "editor",
+      "user": "usuario",
+      "viewer": "lector",
+      "approver": "aprobador",
+      "none": "ningún rol"
+    },
+    "guidedSetup": "La configuración guiada guarda claves de API en la bóveda, por lo que requiere un administrador. Como editor, puede crear un agente con la creación rápida en la página Agentes y configurarlo después.",
+    "quickCreate": "Abrir Agentes (creación rápida)",
+    "goTo": "Ir a {{page}}",
+    "openWorkforce": "Abrir Workforce"
+  },
   "auth": {
     "logout": "Cerrar sesión",
     "userMenu": "Menú de usuario",
@@ -2874,7 +2890,8 @@
     "quickCreateDesc": "Establezca un nombre y descripción, configure los detalles más tarde.",
     "guidedSetup": "Configuración guiada",
     "guidedSetupDesc": "Asistente paso a paso con proveedor de LLM, prompts y despliegue.",
-    "guidedSetupDescGroup": "Asistente paso a paso para el equipo, el estilo de discusión y las aprobaciones opcionales; también puede crear los agentes miembro."
+    "guidedSetupDescGroup": "Asistente paso a paso para el equipo, el estilo de discusión y las aprobaciones opcionales; también puede crear los agentes miembro.",
+    "guidedSetupAdminOnly": "La configuración guiada requiere un administrador porque guarda claves de API en la bóveda. Use la creación rápida y configure el agente después."
   },
   "groups": {
     "actionConflict": "Otra operación sigue en curso, o esta discusión ya no acepta esa acción. Vuelva a intentarlo.",
@@ -4634,7 +4651,8 @@
         "label": "Cuenta de servicio de Google (clave JSON)",
         "description": "Las API de Google como cuenta de servicio, firmadas con su clave privada (portador JWT, RFC 7523). Guarde el archivo de clave JSON descargado como UNA sola entrada del almacén y haga referencia a ella como clave privada; de ahí se leen el emisor y el ID de clave. Añada https://oauth2.googleapis.com a la lista de permitidos de endpoints de credenciales. Sin delegación en todo el dominio, la cuenta solo ve lo que se comparte con ella."
       }
-    }
+    },
+    "readOnlyForRole": "Solo lectura: modificar una conexión requiere el rol de administrador."
   },
   "workspaces": {
     "allSpaces": "Todos los espacios",

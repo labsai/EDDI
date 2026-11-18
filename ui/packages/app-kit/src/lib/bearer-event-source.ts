@@ -43,6 +43,8 @@ export class BearerEventSource {
    * for a user without `eddi-admin`) shows a spinner forever.
    */
   onexhausted: (() => void) | null = null;
+  /** True once the server answered 403: the source has stopped and will not retry. */
+  forbidden = false;
 
   constructor(
     private readonly url: string,
@@ -96,6 +98,18 @@ export class BearerEventSource {
         headers: { Accept: "text/event-stream", ...this.currentHeaders() },
         signal: this.abortController.signal,
       });
+
+      if (response.status === 403) {
+        // Forbidden is the role's answer, not a hiccup: it will not become a 200
+        // by asking again, and the "Reconnecting…" line the retries kept alive
+        // told a viewer on the Logs page that something was down. Report it once
+        // and stop. (A 401 is still retried: the next attempt carries a
+        // refreshed token.)
+        this.forbidden = true;
+        this.onerror?.();
+        this.onexhausted?.();
+        return;
+      }
 
       if (!response.ok || !response.body) {
         this.scheduleReconnect();

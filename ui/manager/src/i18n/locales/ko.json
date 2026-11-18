@@ -33,6 +33,22 @@
     "license": "EDDI는 Apache License 2.0에 따라 배포되는 오픈 소스 소프트웨어입니다.",
     "licenseLink": "라이선스 읽기"
   },
+  "access": {
+    "title": "현재 역할로는 사용할 수 없습니다",
+    "body": "{{held}}(으)로 로그인했습니다. 이 페이지에는 {{needed}} 역할이 필요합니다.",
+    "role": {
+      "admin": "관리자",
+      "editor": "편집자",
+      "user": "사용자",
+      "viewer": "뷰어",
+      "approver": "승인자",
+      "none": "역할 없음"
+    },
+    "guidedSetup": "가이드 설정은 API 키를 볼트에 저장하므로 관리자가 필요합니다. 편집자는 에이전트 페이지에서 빠른 생성으로 에이전트를 만든 뒤 나중에 구성할 수 있습니다.",
+    "quickCreate": "에이전트 열기(빠른 생성)",
+    "goTo": "{{page}}(으)로 이동",
+    "openWorkforce": "Workforce 열기"
+  },
   "auth": {
     "logout": "로그아웃",
     "userMenu": "사용자 메뉴",
@@ -2846,7 +2862,8 @@
     "quickCreateDesc": "이름과 설명을 설정하고 세부 정보는 나중에 구성합니다.",
     "guidedSetup": "가이드 설정",
     "guidedSetupDesc": "LLM 제공자, 프롬프트 및 배포를 포함한 단계별 마법사.",
-    "guidedSetupDescGroup": "팀, 토론 방식, 선택적 승인을 단계별로 설정하는 마법사입니다. 멤버 에이전트도 함께 만들 수 있습니다."
+    "guidedSetupDescGroup": "팀, 토론 방식, 선택적 승인을 단계별로 설정하는 마법사입니다. 멤버 에이전트도 함께 만들 수 있습니다.",
+    "guidedSetupAdminOnly": "가이드 설정은 API 키를 볼트에 저장하므로 관리자가 필요합니다. 빠른 생성을 사용하고 나중에 에이전트를 구성하세요."
   },
   "groups": {
     "actionConflict": "다른 작업이 아직 진행 중이거나 이 토론이 더 이상 해당 작업을 수락하지 않습니다. 다시 시도하세요.",
@@ -4592,7 +4609,8 @@
         "label": "Google 서비스 계정(JSON 키)",
         "description": "서비스 계정으로 Google API를 사용하며, 해당 계정의 개인 키로 서명합니다(RFC 7523 JWT 베어러). 다운로드한 JSON 키 파일을 볼트의 항목 하나로 저장하고 개인 키로 참조하세요. 발급자와 키 ID는 그 파일에서 읽습니다. https://oauth2.googleapis.com을 자격 증명 엔드포인트 허용 목록에 추가하세요. 도메인 전체 위임이 없으면 계정은 자신과 공유된 항목만 볼 수 있습니다."
       }
-    }
+    },
+    "readOnlyForRole": "읽기 전용: 연결을 변경하려면 관리자 역할이 필요합니다."
   },
   "workspaces": {
     "allSpaces": "모든 작업 공간",

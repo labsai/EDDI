@@ -15,6 +15,7 @@ import { api } from "../../lib/api-client";
 import { clearWorkforcePins } from "../../lib/workforce-pins";
 import { clearWorkforceHandoffs } from "../../lib/workforce-handoffs";
 import { mockRolesOverride } from "../../lib/mock-roles";
+import { realmRolesOf } from "../../lib/roles";
 import {
   AuthContext,
   GUEST_CONTEXT,
@@ -119,6 +120,13 @@ function KeycloakAuthProvider({
         const syncTokens = (refreshed: boolean) => {
           if (!mounted || !keycloak.token) return false;
           api.setAuthToken(keycloak.token);
+          // Roles can change while the tab lives (an administrator grants or
+          // removes one): follow the refreshed token. The same array is kept
+          // when nothing changed, so no consumer re-renders for it.
+          const fresh = realmRolesOf(keycloak.tokenParsed);
+          setRoles((prev) =>
+            prev.length === fresh.length && prev.every((r, i) => r === fresh[i]) ? prev : fresh,
+          );
           // Keep idTokenRef in sync — Keycloak may or may not return a
           // new id_token in the refresh response. We always preserve the
           // most recent one so logout can send id_token_hint.
@@ -200,9 +208,7 @@ function KeycloakAuthProvider({
           }
 
           // Extract realm roles
-          const realmRoles =
-            keycloak.tokenParsed?.realm_access?.roles ?? [];
-          setRoles(realmRoles);
+          setRoles(realmRolesOf(keycloak.tokenParsed));
         }
 
         setLoading(false);

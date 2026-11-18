@@ -12,7 +12,7 @@ import { useTheme } from "@eddi/ui";
 import { BrandIcon } from "@eddi/app-kit/components/layout/brand-logo";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
 import { useMayUse } from "@eddi/app-kit/hooks/use-auth";
-import { ROLE_APPROVER, ROLE_USER } from "@eddi/app-kit/lib/roles";
+import { ROLE_APPROVER, ROLE_USER, ROLE_VIEWER } from "@eddi/app-kit/lib/roles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -148,11 +148,13 @@ export function LandingPage() {
   // dedicated `eddi-viewer` or `eddi-approver` would get nothing but 403s
   // there, so they go to the Manager instead: an approver to the approvals
   // inbox (their whole job, and an endpoint that admits them), a viewer to the
-  // Manager dashboard. Workforce is another app (ui/workforce), so getting there
+  // cluster console (its one screen). Workforce is another app (ui/workforce), so getting there
   // is a page load, not a router redirect: AppNavigate picks the right one.
   if (!canAuthor) {
     if (may([ROLE_USER])) return <AppNavigate to="/workforce" />;
     if (may([ROLE_APPROVER])) return <AppNavigate to="/manage/approvals" />;
+    // The viewer opens exactly one Manager screen: the cluster console.
+    if (may([ROLE_VIEWER])) return <AppNavigate to="/manage/coordinator" />;
     return <AppNavigate to="/manage" />;
   }
 

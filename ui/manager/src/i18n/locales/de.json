@@ -33,6 +33,22 @@
     "license": "EDDI ist Open-Source-Software unter der Apache License 2.0.",
     "licenseLink": "Lizenz lesen"
   },
+  "access": {
+    "title": "Für Ihre Rolle nicht verfügbar",
+    "body": "Sie sind als {{held}} angemeldet. Diese Seite erfordert die Rolle {{needed}}.",
+    "role": {
+      "admin": "Administrator",
+      "editor": "Editor",
+      "user": "Benutzer",
+      "viewer": "Betrachter",
+      "approver": "Freigeber",
+      "none": "keine Rolle"
+    },
+    "guidedSetup": "Die geführte Einrichtung speichert API-Schlüssel im Tresor und erfordert daher einen Administrator. Als Editor können Sie auf der Seite „Agenten“ mit „Schnell erstellen“ einen Agenten anlegen und ihn danach konfigurieren.",
+    "quickCreate": "Agenten öffnen (Schnell erstellen)",
+    "goTo": "Zu {{page}}",
+    "openWorkforce": "Workforce öffnen"
+  },
   "auth": {
     "logout": "Abmelden",
     "userMenu": "Benutzermenü",
@@ -2846,7 +2862,8 @@
     "quickCreateDesc": "Legen Sie Name und Beschreibung fest. Details konfigurieren Sie später.",
     "guidedSetup": "Geführtes Setup",
     "guidedSetupDesc": "Schrittweises Setup mit LLM-Provider, Prompts und Deployment.",
-    "guidedSetupDescGroup": "Schritt-für-Schritt-Assistent für Team, Diskussionsstil und optionale Freigaben – er kann auch die Mitglieder-Agenten erstellen."
+    "guidedSetupDescGroup": "Schritt-für-Schritt-Assistent für Team, Diskussionsstil und optionale Freigaben – er kann auch die Mitglieder-Agenten erstellen.",
+    "guidedSetupAdminOnly": "Die geführte Einrichtung erfordert einen Administrator, da sie API-Schlüssel im Tresor speichert. Nutzen Sie „Schnell erstellen“ und konfigurieren Sie den Agenten danach."
   },
   "groups": {
     "actionConflict": "Ein anderer Vorgang läuft noch, oder diese Diskussion akzeptiert diese Aktion nicht mehr. Bitte erneut versuchen.",
@@ -4592,7 +4609,8 @@
         "label": "Google-Dienstkonto (JSON-Schlüssel)",
         "description": "Google-APIs als Dienstkonto, signiert mit dessen privatem Schlüssel (RFC 7523 JWT Bearer). Legen Sie die heruntergeladene JSON-Schlüsseldatei als EINEN Vault-Eintrag ab und referenzieren Sie ihn als privaten Schlüssel; Aussteller und Schlüssel-ID werden daraus gelesen. Fügen Sie https://oauth2.googleapis.com zur Allowlist der Credential-Endpunkte hinzu. Ohne domainweite Delegierung sieht das Konto nur, was mit ihm geteilt wurde."
       }
-    }
+    },
+    "readOnlyForRole": "Schreibgeschützt: Das Ändern einer Verbindung erfordert die Administratorrolle."
   },
   "workspaces": {
     "allSpaces": "Alle Arbeitsbereiche",

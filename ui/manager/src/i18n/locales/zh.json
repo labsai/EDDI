@@ -33,6 +33,22 @@
     "license": "EDDI 是开源软件，采用 Apache License 2.0 许可。",
     "licenseLink": "阅读许可证"
   },
+  "access": {
+    "title": "您的角色无法使用此功能",
+    "body": "您当前以{{held}}身份登录。此页面需要{{needed}}角色。",
+    "role": {
+      "admin": "管理员",
+      "editor": "编辑者",
+      "user": "用户",
+      "viewer": "查看者",
+      "approver": "审批者",
+      "none": "无角色"
+    },
+    "guidedSetup": "引导式设置会将 API 密钥存入密钥库，因此需要管理员。作为编辑者，您可以在“智能体”页面使用快速创建来创建智能体，之后再进行配置。",
+    "quickCreate": "打开智能体（快速创建）",
+    "goTo": "前往{{page}}",
+    "openWorkforce": "打开 Workforce"
+  },
   "auth": {
     "logout": "退出",
     "userMenu": "用户菜单",
@@ -2846,7 +2862,8 @@
     "quickCreateDesc": "定义名称和描述，稍后配置详细信息。",
     "guidedSetup": "配置向导",
     "guidedSetupDesc": "使用分步向导设置LLM模型、提示词及默认规则。",
-    "guidedSetupDescGroup": "按步骤设置团队、讨论方式和可选审批的向导，也可以一并创建成员智能体。"
+    "guidedSetupDescGroup": "按步骤设置团队、讨论方式和可选审批的向导，也可以一并创建成员智能体。",
+    "guidedSetupAdminOnly": "引导式设置会将 API 密钥存入密钥库，因此需要管理员。请使用快速创建，之后再配置智能体。"
   },
   "groups": {
     "actionConflict": "另一个操作仍在进行中，或此讨论不再接受该操作。请重试。",
@@ -4592,7 +4609,8 @@
         "label": "Google 服务账号（JSON 密钥）",
         "description": "以服务账号身份调用 Google API，并用其私钥签名（RFC 7523 JWT 持有者）。将下载的 JSON 密钥文件作为保险库中的一个条目存储，并将其作为私钥引用；签发者和密钥 ID 从中读取。将 https://oauth2.googleapis.com 添加到凭据端点允许列表。未启用全网域委派时，该账号只能看到与其共享的内容。"
       }
-    }
+    },
+    "readOnlyForRole": "只读：修改连接需要管理员角色。"
   },
   "workspaces": {
     "allSpaces": "所有工作区",

@@ -33,6 +33,22 @@
     "license": "EDDI is open-source software, licensed under the Apache License 2.0.",
     "licenseLink": "Read the license"
   },
+  "access": {
+    "title": "Not available for your role",
+    "body": "You are signed in as {{held}}. This page needs the {{needed}} role.",
+    "role": {
+      "admin": "administrator",
+      "editor": "editor",
+      "user": "user",
+      "viewer": "viewer",
+      "approver": "approver",
+      "none": "no role"
+    },
+    "guidedSetup": "Guided setup stores API keys in the vault, so it needs an administrator. As an editor you can create an agent with Quick Create on the Agents page and configure it afterwards.",
+    "quickCreate": "Open Agents (Quick Create)",
+    "goTo": "Go to {{page}}",
+    "openWorkforce": "Open Workforce"
+  },
   "auth": {
     "logout": "Logout",
     "userMenu": "User menu",
@@ -230,7 +246,8 @@
     "quickCreateDesc": "Set a name and description, configure details later.",
     "guidedSetup": "Guided Setup",
     "guidedSetupDesc": "Step-by-step wizard with LLM provider, prompts, and deployment.",
-    "guidedSetupDescGroup": "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too."
+    "guidedSetupDescGroup": "Step-by-step wizard for the team, discussion style, and optional approvals — it can create the member agents too.",
+    "guidedSetupAdminOnly": "Guided setup needs an administrator because it stores API keys in the vault. Use Quick Create and configure the agent afterwards."
   },
   "platform": {
     "status": "Platform Status",
@@ -4592,7 +4609,8 @@
         "label": "Google service account (JSON key)",
         "description": "Google APIs as a service account, signed with its private key (RFC 7523 JWT bearer). Store the downloaded JSON key file as ONE vault entry and reference it as the private key; the issuer and key id are read from it. Add https://oauth2.googleapis.com to the credential endpoint allowlist. Without domain-wide delegation the account sees only what is shared with it."
       }
-    }
+    },
+    "readOnlyForRole": "Read-only: changing a connection needs the administrator role."
   },
   "workspaces": {
     "allSpaces": "All workspaces",

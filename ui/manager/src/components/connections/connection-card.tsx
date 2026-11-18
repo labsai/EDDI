@@ -7,6 +7,7 @@ import {
   AuthTypeBadge,
   BindingBadge,
 } from "@/components/connections/connection-badges";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import type { EnrichedConnectionDescriptor } from "@eddi/app-kit/lib/api/connections";
 
 interface ConnectionCardProps {
@@ -22,6 +23,8 @@ export function ConnectionCard({
 }: ConnectionCardProps) {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
+  // An editor reads connections; creating, copying and deleting them is admin-only.
+  const mayManage = useCan("connections.manage");
   const to = `/manage/connections/${connection.id}?version=${connection.version}`;
 
   return (
@@ -61,6 +64,7 @@ export function ConnectionCard({
             )}
           </div>
         </div>
+        {mayManage && (
         <div className="reveal-on-touch flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           <Button
             variant="ghost"
@@ -89,6 +93,7 @@ export function ConnectionCard({
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
+        )}
       </div>
 
       {/* A config that would not load still gets a row: a connection an admin

@@ -33,6 +33,22 @@
     "license": "O EDDI é software de código aberto, licenciado sob a Apache License 2.0.",
     "licenseLink": "Ler a licença"
   },
+  "access": {
+    "title": "Indisponível para o seu perfil",
+    "body": "Você entrou como {{held}}. Esta página exige o perfil {{needed}}.",
+    "role": {
+      "admin": "administrador",
+      "editor": "editor",
+      "user": "usuário",
+      "viewer": "visualizador",
+      "approver": "aprovador",
+      "none": "nenhum perfil"
+    },
+    "guidedSetup": "A configuração guiada grava chaves de API no cofre, por isso exige um administrador. Como editor, você pode criar um agente com a criação rápida na página Agentes e configurá-lo depois.",
+    "quickCreate": "Abrir Agentes (criação rápida)",
+    "goTo": "Ir para {{page}}",
+    "openWorkforce": "Abrir Workforce"
+  },
   "auth": {
     "logout": "Sair",
     "userMenu": "Menu do utilizador",
@@ -2874,7 +2890,8 @@
     "quickCreateDesc": "Defina nome e descrição. Configure os detalhes de pipeline mais tarde.",
     "guidedSetup": "Configuração Guiada",
     "guidedSetupDesc": "Assistente passo a passo integrado com modelo LLM e regras básicas.",
-    "guidedSetupDescGroup": "Assistente passo a passo para a equipe, o estilo de discussão e as aprovações opcionais; ele também pode criar os agentes membros."
+    "guidedSetupDescGroup": "Assistente passo a passo para a equipe, o estilo de discussão e as aprovações opcionais; ele também pode criar os agentes membros.",
+    "guidedSetupAdminOnly": "A configuração guiada exige um administrador porque grava chaves de API no cofre. Use a criação rápida e configure o agente depois."
   },
   "groups": {
     "actionConflict": "Outra operação ainda está em andamento, ou esta discussão não aceita mais essa ação. Tente novamente.",
@@ -4634,7 +4651,8 @@
         "label": "Conta de serviço do Google (chave JSON)",
         "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
       }
-    }
+    },
+    "readOnlyForRole": "Somente leitura: alterar uma conexão exige o perfil de administrador."
   },
   "workspaces": {
     "allSpaces": "Todos os espaços",

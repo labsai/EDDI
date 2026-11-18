@@ -91,7 +91,7 @@ The realm seeds three accounts, **none of them with a password**:
 | Username | Role |
 |----------|------|
 | `eddi` | `eddi-admin`, `eddi-editor`, `eddi-viewer` |
-| `viewer` | `eddi-viewer` (read-only) |
+| `viewer` | `eddi-viewer` (cluster console and documentation only; no access to agents or configuration) |
 | `user` | `eddi-user` |
 
 Set a password for the one you need in the admin console (Users → *name* →

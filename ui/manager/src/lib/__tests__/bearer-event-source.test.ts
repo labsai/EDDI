@@ -240,11 +240,27 @@ describe("BearerEventSource", () => {
     es.close();
   });
 
-  it("gives up after the attempt budget and fires onexhausted", async () => {
-    // Regression: reconnection was unbounded, so a stream the backend refuses
-    // outright — a 403 on /administration/logs without the eddi-admin role — was
-    // re-requested every five seconds for the lifetime of the session.
+  it("stops at once on a 403 instead of showing 'Reconnecting' for ever", async () => {
+    // Regression (BR5): a viewer on /administration/logs got a 403 that was
+    // retried, so the page said "Reconnecting…" indefinitely. Forbidden is the
+    // role's answer — report it once and stop.
     fetchSpy.mockResolvedValue(new Response(null, { status: 403 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+
+    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 20);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(es.forbidden).toBe(true);
+    es.close();
+  });
+
+  it("gives up after the attempt budget and fires onexhausted", async () => {
+    // Regression: reconnection was unbounded, so a stream that keeps failing
+    // was re-requested every five seconds for the lifetime of the session.
+    fetchSpy.mockResolvedValue(new Response(null, { status: 502 }));
     const exhausted = vi.fn();
     const es = new BearerEventSource("http://test/sse");
     es.onexhausted = exhausted;

@@ -33,6 +33,22 @@
     "license": "EDDI est un logiciel libre, distribué sous licence Apache 2.0.",
     "licenseLink": "Lire la licence"
   },
+  "access": {
+    "title": "Indisponible pour votre rôle",
+    "body": "Vous êtes connecté en tant que {{held}}. Cette page nécessite le rôle {{needed}}.",
+    "role": {
+      "admin": "administrateur",
+      "editor": "éditeur",
+      "user": "utilisateur",
+      "viewer": "lecteur",
+      "approver": "approbateur",
+      "none": "aucun rôle"
+    },
+    "guidedSetup": "La configuration guidée stocke des clés d'API dans le coffre ; elle nécessite donc un administrateur. En tant qu'éditeur, vous pouvez créer un agent avec la création rapide sur la page Agents, puis le configurer.",
+    "quickCreate": "Ouvrir Agents (création rapide)",
+    "goTo": "Aller à {{page}}",
+    "openWorkforce": "Ouvrir Workforce"
+  },
   "auth": {
     "logout": "Déconnexion",
     "userMenu": "Menu utilisateur",
@@ -2874,7 +2890,8 @@
     "quickCreateDesc": "Définissez un nom, puis configurez plus tard.",
     "guidedSetup": "Assistant de configuration",
     "guidedSetupDesc": "Configuration pas à pas : fournisseur LLM, prompts et déploiement.",
-    "guidedSetupDescGroup": "Assistant pas à pas pour l'équipe, le style de discussion et les approbations facultatives — il peut aussi créer les agents membres."
+    "guidedSetupDescGroup": "Assistant pas à pas pour l'équipe, le style de discussion et les approbations facultatives — il peut aussi créer les agents membres.",
+    "guidedSetupAdminOnly": "La configuration guidée nécessite un administrateur car elle stocke des clés d'API dans le coffre. Utilisez la création rapide, puis configurez l'agent."
   },
   "groups": {
     "actionConflict": "Une autre opération est encore en cours, ou cette discussion n'accepte plus cette action. Veuillez réessayer.",
@@ -4634,7 +4651,8 @@
         "label": "Compte de service Google (clé JSON)",
         "description": "Les API Google en tant que compte de service, signées avec sa clé privée (jeton porteur JWT, RFC 7523). Stockez le fichier de clé JSON téléchargé comme UNE seule entrée du coffre et référencez-la comme clé privée ; l'émetteur et l'ID de clé y sont lus. Ajoutez https://oauth2.googleapis.com à la liste d'autorisation des points de terminaison d'identifiants. Sans délégation à l'échelle du domaine, le compte ne voit que ce qui est partagé avec lui."
       }
-    }
+    },
+    "readOnlyForRole": "Lecture seule : modifier une connexion nécessite le rôle d'administrateur."
   },
   "workspaces": {
     "allSpaces": "Tous les espaces",

@@ -31,6 +31,7 @@ import {
   useDuplicateConnection,
 } from "@eddi/app-kit/hooks/use-connections";
 import { useConnectionLinkResult } from "@/hooks/use-connection-link-result";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { getErrorMessage, isApiError } from "@eddi/app-kit/lib/api-client";
 
 /**
@@ -89,6 +90,8 @@ export function ConnectionsPage() {
   }, [outcome]);
 
   const notAdmin = isError && isApiError(error) && error.status === 403;
+  // The list and a connection are readable by an editor; every change is admin-only.
+  const mayManage = useCan("connections.manage");
 
   const filtered = useMemo(() => {
     if (!connections) return [];
@@ -177,7 +180,7 @@ export function ConnectionsPage() {
             )}
           </p>
         </div>
-        {!notAdmin && (
+        {!notAdmin && mayManage && (
           <Button onClick={() => setCreateOpen(true)} data-testid="create-connection-btn">
             <Plus className="h-4 w-4" aria-hidden="true" />
             {t("connections.create", "New connection")}
@@ -289,9 +292,9 @@ export function ConnectionsPage() {
                   : undefined
               }
               actionLabel={
-                !search ? t("connections.create", "New connection") : undefined
+                !search && mayManage ? t("connections.create", "New connection") : undefined
               }
-              onAction={!search ? () => setCreateOpen(true) : undefined}
+              onAction={!search && mayManage ? () => setCreateOpen(true) : undefined}
             />
           ) : view === "card" ? (
             <div className="cq-card-grid">

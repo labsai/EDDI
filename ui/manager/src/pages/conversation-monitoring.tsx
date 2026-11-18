@@ -23,6 +23,7 @@ import {
   usePurgeEndedConversations,
 } from "@/hooks/use-conversations";
 import { useAgentVersions } from "@eddi/app-kit/hooks/use-agents";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import type { ConversationState, ConversationStatus } from "@eddi/app-kit/lib/api/conversations";
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { Button } from "@eddi/ui";
@@ -123,6 +124,9 @@ export function ConversationMonitoringPage() {
 
   const endMutation = useEndActiveConversations();
   const purgeMutation = usePurgeEndedConversations();
+  // Purging every agent's ended conversations is admin-only; an editor can end
+  // active ones but is not offered the purge.
+  const mayPurge = useCan("conversations.purge");
 
   // Prune selection to ids that still exist in the latest poll.
   useEffect(() => {
@@ -512,6 +516,7 @@ export function ConversationMonitoringPage() {
       {/* Admin — bulk purge of ENDED conversations */}
       {/* Not scoped to the agent picker above: the backend purges every agent's
           ended conversations, so this is its own, clearly labelled section. */}
+      {mayPurge && (
       <section
         className="mt-10 rounded-xl border border-destructive/30 bg-card p-5 shadow-sm"
         aria-labelledby="purge-heading"
@@ -568,6 +573,7 @@ export function ConversationMonitoringPage() {
           </p>
         )}
       </section>
+      )}
 
       {/* End-selected confirmation */}
       <AlertDialog

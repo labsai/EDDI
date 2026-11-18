@@ -1,18 +1,13 @@
 /**
- * EDDI's realm roles and which Manager screens each one can use.
+ * EDDI's realm roles and what each one can do in the Manager.
  *
  * The backend is the authority — every REST resource carries `@RolesAllowed`
  * and refuses what a role may not do. This table only keeps the Manager from
  * OFFERING what the backend will refuse: an `eddi-editor` used to see the Logs,
  * Audit and Vault quick actions and their sidebar entries, and a dashboard that
  * fired three admin-only requests on every load and reported the 403s as
- * "Vault unavailable" / "Coordinator —".
- *
- * Kept in step with the `@RolesAllowed` on the resource each screen calls
- * (`IRestLogAdmin`, `IRestCoordinatorAdmin`, `IRestAuditStore`,
- * `IRestSecretStore`, `IRestConnectionStore` admin CRUD, `IRestTenantQuota`,
- * `IRestOrphanAdmin`, `IRestGdprAdmin`, `IRestBrandingAdmin`, `IRestUserMemoryStore` /
- * `IRestPropertiesStore`).
+ * "Vault unavailable" / "Coordinator —"; an `eddi-viewer` met "You don't have
+ * permission" under every create button.
  */
 
 export const ROLE_ADMIN = "eddi-admin";
@@ -25,38 +20,189 @@ export const ROLE_APPROVER = "eddi-approver";
 export const EDDI_ROLES: readonly string[] = [ROLE_ADMIN, ROLE_EDITOR, ROLE_USER, ROLE_VIEWER, ROLE_APPROVER];
 
 /**
- * Screens whose backend accepts only some roles, by path prefix. A path not
- * listed is open to everyone who can use the Manager at all.
+ * The permission map: what each capability needs, read from the backend's
+ * `@RolesAllowed` (EDDI has no role hierarchy, so every endpoint lists every
+ * role it admits). This is the ONE place the Manager decides what a role may
+ * do. The route guard, the sidebar, the command palette, the dashboard and the
+ * in-page buttons all read it (`useCan`, `useMayOpenScreen`); a page that needs
+ * a new capability adds a line here instead of testing a role name.
+ *
+ * Derivation (each interface is under `src/main/java`):
+ *
+ * - admin + editor: `dashboard.read`, `agents.*`, `workflows.*`, `resources.*`,
+ *   `variables.manage`, `groups.*`, `channels.manage`, `triggers.manage`,
+ *   `schedules.manage`, `capabilities.read`, `sync.run`, `chat.use`,
+ *   `operator.use`, `conversations.monitor`, `alerts.manage`, `feedback.read`,
+ *   `modelPrices.read`, `workspaces.read`, `connections.read` — from
+ *   `IRestAgentStore`, `IRestDocumentDescriptorStore`, `IRestWorkflowStore`,
+ *   the extension stores, `IRestAgentGroupStore`, `IRestAgentAdministration`,
+ *   `IRestDeploymentStore`, `IRestChannelIntegrationStore`,
+ *   `IRestAgentTriggerStore`, `IRestScheduleStore`, `IRestCapabilityRegistry`,
+ *   `IRestExportService` / `IRestImportService`, `IRestGlobalVariableStore`,
+ *   `IRestAlertRules` / `IRestAlertEvents`, `IRestConversationRatingAdmin`,
+ *   `IRestModelPriceCatalog` (reads), `IRestWorkspaces` (class gate),
+ *   `IRestConnectionStore` (descriptor and read methods),
+ *   `IRestConversationStore.getActiveConversations`.
+ * - admin only: `agents.signingKey` (`IRestAgentStore` signing-key methods),
+ *   `setup.guided` (`IRestAgentSetup` — it writes API keys to the vault; an
+ *   editor creates the same resources one by one, which is Quick Create),
+ *   `connections.manage` (`IRestConnectionStore`), `secrets.manage`
+ *   (`IRestSecretStore`), `logs.read` (`IRestLogAdmin`), `audit.read`
+ *   (`IRestAuditStore`), `quotas.manage` (`IRestTenantQuota`),
+ *   `orphans.manage` (`IRestOrphanAdmin`), `gdpr.admin` (`IRestGdprAdmin`),
+ *   `branding.manage` (`IRestBrandingAdmin`), `conversations.purge`
+ *   (`IRestConversationStore` purge and end-inactive), `modelPrices.manage`
+ *   (`IRestModelPriceCatalog` replace), `workspaces.manage` (`IRestWorkspaces`
+ *   settings), `teamBudgets.transfer` (`IRestTeamBudgets`),
+ *   `hitl.analyticsRebuild` (`IRestApprovalAnalytics.rebuild`), `cluster.act`
+ *   (`IRestClusterAdmin` recovery actions and the dead-letter listing).
+ * - `cluster.read`: admin + viewer — `IRestClusterAdmin` overview, leases,
+ *   activity, diagnose and dead-letter counts.
+ * - `oversight.read`: admin, editor, approver — `IRestApprovalAnalytics`,
+ *   `IRestAuditSamples`, `IRestAutonomy`.
+ * - `approvals.decide`: admin, editor, user, approver — `IRestAgentEngine`'s
+ *   approval methods.
+ * - `userdata.own`: admin + user — `IRestUserMemoryStore`, `IRestPropertiesStore`.
+ *
+ * So `eddi-viewer` opens ONE Manager screen: the cluster console. It also reads
+ * documentation, agent usage, workspace info and team budgets, which have no
+ * screen of their own.
+ *
+ * Roles come from `realm_access.roles`, the only claim the backend reads
+ * (`quarkus.oidc.roles.role-claim-path`); `resource_access` is ignored there,
+ * so it is ignored here (`realmRolesOf`).
  */
-const SCREEN_ROLES: ReadonlyArray<readonly [prefix: string, roles: readonly string[]]> = [
-  ["/manage/logs", [ROLE_ADMIN]],
-  ["/manage/coordinator", [ROLE_ADMIN]],
-  ["/manage/audit", [ROLE_ADMIN]],
-  ["/manage/secrets", [ROLE_ADMIN]],
+export const CAPABILITY_ROLES = {
+  "dashboard.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "agents.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "agents.write": [ROLE_ADMIN, ROLE_EDITOR],
+  "agents.deploy": [ROLE_ADMIN, ROLE_EDITOR],
+  "agents.signingKey": [ROLE_ADMIN],
+  "setup.guided": [ROLE_ADMIN],
+  "workflows.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "workflows.write": [ROLE_ADMIN, ROLE_EDITOR],
+  "resources.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "resources.write": [ROLE_ADMIN, ROLE_EDITOR],
+  "variables.manage": [ROLE_ADMIN, ROLE_EDITOR],
+  "groups.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "groups.write": [ROLE_ADMIN, ROLE_EDITOR],
+  "channels.manage": [ROLE_ADMIN, ROLE_EDITOR],
+  "triggers.manage": [ROLE_ADMIN, ROLE_EDITOR],
+  "schedules.manage": [ROLE_ADMIN, ROLE_EDITOR],
+  "capabilities.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "sync.run": [ROLE_ADMIN, ROLE_EDITOR],
+  "chat.use": [ROLE_ADMIN, ROLE_EDITOR],
+  "operator.use": [ROLE_ADMIN, ROLE_EDITOR],
+  "conversations.monitor": [ROLE_ADMIN, ROLE_EDITOR],
+  "conversations.purge": [ROLE_ADMIN],
+  "alerts.manage": [ROLE_ADMIN, ROLE_EDITOR],
+  "feedback.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "oversight.read": [ROLE_ADMIN, ROLE_EDITOR, ROLE_APPROVER],
+  "hitl.analyticsRebuild": [ROLE_ADMIN],
+  "approvals.decide": [ROLE_ADMIN, ROLE_EDITOR, ROLE_USER, ROLE_APPROVER],
+  "connections.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "connections.manage": [ROLE_ADMIN],
+  "modelPrices.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "modelPrices.manage": [ROLE_ADMIN],
+  "workspaces.read": [ROLE_ADMIN, ROLE_EDITOR],
+  "workspaces.manage": [ROLE_ADMIN],
+  "teamBudgets.transfer": [ROLE_ADMIN],
+  "secrets.manage": [ROLE_ADMIN],
+  "logs.read": [ROLE_ADMIN],
+  "audit.read": [ROLE_ADMIN],
+  "quotas.manage": [ROLE_ADMIN],
+  "orphans.manage": [ROLE_ADMIN],
+  "gdpr.admin": [ROLE_ADMIN],
+  "branding.manage": [ROLE_ADMIN],
+  "cluster.read": [ROLE_ADMIN, ROLE_VIEWER],
+  "cluster.act": [ROLE_ADMIN],
+  "userdata.own": [ROLE_ADMIN, ROLE_USER],
+} as const satisfies Record<string, readonly string[]>;
+
+export type Capability = keyof typeof CAPABILITY_ROLES;
+
+/** The roles that hold `capability`. */
+export function rolesForCapability(capability: Capability): readonly string[] {
+  return CAPABILITY_ROLES[capability];
+}
+
+/**
+ * The capability a Manager screen needs, by path prefix; the FIRST match wins,
+ * so a more specific path sits above its parent. A path not listed is open to
+ * every role that can reach the Manager at all.
+ */
+const SCREENS: ReadonlyArray<{ path: string; capability: Capability; exact?: boolean }> = [
+  { path: "/manage", capability: "dashboard.read", exact: true },
+  { path: "/manage/agents/wizard", capability: "setup.guided" },
+  { path: "/manage/studio", capability: "agents.write" },
+  { path: "/manage/agents", capability: "agents.read" },
+  { path: "/manage/agentview", capability: "agents.read" },
+  { path: "/manage/workflows", capability: "workflows.read" },
+  { path: "/manage/workflowview", capability: "workflows.read" },
+  { path: "/manage/resources", capability: "resources.read" },
+  { path: "/manage/groups", capability: "groups.read" },
+  { path: "/manage/channels", capability: "channels.manage" },
+  { path: "/manage/triggers", capability: "triggers.manage" },
+  { path: "/manage/schedules", capability: "schedules.manage" },
+  { path: "/manage/capabilities", capability: "capabilities.read" },
+  { path: "/manage/sync", capability: "sync.run" },
+  { path: "/manage/variables", capability: "variables.manage" },
+  { path: "/manage/chat", capability: "chat.use" },
+  { path: "/manage/operator", capability: "operator.use" },
+  { path: "/manage/conversations/monitoring", capability: "conversations.monitor" },
+  { path: "/manage/approvals", capability: "approvals.decide" },
+  { path: "/manage/oversight", capability: "oversight.read" },
+  { path: "/manage/alerts", capability: "alerts.manage" },
+  { path: "/manage/feedback", capability: "feedback.read" },
   // `IRestConnectionStore` is eddi-admin, but its descriptors and reads also
   // admit eddi-editor — an editor can open the list and a connection (read-only;
-  // create, update and delete stay admin).
-  ["/manage/connections", [ROLE_ADMIN, ROLE_EDITOR]],
-  ["/manage/quotas", [ROLE_ADMIN]],
-  ["/manage/orphans", [ROLE_ADMIN]],
-  ["/manage/gdpr", [ROLE_ADMIN]],
+  // create, update and delete stay admin: `connections.manage`).
+  { path: "/manage/connections", capability: "connections.read" },
+  { path: "/manage/model-prices", capability: "modelPrices.read" },
+  { path: "/manage/workspaces", capability: "workspaces.read" },
+  { path: "/manage/secrets", capability: "secrets.manage" },
+  { path: "/manage/logs", capability: "logs.read" },
+  { path: "/manage/audit", capability: "audit.read" },
+  // The cluster console admits the read-only viewer too; its dead-letter
+  // listing and recovery actions are `cluster.act`, which the page checks.
+  { path: "/manage/coordinator", capability: "cluster.read" },
+  { path: "/manage/quotas", capability: "quotas.manage" },
+  { path: "/manage/orphans", capability: "orphans.manage" },
+  { path: "/manage/gdpr", capability: "gdpr.admin" },
   // `IRestBrandingAdmin`: eddi-admin only — a brand is deployment identity.
-  ["/manage/branding", [ROLE_ADMIN]],
-  ["/manage/userdata", [ROLE_ADMIN, ROLE_USER]],
-  // `IRestConversationRatingAdmin` enumerates admin and editor (no viewer).
-  ["/manage/feedback", [ROLE_ADMIN, ROLE_EDITOR]],
-  // `IRestAlertRules` / `IRestAlertEvents` enumerate admin and editor (no viewer).
-  ["/manage/alerts", [ROLE_ADMIN, ROLE_EDITOR]],
+  { path: "/manage/branding", capability: "branding.manage" },
+  { path: "/manage/userdata", capability: "userdata.own" },
 ];
+
+/** The capability the screen at `path` needs, or `null` when any role may open it. */
+export function capabilityForScreen(path: string): Capability | null {
+  const bare = path.split(/[?#]/, 1)[0] ?? path;
+  const trimmed = bare.length > 1 ? bare.replace(/\/+$/, "") : bare;
+  const hit = SCREENS.find((s) =>
+    s.exact ? trimmed === s.path : trimmed === s.path || trimmed.startsWith(`${s.path}/`),
+  );
+  return hit?.capability ?? null;
+}
 
 /** The roles that may use the screen at `path`, or `null` when any role may. */
 export function rolesForScreen(path: string): readonly string[] | null {
-  for (const [prefix, roles] of SCREEN_ROLES) {
-    if (path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`)) {
-      return roles;
-    }
-  }
-  return null;
+  const capability = capabilityForScreen(path);
+  return capability ? CAPABILITY_ROLES[capability] : null;
+}
+
+/**
+ * The realm roles in a parsed access token, from `realm_access.roles` — the one
+ * claim the backend reads. `resource_access` is not an EDDI role as far as the
+ * server is concerned, so it is not one here either.
+ */
+export function realmRolesOf(tokenParsed: unknown): string[] {
+  const roles = (tokenParsed as { realm_access?: { roles?: unknown } } | undefined)?.realm_access?.roles;
+  return Array.isArray(roles) ? roles.filter((r): r is string => typeof r === "string") : [];
+}
+
+/** The EDDI roles among `roles`, most privileged first. */
+export function eddiRolesOf(roles: readonly string[]): string[] {
+  return EDDI_ROLES.filter((r) => roles.includes(r));
 }
 
 /**
@@ -84,4 +230,9 @@ export function mayUse(
 ): boolean {
   if (!required || authDisabled || !rolesAreKnown(roles)) return true;
   return required.some((r) => roles.includes(r));
+}
+
+/** Whether a user with `roles` holds `capability` (see `mayUse` for the degradation rules). */
+export function mayDo(capability: Capability, roles: readonly string[], authDisabled: boolean): boolean {
+  return mayUse(CAPABILITY_ROLES[capability], roles, authDisabled);
 }
