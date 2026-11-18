@@ -146,6 +146,13 @@ class PostgresSanitizingDataSourceTest {
     }
 
     @Test
+    void jsonParametersOf_parsesAStatementOnce() {
+        String sql = "UPDATE t SET d = ?::jsonb WHERE id = ?";
+        assertSame(PostgresSanitizingDataSource.jsonParametersOf(sql), PostgresSanitizingDataSource.jsonParametersOf(sql));
+        assertTrue(PostgresSanitizingDataSource.jsonParametersOf(sql).get(1));
+    }
+
+    @Test
     void jsonParameters_findsCastsAndIgnoresQuotedQuestionMarks() {
         BitSet json = PostgresSanitizingDataSource.jsonParameters(
                 "UPDATE t SET d = jsonb_set(d, '{a?}', ?::jsonb), n = ?, \"c?\" = CAST(? AS jsonb) -- ?\n WHERE id = ?::uuid /* ? */ AND x = ?::JSON");

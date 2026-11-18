@@ -167,7 +167,7 @@ class PostgresOAuthStateStoreUnitTest {
         // instead of running forever against a table that was never created.
         doThrow(new SQLException("could not obtain lock on relation")).doReturn(true).when(statement).execute(anyString());
 
-        store.deleteExpired();
+        assertThrows(IllegalStateException.class, () -> store.deleteExpired());
         store.deleteExpired();
         store.deleteExpired();
 
@@ -176,16 +176,15 @@ class PostgresOAuthStateStoreUnitTest {
     }
 
     @Test
-    @DisplayName("schema — an initialisation failure is logged, not thrown, and the operation still runs")
+    @DisplayName("schema — an initialisation failure surfaces to the caller instead of being swallowed")
     void schemaFailureDoesNotAbortTheCall() throws Exception {
-        // On a deployment whose table already exists and whose app user holds no DDL
-        // grant, refusing to continue would take account linking down over a step that
-        // had nothing left to do.
+        // Carrying on only moved the failure to a later "relation does not exist" with
+        // the
+        // cause lost; every other PostgreSQL store already throws here.
         doThrow(new SQLException("permission denied for schema public")).when(connection).createStatement();
-        when(preparedStatement.executeUpdate()).thenReturn(2);
 
-        assertEquals(2, store.deleteExpired());
-        verify(preparedStatement).executeUpdate();
+        assertThrows(IllegalStateException.class, () -> store.deleteExpired());
+        verify(preparedStatement, never()).executeUpdate();
     }
 
     // ==================== create ====================

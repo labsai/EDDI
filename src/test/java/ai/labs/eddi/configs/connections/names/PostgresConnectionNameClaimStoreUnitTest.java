@@ -123,12 +123,11 @@ class PostgresConnectionNameClaimStoreUnitTest {
     }
 
     @Test
-    @DisplayName("a failed schema step still closes its statement and connection")
+    @DisplayName("a failed schema step surfaces to the caller and still closes its statement and connection")
     void schemaFailureClosesItsResources() throws Exception {
         when(statement.execute(anyString())).thenThrow(new SQLException("permission denied for schema public"));
-        when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        assertTrue(store.claim(TENANT, NAME, "token-1"));
+        assertThrows(IllegalStateException.class, () -> store.claim(TENANT, NAME, "token-1"));
 
         verify(statement).close();
         assertEveryConnectionAndStatementClosed();

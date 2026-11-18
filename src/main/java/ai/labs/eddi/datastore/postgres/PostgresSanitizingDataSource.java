@@ -18,6 +18,8 @@ import java.sql.SQLException;
 import java.util.Arrays;
 import java.util.BitSet;
 import java.util.Locale;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -204,7 +206,7 @@ public final class PostgresSanitizingDataSource {
             Object result = PostgresSanitizingDataSource.invoke(target, method, args);
             if (name.equals("prepareStatement") && result instanceof PreparedStatement statement && args != null && args[0] instanceof String sql) {
                 return (PreparedStatement) Proxy.newProxyInstance(PostgresSanitizingDataSource.class.getClassLoader(),
-                        new Class<?>[]{PreparedStatement.class}, new PreparedStatementHandler(statement, jsonParameters(sql)));
+                        new Class<?>[]{PreparedStatement.class}, new PreparedStatementHandler(statement, jsonParametersOf(sql)));
             }
             return result;
         }
@@ -277,6 +279,28 @@ public final class PostgresSanitizingDataSource {
                 object.setValue(cleaned);
             }
         }
+    }
+
+    /**
+     * Statements are fixed strings that run over and over; parse each once. Bounded
+     * for dynamic SQL.
+     */
+    private static final int MAX_CACHED_STATEMENTS = 1024;
+    private static final Map<String, BitSet> JSON_PARAMETERS = new ConcurrentHashMap<>();
+
+    /**
+     * Cached {@link #jsonParameters}; the returned set is shared and must not be
+     * modified.
+     */
+    static BitSet jsonParametersOf(String sql) {
+        BitSet cached = JSON_PARAMETERS.get(sql);
+        if (cached == null) {
+            cached = jsonParameters(sql);
+            if (JSON_PARAMETERS.size() < MAX_CACHED_STATEMENTS) {
+                JSON_PARAMETERS.put(sql, cached);
+            }
+        }
+        return cached;
     }
 
     /**
