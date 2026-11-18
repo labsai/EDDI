@@ -13,11 +13,19 @@ function denialKey(id: string) {
   return ["email-log-denial", id] as const;
 }
 
-/** A 403 from the integration's mail log: when it happened, and the error to show. */
+/** A 403 from the integration's mail log: the last request sent before it, and the error to show. */
 export interface EmailLogDenial {
-  at: number;
+  /** The request sequence number current when the denial was recorded; only a later request can lift it. */
+  afterRequest: number;
   error: unknown;
 }
+
+/**
+ * Orders the mail-log requests this page sends. A sequence, not a clock: two
+ * requests in one millisecond still have distinct numbers, so a response to a
+ * request sent before a denial can never pass for one sent after it.
+ */
+let requestSequence = 0;
 
 /**
  * Records a 403 for the integration's mail log and drops every cached page of
@@ -27,7 +35,7 @@ export interface EmailLogDenial {
  * sent before the denial must not repopulate the cache.
  */
 export function markEmailLogDenied(queryClient: QueryClient, id: string, error: unknown) {
-  queryClient.setQueryData<EmailLogDenial>(denialKey(id), { at: Date.now(), error });
+  queryClient.setQueryData<EmailLogDenial>(denialKey(id), { afterRequest: requestSequence, error });
   // After the failing query has settled, so it is dropped with the rest.
   setTimeout(() => {
     void queryClient.cancelQueries({ queryKey: emailLogKey(id) }).then(() => queryClient.removeQueries({ queryKey: emailLogKey(id) }));
@@ -55,11 +63,11 @@ export function useEmailLog(id: string, filters: EmailLogFilters, enabled = true
   return useInfiniteQuery({
     queryKey: [...emailLogKey(id), filters] as const,
     queryFn: async ({ pageParam }) => {
-      const sentAt = Date.now();
+      const sent = ++requestSequence;
       try {
         const page = await getEmailLog(id, filters, pageParam);
         const denial = queryClient.getQueryData<EmailLogDenial | null>(denialKey(id));
-        if (denial && denial.at <= sentAt) queryClient.setQueryData(denialKey(id), null);
+        if (denial && sent > denial.afterRequest) queryClient.setQueryData(denialKey(id), null);
         return page;
       } catch (error) {
         if (isApiError(error) && error.status === 403) markEmailLogDenied(queryClient, id, error);
