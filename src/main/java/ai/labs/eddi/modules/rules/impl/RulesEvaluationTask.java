@@ -92,7 +92,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
         } catch (RulesEvaluator.RuleExecutionException e) {
             String msg = "Error while evaluating behavior rules!";
             log.error(msg, e);
-            throw new LifecycleException(msg, e);
+            throw new RuleEvaluationFailedException(msg, e);
         } catch (InterruptedException e) {
             // B2: the pipeline's graceful-stop signal IS the thread's interrupt flag —
             // LifecycleManager re-checks Thread.currentThread().isInterrupted() before

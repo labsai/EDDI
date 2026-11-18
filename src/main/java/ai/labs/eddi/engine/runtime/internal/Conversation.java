@@ -298,19 +298,7 @@ public class Conversation implements IConversation {
 
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
-            try {
-                executeConversationStep(lifecycleData, null);
-            } catch (LifecycleException.LifecycleInterruptedException e) {
-                throw e;
-            } catch (LifecycleException e) {
-                // A task failed on the CONVERSATION_START turn (a rule set with a
-                // dependency cycle, say). Like a failed say turn, this leaves the
-                // conversation in state ERROR with the reason in the step's taskErrors —
-                // it used to propagate and answer the start request with a bare HTTP 500,
-                // so that no conversation could be created at all.
-                LOGGER.errorf(e, "The CONVERSATION_START turn of conversation %s failed", conversationMemory.getConversationId());
-                setConversationState(ConversationState.ERROR);
-            }
+            executeConversationStep(lifecycleData, null);
         } finally {
             recordAgentVersion();
             checkActionsForConversationEnd();
