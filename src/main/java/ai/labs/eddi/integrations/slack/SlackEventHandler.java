@@ -25,6 +25,9 @@ import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -70,7 +73,11 @@ public class SlackEventHandler {
 
     private static final Logger LOGGER = Logger.getLogger(SlackEventHandler.class);
 
-    /** Pattern to strip bot mention: {@code <@U0123BOTID> actual message} */
+    /**
+     * A leading user mention: {@code <@U0123BOTID> actual message}. It cannot tell
+     * the bot from anybody else, so it only strips when the envelope named no bot
+     * id; whether a message mentions THIS bot is {@code mentionsThisBot}.
+     */
     private static final Pattern BOT_MENTION_PATTERN = Pattern.compile("^<@[A-Z0-9]+>\\s*");
 
     /**
@@ -121,6 +128,13 @@ public class SlackEventHandler {
     private final ExecutorService executorService;
 
     /**
+     * Unmentioned thread replies dropped because the bot takes no part in the
+     * thread. Not an error: it is the rule working, and the number tells an
+     * operator how much human-only thread traffic reaches the app.
+     */
+    private final Counter ignoredThreadReplies;
+
+    /**
      * Timeouts and the API retry budget. These were compile-time constants, so an
      * agent whose turn legitimately ran past sixty seconds always failed on Slack
      * and worked over {@code /v1}, with no way to tune it short of a rebuild.
@@ -161,7 +175,7 @@ public class SlackEventHandler {
     @SuppressWarnings("unused")
     private final IUserMemoryStore userMemoryStore;
 
-    @Inject
+    /** With meters kept locally — for tests that do not look at them. */
     public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
             ObserveGate observeGate,
             ToolCostTracker toolCostTracker,
@@ -173,6 +187,25 @@ public class SlackEventHandler {
             SlackConfig slackConfig,
             ISlackApprovalRecordStore approvalRecords,
             IUserMemoryStore userMemoryStore) {
+        this(channelTargetRouter, observeGate, toolCostTracker, slackApi, conversationService, groupConversationService,
+                userConversationStore, cacheFactory, slackConfig, approvalRecords, userMemoryStore,
+                new SimpleMeterRegistry());
+    }
+
+    @Inject
+    public SlackEventHandler(ChannelTargetRouter channelTargetRouter,
+            ObserveGate observeGate,
+            ToolCostTracker toolCostTracker,
+            SlackWebApiClient slackApi,
+            IConversationService conversationService,
+            IGroupConversationService groupConversationService,
+            IUserConversationStore userConversationStore,
+            ICacheFactory cacheFactory,
+            SlackConfig slackConfig,
+            ISlackApprovalRecordStore approvalRecords,
+            IUserMemoryStore userMemoryStore,
+            MeterRegistry meterRegistry) {
+        this.ignoredThreadReplies = meterRegistry.counter("eddi.slack.thread.replies.ignored");
         this.channelTargetRouter = channelTargetRouter;
         this.observeGate = observeGate;
         this.toolCostTracker = toolCostTracker;
@@ -360,8 +393,9 @@ public class SlackEventHandler {
         // For "message" events (from message.channels/groups/im subscriptions):
         // - DMs (channel_type: "im") → always process (no app_mention in DMs)
         // - Top-level channel messages → handled by app_mention, skip here
-        // - Thread replies with @mention → handled by app_mention, skip here
-        // - Thread replies without @mention → process here (thread continuity)
+        // - Thread replies that mention THIS bot → app_mention handles them, skip here
+        // - Thread replies without a mention → answered only in a thread the bot
+        // already takes part in (it was mentioned there, or has spoken there)
         if ("message".equals(eventType)) {
             if (eventThreadTs == null && !isDirectMessage) {
                 // Top-level channel message. Only app_mention answers these — unless
@@ -374,11 +408,25 @@ public class SlackEventHandler {
                 LOGGER.debugf("[SLACK] Ignoring top-level message event (use @mention)");
                 return;
             }
-            String text = (String) event.get("text");
-            if (text != null && BOT_MENTION_PATTERN.matcher(text).find()) {
-                // Thread reply with @mention — app_mention event will handle it
-                LOGGER.debugf("[SLACK] Ignoring @mentioned thread reply (handled by app_mention)");
-                return;
+            if (!isDirectMessage) {
+                // A DM never gets an app_mention, so the mention test only applies in
+                // a channel. It is the observer path's predicate (mentionsThisBot): a
+                // mention of THIS bot anywhere in the text, not any user's mention at
+                // the start. A message and its app_mention therefore yield one turn,
+                // whichever order the two arrive in.
+                if (mentionsThisBot((String) event.get("text"), botUserId)) {
+                    LOGGER.debugf("[SLACK] Ignoring a thread reply that mentions the bot (handled by app_mention)");
+                    return;
+                }
+                if (!participatesInThread(eventChannel, eventThreadTs, event, origin)) {
+                    // A human-only thread: the bot was never part of it and the reply is
+                    // addressed to somebody else. Answering would send private team talk
+                    // to the model, at the agent's cost.
+                    ignoredThreadReplies.increment();
+                    LOGGER.debugf("[SLACK] Ignoring a thread reply in channel %s: the bot takes no part in the thread",
+                            sanitize(eventChannel));
+                    return;
+                }
             }
         }
 
@@ -396,13 +444,28 @@ public class SlackEventHandler {
         }
         SlackUser user = slackUser(origin, slackUserId);
 
-        // Strip bot mention prefix: "<@U0123BOTID> hello" → "hello"
-        text = stripBotMention(text);
+        // Strip this bot's leading mention: "<@U0123BOTID> hello" → "hello". Another
+        // user's mention is part of the message and stays.
+        text = stripBotMention(text, botUserId);
 
         String threadTs = getThreadTs(event);
 
         if (text.isBlank()) {
             postHelp(channelId, threadTs, null);
+            return;
+        }
+
+        // One Slack message, one turn. Slack delivers a message that mentions the bot
+        // as
+        // two events (message + app_mention) with different event ids, which the
+        // event-id de-duplication cannot see are one. The message path already steps
+        // aside for a mention of this bot; this is the net under it for what that test
+        // cannot tell. A DM has no second event, so it is not marked.
+        String messageTs = (String) event.get("ts");
+        if (messageTs != null && !isDirectMessage
+                && eventDedup.putIfAbsent("msg:" + channelId + ":" + messageTs, Boolean.TRUE) != null) {
+            LOGGER.debugf("[SLACK] Message %s in channel %s was already handled — skipping", sanitize(messageTs),
+                    sanitize(channelId));
             return;
         }
 
@@ -664,9 +727,8 @@ public class SlackEventHandler {
      * miss; the alternative is answering a sentence `app_mention` is answering too,
      * which is the bot replying twice. The anchored {@link #BOT_MENTION_PATTERN}
      * used to serve here and could do neither: being anchored it missed a trailing
-     * mention entirely, and produced exactly that double reply. It is still the
-     * thread-reply branch's test, where `stripBotMention` depends on it being
-     * prefix-only.
+     * mention entirely, and produced exactly that double reply. This is now the one
+     * test for both event paths — the observer's and the thread-reply branch's.
      */
     static boolean mentionsThisBot(String text, String botUserId) {
         if (text == null || text.isBlank()) {
@@ -1727,5 +1789,74 @@ public class SlackEventHandler {
     static String stripBotMention(String text) {
         Matcher matcher = BOT_MENTION_PATTERN.matcher(text);
         return matcher.replaceFirst("").trim();
+    }
+
+    /**
+     * Strip THIS bot's mention from the start of the text:
+     * {@code "<@U0BOT> what is EDDI?" → "what is EDDI?"}. A leading mention of
+     * somebody else is part of the message and stays ("<@U0ALICE> look at this").
+     * Without the bot's own id (an envelope that carried no authorization) any
+     * leading mention is stripped, as {@link #stripBotMention(String)} does.
+     */
+    static String stripBotMention(String text, String botUserId) {
+        if (botUserId == null || botUserId.isBlank()) {
+            return stripBotMention(text);
+        }
+        return text.replaceFirst("^<@" + Pattern.quote(botUserId) + "(\\|[^>]*)?>\\s*", "").trim();
+    }
+
+    /**
+     * Whether the bot already takes part in this thread, so that an unmentioned
+     * reply in it is addressed to the bot and not to the people in the thread.
+     * <p>
+     * The bot takes part in a thread when it was mentioned in it or has spoken in
+     * it. Three records say so, in order of cost:
+     * <ol>
+     * <li>the thread's target lock — written for every thread the bot handles (24
+     * hours, shared across nodes in cluster mode)</li>
+     * <li>a group discussion's agent message the reply is under</li>
+     * <li>the user's own conversation mapping for one of the channel's targets in
+     * this thread — it lives in the database, so it survives a restart, which the
+     * lock does not on a single node. It is the replying user's own mapping, so
+     * after a restart a thread revives only for people who had already talked to
+     * the bot in it; a colleague who had not must mention the bot once. The lock is
+     * written back when a mapping is found.</li>
+     * </ol>
+     */
+    private boolean participatesInThread(String channelId, String parentTs, Map<String, Object> event,
+                                         EventOrigin origin) {
+        if (channelId == null || parentTs == null) {
+            return false;
+        }
+        if (channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs) != null) {
+            return true;
+        }
+        GroupFollowUp followUp = activeGroupListeners.get(parentTs);
+        if (followUp != null && channelId.equals(followUp.channelId())) {
+            return true;
+        }
+        if (!(event.get("user") instanceof String slackUserId) || !SlackUserIdentity.isValidSlackUserId(slackUserId)) {
+            return false;
+        }
+        var integration = channelTargetRouter.integrationFor("slack", channelId);
+        if (integration == null || integration.getTargets() == null) {
+            return false;
+        }
+        String eddiUserId = slackUser(origin, slackUserId).eddiUserId();
+        for (ChannelTarget target : integration.getTargets()) {
+            if (target.getTargetId() == null || target.getTargetId().isBlank()) {
+                continue;
+            }
+            try {
+                if (userConversationStore.readUserConversation(threadIntent(channelId, target.getTargetId(), parentTs),
+                        eddiUserId) != null) {
+                    channelTargetRouter.lockThreadTarget("slack", channelId, parentTs, target);
+                    return true;
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Could not read the thread mapping for channel %s: %s", sanitize(channelId), e.getMessage());
+            }
+        }
+        return false;
     }
 }

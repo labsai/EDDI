@@ -942,6 +942,17 @@ worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana al
 rule on `outcome="gave_up"` is in the
 [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
 
+### Slack Metrics
+
+```text
+eddi_slack_thread_replies_ignored_total   # Unmentioned thread replies dropped because the bot takes no part in the thread
+```
+
+Not an error: the counter is the rule "the bot answers an unmentioned thread reply only in a thread it
+already takes part in" working. A high rate means the Slack app receives a lot of conversation between people
+(`message.channels` is subscribed); none of it reaches a model. See
+[Slack Integration](slack-integration.md#when-the-bot-answers).
+
 ### Agent Identity & Signing Metrics
 
 ```text

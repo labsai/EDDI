@@ -19573,6 +19573,82 @@
           }
         },
         {
+          "id": 470,
+          "type": "timeseries",
+          "title": "Slack thread replies ignored",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_slack_thread_replies_ignored_total` \u2014 unmentioned thread replies dropped because the bot takes no part in the thread (`message.channels` is subscribed, so Slack sends every message of the channel). Not an error: it is the rule working. See the Slack integration page.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 120
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum(rate(eddi_slack_thread_replies_ignored_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "ignored thread replies"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "ops",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
           "id": 277,
           "type": "timeseries",
           "title": "Alert queue depth",

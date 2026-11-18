@@ -139,7 +139,7 @@ For the bot to accept DMs, you must enable the Messages Tab:
 4. Subscribe to **Bot Events**:
    - `app_mention` — triggers when the bot is @mentioned in a channel
    - `message.im` — triggers on direct messages to the bot
-   - `message.channels` — enables thread-reply continuity without @mention
+   - `message.channels` — enables thread-reply continuity without @mention. The bot answers an unmentioned reply **only in a thread it already takes part in** (see [When the bot answers](#when-the-bot-answers)); replies in threads between people are ignored
 5. Click **Save Changes**
 
 ---
@@ -255,6 +255,22 @@ thread's history is still on screen. What the agent remembers about the user (lo
 carries over; only the conversation's own state starts again. Two messages arriving at once on an
 ended thread end up in the same new conversation. See
 [Running conversations and new agent versions](deployment-management-of-agents.md#running-conversations-and-new-agent-versions).
+
+### When the bot answers
+
+With `message.channels` subscribed, Slack sends EDDI **every** message of the channel, so the bot decides what is addressed to it:
+
+| Message | Answered? |
+|---|---|
+| A message that mentions the bot (`@EDDI`, at the start or anywhere in the text) | Yes — through the `app_mention` event |
+| An unmentioned top-level channel message | **No** (unless an [observer](#observe-mode-passive-watching) is configured for the channel) |
+| An unmentioned reply in a thread the bot **takes part in** | Yes |
+| An unmentioned reply in a thread the bot does not take part in (a thread between people) | **No** — nothing is sent to the model; counted in `eddi_slack_thread_replies_ignored_total` |
+| A direct message | Yes |
+
+The bot **takes part in a thread** when it was mentioned in it, or has answered in it (including a group discussion's agent message the reply is under, and an observer's answer). EDDI knows this from the thread's target lock (24 hours, shared across nodes in a cluster) and from the replying user's own conversation mapping for the thread, which is stored in the database. A restart of a single node clears the locks, so afterwards a thread revives for the people who had already talked to the bot in it (their mapping is found and the lock is restored); someone who had not must mention the bot once.
+
+A mention counts only when it names **this bot** (the bot's own user id from the event envelope). A message that mentions another person ("`@alice` look at this") is not a mention of the bot: in a thread the bot takes part in it is answered like any reply, in any other thread it is ignored. A message that mentions the bot is answered once, however Slack delivers it (as `message` and `app_mention`, in either order). If an event envelope carries no bot id, any mention in a thread reply is treated as possibly the bot's and left to `app_mention`.
 
 ### Direct Messages (DMs)
 
