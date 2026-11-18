@@ -318,7 +318,11 @@ public class AttachmentShareService {
                 refuse(refused, UNKNOWN_FILE, callRefusal);
                 continue;
             }
-            Optional<ConversationListing.Entry> listed = selector != null ? list.entryForRoot(selector.storageRef()) : Optional.empty();
+            if (selector == null) {
+                refuse(refused, UNKNOWN_FILE, Refusal.NOT_FOUND);
+                continue;
+            }
+            Optional<ConversationListing.Entry> listed = list.entryForRoot(selector.storageRef());
             // A file the listing does not hold has no name the model may see.
             String name = listed.map(ConversationListing.Entry::displayName).orElse(UNKNOWN_FILE);
             if (listed.isEmpty()) {
