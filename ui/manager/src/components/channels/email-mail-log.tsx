@@ -170,9 +170,11 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
     const cached = queryClient.getQueryCache().getAll().filter((query) => JSON.stringify(query.queryKey).startsWith(prefix));
     // Mounting again (the cache outlives the component): rebuild "lifted" from
     // the cache itself — a successful read newer than a cached 403 already
-    // lifted it.
+    // lifted it. `dataUpdatedAt` is the last SUCCESSFUL read, kept even when a
+    // later refetch of that query failed, so the query's current status is
+    // irrelevant here.
     for (const query of cached) {
-      if (query.state.status === "success" && query.state.dataUpdatedAt > liftedAt.current) liftedAt.current = query.state.dataUpdatedAt;
+      if (query.state.dataUpdatedAt > liftedAt.current) liftedAt.current = query.state.dataUpdatedAt;
     }
     for (const query of cached) noteDenial(query.state.error, query.state.errorUpdatedAt);
     return queryClient.getQueryCache().subscribe((event) => {

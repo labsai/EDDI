@@ -150,8 +150,10 @@ describe("EmailMailLog", () => {
     // so its cached rows show.
     mode = "down";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    await waitFor(() => expect(networkFailures).toBeGreaterThan(0)); // the network error, not the old 403
-    await waitFor(() => expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument());
+    // Settled on the network error (retries included), not on the old 403.
+    await waitFor(() => expect(networkFailures).toBeGreaterThan(0));
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
+    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
   });
 
   it("does not revive a lifted 403 when the section mounts again on the same cache", async () => {
@@ -177,14 +179,21 @@ describe("EmailMailLog", () => {
     mode = "ok";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
     expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
+    // REFUSED's own later refetch fails: its status is now "error", but its last
+    // successful read (newer than All's 403) still counts as the lift.
+    mode = "down";
+    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"], type: "active" });
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
+    expect(networkFailures).toBeGreaterThan(0);
     first.unmount();
 
     // Back later, same cache: the section starts on "All" (old 403 cached), whose
-    // refetch now fails on the network.
-    mode = "down";
+    // refetch also fails on the network.
+    const before = networkFailures;
     renderPage("/", <EmailMailLog channelId="ch-email" />, "/", queryClient);
-    await waitFor(() => expect(networkFailures).toBeGreaterThan(0));
-    await waitFor(() => expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument());
+    await waitFor(() => expect(networkFailures).toBeGreaterThan(before));
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
+    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
   });
 
   it("counts a 403 that arrives after the filter has already changed", async () => {
