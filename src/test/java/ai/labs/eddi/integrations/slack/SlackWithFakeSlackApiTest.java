@@ -83,8 +83,9 @@ class SlackWithFakeSlackApiTest {
     }
 
     private static SlackConfig config(int requestTimeoutSeconds, int retries, int lateWindowSeconds) {
-        return new SlackConfig(requestTimeoutSeconds, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS, retries, 10L,
-                FakeSlackApi.BASE_URL, lateWindowSeconds);
+        return new SlackConfig(requestTimeoutSeconds, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS, retries, 10L)
+                .withApiBaseUrl(FakeSlackApi.BASE_URL)
+                .withLateAnswerWindowSeconds(lateWindowSeconds);
     }
 
     // ─── The client ───

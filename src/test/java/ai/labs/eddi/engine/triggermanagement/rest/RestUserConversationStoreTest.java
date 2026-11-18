@@ -164,6 +164,18 @@ class RestUserConversationStoreTest {
             verify(cache).put("intent1::user1", uc);
         }
 
+        @Test
+        @DisplayName("a mapping written over REST never names a channel signer: only a channel adapter records one")
+        void channelSignerIsNotAcceptedOverRest() throws Exception {
+            UserConversation uc = new UserConversation("intent1", "user1",
+                    Deployment.Environment.production, "agent1", "conv1");
+            uc.setChannelSigner("integration:another-app");
+
+            restStore.createUserConversation("intent1", "user1", uc);
+
+            verify(userConversationStore).createUserConversation(argThat(stored -> stored.getChannelSigner() == null));
+        }
+
         /**
          * The ownership guard authorises the PATH userId, but it is the BODY that gets
          * persisted. Without this check a caller authorised for their own path could

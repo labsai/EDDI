@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.integrations.slack.SlackConfig;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -77,9 +78,11 @@ public class ChannelTargetRouter {
     static final Set<String> CREDENTIAL_KEYS = Set.of(KEY_BOT_TOKEN, KEY_SIGNING_SECRET);
 
     /**
-     * Where a Slack bot token is sent - checked against the secret's allowedHosts.
+     * Where a Slack bot token is sent — checked against the secret's allowedHosts.
+     * The same bean the Slack client sends through, so the destination that is
+     * judged is the destination that is called ({@code eddi.slack.api-base-url}).
      */
-    private static final String SLACK_API_DESTINATION = "https://slack.com/api/";
+    private final SlackConfig slackConfig;
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -161,7 +164,8 @@ public class ChannelTargetRouter {
             IAgentStore agentStore,
             SecretResolver secretResolver,
             VaultHostAllowlist vaultHostAllowlist,
-            ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory,
+            SlackConfig slackConfig) {
         this.channelStore = channelStore;
         this.descriptorStore = descriptorStore;
         this.agentAdmin = agentAdmin;
@@ -169,6 +173,20 @@ public class ChannelTargetRouter {
         this.secretResolver = secretResolver;
         this.vaultHostAllowlist = vaultHostAllowlist;
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
+        this.slackConfig = slackConfig;
+    }
+
+    /** Against the default Slack API base URL — for tests that do not set one. */
+    public ChannelTargetRouter(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore descriptorStore,
+            IDeploymentStatusReader agentAdmin,
+            IAgentStore agentStore,
+            SecretResolver secretResolver,
+            VaultHostAllowlist vaultHostAllowlist,
+            ICacheFactory cacheFactory) {
+        this(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, vaultHostAllowlist, cacheFactory,
+                new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS,
+                        SlackConfig.DEFAULT_API_MAX_RETRIES, SlackConfig.DEFAULT_API_RETRY_BASE_MS));
     }
 
     /** Without the destination check — for tests that do not exercise it. */
@@ -793,44 +811,123 @@ public class ChannelTargetRouter {
      * The webhook establishes who signed: an integration (by name) or a legacy
      * connector (by secret). Only that app's token is returned, so a DM to one app
      * is never answered with another app's credentials.
+     * <p>
+     * A legacy signing secret can stand for more than one connector — a Slack app
+     * distributed to several workspaces has one signing secret and a bot token per
+     * workspace. A legacy connector declares no workspace, and the event's own
+     * {@code team} is the sender's claim, so the connectors cannot be told apart:
+     * the token is returned only when every connector holding the secret has the
+     * same one.
      *
      * @return the signing app's bot token, or {@code null} when it cannot be
-     *         determined or the app has none
+     *         determined, is ambiguous, or the app has none
      */
     public String getBotTokenForSigner(String channelType, String signingIntegrationName, String verifiedSigningSecret) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         if (signingIntegrationName != null) {
             return getIntegrationByName(normalizedType, signingIntegrationName)
-                    .map(cfg -> cfg.getPlatformConfig() != null ? cfg.getPlatformConfig().get("botToken") : null)
+                    .map(cfg -> cfg.getPlatformConfig() != null ? cfg.getPlatformConfig().get(KEY_BOT_TOKEN) : null)
                     .filter(token -> token != null && !token.isBlank())
                     .orElse(null);
         }
         if (CHANNEL_TYPE_SLACK.equals(normalizedType) && verifiedSigningSecret != null && !verifiedSigningSecret.isBlank()) {
-            return legacyMap.entrySet().stream()
-                    .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
-                    .sorted(Map.Entry.comparingByKey())
-                    .map(entry -> entry.getValue().botToken())
-                    .filter(token -> token != null && !token.isBlank())
-                    .findFirst()
-                    .orElse(null);
+            Set<String> tokens = new HashSet<>();
+            for (LegacyTarget legacy : legacyMap.values()) {
+                if (secretsEqual(legacy.signingSecret(), verifiedSigningSecret)) {
+                    // A connector without a usable token is a candidate too: it may be the
+                    // one that signed, and the other connector's token would be the wrong
+                    // app's.
+                    tokens.add(legacy.botToken() != null ? legacy.botToken() : "");
+                }
+            }
+            return tokens.size() == 1 && !tokens.iterator().next().isBlank() ? tokens.iterator().next() : null;
         }
         return null;
+    }
+
+    /** {@link #signerKeyOf} prefix for a new-style integration, by name. */
+    static final String SIGNER_INTEGRATION_PREFIX = "integration:";
+
+    /** {@link #signerKeyOf} prefix for a legacy connector, by channel id. */
+    static final String SIGNER_LEGACY_PREFIX = "legacy:";
+
+    /**
+     * A stable reference to the app whose credentials {@code route} carries, to be
+     * stored with what that route started (a thread's conversation mapping) and
+     * read back with {@link #getBotTokenForSignerKey} when the answer is posted
+     * later from somewhere without an event (a resumed approval in a DM).
+     * {@code integration:<name>} for a new-style integration;
+     * {@code legacy:<channelId>} for a legacy connector — the lowest-keyed
+     * connector holding the route's very token and secret, so the token read back
+     * is the one the route used.
+     *
+     * @return the reference, or {@code null} when the route carries no app
+     */
+    public String signerKeyOf(ResolvedTarget route) {
+        if (route == null) {
+            return null;
+        }
+        if (route.integration() != null) {
+            String name = route.integration().getName();
+            return name != null && !name.isBlank() ? SIGNER_INTEGRATION_PREFIX + name : null;
+        }
+        if (route.legacyBotToken() == null || route.legacySigningSecret() == null) {
+            return null;
+        }
+        refreshIfNeeded();
+        return legacyMap.entrySet().stream()
+                .filter(entry -> route.legacyBotToken().equals(entry.getValue().botToken())
+                        && secretsEqual(entry.getValue().signingSecret(), route.legacySigningSecret()))
+                .map(Map.Entry::getKey)
+                .sorted()
+                .findFirst()
+                .map(channelId -> SIGNER_LEGACY_PREFIX + channelId)
+                .orElse(null);
+    }
+
+    /**
+     * The bot token of the app {@code signerKey} ({@link #signerKeyOf}) names —
+     * exactly that app, never another serving the same agent.
+     *
+     * @return its token, or {@code null} when the app is gone, renamed, or has no
+     *         usable token
+     */
+    public String getBotTokenForSignerKey(String channelType, String signerKey) {
+        if (signerKey == null || signerKey.isBlank()) {
+            return null;
+        }
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String token = null;
+        if (signerKey.startsWith(SIGNER_INTEGRATION_PREFIX)) {
+            token = getIntegrationByName(normalizedType, signerKey.substring(SIGNER_INTEGRATION_PREFIX.length()))
+                    .map(cfg -> cfg.getPlatformConfig() != null ? cfg.getPlatformConfig().get(KEY_BOT_TOKEN) : null)
+                    .orElse(null);
+        } else if (signerKey.startsWith(SIGNER_LEGACY_PREFIX) && CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            LegacyTarget legacy = legacyMap.get(signerKey.substring(SIGNER_LEGACY_PREFIX.length()));
+            token = legacy != null ? legacy.botToken() : null;
+        }
+        return token != null && !token.isBlank() ? token : null;
     }
 
     /**
      * The bot token to answer a conversation of {@code targetId} (an agent or a
      * group) with, when the channel it ran in is owned by no integration — a DM,
      * seen from a place that has no event to read the signer from (a resumed
-     * approval). Slack's {@code team_id} narrows the candidates: an integration
-     * that declares another workspace is skipped.
+     * approval) and whose record names no signer ({@link #signerKeyOf}) because an
+     * earlier release wrote it. Slack's {@code team_id} narrows the candidates: an
+     * integration that declares another workspace is skipped.
      * <p>
-     * Answers only when it is unambiguous: if the integrations and legacy
-     * connectors that serve the target hold more than one distinct token, nothing
-     * is returned — guessing would post one app's answer with another app's
-     * credentials.
+     * Answers only when exactly one app serves the target: the candidates are the
+     * integrations and legacy connectors that serve it, those without a usable
+     * token included — such an app may be the one the user wrote to, and the other
+     * app's token would then be the wrong one. Two integrations holding the same
+     * token are one app. A legacy connector declares no workspace, so it is never
+     * narrowed away. Guessing would post one app's answer with another app's
+     * credentials, so ambiguity yields nothing.
      *
-     * @return the one bot token that serves the target, or {@code null}
+     * @return the one serving app's bot token, or {@code null}
      */
     public String getBotTokenForTarget(String channelType, String targetId, String teamId) {
         refreshIfNeeded();
@@ -840,6 +937,7 @@ public class ChannelTargetRouter {
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         String prefix = normalizedType + ":";
         Set<String> tokens = new TreeSet<>();
+        Set<String> tokenless = new HashSet<>();
         for (var entry : integrationMap.entrySet()) {
             if (!entry.getKey().startsWith(prefix)) {
                 continue;
@@ -853,20 +951,28 @@ public class ChannelTargetRouter {
             if (teamId != null && declaredTeam != null && !declaredTeam.isBlank() && !declaredTeam.equals(teamId)) {
                 continue;
             }
-            String token = platform.get("botToken");
+            String token = platform.get(KEY_BOT_TOKEN);
             if (token != null && !token.isBlank()) {
                 tokens.add(token);
+            } else {
+                // One integration is registered once per channel it covers: count it once.
+                tokenless.add(SIGNER_INTEGRATION_PREFIX + cfg.getName());
             }
         }
         if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
-            for (var legacy : legacyMap.values()) {
-                if ((targetId.equals(legacy.agentId()) || targetId.equals(legacy.groupId()))
-                        && legacy.botToken() != null && !legacy.botToken().isBlank()) {
-                    tokens.add(legacy.botToken());
+            for (var legacy : legacyMap.entrySet()) {
+                LegacyTarget connector = legacy.getValue();
+                if (!targetId.equals(connector.agentId()) && !targetId.equals(connector.groupId())) {
+                    continue;
+                }
+                if (connector.botToken() != null && !connector.botToken().isBlank()) {
+                    tokens.add(connector.botToken());
+                } else {
+                    tokenless.add(SIGNER_LEGACY_PREFIX + legacy.getKey());
                 }
             }
         }
-        return tokens.size() == 1 ? tokens.iterator().next() : null;
+        return tokens.size() == 1 && tokenless.isEmpty() ? tokens.iterator().next() : null;
     }
 
     /**
@@ -1248,9 +1354,12 @@ public class ChannelTargetRouter {
     }
 
     /**
-     * Whether the secret behind a Slack bot token reference may be sent to Slack's
-     * API under its {@code allowedHosts}. A plaintext token is not the vault's
-     * business and passes.
+     * Whether the secret behind a Slack bot token reference may be sent to the
+     * Slack Web API under its {@code allowedHosts}. The destination is
+     * {@link SlackConfig#getApiBaseUrl()} — the base URL the Slack client really
+     * sends to — not a fixed slack.com, so a secret allowed only at slack.com is
+     * withheld when {@code eddi.slack.api-base-url} points elsewhere. A plaintext
+     * token is not the vault's business and passes.
      */
     private boolean botTokenMayGoToSlack(String integrationKey, String raw) {
         if (raw == null || !SecretReference.isVaultReference(raw)) {
@@ -1260,10 +1369,12 @@ public class ChannelTargetRouter {
             // Every reference in the value, not just the first: the resolver expands all
             // of them, so a token written as "${vault:a}${vault:b}" sends both secrets.
             List<String> references = List.copyOf(VaultHostAllowlist.referencesIn(List.of(raw)));
-            vaultHostAllowlist.requireAllowed(references, SLACK_API_DESTINATION, "Slack integration " + integrationKey + " bot token");
+            vaultHostAllowlist.requireAllowed(references, slackConfig.getApiBaseUrl(),
+                    "Slack integration " + integrationKey + " bot token");
             return true;
         } catch (VaultHostAllowlist.HostNotAllowedException e) {
-            warnUnusable(integrationKey, KEY_BOT_TOKEN, "may not be sent to slack.com (" + e.getMessage() + ")", true);
+            warnUnusable(integrationKey, KEY_BOT_TOKEN,
+                    "may not be sent to the Slack Web API host (eddi.slack.api-base-url) (" + e.getMessage() + ")", true);
             return false;
         }
     }

@@ -60,4 +60,32 @@ class UserConversationTest {
         assertEquals("user-1", deserialized.getUserId());
         assertEquals("agent-1", deserialized.getAgentId());
     }
+
+    @Test
+    void channelSignerRoundTrips() throws Exception {
+        var mapper = new ObjectMapper();
+        var uc = new UserConversation("channel:slack:D1:agent-1:main", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-123");
+        uc.setChannelSigner("integration:app-a");
+
+        var deserialized = mapper.readValue(mapper.writeValueAsString(uc), UserConversation.class);
+
+        assertEquals("integration:app-a", deserialized.getChannelSigner());
+    }
+
+    /**
+     * A mapping stored by an earlier release — in MongoDB or in PostgreSQL's JSONB
+     * column, both of which hold the serialized object — has no channelSigner: it
+     * reads as unknown.
+     */
+    @Test
+    void aMappingStoredWithoutTheSignerReadsAsUnknown() throws Exception {
+        var json = "{\"intent\":\"channel:slack:D1:agent-1:main\",\"userId\":\"slack:T1:U1\","
+                + "\"environment\":\"production\",\"agentId\":\"agent-1\",\"conversationId\":\"conv-1\"}";
+
+        var deserialized = new ObjectMapper().readValue(json, UserConversation.class);
+
+        assertNull(deserialized.getChannelSigner());
+        assertEquals("conv-1", deserialized.getConversationId());
+    }
 }

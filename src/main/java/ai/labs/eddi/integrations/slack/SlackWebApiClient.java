@@ -56,12 +56,6 @@ import java.io.IOException;
 public class SlackWebApiClient {
 
     private static final Logger LOGGER = Logger.getLogger(SlackWebApiClient.class);
-    /**
-     * Where every bot token is sent. Public so the channel router can check a
-     * vaulted token's {@code allowedHosts} against this destination before it
-     * resolves it.
-     */
-    public static final String SLACK_API_BASE = SlackConfig.DEFAULT_API_BASE_URL;
 
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
@@ -84,8 +78,10 @@ public class SlackWebApiClient {
 
     /**
      * @param slackConfig
-     *            names the API base URL ({@code eddi.slack.api-base-url}); the
-     *            outbound policy is the same whatever it is
+     *            names the API base URL ({@code eddi.slack.api-base-url}) — the
+     *            same value the channel router checks a vaulted bot token's
+     *            {@code allowedHosts} against; the outbound policy is the same
+     *            whatever it is
      */
     @Inject
     public SlackWebApiClient(ObjectMapper objectMapper, OutboundHttp http, SlackConfig slackConfig) {
@@ -229,13 +225,15 @@ public class SlackWebApiClient {
         try {
             String jsonBody = objectMapper.writeValueAsString(body);
 
-            // A host the operator chose (eddi.slack.api-base-url, https or loopback,
-            // checked
-            // at startup), not one a user or a model supplied: no SSRF check, and no
-            // redirect is followed — a 3xx is answered like any other non-200 status,
-            // never replayed with the bot token.
+            // A host the operator chose (eddi.slack.api-base-url, https or a loopback
+            // literal, checked at startup), not one a user or a model supplied. Private
+            // and loopback addresses stay reachable (a proxy, a local test double), but
+            // never the cloud metadata service or a link-local address, whatever the
+            // name resolves to at call time. No redirect is followed — a 3xx is
+            // answered like any other non-200 status, never replayed with the bot
+            // token.
             var request = OutboundRequest.builder(Profile.DEFAULT, URI.create(slackConfig.getApiBaseUrl() + endpoint))
-                    .ssrf(SsrfPolicy.NONE)
+                    .ssrf(SsrfPolicy.METADATA_ONLY)
                     .redirects(RedirectPolicy.NEVER)
                     .header("Content-Type", "application/json; charset=utf-8")
                     .header("Authorization", authToken)
@@ -285,13 +283,15 @@ public class SlackWebApiClient {
 
     /**
      * What Slack's {@code Retry-After} header asks for, in milliseconds: a rate
-     * limited call (HTTP 429) names the seconds to wait. Anything but a plain
-     * non-negative number of seconds — absent, an HTTP date, garbage — is 0, and
-     * the caller falls back to its own backoff.
+     * limited call (HTTP 429) names the seconds to wait. A number too long to parse
+     * is clamped to {@link #MAX_RETRY_AFTER_SECONDS} — it asks for a very long
+     * wait, not for none. Anything but a plain non-negative number of seconds —
+     * absent, an HTTP date, garbage — is 0, and the caller falls back to its own
+     * backoff. Callers cap the wait they actually take.
      */
     static long retryAfterMillis(OutboundResponse<?> response) {
         String value = response.firstHeader("Retry-After").map(String::trim).orElse("");
-        if (value.isEmpty() || value.length() > 9) {
+        if (value.isEmpty()) {
             return 0;
         }
         for (int i = 0; i < value.length(); i++) {
@@ -299,8 +299,14 @@ public class SlackWebApiClient {
                 return 0;
             }
         }
-        return Long.parseLong(value) * 1000L;
+        if (value.length() > 9) {
+            return MAX_RETRY_AFTER_SECONDS * 1000L;
+        }
+        return Math.min(Long.parseLong(value), MAX_RETRY_AFTER_SECONDS) * 1000L;
     }
+
+    /** The longest {@code Retry-After} that is read as such: one day. */
+    static final long MAX_RETRY_AFTER_SECONDS = 86_400L;
 
     /**
      * Convert standard Markdown to Slack mrkdwn format.

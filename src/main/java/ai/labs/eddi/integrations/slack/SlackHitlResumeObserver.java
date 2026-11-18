@@ -108,15 +108,11 @@ public class SlackHitlResumeObserver {
         }
 
         String botToken = channelTargetRouter.getBotToken("slack", route.channelId());
-        if ((botToken == null || botToken.isBlank()) && route.agentId() != null
-                && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
-            // A DM's channel id belongs to no integration, so it has no token of its
-            // own. Take that of the one app that serves the thread's agent — the app
-            // the user DMed — so the outcome of an approval reaches the DM instead of
-            // vanishing. More than one candidate is ambiguous and yields nothing. A
-            // channel an integration owns but left without a token is not a DM: it
-            // stays silent rather than borrowing another app's credentials.
-            botToken = channelTargetRouter.getBotTokenForTarget("slack", route.agentId(), teamOf(mapping.getUserId()));
+        if ((botToken == null || botToken.isBlank()) && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
+            botToken = dmBotToken(mapping, route, conversationId);
+            if (botToken == null) {
+                return;
+            }
         }
         if (botToken == null || botToken.isBlank()) {
             LOGGER.debugf("No bot token for Slack channel %s — cannot deliver HITL outcome", sanitize(route.channelId()));
@@ -157,6 +153,40 @@ public class SlackHitlResumeObserver {
         for (int i = 0; delivered && i < continuationChunks.size(); i++) {
             delivered = postSafe(auth, route.channelId(), route.threadTs(), continuationChunks.get(i));
         }
+    }
+
+    /**
+     * The token for a DM, whose channel id belongs to no integration and so has
+     * none of its own. The app that signed the DM is recorded on the mapping
+     * ({@link UserConversation#getChannelSigner()}), and exactly that app's token
+     * is used — never one of another app that serves the same agent. A mapping an
+     * earlier release wrote names no app: then the token is used only when exactly
+     * one app (with or without a usable token) serves the agent in the user's
+     * workspace. A channel an integration owns but left without a token is not a DM
+     * and never reaches here: it stays silent rather than borrowing another app's
+     * credentials.
+     *
+     * @return the token, or {@code null} — with one WARN naming only ids — when it
+     *         cannot be told which app's token to use
+     */
+    private String dmBotToken(UserConversation mapping, SlackRoute route, String conversationId) {
+        String signer = mapping.getChannelSigner();
+        String token;
+        if (signer != null && !signer.isBlank()) {
+            token = channelTargetRouter.getBotTokenForSignerKey("slack", signer);
+        } else {
+            String agentId = route.agentId() != null ? route.agentId() : mapping.getAgentId();
+            token = agentId == null ? null : channelTargetRouter.getBotTokenForTarget("slack", agentId, teamOf(mapping.getUserId()));
+        }
+        if (token == null || token.isBlank()) {
+            LOGGER.warnf("No bot token can be chosen for the DM %s of conversation %s (%s) — its HITL outcome is not posted",
+                    sanitize(route.channelId()), sanitize(conversationId),
+                    signer != null && !signer.isBlank()
+                            ? "the app that signed it has no usable token now"
+                            : "the mapping names no signing app and the agent is not served by exactly one");
+            return null;
+        }
+        return token;
     }
 
     private static boolean isError(SimpleConversationMemorySnapshot snapshot) {

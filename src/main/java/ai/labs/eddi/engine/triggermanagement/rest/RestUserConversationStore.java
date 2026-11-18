@@ -93,6 +93,10 @@ public class RestUserConversationStore implements IRestUserConversationStore {
         // A body that omits them inherits the authorised path values.
         userConversation.setUserId(userId);
         userConversation.setIntent(intent);
+        // Only a channel adapter records which app's credentials started a
+        // conversation; a mapping written over REST names none, so it can never
+        // steer a later post to another app's bot token.
+        userConversation.setChannelSigner(null);
         try {
             userConversationStore.createUserConversation(userConversation);
             userConversationCache.put(calculateCacheKey(intent, userId), userConversation);
