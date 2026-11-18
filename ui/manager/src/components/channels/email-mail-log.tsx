@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, type FormEvent } from "react";
+import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -77,7 +77,7 @@ function LogTable({ rows, testId }: { rows: EmailLogRow[]; testId: string }) {
 }
 
 /** "Look up Message-ID": why EDDI did or did not answer one mail. */
-function MessageIdLookup({ channelId }: { channelId: string }) {
+function MessageIdLookup({ channelId, onDenied }: { channelId: string; onDenied: (error: unknown) => void }) {
   const { t } = useTranslation();
   const uid = useId();
   const [messageId, setMessageId] = useState("");
@@ -87,7 +87,8 @@ function MessageIdLookup({ channelId }: { channelId: string }) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const value = messageId.trim();
-    if (value) lookup.mutate(value);
+    // The lookup sits behind the same EDIT check: its 403 denies the whole log.
+    if (value) lookup.mutate(value, { onError: (error) => { if (isApiError(error) && error.status === 403) onDenied(error); } });
   };
 
   return (
@@ -131,7 +132,10 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   const { t } = useTranslation();
   const uid = useId();
   const [filters, setFilters] = useState<EmailLogFilters>({});
-  const log = useEmailLog(channelId, filters);
+  // Declared before the query: while access is denied the log does not fetch.
+  const [denial, setDenial] = useState<unknown>(null);
+  const forbidden = denial !== null;
+  const log = useEmailLog(channelId, filters, !forbidden);
   const rows = log.data?.pages.flatMap((page) => page.rows) ?? [];
   // "All" removes the key, so the query key matches the unfiltered list again.
   const setFilter = (key: keyof EmailLogFilters, value: string) =>
@@ -148,49 +152,29 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   useEffect(() => {
     if (hash === "#mail-log") document.getElementById("mail-log")?.scrollIntoView?.({ block: "start" });
   }, [hash, locationKey]);
-  // Edit access withdrawn while the page is open: a 403 on ANY of the log's
-  // queries hides every row and the lookup until a later successful read confirms
-  // access again (a cached list under another filter is not that). Other
-  // failures (network, a failed next page) keep what is already shown.
-  const [deniedAt, setDeniedAt] = useState<number | null>(null);
-  // Watch every mail-log query of this integration, not only the selected one: a
-  // request still in flight when the filter changed can come back 403 after its
-  // query is no longer on screen, and that denial counts all the same.
+  // Edit access withdrawn while the page is open (a 403 from ANY of this
+  // integration's mail-log requests or from the lookup): every cached page of
+  // the log is cancelled and dropped, nothing is fetched while denied, and only
+  // Retry — a fresh request — can lift it. With no cached rows left anywhere,
+  // no filter, remount or late response can bring them back.
   const queryClient = useQueryClient();
-  // When a successful read last lifted a denial. A 403 from before then is
-  // handled: a query keeps its old error while it refetches, and seeing it again
-  // must not bring the denial back.
-  const liftedAt = useRef(0);
+  const deny = useCallback(
+    (error: unknown) => {
+      setDenial(error);
+      const queryKey = ["channels", channelId, "email-log"];
+      void queryClient.cancelQueries({ queryKey }).then(() => queryClient.removeQueries({ queryKey }));
+    },
+    [queryClient, channelId],
+  );
   useEffect(() => {
     const prefix = JSON.stringify(["channels", channelId, "email-log"]).slice(0, -1);
-    const noteDenial = (error: unknown, at: number) => {
-      if (!isApiError(error) || error.status !== 403 || at <= liftedAt.current) return;
-      setDeniedAt((prev) => (prev === null || at > prev ? at : prev));
-    };
-    const cached = queryClient.getQueryCache().getAll().filter((query) => JSON.stringify(query.queryKey).startsWith(prefix));
-    // Mounting again (the cache outlives the component): rebuild "lifted" from
-    // the cache itself — a successful read newer than a cached 403 already
-    // lifted it. `dataUpdatedAt` is the last SUCCESSFUL read, kept even when a
-    // later refetch of that query failed, so the query's current status is
-    // irrelevant here.
-    for (const query of cached) {
-      if (query.state.dataUpdatedAt > liftedAt.current) liftedAt.current = query.state.dataUpdatedAt;
-    }
-    for (const query of cached) noteDenial(query.state.error, query.state.errorUpdatedAt);
+    // Only a NEW error: a query keeps its last error while it refetches.
     return queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== "updated" || !JSON.stringify(event.query.queryKey).startsWith(prefix)) return;
-      noteDenial(event.query.state.error, event.query.state.errorUpdatedAt);
+      if (event.type !== "updated" || event.action.type !== "error") return;
+      if (!JSON.stringify(event.query.queryKey).startsWith(prefix)) return;
+      if (isApiError(event.action.error) && event.action.error.status === 403) deny(event.action.error);
     });
-  }, [queryClient, channelId]);
-  const accessConfirmed = deniedAt !== null && log.isSuccess && !log.isError && log.dataUpdatedAt > deniedAt;
-  // A read newer than the denial confirms access: lift it for every filter, so a
-  // list cached before it shows again (and a later network error keeps it).
-  useEffect(() => {
-    if (!accessConfirmed) return;
-    liftedAt.current = log.dataUpdatedAt;
-    setDeniedAt(null);
-  }, [accessConfirmed, log.dataUpdatedAt]);
-  const forbidden = deniedAt !== null && !accessConfirmed;
+  }, [queryClient, channelId, deny]);
 
   return (
     <div className="space-y-4" data-testid="email-mail-log">
@@ -200,7 +184,7 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
           "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. The mail log does not store subjects or bodies.",
         )}
       </p>
-      {!forbidden && <MessageIdLookup key={channelId} channelId={channelId} />}
+      {!forbidden && <MessageIdLookup key={channelId} channelId={channelId} onDenied={deny} />}
       <div className="flex flex-wrap gap-2">
         <label className="sr-only" htmlFor={`${uid}-direction`}>{t("emailLog.colDirection", "Direction")}</label>
         <select id={`${uid}-direction`} className={selectClass} data-testid="email-log-filter-direction" value={filters.direction ?? ""} onChange={(e) => setFilter("direction", e.target.value)}>
@@ -223,9 +207,10 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
           ))}
         </select>
       </div>
-      {log.isLoading && <Skeleton className="h-24 w-full" />}
-      {log.isError && <ErrorState error={log.error} onRetry={() => void log.refetch()} />}
-      {log.isSuccess && rows.length === 0 && (
+      {forbidden && <ErrorState error={denial} onRetry={() => setDenial(null)} />}
+      {!forbidden && log.isLoading && <Skeleton className="h-24 w-full" />}
+      {!forbidden && log.isError && <ErrorState error={log.error} onRetry={() => void log.refetch()} />}
+      {!forbidden && log.isSuccess && rows.length === 0 && (
         <EmptyState icon={Inbox} title={t("emailLog.empty", "No mail in the log")} description={t("emailLog.emptyHint", "Nothing matches these filters, or the integration has not fetched any mail yet.")} />
       )}
       {rows.length > 0 && !forbidden && <LogTable rows={rows} testId="email-log-table" />}

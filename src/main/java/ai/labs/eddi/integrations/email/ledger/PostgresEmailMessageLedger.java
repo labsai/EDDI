@@ -127,7 +127,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 statement.execute(CREATE_TABLE);
             }
             for (String index : INDEXES) {
-                if (!PostgresLateIndexes.exists(connection, indexName(index))) {
+                if (!PostgresLateIndexes.hasIndex(connection, TABLE, indexName(index))) {
                     statement.execute(index);
                 }
             }

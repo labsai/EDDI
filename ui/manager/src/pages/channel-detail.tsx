@@ -246,22 +246,11 @@ export function ChannelDetailPage() {
   // A link without ?version (the owner digest's) opens the current version, not
   // version 1: resolve it, then put it in the URL (keeping the #mail-log hash).
   const hasVersion = searchParams.has("version");
-  const currentVersion = useChannelCurrentVersion(id!, !hasVersion);
-  // Each versionless navigation asks again, and only an answer to THIS ask
-  // counts: an earlier answer still in the query (a page that stayed mounted,
-  // a refetch that failed) is never written into the URL.
-  const [lookup, setLookup] = useState<{ key: string; from: number } | null>(null);
-  const refetchCurrentVersion = currentVersion.refetch;
-  useEffect(() => {
-    if (hasVersion) return;
-    setLookup({ key: location.key, from: Date.now() });
-    void refetchCurrentVersion();
-  }, [hasVersion, location.key, refetchCurrentVersion]);
-  // Until the effect above has recorded THIS navigation, nothing counts as answered.
-  const askedNow = lookup !== null && lookup.key === location.key;
-  const versionAnswered =
-    askedNow && !currentVersion.isFetching && !currentVersion.isError && currentVersion.dataUpdatedAt >= (lookup?.from ?? 0);
-  const versionLookupFailed = !hasVersion && askedNow && !currentVersion.isFetching && currentVersion.isError;
+  const currentVersion = useChannelCurrentVersion(id!, location.key, !hasVersion);
+  // The query is this navigation's own (keyed by it), so a settled success is
+  // this navigation's answer and a settled failure is its error.
+  const versionAnswered = currentVersion.isSuccess && !currentVersion.isFetching;
+  const versionLookupFailed = !hasVersion && currentVersion.isError && !currentVersion.isFetching;
   useEffect(() => {
     if (hasVersion || !versionAnswered || currentVersion.data === undefined) return;
     const params = new URLSearchParams(location.search);

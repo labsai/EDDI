@@ -33,10 +33,14 @@ export function useChannel(id: string, version?: number, enabled = true) {
   });
 }
 
-/** The channel's current version, for a link that names none. */
-export function useChannelCurrentVersion(id: string, enabled = true) {
+/**
+ * The channel's current version, for a link that names none. Keyed by the
+ * navigation, so each navigation gets its own request: never an answer, or a
+ * pending request, that belongs to an earlier one.
+ */
+export function useChannelCurrentVersion(id: string, navigationKey: string, enabled = true) {
   return useQuery({
-    queryKey: [...CHANNELS_KEY, id, "currentversion"],
+    queryKey: [...CHANNELS_KEY, id, "currentversion", navigationKey],
     queryFn: () => getChannelCurrentVersion(id),
     enabled: enabled && !!id,
     // Always this navigation's answer, never a cached one: another editor may

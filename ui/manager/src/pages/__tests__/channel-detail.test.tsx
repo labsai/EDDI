@@ -585,11 +585,11 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
     await userEvent.click(screen.getByTestId("go-email"));
 
     expect(await screen.findByTestId("channel-detail-loading")).toBeInTheDocument();
-    expect(screen.queryByText("Engineering Slack")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("channel-name-input")).not.toBeInTheDocument(); // no editor for A under B
     expect(screen.queryByTestId("save-channel-btn")).not.toBeInTheDocument();
     expect(screen.queryByTestId("delete-channel-btn")).not.toBeInTheDocument();
 
     release();
-    expect(await screen.findByText("Invoice intake")).toBeInTheDocument();
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
   });
 });

@@ -505,11 +505,18 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (value == null || value.isBlank()) {
             return null;
         }
+        IEmailMessageLedger.Cursor cursor;
         try {
-            return IEmailMessageLedger.Cursor.decode(value.trim());
+            cursor = IEmailMessageLedger.Cursor.decode(value.trim());
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("'after' is not a cursor this mail log issued.");
         }
+        // Same range as since/until: a forged cursor far outside it would fail in
+        // the store (a 500), not page.
+        if (cursor.createdAt().isBefore(Instant.EPOCH) || cursor.createdAt().isAfter(LATEST_BOUND)) {
+            throw new BadRequestException("'after' is not a cursor this mail log issued.");
+        }
+        return cursor;
     }
 
     /**

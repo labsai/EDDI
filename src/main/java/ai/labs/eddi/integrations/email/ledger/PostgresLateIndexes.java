@@ -100,6 +100,22 @@ final class PostgresLateIndexes {
         }
     }
 
+    /**
+     * Whether {@code table} (resolved through the search path) has an index named
+     * {@code indexName}. Not {@code to_regclass(indexName)}: that also finds a
+     * same-named index of another schema's table.
+     */
+    static boolean hasIndex(Connection conn, String table, String indexName) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = to_regclass(?) AND c.relname = ?")) {
+            ps.setString(1, table);
+            ps.setString(2, indexName);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next();
+            }
+        }
+    }
+
     /** {@code pg_index.indisvalid} of an index, or null when it does not exist. */
     static Boolean isValid(Connection conn, String indexName) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)")) {

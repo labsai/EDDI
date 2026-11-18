@@ -49,183 +49,179 @@ describe("EmailMailLog", () => {
     expect(screen.queryByTestId("email-log-row-reason-only")).not.toBeInTheDocument();
   });
 
-  it("hides rows already loaded once the log answers 403 (edit access withdrawn)", async () => {
-    let forbidden = false;
+  // ── Edit access withdrawn: one denial for the whole log ─────────────────────
+  // A 403 from any mail-log request (or the lookup) drops every cached page of
+  // the integration's log, stops fetching, and only Retry lifts it.
+
+  const LOG_KEY = ["channels", "ch-email", "email-log"];
+  type Mode = "ok" | "forbidden" | "down";
+  function serveLog(state: { mode: Mode; downHits: number }) {
     server.use(
-      http.get("*/channelstore/channels/:id/email-log", () =>
-        forbidden
-          ? HttpResponse.json({ error: "forbidden" }, { status: 403 })
-          : HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "kept" }], nextCursor: null }),
-      ),
+      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+        if (state.mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        if (state.mode === "down") {
+          state.downHits++;
+          return HttpResponse.error();
+        }
+        const filtered = new URL(request.url).searchParams.has("state");
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+      }),
     );
+  }
+
+  it("hides rows already loaded once the log answers 403, and the lookup with them", async () => {
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    serveLog(state);
     const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
-    expect(await screen.findByTestId("email-log-row-kept")).toBeInTheDocument();
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
 
-    forbidden = true;
-    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
+    state.mode = "forbidden";
+    await queryClient.refetchQueries({ queryKey: LOG_KEY });
 
-    await waitFor(() => expect(screen.queryByTestId("email-log-row-kept")).not.toBeInTheDocument());
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
+    expect(screen.getByTestId("error-state")).toBeInTheDocument();
     expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+    // No page of the log is left in the cache (a disabled observer may keep an empty entry).
+    await waitFor(() => expect(queryClient.getQueryCache().findAll({ queryKey: LOG_KEY }).every((q) => q.state.data === undefined)).toBe(true));
   });
 
-  it("keeps a 403 in force when the filter goes back to a list cached before it", async () => {
-    let forbidden = false;
+  it("drops every cached filter on a 403: going back to another filter shows nothing and fetches nothing", async () => {
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    let requests = 0;
     server.use(
-      http.get("*/channelstore/channels/:id/email-log", () =>
-        forbidden
+      http.get("*/channelstore/channels/:id/email-log", () => {
+        requests++;
+        return state.mode === "forbidden"
           ? HttpResponse.json({ error: "forbidden" }, { status: 403 })
-          : HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "cached" }], nextCursor: null }),
-      ),
+          : HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "cached" }], nextCursor: null });
+      }),
     );
     renderWithProviders(<EmailMailLog channelId="ch-email" />);
     expect(await screen.findByTestId("email-log-row-cached")).toBeInTheDocument();
 
-    forbidden = true;
-    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
-    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the 403 has arrived
-
-    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    await waitFor(() => expect(screen.getByTestId("email-log-filter-state")).toHaveValue(""));
-    expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument();
-  });
-
-  it("shows a list cached before a 403 again once a later read confirms access", async () => {
-    let mode: "ok" | "forbidden" | "down" = "ok";
-    server.use(
-      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
-        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
-        if (mode === "down") return HttpResponse.error();
-        const filtered = new URL(request.url).searchParams.has("state");
-        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
-      }),
-    );
-    renderWithProviders(<EmailMailLog channelId="ch-email" />);
-    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
-
-    mode = "forbidden";
+    state.mode = "forbidden";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
     expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    const afterDenial = requests;
 
-    // Access restored: a successful read of this filter lifts the denial...
-    mode = "ok";
-    await userEvent.click(screen.getByTestId("error-state-retry"));
-    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
-
-    // ...so the list cached before the 403 shows again, even once its refetch fails.
-    mode = "down";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the network error has arrived
-    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+    expect(screen.getByTestId("error-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument();
+    expect(requests).toBe(afterDenial); // nothing fetched while denied
+  });
+
+  it("only Retry lifts the denial, with a fresh request", async () => {
+    const state = { mode: "forbidden" as Mode, downHits: 0 };
+    serveLog(state);
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+
+    state.mode = "ok";
+    await userEvent.click(screen.getByTestId("error-state-retry"));
+
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
     expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
   });
 
-  it("does not revive a 403 that a later successful read already lifted", async () => {
-    let mode: "ok" | "forbidden" | "down" = "ok";
-    let networkFailures = 0;
+  it("counts a 403 that arrives after the filter has already changed", async () => {
+    let release: (() => void) | null = null;
+    const state = { mode: "ok" as Mode, downHits: 0 };
     server.use(
-      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
-        const filtered = new URL(request.url).searchParams.has("state");
-        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
-        if (mode === "down") {
-          networkFailures++;
+      http.get("*/channelstore/channels/:id/email-log", async ({ request }) => {
+        if (new URL(request.url).searchParams.has("state")) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        }
+        if (state.mode === "down") {
+          state.downHits++;
           return HttpResponse.error();
         }
-        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "all" }], nextCursor: null });
       }),
     );
     const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
     expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
 
-    // "All" itself answers 403 (it keeps its rows and that error in the cache).
-    mode = "forbidden";
-    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
-    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
-
-    // Access is back: another filter reads successfully and lifts the denial.
-    mode = "ok";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
-    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
-
-    // Back on "All", whose refetch fails on the network: its old 403 is handled,
-    // so its cached rows show.
-    mode = "down";
+    await waitFor(() => expect(release).not.toBeNull());
+    state.mode = "down";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    // Settled on the network error (retries included), not on the old 403.
-    await waitFor(() => expect(networkFailures).toBeGreaterThan(0));
-    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
+    await waitFor(() => expect(state.downHits).toBeGreaterThan(0));
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: [...LOG_KEY, {}], exact: true })).toBe(0));
     expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+
+    release!(); // the off-screen request now comes back 403
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
   });
 
-  it("does not revive a lifted 403 when the section mounts again on the same cache", async () => {
-    let mode: "ok" | "forbidden" | "down" = "ok";
-    let networkFailures = 0;
+  it("does not let a response to a request sent before the denial lift it", async () => {
+    let releaseAll: (() => void) | null = null;
+    let holdAll = false;
     server.use(
-      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
-        const filtered = new URL(request.url).searchParams.has("state");
-        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
-        if (mode === "down") {
-          networkFailures++;
-          return HttpResponse.error();
+      http.get("*/channelstore/channels/:id/email-log", async ({ request }) => {
+        if (new URL(request.url).searchParams.has("state")) return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        if (holdAll) {
+          await new Promise<void>((resolve) => {
+            releaseAll = resolve;
+          });
         }
-        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "late" }], nextCursor: null });
       }),
     );
+    const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-late")).toBeInTheDocument();
+
+    // A refetch of the list passes the server's check and is still in flight...
+    holdAll = true;
+    void queryClient.refetchQueries({ queryKey: LOG_KEY });
+    await waitFor(() => expect(releaseAll).not.toBeNull());
+    // ...when another filter answers 403.
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+
+    releaseAll!(); // the earlier request's success arrives afterwards
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("email-log-row-late")).not.toBeInTheDocument();
+    expect(screen.getByTestId("error-state")).toBeInTheDocument();
+  });
+
+  it("leaves no cached rows behind for a remount on the same cache", async () => {
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    serveLog(state);
     const first = renderWithProviders(<EmailMailLog channelId="ch-email" />);
     const { queryClient } = first;
     expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
-    mode = "forbidden";
-    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
+    state.mode = "forbidden";
+    await queryClient.refetchQueries({ queryKey: LOG_KEY });
     await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
-    mode = "ok";
-    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
-    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
-    // REFUSED's own later refetch fails: its status is now "error", but its last
-    // successful read (newer than All's 403) still counts as the lift.
-    mode = "down";
-    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"], type: "active" });
-    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
-    expect(networkFailures).toBeGreaterThan(0);
     first.unmount();
 
-    // Back later, same cache: the section starts on "All" (old 403 cached), whose
-    // refetch also fails on the network.
-    const before = networkFailures;
+    // Back later, same cache, and the network is down: there is nothing to show.
+    state.mode = "down";
     renderPage("/", <EmailMailLog channelId="ch-email" />, "/", queryClient);
-    await waitFor(() => expect(networkFailures).toBeGreaterThan(before));
-    await waitFor(() => expect(queryClient.isFetching({ queryKey: ["channels", "ch-email", "email-log"] })).toBe(0));
-    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+    await waitFor(() => expect(state.downHits).toBeGreaterThan(0));
+    await waitFor(() => expect(queryClient.isFetching({ queryKey: LOG_KEY })).toBe(0));
+    expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument();
   });
 
-  it("counts a 403 that arrives after the filter has already changed", async () => {
-    let refusedFilter: (() => void) | null = null;
-    let listDown = false;
+  it("a 403 from the Message-ID lookup denies the whole log", async () => {
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    serveLog(state);
     server.use(
-      http.get("*/channelstore/channels/:id/email-log", async ({ request }) => {
-        if (new URL(request.url).searchParams.has("state")) {
-          await new Promise<void>((resolve) => {
-            refusedFilter = resolve;
-          });
-          return HttpResponse.json({ error: "forbidden" }, { status: 403 });
-        }
-        if (listDown) return HttpResponse.error();
-        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "all" }], nextCursor: null });
-      }),
+      http.post("*/channelstore/channels/:id/email-log/lookup", () => HttpResponse.json({ error: "forbidden" }, { status: 403 })),
     );
     renderWithProviders(<EmailMailLog channelId="ch-email" />);
     expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
 
-    // A filtered request goes out and is still pending when the user goes back.
-    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
-    await waitFor(() => expect(refusedFilter).not.toBeNull());
-    listDown = true;
-    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the list's refetch failed (network)
-    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+    await userEvent.type(screen.getByTestId("email-log-lookup-input"), "<m@x.example>");
+    await userEvent.click(screen.getByTestId("email-log-lookup-btn"));
 
-    // The off-screen request now comes back 403: the cached rows must go.
-    refusedFilter!();
     await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
-    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+    expect(screen.getByTestId("error-state")).toBeInTheDocument();
   });
 
   it("loads the next page with the cursor the server returned", async () => {

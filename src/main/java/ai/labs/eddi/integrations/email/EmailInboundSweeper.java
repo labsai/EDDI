@@ -26,6 +26,7 @@ import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.function.Supplier;
 import java.util.List;
 import java.util.Optional;
 
@@ -153,7 +154,7 @@ public class EmailInboundSweeper {
             LOGGER.warnf("Email inbound sweep (poll schedules) failed: %s", e.getMessage());
         }
         try {
-            sendDigests(now);
+            sendDigests(clock);
         } catch (RuntimeException e) {
             LOGGER.warnf("Email inbound sweep (owner digests) failed: %s", e.getMessage());
         }
@@ -164,7 +165,14 @@ public class EmailInboundSweeper {
      * not had today's yet ({@code ownerDigest: daily}); the notifier claims each
      * once cluster-wide. Returns how many went out.
      */
-    int sendDigests(Instant now) {
+    /**
+     * The time each digest is judged at, read right before its send: earlier sends
+     * in one sweep take time, and a sweep that started before midnight must not
+     * judge a later integration by the previous day.
+     */
+    Supplier<Instant> clock = Instant::now;
+
+    int sendDigests(Supplier<Instant> clock) {
         int sent = 0;
         // A fresh read, never the directory's last-good fallback: a stale list could
         // still name an owner an editor removed. A failed read sends nothing this
@@ -181,7 +189,7 @@ public class EmailInboundSweeper {
                 if (settings == null || !settings.dailyOwnerDigest()) {
                     continue;
                 }
-                if (ownerNotifier.sendDigestIfDue(integration.id(), integration.configuration().getName(), settings, now)) {
+                if (ownerNotifier.sendDigestIfDue(integration.id(), integration.configuration().getName(), settings, clock.get())) {
                     sent++;
                 }
             } catch (RuntimeException e) {

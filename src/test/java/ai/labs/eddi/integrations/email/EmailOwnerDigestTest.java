@@ -28,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayDeque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -40,6 +41,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -220,17 +222,46 @@ class EmailOwnerDigestTest {
         none.setName("None");
         when(directory.scan()).thenReturn(List.of(new EmailIntegration("int-daily", daily, settings("daily")),
                 new EmailIntegration("int-none", none, settings(null)), new EmailIntegration("int-turned-off", daily, settings("daily"))));
-        when(directory.find("int-daily")).thenReturn(Optional.of(new EmailIntegration("int-daily", daily, settings("daily"))));
+        // The fresh read names a different owner list than the scan: that one is passed
+        // on.
+        Map<String, String> fresh = new HashMap<>(Map.of("mode", "trigger", "transport", "imap", "connection", "c", "host", "imap.x.com",
+                "address", "invoices@contoso.com", "ownerNotifyAddresses", "fresh@contoso.com", "ownerDigest", "daily"));
+        when(directory.find("int-daily")).thenReturn(Optional.of(new EmailIntegration("int-daily", daily, EmailChannelSettings.from(fresh))));
         // Switched off after the scan: the fresh read right before the send wins.
         when(directory.find("int-turned-off")).thenReturn(Optional.of(new EmailIntegration("int-turned-off", daily, settings("off"))));
-        when(owner.sendDigestIfDue(eq("int-daily"), eq("Daily"), any(), eq(TODAY_0010))).thenReturn(true);
+        when(owner.sendDigestIfDue(eq("int-daily"), eq("Daily"),
+                argThat(s -> s != null && s.ownerNotifyAddresses().equals(List.of("fresh@contoso.com"))), eq(TODAY_0010))).thenReturn(true);
         var sweeper = new EmailInboundSweeper(ledger, mock(IConversationService.class), directory, mock(EmailPollScheduler.class), owner,
                 new SimpleMeterRegistry(), Duration.ofMinutes(30));
 
-        assertEquals(1, sweeper.sendDigests(TODAY_0010));
+        assertEquals(1, sweeper.sendDigests(() -> TODAY_0010));
         verify(owner, never()).sendDigestIfDue(eq("int-none"), any(), any(), any());
         verify(owner, never()).sendDigestIfDue(eq("int-turned-off"), any(), any(), any());
         verify(directory, never()).all(); // never the last-good fallback, which may name a removed owner
+    }
+
+    @Test
+    @DisplayName("each integration's digest is judged at the time it is sent, so a sweep that crosses midnight uses the new day")
+    void clockPerIntegration() {
+        EmailIntegrationDirectory directory = mock(EmailIntegrationDirectory.class);
+        EmailOwnerNotifier owner = mock(EmailOwnerNotifier.class);
+        var config = new ChannelIntegrationConfiguration();
+        config.setName("Daily");
+        var first = new EmailIntegration("int-a", config, settings("daily"));
+        var second = new EmailIntegration("int-b", config, settings("daily"));
+        when(directory.scan()).thenReturn(List.of(first, second));
+        when(directory.find("int-a")).thenReturn(Optional.of(first));
+        when(directory.find("int-b")).thenReturn(Optional.of(second));
+        var sweeper = new EmailInboundSweeper(ledger, mock(IConversationService.class), directory, mock(EmailPollScheduler.class), owner,
+                new SimpleMeterRegistry(), Duration.ofMinutes(30));
+        Instant beforeMidnight = Instant.parse("2026-11-17T23:59:59Z");
+        Instant afterMidnight = Instant.parse("2026-11-18T00:06:00Z");
+        var times = new ArrayDeque<>(List.of(beforeMidnight, afterMidnight));
+
+        sweeper.sendDigests(times::poll);
+
+        verify(owner).sendDigestIfDue(eq("int-a"), any(), any(), eq(beforeMidnight));
+        verify(owner).sendDigestIfDue(eq("int-b"), any(), any(), eq(afterMidnight));
     }
 
     @Test
