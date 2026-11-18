@@ -35,10 +35,11 @@ public class CharacterUtilities {
         if (lookup == null || lookup.isEmpty()) {
             return false;
         }
-        for (int i = 0; i < lookup.length(); i++)
-            if (!Character.isDigit(lookup.charAt(i))) {
+        for (int i = 0; i < lookup.length(); i += Character.charCount(lookup.codePointAt(i))) {
+            if (!Character.isDigit(lookup.codePointAt(i))) {
                 return false;
             }
+        }
 
         return true;
     }
@@ -53,14 +54,18 @@ public class CharacterUtilities {
             return null;
         }
         StringBuilder converted = null;
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c > '9' && Character.isDigit(c)) {
+        for (int i = 0; i < text.length();) {
+            int codePoint = text.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (codePoint > '9' && Character.isDigit(codePoint)) {
                 if (converted == null) {
-                    converted = new StringBuilder(text);
+                    converted = new StringBuilder(text.length()).append(text, 0, i);
                 }
-                converted.setCharAt(i, (char) ('0' + Character.digit(c, 10)));
+                converted.append((char) ('0' + Character.digit(codePoint, 10)));
+            } else if (converted != null) {
+                converted.appendCodePoint(codePoint);
             }
+            i += width;
         }
         return converted == null ? text : converted.toString();
     }
@@ -79,14 +84,17 @@ public class CharacterUtilities {
         }
 
         boolean firstComma = true;
-        for (int i = 0; i < lookup.length(); i++) {
-            if (!Character.isDigit(lookup.charAt(i))) {
-                if ((lookup.charAt(i) == '.' || lookup.charAt(i) == ',') && i + 1 != lookup.length() && firstComma) {
+        for (int i = 0; i < lookup.length();) {
+            int codePoint = lookup.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (!Character.isDigit(codePoint)) {
+                if ((codePoint == '.' || codePoint == ',') && i + width != lookup.length() && firstComma) {
                     firstComma = false;
                 } else {
                     return false;
                 }
             }
+            i += width;
         }
 
         return true;

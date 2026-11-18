@@ -83,6 +83,33 @@ class ValueTest {
         }
 
         @Test
+        @DisplayName("conversions never throw: over-range, decimal and non-numeric give null")
+        void conversionsNeverThrow() {
+            assertNull(new Value("9".repeat(30)).toInteger());
+            assertNull(new Value("2.5").toInteger());
+            assertNull(new Value("abc").toInteger());
+            assertNull(new Value("9".repeat(60)).toFloat());
+            assertNull(new Value("abc").toFloat());
+        }
+
+        @Test
+        @DisplayName("non-ASCII digits convert like ASCII digits")
+        void nonAsciiDigits() {
+            assertEquals(12, new Value("١٢").toInteger());
+            assertEquals(12, new Value("１２").toInteger());
+            assertEquals(2.5f, new Value("２.５").toFloat(), 0.01f);
+            assertEquals(7, new Value("𐒧").toInteger(), "a digit outside the BMP (Osmanya)");
+        }
+
+        @Test
+        @DisplayName("the text is kept as written; numbers compare by value")
+        void textIsKeptButNumbersCompare() {
+            assertEquals("١٢", new Value("١٢").getExpressionName());
+            assertEquals(new Value("12"), new Value("١٢"));
+            assertEquals(new Value("12").hashCode(), new Value("١٢").hashCode());
+        }
+
+        @Test
         @DisplayName("should convert to boolean")
         void convertsToBoolean() {
             assertTrue(new Value("true").toBoolean());

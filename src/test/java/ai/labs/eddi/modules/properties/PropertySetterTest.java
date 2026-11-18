@@ -7,6 +7,8 @@ package ai.labs.eddi.modules.properties;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.expressions.ExpressionFactory;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.impl.PropertySetter;
@@ -99,6 +101,26 @@ public class PropertySetterTest {
     public void tooLongIntegerStaysAString() {
         String huge = "9".repeat(30);
         Assertions.assertEquals(huge, single(huge).getValueString());
+    }
+
+    @Test
+    public void nineteenDigitLeafIsALongOnlyWhenItFits() {
+        Assertions.assertEquals(Long.MAX_VALUE, single("9223372036854775807").getValueLong());
+        Assertions.assertEquals(1000000000000000000L, single("1000000000000000000").getValueLong());
+        Assertions.assertEquals("9223372036854775808", single("9223372036854775808").getValueString());
+    }
+
+    @Test
+    public void digitsOfAnotherScriptAreKeptAsWritten() {
+        Assertions.assertEquals("١٢", single("١٢").getValueString());
+
+        // the exact expression, parsed by the real provider
+        var provider = new ExpressionProvider(new ExpressionFactory());
+        List<Property> parsed = new PropertySetter(new LinkedList<>()).extractProperties(
+                provider.parseExpressions("property(customerCode(١٢))"));
+        Assertions.assertEquals(1, parsed.size());
+        Assertions.assertEquals("customerCode", parsed.get(0).getName());
+        Assertions.assertEquals("١٢", parsed.get(0).getValueString());
     }
 
     @Test

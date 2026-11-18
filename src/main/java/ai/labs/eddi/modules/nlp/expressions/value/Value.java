@@ -23,7 +23,9 @@ public class Value extends Expression {
     }
 
     public Value(String expressionName) {
-        super(toAsciiDigits(expressionName));
+        // The text as written: a property(...) leaf is kept verbatim, so digits of
+        // another script are converted only where a number is compared or converted.
+        super(expressionName);
     }
 
     @Override
@@ -49,12 +51,29 @@ public class Value extends Expression {
         return BOOLEAN_MATCHER_PATTERN.matcher(expressionName).matches();
     }
 
+    /**
+     * The value as an int, or {@code null} when it is not an integer or does not
+     * fit an int. Never throws.
+     */
     public Integer toInteger() {
-        return Integer.parseInt(toAsciiDigits(expressionName));
+        try {
+            return Integer.parseInt(toAsciiDigits(expressionName));
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
+    /**
+     * The value as a float, or {@code null} when it is not a number or is out of
+     * the float range. Never throws.
+     */
     public Float toFloat() {
-        return Float.parseFloat(toAsciiDigits(expressionName).replace(',', '.'));
+        try {
+            float result = Float.parseFloat(toAsciiDigits(expressionName).replace(',', '.'));
+            return Float.isInfinite(result) ? null : result;
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     public Boolean toBoolean() {

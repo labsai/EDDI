@@ -23,8 +23,11 @@ import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
 
 public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
-    /** At most 18 ASCII digits and no leading zero, so it always fits a long. */
-    private static final Pattern PLAIN_INTEGER = Pattern.compile("0|[1-9][0-9]{0,17}");
+    /**
+     * At most 19 ASCII digits and no leading zero; whether it fits a long is
+     * decided by parsing it.
+     */
+    private static final Pattern PLAIN_INTEGER = Pattern.compile("0|[1-9][0-9]{0,18}");
 
     private final List<SetOnActions> setOnActionsList;
 
@@ -71,11 +74,16 @@ public class PropertySetter implements IPropertySetter {
             return new Property(name, (String) null, scope);
         }
         if (PLAIN_INTEGER.matcher(leaf).matches()) {
-            long number = Long.parseLong(leaf);
-            if (number <= Integer.MAX_VALUE) {
-                return new Property(name, (int) number, scope);
+            try {
+                long number = Long.parseLong(leaf);
+                if (number <= Integer.MAX_VALUE) {
+                    return new Property(name, (int) number, scope);
+                }
+                return new Property(name, number, scope);
+            } catch (NumberFormatException e) {
+                // beyond the long range (19 digits above 9223372036854775807): keep the text
+                return new Property(name, leaf, scope);
             }
-            return new Property(name, number, scope);
         }
         if (leaf.equalsIgnoreCase("true") || leaf.equalsIgnoreCase("false")) {
             return new Property(name, Boolean.parseBoolean(leaf), scope);
