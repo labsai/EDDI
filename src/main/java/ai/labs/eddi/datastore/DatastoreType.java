@@ -10,16 +10,17 @@ import java.util.Locale;
  * The value of {@code eddi.datastore.type}, read the one way every reader in
  * EDDI reads it.
  * <p>
- * Each reader used to compare the raw string with {@code "postgres".equals(...)},
- * so {@code Postgres}, {@code postgresql} or a typo selected MongoDB, silently,
- * against the built-in default connection string. The value is now trimmed and
- * matched case-insensitively against the known names, and anything else is an
- * error that stops the startup with a message naming the accepted values:
+ * Each reader used to compare the raw string with
+ * {@code "postgres".equals(...)}, so {@code Postgres}, {@code postgresql} or a
+ * typo selected MongoDB, silently, against the built-in default connection
+ * string. The value is now trimmed and matched case-insensitively against the
+ * known names, and anything else is an error that stops the startup with a
+ * message naming the accepted values:
  * <ul>
  * <li>{@code mongodb} - MongoDB (the default; also what an unset or blank value
  * means)</li>
- * <li>{@code postgres} - PostgreSQL; {@code postgresql} is accepted as an alias,
- * the name of the JDBC protocol and of the database</li>
+ * <li>{@code postgres} - PostgreSQL; {@code postgresql} is accepted as an
+ * alias, the name of the JDBC protocol and of the database</li>
  * </ul>
  * The Helm chart is stricter than this (it renders only the two lower-case
  * names); a guard may be stricter than its consumer, never looser.
@@ -41,13 +42,16 @@ public enum DatastoreType {
         return switch (raw.trim().toLowerCase(Locale.ROOT)) {
             case "mongodb" -> MONGODB;
             case "postgres", "postgresql" -> POSTGRES;
-            default -> throw new IllegalArgumentException("Unknown eddi.datastore.type '" + raw + "'. Use 'mongodb' or 'postgres' ('postgresql' is accepted as "
+            default -> throw new IllegalArgumentException("Unknown eddi.datastore.type '" + raw
+                    + "'. Use 'mongodb' or 'postgres' ('postgresql' is accepted as "
                     + "an alias of 'postgres'); the value is trimmed and not case-sensitive. EDDI refuses to start rather than guess, because an "
                     + "unrecognised value used to select MongoDB against the default connection string.");
         };
     }
 
-    /** {@code true} for PostgreSQL; throws like {@link #parse} for an unknown value. */
+    /**
+     * {@code true} for PostgreSQL; throws like {@link #parse} for an unknown value.
+     */
     public static boolean isPostgres(String raw) {
         return parse(raw) == POSTGRES;
     }

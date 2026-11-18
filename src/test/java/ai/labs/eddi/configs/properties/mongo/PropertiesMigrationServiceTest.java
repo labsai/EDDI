@@ -68,7 +68,8 @@ class PropertiesMigrationServiceTest {
 
     @Test
     void runsForEveryDatastoreTypeTheRestOfEddiTreatsAsMongo() {
-        // DatastoreType (the one reader, also used by DataStoreProducers) reads "MongoDB" like "mongodb";
+        // DatastoreType (the one reader, also used by DataStoreProducers) reads
+        // "MongoDB" like "mongodb";
         // a value it does not know is refused instead of being taken for MongoDB
         assertThrows(IllegalArgumentException.class, () -> service("mongo"));
         var service = service(" MongoDB ");

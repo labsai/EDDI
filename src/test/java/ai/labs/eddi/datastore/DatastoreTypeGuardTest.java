@@ -27,7 +27,10 @@ class DatastoreTypeGuardTest {
         assertThrows(IllegalArgumentException.class, () -> DatastoreTypeGuard.check("postgre", true));
     }
 
-    /** What .env.example shipped to docker-compose.postgres-only.yml: the profile says postgres, the variable says mongodb. */
+    /**
+     * What .env.example shipped to docker-compose.postgres-only.yml: the profile
+     * says postgres, the variable says mongodb.
+     */
     @Test
     void thePostgresProfileWithAMongoTypeStopsTheStartup() {
         var failure = assertThrows(IllegalStateException.class, () -> DatastoreTypeGuard.check("mongodb", true));

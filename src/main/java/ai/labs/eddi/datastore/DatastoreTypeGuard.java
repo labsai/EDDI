@@ -49,7 +49,8 @@ public class DatastoreTypeGuard {
     static void check(String configuredType, boolean postgresProfileActive) {
         DatastoreType type = DatastoreType.parse(configuredType);
         if (postgresProfileActive && type != DatastoreType.POSTGRES) {
-            throw new IllegalStateException("The 'postgres' profile is active (QUARKUS_PROFILE=postgres) but eddi.datastore.type is '" + configuredType
+            throw new IllegalStateException("The 'postgres' profile is active (QUARKUS_PROFILE=postgres) but eddi.datastore.type is '"
+                    + configuredType
                     + "', which selects MongoDB. The profile sets the type to postgres itself, so an EDDI_DATASTORE_TYPE environment variable or a "
                     + "-Deddi.datastore.type that says otherwise (for example the 'mongodb' in a copied .env.example) overrides it. Remove it or "
                     + "set it to 'postgres'.");

@@ -2671,8 +2671,10 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("the datastore type is compared as exactly as the Java that reads it")
         void datastoreTypeIsComparedTheWayJavaComparesIt() throws IOException {
-            // EDDI reads the type through DatastoreType: trimmed, case-insensitive, \"mongodb\", \"postgres\"
-            // and the alias \"postgresql\", anything else refused at startup. The chart may be stricter
+            // EDDI reads the type through DatastoreType: trimmed, case-insensitive,
+            // \"mongodb\", \"postgres\"
+            // and the alias \"postgresql\", anything else refused at startup. The chart may
+            // be stricter
             // than that (it renders only the two lower-case names) but never looser.
             String producers = read(DATASTORE_PRODUCERS);
             assertTrue(producers.contains("DatastoreType.isPostgres(datastoreType)"),
@@ -2681,7 +2683,9 @@ class DeploymentManifestsTest {
             assertFalse(producers.contains("\"postgres\".equals(datastoreType)"),
                     DATASTORE_PRODUCERS + " compares the raw datastore type again; every reader must go through DatastoreType");
             String datastoreType = read(DATASTORE_PRODUCERS.resolveSibling("DatastoreType.java"));
-            assertTrue(datastoreType.contains("case \"mongodb\" -> MONGODB;") && datastoreType.contains("case \"postgres\", \"postgresql\" -> POSTGRES;"),
+            assertTrue(
+                    datastoreType.contains("case \"mongodb\" -> MONGODB;")
+                            && datastoreType.contains("case \"postgres\", \"postgresql\" -> POSTGRES;"),
                     "DatastoreType no longer accepts exactly mongodb, postgres and postgresql; the chart renders only "
                             + "the first two and must stay within what EDDI accepts");
 

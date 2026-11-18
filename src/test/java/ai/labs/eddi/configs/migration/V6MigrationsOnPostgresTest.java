@@ -80,7 +80,8 @@ class V6MigrationsOnPostgresTest {
     @Test
     @DisplayName("the datastore type is read as DataStoreProducers reads it: not case-sensitive, and an unknown value is refused")
     void datastoreTypeIsReadLikeEveryOtherReader() {
-        // "Postgres" selects the PostgreSQL stores in DataStoreProducers, so it must switch
+        // "Postgres" selects the PostgreSQL stores in DataStoreProducers, so it must
+        // switch
         // these migrations to the PostgreSQL behaviour as well.
         var migration = new V6RenameMigration(unreachableMongo(), mock(IMigrationLogStore.class), false, "Postgres");
 
