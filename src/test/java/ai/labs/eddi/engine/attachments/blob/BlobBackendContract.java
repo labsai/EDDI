@@ -21,7 +21,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
@@ -330,10 +329,15 @@ public interface BlobBackendContract {
         assertEquals(0, storedRecordCount(), "stored records");
     }
 
+    /** The listed keys; each key must be listed once. */
     private Set<String> listed(String prefix) throws IOException {
-        try (Stream<String> keys = backend().list(prefix)) {
-            return keys.collect(Collectors.toSet());
+        List<String> keys;
+        try (Stream<String> stream = backend().list(prefix)) {
+            keys = stream.toList();
         }
+        Set<String> unique = Set.copyOf(keys);
+        assertEquals(unique.size(), keys.size(), () -> "list returned a key twice: " + keys);
+        return unique;
     }
 
     private static void assertRangesMatch(BlobBackend reader, String key, byte[] content) throws IOException {

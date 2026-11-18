@@ -29,6 +29,7 @@ import java.sql.Statement;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -46,7 +47,10 @@ import java.util.stream.StreamSupport;
  * nor sends the WAL one huge commit. The price is that a node dying mid-upload
  * leaves committed chunks behind: {@link #list} finds them and {@link #delete}
  * removes them. A {@code put} that fails while its node lives removes them
- * itself, on a fresh connection.
+ * itself, on a fresh connection. Each chunk is inserted on a connection
+ * borrowed for that insert only, so a slow uploader holds none while it sends
+ * the next chunk. Because it commits as it goes, {@code put} must not run
+ * inside a JTA transaction.
  * <p>
  * <b>Reads fetch one chunk per query</b>, each on its own pooled connection: a
  * single {@code SELECT … ORDER BY seq} would be read whole into memory by the
@@ -79,7 +83,7 @@ public class PgChunksBlobBackend implements BlobBackend {
             )
             """;
     private static final String SCHEMA_LOCK = "SELECT pg_advisory_xact_lock(hashtextextended('eddi-attachment-chunks-schema', 0))";
-    private static final String INSERT_FIRST = "INSERT INTO attachment_chunks (blob_key, seq, data) VALUES (?, 0, ?) ON CONFLICT DO NOTHING";
+    private static final String INSERT_FIRST = "INSERT INTO attachment_chunks (blob_key, seq, data) VALUES (?, ?, ?) ON CONFLICT DO NOTHING";
     private static final String INSERT_NEXT = "INSERT INTO attachment_chunks (blob_key, seq, data) VALUES (?, ?, ?)";
     private static final String SELECT_LAYOUT = "SELECT max(seq), max(CASE WHEN seq = 0 THEN octet_length(data) END) FROM attachment_chunks WHERE blob_key = ?";
     private static final String SELECT_CHUNK = "SELECT data FROM attachment_chunks WHERE blob_key = ? AND seq = ?";
@@ -129,10 +133,7 @@ public class PgChunksBlobBackend implements BlobBackend {
         long expected = declaredLength >= 0 ? declaredLength : maxBytes;
         byte[] buffer = new byte[(int) Math.max(1, Math.min(chunkBytes, expected))];
         boolean wroteFirstChunk = false;
-        try (Connection conn = connection();
-                PreparedStatement first = conn.prepareStatement(INSERT_FIRST);
-                PreparedStatement next = conn.prepareStatement(INSERT_NEXT)) {
-            conn.setAutoCommit(true);
+        try {
             int seq = 0;
             while (true) {
                 int n = source.readNBytes(buffer, 0, buffer.length);
@@ -141,17 +142,12 @@ public class PgChunksBlobBackend implements BlobBackend {
                 }
                 byte[] data = n == buffer.length ? buffer : Arrays.copyOf(buffer, n);
                 if (seq == 0) {
-                    first.setString(1, key);
-                    first.setBytes(2, data);
-                    if (first.executeUpdate() == 0) {
+                    if (insertChunk(INSERT_FIRST, key, seq, data) == 0) {
                         throw new FileAlreadyExistsException("A blob with this key already exists");
                     }
                     wroteFirstChunk = true;
                 } else {
-                    next.setString(1, key);
-                    next.setInt(2, seq);
-                    next.setBytes(3, data);
-                    next.executeUpdate();
+                    insertChunk(INSERT_NEXT, key, seq, data);
                 }
                 seq++;
                 if (n < buffer.length) {
@@ -360,6 +356,7 @@ public class PgChunksBlobBackend implements BlobBackend {
 
         @Override
         public int read(byte[] b, int off, int len) throws IOException {
+            Objects.checkFromIndexSize(off, len, b.length);
             if (len == 0) {
                 return 0;
             }
@@ -384,6 +381,20 @@ public class PgChunksBlobBackend implements BlobBackend {
         }
     }
 
+    /**
+     * Inserts one chunk on a connection borrowed for that insert alone, so a slow
+     * uploader never holds a pooled connection while the next chunk arrives.
+     */
+    private int insertChunk(String sql, String key, int seq, byte[] data) throws SQLException {
+        try (Connection conn = connection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            conn.setAutoCommit(true);
+            ps.setString(1, key);
+            ps.setInt(2, seq);
+            ps.setBytes(3, data);
+            return ps.executeUpdate();
+        }
+    }
+
     private void deleteRows(String key) throws SQLException {
         try (Connection conn = connection(); PreparedStatement ps = conn.prepareStatement(DELETE)) {
             conn.setAutoCommit(true);
@@ -404,7 +415,13 @@ public class PgChunksBlobBackend implements BlobBackend {
         }
     }
 
-    private synchronized void ensureSchema() throws IOException {
+    private void ensureSchema() throws IOException {
+        if (!schemaReady) {
+            createSchema();
+        }
+    }
+
+    private synchronized void createSchema() throws IOException {
         if (schemaReady) {
             return;
         }

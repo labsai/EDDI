@@ -35,9 +35,12 @@ import org.bson.Document;
 import java.io.FilterInputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.NoSuchFileException;
+import java.util.Iterator;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -126,7 +129,9 @@ public class GridFsBlobBackend implements BlobBackend {
         } catch (IOException | RuntimeException e) {
             if (isDuplicateKey(e)) {
                 // Another put won the key between the check and the write: the unique
-                // index refused our first write, so nothing here is ours to remove.
+                // index refused our first write, so nothing here is ours to remove. (Had the
+                // winner been an empty object, our chunks would already be in and the refusal
+                // would come from the files document on close; random keys make that moot.)
                 throw new FileAlreadyExistsException("A blob with this key already exists");
             }
             IOException failure = asIOException(e);
@@ -206,7 +211,9 @@ public class GridFsBlobBackend implements BlobBackend {
         try {
             fileIds = files.find(Filters.regex("_id", anchored)).projection(Projections.include("_id")).sort(Sorts.ascending("_id"))
                     .iterator();
-            orphanIds = chunks.aggregate(List.of(Aggregates.match(Filters.regex("files_id", anchored)), Aggregates.group("$files_id")))
+            orphanIds = chunks
+                    .aggregate(List.of(Aggregates.match(Filters.regex("files_id", anchored)), Aggregates.group("$files_id"),
+                            Aggregates.sort(Sorts.ascending("_id"))))
                     .allowDiskUse(true).iterator();
         } catch (MongoException e) {
             closeQuietly(fileIds);
@@ -215,10 +222,15 @@ public class GridFsBlobBackend implements BlobBackend {
         }
         MongoCursor<Document> filesCursor = fileIds;
         MongoCursor<Document> chunksCursor = orphanIds;
-        return Stream.concat(ids(filesCursor), ids(chunksCursor)).distinct().onClose(() -> {
-            closeQuietly(filesCursor);
-            closeQuietly(chunksCursor);
-        });
+        // Both cursors ascend by key; merging them drops the duplicates (every
+        // non-empty
+        // object is in both) without remembering the keys already returned.
+        Iterator<String> merged = new SortedUnion(ids(filesCursor), ids(chunksCursor));
+        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(merged, Spliterator.ORDERED | Spliterator.DISTINCT | Spliterator.NONNULL),
+                false).onClose(() -> {
+                    closeQuietly(filesCursor);
+                    closeQuietly(chunksCursor);
+                });
     }
 
     private record Opened(InputStream stream, long length) {
@@ -267,9 +279,79 @@ public class GridFsBlobBackend implements BlobBackend {
         }
     }
 
-    private static Stream<String> ids(MongoCursor<Document> cursor) {
-        return StreamSupport.stream(Spliterators.spliteratorUnknownSize(cursor, Spliterator.ORDERED | Spliterator.NONNULL), false)
-                .map(document -> document.getString("_id"));
+    /**
+     * The {@code _id}s of an ascending cursor; a read failure surfaces as
+     * {@link UncheckedIOException}.
+     */
+    private static Iterator<String> ids(MongoCursor<Document> cursor) {
+        return new Iterator<>() {
+            @Override
+            public boolean hasNext() {
+                try {
+                    return cursor.hasNext();
+                } catch (MongoException e) {
+                    throw new UncheckedIOException(asIOException(e));
+                }
+            }
+
+            @Override
+            public String next() {
+                try {
+                    return cursor.next().getString("_id");
+                } catch (MongoException e) {
+                    throw new UncheckedIOException(asIOException(e));
+                }
+            }
+        };
+    }
+
+    /**
+     * The union of two ascending key iterators, ascending and without duplicates.
+     */
+    private static final class SortedUnion implements Iterator<String> {
+
+        private final Iterator<String> left;
+        private final Iterator<String> right;
+        private String nextLeft;
+        private String nextRight;
+
+        SortedUnion(Iterator<String> left, Iterator<String> right) {
+            this.left = left;
+            this.right = right;
+        }
+
+        @Override
+        public boolean hasNext() {
+            if (nextLeft == null && left.hasNext()) {
+                nextLeft = left.next();
+            }
+            if (nextRight == null && right.hasNext()) {
+                nextRight = right.next();
+            }
+            return nextLeft != null || nextRight != null;
+        }
+
+        @Override
+        public String next() {
+            if (!hasNext()) {
+                throw new NoSuchElementException();
+            }
+            String result;
+            if (nextRight == null) {
+                result = nextLeft;
+            } else if (nextLeft == null) {
+                result = nextRight;
+            } else {
+                result = nextLeft.compareTo(nextRight) <= 0 ? nextLeft : nextRight;
+            }
+            if (result.equals(nextLeft)) {
+                nextLeft = null;
+            }
+            if (result.equals(nextRight)) {
+                nextRight = null;
+            }
+            return result;
+        }
     }
 
     private static boolean isDuplicateKey(Throwable e) {

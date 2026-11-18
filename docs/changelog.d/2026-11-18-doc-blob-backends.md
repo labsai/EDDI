@@ -25,11 +25,15 @@ backend. Nothing changes for users or existing data.
 - **`gridfs`** (`datastore/mongo/GridFsBlobBackend`): its own bucket
   `attachment_blobs` (the `attachments` bucket is never touched), key = file `_id`,
   primary reads. Because GridFS writes the files document only on close, `list`
-  also reports orphan chunks of a crashed upload and `delete` removes them.
+  also reports orphan chunks of a crashed upload and `delete` removes them; it
+  merges the two ascending key cursors, so a listing of millions of keys holds
+  none of them in memory.
 - **`pg-chunks`** (`datastore/postgres/PgChunksBlobBackend`): table
   `attachment_chunks(blob_key, seq, data)`, one row per chunk of
   `eddi.attachments.blob.pg-chunks.chunk-bytes` (4 MiB), each committed on its own
-  so a 500 MB upload is not one transaction. Reads fetch one chunk per query on its
+  so a 500 MB upload is not one transaction, and each inserted on a connection
+  borrowed for that insert alone, so a slow uploader holds no pooled connection
+  while it sends. `put` therefore must not run inside a JTA transaction. Reads fetch one chunk per query on its
   own connection, asking pgjdbc for binary transfer (text mode hex-encodes each
   chunk to twice its size; no test pins that request). GridFS reads likewise cap a read batch at
   about 4 MiB of chunks, equally untested. Range reads take the chunk size from the object's first chunk,
@@ -37,7 +41,7 @@ backend. Nothing changes for users or existing data.
 - **Tests:** `BlobBackendContract` (sizes 0, 1, chunk−1, chunk, chunk+1, several
   chunks; overrun past declared length and past `maxBytes`, short stream and
   mid-stream source failure all after durable chunks; ranges; idempotent delete;
-  prefix listing; key alphabet) runs in `GridFsBlobBackendIT`, `PgChunksBlobBackendIT`
+  prefix listing, each key once; key alphabet) runs in `GridFsBlobBackendIT`, `PgChunksBlobBackendIT`
   and, against an in-memory double, in the unit run. A 64 MiB round trip runs in a
   child JVM with `-Xmx128m` through the new test helper `testing/ChildJvm`.
 
