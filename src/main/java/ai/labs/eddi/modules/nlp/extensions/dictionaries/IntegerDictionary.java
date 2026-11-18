@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.modules.nlp.expressions.Expression;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.model.FoundWord;
@@ -30,7 +31,15 @@ public class IntegerDictionary implements IDictionary {
     @Override
     public List<IFoundWord> lookupTerm(final String value) {
         if (CharacterUtilities.isStringInteger(value)) {
-            Expression integerExp = expressionProvider.createExpression("integer", CharacterUtilities.toAsciiDigits(value));
+            Expression integerExp;
+            try {
+                integerExp = expressionProvider.createExpression("integer", CharacterUtilities.toAsciiDigits(value));
+            } catch (ExpressionLimitExceededException e) {
+                // A number longer than the expression limit is no integer expression: the
+                // token is read as the unknown word it would be otherwise, and the turn
+                // does not fail.
+                return IDictionary.NO_WORDS_FOUND;
+            }
             IWord word = new Word(value, new Expressions(integerExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));

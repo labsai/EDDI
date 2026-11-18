@@ -44,7 +44,7 @@ public final class StoredExpressions {
             return parsed != null ? parsed : new Expressions();
         } catch (ExpressionLimitExceededException e) {
             LOGGER.debugf("Stored expressions are over a limit, read as one bounded unknown: %s", e.getMessage());
-            return boundedUnknown(stored);
+            return boundedUnknown(stored, provider.maxExpressionLength());
         }
     }
 
@@ -55,15 +55,35 @@ public final class StoredExpressions {
      * database).
      */
     public static Expressions boundedUnknown(String text) {
+        return boundedUnknown(text, 0);
+    }
+
+    /**
+     * Like {@link #boundedUnknown(String)}, and the whole {@code unknown(...)}
+     * expression fits {@code maxExpressionLength} ({@code <= 0}: no limit), so the
+     * expression provider can read back what is stored. The payload shrinks by the
+     * length of the wrapper; notation characters removed from it shrink it further.
+     */
+    public static Expressions boundedUnknown(String text, int maxExpressionLength) {
         Expressions expressions = new Expressions();
         if (text == null) {
             return expressions;
         }
-        int end = Math.min(text.length(), MAX_UNKNOWN_PAYLOAD_CHARS);
+        int budget = MAX_UNKNOWN_PAYLOAD_CHARS;
+        if (maxExpressionLength > 0) {
+            budget = Math.min(budget, maxExpressionLength - UNKNOWN_WRAPPER_CHARS);
+        }
+        if (budget <= 0) {
+            return expressions;
+        }
+        int end = Math.min(text.length(), budget);
         if (end < text.length() && end > 0 && Character.isHighSurrogate(text.charAt(end - 1))) {
             end--;
         }
         expressions.addAll(new Unknown(text.substring(0, end)).getExpressions());
         return expressions;
     }
+
+    /** {@code unknown(} and {@code )}. */
+    private static final int UNKNOWN_WRAPPER_CHARS = "unknown()".length();
 }

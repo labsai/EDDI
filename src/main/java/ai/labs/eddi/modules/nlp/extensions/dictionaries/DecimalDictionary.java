@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.modules.nlp.expressions.Expression;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.IExpressionProvider;
 import ai.labs.eddi.modules.nlp.model.FoundWord;
@@ -36,7 +37,13 @@ public class DecimalDictionary implements IDictionary {
                 value = value.replace(',', '.');
             }
 
-            Expression decimalExp = expressionProvider.createExpression("decimal", CharacterUtilities.toAsciiDigits(value));
+            Expression decimalExp;
+            try {
+                decimalExp = expressionProvider.createExpression("decimal", CharacterUtilities.toAsciiDigits(value));
+            } catch (ExpressionLimitExceededException e) {
+                // see IntegerDictionary: a number over the expression limit is read as unknown
+                return IDictionary.NO_WORDS_FOUND;
+            }
             IWord word = new Word(value, new Expressions(decimalExp), ID);
 
             return Collections.singletonList(new FoundWord(word, false, 1.0));

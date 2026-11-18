@@ -216,6 +216,25 @@ class InputParserTaskPassThroughTest {
     }
 
     @Test
+    @DisplayName("with appendExpressions, the earlier result is kept when a result that fits alone does not fit beside it")
+    void appendKeepsEarlierResultWhenOnlyTheMergeIsTooLong() {
+        var smallProvider = new ExpressionProvider(new ExpressionFactory(), new ExpressionLimits(40, 32));
+        var smallTask = new InputParserTask(smallProvider, new HashMap<>(), new HashMap<>(), new HashMap<>(), new ObjectMapper(), null);
+        MemoryContext ctx = TestMemoryFactory.createWithInput("hello wonderful world");
+        var earlier = new Data<>("expressions:parsed", "greeting(hello)");
+        doAnswer(invocation -> {
+            MemoryKey<?> key = invocation.getArgument(0);
+            return "expressions:parsed".equals(key.key()) ? earlier : null;
+        }).when(ctx.currentStep()).getLatestData(any(MemoryKey.class));
+        var config = passThroughConfig();
+        config.setAppendExpressions(true);
+
+        smallTask.execute(ctx.memory(), emptyParser(config));
+
+        assertEquals("greeting(hello)", storedExpressions(ctx));
+    }
+
+    @Test
     @DisplayName("with appendExpressions, earlier results survive an over-long new result")
     void appendKeepsEarlierResults() {
         MemoryContext ctx = TestMemoryFactory.createWithInput("a".repeat(40_000));

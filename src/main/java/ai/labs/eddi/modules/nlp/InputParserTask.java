@@ -256,8 +256,12 @@ public class InputParserTask implements ILifecycleTask {
         if (limits != null && InputParser.exceedsTokenLimit(normalizedInput, limits)) {
             currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
         }
-        Expressions expressions = StoredExpressions.boundedUnknown(normalizedInput);
-        storeResultInMemory(currentStep, new Solution(expressions), List.of(), config, normalizedInput);
+        // The single unknown carries only the tokens the parser reads: words past
+        // maxInputTokens must not be matchable. The conversation input keeps the full
+        // text.
+        String readable = limits == null ? normalizedInput : InputParser.withinTokenLimit(normalizedInput, limits);
+        Expressions expressions = StoredExpressions.boundedUnknown(readable, expressionProvider.maxExpressionLength());
+        storeResultInMemory(currentStep, new Solution(expressions), List.of(), config, readable);
     }
 
     /**
@@ -441,13 +445,18 @@ public class InputParserTask implements ILifecycleTask {
         // storing them, otherwise downstream behaviour rules would see no expressions
         // and no intents at all.
         int maxLength = expressionProvider.maxExpressionLength();
+        // Matches, confidence and alternatives describe the reading that is kept: they
+        // are not published for one that was reduced to an unknown or rejected on
+        // append.
+        boolean diagnosticsDescribeResult = true;
         if (maxLength > 0 && !isNullOrEmpty(sourceText) && joinStrings(", ", newExpressions).length() > maxLength) {
+            diagnosticsDescribeResult = false;
             // The parsed form is longer than the expression parser will read back (one
             // unbroken token, or a couple of hundred long ones): every rule that looks at
             // it would fail the turn. Degrade this result to one bounded unknown
             // expression — the text itself is untouched.
             log.debugf("Parser result exceeds the expression limit of %d; reduced to one unknown expression", maxLength);
-            newExpressions = StoredExpressions.boundedUnknown(sourceText);
+            newExpressions = StoredExpressions.boundedUnknown(sourceText, maxLength);
             currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
         }
         if (parserConfig.isAppendExpressions()) {
@@ -459,9 +468,12 @@ public class InputParserTask implements ILifecycleTask {
                 merged.addAll(newExpressions);
                 merged = merged.stream().distinct().collect(Collectors.toCollection(Expressions::new));
                 // The earlier results stay when adding this one would pass the limit.
-                newExpressions = maxLength > 0 && !currentExpressions.isEmpty() && joinStrings(", ", merged).length() > maxLength
-                        ? currentExpressions
-                        : merged;
+                if (maxLength > 0 && !currentExpressions.isEmpty() && joinStrings(", ", merged).length() > maxLength) {
+                    newExpressions = currentExpressions;
+                    diagnosticsDescribeResult = false;
+                } else {
+                    newExpressions = merged;
+                }
             }
         } else {
             // This result replaces an earlier parser's on this step: its diagnostics
@@ -482,6 +494,10 @@ public class InputParserTask implements ILifecycleTask {
         Data<List<String>> intentData = new Data<>(INTENTS.key(), intents);
         currentStep.storeData(intentData);
         currentStep.addConversationOutputList(INTENTS.key(), intents);
+
+        if (!diagnosticsDescribeResult) {
+            return;
+        }
 
         // Store input→expression matches for debugging/audit
         List<String> matchDetails = solution.getMatchDetails();
@@ -874,8 +890,9 @@ public class InputParserTask implements ILifecycleTask {
                 new ConfigValue("Min Partial Phrase Coverage", DOUBLE, true, IInputParser.Config.DEFAULT_MIN_PARTIAL_PHRASE_COVERAGE));
         extensionConfigs.put(CONFIG_MIN_MATCHING_ACCURACY, new ConfigValue("Min Matching Accuracy", DOUBLE, true, 0.0));
         extensionConfigs.put(CONFIG_MAX_ALTERNATIVES, new ConfigValue("Max Alternatives Stored", INT, true, 0));
-        extensionConfigs.put(CONFIG_PRESERVE_INPUT, new ConfigValue("Preserve Input As Typed", BOOLEAN, true, true));
-        extensionConfigs.put(CONFIG_PASS_THROUGH, new ConfigValue("Pass-Through (no dictionaries)", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_PRESERVE_INPUT, new ConfigValue("Preserve Input As Typed", BOOLEAN, true, null));
+        // Off unless set: the setup wizard writes true explicitly for new agents.
+        extensionConfigs.put(CONFIG_PASS_THROUGH, new ConfigValue("Pass-Through (no dictionaries)", BOOLEAN, true, false));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;
