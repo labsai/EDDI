@@ -400,7 +400,7 @@ class PrePostUtilsExtendedTest {
     @DisplayName("postResponse quick replies — expression notation from API data (real templating engine)")
     class QuickReplyNotation {
 
-        private List<Map<String, Object>> render(String value, String expressions, String filter, Map<String, Object> api) throws Exception {
+        private List<Map<String, Object>> render(String value, String expressions, String filter, Object api) throws Exception {
             var realEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
             var utils = new PrePostUtils(jsonSerialization, realEngine, dataFactory, mock(SecretPropertyVault.class));
             var memory = mock(IConversationMemory.class);
@@ -459,6 +459,105 @@ class PrePostUtilsExtendedTest {
             var replies = render("Pick {item.name}", "choose({item.name})", null, Map.of("items", List.of(Map.of("name", "*"))));
             assertEquals("Pick *", replies.getFirst().get("value"));
             assertEquals("choose()", replies.getFirst().get("expressions"));
+        }
+
+        @Test
+        @DisplayName("a filter that answers differently each time is evaluated once: every value keeps its own row's expressions")
+        void nondeterministicFilterSelectsOnce() throws Exception {
+            var items = List.of(Map.of("name", "a"), Map.of("name", "b"), Map.of("name", "c"));
+            // first walk keeps a and c; a second evaluation would keep b and c — the same
+            // count, so pairing by position would give "Pick a" the expressions of b
+            var toggle = new Toggle(true, false, true, false, true, true);
+            var replies = render("Pick {item.name}", "choose({item.name})", "api.toggle.flip", Map.of("items", items, "toggle", toggle));
+            assertEquals(2, replies.size());
+            assertEquals("Pick a", replies.get(0).get("value"));
+            assertEquals("choose(a)", replies.get(0).get("expressions"));
+            assertEquals("Pick c", replies.get(1).get("value"));
+            assertEquals("choose(c)", replies.get(1).get("expressions"));
+            assertEquals(3, toggle.calls, "the filter runs once per element, in the first render only");
+        }
+
+        @Test
+        @DisplayName("when the expressions render yields another number of rows: values kept, no expressions")
+        void countMismatchBuildsWithoutExpressions() throws Exception {
+            // the two renders disagree on the row count, as an array getter that is not
+            // idempotent would make them
+            when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(invocation -> rows(invocation.getArgument(1), "Pick a", "Pick b"));
+            when(templatingEngine.processExpressionsTemplate(anyString(), any()))
+                    .thenAnswer(invocation -> rows(invocation.getArgument(1), "choose(a)", "choose(b)", "choose(c)"));
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            var conversationProperties = mock(ConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+            when(conversationProperties.toMap()).thenReturn(new HashMap<>());
+            when(dataFactory.createData(anyString(), any()))
+                    .thenAnswer(invocation -> new Data<>(invocation.getArgument(0), invocation.getArgument(1)));
+            var qrInstruction = new QuickRepliesBuildingInstruction();
+            qrInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
+            qrInstruction.setQuickReplyValue("Pick {item.name}");
+            qrInstruction.setQuickReplyExpressions("choose({item.name})");
+            qrInstruction.setIterationObjectName("item");
+            qrInstruction.setPathToTargetArray("api.items");
+            var postResponse = new PostResponse();
+            postResponse.setQrBuildInstructions(List.of(qrInstruction));
+
+            prePostUtils.runPostResponse(memory, postResponse, new HashMap<>(), 200, false);
+
+            var captor = ArgumentCaptor.forClass(IData.class);
+            verify(currentStep, atLeastOnce()).storeData(captor.capture());
+            var stored = captor.getAllValues().stream().filter(data -> "context:quickReplies".equals(data.getKey())).findFirst().orElseThrow();
+            var replies = (List<Map<String, Object>>) ((Context) stored.getResult()).getValue();
+            assertEquals(2, replies.size());
+            assertEquals("Pick a", replies.get(0).get("value"));
+            assertEquals("", replies.get(0).get("expressions"));
+            assertEquals("Pick b", replies.get(1).get("value"));
+            assertEquals("", replies.get(1).get("expressions"));
+        }
+
+        private static String rows(Map<String, Object> renderData, String... rows) {
+            var rendered = new StringBuilder();
+            for (String row : rows) {
+                rendered.append(row).append(renderData.get("eddiRowDelimiter"));
+            }
+            return rendered.toString();
+        }
+
+        @Test
+        @DisplayName("the replay notices when the array has more or fewer elements than were recorded")
+        void replayDetectsAnotherLength() {
+            var exact = new PrePostUtils.IterationSelection();
+            exact.getKept();
+            exact.getDropped();
+            assertTrue(exact.getNext());
+            assertFalse(exact.getNext());
+            assertTrue(exact.replayedExactly());
+
+            var longer = new PrePostUtils.IterationSelection();
+            longer.getKept();
+            assertTrue(longer.getNext());
+            assertFalse(longer.getNext(), "an element beyond the record is not kept");
+            assertFalse(longer.replayedExactly());
+
+            var shorter = new PrePostUtils.IterationSelection();
+            shorter.getKept();
+            shorter.getKept();
+            assertTrue(shorter.getNext());
+            assertFalse(shorter.replayedExactly());
+        }
+    }
+
+    /** A filter whose verdicts follow a script, one per evaluation. */
+    public static final class Toggle {
+        private final boolean[] verdicts;
+        int calls;
+
+        Toggle(boolean... verdicts) {
+            this.verdicts = verdicts;
+        }
+
+        public boolean isFlip() {
+            return verdicts[calls++ % verdicts.length];
         }
     }
 }

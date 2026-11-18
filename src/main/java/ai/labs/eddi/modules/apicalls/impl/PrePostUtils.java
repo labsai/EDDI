@@ -61,6 +61,7 @@ public class PrePostUtils {
      */
     private static final String KEY_FIELD_DELIMITER = "eddiFieldDelimiter";
     private static final String KEY_ROW_DELIMITER = "eddiRowDelimiter";
+    private static final String KEY_SELECTION = "eddiIterationSelection";
 
     /**
      * Used to assemble output items / quick replies as a JSON object tree. Building
@@ -322,21 +323,33 @@ public class PrePostUtils {
             throws ITemplatingEngine.TemplateEngineException {
 
         List<Object> quickReplies = new LinkedList<>();
-        var valueRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
-                List.of(nullToEmpty(quickReplyValue)), templateDataObjects, false);
         // The expressions field becomes a trusted dictionary phrase on the next turn,
         // so data an upstream API returned must not be able to add expression notation
-        // to it. It is rendered by the engine that strips notation from the values an
-        // expression substitutes (and from nothing else), over the same original data
-        // and with the same filter: conditions, loops and the filter select exactly
-        // the rows the value pass selected, and the two passes pair up row by row. The
-        // value, which the user sees and types, keeps the data as it is.
+        // to it: it is rendered by the engine that strips notation from the values an
+        // expression substitutes (and from nothing else). The value, which the user
+        // sees and types, is rendered by the ordinary engine and keeps the data as it
+        // is. Two engines mean two renders — but ONE selection: the filter is evaluated
+        // only by the first render, which records which elements it kept; the second
+        // render walks the same array and replays that record instead of evaluating
+        // the filter again. A filter that is not deterministic (uuidUtils:, a clock)
+        // therefore cannot select other rows for the expressions than for the values.
+        var selection = new IterationSelection();
+        var valueRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                List.of(nullToEmpty(quickReplyValue)), templateDataObjects, false, selection, false);
         var expressionRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
-                List.of(nullToEmpty(quickReplyExpressions)), templateDataObjects, true);
-        // Both passes render the same template over the same data, so the counts match.
-        // A template that is not deterministic could break that; then no row may get
-        // another row's expressions, and the parser derives them from the value.
-        boolean paired = expressionRows.size() == valueRows.size();
+                List.of(nullToEmpty(quickReplyExpressions)), templateDataObjects, true, selection, true);
+        // The second render walks the array again, so the rows only fail to pair up
+        // when
+        // the array itself came out with a different number of elements the second time
+        // (a getter in the data model that is not idempotent). Then no row may get
+        // another row's expressions: every quick reply keeps its value and gets none.
+        // The next turn still recognises the value (DictionaryUtilities adds it as a
+        // temporary word or phrase), but it contributes no expression.
+        boolean paired = expressionRows.size() == valueRows.size() && selection.replayedExactly();
+        if (!paired) {
+            LOGGER.warnf("Quick replies: the expressions render produced %d rows for %d values; the quick replies are built without expressions",
+                    expressionRows.size(), valueRows.size());
+        }
         var expressions = expressionRows.iterator();
         for (var valueRow : valueRows) {
             quickReplies.add(createQuickReply(valueRow.getFirst(), paired ? expressions.next().getFirst() : ""));
@@ -382,16 +395,25 @@ public class PrePostUtils {
     private List<List<String>> renderPerIteration(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
                                                   List<String> valueTemplates, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
-        return renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression, valueTemplates, templateDataObjects, false);
+        return renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression, valueTemplates, templateDataObjects, false,
+                null, false);
     }
 
     /**
      * @param notationSafe
      *            render with the engine that strips expression notation from the
      *            values it substitutes (for a quick reply's {@code expressions})
+     * @param selection
+     *            when not {@code null} and a filter is set: the record of which
+     *            elements the filter kept
+     * @param replay
+     *            {@code false}: evaluate the filter and record its verdicts in
+     *            {@code selection}; {@code true}: do not evaluate the filter, keep
+     *            the elements {@code selection} recorded
      */
     private List<List<String>> renderPerIteration(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
-                                                  List<String> valueTemplates, Map<String, Object> templateDataObjects, boolean notationSafe)
+                                                  List<String> valueTemplates, Map<String, Object> templateDataObjects, boolean notationSafe,
+                                                  IterationSelection selection, boolean replay)
             throws ITemplatingEngine.TemplateEngineException {
 
         var nonce = UUID.randomUUID().toString().replace("-", "");
@@ -402,7 +424,12 @@ public class PrePostUtils {
         template.append("{#for ").append(iterationObjectName).append(" in ").append(orEmpty(pathToTargetArray)).append("}");
 
         boolean filtered = !isNullOrEmpty(templateFilterExpression);
-        if (filtered) {
+        boolean recorded = filtered && selection != null;
+        if (recorded && replay) {
+            template.append("{#if ").append(KEY_SELECTION).append(".next}");
+        } else if (recorded) {
+            template.append("{#if ").append(templateFilterExpression).append("}{").append(KEY_SELECTION).append(".kept}");
+        } else if (filtered) {
             template.append("{#if ").append(templateFilterExpression).append("}");
         }
 
@@ -414,6 +441,9 @@ public class PrePostUtils {
         }
         template.append('{').append(KEY_ROW_DELIMITER).append('}');
 
+        if (recorded && !replay) {
+            template.append("{#else}{").append(KEY_SELECTION).append(".dropped}");
+        }
         if (filtered) {
             template.append("{/if}");
         }
@@ -425,6 +455,9 @@ public class PrePostUtils {
         Map<String, Object> renderData = templateDataObjects == null ? new HashMap<>() : new HashMap<>(templateDataObjects);
         renderData.put(KEY_FIELD_DELIMITER, fieldDelimiter);
         renderData.put(KEY_ROW_DELIMITER, rowDelimiter);
+        if (recorded) {
+            renderData.put(KEY_SELECTION, selection);
+        }
 
         var rendered = notationSafe
                 ? templatingEngine.processExpressionsTemplate(template.toString(), renderData)
@@ -447,6 +480,47 @@ public class PrePostUtils {
         }
 
         return rows;
+    }
+
+    /**
+     * The verdicts of a filter over the elements of one array, recorded by one
+     * render and replayed by the next, so that two renders of the same array keep
+     * the same elements while the filter is evaluated once. Template data of a
+     * single quick-reply build; never shared between renders of different builds.
+     * <p>
+     * Its properties are read by the template the build generates:
+     * {@code kept}/{@code dropped} record the verdict for the current element (and
+     * render as nothing), {@code next} answers the recorded verdict for the element
+     * the replaying render is at. Public with getters because the runtime engine
+     * reads properties only.
+     */
+    public static final class IterationSelection {
+        private final List<Boolean> verdicts = new ArrayList<>();
+        private int replayed;
+        private boolean overrun;
+
+        public String getKept() {
+            verdicts.add(Boolean.TRUE);
+            return "";
+        }
+
+        public String getDropped() {
+            verdicts.add(Boolean.FALSE);
+            return "";
+        }
+
+        public boolean getNext() {
+            if (replayed >= verdicts.size()) {
+                overrun = true;
+                return false;
+            }
+            return verdicts.get(replayed++);
+        }
+
+        /** Whether the replay walked exactly as many elements as were recorded. */
+        boolean replayedExactly() {
+            return !overrun && replayed == verdicts.size();
+        }
     }
 
     /**
