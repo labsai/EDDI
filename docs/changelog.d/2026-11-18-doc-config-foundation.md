@@ -13,6 +13,7 @@ No user-visible behaviour. The foundation every later documents package (handove
 
 ### Design decisions
 
+- **Save and deploy read a value the same way.** Enum names match exactly at both ends (operator defaults are trimmed). Byte counts are compared exactly, never through a `double`. A negative stored value falls back to the default, and that default is still clamped to the bound. Bounds are read fresh for every save and every deploy, never cached.
 - **Refuse at save, clamp and warn at deploy.** A bound tightened by an operator never un-deploys a running agent and never makes a stored configuration unloadable; only the next save of an over-bound value fails.
 - **Enum names are validated against the names the design states.** Where the design names only some values (`unitForm`: `AUTO`, `BLOCKS`; `images.mode`: `EMBEDDED`; `embeddedFiles.extract`: `NONE`; `library.promote`: `TOOL`), only those are known; the package that makes a key live adds the rest. `large.onReady: CONTINUE` is not a value.
 - **Tests read the design, not the code.** The design's JSON and defaults table are written out literally (`DocumentsDesignJson`), so a key missing from the class or a drifting default fails a test instead of being agreed with.
