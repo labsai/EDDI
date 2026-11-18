@@ -16,7 +16,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /** {@link EmailMessageLedgerContract} against PostgreSQL (Testcontainers). */
-class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMessageLedgerContract {
+class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMessageLedgerContract, EmailLedgerLogContract {
 
     private static PostgresEmailMessageLedger store;
     private static DataSource dataSource;

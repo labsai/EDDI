@@ -183,6 +183,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `maxTurnsPerSenderPerDay` | `50` | Turns one sender address may start per UTC day; over it, the sender's further mail waits for the next day. `0` = no limit |
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
 | `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
+| `ownerDigest` | `off` | `daily`: the `ownerNotifyAddresses` also get one mail per UTC day with the previous day's mail counts by outcome ([Troubleshooting](#troubleshooting-why-didnt-eddi-act-on-a-mail)) |
 
 Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
 → `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
@@ -350,6 +351,60 @@ to the poller and defined by the transport (`mailboxCursor` / `mailbox_cursor`, 
 it is `UIDVALIDITY` plus the last settled UID, also kept in the `uidValidity`/`lastUid` fields older versions read,
 so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` (the folder was rebuilt) rescans the folder, deduplicated by the ledger and the
 `$EddiProcessed` keyword.
+
+## Troubleshooting: why didn't EDDI act on a mail?
+
+Every mail the poll fetched has a ledger row for the ledger's retention (`eddi.email.ledger-retention`, 30 days), and
+a mail EDDI did not act on carries the reason. Nothing is ever sent back to the sender about it. Three ways to read
+the rows (none shows a subject or a body, since the ledger stores neither):
+
+- **The Manager**: the **Mail log** section of the integration's page (`/manage/channels/<id>#mail-log`). It has
+  filters by direction, state and reason category, and a "Look up Message-ID" box.
+- **REST**, with edit access to the integration (the same rule as the suppression list). The response is 404 for a
+  channel that is not an email integration:
+
+  ```bash
+  # newest first, 50 per page; pass nextCursor back as `after`
+  curl "http://localhost:7070/channelstore/channels/<id>/email-log?direction=IN&state=REFUSED&reason=blocked&limit=50"
+  # one mail by its Message-ID (from the sender's mail client: "show original" / "view source")
+  curl -X POST http://localhost:7070/channelstore/channels/<id>/email-log/lookup \
+       -H 'Content-Type: application/json' -d '{"messageId": "<CAF1234@mail.example.com>"}'
+  ```
+
+  Filters: `direction` (`IN`, `OUT`), `kind` (`TRIGGER` = an inbound mail in either mode, `REPLY`, `NOTIFY`,
+  `NOTICE`), `state`, `reason` (a prefix such as `blocked` or `loop:own_address`), and `since`/`until` (ISO-8601
+  instants; `until` is exclusive). `limit` is 1–200. An unknown value, or a cursor this log did not issue, is a 400.
+  A row has `id, kind, direction, messageId, state, reason, reasonCategory, conversationId, counterpart` (the sender
+  of an inbound mail, the recipient of an outbound one), `attempts, createdAt, updatedAt`. The lookup is a POST so
+  the Message-ID, which usually names a domain, stays out of access logs. It returns the inbound row and any outbound
+  row under that id, or 404.
+- **The daily digest** (`ownerDigest: daily`): from 00:05 UTC, one mail per day to the `ownerNotifyAddresses` that
+  pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
+  (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
+  subjects or bodies. A day without mail sends nothing. It needs the [system mailer](hitl.md#email-notifications),
+  and the inbound sweep sends it, so no extra schedule is involved.
+
+What the reason means. The category is the part before the first `:`:
+
+| `reason` | State | Meaning |
+|---|---|---|
+| *(none)* | `DONE` | The turn ran. Look at the conversation (`conversationId`) for what the agent did |
+| `loop:<auto_submitted…>`, `loop:own_address`, `loop:other_integration`, `loop:eddi_message_id`, `loop:refers_to_eddi_mail` | `REFUSED` | An auto-reply, a list or bulk mail, a delivery report, mail from this or another integration's address, or a reply to mail EDDI sent. See [How a mail is processed](#how-a-mail-is-processed) step 3 |
+| `blocked:no_single_sender` | `REFUSED` | The mail has no `From`, or more than one |
+| `blocked:blocklist` | `REFUSED` | The sender matches `senderBlocklist` (or is the integration's own address) |
+| `blocked:not_allowlisted` | `REFUSED` | `senderAllowlist` is set and the sender matches none of its entries |
+| `unauthenticated:<verdict>` | `REFUSED` | No aligned DKIM pass (`fail`, `none`, `pass-unaligned`, …) and `requireAuthentication` is on (always in conversation mode) |
+| `unroutable` | `REFUSED` | No target matched and there is no usable default target |
+| `too_large`, `too_large:input` | `REFUSED` | Over `maxMessageBytes`, or the rendered input was too long |
+| `parse_error:<reason>` | `REFUSED` | The MIME could not be parsed |
+| `failed:<exception>` | `REFUSED` or `RECEIVED` | Submitting the turn failed; retried with back-off, then refused |
+| `stranded`, `stranded:not_in_mailbox` | `REFUSED` | A node stopped mid-turn; see the crash table above (owners get the `lost` notice) |
+| `auth_temporary`, `budget`, `throttled`, `quota`, `busy`, `agent_not_ready`, `conversation_busy`, `store_unavailable`, `conversation_ended` | `RECEIVED` | **Deferred, not refused**: the mail waits in the mailbox and is tried again, at the next poll or, for `budget` and `throttled`, on the next UTC day |
+| `requeued_stale_claim` | `RECEIVED` | A claim outlived its node; the next poll processes the mail |
+
+A mail with **no row at all** was never fetched. It may sit in another folder (`folder` is polled, spam folders are
+not), have arrived before the integration existed, or be older than the retention. Check the mailbox and the poll's
+state in the [Operations](#operations) logs.
 
 ## Operations
 

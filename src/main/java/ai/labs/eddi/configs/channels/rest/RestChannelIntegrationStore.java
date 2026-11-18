@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailLogView;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -20,6 +21,7 @@ import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -37,6 +39,8 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -419,6 +423,69 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         return emailSupport().clearSuppression(id, request.address())
                 ? Response.noContent().build()
                 : Response.status(Response.Status.NOT_FOUND).build();
+    }
+
+    @Override
+    public EmailLogView.Page readEmailLog(String id, String direction, String kind, String state, String reason, String since, String until,
+                                          Integer limit, String after) {
+        requireEmailIntegrationForEdit(id);
+        var query = new IEmailMessageLedger.LedgerQuery(enumParam("direction", direction, IEmailMessageLedger.Direction.class),
+                enumParam("kind", kind, IEmailMessageLedger.Kind.class), enumParam("state", state, IEmailMessageLedger.State.class),
+                reason == null ? null : reason.trim(), instantParam("since", since), instantParam("until", until), limit == null ? 50 : limit,
+                cursorParam(after), false);
+        var page = emailSupport().mailLog(id, query);
+        return new EmailLogView.Page(page.rows().stream().map(RestChannelIntegrationStore::logView).toList(), page.nextCursor());
+    }
+
+    @Override
+    public List<EmailLogView> lookupEmailLog(String id, EmailLogView.LookupRequest request) {
+        requireEmailIntegrationForEdit(id);
+        List<EmailLogView> rows = emailSupport().lookup(id, request == null ? null : request.messageId()).stream()
+                .map(RestChannelIntegrationStore::logView).toList();
+        if (rows.isEmpty()) {
+            throw new NotFoundException("The mail log has no message with that Message-ID (rows are kept for the ledger's retention).");
+        }
+        return rows;
+    }
+
+    static EmailLogView logView(IEmailMessageLedger.LedgerEntry row) {
+        return new EmailLogView(row.id(), row.kind().name(), row.direction().name(), row.messageId(), row.state().name(), row.lastError(),
+                IEmailMessageLedger.reasonCategory(row.lastError()), row.conversationId(), row.recipient(), row.attempts(),
+                row.createdAt().toString(), row.updatedAt() == null ? null : row.updatedAt().toString());
+    }
+
+    /** Blank and absent are the same (Quarkus hands {@code ?x=} over as null). */
+    private static <E extends Enum<E>> E enumParam(String name, String value, Class<E> type) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("Unknown " + name + " '" + sanitize(value) + "'.");
+        }
+    }
+
+    private static Instant instantParam(String name, String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Instant.parse(value.trim());
+        } catch (DateTimeParseException e) {
+            throw new BadRequestException("'" + name + "' must be an ISO-8601 instant such as 2026-11-18T00:00:00Z.");
+        }
+    }
+
+    private static IEmailMessageLedger.Cursor cursorParam(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return IEmailMessageLedger.Cursor.decode(value.trim());
+        } catch (IllegalArgumentException e) {
+            throw new BadRequestException("'after' is not a cursor this mail log issued.");
+        }
     }
 
     /**

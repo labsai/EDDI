@@ -13,7 +13,7 @@ import java.util.Locale;
 import java.util.Set;
 
 /** {@link EmailMessageLedgerContract} against MongoDB (Testcontainers). */
-class MongoEmailMessageLedgerIT extends MongoTestBase implements EmailMessageLedgerContract {
+class MongoEmailMessageLedgerIT extends MongoTestBase implements EmailMessageLedgerContract, EmailLedgerLogContract {
 
     private static MongoEmailMessageLedger store;
 

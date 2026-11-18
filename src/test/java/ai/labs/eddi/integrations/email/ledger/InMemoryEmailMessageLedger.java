@@ -11,6 +11,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 
 /**
@@ -193,5 +194,29 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     /** Every row, for assertions. */
     public synchronized List<LedgerEntry> all() {
         return List.copyOf(rows.values());
+    }
+
+    /** Newest first, ties by id descending — the stores' keyset order. */
+    private static final Comparator<LedgerEntry> NEWEST_FIRST = Comparator.comparing(LedgerEntry::createdAt).thenComparing(LedgerEntry::id)
+            .reversed();
+
+    @Override
+    public synchronized LedgerPage findByIntegration(String integrationId, LedgerQuery query) {
+        Cursor after = query.after();
+        List<LedgerEntry> readAhead = rows.values().stream().filter(r -> r.integrationId().equals(integrationId)).filter(query::matches)
+                .filter(r -> after == null || r.createdAt().isBefore(after.createdAt())
+                        || (r.createdAt().equals(after.createdAt()) && r.id().compareTo(after.id()) < 0))
+                .sorted(NEWEST_FIRST).limit(query.limit() + 1L).toList();
+        return LedgerPage.of(readAhead, query.limit());
+    }
+
+    @Override
+    public synchronized Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until) {
+        Map<String, Long> counts = new TreeMap<>();
+        rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && r.kind() == Kind.TRIGGER && !r.createdAt().isBefore(since)
+                        && r.createdAt().isBefore(until) && !MARKER_REASON.equals(r.lastError()))
+                .forEach(r -> counts.merge(IEmailMessageLedger.outcomeKey(r.state(), r.lastError()), 1L, Long::sum));
+        return counts;
     }
 }

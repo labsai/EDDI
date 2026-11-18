@@ -7,6 +7,8 @@ package ai.labs.eddi.integrations.email.ledger;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Accumulators;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
@@ -24,9 +26,12 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 /**
  * MongoDB implementation of {@link IEmailMessageLedger}.
@@ -84,6 +89,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_inbound_sender"));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
                 new IndexOptions().name("idx_email_ledger_conversation"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.descending(F_CREATED), Indexes.descending(F_ID)),
+                new IndexOptions().name("idx_email_ledger_integration_created"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -258,6 +265,56 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public long deleteByRecipient(String recipient) {
         return rows.deleteMany(Filters.eq(F_RECIPIENT, recipient)).getDeletedCount();
+    }
+
+    @Override
+    public LedgerPage findByIntegration(String integrationId, LedgerQuery query) {
+        List<Bson> filters = new ArrayList<>();
+        filters.add(Filters.eq(F_INTEGRATION, integrationId));
+        if (query.direction() != null) {
+            filters.add(Filters.eq(F_DIRECTION, query.direction().name()));
+        }
+        if (query.kind() != null) {
+            filters.add(Filters.eq(F_KIND, query.kind().name()));
+        }
+        if (query.state() != null) {
+            filters.add(Filters.eq(F_STATE, query.state().name()));
+        }
+        if (query.reasonPrefix() != null) {
+            filters.add(Filters.regex(F_ERROR, "^" + Pattern.quote(query.reasonPrefix())));
+        }
+        if (query.since() != null) {
+            filters.add(Filters.gte(F_CREATED, Date.from(query.since())));
+        }
+        if (query.until() != null) {
+            filters.add(Filters.lt(F_CREATED, Date.from(query.until())));
+        }
+        if (!query.includeMarkers()) {
+            filters.add(Filters.ne(F_ERROR, MARKER_REASON));
+        }
+        if (query.after() != null) {
+            Date at = Date.from(query.after().createdAt());
+            filters.add(Filters.or(Filters.lt(F_CREATED, at), Filters.and(Filters.eq(F_CREATED, at), Filters.lt(F_ID, query.after().id()))));
+        }
+        List<LedgerEntry> readAhead = new ArrayList<>();
+        for (Document document : rows.find(Filters.and(filters)).sort(Sorts.descending(F_CREATED, F_ID)).limit(query.limit() + 1)) {
+            readAhead.add(toEntry(document));
+        }
+        return LedgerPage.of(readAhead, query.limit());
+    }
+
+    @Override
+    public Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until) {
+        Bson match = Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
+                Filters.gte(F_CREATED, Date.from(since)), Filters.lt(F_CREATED, Date.from(until)), Filters.ne(F_ERROR, MARKER_REASON));
+        Document groupKey = new Document("state", "$" + F_STATE).append("error", "$" + F_ERROR);
+        Map<String, Long> counts = new TreeMap<>();
+        for (Document group : rows.aggregate(List.of(Aggregates.match(match), Aggregates.group(groupKey, Accumulators.sum("n", 1L))))) {
+            Document key = group.get("_id", Document.class);
+            Number n = group.get("n", Number.class);
+            counts.merge(IEmailMessageLedger.outcomeKey(State.valueOf(key.getString("state")), key.getString("error")), n.longValue(), Long::sum);
+        }
+        return counts;
     }
 
     static Document toDocument(LedgerEntry entry) {

@@ -11,7 +11,9 @@ import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
+import ai.labs.eddi.engine.mail.MessageIds;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -49,6 +51,10 @@ public class EmailChannelSupport {
      */
     @Inject
     Instance<IEmailSuppressionStore> suppressions;
+
+    /** The message ledger, for the mail log. Field-injected like the above. */
+    @Inject
+    Instance<IEmailMessageLedger> ledger;
 
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
@@ -196,6 +202,42 @@ public class EmailChannelSupport {
         LOGGER.infof("Email integration %s: suppression of %s %s by an administrator", sanitize(integrationId),
                 IEmailSuppressionStore.hash(normalized), removed ? "cleared" : "not found");
         return removed;
+    }
+
+    /**
+     * One page of the integration's mail log (its ledger rows, newest first).
+     */
+    public IEmailMessageLedger.LedgerPage mailLog(String integrationId, IEmailMessageLedger.LedgerQuery query) {
+        return requireLedger().findByIntegration(integrationId, query);
+    }
+
+    /**
+     * The integration's ledger rows of one message — the inbound mail and, under
+     * the same Message-ID, an outbound one — inbound first. {@code <left@right>}, a
+     * bare {@code left@right}, and the synthetic keys the ledger gives a mail
+     * without a Message-ID are accepted.
+     *
+     * @throws BadRequestException
+     *             when {@code messageId} is blank or too long
+     */
+    public List<IEmailMessageLedger.LedgerEntry> lookup(String integrationId, String messageId) {
+        if (messageId == null || messageId.isBlank() || messageId.length() > 2 * MessageIds.MAX_ID_LENGTH) {
+            throw new BadRequestException("The body must name the Message-ID to look up: {\"messageId\": \"<...@...>\"}.");
+        }
+        String trimmed = messageId.trim();
+        String key = MessageIds.parseFirst(trimmed).orElse(trimmed);
+        IEmailMessageLedger ledger = requireLedger();
+        List<IEmailMessageLedger.LedgerEntry> rows = new ArrayList<>();
+        ledger.findByMessage(integrationId, IEmailMessageLedger.Direction.IN, key).ifPresent(rows::add);
+        ledger.findByMessage(integrationId, IEmailMessageLedger.Direction.OUT, key).ifPresent(rows::add);
+        return rows;
+    }
+
+    private IEmailMessageLedger requireLedger() {
+        if (ledger == null || !ledger.isResolvable()) {
+            throw new ServiceUnavailableException("The email message ledger is not available on this node.");
+        }
+        return ledger.get();
     }
 
     private IEmailSuppressionStore requireSuppressions() {

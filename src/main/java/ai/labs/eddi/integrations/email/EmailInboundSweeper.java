@@ -152,6 +152,34 @@ public class EmailInboundSweeper {
         } catch (RuntimeException e) {
             LOGGER.warnf("Email inbound sweep (poll schedules) failed: %s", e.getMessage());
         }
+        try {
+            sendDigests(now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email inbound sweep (owner digests) failed: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * Sends the daily owner digest of every integration that asked for one and has
+     * not had today's yet ({@code ownerDigest: daily}); the notifier claims each
+     * once cluster-wide. Returns how many went out.
+     */
+    int sendDigests(Instant now) {
+        int sent = 0;
+        for (EmailIntegration integration : directory.all()) {
+            EmailChannelSettings settings = integration.settings();
+            if (settings == null || !settings.dailyOwnerDigest()) {
+                continue;
+            }
+            try {
+                if (ownerNotifier.sendDigestIfDue(integration.id(), integration.configuration().getName(), settings, now)) {
+                    sent++;
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Email integration %s: its daily digest failed: %s", sanitize(integration.id()), e.getMessage());
+            }
+        }
+        return sent;
     }
 
     /**

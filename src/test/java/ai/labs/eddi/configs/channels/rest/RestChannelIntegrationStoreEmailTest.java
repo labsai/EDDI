@@ -7,20 +7,25 @@ package ai.labs.eddi.configs.channels.rest;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailLogView;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
 import java.util.HashMap;
@@ -28,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -183,6 +189,110 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(NotFoundException.class, () -> sut.readEmailSuppressions(ID, 10));
         assertThrows(NotFoundException.class, () -> sut.clearEmailSuppression(ID, new EmailSuppressionView.ClearRequest("a@b.example")));
         verify(support, never()).clearSuppression(any(), any());
+    }
+
+    @Test
+    @DisplayName("mail log: filters are parsed into the ledger query, rows mapped with their reason category, the cursor passed on")
+    void mailLog() throws Exception {
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
+        var row = new IEmailMessageLedger.LedgerEntry("row-1", ID, IEmailMessageLedger.Kind.TRIGGER, IEmailMessageLedger.Direction.IN,
+                "<m@x.example>",
+                null, "imap:INBOX:1:1", "in:k", "alice@example.com", IEmailMessageLedger.State.REFUSED, 0, null, null, null,
+                "blocked:not_allowlisted", Instant.parse("2026-11-17T10:00:00Z"), Instant.parse("2026-11-17T10:00:01Z"),
+                Instant.parse("2026-12-17T10:00:00Z"));
+        var cursor = new IEmailMessageLedger.Cursor(Instant.parse("2026-11-17T09:00:00Z"), "row-0");
+        ArgumentCaptor<IEmailMessageLedger.LedgerQuery> query = ArgumentCaptor.forClass(IEmailMessageLedger.LedgerQuery.class);
+        when(support.mailLog(eq(ID), query.capture())).thenReturn(new IEmailMessageLedger.LedgerPage(List.of(row), "next"));
+
+        EmailLogView.Page page = sut.readEmailLog(ID, "in", "trigger", "refused", "blocked", "2026-11-17T00:00:00Z", null, 500, cursor.encode());
+
+        assertEquals("next", page.nextCursor());
+        EmailLogView view = page.rows().get(0);
+        assertEquals("blocked:not_allowlisted", view.reason());
+        assertEquals("blocked", view.reasonCategory());
+        assertEquals("alice@example.com", view.counterpart());
+        assertEquals("2026-11-17T10:00:00Z", view.createdAt());
+        var q = query.getValue();
+        assertEquals(IEmailMessageLedger.Direction.IN, q.direction());
+        assertEquals(IEmailMessageLedger.Kind.TRIGGER, q.kind());
+        assertEquals(IEmailMessageLedger.State.REFUSED, q.state());
+        assertEquals("blocked", q.reasonPrefix());
+        assertEquals(Instant.parse("2026-11-17T00:00:00Z"), q.since());
+        assertNull(q.until());
+        assertEquals(IEmailMessageLedger.MAX_PAGE, q.limit(), "the limit is clamped");
+        assertEquals(cursor, q.after());
+        assertFalse(q.includeMarkers());
+    }
+
+    @Test
+    @DisplayName("mail log: blank parameters are no filter; a bad enum, instant or cursor is a 400, not a 500")
+    void mailLogBadParameters() throws Exception {
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
+        ArgumentCaptor<IEmailMessageLedger.LedgerQuery> query = ArgumentCaptor.forClass(IEmailMessageLedger.LedgerQuery.class);
+        when(support.mailLog(eq(ID), query.capture())).thenReturn(new IEmailMessageLedger.LedgerPage(List.of(), null));
+
+        sut.readEmailLog(ID, "", null, " ", "", null, "", null, "");
+        var q = query.getValue();
+        assertNull(q.direction());
+        assertNull(q.state());
+        assertNull(q.reasonPrefix());
+        assertNull(q.after());
+        assertEquals(50, q.limit());
+
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, "sideways", null, null, null, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, "LOST", null, null, null, null, null));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, "yesterday", null, null, null));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "%%%"));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "bm8tYmFy"));
+    }
+
+    @Test
+    @DisplayName("mail log lookup: the rows of one Message-ID, 404 when the ledger has none")
+    void mailLogLookup() throws Exception {
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
+        var row = new IEmailMessageLedger.LedgerEntry("row-1", ID, IEmailMessageLedger.Kind.TRIGGER, IEmailMessageLedger.Direction.IN,
+                "<m@x.example>",
+                "conv-1", "imap:INBOX:1:1", "in:k", "alice@example.com", IEmailMessageLedger.State.DONE, 0, null, null, null, null,
+                Instant.parse("2026-11-17T10:00:00Z"), null, Instant.parse("2026-12-17T10:00:00Z"));
+        when(support.lookup(ID, "<m@x.example>")).thenReturn(List.of(row));
+        when(support.lookup(ID, "<gone@x.example>")).thenReturn(List.of());
+
+        var rows = sut.lookupEmailLog(ID, new EmailLogView.LookupRequest("<m@x.example>"));
+        assertEquals(1, rows.size());
+        assertEquals("conv-1", rows.get(0).conversationId());
+        assertNull(rows.get(0).reasonCategory());
+        assertNull(rows.get(0).updatedAt());
+        assertThrows(NotFoundException.class, () -> sut.lookupEmailLog(ID, new EmailLogView.LookupRequest("<gone@x.example>")));
+    }
+
+    @Test
+    @DisplayName("mail log: edit access is checked first; a caller without it reads nothing")
+    void mailLogNeedsEditAccess() throws Exception {
+        ResourceAccessGuard guard = mock(ResourceAccessGuard.class);
+        doThrow(new ForbiddenException("no")).when(guard).requireAccess(eq(ID), eq(AccessLevel.EDIT), any());
+        @SuppressWarnings("unchecked")
+        Instance<EmailChannelSupport> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(support);
+        var guarded = new RestChannelIntegrationStore(channelStore, mock(IDocumentDescriptorStore.class), guard, instance);
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
+
+        assertThrows(ForbiddenException.class, () -> guarded.readEmailLog(ID, null, null, null, null, null, null, null, null));
+        assertThrows(ForbiddenException.class, () -> guarded.lookupEmailLog(ID, new EmailLogView.LookupRequest("<m@x.example>")));
+        verify(support, never()).mailLog(any(), any());
+        verify(support, never()).lookup(any(), any());
+    }
+
+    @Test
+    @DisplayName("a channel that is not an email integration has no mail log")
+    void mailLogOnlyForEmail() throws Exception {
+        var slack = email(Map.of());
+        slack.setChannelType("slack");
+        when(channelStore.read(ID, 1)).thenReturn(slack);
+
+        assertThrows(NotFoundException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, null));
+        assertThrows(NotFoundException.class, () -> sut.lookupEmailLog(ID, new EmailLogView.LookupRequest("<m@x.example>")));
+        verify(support, never()).mailLog(any(), any());
     }
 
     @Test

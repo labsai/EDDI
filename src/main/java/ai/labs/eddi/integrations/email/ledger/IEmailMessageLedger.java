@@ -4,8 +4,13 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
+import java.time.format.DateTimeParseException;
+import java.util.Base64;
 import java.util.List;
+import java.util.Locale;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 
@@ -350,4 +355,169 @@ public interface IEmailMessageLedger {
      * Removes rows addressed to {@code recipient} (normalised), for GDPR erasure.
      */
     long deleteByRecipient(String recipient);
+
+    /**
+     * The {@code lastError} of a signature marker row (one per DKIM signature that
+     * ran, written by the replay guard): a dedup record, not a mail. The mail log
+     * leaves these out unless asked, and the outcome counts never include them.
+     */
+    String MARKER_REASON = "signature_seen";
+
+    /** The most rows one {@link #findByIntegration} page returns. */
+    int MAX_PAGE = 200;
+
+    /**
+     * The category of a reason: {@code lastError} up to its first {@code :}
+     * ({@code blocked:not_allowlisted} → {@code blocked}), or null without one.
+     */
+    static String reasonCategory(String lastError) {
+        if (lastError == null || lastError.isBlank()) {
+            return null;
+        }
+        int colon = lastError.indexOf(':');
+        return colon < 0 ? lastError : lastError.substring(0, colon);
+    }
+
+    /**
+     * The key {@link #countInboundByOutcome} counts a row under: the state in lower
+     * case, and for a {@link State#REFUSED} row also the reason category
+     * ({@code refused:blocked}, {@code refused:unknown} without a reason). A
+     * {@link State#RECEIVED} row with a reason (deferred: a budget, a temporary
+     * authentication result) is counted as {@code deferred:<category>}.
+     */
+    static String outcomeKey(State state, String lastError) {
+        String category = reasonCategory(lastError);
+        if (state == State.REFUSED) {
+            return "refused:" + (category == null ? "unknown" : category);
+        }
+        if (state == State.RECEIVED && category != null) {
+            return "deferred:" + category;
+        }
+        return state.name().toLowerCase(Locale.ROOT);
+    }
+
+    /**
+     * A position in a {@link #findByIntegration} listing: the last row of the
+     * previous page. Opaque to clients ({@link #encode()}).
+     */
+    record Cursor(Instant createdAt, String id) {
+
+        public Cursor {
+            Objects.requireNonNull(createdAt, "createdAt");
+            Objects.requireNonNull(id, "id");
+        }
+
+        public static Cursor after(LedgerEntry row) {
+            return new Cursor(row.createdAt(), row.id());
+        }
+
+        public String encode() {
+            return Base64.getUrlEncoder().withoutPadding().encodeToString((createdAt + "|" + id).getBytes(StandardCharsets.UTF_8));
+        }
+
+        /**
+         * @throws IllegalArgumentException
+         *             when {@code value} is not a cursor this ledger issued
+         */
+        public static Cursor decode(String value) {
+            try {
+                String decoded = new String(Base64.getUrlDecoder().decode(value), StandardCharsets.UTF_8);
+                int bar = decoded.indexOf('|');
+                if (bar <= 0 || bar == decoded.length() - 1) {
+                    throw new IllegalArgumentException("malformed cursor");
+                }
+                return new Cursor(Instant.parse(decoded.substring(0, bar)), decoded.substring(bar + 1));
+            } catch (IllegalArgumentException | DateTimeParseException e) {
+                throw new IllegalArgumentException("malformed cursor", e);
+            }
+        }
+    }
+
+    /**
+     * A filter over one integration's rows. Every field but {@code limit} may be
+     * null (no filter).
+     *
+     * @param direction
+     *            in or out
+     * @param kind
+     *            what the rows are for
+     * @param state
+     *            their state
+     * @param reasonPrefix
+     *            {@code lastError} starts with it (a category such as
+     *            {@code blocked}, or a full reason)
+     * @param since
+     *            created at or after
+     * @param until
+     *            created before
+     * @param limit
+     *            rows per page, clamped to 1..{@link #MAX_PAGE}
+     * @param after
+     *            continue after this row
+     * @param includeMarkers
+     *            also list signature marker rows ({@link #MARKER_REASON})
+     */
+    record LedgerQuery(Direction direction, Kind kind, State state, String reasonPrefix, Instant since, Instant until, int limit, Cursor after,
+            boolean includeMarkers) {
+
+        public LedgerQuery {
+            limit = Math.max(1, Math.min(limit, MAX_PAGE));
+            if (reasonPrefix != null && reasonPrefix.isBlank()) {
+                reasonPrefix = null;
+            }
+        }
+
+        /** Every row, newest first, {@code limit} per page. */
+        public static LedgerQuery all(int limit) {
+            return new LedgerQuery(null, null, null, null, null, null, limit, null, false);
+        }
+
+        /** Whether {@code row} passes this filter (cursor and integration aside). */
+        public boolean matches(LedgerEntry row) {
+            return (direction == null || row.direction() == direction) && (kind == null || row.kind() == kind)
+                    && (state == null || row.state() == state)
+                    && (reasonPrefix == null || (row.lastError() != null && row.lastError().startsWith(reasonPrefix)))
+                    && (since == null || !row.createdAt().isBefore(since)) && (until == null || row.createdAt().isBefore(until))
+                    && (includeMarkers || !MARKER_REASON.equals(row.lastError()));
+        }
+    }
+
+    /**
+     * One page of a listing.
+     *
+     * @param rows
+     *            newest first
+     * @param nextCursor
+     *            {@link Cursor#encode()} of the last row when more may follow, else
+     *            null
+     */
+    record LedgerPage(List<LedgerEntry> rows, String nextCursor) {
+
+        /**
+         * The page from up to {@code limit + 1} rows read in order: the extra row only
+         * says that there is more.
+         */
+        public static LedgerPage of(List<LedgerEntry> readAhead, int limit) {
+            if (readAhead.size() <= limit) {
+                return new LedgerPage(List.copyOf(readAhead), null);
+            }
+            List<LedgerEntry> page = List.copyOf(readAhead.subList(0, limit));
+            return new LedgerPage(page, Cursor.after(page.get(limit - 1)).encode());
+        }
+    }
+
+    /**
+     * Rows of one integration, newest first — keyset-paginated on
+     * {@code (createdAt desc, id desc)}, so equal timestamps neither repeat nor
+     * skip a row across pages. The mail log of the Manager and of {@code GET
+     * /channelstore/channels/{id}/email-log}.
+     */
+    LedgerPage findByIntegration(String integrationId, LedgerQuery query);
+
+    /**
+     * How many {@link Kind#TRIGGER} rows of one integration were created in
+     * {@code [since, until)}, by {@link #outcomeKey} — the owner digest. Signature
+     * markers are not counted.
+     */
+    Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until);
 }

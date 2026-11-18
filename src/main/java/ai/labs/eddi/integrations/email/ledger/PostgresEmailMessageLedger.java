@@ -20,7 +20,9 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.TreeMap;
 import java.util.UUID;
 
 /**
@@ -74,7 +76,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_integration_created ON email_message_ledger "
+                    + "(integration_id, created_at DESC, id COLLATE \"C\" DESC)"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -410,6 +414,89 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return statement.executeUpdate();
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to delete email ledger rows", e);
+        }
+    }
+
+    @Override
+    public LedgerPage findByIntegration(String integrationId, LedgerQuery query) {
+        // Ids compare byte-wise (COLLATE "C"), as in MongoDB and the in-memory fake:
+        // a locale collation that ignores hyphens would order ties differently.
+        StringBuilder sql = new StringBuilder("SELECT " + COLUMNS + " FROM " + TABLE + " WHERE integration_id = ?");
+        List<Object> parameters = new ArrayList<>();
+        parameters.add(integrationId);
+        if (query.direction() != null) {
+            sql.append(" AND direction = ?");
+            parameters.add(query.direction().name());
+        }
+        if (query.kind() != null) {
+            sql.append(" AND kind = ?");
+            parameters.add(query.kind().name());
+        }
+        if (query.state() != null) {
+            sql.append(" AND state = ?");
+            parameters.add(query.state().name());
+        }
+        if (query.reasonPrefix() != null) {
+            // LEFT(), not LIKE: reasons contain '_', which LIKE would read as a wildcard.
+            sql.append(" AND LEFT(last_error, ?) = ?");
+            parameters.add(query.reasonPrefix().length());
+            parameters.add(query.reasonPrefix());
+        }
+        if (query.since() != null) {
+            sql.append(" AND created_at >= ?");
+            parameters.add(timestamp(query.since()));
+        }
+        if (query.until() != null) {
+            sql.append(" AND created_at < ?");
+            parameters.add(timestamp(query.until()));
+        }
+        if (!query.includeMarkers()) {
+            sql.append(" AND (last_error IS NULL OR last_error <> ?)");
+            parameters.add(MARKER_REASON);
+        }
+        if (query.after() != null) {
+            sql.append(" AND (created_at < ? OR (created_at = ? AND id COLLATE \"C\" < ?))");
+            Timestamp at = timestamp(query.after().createdAt());
+            parameters.add(at);
+            parameters.add(at);
+            parameters.add(query.after().id());
+        }
+        sql.append(" ORDER BY created_at DESC, id COLLATE \"C\" DESC LIMIT ?");
+        parameters.add(query.limit() + 1);
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            for (int i = 0; i < parameters.size(); i++) {
+                statement.setObject(i + 1, parameters.get(i));
+            }
+            List<LedgerEntry> readAhead = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    readAhead.add(toEntry(rows));
+                }
+            }
+            return LedgerPage.of(readAhead, query.limit());
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to list email ledger rows", e);
+        }
+    }
+
+    @Override
+    public Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until) {
+        String sql = "SELECT state, last_error, COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND kind = 'TRIGGER' AND created_at >= ? "
+                + "AND created_at < ? AND (last_error IS NULL OR last_error <> ?) GROUP BY state, last_error";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setTimestamp(2, timestamp(since));
+            statement.setTimestamp(3, timestamp(until));
+            statement.setString(4, MARKER_REASON);
+            Map<String, Long> counts = new TreeMap<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    counts.merge(IEmailMessageLedger.outcomeKey(State.valueOf(rows.getString(1)), rows.getString(2)), rows.getLong(3), Long::sum);
+                }
+            }
+            return counts;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count email ledger rows", e);
         }
     }
 
