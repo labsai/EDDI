@@ -48,7 +48,7 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   `useAuth`; nothing is shown with authentication off. `AuthProvider` (and `AppProviders`) take an `app`: Workforce
   signs out back to `/workforce` instead of landing in the Manager, and its failed-sign-in text no longer says "The
   Manager" (`auth.initFailedBodyWorkforce`, eleven locales). `workforce-threads` in `localStorage` was one key for
-  everybody and survived sign-out; it is now `workforce-threads-<principal>`, every thread key (and the old unscoped
+  everybody and survived sign-out; it is now `workforce-threads-<principal>`, the person's thread key (and the old unscoped
   one, which is deleted unread) is removed at sign-out. `user-display.ts` and the three menu strings (`auth.logout`,
   `auth.userMenu`, `auth.signedIn`) moved to `@eddi/app-kit` so both apps share them.
   Files: `ui/workforce/src/components/workforce/workforce-user-menu.tsx`, `hooks/use-workforce-threads.ts`,
@@ -65,14 +65,38 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
 
 ### Behaviour changes an upgrader will notice
 
-- The three UIs send an `Idempotency-Key` header. They run on the EDDI origin, so no CORS rule is involved; a widget
-  embedded with an `apiBaseUrl` on another origin needs `idempotency-key` in `quarkus.http.cors.headers` (the
-  default list does not have it yet; the backend configuration was out of scope for this branch).
-
-- Workforce thread pointers (`workforce-threads`) are not carried over to the per-user key: after the upgrade each
-  advisor thread starts a new conversation once (the old conversations stay in the history).
+- The three UIs send an `Idempotency-Key` header, but only to their own origin. A Chat UI embedded with an
+  `apiBaseUrl` on another origin sends none (exactly the behaviour before this branch) unless the embedder sets
+  `idempotencyKeys: true`; the backend must then allow the header. The default `quarkus.http.cors.headers` now lists
+  `idempotency-key` and `x-eddi-request-id`; a deployment that overrides that list (`QUARKUS_HTTP_CORS_HEADERS`) must
+  keep them if it opts in.
+- Workforce thread pointers (`workforce-threads`) are not carried over to the per-user key (the token subject, the
+  username as fallback): the old unscoped key is deleted unread, so after the upgrade each advisor thread starts a new
+  conversation once (the old conversations stay in the history). Sign-out removes only the signing-out person's
+  pointers and that legacy key, not other people's on the same browser profile.
 - Signing out of Workforce lands on `/workforce`; the Keycloak client must allow that post-logout redirect (the
   shipped realm uses `/*`).
+
+### Review follow-up (same branch)
+
+- **CORS.** `idempotency-key, x-eddi-request-id` added to `quarkus.http.cors.headers` (`application.properties`);
+  `docs/configuration-reference.md` and `docs/conversations.md` updated. No Java test pins the value (CI:
+  `CorsExposedHeadersConfigTest` reads the exposed-headers key only).
+- **Same-origin only** (`HttpClient.sendsIdempotencyKeys`, `isSameOrigin`; opt-in `HttpClient({idempotencyKeys})`,
+  `ChatConfig.idempotencyKeys`). A request that failed with no answer while offline, or cross-origin, is "not sent"
+  (draft back); a plain `Error` from client code is "failed", only `TypeError`/status 0 is "outcome unknown".
+- **Kept keys.** `SUBMISSION_KEY_MAX_AGE_MS` (540 s, below the backend's 600 s) expires a key; `resume`, `open`,
+  `retry`, undo and redo end the pending submission; a send settles only its own submission (overlapping sends).
+  A 409 on a retried key whose first attempt still runs keeps the message in every transport.
+- **`turn_not_stored`** is its own class (stream code and REST `TURN_NOT_STORED` on 409/422/503/507): the message
+  stays, the notice says the reply was not saved, and for 507 or `retryable:false` says to start a new conversation.
+  HTTP error bodies (`code`, `retryable`, `reason`) are read for it.
+- **Copy.** The unknown-outcome notice no longer promises anything absolute and has a variant for a key past its age.
+  "Empty" is not shown for quick-reply-only, button, link, image or input-field turns; "revised" is neutral and not
+  shown when the final text is the streamed text without its reasoning block.
+- **Workforce.** A failure that arrives while the thread is parked is kept and shown on return; the registry is keyed
+  by person and emptied on sign-out (`onSignOut`) or a change of person; a live region announces the thread's
+  notices. `BearerEventSource` refills its retry budget only after a real (non-comment) event or 30 s of uptime.
 
 ### Not done
 

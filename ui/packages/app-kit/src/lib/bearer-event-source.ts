@@ -24,6 +24,12 @@ type EventHandler = (event: MessageEvent) => void;
  */
 export type HeaderSource = Record<string, string> | (() => Record<string, string>);
 
+/**
+ * How long a connection must have stayed up to count as healthy when no real
+ * event came (a quiet stream that only sends heartbeats).
+ */
+export const BEARER_MIN_HEALTHY_UPTIME_MS = 30_000;
+
 export class BearerEventSource {
   private abortController: AbortController | null = null;
   private inactivityTimer: ReturnType<typeof setTimeout> | null = null;
@@ -113,7 +119,25 @@ export class BearerEventSource {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let completedEvent = false;
+      const openedAt = Date.now();
+      let refilled = false;
+      // Refill the retry budget once the connection has proven itself: a real event
+      // (not a comment — a server that sends one heartbeat and drops would
+      // otherwise reset the budget on every attempt and be retried every five
+      // seconds for good), or an uptime of BEARER_MIN_HEALTHY_UPTIME_MS.
+      const refill = () => {
+        if (refilled) return;
+        refilled = true;
+        this.reconnects.reset();
+      };
+      const deliver = (blocks: string[]) => {
+        for (const block of blocks) {
+          const msg = this.parseBlock(block.trim());
+          if (!msg) continue;
+          this.dispatch(msg);
+          refill();
+        }
+      };
 
       this.resetInactivityTimer();
 
@@ -128,14 +152,7 @@ export class BearerEventSource {
             buffer = (buffer + decoder.decode()).replace(/\r\n/g, "\n").replace(/\r/g, "\n");
             const complete = buffer.split("\n\n");
             complete.pop();
-            if (complete.length > 0 && !completedEvent) {
-              completedEvent = true;
-              this.reconnects.reset();
-            }
-            for (const block of complete) {
-              const msg = this.parseBlock(block.trim());
-              if (msg) this.dispatch(msg);
-            }
+            deliver(complete);
             break;
           }
 
@@ -151,25 +168,10 @@ export class BearerEventSource {
           const blocks = buffer.split("\n\n");
           buffer = blocks.pop() ?? "";
 
-          // Refill the retry budget only once the stream has produced a COMPLETE
-          // event (a block ended by its blank line, a heartbeat comment
-          // included) — NOT when the headers arrive, and not on the first bytes
-          // either: a server that answers 200, sends a few bytes and drops
-          // refilled the budget on every attempt and so reconnected every five
-          // seconds for good. A finished event is the earliest proof that the
-          // connection works; EDDI's log stream sends a heartbeat comment every
-          // 15s, so a healthy idle stream still refills promptly.
-          if (!completedEvent && blocks.length > 0) {
-            completedEvent = true;
-            this.reconnects.reset();
-          }
-
-          for (const block of blocks) {
-            const msg = this.parseBlock(block.trim());
-            if (msg) this.dispatch(msg);
-          }
+          deliver(blocks);
         }
       } finally {
+        if (Date.now() - openedAt >= BEARER_MIN_HEALTHY_UPTIME_MS) refill();
         // However the loop ended — EOF, close(), a newer connection, a throw — the
         // body is released, so a failing listener cannot leave the reader open.
         void reader.cancel().catch(() => undefined);

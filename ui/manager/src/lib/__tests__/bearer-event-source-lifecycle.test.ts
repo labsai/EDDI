@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi, type MockInstance } from "vitest";
-import { BearerEventSource } from "@eddi/app-kit/lib/bearer-event-source";
+import { BEARER_MIN_HEALTHY_UPTIME_MS, BearerEventSource } from "@eddi/app-kit/lib/bearer-event-source";
 import { SSE_RECONNECT_MAX_ATTEMPTS, SSE_RECONNECT_MAX_DELAY_MS } from "@eddi/app-kit/lib/constants";
 
 /**
@@ -109,18 +109,45 @@ describe("BearerEventSource lifecycle", () => {
     es.close();
   });
 
-  it("a heartbeat comment is a complete event: the budget refills", async () => {
+  it("a server that sends one heartbeat and drops does not refill the budget either", async () => {
+    fetchSpy.mockImplementation(async () => new Response(stream([": keep-alive\n\n"]), { status: 200 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+    await vi.advanceTimersByTimeAsync(0);
+    for (let i = 0; i < SSE_RECONNECT_MAX_ATTEMPTS; i++) {
+      await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS);
+    }
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(fetchSpy.mock.calls.length).toBe(SSE_RECONNECT_MAX_ATTEMPTS + 1);
+    es.close();
+  });
+
+  it("a connection that stayed up for the minimum time is healthy even if it only sent heartbeats", async () => {
+    let closeStream!: () => void;
     fetchSpy
       .mockResolvedValueOnce(new Response(null, { status: 502 }))
-      .mockResolvedValueOnce(new Response(stream([": keep-alive\n\n"]), { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream<Uint8Array>({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(": keep-alive\n\n"));
+              closeStream = () => controller.close();
+            },
+          }),
+          { status: 200 },
+        ),
+      )
       .mockResolvedValue(new Response(null, { status: 502 }));
     const es = new BearerEventSource("http://test/sse");
     await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(5000);
+    await vi.advanceTimersByTimeAsync(5000); // second attempt connects
+    await vi.advanceTimersByTimeAsync(BEARER_MIN_HEALTHY_UPTIME_MS);
+    closeStream();
     await vi.advanceTimersByTimeAsync(0);
-    const afterSuccess = fetchSpy.mock.calls.length;
-    await vi.advanceTimersByTimeAsync(5000); // the BASE delay again
-    expect(fetchSpy.mock.calls.length).toBeGreaterThan(afterSuccess);
+    const afterDrop = fetchSpy.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(5000); // the BASE delay again: the budget refilled
+    expect(fetchSpy.mock.calls.length).toBeGreaterThan(afterDrop);
     es.close();
   });
 

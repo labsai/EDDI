@@ -1747,6 +1747,13 @@ function WorkforceThread() {
             </div>
           )}
 
+          {/* The client's own notices (the conversation ended, a reply not saved, …)
+              are lines in the transcript, which is not a live region; this one says
+              the latest to assistive technology, once, when it appears. */}
+          <div className="sr-only" role="status" aria-live="polite" aria-atomic="true" data-testid="thread-notice-live">
+            {[...messages].reverse().find((m) => m.kind === "notice")?.content ?? ""}
+          </div>
+
           <div ref={messagesEndRef} />
         </div>
 

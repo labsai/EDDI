@@ -177,6 +177,19 @@ describe("WorkforceThread – retry after a failed turn", () => {
     expect(keys[1]).toBe(keys[0]);
   });
 
+  it("announces the controller's notices in a polite live region (a 410: the conversation has ended)", async () => {
+    setupMocks((() => {
+      throw { status: 410, message: "gone" };
+    }) as never);
+
+    await renderAndSend("Anyone there?");
+
+    await waitFor(() => expect(screen.getByTestId("thread-notice-live")).toHaveTextContent(/has ended/i));
+    const region = screen.getByTestId("thread-notice-live");
+    expect(region).toHaveAttribute("aria-live", "polite");
+    expect(region).toHaveAttribute("role", "status");
+  });
+
   it("withdraws and re-sends the question when the turn produced nothing", async () => {
     let call = 0;
     setupMocks(async function* () {
