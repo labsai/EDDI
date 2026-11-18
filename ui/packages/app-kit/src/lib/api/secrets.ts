@@ -324,7 +324,7 @@ async function throwVaultError(res: Response, action: string): Promise<never> {
 export async function listSecrets(
   tenantId: string,
 ): Promise<SecretMetadata[]> {
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     `${api.getBaseUrl()}${secretPath(tenantId)}`,
     { headers: api.getAuthHeader() },
   );
@@ -352,7 +352,7 @@ export async function storeSecret(
   if (allowedAgents) body.allowedAgents = allowedAgents;
   if (allowedHosts) body.allowedHosts = allowedHosts;
 
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     `${api.getBaseUrl()}${secretPath(tenantId, keyName)}`,
     {
       method: "PUT",
@@ -440,7 +440,7 @@ export async function deleteSecret(
   tenantId: string,
   keyName: string,
 ): Promise<void> {
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     `${api.getBaseUrl()}${secretPath(tenantId, keyName)}`,
     { method: "DELETE", headers: api.getAuthHeader() },
   );
@@ -452,7 +452,7 @@ export async function deleteSecret(
 /** Get vault health status. Parses the body on both 200 and 503. */
 export async function getVaultHealth(): Promise<VaultHealth> {
   try {
-    const res = await fetch(`${api.getBaseUrl()}${BASE}/health`, {
+    const res = await api.authorizedFetch(`${api.getBaseUrl()}${BASE}/health`, {
       headers: api.getAuthHeader(),
     });
     if (res.status === 401 || res.status === 403) {
@@ -547,7 +547,7 @@ export async function findSecret(
  * freshly generated DEK. Maps to `POST /{tenantId}/rotate-dek`.
  */
 export async function rotateDek(tenantId: string): Promise<RotateDekResponse> {
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     `${api.getBaseUrl()}${secretPath(tenantId)}/rotate-dek`,
     { method: "POST", headers: api.getAuthHeader() },
   );
@@ -568,7 +568,7 @@ export async function rotateKek(args: {
   oldKey: string;
   newKey: string;
 }): Promise<RotateKekResponse> {
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     `${api.getBaseUrl()}${BASE}/admin/rotate-kek`,
     {
       method: "POST",
@@ -594,7 +594,7 @@ export async function rotateKek(args: {
 export async function resetTenant(
   tenantId: string,
 ): Promise<ResetTenantResponse> {
-  const res = await fetch(
+  const res = await api.authorizedFetch(
     // confirm=true: the backend refuses a reset without it (the dialog that
     // calls this has already made the admin type the tenant id).
     `${api.getBaseUrl()}${secretPath(tenantId)}/reset?confirm=true`,

@@ -1,4 +1,4 @@
-import { api } from "../api-client";
+import { api, ApiClientError } from "../api-client";
 import { seg } from "./path-segment";
 
 /*
@@ -183,6 +183,8 @@ function uploadWithProgress(
         headers: { "Content-Type": xhr.getResponseHeader("Content-Type") ?? "application/json" },
       });
       if (!response.ok) {
+        // A 401 after the token was renewed: the session is gone — say so.
+        if (xhr.status === 401) api.reportUnauthorized();
         void toAttachmentError(response).then(reject, reject);
         return;
       }
@@ -233,12 +235,14 @@ export async function uploadAttachment(
   formData.append("file", file);
 
   if (onProgress && file.size >= PROGRESS_MIN_BYTES && typeof XMLHttpRequest !== "undefined") {
+    // XMLHttpRequest cannot go through the refreshing client: renew the token first.
+    await api.ensureFreshToken();
     return uploadWithProgress(`${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`, formData, onProgress, signal);
   }
 
   let response: Response;
   try {
-    response = await fetch(
+    response = await api.authorizedFetch(
       `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
       {
         method: "POST",
@@ -250,9 +254,12 @@ export async function uploadAttachment(
   } catch (networkError) {
     if (signal?.aborted) throw cancelledError();
     throw new AttachmentError(
-      networkError instanceof Error
-        ? `Network error: ${networkError.message}`
-        : "Network error: unable to reach server",
+      // The client already words a network failure ("Network error: …").
+      networkError instanceof ApiClientError
+        ? networkError.message
+        : networkError instanceof Error
+          ? `Network error: ${networkError.message}`
+          : "Network error: unable to reach server",
       0,
     );
   }
@@ -272,7 +279,7 @@ export async function uploadAttachment(
 export async function listAttachments(
   conversationId: string,
 ): Promise<AttachmentMeta[]> {
-  const response = await fetch(
+  const response = await api.authorizedFetch(
     `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { headers: api.getAuthHeader() },
   );
@@ -303,7 +310,7 @@ export async function downloadAttachment(
   conversationId: string,
   storageRef: string,
 ): Promise<Blob> {
-  const response = await fetch(getAttachmentDownloadUrl(conversationId, storageRef), {
+  const response = await api.authorizedFetch(getAttachmentDownloadUrl(conversationId, storageRef), {
     headers: api.getAuthHeader(),
   });
   if (!response.ok) throw await toAttachmentError(response);
@@ -318,7 +325,7 @@ export async function deleteAttachment(
   conversationId: string,
   storageRef: string,
 ): Promise<void> {
-  const response = await fetch(getAttachmentDownloadUrl(conversationId, storageRef), {
+  const response = await api.authorizedFetch(getAttachmentDownloadUrl(conversationId, storageRef), {
     method: "DELETE",
     headers: api.getAuthHeader(),
   });
@@ -334,7 +341,7 @@ export async function deleteAttachment(
 export async function deleteAllAttachments(
   conversationId: string,
 ): Promise<number> {
-  const response = await fetch(
+  const response = await api.authorizedFetch(
     `${api.getBaseUrl()}/conversations/${seg(conversationId)}/attachments`,
     { method: "DELETE", headers: api.getAuthHeader() },
   );

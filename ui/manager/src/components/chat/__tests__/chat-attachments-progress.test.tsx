@@ -62,6 +62,8 @@ describe("uploadAttachment with progress", () => {
   it("reports the bytes sent and resolves with the stored file", async () => {
     const progress = vi.fn();
     const upload = uploadAttachment("conv1", big("notes.txt", "text/plain"), progress);
+    // The upload renews the token first, so the request starts a tick later.
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     const xhr = sent[0]!;
     expect(xhr.method).toBe("POST");
     expect(xhr.url).toMatch(/\/conversations\/conv1\/attachments$/);
@@ -73,6 +75,8 @@ describe("uploadAttachment with progress", () => {
 
   it("refuses with the server's reason, as the fetch path does", async () => {
     const upload = uploadAttachment("conv1", big("a.exe"), vi.fn());
+    // The upload renews the token first, so the request starts a tick later.
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     sent[0]!.respond(400, { error: "That file type is not accepted", code: "ATTACHMENT_REJECTED" });
     await expect(upload).rejects.toMatchObject({ message: "That file type is not accepted", status: 400, code: "ATTACHMENT_REJECTED" });
     await expect(upload).rejects.toBeInstanceOf(AttachmentError);
@@ -90,6 +94,8 @@ describe("uploadAttachment with progress", () => {
 
   it("names a dropped connection", async () => {
     const upload = uploadAttachment("conv1", big("a.txt"), vi.fn());
+    // The upload renews the token first, so the request starts a tick later.
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     sent[0]!.onerror?.();
     await expect(upload).rejects.toMatchObject({ status: 0, message: expect.stringContaining("Network error") });
   });
@@ -203,6 +209,8 @@ describe("an upload the user walks away from", () => {
   it("aborts the request from the signal and rejects as cancelled", async () => {
     const controller = new AbortController();
     const upload = uploadAttachment("conv1", big("a.txt"), vi.fn(), controller.signal);
+    // The upload renews the token first, so the request starts a tick later.
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
     controller.abort();
     expect(sent[0]!.aborted).toBe(true);
     await expect(upload).rejects.toMatchObject({ code: "UPLOAD_CANCELLED" });

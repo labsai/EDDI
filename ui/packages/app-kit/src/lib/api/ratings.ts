@@ -144,7 +144,7 @@ export async function markRatingsReviewed(query: RatingQuery): Promise<number> {
  * @returns whether the server's 100,000-row cap cut the export short
  */
 export async function downloadRatingsCsv(query: RatingQuery): Promise<{ truncated: boolean }> {
-  const res = await fetch(`${api.getBaseUrl()}/ratings/export${ratingQueryString(query)}`, {
+  const res = await api.authorizedFetch(`${api.getBaseUrl()}/ratings/export${ratingQueryString(query)}`, {
     headers: { ...api.getAuthHeader(), Accept: "text/csv" },
   });
   if (!res.ok) {

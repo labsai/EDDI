@@ -37,6 +37,13 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   `ui/workforce/src/pages/workforce/workforce-thread.tsx`, `ui/packages/app-kit/src/components/chat/chat-panel.tsx`,
   `ui/chat/src/components/ChatWidget.tsx`.
 
+- **One fetch path with token refresh.** The 15 bare `fetch` calls in `@eddi/app-kit` (group streams, attachments,
+  secrets, ratings export, branding theme) now use `api.authorizedFetch`: token renewed before the request, one retry
+  with a fresh token after a 401 (for the streams before the body is read), then the session-expired banner instead
+  of a raw 401. The XMLHttpRequest upload renews the token first and reports a surviving 401 (`api.ensureFreshToken`,
+  `api.reportUnauthorized`). `no-raw-fetch.ts` (hosted by the Manager's suite) fails on a new bare `fetch(` in
+  app-kit outside a documented allow-list (the client, the reconnecting `BearerEventSource`, the boot probe).
+
 ### Behaviour changes an upgrader will notice
 
 - The three UIs send an `Idempotency-Key` header. They run on the EDDI origin, so no CORS rule is involved; a widget
