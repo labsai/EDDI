@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.utils;
 
+import java.sql.Time;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -120,5 +121,12 @@ class LanguageUtilitiesTest {
         assertNotNull(LanguageUtilities.isTimeExpression("23h"));
         assertNotNull(LanguageUtilities.isTimeExpression("12h10"));
         assertNull(LanguageUtilities.isTimeExpression("24h"));
+    }
+
+    @Test
+    void isTimeExpression_24ColonOnlyWhenTheWholeValueIs2400() {
+        assertEquals(Time.valueOf("00:00:00"), LanguageUtilities.isTimeExpression("24:00"));
+        assertEquals(Time.valueOf("12:24:00"), LanguageUtilities.isTimeExpression("12:24:00"));
+        assertEquals(Time.valueOf("13:24:00"), LanguageUtilities.isTimeExpression("13:24:00"));
     }
 }

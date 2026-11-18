@@ -37,7 +37,8 @@ public class LanguageUtilities {
             }
         }
 
-        if (value.contains("24:00")) {
+        // Exactly "24:00": a substring test turned "12:24:00" into midnight.
+        if (value.equals("24:00")) {
             value = "00:00";
         }
 

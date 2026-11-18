@@ -186,11 +186,14 @@ public class OutputTemplateTask implements ILifecycleTask {
             }
             var preTemplating = quickReplyData.getResult();
             var templating = templatingFunction(contextMap, TemplateMode.TEXT, quickReplyData.getKey());
+            // The expressions field becomes a trusted dictionary phrase on the next turn:
+            // data substituted into it must not carry expression notation.
+            var expressionsTemplating = templatingFunction(NotationSafeData.wrap(contextMap), TemplateMode.TEXT, quickReplyData.getKey());
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {
                 // Same failure behaviour as the output path — a failed template can no
                 // longer turn a quick reply into a null entry in the list.
                 quickReply.setValue(templating.apply(quickReply.getValue()));
-                quickReply.setExpressions(templating.apply(quickReply.getExpressions()));
+                quickReply.setExpressions(expressionsTemplating.apply(quickReply.getExpressions()));
                 return quickReply;
             }).collect(Collectors.toList());
 

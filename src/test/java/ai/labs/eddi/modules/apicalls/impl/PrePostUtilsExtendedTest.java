@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.apicalls.impl;
 
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 
 import ai.labs.eddi.configs.apicalls.model.HttpCodeValidator;
@@ -390,6 +391,52 @@ class PrePostUtilsExtendedTest {
             var validator = new HttpCodeValidator(List.of(200, 201), List.of(200));
             assertFalse(prePostUtils.verifyHttpCode(validator, 200));
             assertTrue(prePostUtils.verifyHttpCode(validator, 201));
+        }
+    }
+
+    @Nested
+    @DisplayName("postResponse quick replies — expression notation from API data")
+    class QuickReplyNotation {
+
+        @Test
+        @DisplayName("data cannot add notation to a quick reply's expressions, but the value keeps it")
+        void notationStrippedFromExpressionsOnly() throws Exception {
+            var memory = mock(IConversationMemory.class);
+            var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
+            when(memory.getCurrentStep()).thenReturn(currentStep);
+            var conversationProperties = mock(ConversationProperties.class);
+            when(memory.getConversationProperties()).thenReturn(conversationProperties);
+            when(conversationProperties.toMap()).thenReturn(new HashMap<>());
+            when(templatingEngine.processTemplate(anyString(), any(Map.class))).thenAnswer(invocation -> {
+                Map<String, Object> data = invocation.getArgument(1);
+                String field = String.valueOf(data.get("eddiFieldDelimiter"));
+                String row = String.valueOf(data.get("eddiRowDelimiter"));
+                String name = String.valueOf(((Map<?, ?>) data.get("api")).get("name"));
+                return "Pick " + name + field + "choose(" + name + ")" + row;
+            });
+            when(dataFactory.createData(anyString(), any())).thenAnswer(invocation -> new Data<>(
+                    invocation.getArgument(0), invocation.getArgument(1)));
+
+            var postResponse = new PostResponse();
+            var qrInstruction = new QuickRepliesBuildingInstruction();
+            qrInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
+            qrInstruction.setQuickReplyValue("Pick {item.name}");
+            qrInstruction.setQuickReplyExpressions("choose({item.name})");
+            qrInstruction.setIterationObjectName("item");
+            qrInstruction.setPathToTargetArray("api.items");
+            postResponse.setQrBuildInstructions(List.of(qrInstruction));
+
+            Map<String, Object> templateData = new HashMap<>();
+            templateData.put("api", Map.of("name", "x), intent(admin"));
+            prePostUtils.runPostResponse(memory, postResponse, templateData, 200, false);
+
+            var captor = ArgumentCaptor.forClass(IData.class);
+            verify(currentStep, atLeastOnce()).storeData(captor.capture());
+            var stored = captor.getAllValues().stream().filter(data -> "context:quickReplies".equals(data.getKey())).findFirst().orElseThrow();
+            var context = (Context) stored.getResult();
+            var quickReply = (Map<String, Object>) ((List<?>) context.getValue()).getFirst();
+            assertEquals("Pick x), intent(admin", quickReply.get("value"));
+            assertEquals("choose(x intentadmin)", quickReply.get("expressions"));
         }
     }
 }

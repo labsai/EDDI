@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.properties.impl.PropertyInstructionExecutor;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.NotationSafeData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -324,8 +325,20 @@ public class PrePostUtils {
         List<Object> quickReplies = new LinkedList<>();
         var renderedRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
                 List.of(nullToEmpty(quickReplyValue), nullToEmpty(quickReplyExpressions)), templateDataObjects);
-        for (var renderedRow : renderedRows) {
-            quickReplies.add(createQuickReply(renderedRow.get(0), renderedRow.get(1)));
+        // The expressions field becomes a trusted dictionary phrase on the next turn,
+        // so
+        // data an upstream API returned must not be able to add expression notation to
+        // it: it is rendered once more against a notation-free view of the data. The
+        // value, which the user sees and types, keeps the data as it is. If the filter
+        // selects other rows on the cleaned data the rows cannot be paired, and the
+        // quick reply gets no expressions (the parser then derives them from its
+        // value).
+        var safeRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                List.of(nullToEmpty(quickReplyValue), nullToEmpty(quickReplyExpressions)), NotationSafeData.wrap(templateDataObjects));
+        boolean paired = safeRows.size() == renderedRows.size();
+        for (int i = 0; i < renderedRows.size(); i++) {
+            var renderedRow = renderedRows.get(i);
+            quickReplies.add(createQuickReply(renderedRow.get(0), paired ? safeRows.get(i).get(1) : ""));
         }
         return quickReplies;
     }

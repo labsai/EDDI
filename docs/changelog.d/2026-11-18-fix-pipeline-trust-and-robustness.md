@@ -65,3 +65,17 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 - Saving a ruleset with a dependency cycle, a dangling dependency or duplicate rule names in a group is refused (HTTP 400, rule named). This includes import and sync: an exported agent whose ruleset has such a defect is refused on import until it is fixed. (#1417 changes the same validator for legacy configs: its `ExistingRuleSetWrite` scope should also skip `RuleSetSaveValidator`.)
 - An output set with `timesOccurred` below -1 is refused on save.
 
+## 🔒 fix(templating): data cannot inject expression notation into quick replies; smaller pipeline items (2026-11-18)
+
+**Repo:** EDDI (`fix/pipeline-trust-and-robustness`)
+
+### What changed and why
+
+- The `expressions` field of a quick reply is templated with property or API data and becomes a trusted dictionary phrase on the next turn. Data such as `x), intent(admin` therefore produced the user-typeable expression `intent(admin)`. The field is now rendered against `NotationSafeData`, a read-only view of the template data without `(`, `)` and `,`, in `OutputTemplateTask` (output-set quick replies) and `PrePostUtils` (quick replies built by a `postResponse`). The quick reply's value keeps the data, so what the user sees and types is unchanged. If a `postResponse` filter selects other rows on the cleaned data, the quick reply gets no expressions (the parser derives them from its value).
+- `LanguageUtilities.isTimeExpression` turned `12:24:00` into midnight because it tested `contains("24:00")`; it now tests the whole value.
+- `STOP_CONVERSATION` ends the turn right after the task that emitted it, so a farewell output for that action never runs. Semantics unchanged; `agent-config-authoring.md` now says to use `CONVERSATION_END` for a farewell.
+
+### Left as it was
+
+`behavior_rules:fail` is still written every turn: `docs/developer-quickstart.md` presents it as a debugging aid, so a reader exists.
+

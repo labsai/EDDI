@@ -100,6 +100,10 @@ Do NOT reuse system action names as quick reply expressions. `CATCH_ANY_INPUT_AS
 ✅ RIGHT:  "expressions" : "get_started"           (dedicated identifier)
 ```
 
+Data substituted into a quick reply's `expressions` field (a property, an API value) loses the characters `(`, `)` and `,` — the expression is a trusted dictionary phrase on the next turn, and data such as `x), intent(admin` must not be able to add an expression of its own. Your own notation in the field (`choose({properties.item})`) is kept, and the quick reply's `value`, which the user sees and types, keeps the data as it is.
+
+> **`STOP_CONVERSATION` produces no output.** The turn stops right after the task that emitted the action, so an output configured for a rule's `STOP_CONVERSATION` action never runs. Emit `CONVERSATION_END` for a farewell: the output is rendered and the conversation ends.
+
 > **HITL**: EDDI has two human-approval gates. (1) A behavior rule that emits `PAUSE_CONVERSATION` gates a **whole turn** — the conversation pauses (`AWAITING_HUMAN`) until a human approves or rejects via `POST /agents/{conversationId}/resume`. (2) `hitlConfig.toolApprovals` gates **individual LLM tool calls** — when the model invokes a tool matching a `requireApproval` pattern (any of the 8 tool sources: `builtin`, `http`, `mcp`, `a2a`, `dynamic`, `memory`, `recall`, `team`), the conversation pauses *before* the tool runs (`hitlPauseType: "TOOL_CALL"`, resumed through the same endpoint). Both share the same pause/timeout/audit/Slack machinery; timeout behavior is configured via `hitlConfig` on the agent (with a tool-level override). Full reference: [Human-in-the-Loop](hitl.md).
 
 ### `actionmatcher` comma-separated values = AND (contiguous sublist), NOT OR
