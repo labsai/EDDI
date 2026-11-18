@@ -793,7 +793,7 @@ public class McpHitlTools {
             }
             meterRegistry.counter("eddi.mcp.hitl.cancelled", "surface", "group").increment();
             return cancelled
-                    ? "{\"status\":\"CANCELLED\"}"
+                    ? "{\"status\":\"" + (stillRunning(conversationId) ? "CANCELLING" : "CANCELLED") + "\"}"
                     : errorJson("Group conversation is already in a terminal state — nothing to cancel",
                             "WRONG_STATE", null);
         } catch (ForbiddenException e) {
@@ -806,6 +806,21 @@ public class McpHitlTools {
         } catch (Exception e) {
             LOGGER.warn("MCP cancel_group_discussion failed", e);
             return errorJson("Failed to cancel group discussion", "INTERNAL", null);
+        }
+    }
+
+    /**
+     * Whether a just-cancelled discussion is still running: the cancel reached a
+     * running leg, which stops before its next member turn (K2). Unreadable reads
+     * as stopped.
+     */
+    private boolean stillRunning(String conversationId) {
+        try {
+            var state = groupConversationService.readGroupConversation(conversationId).getState();
+            return state == GroupConversation.GroupConversationState.IN_PROGRESS
+                    || state == GroupConversation.GroupConversationState.SYNTHESIZING;
+        } catch (Exception e) {
+            return false;
         }
     }
 

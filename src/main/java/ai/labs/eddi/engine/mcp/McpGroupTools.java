@@ -450,6 +450,8 @@ public class McpGroupTools {
             + "All configured member agents participate using the group's discussion style. "
             + "Returns the full GroupConversation including transcript, task list (for TASK_FORCE), "
             + "dynamic agent tracking, and synthesized answer. "
+            + "Check 'outcome': ANSWERED, NO_ANSWER (COMPLETED without an answer — see 'outcomeReason') or FAILED "
+            + "(no member answered); a transcript entry whose 'outcome' is not ANSWERED is a member that did not answer. "
             + "WARNING: TASK_FORCE discussions with many agents/tasks can take several minutes. "
             + "For long-running discussions, use start_group_discussion instead (returns immediately, "
             + "poll with read_group_conversation).")
@@ -487,7 +489,8 @@ public class McpGroupTools {
             + "dynamic agent tracking (createdAgentIds, retainedAgentIds), synthesized answer, "
             + "the structured decision record in the 'decision' field "
             + "(verdict/vote/agreement/award, if one was reached), "
-            + "and conversation state. Use this to poll for completion after start_group_discussion, "
+            + "and conversation state with its 'outcome' and 'outcomeReason' (COMPLETED with outcome NO_ANSWER "
+            + "ended without an answer). Use this to poll for completion after start_group_discussion, "
             + "or to inspect task-level results after a TASK_FORCE discussion.")
     public String read_group_conversation(
                                           @ToolArg(description = "Group conversation ID (from "

@@ -87,7 +87,7 @@ class MemberTurnOutcomeTest {
     }
 
     /** The member's conversation ends in ERROR with no output keys. */
-    private void memberAnswersWithErrorState() {
+    private void memberAnswersWithErrorState() throws Exception {
         var snapshot = new SimpleConversationMemorySnapshot();
         snapshot.setConversationState(ConversationState.ERROR);
         doAnswer(inv -> {
@@ -130,6 +130,25 @@ class MemberTurnOutcomeTest {
 
         assertThrows(GroupDiscussionException.class, () -> executor.executeAgentTurn(member(), gc(), "input",
                 protocol(MemberFailurePolicy.ABORT, 0), 0, phase(PhaseType.OPINION), null, null));
+    }
+
+    /**
+     * K7: a RETRY after a timeout used to ask the same member conversation again
+     * while the timed-out turn still ran — the retry queued behind it and both were
+     * billed. A turn that cannot be stopped is now not retried.
+     */
+    @Test
+    void timeoutRetry_isSkippedWhenTheTimedOutTurnCannotBeStopped() throws Exception {
+        var executor = executor();
+        // say never answers, and the cancel does not end the turn either.
+        var protocol = new ProtocolConfig(1, MemberFailurePolicy.RETRY, 2, MemberUnavailablePolicy.SKIP);
+
+        TranscriptEntry entry = executor.executeAgentTurn(member(), gc(), "input", protocol, 0, phase(PhaseType.OPINION), null, null);
+
+        verify(conversationService, times(1)).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(conversationService).cancelConversation(eq("conv-1"), any(), any());
+        assertEquals(TurnOutcome.TIMED_OUT, entry.outcome());
+        assertEquals(MemberTurnExecutor.REASON_TIMEOUT_NOT_RETRIED, entry.errorReason());
     }
 
     @Test

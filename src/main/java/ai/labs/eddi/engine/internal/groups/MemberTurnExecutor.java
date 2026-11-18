@@ -23,6 +23,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.groups.budget.TeamBudgetCeilings;
@@ -109,6 +110,19 @@ public class MemberTurnExecutor {
     public static final String REASON_SUB_GROUP_FAILED = "Sub-group discussion failed";
     /** A nested GROUP member could not start: the depth limit. */
     public static final String REASON_SUB_GROUP_DEPTH = "Sub-group depth exceeded";
+    /** A nested GROUP member could not start: the parent's turn budget is spent. */
+    public static final String REASON_TURN_BUDGET = "Turn budget exhausted";
+    /**
+     * A timed-out turn whose RETRY was skipped: the timed-out turn could not be
+     * stopped, and a retry would have queued behind it in the same conversation.
+     */
+    public static final String REASON_TIMEOUT_NOT_RETRIED = "Timeout — not retried, the timed-out turn did not stop";
+
+    /**
+     * How long a RETRY after a timeout waits for the cancelled first attempt to end
+     * (capped by the turn timeout).
+     */
+    static final int RETRY_DRAIN_SECONDS = 5;
 
     private static final Environment DEFAULT_ENV = Environment.production;
 
@@ -341,8 +355,10 @@ public class MemberTurnExecutor {
             }
             LOGGER.warnf("Agent %s unavailable for group %s: %s", LogSanitizer.sanitize(member.agentId()),
                     LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
-            return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    TurnOutcome.FAILED, REASON_UNAVAILABLE, targetAgentId);
+            // Unavailable, like not deployed: decided by onMemberUnavailable, a SKIPPED
+            // turn.
+            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    Instant.now(), REASON_UNAVAILABLE, targetAgentId);
         }
 
         // Snapshot instead of handing out the live list: the groupTranscript context
@@ -429,12 +445,16 @@ public class MemberTurnExecutor {
         int maxRetries = protocol.maxRetries() > 0 ? protocol.maxRetries() : defaultMaxRetries;
         int timeout = protocol.agentTimeoutSeconds() > 0 ? protocol.agentTimeoutSeconds() : defaultAgentTimeoutSeconds;
 
+        // The response of the attempt in flight — a timeout RETRY waits for it to end
+        // after cancelling it, before asking again (K7).
+        CompletableFuture<String> attemptInFlight = null;
         while (true) {
             if (cancellation != null && cancellation.isCancelled()) {
                 throw new GroupConversationService.MemberTurnCancelledException();
             }
             try {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
+                attemptInFlight = responseFuture;
                 final String convId = privateConvId;
                 // #3: a member agent's own behavior rule may emit PAUSE_CONVERSATION,
                 // pausing its private conversation (AWAITING_HUMAN). Member-level HITL
@@ -525,6 +545,9 @@ public class MemberTurnExecutor {
                     response = responseFuture.get(timeout, TimeUnit.SECONDS);
                 } catch (ExecutionException ee) {
                     if (cancellation != null && cancellation.isCancelled()) {
+                        if (cancellation.stopsInFlight()) {
+                            stopMemberTurn(member, convId);
+                        }
                         throw new GroupConversationService.MemberTurnCancelledException();
                     }
                     throw ee;
@@ -591,6 +614,13 @@ public class MemberTurnExecutor {
                     throw new GroupConversationService.MemberTurnCancelledException();
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
+                    // K7: the timed-out turn is still running in the same member
+                    // conversation; a retry would queue behind it and bill twice. Stop it
+                    // and wait for it to end — or record the timeout without a retry.
+                    if (!stopTimedOutAttempt(member, privateConvId, attemptInFlight, timeout)) {
+                        return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(),
+                                TranscriptEntryType.SKIPPED, TurnOutcome.TIMED_OUT, REASON_TIMEOUT_NOT_RETRIED, targetAgentId);
+                    }
                     retries++;
                     LOGGER.warnf("Agent %s timed out (attempt %d/%d), retrying...", member.agentId(), retries, maxRetries);
                     continue;
@@ -629,6 +659,11 @@ public class MemberTurnExecutor {
                 // its private history, since the group transcript rides in with every
                 // turn's context.
                 if (cause instanceof IConversationService.ConversationEndedException && !replacedEndedConversation) {
+                    // K2: a deleted or ended discussion ends its members' conversations
+                    // first — that is no reason to start fresh ones for it.
+                    if (groupConversationService != null && groupConversationService.discussionEnded(gc.getId())) {
+                        throw new GroupConversationService.MemberTurnCancelledException();
+                    }
                     replacedEndedConversation = true;
                     try {
                         String endedConvId = privateConvId;
@@ -932,10 +967,21 @@ public class MemberTurnExecutor {
             Double remainingBudget = bindingCeiling == null
                     ? null
                     : Math.max(0.0, bindingCeiling - gc.getTotalCost());
+            // K8: the child runs under the turns this discussion has left, and hears
+            // its cancel. With no turn left, no child is started at all.
+            Integer remainingTurns = gc.remainingLegTurns();
+            if (remainingTurns != null && remainingTurns <= 0) {
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), REASON_TURN_BUDGET, targetAgentId);
+            }
+            DiscussionControlToken parentToken = groupConversationService.controlTokenOf(gc.getId());
+            DiscussionCancellation.checkpoint(parentToken);
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation = groupConversationService.discuss(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget, gc.getId());
+            GroupConversation subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
+                    gc.getAttachments(), remainingBudget, gc.getId(), parentToken, remainingTurns);
+            gc.chargeLegTurns(subConversation.legTurnsUsed());
+            DiscussionCancellation.checkpoint(parentToken);
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
             // before the AWAITING_APPROVAL branch below, so a nested pause that gets
@@ -997,6 +1043,9 @@ public class MemberTurnExecutor {
             return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
                     targetAgentId);
 
+        } catch (GroupConversationService.MemberTurnCancelledException e) {
+            // The parent was cancelled: not a failure of this member.
+            throw e;
         } catch (GroupDepthExceededException e) {
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                     Instant.now(), REASON_SUB_GROUP_DEPTH, targetAgentId);
@@ -1027,6 +1076,51 @@ public class MemberTurnExecutor {
         }
         return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                 TurnOutcome.FAILED, reason, targetAgentId);
+    }
+
+    /**
+     * Stops a timed-out attempt before its retry: cancels the member conversation's
+     * running turn and waits (at most {@link #RETRY_DRAIN_SECONDS}, never longer
+     * than the turn timeout) for the attempt to end.
+     *
+     * @return whether the attempt ended, so a retry will not queue behind it
+     */
+    private boolean stopTimedOutAttempt(GroupMember member, String convId, CompletableFuture<String> attempt, int timeoutSeconds) {
+        if (attempt == null || attempt.isDone()) {
+            return true;
+        }
+        try {
+            conversationService.cancelConversation(convId, ControlSignal.CANCEL_GRACEFUL, "system:group");
+        } catch (Exception e) {
+            LOGGER.debugf("Could not cancel the timed-out turn of member %s: %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
+        try {
+            attempt.get(Math.max(1, Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds)), TimeUnit.SECONDS);
+            return true;
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return false;
+        } catch (ExecutionException e) {
+            return true;
+        } catch (TimeoutException e) {
+            LOGGER.warnf("Agent %s: the timed-out turn did not stop within %ds — not retrying it", LogSanitizer.sanitize(member.agentId()),
+                    Math.min(RETRY_DRAIN_SECONDS, timeoutSeconds));
+            return false;
+        }
+    }
+
+    /**
+     * Stops the member's running conversation turn (best effort): the discussion
+     * was cancelled immediately, and its LLM call should not run — and bill — on.
+     */
+    private void stopMemberTurn(GroupMember member, String convId) {
+        try {
+            conversationService.cancelConversation(convId, ControlSignal.CANCEL_IMMEDIATE, "system:group");
+        } catch (Exception e) {
+            LOGGER.debugf("Could not stop the running turn of member %s (conversation %s): %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(convId), LogSanitizer.sanitize(e.getMessage()));
+        }
     }
 
     /**

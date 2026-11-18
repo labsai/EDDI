@@ -321,7 +321,8 @@ class RestGroupConversationApproverScopeTest {
 
             Response response = rest.cancelDiscussion(GROUP_ID, GC_ID);
 
-            assertEquals(200, response.getStatus());
+            // K2: still running — the cancel was accepted, it has not landed yet
+            assertEquals(202, response.getStatus());
             assertEquals(gc, response.getEntity());
             verify(groupService, never()).cancelPausedDiscussion(anyString(), any());
         }

@@ -959,6 +959,44 @@ public class TaskForceEngine {
     static final String METER_VERIFY_UNPARSEABLE = "eddi.group.verify.unparseable";
 
     /**
+     * Micrometer name of the counter of VERIFY passes whose verifier did not answer
+     * — its tasks were failed, not verified (K4).
+     */
+    static final String METER_VERIFY_UNANSWERED = "eddi.group.verify.unanswered";
+
+    /** The verification note of a task whose verifier did not answer. */
+    static final String NOTE_VERIFIER_DID_NOT_ANSWER = "Not verified: the verifier did not answer";
+
+    /**
+     * K4: a verifier that did not answer — not deployed, skipped, failed, timed out
+     * — verified nothing. Every task of the pass still {@code COMPLETED} fails (and
+     * is reworked within {@code maxReworks}); the verifier's own entry is recorded
+     * so the transcript shows why. These tasks used to be "Auto-verified": a
+     * TASK_FORCE whose moderator was not deployed passed all of its work.
+     */
+    private void failUnverifiedTasks(GroupConversation gc, List<TaskItem> pass, TranscriptEntry verifyEntry, int phaseIdx,
+                                     DiscussionPhase phase, GroupDiscussionEventListener listener) {
+        Metrics.counter(METER_VERIFY_UNANSWERED).increment();
+        LOGGER.warnf("VERIFY for group %s: the verifier did not answer (%s) — %d task(s) not verified", LogSanitizer.sanitize(gc.getGroupId()),
+                verifyEntry.outcome(), pass.size());
+        gc.getTranscript().add(verifyEntry);
+        if (listener != null) {
+            listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(verifyEntry, phaseIdx, phase.name(), null, null));
+        }
+        for (TaskItem task : pass) {
+            TaskItem live = gc.getTaskList().findById(task.id());
+            if (live == null || live.status() != TaskStatus.COMPLETED) {
+                continue;
+            }
+            gc.getTaskList().verifyTask(live.id(), false, NOTE_VERIFIER_DID_NOT_ANSWER);
+            if (listener != null) {
+                listener.onTaskVerified(new GroupConversationEventSink.TaskVerifiedEvent(live.id(), live.subject(), false,
+                        NOTE_VERIFIER_DID_NOT_ANSWER));
+            }
+        }
+    }
+
+    /**
      * The tasks of a verification pass that failed it and may still be reworked.
      */
     private static List<TaskItem> failedThisPass(GroupConversation gc, List<TaskItem> pass, int maxReworks) {
@@ -1072,6 +1110,13 @@ public class TaskForceEngine {
         }
 
         TranscriptEntry verifyEntry = memberTurnExecutor.executeAgentTurn(verifier, gc, verifyInput, protocol, phaseIdx, phase, null, listener);
+
+        // K4: a verifier that did not answer (not deployed, skipped, failed, timed
+        // out) verified nothing. Its tasks used to be "Auto-verified".
+        if (!verifyEntry.answered()) {
+            failUnverifiedTasks(gc, readable, verifyEntry, phaseIdx, phase, listener);
+            return;
+        }
 
         // Parse verification results — same three-tier fallback, over the tasks the
         // verifier was shown only

@@ -212,7 +212,26 @@ public final class GroupConversationEventSink {
     public record SynthesisStartEvent(String moderatorAgentId) {
     }
 
-    public record GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer) {
+    /**
+     * @param outcome
+     *            how the round ended ({@code ANSWERED}, {@code NO_ANSWER},
+     *            {@code FAILED}); {@code null} where it was not decided (a
+     *            rejection, a discussion ended elsewhere by an older node)
+     * @param outcomeReason
+     *            the short stable code next to it, or {@code null}
+     */
+    public record GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer,
+            GroupConversation.DiscussionOutcome outcome, String outcomeReason) {
+
+        /** Without an outcome. */
+        public GroupCompleteEvent(GroupConversation.GroupConversationState state, String synthesizedAnswer) {
+            this(state, synthesizedAnswer, null, null);
+        }
+
+        /** The terminal event of {@code gc} as it stands. */
+        public static GroupCompleteEvent of(GroupConversation gc) {
+            return new GroupCompleteEvent(gc.getState(), gc.getSynthesizedAnswer(), gc.getOutcome(), gc.getOutcomeReason());
+        }
     }
 
     public record GroupErrorEvent(String error) {

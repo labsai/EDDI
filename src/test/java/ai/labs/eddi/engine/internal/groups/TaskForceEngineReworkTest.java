@@ -52,6 +52,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.reset;
 import static org.mockito.Mockito.when;
 
 /**
@@ -188,6 +189,32 @@ class TaskForceEngineReworkTest {
 
             assertEquals(TaskStatus.VERIFIED, task(gc).status());
             assertEquals(1, verifierCalls);
+        }
+    }
+
+    @Nested
+    @DisplayName("a verifier that does not answer (K4)")
+    class VerifierDoesNotAnswer {
+
+        @Test
+        @DisplayName("a failed, skipped or timed-out verifier verifies nothing")
+        void noAnswerIsNotAPass() throws Exception {
+            // Replace setUp's answering verifier (re-stubbing over it would run it).
+            reset(memberTurnExecutor);
+            doAnswer(inv -> inv.getArgument(1)).when(memberTurnExecutor).sign(any(), any());
+            doAnswer(inv -> {
+                verifierCalls++;
+                return TranscriptEntry.notAnswered(MODERATOR, MODERATOR, 2, "Verify", TranscriptEntryType.SKIPPED,
+                        GroupConversation.TurnOutcome.FAILED, MemberTurnExecutor.REASON_ERROR_STATE, null);
+            }).when(memberTurnExecutor).executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any());
+            var gc = completed();
+
+            verify(gc, config(0), protocol(50, null), new AtomicInteger(), 50);
+
+            assertEquals(TaskStatus.FAILED, task(gc).status(), "it used to be auto-verified");
+            assertEquals(TaskForceEngine.NOTE_VERIFIER_DID_NOT_ANSWER, task(gc).verificationNote());
+            assertEquals(1.0, meter(TaskForceEngine.METER_VERIFY_UNANSWERED));
+            assertEquals(0.0, meter(TaskForceEngine.METER_VERIFY_UNPARSEABLE), "not an unparseable verdict: there was none");
         }
     }
 

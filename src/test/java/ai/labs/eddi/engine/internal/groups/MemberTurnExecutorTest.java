@@ -751,10 +751,10 @@ class MemberTurnExecutorTest {
         subConversation.setId("sub-gc-1");
         subConversation.setSynthesizedAnswer("Nested answer");
         subConversation.setTotalCost(0.42);
-        // The 8-arg overload — I1 added the inherited-cost-ceiling parameter, and the
+        // The nested overload — I1 added the inherited-cost-ceiling parameter, the
         // parent discussion's id rides along as the source its attachments' storageRefs
-        // must be readable from.
-        when(groupConversationService.discuss(eq("sub-group-1"), any(), any(), anyInt(), any(), any(), any(), eq("gc-1")))
+        // must be readable from, and K8 the parent's control token and remaining turns.
+        when(groupConversationService.discussNested(eq("sub-group-1"), any(), any(), anyInt(), any(), any(), any(), eq("gc-1"), any(), any()))
                 .thenReturn(subConversation);
 
         var executor = new MemberTurnExecutor(Mockito.mock(IConversationService.class), Mockito.mock(IAgentFactory.class),

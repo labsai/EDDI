@@ -268,6 +268,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (TeamBudgetRefusedException e) {
             LOGGER.infof("Group discussion refused (team budget, %s) for group %s", e.reason(), sanitize(groupId));
             return budgetRefused(e);
+        } catch (IGroupConversationService.GroupMembersUnresolvableException e) {
+            // GR4: fixed text written for the caller, carrying no ids.
+            LOGGER.infof("Group discussion refused for group %s: no member can take a turn", sanitize(groupId));
+            return Response.status(422).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (IGroupConversationService.GroupDepthExceededException e) {
             // Curated bodies throughout this class: the raw exception text is never
             // returned to the caller (CodeQL: information exposure / reflected value —
@@ -354,6 +358,10 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (TeamBudgetRefusedException e) {
             LOGGER.infof("Group streaming discussion refused (team budget, %s) for group %s", e.reason(), sanitize(groupId));
             sendErrorEvent(eventSink, sse, budgetRefusalText(e));
+            closeQuietly(eventSink);
+        } catch (IGroupConversationService.GroupMembersUnresolvableException e) {
+            LOGGER.infof("Group streaming discussion refused for group %s: no member can take a turn", sanitize(groupId));
+            sendErrorEvent(eventSink, sse, e.getMessage());
             closeQuietly(eventSink);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Curated event text: the SSE body is rendered by the chat UI, so never push
@@ -571,7 +579,9 @@ public class RestGroupConversation implements IRestGroupConversation {
                         .build();
             }
             var gc = groupConversationService.readGroupConversation(gcId);
-            return Response.ok(gc).build();
+            // K2: a running discussion was signalled and stops before its next member
+            // turn — say so (202) instead of a 200 that reads as "cancelled".
+            return Response.status(isRunning(gc) ? Response.Status.ACCEPTED : Response.Status.OK).entity(gc).build();
         } catch (ForbiddenException e) {
             throw e;
         } catch (IResourceStore.ResourceNotFoundException
@@ -588,6 +598,16 @@ public class RestGroupConversation implements IRestGroupConversation {
             return Response.status(Response.Status.INTERNAL_SERVER_ERROR).type(TEXT_PLAIN)
                     .entity("Failed to cancel group discussion.").build();
         }
+    }
+
+    /**
+     * Whether a discussion is still running (a cancel of it has not landed yet).
+     */
+    static boolean isRunning(GroupConversation gc) {
+        var state = gc != null ? gc.getState() : null;
+        return state == GroupConversation.GroupConversationState.IN_PROGRESS
+                || state == GroupConversation.GroupConversationState.SYNTHESIZING
+                || state == GroupConversation.GroupConversationState.CREATED;
     }
 
     /** Upper bound for the free-text reviewer note persisted with a decision. */
@@ -1368,7 +1388,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                 return;
             }
             sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
-                    toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
+                    toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null, event.outcome(), event.outcomeReason())));
             closeQuietly(eventSink);
         }
 

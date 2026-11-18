@@ -879,6 +879,7 @@ public class GroupLifecycleOps {
         }
 
         gc.setState(GroupConversationState.FAILED);
+        DiscussionOutcomes.failed(gc);
         gc.setLastModified(Instant.now());
         // Count the failure itself, never the outcome of the race — otherwise a lost
         // CAS

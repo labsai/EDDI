@@ -22,6 +22,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
@@ -180,6 +181,22 @@ public class GroupConversation {
      * are listed in {@code DiscussionOutcomes}.
      */
     private String outcomeReason;
+    /**
+     * The turns a parent discussion had left when it ran this nested one as a GROUP
+     * member's turn; the child runs under {@code min(own maxTurns, this)}.
+     * {@code null} for a top-level discussion. Persisted like
+     * {@link #inheritedCostCeiling}: it belongs to the run.
+     */
+    private Integer inheritedMaxTurns;
+    /**
+     * The running leg's turn counter and its current cap — runtime only, never
+     * persisted. Lets a nested GROUP member's turn hand the parent's remaining
+     * budget to its child and charge the child's turns back.
+     */
+    @JsonIgnore
+    private transient AtomicInteger legTurnCounter;
+    @JsonIgnore
+    private transient volatile int legMaxTurns;
     /**
      * The negotiation's proposals + concession ledger (I11). {@code null} until the
      * first PROPOSAL/BARGAIN phase produces state; persisted with the document so a
@@ -1411,6 +1428,43 @@ public class GroupConversation {
 
     public void setOutcomeReason(String outcomeReason) {
         this.outcomeReason = outcomeReason;
+    }
+
+    public Integer getInheritedMaxTurns() {
+        return inheritedMaxTurns;
+    }
+
+    public void setInheritedMaxTurns(Integer inheritedMaxTurns) {
+        this.inheritedMaxTurns = inheritedMaxTurns;
+    }
+
+    /** Binds the running leg's turn counter and its current cap (runtime only). */
+    public void bindLegTurnBudget(AtomicInteger counter, int cap) {
+        this.legTurnCounter = counter;
+        this.legMaxTurns = cap;
+    }
+
+    /**
+     * The turns the running leg has left under its current cap, or {@code null}
+     * when no leg is bound.
+     */
+    public Integer remainingLegTurns() {
+        var counter = legTurnCounter;
+        return counter == null ? null : Math.max(0, legMaxTurns - counter.get());
+    }
+
+    /** The turns the running (or last) leg has counted; 0 when none is bound. */
+    public int legTurnsUsed() {
+        var counter = legTurnCounter;
+        return counter == null ? 0 : counter.get();
+    }
+
+    /** Charges {@code turns} spent elsewhere (a nested discussion) to this leg. */
+    public void chargeLegTurns(int turns) {
+        var counter = legTurnCounter;
+        if (counter != null && turns > 0) {
+            counter.addAndGet(turns);
+        }
     }
 
     public NegotiationState getNegotiation() {

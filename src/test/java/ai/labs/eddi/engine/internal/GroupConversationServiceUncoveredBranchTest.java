@@ -1072,7 +1072,11 @@ class GroupConversationServiceUncoveredBranchTest {
             stubAgent("mod", "Synthesis");
 
             var result = service.discuss(GROUP_ID, QUESTION, USER_ID, 0);
-            assertEquals(GroupConversationState.COMPLETED, result.getState());
+            // K1: the only member's ERROR-state turn is FAILED, so no member answered and
+            // the moderator's synthesis of nothing is not the discussion's answer
+            assertEquals(GroupConversationState.FAILED, result.getState());
+            assertEquals(GroupConversation.DiscussionOutcome.FAILED, result.getOutcome());
+            assertNull(result.getSynthesizedAnswer());
         }
     }
 

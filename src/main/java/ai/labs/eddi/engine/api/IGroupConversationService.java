@@ -413,6 +413,17 @@ public interface IGroupConversationService {
     }
 
     /**
+     * A discussion cannot start because its group has no members (live GR4: such a
+     * discussion used to run to a hollow {@code COMPLETED}). A client error with a
+     * message written for the caller; REST surfaces it as {@code 422}.
+     */
+    class GroupMembersUnresolvableException extends GroupDiscussionException {
+        public GroupMembersUnresolvableException(String message) {
+            super(message);
+        }
+    }
+
+    /**
      * The operation could not be completed because a member agent or model call
      * failed — an upstream-dependency failure, not a client or state error. REST
      * surfaces this as {@code 502}, so clients do not mistake a provider outage for

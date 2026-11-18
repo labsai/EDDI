@@ -235,6 +235,8 @@ public interface IRestGroupConversation {
                        + "a caller who is only an approver may cancel only a discussion that is awaiting a decision, and "
                        + "receives the resulting state rather than the conversation.")
     @APIResponse(responseCode = "200", description = "Discussion cancelled.")
+    @APIResponse(responseCode = "202", description = "Running discussion signalled: it stops before its next member turn "
+            + "(the body still shows IN_PROGRESS or SYNTHESIZING; poll for CANCELLED).")
     @APIResponse(responseCode = "403", description = "Approver-only caller and the discussion is not awaiting a decision.")
     @APIResponse(responseCode = "404", description = "Group conversation not found.")
     @APIResponse(responseCode = "409", description = "Already in a terminal state.")

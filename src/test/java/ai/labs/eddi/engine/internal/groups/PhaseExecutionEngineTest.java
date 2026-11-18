@@ -107,8 +107,10 @@ class PhaseExecutionEngineTest {
         engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), speakers, phase(TurnOrder.SEQUENTIAL), protocol(), "Q?", 0, null,
                 turnCounter, 2);
 
-        // maxTurns=2 caps it at the first two speakers, in order
-        assertEquals(2, gc.getTranscript().size());
+        // maxTurns=2 caps it at the first two speakers, in order — and the cut is
+        // recorded (K3), so a discussion stopped by the cap says so
+        assertEquals(3, gc.getTranscript().size());
+        assertTrue(gc.getTranscript().get(2).errorReason().startsWith(TurnBudget.CUT_NOTE_PREFIX));
         assertEquals("a", gc.getTranscript().get(0).speakerAgentId());
         assertEquals("b", gc.getTranscript().get(1).speakerAgentId());
         assertEquals(2, turnCounter.get());
@@ -129,7 +131,8 @@ class PhaseExecutionEngineTest {
         engine.executeSequentialPhase(gc, new AgentGroupConfiguration(), List.of(member("a")), phase(TurnOrder.SEQUENTIAL), protocol(), "Q?", 0,
                 null, new AtomicInteger(0), 0);
 
-        assertTrue(gc.getTranscript().isEmpty());
+        assertTrue(TurnBudget.wasCut(gc), "the cut speaker is noted (K3)");
+        assertEquals(1, gc.getTranscript().size());
         verifyNoInteractions(memberTurnExecutor);
     }
 
@@ -390,7 +393,8 @@ class PhaseExecutionEngineTest {
         engine.executeParallelPhase(gc, new AgentGroupConfiguration(), List.of(member("a")), phase(TurnOrder.PARALLEL), protocol(), "Q?", 0, null,
                 turnCounter, 5);
 
-        assertTrue(gc.getTranscript().isEmpty());
+        assertTrue(TurnBudget.wasCut(gc), "the cut speaker is noted (K3)");
+        assertEquals(1, gc.getTranscript().size());
         verifyNoInteractions(memberTurnExecutor);
     }
 

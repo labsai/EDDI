@@ -238,7 +238,9 @@ class GroupConversationServiceCostCeilingTest {
                 new DiscussionPhase("Summary", PhaseType.SYNTHESIS, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true),
                 new DiscussionPhase("Review", PhaseType.REVISION, "ALL", TurnOrder.SEQUENTIAL, ContextScope.FULL, false, null, 1, true));
         var config = buildConfig(phases,
-                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 2, 0.5, CostPolicy.SYNTHESIZE_NOW));
+                // maxTurns 3, not 2: one turn is kept for the synthesis (K3), so with 2 the
+                // turn cap, not the cost ceiling, would stop Critique.
+                new ProtocolConfig(60, MemberFailurePolicy.SKIP, 2, MemberUnavailablePolicy.SKIP, 3, 0.5, CostPolicy.SYNTHESIZE_NOW));
         doReturn(mockResourceId()).when(groupStore).getCurrentResourceId(GROUP_ID);
         doReturn(config).when(groupStore).read(GROUP_ID, 1);
         doReturn("gc-synth-resume").when(conversationStore).create(any());

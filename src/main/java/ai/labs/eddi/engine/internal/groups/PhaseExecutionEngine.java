@@ -23,6 +23,8 @@ import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancellation;
 import ai.labs.eddi.engine.internal.GroupConversationService.MemberTurnCancelledException;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -33,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -112,6 +115,39 @@ public class PhaseExecutionEngine {
      */
     public void setSigningGuard(GroupSigningGuard signingGuard) {
         this.signingGuard = signingGuard;
+    }
+
+    private Map<String, DiscussionControlToken> discussionControls;
+
+    /**
+     * Wires the discussions' control tokens (K2): a cancel is then read before
+     * every speaker, and {@code CANCEL_IMMEDIATE} releases the running turn.
+     * Without it the engine runs every phase to its end, as before.
+     */
+    public void setDiscussionControls(Map<String, DiscussionControlToken> discussionControls) {
+        this.discussionControls = discussionControls;
+    }
+
+    private DiscussionControlToken tokenOf(GroupConversation gc) {
+        return discussionControls == null || gc.getId() == null ? null : discussionControls.get(gc.getId());
+    }
+
+    /**
+     * One member turn, stopped by the discussion's cancel: refused when it is
+     * already cancelled, released on {@code CANCEL_IMMEDIATE} while it runs.
+     */
+    private TranscriptEntry cancellableTurn(GroupMember speaker, GroupConversation gc, String input, ProtocolConfig protocol, int phaseIdx,
+                                            DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener)
+            throws GroupDiscussionException {
+        var token = tokenOf(gc);
+        DiscussionCancellation.checkpoint(token);
+        if (token == null) {
+            return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, targetAgentId, listener);
+        }
+        try (var link = DiscussionCancellation.link(token)) {
+            return memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, targetAgentId, listener,
+                    link.cancellation());
+        }
     }
 
     /**
@@ -852,7 +888,10 @@ public class PhaseExecutionEngine {
         int from = Math.min(Math.max(startSpeakerIdx, 0), speakers.size());
         for (int idx = from; idx < speakers.size(); idx++) {
             GroupMember speaker = speakers.get(idx);
+            // K2: a cancel stops the phase before the next speaker, not at its end.
+            DiscussionCancellation.checkpoint(tokenOf(gc));
             if (turnCounter.get() >= maxTurns) {
+                TurnBudget.noteCut(gc, phaseIdx, phase.name());
                 break;
             }
             // I1: checked before each turn — an already-dispatched turn may still
@@ -882,7 +921,7 @@ public class PhaseExecutionEngine {
             // I11: the negotiation table lives on gc, which buildPhaseInput does
             // not see — appended here (no-op for non-negotiation phases).
             input = NegotiationEngine.appendStateIfRelevant(input, gc, phase, config.getNegotiationConfig(), recordsOf(gc, config));
-            TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
+            TranscriptEntry entry = cancellableTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
                 listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(), null, null));
@@ -948,11 +987,17 @@ public class PhaseExecutionEngine {
         // Cap batch size to remaining turn budget
         int remainingTurns = maxTurns > 0 ? Math.max(0, maxTurns - turnCounter.get()) : agentSpeakers.size();
         if (remainingTurns == 0) {
+            if (!agentSpeakers.isEmpty()) {
+                TurnBudget.noteCut(gc, phaseIdx, phase.name());
+            }
             return;
         }
         List<GroupMember> batchSpeakers = maxTurns > 0
                 ? agentSpeakers.subList(0, Math.min(agentSpeakers.size(), remainingTurns))
                 : agentSpeakers;
+        if (batchSpeakers.size() < agentSpeakers.size()) {
+            TurnBudget.noteCut(gc, phaseIdx, phase.name());
+        }
 
         // SAFETY: Snapshot the transcript so parallel tasks each see a consistent view.
         // Iterating a Collections.synchronizedList requires holding its monitor.
@@ -979,6 +1024,34 @@ public class PhaseExecutionEngine {
         // Cooperative cancellation for this batch — cancel(true) does not stop a
         // supplyAsync body, so a "cancelled" speaker would otherwise keep running.
         var cancellation = new MemberTurnCancellation();
+        // K2: the discussion's CANCEL_IMMEDIATE releases the batch as well.
+        var token = tokenOf(gc);
+        DiscussionCancellation.checkpoint(token);
+        Runnable unlinkBatch = token == null ? () -> {
+        } : token.onCancel(signal -> {
+            if (signal == ControlSignal.CANCEL_IMMEDIATE) {
+                cancellation.cancelAndStopInFlight();
+            }
+        });
+        try {
+            runParallelBatch(gc, config, phase, protocol, question, phaseIdx, listener, batchSpeakers, snapshotTranscript, cancellation, token);
+        } finally {
+            unlinkBatch.run();
+        }
+        // Count all completed turns for this batch (parallel turns are atomic batches)
+        turnCounter.addAndGet(batchSpeakers.size());
+        DiscussionCancellation.checkpoint(token);
+
+        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
+        // "parallel" (independent) round stays independent — a human answering
+        // after the agents must not read their answers first.
+        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
+    }
+
+    private void runParallelBatch(GroupConversation gc, AgentGroupConfiguration config, DiscussionPhase phase, ProtocolConfig protocol,
+                                  String question, int phaseIdx, GroupDiscussionEventListener listener, List<GroupMember> batchSpeakers,
+                                  List<TranscriptEntry> snapshotTranscript, MemberTurnCancellation cancellation, DiscussionControlToken token)
+            throws GroupDiscussionException {
 
         // Notify all speakers starting (parallel)
         if (listener != null) {
@@ -1075,6 +1148,11 @@ public class PhaseExecutionEngine {
                     cause = ce.getCause();
                 }
                 if (cause instanceof MemberTurnCancelledException) {
+                    if (token != null && token.isCancelled()) {
+                        // Released by the discussion's own cancel: not a timeout, and
+                        // the leg ends as CANCELLED right after the batch.
+                        continue;
+                    }
                     // Already released by the batch deadline above — same outcome as a
                     // speaker whose own get() timed out.
                     recordParallelOutcome(gc, timeoutEntry(speaker, phaseIdx, phase), phaseIdx, phase, listener);
@@ -1093,13 +1171,6 @@ public class PhaseExecutionEngine {
                         listener);
             }
         }
-        // Count all completed turns for this batch (parallel turns are atomic batches)
-        turnCounter.addAndGet(batchSpeakers.size());
-
-        // I6: the human tail, prompted against the PRE-fan-out snapshot so a
-        // "parallel" (independent) round stays independent — a human answering
-        // after the agents must not read their answers first.
-        promptHumanTail(gc, config, humans, phase, protocol, question, phaseIdx, turnCounter, maxTurns, 0, snapshotTranscript);
     }
 
     /**
@@ -1169,7 +1240,9 @@ public class PhaseExecutionEngine {
                 if (speaker.agentId().equals(target.agentId())) {
                     continue; // Don't critique yourself
                 }
+                DiscussionCancellation.checkpoint(tokenOf(gc));
                 if (turnCounter.get() >= maxTurns) {
+                    TurnBudget.noteCut(gc, phaseIdx, phase.name());
                     break outer;
                 }
                 if (GroupCostLedger.enforceCeiling(gc, protocol, phaseIdx, phase)) {
@@ -1183,8 +1256,7 @@ public class PhaseExecutionEngine {
                 String input = contextBuilder.buildPhaseInput(phase, speaker, question, gc.getTranscript(), phaseIdx, target,
                         GroupConversationService.rosterWithRecruits(config, gc), config.getContextWindow(), gc,
                         config.getRetroConfig());
-                TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(),
-                        listener);
+                TranscriptEntry entry = cancellableTurn(speaker, gc, input, protocol, phaseIdx, phase, target.agentId(), listener);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
                     listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(),
