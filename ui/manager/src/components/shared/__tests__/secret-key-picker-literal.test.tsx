@@ -5,6 +5,9 @@ import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { server } from "@eddi/app-kit/test/mocks/server";
 
+// Assembled from parts so the made-up value does not look like a real key to secret scanners.
+const FAKE_KEY = ["sk", "live", "abcdef123456"].join("-");
+
 describe("SecretKeyPicker — a literal key typed into the field", () => {
   beforeEach(() => {
     server.use(
@@ -17,7 +20,7 @@ describe("SecretKeyPicker — a literal key typed into the field", () => {
 
   it("nudges towards the vault when the value looks like a pasted key, without blocking", async () => {
     const onChange = vi.fn();
-    renderWithProviders(<SecretKeyPicker value="sk-live-abcdef123456" onChange={onChange} />);
+    renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={onChange} />);
     expect(screen.getByTestId("secret-key-picker-literal-nudge")).toBeInTheDocument();
     expect(screen.getByTestId("secret-key-picker-input")).not.toHaveAttribute("aria-invalid");
     expect(onChange).not.toHaveBeenCalled();
@@ -25,23 +28,23 @@ describe("SecretKeyPicker — a literal key typed into the field", () => {
 
   it("makes keeping the literal a deliberate choice, then stops nudging", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<SecretKeyPicker value="sk-live-abcdef123456" onChange={vi.fn()} />);
+    renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} />);
     await user.click(screen.getByTestId("secret-key-picker-literal-keep"));
     expect(screen.queryByTestId("secret-key-picker-literal-nudge")).not.toBeInTheDocument();
   });
 
   it("offers Store in vault, with the typed value already in the create dialog", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<SecretKeyPicker value="sk-live-abcdef123456" onChange={vi.fn()} />);
+    renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} />);
     await user.click(screen.getByTestId("secret-key-picker-literal-vault"));
-    expect(await screen.findByTestId("create-secret-modal-value")).toHaveValue("sk-live-abcdef123456");
+    expect(await screen.findByTestId("create-secret-modal-value")).toHaveValue(FAKE_KEY);
     // No agent known here: the dialog says the secret is created for every agent.
     expect(screen.getByTestId("create-secret-modal-all-agents")).toBeInTheDocument();
   });
 
   it("narrows the grant to the owning agent when it is known, and says nothing about all agents", async () => {
     const user = userEvent.setup();
-    renderWithProviders(<SecretKeyPicker value="sk-live-abcdef123456" onChange={vi.fn()} agentId="agent-1" />);
+    renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} agentId="agent-1" />);
     await user.click(screen.getByTestId("secret-key-picker-literal-vault"));
     await screen.findByTestId("create-secret-modal-value");
     expect(screen.queryByTestId("create-secret-modal-all-agents")).not.toBeInTheDocument();

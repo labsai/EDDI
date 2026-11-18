@@ -4,8 +4,8 @@ import { isCredentialKey, maskCredentials } from "@/lib/mask-credentials";
 describe("maskCredentials", () => {
   it("masks literal values under credential-shaped keys, at any depth", () => {
     const masked = maskCredentials({
-      tasks: [{ parameters: { apiKey: "sk-live-123456", model: "gpt", botToken: "xoxb-1" } }],
-      password: "hunter2",
+      tasks: [{ parameters: { apiKey: "sk-live-123456", model: "gpt", botToken: "xoxb-1" } }], // gitleaks:allow
+      password: "hunter2", // gitleaks:allow
     }) as { tasks: { parameters: Record<string, string> }[]; password: string };
     expect(masked.tasks[0]!.parameters.apiKey).not.toContain("sk-live");
     expect(masked.tasks[0]!.parameters.botToken).not.toContain("xoxb");
@@ -24,9 +24,9 @@ describe("maskCredentials", () => {
   });
 
   it("lets a changed credential still show as a change", () => {
-    const a = maskCredentials({ apiKey: "one-secret-value" }) as { apiKey: string };
-    const b = maskCredentials({ apiKey: "two-secret-value" }) as { apiKey: string };
-    const c = maskCredentials({ apiKey: "one-secret-value" }) as { apiKey: string };
+    const a = maskCredentials({ apiKey: "one-secret-value" }) as { apiKey: string }; // gitleaks:allow
+    const b = maskCredentials({ apiKey: "two-secret-value" }) as { apiKey: string }; // gitleaks:allow
+    const c = maskCredentials({ apiKey: "one-secret-value" }) as { apiKey: string }; // gitleaks:allow
     expect(a.apiKey).not.toBe(b.apiKey);
     expect(a.apiKey).toBe(c.apiKey);
   });
@@ -51,8 +51,8 @@ describe("maskCredentials", () => {
 
   it("masks literals the backend redacts: header names ending in key, cookies, pwd, connection strings", () => {
     const masked = maskCredentials({
-      headers: { "Ocp-Apim-Subscription-Key": "abc123456", Cookie: "sid=1", Accept: "text/plain" },
-      pwd: "hunter2",
+      headers: { "Ocp-Apim-Subscription-Key": "abc123456", Cookie: "sid=1", Accept: "text/plain" }, // gitleaks:allow
+      pwd: "hunter2", // gitleaks:allow
       connectionString: "Server=x;Password=y",
     }) as { headers: Record<string, string>; pwd: string; connectionString: string };
     expect(masked.headers["Ocp-Apim-Subscription-Key"]).not.toContain("abc123");
