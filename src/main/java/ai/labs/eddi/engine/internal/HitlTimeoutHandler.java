@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import io.micrometer.core.instrument.Counter;
@@ -164,6 +165,11 @@ public class HitlTimeoutHandler {
                     + "the current pause has its own timeout", conversationId);
         } catch (IllegalArgumentException e) {
             LOGGER.errorf(e, "HITL timeout decision for conversation %s was refused as invalid", conversationId);
+        } catch (MandatoryApprovalRefusedException e) {
+            // A call of the pause needs a mandatory human approval, which no timeout can
+            // give. Not retried: the pause keeps waiting for a person.
+            LOGGER.infof("HITL timeout auto-%s for conversation %s not applied — %s", decision.getVerdict(), conversationId,
+                    e.getMessage());
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 LOGGER.infof("HITL timeout for conversation %s skipped — it is no longer awaiting a decision (%s)",

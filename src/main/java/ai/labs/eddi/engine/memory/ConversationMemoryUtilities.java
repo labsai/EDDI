@@ -876,6 +876,11 @@ public class ConversationMemoryUtilities {
                 projectedCall.setSource(call.getSource());
                 projectedCall.setGateReason(call.getGateReason());
                 projectedCall.setArgsTruncated(call.isArgsTruncated());
+                // Why a mandatory call is asked and whose decision it needs — server-built,
+                // never model text, so as safe to show as the tool name.
+                projectedCall.setMandatoryReasonCode(call.getMandatoryReasonCode());
+                projectedCall.setMandatoryApprover(call.getMandatoryApprover());
+                projectedCall.setMandatorySummary(call.getMandatorySummary());
                 // Deliberately NOT copied: argumentsRaw, argumentsRedacted.
                 projectedCalls.add(projectedCall);
             }

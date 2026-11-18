@@ -9,6 +9,8 @@ import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovals;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
 import ai.labs.eddi.engine.hitl.tools.ClearedToolCalls;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
@@ -308,9 +310,30 @@ class ToolLoopResumer {
             }
 
             // APPROVED (top-level default or per-call) below.
-            trace.add(committedPlanHash != null
-                    ? Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId(), "planHash", committedPlanHash)
-                    : Map.of("type", "hitl_approved", "tool", c.getToolName(), "callId", c.getCallId()));
+            trace.add(approvedEntry(c, committedPlanHash, decision.getMandatoryApproval()));
+
+            // A mandatory call (MandatoryApprovalRule) runs only on an approval the resume
+            // path checked against its ApproverRule. Every decision is checked there; this
+            // is the execution-side line, so a decision that reached this loop by any
+            // other route still cannot run one.
+            if (c.isMandatory() && decision.getMandatoryApproval() == null) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"this call needs an approval its approver could not give\"}"));
+                trace.add(Map.of("type", "hitl_mandatory_unapproved", "tool", c.getToolName(), "callId", c.getCallId()));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                continue;
+            }
+            // Amended arguments are re-asked of the turn's mandatory rules: an approver
+            // must not amend a pattern-gated call into one that carries, say, a file — the
+            // approval given was not the one such a call needs.
+            if (amended != null && !c.isMandatory()
+                    && MandatoryApprovals.evaluate(setup.mandatoryApprovalRules(), rebuiltRequest(c, amended)) != null) {
+                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the amended call needs a mandatory approval it was not given\"}"));
+                trace.add(Map.of("type", "hitl_mandatory_unapproved", "tool", c.getToolName(), "callId", c.getCallId()));
+                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
+                continue;
+            }
 
             // Truncated raw args can't be honestly executed (the approver never saw the
             // full args and the raw bytes are incomplete). Validation already blocks
@@ -409,7 +432,10 @@ class ToolLoopResumer {
                 // ApprovedCallScope: the self-ungating rule is also applied to the request
                 // as finally built and sent (ApiCallExecutor), not only to the preview
                 // checked above, which preRequest property instructions can change.
-                String result = ApprovedCallScope.run(protection, conversationId,
+                // A mandatory call's attribution is bound around it, so a record the call
+                // creates can store who approved it and on whose behalf.
+                MandatoryApprovalAttribution attribution = c.isMandatory() ? decision.getMandatoryApproval() : null;
+                String result = ApprovedCallScope.run(protection, conversationId, attribution,
                         () -> CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
                                 toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,
                                 enableRateLimiting, enableCaching, enableCostTracking, task, isLazy, builtInSpecs, activeSpecs)));
@@ -644,6 +670,35 @@ class ToolLoopResumer {
             }
         }
         return exchange;
+    }
+
+    /**
+     * The {@code hitl_approved} trace entry of an approved call. A mandatory call's
+     * entry also records who approved it, in what capacity and on whose behalf —
+     * stored with the step, so the trail exists even with the audit ledger off.
+     */
+    static Map<String, Object> approvedEntry(PendingToolCallBatch.PendingToolCall c, String committedPlanHash,
+                                             MandatoryApprovalAttribution attribution) {
+        Map<String, Object> entry = new HashMap<>();
+        entry.put("type", "hitl_approved");
+        entry.put("tool", c.getToolName());
+        entry.put("callId", c.getCallId());
+        if (committedPlanHash != null) {
+            entry.put("planHash", committedPlanHash);
+        }
+        if (c.isMandatory()) {
+            entry.put("mandatoryReasonCode", c.getMandatoryReasonCode());
+            if (attribution != null) {
+                entry.put("actingAs", attribution.actingAs().name());
+                if (attribution.approvedBy() != null) {
+                    entry.put("approvedBy", attribution.approvedBy());
+                }
+                if (attribution.onBehalfOf() != null) {
+                    entry.put("onBehalfOf", attribution.onBehalfOf());
+                }
+            }
+        }
+        return entry;
     }
 
     static ToolExecutionRequest rebuiltRequest(PendingToolCallBatch.PendingToolCall c) {

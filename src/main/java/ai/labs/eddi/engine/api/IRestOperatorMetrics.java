@@ -122,6 +122,11 @@ public interface IRestOperatorMetrics {
      * provisioned via setup-api carries no task-level approvals, so its verdicts
      * are exact; for hand-authored agents with task-level approvals this endpoint
      * answers about the agent-level policy, not the resolved one.
+     * <p>
+     * Patterns only: the synthetic call has no arguments, so mandatory,
+     * argument-aware approvals ({@code MandatoryApprovalRule} — e.g. a call that
+     * carries a file out of the deployment) are not evaluated. A real call such a
+     * rule matches is gated even where this endpoint answers "not gated".
      */
     @POST
     @Path("/gate-dry-run")
@@ -130,7 +135,9 @@ public interface IRestOperatorMetrics {
     @Operation(summary = "Classify a synthetic tool call against an agent's approval policy",
                description = "Runs the runtime gate classification (ToolApprovalGate.classify) for one synthetic tool call against the "
                        + "agent document's stored AGENT-LEVEL toolApprovals, without executing anything. Deterministic: same policy plus "
-                       + "same call address always yields the same answer. Task-level toolApprovals overrides are not resolved here.")
+                       + "same call address always yields the same answer. Task-level toolApprovals overrides are not resolved here. The "
+                       + "synthetic call has no arguments, so it reports pattern results only: mandatory, argument-aware approvals "
+                       + "(a call carrying a file out of the deployment) are not evaluated and gate a real call regardless.")
     @APIResponse(responseCode = "200", description = "Classification result.")
     @APIResponse(responseCode = "400", description = "agentId, version or toolName missing or invalid, or an unknown source.")
     @APIResponse(responseCode = "404", description = "No agent document at that id and version.")

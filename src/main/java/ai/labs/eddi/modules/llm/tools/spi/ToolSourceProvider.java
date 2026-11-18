@@ -4,6 +4,10 @@
  */
 package ai.labs.eddi.modules.llm.tools.spi;
 
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
+
+import java.util.List;
+
 /**
  * One source of tools for a turn (R2 step 1) — built-ins, dynamic-agent tools,
  * user memory, conversation recall, attachments, httpcalls, MCP, A2A.
@@ -61,4 +65,20 @@ public interface ToolSourceProvider {
      * worse than the cost of one try/catch at the iteration site.
      */
     ToolContribution contribute(ToolAssemblyContext ctx);
+
+    /**
+     * Mandatory, argument-aware approvals for the tools this source contributes
+     * this turn — e.g. "a call that carries a file out of the deployment needs the
+     * conversation user's confirmation". See {@link MandatoryApprovalRule}: a call
+     * a rule matches is gated before the agent's approval patterns, so the designer
+     * cannot exempt it.
+     * <p>
+     * Asked once per turn, right after {@link #contribute}, under the same failure
+     * handling: a provider whose rules cannot be built loses its tools for the turn
+     * too ({@link ToolSourceRegistry}), so a tool is never offered without the
+     * rules that govern it. Rules are per-turn objects, never cached across turns.
+     */
+    default List<MandatoryApprovalRule> mandatoryApprovals(ToolAssemblyContext ctx) {
+        return List.of();
+    }
 }

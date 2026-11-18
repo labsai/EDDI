@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.Locale;
 import java.util.Map;
 import ai.labs.eddi.engine.hitl.audit.HitlChannel;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
 import ai.labs.eddi.engine.model.Context;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonIgnore;
@@ -151,6 +152,15 @@ public class HitlDecision {
      */
     @JsonIgnore
     private String planBinding;
+    /**
+     * How a mandatory approval this decision gives was accepted
+     * ({@code MandatoryApproverCheck}): who approved and, for an administrator, on
+     * whose behalf. Set by the resume path after the approver was checked, read by
+     * the resumed tool loop — which executes a mandatory call only when it is set —
+     * and by the decision's audit entry. Server-side only, never read from a body.
+     */
+    @JsonIgnore
+    private MandatoryApprovalAttribution mandatoryApproval;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -265,6 +275,16 @@ public class HitlDecision {
     @JsonIgnore
     public void setChannel(HitlChannel channel) {
         this.channel = channel;
+    }
+
+    @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApproval() {
+        return mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApproval(MandatoryApprovalAttribution mandatoryApproval) {
+        this.mandatoryApproval = mandatoryApproval;
     }
 
     @JsonIgnore

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.hitl.tools;
 
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard.Protection;
 
+import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
@@ -38,7 +39,7 @@ public final class ApprovedCallScope {
      * What an approved execution is held to: the agent's protection and its
      * conversation.
      */
-    private record Binding(Protection protection, String conversationId) {
+    private record Binding(Protection protection, String conversationId, MandatoryApprovalAttribution attribution) {
     }
 
     private static final ThreadLocal<Binding> ACTING_AGENT = new ThreadLocal<>();
@@ -71,8 +72,17 @@ public final class ApprovedCallScope {
      * {@code conversationId} — the conversation the approved call runs in.
      */
     public static <T> T run(Protection protection, String conversationId, Supplier<T> work) {
+        return run(protection, conversationId, null, work);
+    }
+
+    /**
+     * As {@link #run(Protection, String, Supplier)}, also binding how a mandatory
+     * approval of this call was accepted ({@link #attribution()}); null for a call
+     * no mandatory rule gated.
+     */
+    public static <T> T run(Protection protection, String conversationId, MandatoryApprovalAttribution attribution, Supplier<T> work) {
         Binding previous = ACTING_AGENT.get();
-        ACTING_AGENT.set(new Binding(protection == null ? Protection.ofAgent(null) : protection, conversationId));
+        ACTING_AGENT.set(new Binding(protection == null ? Protection.ofAgent(null) : protection, conversationId, attribution));
         try {
             return work.get();
         } finally {
@@ -98,6 +108,17 @@ public final class ApprovedCallScope {
                 restore(previous);
             }
         };
+    }
+
+    /**
+     * Who approved the mandatorily gated call executing on this thread, and on
+     * whose behalf — for the record the call creates ({@code approvedBy},
+     * {@code onBehalfOf}). Empty outside an approved execution and for a call no
+     * mandatory rule gated.
+     */
+    public static Optional<MandatoryApprovalAttribution> attribution() {
+        Binding binding = ACTING_AGENT.get();
+        return binding == null ? Optional.empty() : Optional.ofNullable(binding.attribution());
     }
 
     /** Whether an approved call is executing on this thread. */

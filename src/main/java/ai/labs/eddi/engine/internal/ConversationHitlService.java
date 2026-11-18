@@ -45,6 +45,9 @@ import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IAgent;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalAttribution;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApproverCheck;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -616,6 +619,22 @@ class ConversationHitlService {
                 restorePauseAfterFailedResume(conversationId, null, false);
                 throw new ProcessingRestrictedException("Processing is restricted for this user (GDPR Art. 18)");
             }
+            // Mandatory approvals (MandatoryApprovalRule): a decision that approves a call
+            // a rule gated must come from an approver that call's ApproverRule accepts —
+            // for consent, the conversation's verified user or an administrator with a
+            // reason. Checked on the snapshot this resume runs, before anything runs; a
+            // refusal puts the pause back untouched, so the call stays pending for
+            // someone who may decide it. Rejections are never refused.
+            try {
+                decision.setMandatoryApproval(MandatoryApproverCheck.enforce(snapshot.getHitlPendingToolCalls(), decision,
+                        callerIdentityContext.captureOrCurrent(), snapshot.getUserId(), snapshot.getResolutionProvenance()));
+            } catch (MandatoryApprovalRefusedException refused) {
+                LOGGER.infof("Refused a decision on conversation %s: it approves a call that needs a mandatory approval its "
+                        + "approver cannot give (%s); the pause is untouched", sanitize(conversationId), refused.getMessage());
+                restorePauseAfterFailedResume(conversationId, null, false);
+                throw refused;
+            }
+            logAdminOnBehalf(conversationId, decision);
             memory = convertConversationMemorySnapshot(snapshot);
             memory.setConversationState(ConversationState.AWAITING_HUMAN);
             // Execution side of the binding: re-derive the hash from the plan this
@@ -641,7 +660,7 @@ class ConversationHitlService {
             prePauseFacts = new HitlDecisionRecords.RegularPause(snapshot.getHitlPausedAt(),
                     snapshot.getHitlTimeoutPolicy() != null ? snapshot.getHitlTimeoutPolicy().name() : null, ruleDraftOf(memory));
         } catch (ResourceNotFoundException | IConversationService.PauseMismatchException | ProcessingRestrictedException
-                | HitlPlanBinding.PlanHashRequired e) {
+                | HitlPlanBinding.PlanHashRequired | MandatoryApprovalRefusedException e) {
             throw e; // genuinely deleted, or already restored above
         } catch (Exception e) {
             // transient store failure loading the snapshot — restore the pause. No
@@ -1379,6 +1398,8 @@ class ConversationHitlService {
         }
 
         PendingToolCallBatch batch = snapshot.getHitlPendingToolCalls();
+        // A mandatory call is approved or rejected as its rule saw it, never amended.
+        MandatoryApproverCheck.refuseAmendments(batch, decision);
         List<PendingToolCallBatch.PendingToolCall> pendingCalls = batch != null && batch.getCalls() != null
                 ? batch.getCalls()
                 : List.of();
@@ -2103,8 +2124,42 @@ class ConversationHitlService {
         } else {
             effectivePolicy = inheritedPolicy;
         }
+        // A batch carrying a mandatory call (MandatoryApprovalRule) is never
+        // auto-approved on a silent timeout, whatever any level of the config says —
+        // the approval it needs cannot come from a timer.
+        if (effectivePolicy == HitlTimeoutPolicy.AUTO_APPROVE && hasMandatoryCall(pendingBatch)) {
+            effectivePolicy = HitlTimeoutPolicy.WAIT_INDEFINITELY;
+        }
         memory.setHitlTimeoutPolicy(effectivePolicy);
         memory.setHitlApprovalTimeout(effectiveTimeout);
+    }
+
+    /** Whether the batch holds a call a mandatory-approval rule gated. */
+    static boolean hasMandatoryCall(PendingToolCallBatch batch) {
+        if (batch == null || batch.getCalls() == null) {
+            return false;
+        }
+        for (PendingToolCallBatch.PendingToolCall call : batch.getCalls()) {
+            if (call != null && call.isMandatory()) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * An administrator approving a mandatory call for the conversation's user is
+     * never silent: besides the decision's audit entry ({@code actingAs},
+     * {@code approvedBy}, {@code onBehalfOf}), one INFO line carries the same
+     * fields — the trail that survives when the audit ledger is disabled.
+     */
+    static void logAdminOnBehalf(String conversationId, HitlDecision decision) {
+        MandatoryApprovalAttribution mandatory = decision.getMandatoryApproval();
+        if (mandatory == null || mandatory.actingAs() != MandatoryApprovalAttribution.ActingAs.ADMIN_ON_BEHALF) {
+            return;
+        }
+        LOGGER.infof("hitl.mandatory.admin_on_behalf conversation=%s approvedBy=%s onBehalfOf=%s actingAs=%s", sanitize(conversationId),
+                sanitize(mandatory.approvedBy()), sanitize(mandatory.onBehalfOf()), mandatory.actingAs().name());
     }
 
     /**

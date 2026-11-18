@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -811,11 +812,37 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            the terminal reply tool of {@code answerMode: "tool"} (also
      *            present in {@code toolSpecs}, with no executor), or null when the
      *            task answers in text
+     * @param mandatoryApprovalRules
+     *            the mandatory, argument-aware approval rules the tool sources
+     *            attached this turn
+     *            ({@code ToolSourceProvider#mandatoryApprovals}); a call one
+     *            matches is gated whatever the agent's approval patterns say. Never
+     *            null
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
             Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
-            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool,
+            List<MandatoryApprovalRule> mandatoryApprovalRules) {
+
+        ToolSetup {
+            mandatoryApprovalRules = mandatoryApprovalRules == null ? List.of() : List.copyOf(mandatoryApprovalRules);
+        }
+
+        /** A setup without mandatory-approval rules. */
+        ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+                Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+                Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+                Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            this(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers, answerTool,
+                    List.of());
+        }
+
+        /** This setup with {@code rules} as its mandatory-approval rules. */
+        ToolSetup withMandatoryApprovalRules(List<MandatoryApprovalRule> rules) {
+            return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers,
+                    answerTool, rules);
+        }
 
         /** A setup without a reply tool. */
         ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
@@ -902,12 +929,18 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
+        // The mandatory, argument-aware approval rules the providers attached to their
+        // tools this turn. Carried on the setup through the LAZY completion and the
+        // reply tool alike, so the live loop and the resume classify with the same
+        // rules.
+        var mandatoryRules = merger.mandatoryApprovalRules();
         if (externalLazy) {
-            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task).withMandatoryApprovalRules(mandatoryRules),
+                    task);
         }
         var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
-                assembled.toolEndpoints(), assembled.toolRequestResolvers());
+                assembled.toolEndpoints(), assembled.toolRequestResolvers(), null, mandatoryRules);
         return withAnswerTool(setup, task);
     }
 
@@ -957,7 +990,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
         if (onlyTool) {
             AnswerTool.noteOnlyTool(task);
         }
-        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool);
+        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool,
+                setup.mandatoryApprovalRules());
     }
 
     private static <V> Map<String, V> copyOf(Map<String, V> map) {

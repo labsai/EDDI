@@ -432,9 +432,43 @@ Patterns are matched by `ToolApprovalPatterns` / `ToolApprovalGate`:
 |------|----------|
 | **Task combines with agent per `eddi.hitl.tool.task-approvals.mode`** | **`strict` (default):** the task block can only STRENGTHEN the agent gate — `requireApproval` is the union of both lists, task-level `exempt` entries are ignored (exempt beats require, so a task-added exemption is precisely the ungating vector), task-level `AUTO_APPROVE` (scalar or rule) is demoted to `WAIT_INDEFINITELY` unless the agent-level policy itself grants it, and `maxAutoApprovalsPerTurn` takes the minimum. **`replace` (legacy):** a present task block is a full replace of the agent-level block — the pre-6.3.0 behavior, for designs that deliberately loosen one task. See `TaskToolApprovalsResolver`. |
 | **Exempt beats require** | If a call matches any `exempt` pattern, it runs — even if it also matches `requireApproval`. |
-| **Absent/empty `requireApproval` = gate off** | No `requireApproval` patterns → the gate is fully inactive; every call runs. |
+| **Absent/empty `requireApproval` = gate off** | No `requireApproval` patterns → the gate is fully inactive; every call runs — except a [mandatory](#mandatory-approvals) call, which a server-side rule gates before any of these rules apply. |
 | **Any match suffices** | A call is gated if it matches *any* `requireApproval` pattern (and no `exempt` pattern). |
 | **An approval authorises one execution** | A call the human approved runs once. A model that reissues *that same call* in the continuation is asking to run it again, so the reissue pauses for a new decision, with the reason "repeat of an approved call that has already been executed" (it used to run a second time on the original approval). The match binds to the call id **and** the tool name **and** a canonical fingerprint of the arguments (key order and whitespace ignored), and it is used up by the first match. A different call that merely reuses the approved id — some OpenAI-compatible servers number calls `call_1` on every turn — is gated like any other. While the gate is active, an empty-string id is treated as missing and a repeated id within one model message is replaced, so per-call verdicts can never apply to two calls at once. |
+
+### Mandatory approvals
+
+Some calls need a human decision because of **what they carry**, not because of their name: a call that sends a file out of the deployment, or that adds a document to a team library. The agent's patterns cannot express that — they match a call by its address, never by its arguments, and an agent designer can `exempt` any tool. So the engine has a second, server-side gate that the designer cannot switch off.
+
+A tool source can attach **mandatory approval rules** to the tools it builds for a turn (`ToolSourceProvider#mandatoryApprovals`). A rule (`MandatoryApprovalRule`) sees the call's arguments and answers either nothing or a `MandatoryApproval`: a stable `reasonCode` (e.g. `file-egress`), who may approve (`ApproverRule`), and one server-built sentence for the approver (never model text, never a storage reference). No source attaches a rule yet; file egress and team-library adds will (see [Security — egress](security.md#egress-needs-an-approval-the-designer-cannot-switch-off)).
+
+A call a rule matches is gated **before** the pattern precedence below is evaluated:
+
+| Pattern-gate behavior | Mandatory call |
+|---|---|
+| `exempt` beats `requireApproval` | Does not apply — the call pauses. |
+| Empty `requireApproval` = gate off | Does not apply — the call pauses even when the agent has no `toolApprovals` at all. |
+| A timeout policy or the no-progress guard decides | A `system:*` decision never approves it; an effective `AUTO_APPROVE` timeout (scalar, rule or explicit) waits instead (`WAIT_INDEFINITELY`). |
+| `maxPausesPerTurn` reached | Refused, as any gated call — never run. |
+| The model reissues the approved, executed call | Gated again as a repeat, and still needs the same approver. |
+| An approver amends the arguments | Refused with `400` for a mandatory call. A pattern-gated call amended into one a rule matches is answered `NOT_EXECUTED`. |
+
+**Who may approve (`ApproverRule`).**
+
+- `ANY_PERMITTED_APPROVER` — oversight: whoever may decide the pause today ([Who May Decide](#who-may-decide)). The agent's effective config (`TaskToolApprovalsResolver.resolve(agent, task)`) must have an active gate — a `requireApproval` pattern, an earned-autonomy suspension, or the fail-closed config of an unreadable policy — or there is nobody it names, and the call is refused.
+- `CONVERSATION_USER` — consent: the conversation's own user, when the conversation's identity is `VERIFIED` (it matched the authenticated principal that created it); or an **administrator acting on the user's behalf**, who must give a reason in the decision's `note` (`toolDecisions.<callId>.note` or the top-level `note`). Anyone else — an `eddi-approver`, a delegate, another member — gets `403` (`FORBIDDEN` over MCP) with *"Only the user of this conversation or an administrator can confirm this."*, and the call stays pending: the pause is put back untouched, its timeout still armed. A rejection is never refused; anyone who may decide the pause may say no.
+
+An administrator's approval is never silent. The decision's `hitl.approval` audit entry carries `actingAs: ADMIN_ON_BEHALF`, `approvedBy` (the administrator) and `onBehalfOf` (the user); an INFO log line `hitl.mandatory.admin_on_behalf` carries the same fields, so the trail survives with the audit ledger disabled; the step's `hitl_approved` trace entry records them with the conversation; and while the approved call runs, `ApprovedCallScope.attribution()` hands them to the tool, so a record the call creates (a library entry, a share) can store who approved it and for whom. An approval by the user records `actingAs: USER`, one under `ANY_PERMITTED_APPROVER` records `actingAs: APPROVER`.
+
+**Where a call cannot pause, it is refused — never run.** The model receives `NOT_EXECUTED` with a fixed reason and the rest of the batch is unaffected:
+
+- a group member's turn (member pauses are rejected by the group, never shown to a human);
+- `CONVERSATION_USER` in a conversation without a user — a run nobody started;
+- `ANY_PERMITTED_APPROVER` without an active gate (above).
+
+**Channels.** Only surfaces that authenticate the approver as an EDDI user can give a `CONVERSATION_USER` approval: the REST `resume` endpoints and the MCP `resume_conversation` tool. A Slack button does not identify an EDDI user, so a Slack approval of such a call is refused and the card stays for a decision in the Manager; a Slack rejection works. With authentication disabled there is no approver identity at all, so no `CONVERSATION_USER` approval can be given — only rejections.
+
+**What the approver sees.** Each pending call carries `mandatoryReasonCode`, `mandatoryApprover` and `mandatorySummary` next to its `gateReason` (`mandatory:<reasonCode>`, or the repeat reason) on `approval-status` (in `pauseDetails.calls` of the summary, and in `detail=full`) and on MCP `get_approval_status` with `detail=full`; a call no rule gated has none of the three. The operator gate dry-run (`POST /administration/operator/gate-dry-run`) classifies a synthetic call without arguments, so it reports pattern results only.
 
 ### Effective timeout policy
 
@@ -444,6 +478,7 @@ Tool pauses resolve their effective timeout policy with a deliberate rule (`Conv
 2. Otherwise an **explicit** `toolApprovals.timeoutPolicy` wins verbatim — including an explicit `AUTO_APPROVE` (the designer opted in at the tool level). Its `approvalTimeout` is used, falling back to the outer `hitlConfig.approvalTimeout`.
 3. Otherwise the outer `hitlConfig.timeoutPolicy`/`approvalTimeout` is inherited, **except** an inherited `AUTO_APPROVE` is **demoted to `WAIT_INDEFINITELY`** — a silent timeout must never auto-execute a gated tool call (that is exactly what the gate exists to prevent).
 4. Absent config on every level leaves the default `WAIT_INDEFINITELY`.
+5. Whatever the steps above chose, a batch holding a [mandatory](#mandatory-approvals) call never gets `AUTO_APPROVE`: it waits (`WAIT_INDEFINITELY`).
 
 The duration resolves down the same chain independently (rule → `toolApprovals` → `hitlConfig`), so a rule that states only a policy still inherits a clock and actually fires.
 

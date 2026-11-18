@@ -56,6 +56,7 @@ import io.quarkus.security.identity.SecurityIdentity;
 import io.smallrye.common.annotation.RunOnVirtualThread;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRefusedException;
 import io.quarkus.security.ForbiddenException;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
@@ -930,6 +931,11 @@ public class RestAgentEngine implements IRestAgentEngine {
             LOGGER.infof("Resume of conversation %s rejected (invalid request): %s", sanitize(conversationId), e.getMessage());
             return Response.status(Response.Status.BAD_REQUEST).type(TEXT_PLAIN)
                     .entity(e.getMessage()).build();
+        } catch (MandatoryApprovalRefusedException e) {
+            // The decision approves a call that needs a mandatory approval (e.g. the
+            // conversation user's consent) this approver cannot give. Nothing ran; the
+            // pause is untouched and the call stays pending. Fixed text.
+            return Response.status(Response.Status.FORBIDDEN).type(TEXT_PLAIN).entity(e.getMessage()).build();
         } catch (IConversationService.PlanMismatchException e) {
             // The decision named a plan (planHash) other than the pending one, or the
             // stored plan no longer verifies. Nothing ran; the pause is untouched.
@@ -1092,6 +1098,13 @@ public class RestAgentEngine implements IRestAgentEngine {
             callView.put("arguments", SecretRedactionFilter.redact(call.getArgumentsRedacted()));
             callView.put("argsTruncated", call.isArgsTruncated());
             callView.put("gateReason", call.getGateReason());
+            // A call a mandatory, argument-aware rule gated: why it is asked and whose
+            // decision it needs. Server-built text only; absent for every other call.
+            if (call.isMandatory()) {
+                callView.put("mandatoryReasonCode", call.getMandatoryReasonCode());
+                callView.put("mandatoryApprover", call.getMandatoryApprover());
+                callView.put("mandatorySummary", call.getMandatorySummary());
+            }
             // The approver's honest replacement for guessing a method/path from a
             // tool name: what this call actually resolves to, already redacted at
             // gate time. requestPinned tells the caller whether that preview is

@@ -17,6 +17,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.model.TokenCountEstimator;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovals;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalGate;
 import ai.labs.eddi.engine.hitl.tools.ToolApprovalRules;
 import ai.labs.eddi.engine.lifecycle.ToolTraceRedaction;
@@ -568,7 +569,9 @@ class ToolLoopRunner {
                 // transcript (a pause freezes it, a cascade hands it on) never holds a
                 // call without a result.
                 AnswerTool.Extraction answerCall = AnswerTool.extract(
-                        ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals), answerToolName);
+                        ToolApprovalGateSupport.normalizeToolCallIds(chatResponse.aiMessage(), effectiveToolApprovals,
+                                !setup.mandatoryApprovalRules().isEmpty()),
+                        answerToolName);
                 AiMessage aiMessage = answerCall.remaining();
                 if (answerCall.replyCalls() > 1) {
                     AnswerTool.duplicate(conversationId, answerCall.replyCalls());
@@ -635,15 +638,21 @@ class ToolLoopRunner {
                     // again as a repeat. Inert when
                     // effectiveToolApprovals is
                     // null/empty — byte-identical to the pre-HITL path.
+                    // The mandatory rules of this turn (ToolSourceProvider#mandatoryApprovals)
+                    // are applied first: a call one matches is gated whatever the patterns
+                    // say, exempt and an empty requireApproval included.
                     var screened = refuseDoomedGatedCalls(
                             refuseExhaustedGatedCalls(
                                     admitted.isEmpty()
                                             ? new ToolApprovalGate.GateResult(List.of(), List.of(), Map.of())
                                             : toolApprovalGate.classify(admitted, toolSources, setup.toolEndpoints(),
-                                                    effectiveToolApprovals, clearedCalls),
+                                                    effectiveToolApprovals, clearedCalls, setup.mandatoryApprovalRules()),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
-                    var gateResult = screened.gateResult();
+                    // A mandatory call this conversation cannot pause for is refused here,
+                    // never executed: a mandatory approval does not degrade to "allowed".
+                    var gateResult = refuseUnpausableMandatoryCalls(screened.gateResult(), effectiveToolApprovals, memory, currentMessages,
+                            aiMessage, trace, exchangeRecorder);
                     // The pin step below reuses what the screening already resolved.
                     var pinResolvers = screened.resolvers();
 
@@ -1113,7 +1122,7 @@ class ToolLoopRunner {
         }
         return stillGated.size() == gateResult.gated().size()
                 ? gateResult
-                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+                : gateResult.withGated(stillGated);
     }
 
     /**
@@ -1181,7 +1190,7 @@ class ToolLoopRunner {
         }
         var screenedGate = stillGated.size() == gateResult.gated().size()
                 ? gateResult
-                : new ToolApprovalGate.GateResult(stillGated, gateResult.allowed(), gateResult.gateReasonByCallId());
+                : gateResult.withGated(stillGated);
         Map<String, ToolRequestResolver> memoised = new HashMap<>();
         for (var entry : resolvers.entrySet()) {
             ToolRequestResolver original = entry.getValue();
@@ -1200,6 +1209,45 @@ class ToolLoopRunner {
             });
         }
         return new Screened(screenedGate, memoised);
+    }
+
+    /**
+     * Refuses every mandatorily gated call (see {@code MandatoryApprovalRule}) that
+     * this conversation cannot pause for — a group member's turn, a consent
+     * approval in a conversation without a user, an oversight approval without an
+     * active gate ({@link MandatoryApprovals#unpausableReason}). The call is
+     * answered {@code NOT_EXECUTED} with a fixed, model-safe reason and never runs;
+     * the rest of the batch is unaffected.
+     */
+    static ToolApprovalGate.GateResult refuseUnpausableMandatoryCalls(ToolApprovalGate.GateResult gateResult,
+                                                                      ToolApprovalsConfig effectiveToolApprovals,
+                                                                      IConversationMemory memory, List<ChatMessage> currentMessages,
+                                                                      AiMessage aiMessage, List<Map<String, Object>> trace,
+                                                                      ToolExchangeRecorder exchangeRecorder) {
+        if (gateResult.mandatoryByCallId().isEmpty()) {
+            return gateResult;
+        }
+        String userId = memory != null ? memory.getUserId() : null;
+        String groupConversationId = memory != null ? AgentOrchestrator.groupConversationIdOf(memory) : null;
+        List<ToolExecutionRequest> stillGated = new ArrayList<>();
+        for (ToolExecutionRequest req : gateResult.gated()) {
+            String refusal = MandatoryApprovals.unpausableReason(gateResult.mandatoryOf(req), effectiveToolApprovals, userId,
+                    groupConversationId);
+            if (refusal == null) {
+                stillGated.add(req);
+                continue;
+            }
+            LOGGER.infof("Refusing tool '%s' without executing it: it needs a mandatory approval this conversation cannot pause for (%s)",
+                    sanitize(req.name()), refusal);
+            addResult(currentMessages, aiMessage, req, MandatoryApprovals.refusalResult(refusal), exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", req.name());
+            withCallId(step, req);
+            step.put("error", "mandatory_approval_unavailable");
+            trace.add(step);
+        }
+        return stillGated.size() == gateResult.gated().size() ? gateResult : gateResult.withGated(stillGated);
     }
 
     /**
