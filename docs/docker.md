@@ -113,10 +113,13 @@ docker compose up
 # compose reads on every run: PostgreSQL keeps the first password in its
 # volume, so a new one on a later run is a password the database rejects
 # (install.sh --db=postgres writes it into .env for you).
-# .env holds secrets, so only you may read it. The leading \n keeps the entry
-# on its own line when the file's last line has no newline.
-touch .env && chmod 600 .env
-grep -q '^POSTGRES_PASSWORD=' .env || printf '\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+# .env holds secrets, so only you may read it: it is created under umask 077,
+# an existing one is tightened, and nothing is written unless both succeeded.
+# The leading \n keeps the entry on its own line when the file's last line has
+# no newline.
+(umask 077 && touch .env) && chmod 600 .env && {
+  grep -q '^POSTGRES_PASSWORD=' .env || printf '\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+}
 docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication. No realm account ships a password (see the
@@ -146,10 +149,10 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
 # be decrypted with the master key they were encrypted under.
 # -hex, not -base64: MONGO_PASSWORD goes into the MongoDB connection string as
 # written, and base64's `/` and `+` change the meaning of a URI.
-touch .env && chmod 600 .env
-for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
-  grep -q "^${key}=" .env || printf '\n%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
-done
+(umask 077 && touch .env) && chmod 600 .env &&
+  for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
+    grep -q "^${key}=" .env || printf '\n%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
+  done
 docker compose -f docker-compose.cluster.yml up -d
 ```
 
