@@ -62,7 +62,8 @@ class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMess
     @DisplayName("the mail log index is built (CONCURRENTLY, off the write path) and valid")
     void lateIndexBuilt() throws Exception {
         try (Connection connection = dataSource.getConnection()) {
-            assertEquals(Boolean.TRUE, PostgresLateIndexes.isValid(connection, "idx_email_ledger_integration_created"));
+            assertEquals(Boolean.TRUE,
+                    PostgresLateIndexes.isValid(connection, PostgresEmailMessageLedger.TABLE, "idx_email_ledger_integration_created"));
         }
         // A second build is a no-op, not an error.
         PostgresLateIndexes.build(dataSource::getConnection, 1, PostgresEmailMessageLedger.LATE_INDEXES);

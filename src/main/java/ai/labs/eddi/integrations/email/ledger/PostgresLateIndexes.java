@@ -68,17 +68,21 @@ final class PostgresLateIndexes {
             conn.setAutoCommit(true); // CREATE INDEX CONCURRENTLY refuses to run inside a transaction
             for (String[] index : indexes) {
                 String name = index[0];
+                // The index's own table, resolved like the CREATE below resolves it: the
+                // validity check and the repair DROP stay on that table's index, never a
+                // same-named one of another schema.
+                String table = index[1].substring(0, index[1].indexOf(' '));
                 int key = name.hashCode();
                 if (!tryLock(conn, lockClass, key)) {
                     throw new SQLException("another instance is building " + name, "55P03");
                 }
                 try (Statement stmt = conn.createStatement()) {
-                    if (Boolean.FALSE.equals(isValid(conn, name))) {
+                    if (Boolean.FALSE.equals(isValid(conn, table, name))) {
                         LOGGER.infof("Rebuilding index %s, left invalid by an interrupted build", name);
-                        stmt.execute("DROP INDEX CONCURRENTLY IF EXISTS " + name);
+                        stmt.execute("DROP INDEX CONCURRENTLY IF EXISTS " + quoted(schemaOf(conn, table)) + "." + name);
                     }
                     stmt.execute("CREATE INDEX CONCURRENTLY IF NOT EXISTS " + name + " ON " + index[1]);
-                    if (!Boolean.TRUE.equals(isValid(conn, name))) {
+                    if (!Boolean.TRUE.equals(isValid(conn, table, name))) {
                         throw new SQLException("index " + name + " is not valid after its build", "55000");
                     }
                 } finally {
@@ -116,14 +120,37 @@ final class PostgresLateIndexes {
         }
     }
 
-    /** {@code pg_index.indisvalid} of an index, or null when it does not exist. */
-    static Boolean isValid(Connection conn, String indexName) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement("SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)")) {
-            ps.setString(1, indexName);
+    /**
+     * {@code pg_index.indisvalid} of {@code table}'s index named {@code indexName},
+     * or null when that table has none.
+     */
+    static Boolean isValid(Connection conn, String table, String indexName) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement(
+                "SELECT i.indisvalid FROM pg_index i JOIN pg_class c ON c.oid = i.indexrelid WHERE i.indrelid = to_regclass(?) AND c.relname = ?")) {
+            ps.setString(1, table);
+            ps.setString(2, indexName);
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() ? rs.getBoolean(1) : null;
             }
         }
+    }
+
+    /** The schema {@code table} resolves to through the search path. */
+    static String schemaOf(Connection conn, String table) throws SQLException {
+        try (PreparedStatement ps = conn
+                .prepareStatement("SELECT n.nspname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace WHERE c.oid = to_regclass(?)")) {
+            ps.setString(1, table);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new SQLException("table " + table + " does not exist", "42P01");
+                }
+                return rs.getString(1);
+            }
+        }
+    }
+
+    private static String quoted(String identifier) {
+        return "\"" + identifier.replace("\"", "\"\"") + "\"";
     }
 
     private static boolean tryLock(Connection conn, int lockClass, int key) throws SQLException {

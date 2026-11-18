@@ -310,7 +310,8 @@ export function ChannelDetailPage() {
   const isEmail = draft?.channelType === "email";
   // The mail log belongs to the saved version: an unsaved switch to email has
   // no log yet (and a switch away still has one).
-  const savedIsEmail = config?.channelType === "email";
+  // Case-insensitive, as the server's own check is.
+  const savedIsEmail = config?.channelType?.toLowerCase() === "email";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;
