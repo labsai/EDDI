@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools.quota;
 
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
+
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,6 +41,7 @@ class PostgresToolQuotaStoreUnitTest {
         var key = new ToolQuotaKey("aaaaaaaaaaaaaaaaaaaaaaaa", "tool:a", "u", 0L);
 
         assertThrows(ToolQuotaStoreException.class, () -> store.tryAcquire(key, 1, Instant.now()));
+        PostgresSchema.resetForTests(); // the back-off between two calls is covered by PostgresSchemaTest
         assertThrows(ToolQuotaStoreException.class, () -> store.tryAcquire(key, 1, Instant.now()));
 
         verify(dataSource, times(2)).getConnection();
