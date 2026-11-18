@@ -65,15 +65,18 @@ import java.util.Set;
  *
  * <p>
  * The page tree cannot be avoided the same way: PDFBox's page iterator, which
- * text extraction uses, recurses once per level of the tree. So the tree is
- * first walked here, iteratively, and refused when it is deeper than
- * {@value #MAX_PAGE_TREE_DEPTH} levels or lists one page twice — the iterator
- * would yield that page twice, and the page numbers here and those the text
- * engine counts would disagree. One recursion is out of reach: when the
- * cross-reference table is broken, the parser rebuilds it and walks the page
- * tree recursively before this code has the document. A
- * {@link StackOverflowError} from there is caught at the boundary and reported
- * as an unreadable file.
+ * text extraction uses, recurses once per branch it enters and builds every
+ * page object up front. So the tree is first walked here exactly as the
+ * iterator will walk it — kid by kid, with its rule for branches seen before —
+ * but with an explicit stack, and refused when the iterator would recurse
+ * deeper than {@value #MAX_PAGE_TREE_DEPTH} levels or build more than
+ * {@value #MAX_PAGES} pages. A tree that lists one page twice is refused too:
+ * the iterator would yield that page twice, and the page numbers here and those
+ * the text engine counts would disagree. One recursion is out of reach: when
+ * the cross-reference table is broken, the parser rebuilds it and walks the
+ * page tree recursively before this code has the document. A
+ * {@link StackOverflowError} from there — or from anywhere else in the read —
+ * is caught at the boundary and reported as an unreadable file.
  *
  * <h2>The cut</h2>
  * <ul>
@@ -119,6 +122,15 @@ public class PdfStructureExtractor {
      * handful; PDFBox's page iterator recurses once per level.
      */
     static final int MAX_PAGE_TREE_DEPTH = 256;
+
+    /**
+     * Pages a document may have. PDFBox builds an object per page, and a page can
+     * be a {@code null} in a {@code /Kids} array — a few decoded bytes that become
+     * a dictionary, a queue entry and a map entry here — so the decode budget,
+     * which bounds the bytes, does not bound the heap. Fifty times what the large
+     * document work is planned for.
+     */
+    static final int MAX_PAGES = 250_000;
 
     /** How many objects a walk visits between deadline checks. */
     private static final int OBJECTS_PER_DEADLINE_CHECK = 64;
@@ -191,7 +203,7 @@ public class PdfStructureExtractor {
                 // Last resort, for the one recursion this code cannot walk ahead of: the
                 // parser's own page-tree check while it rebuilds a broken cross-reference
                 // table. The overflow has unwound by here; nothing is left half-built.
-                throw new UnreadableDocumentException("This PDF's page tree is nested too deeply to be read.");
+                throw new UnreadableDocumentException("This PDF's structure is nested too deeply to be read.");
             } catch (UnreadableDocumentException e) {
                 if (budget.exceeded()) {
                     throw tooMuchToDecode(budget);
@@ -230,7 +242,7 @@ public class PdfStructureExtractor {
             if (document.isEncrypted()) {
                 throw new UnreadableDocumentException("This PDF is encrypted. Upload a copy without a password.");
             }
-            requireShallowPageTree(document, deadline);
+            requireReadablePageTree(document, deadline);
             Map<COSDictionary, Integer> pageNumbers = numberPages(document, deadline);
             int pageCount = pageNumbers.size();
             if (pageCount == 0) {
@@ -293,39 +305,59 @@ public class PdfStructureExtractor {
     }
 
     /**
-     * Walks the page tree the way PDFBox's page iterator does — a node with
-     * {@code /Kids} or of type {@code /Pages} is a branch, a branch seen before is
-     * skipped — but iteratively, and refuses it when it is deeper than
-     * {@link #MAX_PAGE_TREE_DEPTH}, before the iterator's recursion is run on it.
+     * Walks the page tree exactly as PDFBox's page iterator ({@code PDPageTree}'s
+     * {@code enqueueKids}) will: depth first in kid order, a node with
+     * {@code /Kids} or of type {@code /Pages} a branch, a kid skipped when it is a
+     * branch-with-kids already entered, a {@code null} kid counted as the empty
+     * page PDFBox makes of it. The iterator recurses where this keeps a stack of
+     * positions, so the stack's height is the recursion it would need.
+     *
+     * @throws UnreadableDocumentException
+     *             when that recursion would be deeper than
+     *             {@link #MAX_PAGE_TREE_DEPTH}, or the tree holds more than
+     *             {@link #MAX_PAGES} pages — before the iterator runs on it
      */
-    private static void requireShallowPageTree(PDDocument document, Instant deadline) {
+    private static void requireReadablePageTree(PDDocument document, Instant deadline) {
         COSDictionary root = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGES);
-        if (root == null) {
+        if (root == null || !isBranch(root)) {
             return;
         }
-        record Branch(COSDictionary node, int depth) {
+        final class Position {
+            final COSArray kids;
+            int next;
+
+            Position(COSDictionary branch) {
+                COSArray array = branch.getCOSArray(COSName.KIDS);
+                this.kids = array == null ? new COSArray() : array;
+            }
         }
-        Set<COSDictionary> seen = Collections.newSetFromMap(new IdentityHashMap<>());
-        Deque<Branch> pending = new ArrayDeque<>();
-        pending.push(new Branch(root, 1));
-        int visited = 0;
-        while (!pending.isEmpty()) {
-            Branch branch = pending.pop();
-            if (branch.depth() > MAX_PAGE_TREE_DEPTH) {
-                throw new UnreadableDocumentException("This PDF's page tree is nested more than "
-                        + MAX_PAGE_TREE_DEPTH + " levels deep, which no genuine document needs.");
-            }
-            if (++visited % OBJECTS_PER_DEADLINE_CHECK == 0) {
-                requireBefore(deadline);
-            }
-            COSArray kids = branch.node().getCOSArray(COSName.KIDS);
-            if (kids == null) {
+        Set<COSDictionary> entered = Collections.newSetFromMap(new IdentityHashMap<>());
+        Deque<Position> stack = new ArrayDeque<>();
+        stack.push(new Position(root));
+        long pages = 0;
+        long steps = 0;
+        while (!stack.isEmpty()) {
+            Position position = stack.peek();
+            if (position.next >= position.kids.size()) {
+                stack.pop();
                 continue;
             }
-            for (int i = 0; i < kids.size(); i++) {
-                if (kids.getObject(i) instanceof COSDictionary kid && isBranch(kid) && seen.add(kid)) {
-                    pending.push(new Branch(kid, branch.depth() + 1));
+            if (++steps % OBJECTS_PER_DEADLINE_CHECK == 0) {
+                requireBefore(deadline);
+            }
+            COSBase kid = position.kids.getObject(position.next++);
+            if (kid instanceof COSDictionary dictionary && isBranch(dictionary)) {
+                if (dictionary.containsKey(COSName.KIDS) && !entered.add(dictionary)) {
+                    continue;
                 }
+                if (stack.size() >= MAX_PAGE_TREE_DEPTH) {
+                    throw new UnreadableDocumentException("This PDF's page tree is nested more than "
+                            + MAX_PAGE_TREE_DEPTH + " levels deep, which no genuine document needs.");
+                }
+                stack.push(new Position(dictionary));
+            } else if ((kid == null || kid instanceof COSDictionary) && ++pages > MAX_PAGES) {
+                throw new UnreadableDocumentException("This PDF has more than " + MAX_PAGES
+                        + " pages, which is more than one document may have.");
             }
         }
     }

@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.ingestion.extract.document.DocumentManifest;
 import ai.labs.eddi.modules.ingestion.extract.document.DocumentUnit;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitStrategy;
+import org.apache.pdfbox.Loader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -23,6 +24,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
@@ -590,6 +592,42 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @Timeout(60)
+        @DisplayName("measures depth the way PDFBox's iterator recurses, not the way the tree is drawn")
+        void staircasePageTree() {
+            int depth = PdfStructureExtractor.MAX_PAGE_TREE_DEPTH + 50;
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> manifest(PdfFixtures.staircasePageTree(depth), SplitConfig.defaults()));
+
+            assertTrue(failure.getMessage().contains("levels deep"), failure.getMessage());
+        }
+
+        @Test
+        @Timeout(30)
+        @DisplayName("reads a page tree that loops back on itself as PDFBox does: each branch entered once")
+        void loopingPageTree() {
+            assertEquals(1, manifest(PdfFixtures.loopingPageTree(), SplitConfig.defaults()).pageCount());
+        }
+
+        @Test
+        @DisplayName("reads a staircase page tree that stays within the depth")
+        void shallowStaircase() {
+            assertEquals(40, manifest(PdfFixtures.staircasePageTree(40), SplitConfig.defaults()).pageCount());
+        }
+
+        @Test
+        @Timeout(60)
+        @DisplayName("refuses more pages than a document may have before PDFBox builds them")
+        void tooManyPages() {
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> manifest(PdfFixtures.nullPages(PdfStructureExtractor.MAX_PAGES + 1), SplitConfig.defaults()));
+
+            assertTrue(failure.getMessage().contains("more than " + PdfStructureExtractor.MAX_PAGES + " pages"),
+                    failure.getMessage());
+        }
+
+        @Test
         @DisplayName("reads a page tree of ordinary depth")
         void ordinaryPageTree() {
             assertEquals(1, manifest(PdfFixtures.deepPageTree(20), SplitConfig.defaults()).pageCount());
@@ -618,10 +656,16 @@ class PdfStructureExtractorTest {
             assertThrows(UnreadableDocumentException.class, () -> extractor.manifest(
                     PdfFixtures.flateBomb(8 * 1024 * 1024), "ref-1", SplitConfig.defaults(), oneMegabyte, false));
 
-            // A budget left armed would refuse this read, which decodes far more than 2 MB.
-            DocumentManifest manifest = extractor.manifest(PdfFixtures.flateBomb(8 * 1024 * 1024), "ref-1",
-                    SplitConfig.defaults(), limits, false);
-            assertEquals(1, manifest.pageCount());
+            // Decoded outside any extractor, through the filter factory's counted filters,
+            // which charge whatever budget is still armed on this thread: 8 MB against
+            // the spent 2 MB one. (Another manifest() call would prove nothing — it arms
+            // a fresh budget over a leaked one; nor would PDFTextStripper, which inflates
+            // a lone Flate content stream with a decoder of its own.)
+            assertDoesNotThrow(() -> {
+                try (var document = Loader.loadPDF(PdfFixtures.flateBomb(8 * 1024 * 1024))) {
+                    PdfTextExtractor.chargePageContents(document.getPage(0));
+                }
+            });
         }
     }
 }

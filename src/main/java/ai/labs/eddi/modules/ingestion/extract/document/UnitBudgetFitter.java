@@ -21,8 +21,10 @@ import java.util.Objects;
  * {@link SplitConfig#minUnitTokens()} is merged into the section after it, or,
  * when it is the last of its list, into the one before. Its pages join the
  * neighbour's first (or last) part, and the neighbour's title names both. A
- * document with no text at all is not merged — every estimate is zero, and
- * merging would leave one unit of the whole file.</li>
+ * section with no text at all — a scanned chapter, a window of scanned pages —
+ * is neither merged nor merged into: its estimate of zero says nothing about
+ * its size, and a run of them would otherwise fold into one unit of hundreds of
+ * pages.</li>
  * <li><b>Split the large.</b> A section with no parts that is estimated above
  * {@link SplitConfig#maxUnitTokens()} is cut at page boundaries into parts as
  * full as the budget allows: a part ends only where the next page would not
@@ -107,7 +109,7 @@ public final class UnitBudgetFitter {
         for (Node node : top) {
             collapseSingleParts(node);
         }
-        if (config.minUnitTokens() > 0 && fitter.prefix[pageTokens.length] > 0) {
+        if (config.minUnitTokens() > 0) {
             fitter.mergeTiny(top);
         }
         fitter.splitLarge(top);
@@ -185,17 +187,17 @@ public final class UnitBudgetFitter {
 
         /** Takes over the pages of {@code tiny}, which came just before this. */
         void absorbFromBefore(Node tiny) {
-            firstTitle = tiny.firstTitle;
             for (Node node = this; node != null; node = node.isLeaf() ? null : node.children.get(0)) {
                 node.first = tiny.first;
+                node.firstTitle = tiny.firstTitle;
             }
         }
 
         /** Takes over the pages of {@code tail}, which came just after this. */
         void absorbFromAfter(Node tail) {
-            lastTitle = tail.lastTitle;
             for (Node node = this; node != null; node = node.isLeaf() ? null : node.children.getLast()) {
                 node.last = tail.last;
+                node.lastTitle = tail.lastTitle;
             }
         }
     }
@@ -232,6 +234,17 @@ public final class UnitBudgetFitter {
             List<Node> kept = new ArrayList<>(list.size());
             Node carried = null;
             for (Node node : list) {
+                if (tokens(node) == 0) {
+                    // Pages with no text — a scan — neither take a carried unit nor are
+                    // carried: their estimate says nothing about their size, and a run
+                    // of them would otherwise fold into one unit of hundreds of pages.
+                    if (carried != null) {
+                        kept.add(carried);
+                        carried = null;
+                    }
+                    kept.add(node);
+                    continue;
+                }
                 if (carried != null) {
                     node.absorbFromBefore(carried);
                     carried = null;
@@ -243,7 +256,7 @@ public final class UnitBudgetFitter {
                 }
             }
             if (carried != null) {
-                if (kept.isEmpty()) {
+                if (kept.isEmpty() || tokens(kept.getLast()) == 0) {
                     kept.add(carried);
                 } else {
                     kept.getLast().absorbFromAfter(carried);
@@ -273,7 +286,9 @@ public final class UnitBudgetFitter {
                     pagesOverBudget++;
                     continue;
                 }
-                String title = display(node);
+                // An untitled section (a page window) names its parts by their own pages;
+                // "Pages 1–10 (part 1 of 2)" would claim pages the part does not hold.
+                String title = node.firstTitle == null && node.lastTitle == null ? null : display(node);
                 for (int k = 0; k < parts.size(); k++) {
                     int[] part = parts.get(k);
                     if (part[0] == part[1] && tokens(part[0], part[1]) > config.maxUnitTokens()) {
@@ -281,7 +296,8 @@ public final class UnitBudgetFitter {
                     }
                     // The suffix is what tells the parts apart, so the title gives way to it.
                     String suffix = " (part " + (k + 1) + " of " + parts.size() + ")";
-                    node.children.add(Node.leaf(capped(title, MAX_TITLE_CODE_POINTS - suffix.length()) + suffix,
+                    node.children.add(Node.leaf(
+                            title == null ? null : capped(title, MAX_TITLE_CODE_POINTS - suffix.length()) + suffix,
                             part[0], part[1]));
                 }
             }

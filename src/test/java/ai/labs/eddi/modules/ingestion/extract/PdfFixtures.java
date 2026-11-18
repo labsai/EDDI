@@ -350,6 +350,53 @@ public final class PdfFixtures {
     }
 
     /**
+     * A page tree that is two levels deep on paper but makes PDFBox's iterator
+     * recurse {@code depth} levels: the root lists branches N1..Nk, and each Ni
+     * lists a page and then N(i+1). Entering N1 enters N2 before the root's own N2
+     * entry is reached, and so on down. Written by hand.
+     */
+    public static byte[] staircasePageTree(int depth) {
+        List<String> objects = new ArrayList<>();
+        int firstBranch = 3;
+        int firstPage = firstBranch + depth;
+        objects.add("<</Type/Catalog/Pages 2 0 R>>");
+        StringBuilder rootKids = new StringBuilder();
+        for (int i = 0; i < depth; i++) {
+            rootKids.append(firstBranch + i).append(" 0 R ");
+        }
+        objects.add("<</Type/Pages/Kids[" + rootKids + "]/Count " + depth + ">>");
+        for (int i = 0; i < depth; i++) {
+            String next = i + 1 < depth ? " " + (firstBranch + i + 1) + " 0 R" : "";
+            objects.add("<</Type/Pages/Kids[" + (firstPage + i) + " 0 R" + next + "]/Count 1>>");
+        }
+        for (int i = 0; i < depth; i++) {
+            objects.add("<</Type/Page/MediaBox[0 0 612 792]>>");
+        }
+        return rawPdf(objects.stream().map(PdfFixtures::ascii).toList());
+    }
+
+    /**
+     * A page tree that loops: the root's one branch B lists a page and then B
+     * itself. PDFBox's iterator enters B once and skips the second entry, so the
+     * document has one page. Written by hand.
+     */
+    public static byte[] loopingPageTree() {
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"),
+                ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Pages/Kids[4 0 R 3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/MediaBox[0 0 612 792]>>")));
+    }
+
+    /**
+     * A page tree whose {@code /Kids} is {@code count} {@code null}s: five bytes a
+     * page, each of which PDFBox turns into an empty page object.
+     */
+    public static byte[] nullPages(int count) {
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"),
+                ascii("<</Type/Pages/Kids[" + "null ".repeat(count) + "]/Count " + count + ">>")));
+    }
+
+    /**
      * One page showing "A" in a Type 3 font whose {@code space} glyph — never
      * shown, but measured by PDFBox to space words — is a Flate stream inflating to
      * {@code inflatedBytes}. PDFBox measures that width inside a

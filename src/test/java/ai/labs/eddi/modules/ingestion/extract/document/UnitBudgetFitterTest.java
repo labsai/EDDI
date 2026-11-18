@@ -106,6 +106,32 @@ class UnitBudgetFitterTest {
         }
 
         @Test
+        @DisplayName("neither merges pages with no text nor merges into them, so a scan stays in windows")
+        void textlessSectionsStayApart() {
+            int[] tokens = new int[50];
+            tokens[0] = 10;
+            tokens[45] = 600;
+            var windows = List.of(Section.of(null, 1, 10), Section.of(null, 11, 20), Section.of(null, 21, 30),
+                    Section.of(null, 31, 40), Section.of(null, 41, 50));
+
+            Result result = UnitBudgetFitter.fit(windows, tokens, config(10_000, 500, 60));
+
+            assertEquals("u1:1-10 u2:11-20 u3:21-30 u4:31-40 u5:41-50", shape(result));
+        }
+
+        @Test
+        @DisplayName("keeps a tiny last unit apart rather than merge it into pages with no text")
+        void tinyAfterTextless() {
+            int[] tokens = new int[20];
+            tokens[15] = 10;
+            var windows = List.of(Section.of(null, 1, 10), Section.of(null, 11, 20));
+
+            Result result = UnitBudgetFitter.fit(windows, tokens, config(10_000, 500, 60));
+
+            assertEquals("u1:1-10 u2:11-20", shape(result));
+        }
+
+        @Test
         @DisplayName("never merges with a minimum of zero")
         void zeroMinimumNeverMerges() {
             var sections = List.of(Section.of("a", 1, 1), Section.of("b", 2, 2));
@@ -133,6 +159,17 @@ class UnitBudgetFitterTest {
             assertEquals(2, result.units().get(3).level());
             assertEquals("u2", result.units().get(3).parentId());
             assertTrue(result.warnings().isEmpty(), result.warnings().toString());
+        }
+
+        @Test
+        @DisplayName("names the parts of an untitled window by their own pages")
+        void untitledParts() {
+            Result result = UnitBudgetFitter.fit(List.of(Section.of(null, 1, 10)), tokens(10, 300),
+                    config(2_000, 0, 60));
+
+            assertEquals("u1:1-10 u1.1:1-6 u1.2:7-10", shape(result));
+            assertEquals(List.of("Pages 1–10", "Pages 1–6", "Pages 7–10"),
+                    result.units().stream().map(DocumentUnit::title).toList());
         }
 
         @Test
@@ -210,6 +247,19 @@ class UnitBudgetFitterTest {
 
             assertEquals("u1:1-2 u2:3-8", shape(result));
             assertEquals("Two", result.units().get(1).title());
+        }
+
+        @Test
+        @DisplayName("names the merged chapter in the title of the part that now holds it")
+        void mergedIntoAPartRenamesThePart() {
+            var sections = List.of(new Section("Ch1", 1, 4, List.of(Section.of("1.1", 1, 2), Section.of("1.2", 3, 4))),
+                    Section.of("Ch2", 5, 6));
+
+            Result result = UnitBudgetFitter.fit(sections, tokens(6, 10), config(10_000, 0, 2));
+
+            assertEquals("u1:1-6 u1.1:1-2 u1.2:3-6", shape(result));
+            assertEquals(List.of("Ch1 – Ch2", "1.1", "1.2 – Ch2"),
+                    result.units().stream().map(DocumentUnit::title).toList());
         }
 
         @Test
