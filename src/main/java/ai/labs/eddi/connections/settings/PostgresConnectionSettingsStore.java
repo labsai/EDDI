@@ -5,6 +5,7 @@
 package ai.labs.eddi.connections.settings;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -17,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.Arrays;
@@ -84,9 +84,10 @@ public class PostgresConnectionSettingsStore implements IConnectionSettingsStore
             if (schemaInitialized) {
                 return;
             }
-            try (Connection connection = dataSourceInstance.get().getConnection();
-                    Statement statement = connection.createStatement()) {
-                statement.execute(CREATE_TABLE);
+            try {
+                PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConnectionSettingsStore", statement -> {
+                    statement.execute(CREATE_TABLE);
+                });
                 schemaInitialized = true;
                 LOGGER.info("PostgresConnectionSettingsStore initialized (table=connection_settings)");
             } catch (SQLException e) {

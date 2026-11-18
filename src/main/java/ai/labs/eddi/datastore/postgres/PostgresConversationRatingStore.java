@@ -28,7 +28,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -132,15 +131,16 @@ public class PostgresConversationRatingStore implements IConversationRatingStore
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            for (String index : CREATE_INDEXES) {
-                stmt.execute(index);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConversationRatingStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                for (String index : CREATE_INDEXES) {
+                    stmt.execute(index);
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresConversationRatingStore schema initialized");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize conversation_ratings table", e);
             throw new RuntimeException("Failed to initialize conversation_ratings table", e);
         }
     }

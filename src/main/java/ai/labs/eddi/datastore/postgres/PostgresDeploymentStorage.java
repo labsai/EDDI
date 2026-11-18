@@ -48,8 +48,10 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresDeploymentStorage", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize deployments table", e);

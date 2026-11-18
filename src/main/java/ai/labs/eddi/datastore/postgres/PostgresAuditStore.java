@@ -108,6 +108,8 @@ public class PostgresAuditStore implements IAuditStore {
      * fix. Dropping a constraint a column does not have is a no-op in PostgreSQL,
      * so these are idempotent and safe to run on every start.
      */
+    private static final String[] DROP_NOT_NULL_COLUMNS = {"conversation_id", "agent_id", "agent_version"};
+
     private static final String[] DROP_NOT_NULL_CONSTRAINTS = {
             "ALTER TABLE audit_ledger ALTER COLUMN conversation_id DROP NOT NULL",
             "ALTER TABLE audit_ledger ALTER COLUMN AGENT_ID DROP NOT NULL",
@@ -216,17 +218,32 @@ public class PostgresAuditStore implements IAuditStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(ADD_SEQUENCE_COLUMN); // idempotent upgrades for pre-existing ledgers
-            stmt.execute(ADD_AGENT_SIGNATURE_COLUMN);
-            for (String alter : DROP_NOT_NULL_CONSTRAINTS) {
-                stmt.execute(alter);
-            }
-            stmt.execute(CREATE_INDEX_CONV);
-            stmt.execute(CREATE_INDEX_CONV_SEQ);
-            stmt.execute(CREATE_INDEX_AGENT);
-            stmt.execute(CREATE_INDEX_TS);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresAuditStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                // Upgrades of a ledger an earlier release created. An ALTER TABLE takes an
+                // ACCESS
+                // EXCLUSIVE lock even when it changes nothing, which on a busy ledger queues
+                // behind
+                // every running query and blocks every query behind it - so it runs only when
+                // the
+                // column or constraint is actually missing.
+                if (PostgresSchema.columnMissing(stmt, "audit_ledger", "sequence")) {
+                    stmt.execute(ADD_SEQUENCE_COLUMN);
+                }
+                if (PostgresSchema.columnMissing(stmt, "audit_ledger", "agent_signature")) {
+                    stmt.execute(ADD_AGENT_SIGNATURE_COLUMN);
+                }
+                for (int i = 0; i < DROP_NOT_NULL_COLUMNS.length; i++) {
+                    if (PostgresSchema.columnHasNotNull(stmt, "audit_ledger", DROP_NOT_NULL_COLUMNS[i])) {
+                        stmt.execute(DROP_NOT_NULL_CONSTRAINTS[i]);
+                    }
+                }
+                stmt.execute(CREATE_INDEX_CONV);
+                stmt.execute(CREATE_INDEX_CONV_SEQ);
+                stmt.execute(CREATE_INDEX_AGENT);
+                stmt.execute(CREATE_INDEX_TS);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize audit_ledger table", e);

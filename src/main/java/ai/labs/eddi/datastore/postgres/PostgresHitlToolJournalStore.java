@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
@@ -84,13 +83,14 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresHitlToolJournalStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresHitlToolJournalStore schema initialized");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize hitl_tool_execution_journal table", e);
-            return;
+            throw new IllegalStateException("Failed to initialize hitl_tool_execution_journal table", e);
         }
         // Postgres has no TTL index. Run a one-shot, best-effort cleanup at startup
         // to bound growth (a continuous sweep is out of scope). Completed entries

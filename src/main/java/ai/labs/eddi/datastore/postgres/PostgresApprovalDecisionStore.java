@@ -19,7 +19,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -82,11 +81,13 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            for (String index : CREATE_INDEXES) {
-                stmt.execute(index);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresApprovalDecisionStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                for (String index : CREATE_INDEXES) {
+                    stmt.execute(index);
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresApprovalDecisionStore schema initialized");
         } catch (SQLException e) {

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.tenancy;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
@@ -267,12 +268,13 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_QUOTAS_TABLE);
-            // one round trip: a table created before cost reservations existed gets its two
-            // columns
-            stmt.execute(CREATE_USAGE_TABLE + ";\n" + ADD_RESERVATION_COLUMNS);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresTenantQuotaStore", stmt -> {
+                stmt.execute(CREATE_QUOTAS_TABLE);
+                // one round trip: a table created before cost reservations existed gets its two
+                // columns
+                stmt.execute(CREATE_USAGE_TABLE + ";\n" + ADD_RESERVATION_COLUMNS);
+            });
             LOGGER.info("PostgresTenantQuotaStore initialized (tables=tenant_quotas, tenant_usage)");
 
             // Bootstrap default tenant quota if none exists (parity with
@@ -280,7 +282,9 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             // Uses INSERT ... ON CONFLICT DO NOTHING so an existing quota is never
             // overwritten.
             if (defaultTenantId != null && defaultQuota != null) {
-                bootstrapDefaultQuota(conn, defaultQuota);
+                try (Connection conn = dataSourceInstance.get().getConnection()) {
+                    bootstrapDefaultQuota(conn, defaultQuota);
+                }
             }
 
             schemaInitialized = true;

@@ -9,6 +9,7 @@ import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -23,7 +24,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
@@ -109,13 +109,15 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            statement.execute(CREATE_INDEX);
-            statement.execute(CREATE_PRINCIPAL_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConnectionGrantStore", statement -> {
+                statement.execute(CREATE_TABLE);
+                statement.execute(CREATE_INDEX);
+                statement.execute(CREATE_PRINCIPAL_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to create the connection_grants schema");
+            throw new IllegalStateException("Failed to create the connection_grants schema", e);
         }
     }
 

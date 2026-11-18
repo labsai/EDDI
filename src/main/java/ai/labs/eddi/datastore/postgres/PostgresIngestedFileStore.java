@@ -17,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -93,9 +92,10 @@ public class PostgresIngestedFileStore implements IIngestedFileStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection();
-                Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresIngestedFileStore", statement -> {
+                statement.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new IngestedFileStoreException("Could not create the uploaded-file table", e);

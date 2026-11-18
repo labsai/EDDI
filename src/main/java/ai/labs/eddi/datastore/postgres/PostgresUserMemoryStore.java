@@ -173,18 +173,20 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(ADD_LAST_WRITER_COLUMN);
-            for (String sql : (UPGRADE_COLUMNS + CREATE_INDEXES).split(";")) {
-                sql = sql.trim();
-                if (!sql.isEmpty()) {
-                    stmt.execute(sql);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresUserMemoryStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(ADD_LAST_WRITER_COLUMN);
+                for (String sql : (UPGRADE_COLUMNS + CREATE_INDEXES).split(";")) {
+                    sql = sql.trim();
+                    if (!sql.isEmpty()) {
+                        stmt.execute(sql);
+                    }
                 }
-            }
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize usermemories table", e);
+            throw new IllegalStateException("Failed to initialize usermemories table", e);
         }
     }
 

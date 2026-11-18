@@ -5,6 +5,7 @@
 package ai.labs.eddi.secrets.persistence;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -118,15 +119,17 @@ public class PostgresSecretPersistence implements ISecretPersistence {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_SECRETS_TABLE);
-            stmt.execute(CREATE_DEKS_TABLE);
-            stmt.execute(CREATE_META_TABLE);
-            for (String sql : (MIGRATE_DEKS_TABLE + ";" + MIGRATE_SECRETS_TABLE + ";" + CREATE_INDEXES).split(";")) {
-                sql = sql.trim();
-                if (!sql.isEmpty())
-                    stmt.execute(sql);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresSecretPersistence", stmt -> {
+                stmt.execute(CREATE_SECRETS_TABLE);
+                stmt.execute(CREATE_DEKS_TABLE);
+                stmt.execute(CREATE_META_TABLE);
+                for (String sql : (MIGRATE_DEKS_TABLE + ";" + MIGRATE_SECRETS_TABLE + ";" + CREATE_INDEXES).split(";")) {
+                    sql = sql.trim();
+                    if (!sql.isEmpty())
+                        stmt.execute(sql);
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("Secrets vault PostgreSQL tables ensured");
         } catch (SQLException e) {

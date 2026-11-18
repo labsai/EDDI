@@ -44,11 +44,13 @@ public class PostgresMigrationLogStore implements IMigrationLogStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresMigrationLogStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize migration_log table", e);
+            throw new IllegalStateException("Failed to initialize migration_log table", e);
         }
     }
 

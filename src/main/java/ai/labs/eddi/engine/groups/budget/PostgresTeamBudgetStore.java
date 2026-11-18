@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.groups.budget;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -18,7 +19,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -81,9 +81,11 @@ public class PostgresTeamBudgetStore implements ITeamBudgetStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            statement.execute(CREATE_EXPIRES_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresTeamBudgetStore", statement -> {
+                statement.execute(CREATE_TABLE);
+                statement.execute(CREATE_EXPIRES_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new TeamBudgetAccountingUnavailableException("Could not create the " + TABLE + " schema", e);

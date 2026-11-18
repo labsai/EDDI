@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.connections.names;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Duration;
 import java.util.Optional;
 
@@ -101,11 +101,13 @@ public class PostgresConnectionNameClaimStore implements IConnectionNameClaimSto
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConnectionNameClaimStore", statement -> {
+                statement.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to create the connection_name_claims schema");
+            throw new IllegalStateException("Failed to create the connection_name_claims schema", e);
         }
     }
 

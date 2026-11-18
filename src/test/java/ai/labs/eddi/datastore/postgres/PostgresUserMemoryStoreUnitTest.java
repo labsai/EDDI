@@ -876,7 +876,7 @@ class PostgresUserMemoryStoreUnitTest {
     // ─── ensureSchema failure ───────────────────────────────────
 
     @Test
-    void ensureSchema_sqlException_logsButDoesNotThrow() throws Exception {
+    void ensureSchema_sqlException_surfacesToTheCaller() throws Exception {
         // given
         DataSource failDs = mock(DataSource.class);
         when(failDs.getConnection()).thenThrow(new SQLException("Schema error"));
@@ -887,10 +887,10 @@ class PostgresUserMemoryStoreUnitTest {
 
         var freshStore = new PostgresUserMemoryStore(failInstance);
 
-        // when/then — ensureSchema logs the error but does not throw
-        // (unlike other stores, this one catches the exception)
-        // The next call that tries to get a connection will also fail
-        assertThrows(IResourceStore.ResourceStoreException.class,
+        // when/then — a failed schema creation is no longer swallowed: the caller sees
+        // it
+        // (and the next call retries it)
+        assertThrows(IllegalStateException.class,
                 () -> freshStore.readProperties("user1"));
     }
 

@@ -61,12 +61,14 @@ public class PostgresDatabaseLogs implements IDatabaseLogs {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX_TIMESTAMP);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresDatabaseLogs", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX_TIMESTAMP);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize database_logs table", e);
+            throw new IllegalStateException("Failed to initialize database_logs table", e);
         }
     }
 

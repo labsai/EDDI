@@ -191,15 +191,19 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     private void initSchema(String... indexes) {
         List<PostgresFieldIndexSwaps.Swap> swaps = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_RESOURCES_TABLE);
-            stmt.execute(CREATE_HISTORY_TABLE);
-            for (String createIndex : CREATE_INDEXES) {
-                createIndexQuietly(stmt, createIndex);
-            }
-            for (String index : indexes) {
-                createFieldIndex(conn, stmt, index, swaps);
-            }
+        try {
+            // Not runOnce: the field indexes differ per collection, and the swaps this
+            // run decides on must be found by every storage that asks for them.
+            PostgresSchema.run(dataSource, "PostgresResourceStorage:" + collectionName, (conn, stmt) -> {
+                stmt.execute(CREATE_RESOURCES_TABLE);
+                stmt.execute(CREATE_HISTORY_TABLE);
+                for (String createIndex : CREATE_INDEXES) {
+                    createIndexQuietly(stmt, createIndex);
+                }
+                for (String index : indexes) {
+                    createFieldIndex(conn, stmt, index, swaps);
+                }
+            });
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize PostgreSQL schema", e);
         }

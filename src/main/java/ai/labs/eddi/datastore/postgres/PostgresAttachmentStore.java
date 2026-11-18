@@ -88,13 +88,15 @@ public class PostgresAttachmentStore implements IAttachmentStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(ADD_GRANTS_COLUMN);
-            stmt.execute(CREATE_INDEX_CONV);
-            stmt.execute(CREATE_INDEX_TENANT);
-            stmt.execute(ADD_USER_COLUMN);
-            stmt.execute(CREATE_INDEX_USER);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresAttachmentStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(ADD_GRANTS_COLUMN);
+                stmt.execute(CREATE_INDEX_CONV);
+                stmt.execute(CREATE_INDEX_TENANT);
+                stmt.execute(ADD_USER_COLUMN);
+                stmt.execute(CREATE_INDEX_USER);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);

@@ -271,25 +271,27 @@ public class PostgresScheduleStore implements IScheduleStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_SCHEDULES_TABLE);
-            stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
-            stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
-            for (String addColumn : ADD_PAYLOAD_COLUMNS) {
-                stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
-            }
-            warnAboutUnattributableSchedules(stmt);
-            stmt.execute(CREATE_FIRE_LOGS_TABLE);
-            for (String idx : CREATE_INDEXES.split(";")) {
-                String trimmed = idx.trim();
-                if (!trimmed.isEmpty()) {
-                    stmt.execute(trimmed);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresScheduleStore", stmt -> {
+                stmt.execute(CREATE_SCHEDULES_TABLE);
+                stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
+                stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+                for (String addColumn : ADD_PAYLOAD_COLUMNS) {
+                    stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
                 }
-            }
+                warnAboutUnattributableSchedules(stmt);
+                stmt.execute(CREATE_FIRE_LOGS_TABLE);
+                for (String idx : CREATE_INDEXES.split(";")) {
+                    String trimmed = idx.trim();
+                    if (!trimmed.isEmpty()) {
+                        stmt.execute(trimmed);
+                    }
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresScheduleStore schema initialized");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize schedule tables", e);
+            throw new IllegalStateException("Failed to initialize schedule tables", e);
         }
     }
 

@@ -8,6 +8,7 @@ import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.getUtc;
 import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -20,7 +21,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.time.Instant;
 import java.util.Optional;
 
@@ -96,14 +96,16 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            statement.execute(ADD_NONCE_COLUMN);
-            statement.execute(ADD_CONNECTION_ID_COLUMN);
-            statement.execute(CREATE_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresOAuthStateStore", statement -> {
+                statement.execute(CREATE_TABLE);
+                statement.execute(ADD_NONCE_COLUMN);
+                statement.execute(ADD_CONNECTION_ID_COLUMN);
+                statement.execute(CREATE_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
-            LOGGER.errorf(e, "Failed to create the connection_oauth_states schema");
+            throw new IllegalStateException("Failed to create the connection_oauth_states schema", e);
         }
     }
 

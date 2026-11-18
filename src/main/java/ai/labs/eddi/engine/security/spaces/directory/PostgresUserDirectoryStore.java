@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.security.spaces.directory;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -17,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -98,11 +98,13 @@ public class PostgresUserDirectoryStore implements IUserDirectoryStore {
             if (schemaInitialized) {
                 return;
             }
-            try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-                statement.execute(CREATE_TABLE);
-                for (String index : CREATE_INDEXES) {
-                    statement.execute(index);
-                }
+            try {
+                PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresUserDirectoryStore", statement -> {
+                    statement.execute(CREATE_TABLE);
+                    for (String index : CREATE_INDEXES) {
+                        statement.execute(index);
+                    }
+                });
                 schemaInitialized = true;
                 LOGGER.info("PostgresUserDirectoryStore initialized (table=user_directory)");
             } catch (SQLException e) {

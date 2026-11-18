@@ -110,10 +110,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     private synchronized void initSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX_STATE);
-            stmt.execute(CREATE_INDEX_AGENT);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConversationMemoryStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX_STATE);
+                stmt.execute(CREATE_INDEX_AGENT);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize conversation_memories table", e);

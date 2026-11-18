@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.ledger;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -99,11 +99,13 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
-            for (String index : INDEXES) {
-                statement.execute(index);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresEmailMessageLedger", statement -> {
+                statement.execute(CREATE_TABLE);
+                for (String index : INDEXES) {
+                    statement.execute(index);
+                }
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the %s schema", TABLE);

@@ -25,7 +25,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Types;
 import java.time.Instant;
 import java.time.OffsetDateTime;
@@ -128,17 +127,19 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_EVENTS);
-            // Columns added after the table first shipped on development branches.
-            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS subject_user_id VARCHAR(255)");
-            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS digest_event_ids TEXT[]");
-            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_token VARCHAR(64)");
-            stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_until TIMESTAMPTZ");
-            stmt.execute(CREATE_WINDOWS);
-            for (String index : CREATE_INDEXES) {
-                stmt.execute(index);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresAlertEventStore", stmt -> {
+                stmt.execute(CREATE_EVENTS);
+                // Columns added after the table first shipped on development branches.
+                stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS subject_user_id VARCHAR(255)");
+                stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS digest_event_ids TEXT[]");
+                stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_token VARCHAR(64)");
+                stmt.execute("ALTER TABLE alert_events ADD COLUMN IF NOT EXISTS send_claim_until TIMESTAMPTZ");
+                stmt.execute(CREATE_WINDOWS);
+                for (String index : CREATE_INDEXES) {
+                    stmt.execute(index);
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresAlertEventStore schema initialized");
         } catch (SQLException e) {

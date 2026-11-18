@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -60,9 +59,11 @@ public class PostgresLessonHistoryStore implements ILessonHistoryStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresLessonHistoryStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX);
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresLessonHistoryStore schema initialized");
         } catch (SQLException e) {

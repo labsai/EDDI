@@ -210,10 +210,14 @@ class PostgresHitlToolJournalStoreUnitTest {
     }
 
     @Test
-    void schemaInitFailure_isSwallowed_notFatalToConstruction() throws Exception {
+    void schemaInitFailure_surfacesAndIsRetriedByTheNextCall() throws Exception {
         when(statement.execute(anyString())).thenThrow(new SQLException("no db"));
-        // ensureSchema logs + returns without throwing; the store stays usable for
-        // retry.
-        assertDoesNotThrow(() -> store.deleteByConversationId("conv-1"));
+        // a failed creation is no longer swallowed: the caller learns the table is not
+        // there,
+        // and the next call runs the DDL again
+        var failure = assertThrows(IllegalStateException.class, () -> store.deleteByConversationId("conv-1"));
+        assertTrue(failure.getCause() instanceof SQLException);
+        assertThrows(IllegalStateException.class, () -> store.deleteByConversationId("conv-1"));
+        verify(statement, times(2)).execute(anyString());
     }
 }

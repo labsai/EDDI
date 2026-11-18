@@ -18,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -141,16 +140,17 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection();
-                Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_DOCUMENTS_TABLE);
-            statement.execute(CREATE_RUNS_TABLE);
-            statement.execute(CREATE_SOURCES_TABLE);
-            for (String alter : ADD_FENCING_COLUMNS) {
-                statement.execute(alter);
-            }
-            statement.execute(CREATE_RUNS_SOURCE_INDEX);
-            statement.execute(CREATE_ACTIVE_RUN_INDEX);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresIngestionStateStore", statement -> {
+                statement.execute(CREATE_DOCUMENTS_TABLE);
+                statement.execute(CREATE_RUNS_TABLE);
+                statement.execute(CREATE_SOURCES_TABLE);
+                for (String alter : ADD_FENCING_COLUMNS) {
+                    statement.execute(alter);
+                }
+                statement.execute(CREATE_RUNS_SOURCE_INDEX);
+                statement.execute(CREATE_ACTIVE_RUN_INDEX);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             // Thrown, not only logged: carrying on would fail every later call on a

@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.ledger;
 
 import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -16,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -65,10 +65,12 @@ public class PostgresEmailSuppressionStore implements IEmailSuppressionStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            for (String sql : SCHEMA) {
-                statement.execute(sql);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresEmailSuppressionStore", statement -> {
+                for (String sql : SCHEMA) {
+                    statement.execute(sql);
+                }
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the %s schema", TABLE);
