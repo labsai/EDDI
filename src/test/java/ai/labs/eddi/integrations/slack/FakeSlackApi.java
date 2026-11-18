@@ -17,6 +17,7 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
@@ -75,8 +76,12 @@ final class FakeSlackApi implements OutboundEngine {
      * HTTP 429 with a {@code Retry-After} header, as Slack rate-limits a method.
      */
     FakeSlackApi nextRateLimited(int retryAfterSeconds) {
-        return next(429, Map.of("Retry-After", List.of(Integer.toString(retryAfterSeconds))),
-                "{\"ok\":false,\"error\":\"ratelimited\"}");
+        return nextRateLimited(Integer.toString(retryAfterSeconds));
+    }
+
+    /** HTTP 429 with a {@code Retry-After} header of any text. */
+    FakeSlackApi nextRateLimited(String retryAfter) {
+        return next(429, Map.of("Retry-After", List.of(retryAfter)), "{\"ok\":false,\"error\":\"ratelimited\"}");
     }
 
     /** An HTTP status with no Slack body. */
@@ -109,7 +114,18 @@ final class FakeSlackApi implements OutboundEngine {
             throw new AssertionError("the client called " + uri + ", not the configured fake at " + BASE_URL);
         }
         String authorization = hop.headers().getOrDefault("Authorization", List.of()).stream().findFirst().orElse(null);
-        calls.add(new Call(method, authorization, JSON.readTree(hop.body())));
+        JsonNode body = JSON.readTree(hop.body());
+        calls.add(new Call(method, authorization, body));
+        if (!METHODS.contains(method)) {
+            throw new AssertionError("the client called an unknown Slack method: " + method);
+        }
+        // What Slack itself refuses, it refuses here too, so a test cannot pass on a
+        // call the real API would turn down.
+        String refusal = refusal(method, authorization, body);
+        if (refusal != null) {
+            return new Received(200, null, OutboundRequest.caseInsensitiveCopy(Map.of()),
+                    new ByteArrayInputStream(("{\"ok\":false,\"error\":\"" + refusal + "\"}").getBytes(StandardCharsets.UTF_8)));
+        }
 
         Received answer = scripted.poll();
         if (answer != null && answer.body() != null) {
@@ -120,6 +136,31 @@ final class FakeSlackApi implements OutboundEngine {
             return new Received(answer.status(), null, answer.headers(), ok());
         }
         return new Received(200, null, OutboundRequest.caseInsensitiveCopy(Map.of()), ok());
+    }
+
+    /** The Web API methods EDDI calls. */
+    private static final Set<String> METHODS = Set.of("chat.postMessage", "chat.update", "views.open");
+
+    /** Slack's limit on a message's {@code text}. */
+    static final int MAX_TEXT_LENGTH = 40_000;
+
+    /**
+     * The error Slack would answer, or {@code null} when it would accept the call.
+     */
+    private static String refusal(String method, String authorization, JsonNode body) {
+        if (authorization == null || !authorization.startsWith("Bearer xoxb-") || authorization.length() <= "Bearer xoxb-".length()) {
+            return "not_authed";
+        }
+        if (method.startsWith("chat.") && body.path("channel").asText("").isBlank()) {
+            return "channel_not_found";
+        }
+        if (method.equals("chat.postMessage") && body.path("text").asText("").isBlank() && !body.has("blocks")) {
+            return "no_text";
+        }
+        if (body.path("text").asText("").length() > MAX_TEXT_LENGTH) {
+            return "msg_too_long";
+        }
+        return null;
     }
 
     private ByteArrayInputStream ok() {

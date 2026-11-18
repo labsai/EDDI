@@ -958,6 +958,8 @@ of conversation between people (`message.channels` is subscribed); none of it re
 `posted` — the answer was posted to the thread when the turn completed; `failed` — the turn ended in an error and the
 thread got a failure notice; `expired` — the turn was still running after `eddi.slack.late-answer-window-seconds`
 and the thread was told to ask again. A steady `expired` rate means turns routinely run longer than both limits.
+The series of an outcome appears with its first count, so a query over an instance that has had no late answer
+finds none. An observer's turn is never deferred and is not counted here.
 See [Slack Integration](slack-integration.md#slow-answers).
 
 ### Agent Identity & Signing Metrics

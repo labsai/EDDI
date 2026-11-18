@@ -185,6 +185,15 @@ public class SlackEventHandler {
     private final ICache<String, GroupFollowUp> activeGroupListeners;
 
     /**
+     * {@code channel:thread:user} keys of users known to have no part in a thread
+     * (see {@code participatesInThread}): a node-local copy of "the database holds
+     * no mapping", whose removals are announced to the other nodes in cluster mode
+     * ({@code CacheFactory.INVALIDATED}). Bounded by size and
+     * {@link #NON_PARTICIPATION_TTL}.
+     */
+    private final ICache<String, Boolean> nonParticipants;
+
+    /**
      * Persisted record of every approval card posted, keyed by
      * {@code (integrationName, conversationId, pause identity)}. It is both the
      * idempotency marker — one card per pending pause: a card is posted once when a
@@ -242,6 +251,7 @@ public class SlackEventHandler {
             MeterRegistry meterRegistry) {
         this.meterRegistry = meterRegistry;
         this.ignoredThreadReplies = meterRegistry.counter("eddi.slack.thread.replies.ignored");
+        this.nonParticipants = cacheFactory.getCache(NON_PARTICIPATION_CACHE, NON_PARTICIPATION_TTL);
         this.channelTargetRouter = channelTargetRouter;
         this.observeGate = observeGate;
         this.toolCostTracker = toolCostTracker;
@@ -420,6 +430,13 @@ public class SlackEventHandler {
             LOGGER.debugf("[SLACK] Ignoring bot message in channel %s", sanitize(String.valueOf(event.get("channel"))));
             return;
         }
+        // The same loop guard for an event that names this app's own user as the
+        // sender without a bot_id: answering it would be the bot talking to itself.
+        if (botUserId != null && !botUserId.isBlank() && botUserId.equals(event.get("user"))) {
+            LOGGER.debugf("[SLACK] Ignoring a message sent by this bot's own user in channel %s",
+                    sanitize(String.valueOf(event.get("channel"))));
+            return;
+        }
 
         // Extract once — used for DM detection in both the message filter and
         // the DM fallback resolution (step 4 below)
@@ -432,6 +449,9 @@ public class SlackEventHandler {
         // - Thread replies that mention THIS bot → app_mention handles them, skip here
         // - Thread replies without a mention → answered only in a thread the bot
         // already takes part in (it was mentioned there, or has spoken there)
+        // The thread lock the participation check read, so routing does not read it a
+        // second time; null when the check did not run or found no lock.
+        ResolvedTarget participationLock = null;
         if ("message".equals(eventType)) {
             if (eventThreadTs == null && !isDirectMessage) {
                 // Top-level channel message. Only app_mention answers these — unless
@@ -454,7 +474,8 @@ public class SlackEventHandler {
                     LOGGER.debugf("[SLACK] Ignoring a thread reply that mentions the bot (handled by app_mention)");
                     return;
                 }
-                if (!participatesInThread(eventChannel, eventThreadTs, event, origin)) {
+                Participation participation = participatesInThread(eventChannel, eventThreadTs, event, origin);
+                if (participation == null) {
                     // A human-only thread: the bot was never part of it and the reply is
                     // addressed to somebody else. Answering would send private team talk
                     // to the model, at the agent's cost.
@@ -463,6 +484,7 @@ public class SlackEventHandler {
                             sanitize(eventChannel));
                     return;
                 }
+                participationLock = participation.lock();
             }
         }
 
@@ -499,7 +521,7 @@ public class SlackEventHandler {
         // cannot tell. A DM has no second event, so it is not marked.
         String messageTs = (String) event.get("ts");
         if (messageTs != null && !isDirectMessage
-                && eventDedup.putIfAbsent("msg:" + channelId + ":" + messageTs, Boolean.TRUE) != null) {
+                && eventDedup.putIfAbsent(messageDedupKey(origin, channelId, messageTs), Boolean.TRUE) != null) {
             LOGGER.debugf("[SLACK] Message %s in channel %s was already handled — skipping", sanitize(messageTs),
                     sanitize(channelId));
             return;
@@ -510,7 +532,9 @@ public class SlackEventHandler {
         ResolvedTarget resolved = null;
 
         if (parentTs != null) {
-            resolved = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+            resolved = participationLock != null
+                    ? participationLock
+                    : channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
             if (resolved != null && resolved.integration() == null && resolved.legacySigningSecret() == null) {
                 // A channel no integration owns (a DM) gives the lock no credentials.
                 // Take those of an integration or legacy connector that holds the
@@ -702,13 +726,18 @@ public class SlackEventHandler {
         executorService.submit(() -> {
             String conversationId = null;
             OptionalDouble costBefore = OptionalDouble.empty();
+            CompletableFuture<SimpleConversationMemorySnapshot> stillRunning = null;
             try {
                 String intent = threadIntent(channelId, target.getTargetId(), threadTs);
-                ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent);
+                ThreadConversation thread = openThreadConversation(target.getTargetId(), user, intent, resolved);
                 conversationId = thread.conversationId();
                 costBefore = conversationCost(conversationId);
+                // Nobody addressed the bot, so an observer's turn is never deferred: no
+                // "taking longer" line, and no thread lock on the strength of one. This
+                // virtual thread waits instead — the late-answer window on top of the
+                // request timeout — so the spend below is read once the turn has ended.
                 String deliveredTo = sendInThread(resolved, target.getTargetId(), user, intent, thread, channelId,
-                        threadTs, message, botToken);
+                        threadTs, message, botToken, LateWait.block(slackConfig.getLateAnswerWindowSeconds() * 1000L));
                 if (!deliveredTo.equals(conversationId)) {
                     // The conversation ended between opening and sending and the
                     // thread was given a fresh one. Its spend so far is this turn's,
@@ -726,27 +755,48 @@ public class SlackEventHandler {
                 if (threadTs != null) {
                     channelTargetRouter.lockThreadTarget("slack", channelId, threadTs, target);
                 }
+            } catch (TurnTimeoutException e) {
+                // Still running after the request timeout and the late-answer window:
+                // nothing is posted (nobody asked), nothing is locked. What the turn
+                // spends from here on is charged when it ends, below.
+                stillRunning = e.pending();
+                LOGGER.warnf("[OBSERVE] Target '%s' was still answering in channel %s after the late-answer window "
+                        + "— nothing posted", sanitize(target.getName()), sanitize(channelId));
             } catch (Exception e) {
                 LOGGER.errorf(e, "[OBSERVE] Target '%s' failed to answer in channel %s",
                         sanitize(target.getName()), sanitize(channelId));
             } finally {
-                // Both reads or neither. A baseline that failed and a total that
-                // did not would make the delta the conversation's ENTIRE history
-                // of tool spend, charged to this one turn — which would retire
-                // the observer's daily budget on its first reply.
                 OptionalDouble costAfter = conversationCost(conversationId);
-                if (costBefore.isPresent() && costAfter.isPresent()) {
-                    double spent = costAfter.getAsDouble() - costBefore.getAsDouble();
-                    if (spent > 0) {
-                        observeGate.addCost("slack", channelId, target, spent);
-                    }
-                } else if (conversationId != null) {
-                    LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged",
-                            sanitize(conversationId));
+                chargeObserver(channelId, target, conversationId, costBefore, costAfter);
+                if (stillRunning != null && costAfter.isPresent()) {
+                    // The rest of the spend, once the turn really ends — a callback on its
+                    // future, no thread. Measured from the figure just charged, so nothing
+                    // is charged twice.
+                    String runningConversation = conversationId;
+                    stillRunning.whenComplete((snapshot, error) -> chargeObserver(channelId, target, runningConversation,
+                            costAfter, conversationCost(runningConversation)));
                 }
             }
         });
         return true;
+    }
+
+    /**
+     * Charge an observer what a turn spent between two readings. Both readings or
+     * neither: a baseline that failed and a total that did not would make the delta
+     * the conversation's ENTIRE history of tool spend, charged to this one turn —
+     * which would retire the observer's daily budget on its first reply.
+     */
+    private void chargeObserver(String channelId, ChannelTarget target, String conversationId, OptionalDouble before,
+                                OptionalDouble after) {
+        if (before.isPresent() && after.isPresent()) {
+            double spent = after.getAsDouble() - before.getAsDouble();
+            if (spent > 0) {
+                observeGate.addCost("slack", channelId, target, spent);
+            }
+        } else if (conversationId != null) {
+            LOGGER.debugf("[OBSERVE] Cost for conversation %s is unknown — not charged", sanitize(conversationId));
+        }
     }
 
     /**
@@ -843,7 +893,7 @@ public class SlackEventHandler {
         // (thread replies from resolveThreadTarget have strippedMessage=null)
         String message = resolved.strippedMessage() != null ? resolved.strippedMessage() : originalText;
 
-        ThreadConversation thread = openThreadConversation(agentId, user, intent);
+        ThreadConversation thread = openThreadConversation(agentId, user, intent, resolved);
         sendInThread(resolved, agentId, user, intent, thread, channelId, threadTs, message, botToken);
     }
 
@@ -875,17 +925,83 @@ public class SlackEventHandler {
                         ThreadConversation thread, String channelId, String threadTs, String message,
                         String botToken)
             throws Exception {
+        return sendInThread(resolved, agentId, user, intent, thread, channelId, threadTs, message, botToken, LateWait.DEFER);
+    }
+
+    /**
+     * As above, with the handling of a turn that outlives the first wait.
+     * <p>
+     * A deferred turn whose conversation turns out to have ENDED by the time it ran
+     * is recovered from in the late callback exactly as here: a fresh conversation
+     * and the message sent again — waited for on that callback's thread within what
+     * is left of the late-answer window, never deferred a second time.
+     */
+    private String sendInThread(ResolvedTarget resolved, String agentId, SlackUser user, String intent,
+                                ThreadConversation thread, String channelId, String threadTs, String message,
+                                String botToken, LateWait wait)
+            throws Exception {
         announceReplacement(thread, channelId, threadTs, botToken);
+        String endedId = thread.conversationId();
+        EndedRecovery lateRecovery = remainingMillis -> resendInFreshConversation(resolved, agentId, user, intent, endedId,
+                channelId, threadTs, message, botToken, LateWait.block(remainingMillis - requestTimeoutMillis()));
         try {
-            sendAndDeliver(resolved, thread.conversationId(), agentId, channelId, threadTs, message, botToken);
-            return thread.conversationId();
+            sendAndDeliver(resolved, endedId, agentId, channelId, threadTs, message, botToken, wait, lateRecovery);
+            return endedId;
         } catch (IConversationService.ConversationEndedException e) {
-            ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, thread.conversationId(),
-                    endReasonOf(thread.conversationId()));
-            announceReplacement(fresh, channelId, threadTs, botToken);
-            sendAndDeliver(resolved, fresh.conversationId(), agentId, channelId, threadTs, message, botToken);
-            return fresh.conversationId();
+            return resendInFreshConversation(resolved, agentId, user, intent, endedId, channelId, threadTs, message,
+                    botToken, wait);
         }
+    }
+
+    /**
+     * Give the thread a fresh conversation in place of an ended one and send the
+     * message there. A second end in a row propagates.
+     *
+     * @return the fresh conversation
+     */
+    private String resendInFreshConversation(ResolvedTarget resolved, String agentId, SlackUser user, String intent,
+                                             String endedId, String channelId, String threadTs, String message,
+                                             String botToken, LateWait wait)
+            throws Exception {
+        ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, endedId, endReasonOf(endedId),
+                resolved);
+        announceReplacement(fresh, channelId, threadTs, botToken);
+        sendAndDeliver(resolved, fresh.conversationId(), agentId, channelId, threadTs, message, botToken, wait, null);
+        return fresh.conversationId();
+    }
+
+    private long requestTimeoutMillis() {
+        return slackConfig.getRequestTimeoutSeconds() * 1000L;
+    }
+
+    /**
+     * What a turn that outlives the first wait ({@code request-timeout-seconds})
+     * gets.
+     *
+     * @param defer
+     *            {@code true}: the thread is told the answer will follow and it is
+     *            posted from a callback on the turn — an addressed message.
+     *            {@code false}: the caller keeps waiting on its own virtual thread
+     *            for at most {@code extraMillis} more and posts nothing in between
+     *            — an observer, which nobody addressed, and the re-send of a late
+     *            answer, which must not defer a second time
+     */
+    record LateWait(boolean defer, long extraMillis) {
+        static final LateWait DEFER = new LateWait(true, 0);
+
+        static LateWait block(long extraMillis) {
+            return new LateWait(false, Math.max(0, extraMillis));
+        }
+    }
+
+    /**
+     * Re-sends a deferred turn's message in a fresh conversation when the one it
+     * was queued on had ended, within {@code remainingMillis} of the late-answer
+     * window.
+     */
+    @FunctionalInterface
+    private interface EndedRecovery {
+        void resend(long remainingMillis) throws Exception;
     }
 
     /**
@@ -916,11 +1032,12 @@ public class SlackEventHandler {
      * </ul>
      */
     private void sendAndDeliver(ResolvedTarget resolved, String conversationId, String agentId,
-                                String channelId, String threadTs, String message, String botToken)
+                                String channelId, String threadTs, String message, String botToken, LateWait wait,
+                                EndedRecovery lateRecovery)
             throws Exception {
         SimpleConversationMemorySnapshot snapshot;
         try {
-            snapshot = sendAndWait(conversationId, message);
+            snapshot = sendAndWait(conversationId, message, wait);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             // The conversation is already paused — input was NOT consumed. Never
             // surface the generic error message.
@@ -932,9 +1049,19 @@ public class SlackEventHandler {
             notifyApprovers(resolved, conversationId, agentId, loadHitlBookmark(conversationId));
             return;
         } catch (TurnTimeoutException e) {
-            // The wait gave up, the turn did not: the answer is posted when it ends.
-            if (deferToLateAnswer(e.pending(), channelId, threadTs, botToken,
-                    late -> deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, late))) {
+            // The wait gave up, the turn did not: the answer is posted when it ends —
+            // the same outcome handling as in time, the approval card included. A
+            // blocking caller has already waited its extra time in sendAndWait.
+            if (wait.defer() && deferToLateAnswer(e.pending(), channelId, threadTs, botToken, (late, remainingMillis) -> {
+                try {
+                    deliverOutcome(resolved, conversationId, agentId, channelId, threadTs, botToken, late);
+                } catch (IConversationService.ConversationEndedException ended) {
+                    if (lateRecovery == null) {
+                        throw ended;
+                    }
+                    lateRecovery.resend(remainingMillis);
+                }
+            })) {
                 return;
             }
             throw e;
@@ -1296,7 +1423,11 @@ public class SlackEventHandler {
             throws Exception {
         GroupFollowUp followUp = activeGroupListeners.get(parentTs);
         if (followUp == null) {
-            return false; // Not a thread from a group discussion
+            // Not a discussion this node registered — or one it no longer holds: the
+            // listener is node-local and lives two hours. A user who already followed
+            // up here has a mapping in the database; continue that conversation, which
+            // carries the discussion's context from its first turn.
+            return continueStoredFollowUp(parentTs, channelId, user, text, threadTs, origin);
         }
         // The key is a bare Slack timestamp the sender chooses, so the reply must
         // also be in the discussion's channel and come from the app whose route
@@ -1329,20 +1460,86 @@ public class SlackEventHandler {
         String enrichedInput = buildFollowUpInput(ctx, text);
 
         // Route to the specific agent from the group discussion
-        String intent = "channel:followup:" + channelId + ":" + parentTs;
-        ThreadConversation thread = openThreadConversation(agentId, user, intent);
-        announceReplacement(thread, channelId, threadTs, botToken);
+        sendFollowUp(agentId, user, followUpIntent(channelId, parentTs), followUp.route(), channelId, threadTs,
+                enrichedInput, botToken, LateWait.DEFER);
+        return true;
+    }
+
+    /** The mapping key of a follow-up under a group discussion's agent message. */
+    private static String followUpIntent(String channelId, String parentTs) {
+        return "channel:followup:" + channelId + ":" + parentTs;
+    }
+
+    /**
+     * A follow-up under a group discussion's agent message that this node holds no
+     * listener for — another node registered the discussion, the two hours are up,
+     * or the node restarted. The replying user's own follow-up mapping says which
+     * agent they were talking to; that conversation is continued with the message
+     * as it is (its first turn already carried the discussion's context), with the
+     * credentials of the integration that owns the channel. Without a mapping, or
+     * in a channel no integration owns, it is not handled here.
+     *
+     * @return whether the reply was handled (or refused) as a follow-up
+     */
+    private boolean continueStoredFollowUp(String parentTs, String channelId, SlackUser user, String text,
+                                           String threadTs, EventOrigin origin)
+            throws Exception {
+        String intent = followUpIntent(channelId, parentTs);
+        UserConversation stored;
         try {
-            deliverFollowUp(thread.conversationId(), channelId, threadTs, enrichedInput, botToken);
+            stored = userConversationStore.readUserConversation(intent, user.eddiUserId());
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the follow-up mapping for channel %s: %s", sanitize(channelId), e.getMessage());
+            return false;
+        }
+        if (stored == null || stored.getAgentId() == null) {
+            return false;
+        }
+        var integration = channelTargetRouter.integrationFor("slack", channelId);
+        if (integration == null) {
+            return false;
+        }
+        ResolvedTarget route = new ResolvedTarget(null, null, integration, null, null);
+        if (!routeMatchesSigner(route, origin)) {
+            LOGGER.warnf("[SLACK] Follow-up for thread %s does not come from the app that owns the channel — ignoring",
+                    sanitize(parentTs));
+            return true;
+        }
+        LOGGER.infof("Follow-up in thread %s continues the stored conversation of user %s (text_len=%d)",
+                sanitize(parentTs), sanitize(user.slackUserId()), text.length());
+        sendFollowUp(stored.getAgentId(), user, intent, route, channelId, threadTs, text, route.botToken(), LateWait.DEFER);
+        return true;
+    }
+
+    /**
+     * Open (or reuse) the follow-up conversation and send to it, recovering once
+     * from a conversation that has ended — in time or, for a deferred turn, in the
+     * late callback, without deferring a second time.
+     */
+    private void sendFollowUp(String agentId, SlackUser user, String intent, ResolvedTarget route, String channelId,
+                              String threadTs, String input, String botToken, LateWait wait)
+            throws Exception {
+        ThreadConversation thread = openThreadConversation(agentId, user, intent, route);
+        announceReplacement(thread, channelId, threadTs, botToken);
+        String endedId = thread.conversationId();
+        EndedRecovery lateRecovery = remainingMillis -> resendFollowUpInFreshConversation(agentId, user, intent, route, endedId,
+                channelId, threadTs, input, botToken, LateWait.block(remainingMillis - requestTimeoutMillis()));
+        try {
+            deliverFollowUp(endedId, channelId, threadTs, input, botToken, wait, lateRecovery);
         } catch (IConversationService.ConversationEndedException e) {
             // Ended between opening and sending — once, like sendInThread.
-            ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, thread.conversationId(),
-                    endReasonOf(thread.conversationId()));
-            announceReplacement(fresh, channelId, threadTs, botToken);
-            deliverFollowUp(fresh.conversationId(), channelId, threadTs, enrichedInput, botToken);
+            resendFollowUpInFreshConversation(agentId, user, intent, route, endedId, channelId, threadTs, input, botToken,
+                    wait);
         }
+    }
 
-        return true;
+    private void resendFollowUpInFreshConversation(String agentId, SlackUser user, String intent, ResolvedTarget route,
+                                                   String endedId, String channelId, String threadTs, String input,
+                                                   String botToken, LateWait wait)
+            throws Exception {
+        ThreadConversation fresh = replaceEndedThreadConversation(agentId, user, intent, endedId, endReasonOf(endedId), route);
+        announceReplacement(fresh, channelId, threadTs, botToken);
+        deliverFollowUp(fresh.conversationId(), channelId, threadTs, input, botToken, wait, null);
     }
 
     /**
@@ -1355,18 +1552,26 @@ public class SlackEventHandler {
      *             if the conversation has ended, so the caller can replace it
      */
     private void deliverFollowUp(String conversationId, String channelId, String threadTs, String enrichedInput,
-                                 String botToken)
+                                 String botToken, LateWait wait, EndedRecovery lateRecovery)
             throws Exception {
         SimpleConversationMemorySnapshot snapshot;
         try {
-            snapshot = sendAndWait(conversationId, enrichedInput);
+            snapshot = sendAndWait(conversationId, enrichedInput, wait);
         } catch (IConversationService.ConversationAwaitingApprovalException e) {
             postMessage(channelId, threadTs, SlackHitlSupport.STILL_AWAITING_NOTICE, botToken);
             return;
         } catch (TurnTimeoutException e) {
             // The wait gave up, the turn did not: the answer is posted when it ends.
-            if (deferToLateAnswer(e.pending(), channelId, threadTs, botToken,
-                    late -> deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, late))) {
+            if (wait.defer() && deferToLateAnswer(e.pending(), channelId, threadTs, botToken, (late, remainingMillis) -> {
+                try {
+                    deliverFollowUpOutcome(conversationId, channelId, threadTs, botToken, late);
+                } catch (IConversationService.ConversationEndedException ended) {
+                    if (lateRecovery == null) {
+                        throw ended;
+                    }
+                    lateRecovery.resend(remainingMillis);
+                }
+            })) {
                 return;
             }
             throw e;
@@ -1485,6 +1690,17 @@ public class SlackEventHandler {
     // Package-private for unit testing.
     ThreadConversation openThreadConversation(String agentId, SlackUser user, String intent)
             throws Exception {
+        return openThreadConversation(agentId, user, intent, null);
+    }
+
+    /**
+     * As above, recording on a mapping it creates which app {@code route} belongs
+     * to ({@link ChannelTargetRouter#signerKeyOf}), so an answer posted later
+     * without an event — a resumed approval in a DM — uses exactly that app's
+     * token.
+     */
+    private ThreadConversation openThreadConversation(String agentId, SlackUser user, String intent, ResolvedTarget route)
+            throws Exception {
         String eddiUserId = user.eddiUserId();
         // Try existing — readUserConversation returns null when not found,
         // throws ResourceStoreException only on real DB errors (which should propagate)
@@ -1494,7 +1710,8 @@ public class SlackEventHandler {
             if (ended == null) {
                 return ThreadConversation.existing(existing.getConversationId());
             }
-            return replaceEndedThreadConversation(agentId, user, intent, existing.getConversationId(), ended.endReason());
+            return replaceEndedThreadConversation(agentId, user, intent, existing.getConversationId(), ended.endReason(),
+                    route);
         }
 
         String legacyUserId = user.slackUserId();
@@ -1514,7 +1731,7 @@ public class SlackEventHandler {
             }
         }
 
-        return ThreadConversation.existing(createThreadConversation(agentId, eddiUserId, intent).conversationId());
+        return ThreadConversation.existing(createThreadConversation(agentId, eddiUserId, intent, route).conversationId());
     }
 
     /**
@@ -1532,9 +1749,16 @@ public class SlackEventHandler {
     ThreadConversation replaceEndedThreadConversation(String agentId, SlackUser user, String intent,
                                                       String endedConversationId, String endReason)
             throws Exception {
+        return replaceEndedThreadConversation(agentId, user, intent, endedConversationId, endReason, null);
+    }
+
+    private ThreadConversation replaceEndedThreadConversation(String agentId, SlackUser user, String intent,
+                                                              String endedConversationId, String endReason,
+                                                              ResolvedTarget route)
+            throws Exception {
         String eddiUserId = user.eddiUserId();
         userConversationStore.deleteUserConversationIfMatches(intent, eddiUserId, endedConversationId);
-        CreatedConversation created = createThreadConversation(agentId, eddiUserId, intent);
+        CreatedConversation created = createThreadConversation(agentId, eddiUserId, intent, route);
         if (created.won()) {
             LOGGER.infof("Replaced ended conversation %s in %s with %s (end reason: %s)",
                     sanitize(endedConversationId), sanitize(intent), sanitize(created.conversationId()),
@@ -1550,17 +1774,20 @@ public class SlackEventHandler {
     private record CreatedConversation(String conversationId, boolean won) {
     }
 
-    private CreatedConversation createThreadConversation(String agentId, String eddiUserId, String intent)
+    private CreatedConversation createThreadConversation(String agentId, String eddiUserId, String intent,
+                                                         ResolvedTarget route)
             throws Exception {
         var result = conversationService.startConversation(
                 Deployment.Environment.production, agentId, eddiUserId,
                 Map.of("channelIntent", new Context(Context.ContextType.string, intent)));
 
-        // Store mapping
+        // Store mapping — with the app whose credentials started it, when known
         var mapping = new UserConversation(intent, eddiUserId,
                 Deployment.Environment.production, agentId, result.conversationId());
+        mapping.setChannelSigner(route != null ? channelTargetRouter.signerKeyOf(route) : null);
         try {
             userConversationStore.createUserConversation(mapping);
+            forgetNonParticipation(intent, eddiUserId);
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
             // Someone else created the mapping between the read above and this
             // write. Returning our own id would leave the two callers talking to
@@ -1633,8 +1860,10 @@ public class SlackEventHandler {
     private String rekeyLegacyMapping(UserConversation legacy, String eddiUserId) {
         String intent = legacy.getIntent();
         try {
-            userConversationStore.createUserConversation(new UserConversation(intent, eddiUserId,
-                    legacy.getEnvironment(), legacy.getAgentId(), legacy.getConversationId()));
+            var rekeyed = new UserConversation(intent, eddiUserId, legacy.getEnvironment(), legacy.getAgentId(),
+                    legacy.getConversationId());
+            rekeyed.setChannelSigner(legacy.getChannelSigner());
+            userConversationStore.createUserConversation(rekeyed);
         } catch (IResourceStore.ResourceAlreadyExistsException e) {
             // A concurrent message re-keyed it first; fall through and drop the
             // legacy mapping all the same.
@@ -1690,7 +1919,8 @@ public class SlackEventHandler {
      * pause, else {@link #SKIPPED_NOT_ACTIVE}) so callers post the right notice
      * instead of a duplicate approval card (H4) or a stale replay (H7).
      */
-    private SimpleConversationMemorySnapshot sendAndWait(String conversationId, String message) throws Exception {
+    private SimpleConversationMemorySnapshot sendAndWait(String conversationId, String message, LateWait wait)
+            throws Exception {
         var inputData = new InputData();
         inputData.setInput(message);
         inputData.setContext(Map.of("slack", new Context(Context.ContextType.string, "true")));
@@ -1724,6 +1954,15 @@ public class SlackEventHandler {
         try {
             return responseFuture.get(slackConfig.getRequestTimeoutSeconds(), TimeUnit.SECONDS);
         } catch (TimeoutException e) {
+            if (!wait.defer() && wait.extraMillis() > 0) {
+                // A blocking caller keeps waiting here, on its own virtual thread, and
+                // posts nothing meanwhile.
+                try {
+                    return responseFuture.get(wait.extraMillis(), TimeUnit.MILLISECONDS);
+                } catch (TimeoutException stillRunning) {
+                    throw new TurnTimeoutException(stillRunning.getMessage(), responseFuture);
+                }
+            }
             // The turn is still running. The caller may keep waiting for it (see
             // deferToLateAnswer), so the future travels with the exception.
             throw new TurnTimeoutException(e.getMessage(), responseFuture);
@@ -1752,10 +1991,12 @@ public class SlackEventHandler {
 
     /**
      * What to do with the outcome of a turn that completes after the wait gave up.
+     * {@code remainingMillis} is what is left of the late-answer window, for a
+     * re-send that has to stay inside it.
      */
     @FunctionalInterface
     private interface LateDelivery {
-        void deliver(SimpleConversationMemorySnapshot snapshot) throws Exception;
+        void deliver(SimpleConversationMemorySnapshot snapshot, long remainingMillis) throws Exception;
     }
 
     /**
@@ -1763,12 +2004,16 @@ public class SlackEventHandler {
      * thread its answer will follow, and post the answer — or a failure notice —
      * when the turn completes, exactly once.
      * <p>
-     * Costs a callback on the turn's own future: no thread and no timer per pending
-     * answer. The future is bounded by
+     * Costs a callback on a copy of the turn's future and one entry in the JDK's
+     * shared {@code CompletableFuture} delay scheduler for the window: no thread
+     * and no timer of EDDI's own per pending answer. The turn's own future is left
+     * untouched. The wait is bounded by
      * {@code eddi.slack.late-answer-window-seconds} (a turn still running then gets
      * a notice asking the user to try again) and the number of pending answers by
-     * {@link #MAX_PENDING_LATE_ANSWERS}; both are released the moment the turn
-     * ends.
+     * {@link #MAX_PENDING_LATE_ANSWERS}; a slot is released once the late outcome
+     * has been handled — or at once, if the node is shutting down and the callback
+     * can no longer run. A pending answer does not survive a restart: the turn dies
+     * with the node.
      *
      * @return {@code true} when the late answer is taken on and the thread has been
      *         told; {@code false} when it is off or full, so the caller reports the
@@ -1789,21 +2034,29 @@ public class SlackEventHandler {
         // The notice first: a turn that finishes in the next instant must not post its
         // answer ahead of the line that says one is coming.
         postMessage(channelId, threadTs, lateAnswerPendingNotice(slackConfig.getRequestTimeoutSeconds()), botToken);
-        try {
-            pending.orTimeout(window, TimeUnit.SECONDS).whenCompleteAsync((snapshot, error) -> {
+        long deadlineNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(window);
+        pending.copy().orTimeout(window, TimeUnit.SECONDS).whenComplete((snapshot, error) -> {
+            // Runs on whichever thread completed the turn (or the delay scheduler):
+            // hand the work to a virtual thread at once.
+            try {
+                executorService.execute(() -> {
+                    try {
+                        completeLateAnswer(snapshot, error, window, deadlineNanos, channelId, threadTs, botToken, delivery);
+                    } finally {
+                        pendingLateAnswers.decrementAndGet();
+                    }
+                });
+            } catch (RejectedExecutionException shuttingDown) {
                 pendingLateAnswers.decrementAndGet();
-                completeLateAnswer(snapshot, error, window, channelId, threadTs, botToken, delivery);
-            }, executorService);
-        } catch (RuntimeException e) {
-            // The executor is shutting down: nothing will ever run the callback.
-            pendingLateAnswers.decrementAndGet();
-            postMessage(channelId, threadTs, LATE_ANSWER_FAILED_NOTICE, botToken);
-        }
+                LOGGER.warnf("[SLACK] Shutting down — the late answer in channel %s is not posted", sanitize(channelId));
+            }
+        });
         return true;
     }
 
     private void completeLateAnswer(SimpleConversationMemorySnapshot snapshot, Throwable error, int windowSeconds,
-                                    String channelId, String threadTs, String botToken, LateDelivery delivery) {
+                                    long deadlineNanos, String channelId, String threadTs, String botToken,
+                                    LateDelivery delivery) {
         if (error != null) {
             boolean expired = error instanceof TimeoutException;
             LOGGER.warnf("[SLACK] A turn that outlived the wait %s (channel %s)",
@@ -1814,8 +2067,14 @@ public class SlackEventHandler {
             return;
         }
         try {
-            delivery.deliver(snapshot);
+            delivery.deliver(snapshot, Math.max(0, TimeUnit.NANOSECONDS.toMillis(deadlineNanos - System.nanoTime())));
             countLateAnswer("posted");
+        } catch (TurnTimeoutException e) {
+            // The re-send of a turn whose conversation had ended ran out the window.
+            LOGGER.warnf("[SLACK] The re-sent late turn was still running after the late-answer window (channel %s)",
+                    sanitize(channelId));
+            countLateAnswer("expired");
+            postMessage(channelId, threadTs, lateAnswerExpiredNotice(windowSeconds), botToken);
         } catch (Exception e) {
             LOGGER.errorf(e, "[SLACK] Could not deliver the late answer in channel %s", sanitize(channelId));
             countLateAnswer("failed");
@@ -2005,57 +2264,141 @@ public class SlackEventHandler {
     }
 
     /**
+     * Why an unmentioned thread reply is addressed to the bot.
+     *
+     * @param lock
+     *            the thread lock the check read, handed to routing so it is not
+     *            read twice; {@code null} when the bot's part in the thread was
+     *            established otherwise
+     */
+    record Participation(ResolvedTarget lock) {
+        static final Participation WITHOUT_LOCK = new Participation(null);
+    }
+
+    /**
      * Whether the bot already takes part in this thread, so that an unmentioned
      * reply in it is addressed to the bot and not to the people in the thread.
      * <p>
      * The bot takes part in a thread when it was mentioned in it or has spoken in
-     * it. Three records say so, in order of cost:
+     * it. These records say so, in order of cost:
      * <ol>
      * <li>the thread's target lock — written for every thread the bot handles (24
      * hours, shared across nodes in cluster mode)</li>
-     * <li>a group discussion's agent message the reply is under</li>
-     * <li>the user's own conversation mapping for one of the channel's targets in
-     * this thread — it lives in the database, so it survives a restart, which the
-     * lock does not on a single node. It is the replying user's own mapping, so
-     * after a restart a thread revives only for people who had already talked to
+     * <li>a group discussion's agent message the reply is under, registered on this
+     * node (two hours)</li>
+     * <li>the replying user's own conversation mappings in this thread — one per
+     * target of the channel's integration, and the follow-up mapping of a reply
+     * under a group discussion's agent message. They live in the database, so they
+     * survive a restart and hold on every node. They are the replying user's own,
+     * so after a restart a thread revives only for people who had already talked to
      * the bot in it; a colleague who had not must mention the bot once. The lock is
-     * written back when a mapping is found.</li>
+     * written back when a channel-target mapping is found.</li>
      * </ol>
+     * A user found to have none is remembered for {@link #NON_PARTICIPATION_TTL},
+     * so the second and every further ignored reply of that user in that thread
+     * costs the lock read and a local lookup, not the database reads. The entry is
+     * consulted only after the lock, so a lock written since — on any node — wins
+     * over it; and it is dropped, cluster-wide, when a mapping for that user and
+     * thread is created.
+     *
+     * @return why the bot takes part, or {@code null} when it does not
      */
-    private boolean participatesInThread(String channelId, String parentTs, Map<String, Object> event,
-                                         EventOrigin origin) {
+    private Participation participatesInThread(String channelId, String parentTs, Map<String, Object> event,
+                                               EventOrigin origin) {
         if (channelId == null || parentTs == null) {
-            return false;
+            return null;
         }
-        if (channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs) != null) {
-            return true;
+        ResolvedTarget lock = channelTargetRouter.resolveThreadTarget("slack", channelId, parentTs);
+        if (lock != null) {
+            return new Participation(lock);
         }
         GroupFollowUp followUp = activeGroupListeners.get(parentTs);
         if (followUp != null && channelId.equals(followUp.channelId())) {
-            return true;
+            return Participation.WITHOUT_LOCK;
         }
         if (!(event.get("user") instanceof String slackUserId) || !SlackUserIdentity.isValidSlackUserId(slackUserId)) {
-            return false;
-        }
-        var integration = channelTargetRouter.integrationFor("slack", channelId);
-        if (integration == null || integration.getTargets() == null) {
-            return false;
+            return null;
         }
         String eddiUserId = slackUser(origin, slackUserId).eddiUserId();
-        for (ChannelTarget target : integration.getTargets()) {
-            if (target.getTargetId() == null || target.getTargetId().isBlank()) {
-                continue;
-            }
-            try {
-                if (userConversationStore.readUserConversation(threadIntent(channelId, target.getTargetId(), parentTs),
-                        eddiUserId) != null) {
-                    channelTargetRouter.lockThreadTarget("slack", channelId, parentTs, target);
-                    return true;
+        String negativeKey = nonParticipationKey(channelId, parentTs, eddiUserId);
+        if (nonParticipants.get(negativeKey) != null) {
+            return null;
+        }
+        boolean complete = true;
+        var integration = channelTargetRouter.integrationFor("slack", channelId);
+        if (integration != null && integration.getTargets() != null) {
+            for (ChannelTarget target : integration.getTargets()) {
+                if (target.getTargetId() == null || target.getTargetId().isBlank()) {
+                    continue;
                 }
-            } catch (Exception e) {
-                LOGGER.debugf("Could not read the thread mapping for channel %s: %s", sanitize(channelId), e.getMessage());
+                try {
+                    if (userConversationStore.readUserConversation(threadIntent(channelId, target.getTargetId(), parentTs),
+                            eddiUserId) != null) {
+                        channelTargetRouter.lockThreadTarget("slack", channelId, parentTs, target);
+                        return Participation.WITHOUT_LOCK;
+                    }
+                } catch (Exception e) {
+                    complete = false;
+                    LOGGER.debugf("Could not read the thread mapping for channel %s: %s", sanitize(channelId), e.getMessage());
+                }
             }
         }
-        return false;
+        try {
+            if (userConversationStore.readUserConversation(followUpIntent(channelId, parentTs), eddiUserId) != null) {
+                return Participation.WITHOUT_LOCK;
+            }
+        } catch (Exception e) {
+            complete = false;
+            LOGGER.debugf("Could not read the follow-up mapping for channel %s: %s", sanitize(channelId), e.getMessage());
+        }
+        if (complete) {
+            // Read from the database, so a fill: nothing changed that another node
+            // must hear about.
+            nonParticipants.fill(negativeKey, Boolean.TRUE);
+        }
+        return null;
+    }
+
+    /** How long "this user has no part in this thread" is remembered. */
+    static final Duration NON_PARTICIPATION_TTL = Duration.ofMinutes(5);
+
+    /** The cache of users known to have no mapping in a thread. */
+    static final String NON_PARTICIPATION_CACHE = "slack-thread-nonparticipants";
+
+    private static String nonParticipationKey(String channelId, String threadTs, String eddiUserId) {
+        return channelId + ":" + threadTs + ":" + eddiUserId;
+    }
+
+    /**
+     * Forget that {@code eddiUserId} has no part in the thread {@code intent}
+     * names, now that a mapping for it exists. Removal is announced to the other
+     * nodes in cluster mode.
+     */
+    private void forgetNonParticipation(String intent, String eddiUserId) {
+        String[] parts;
+        if (intent.startsWith("channel:slack:")) {
+            parts = intent.split(":", 5);
+            if (parts.length == 5 && !"main".equals(parts[4])) {
+                nonParticipants.remove(nonParticipationKey(parts[2], parts[4], eddiUserId));
+            }
+        } else if (intent.startsWith("channel:followup:")) {
+            parts = intent.split(":", 4);
+            if (parts.length == 4) {
+                nonParticipants.remove(nonParticipationKey(parts[2], parts[3], eddiUserId));
+            }
+        }
+    }
+
+    /**
+     * The key that makes a Slack message and its {@code app_mention} — two events
+     * with different event ids — one turn. Scoped by the workspace the webhook
+     * pinned, so one app's message cannot take another workspace's slot.
+     * <p>
+     * It shares a cache with the raw {@code event_id} keys; a Slack event id is
+     * {@code Ev…} with no colon, so the {@code msg:} prefix cannot meet one.
+     */
+    static String messageDedupKey(EventOrigin origin, String channelId, String messageTs) {
+        String scope = origin != null && origin.teamId() != null && !origin.teamId().isBlank() ? origin.teamId() : "-";
+        return "msg:" + scope + ":" + channelId + ":" + messageTs;
     }
 }

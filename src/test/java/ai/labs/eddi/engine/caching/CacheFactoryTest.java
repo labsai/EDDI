@@ -305,7 +305,7 @@ class CacheFactoryTest {
         @DisplayName("caches that are not rate-sized keep their configured capacity")
         void nonRateSizedCachesKeepConfiguredSize() {
             assertEquals(10_000L, evictionMaximumOf(factory.getCache("tool-results", Duration.ofMinutes(5))));
-            assertEquals(1_000L, evictionMaximumOf(factory.getCache("slack-event-dedup", Duration.ofHours(24))),
+            assertEquals(1_000L, evictionMaximumOf(factory.getCache("an-unlisted-cache", Duration.ofHours(24))),
                     "an unlisted cache must stay on the 1_000 default however long its TTL is");
         }
 
@@ -450,6 +450,34 @@ class CacheFactoryTest {
         assertTrue(capacity >= (long) (steadyState * CacheFactory.RATE_SIZED_EVICTION_HEADROOM),
                 "capacity " + capacity + " must hold the peak window with head-room");
         assertTrue(capacity > 100_000L);
+    }
+
+    /**
+     * S3: unlisted, the Slack event cache stayed at 1,000 entries for its 10
+     * minutes while every channel message took one key and every processed message
+     * a second — keys were evicted before Slack's retries (after 1 and 5 minutes)
+     * arrived, and a retry was processed twice.
+     */
+    @Test
+    @DisplayName("the Slack event dedup cache is rate-sized for its 10-minute window, not the 1,000 default")
+    void slackDedupCacheIsSizedForItsWindow() {
+        Duration window = Duration.ofMinutes(10);
+        assertTrue(CacheFactory.hasExplicitSize("slack-event-dedup"));
+        long capacity = evictionMaximumOf(factory.getCache("slack-event-dedup", window));
+        long steadyState = (long) CacheFactory.SLACK_PEAK_DEDUP_KEYS_PER_SECOND * window.toSeconds();
+        assertEquals(CacheFactory.maximumSizeFor("slack-event-dedup", window), capacity);
+        assertTrue(capacity >= (long) (steadyState * CacheFactory.RATE_SIZED_EVICTION_HEADROOM),
+                "capacity " + capacity + " must hold the peak window with head-room");
+        assertEquals(120_000L, capacity);
+    }
+
+    @Test
+    @DisplayName("the Slack thread non-participation cache is sized, node-local, and its removals reach the other nodes")
+    void slackNonParticipantCacheIsInvalidatedAcrossTheCluster() {
+        assertTrue(CacheFactory.hasExplicitSize("slack-thread-nonparticipants"));
+        assertEquals(10_000L, CacheFactory.maximumSizeFor("slack-thread-nonparticipants", Duration.ofMinutes(5)));
+        assertTrue(CacheFactory.INVALIDATED.contains("slack-thread-nonparticipants"));
+        assertNull(CacheFactory.SHARED_BUCKETS.get("slack-thread-nonparticipants"), "a copy of database state, not shared state");
     }
 
     @Test

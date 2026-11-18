@@ -27,6 +27,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 
 import java.net.URI;
 import java.time.Duration;
@@ -36,6 +37,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.BooleanSupplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -44,6 +46,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.after;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
@@ -159,10 +162,134 @@ class SlackThreadParticipationTest {
 
         handler.handleEventAsync(id(), threadReply("100.1", "100.5", "continuing"), BOT, origin());
 
-        // Written back when the mapping is found (and again when the reply is routed).
-        verify(router, timeout(2000).atLeastOnce()).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"),
-                any(ChannelTarget.class));
         verify(slackApi, timeout(2000)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
+        // The write-back is the lock written BETWEEN the participation check's read of
+        // the lock and routing's read of it — routing's own lock comes after both.
+        InOrder order = inOrder(router);
+        order.verify(router).resolveThreadTarget("slack", CHANNEL, "100.1");
+        order.verify(router).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"), any(ChannelTarget.class));
+        order.verify(router).resolveThreadTarget("slack", CHANNEL, "100.1");
+        order.verify(router).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"), any(ChannelTarget.class));
+    }
+
+    @Test
+    @DisplayName("a thread with a lock reads the lock once per reply: routing reuses the participation check's read")
+    void threadWithLock_readsTheLockOnce() throws Exception {
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "next"), BOT, origin());
+
+        verify(slackApi, timeout(2000)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
+        verify(router, times(1)).resolveThreadTarget("slack", CHANNEL, "100.1");
+    }
+
+    // ─── Cost of an ignored reply ───
+
+    @Test
+    @DisplayName("the second and later ignored replies of a user in a thread read no mapping from the database")
+    void repeatedIgnoredReplies_readTheDatabaseOnce() throws Exception {
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "first"), BOT, origin());
+        verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
+        waitFor(() -> caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE).size() == 1);
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.6", "second"), BOT, origin());
+        handler.handleEventAsync(id(), threadReply("100.1", "100.7", "third"), BOT, origin());
+
+        // One read per channel target plus the follow-up mapping, for the first reply
+        // only.
+        verify(userConversationStore, after(700).times(2)).readUserConversation(anyString(), anyString());
+        verify(router, times(3)).resolveThreadTarget("slack", CHANNEL, "100.1");
+        assertEquals(3.0, meters.counter("eddi.slack.thread.replies.ignored").count());
+        assertEquals("slack-thread-nonparticipants", SlackEventHandler.NON_PARTICIPATION_CACHE);
+    }
+
+    @Test
+    @DisplayName("a store error is not remembered as 'no part in the thread'")
+    void storeErrorIsNotCachedAsNonParticipation() throws Exception {
+        when(userConversationStore.readUserConversation(anyString(), anyString()))
+                .thenThrow(new IllegalStateException("db down"))
+                .thenReturn(null);
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "first"), BOT, origin());
+        verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
+        handler.handleEventAsync(id(), threadReply("100.1", "100.6", "second"), BOT, origin());
+
+        verify(userConversationStore, timeout(2000).times(4)).readUserConversation(anyString(), anyString());
+    }
+
+    @Test
+    @DisplayName("a user's non-participation is forgotten when a mapping for them in the thread is created")
+    void newMappingForgetsNonParticipation() throws Exception {
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "first"), BOT, origin());
+        verify(userConversationStore, timeout(2000).times(2)).readUserConversation(anyString(), anyString());
+        waitFor(() -> caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE).size() == 1);
+        var negatives = caches.get(SlackEventHandler.NON_PARTICIPATION_CACHE);
+
+        // The bot is then mentioned in the thread: routing creates the user's mapping.
+        when(router.resolveTarget("slack", CHANNEL, "now you")).thenReturn(locked());
+        handler.handleEventAsync(id(), mentionEvent("100.1", "100.8", "<@UBOT> now you"), BOT, origin());
+
+        verify(userConversationStore, timeout(2000)).createUserConversation(any());
+        waitFor(negatives::isEmpty);
+    }
+
+    // ─── Group follow-ups across nodes and restarts (S4) ───
+
+    @Test
+    @DisplayName("without the node-local listener, the user's own follow-up mapping keeps a group thread alive")
+    void followUpMappingWithoutListener_isAnsweredByThatAgent() throws Exception {
+        String intent = "channel:followup:" + CHANNEL + ":100.1";
+        when(userConversationStore.readUserConversation(intent, "slack:T1:U0ALICE"))
+                .thenReturn(new UserConversation(intent, "slack:T1:U0ALICE", Deployment.Environment.production, "agent-member",
+                        "conv-fu"));
+        when(conversationService.getConversationState("conv-fu")).thenReturn(ConversationState.READY);
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "and the risks?"), BOT, origin());
+
+        verify(conversationService, timeout(2000)).say(eq("conv-fu"), any(), any(), any(), any(), anyBoolean(), any());
+        verify(slackApi, timeout(2000)).postMessage(eq("Bearer xoxb-a"), eq(CHANNEL), eq("100.1"), anyString());
+        verify(router, never()).resolveTarget(any(), any(), any());
+        assertEquals(0.0, meters.counter("eddi.slack.thread.replies.ignored").count());
+    }
+
+    @Test
+    @DisplayName("a stored follow-up is not continued for an event another app signed")
+    void followUpMappingFromAnotherApp_isRefused() throws Exception {
+        String intent = "channel:followup:" + CHANNEL + ":100.1";
+        when(userConversationStore.readUserConversation(intent, "slack:T1:U0ALICE"))
+                .thenReturn(new UserConversation(intent, "slack:T1:U0ALICE", Deployment.Environment.production, "agent-member",
+                        "conv-fu"));
+
+        handler.handleEventAsync(id(), threadReply("100.1", "100.5", "and the risks?"), BOT,
+                new SlackEventHandler.EventOrigin("T1", null, "secret-other"));
+
+        verify(conversationService, after(700).never()).say(any(), any(), any(), any(), any(), anyBoolean(), any());
+    }
+
+    // ─── The bot's own messages ───
+
+    @Test
+    @DisplayName("an event whose sender is this bot's own user — without a bot_id — runs no turn")
+    void selfMessage_isIgnored() throws Exception {
+        when(router.resolveThreadTarget("slack", CHANNEL, "100.1")).thenReturn(locked());
+        var event = threadReply("100.1", "100.5", "my own answer");
+        event.put("user", BOT);
+
+        handler.handleEventAsync(id(), event, BOT, origin());
+
+        verify(conversationService, after(700).never()).say(any(), any(), any(), any(), any(), anyBoolean(), any());
+        verify(router, never()).resolveThreadTarget(any(), any(), any());
+    }
+
+    // ─── One message, one turn ───
+
+    @Test
+    @DisplayName("the message key is scoped by the pinned workspace")
+    void messageKeyIsScopedByWorkspace() {
+        assertEquals("msg:T1:C1:100.5",
+                SlackEventHandler.messageDedupKey(new SlackEventHandler.EventOrigin("T1", null, "s"), "C1", "100.5"));
+        assertEquals("msg:-:C1:100.5",
+                SlackEventHandler.messageDedupKey(new SlackEventHandler.EventOrigin(null, null, "s"), "C1", "100.5"));
     }
 
     @Test
@@ -286,6 +413,16 @@ class SlackThreadParticipationTest {
     }
 
     // ─── Helpers ───
+
+    private static void waitFor(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("condition not reached within 5 s");
+            }
+            Thread.sleep(10);
+        }
+    }
 
     private ResolvedTarget locked() {
         return new ResolvedTarget(target(), null, integration, null, null);
