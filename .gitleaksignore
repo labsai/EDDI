@@ -235,3 +235,7 @@ eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__test
 eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__tests__/secret-key-picker-literal.test.tsx:generic-api-key:44
 # mask-credentials.test.ts: the apiKey of the fixture document the mask is applied to
 eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/lib/__tests__/mask-credentials.test.ts:generic-api-key:7
+
+# Streaming test fixture of PR #1487 (fix/streaming-contract): a made-up 50-character payload sent
+# through the SSE buffer-budget test in SseChannelLoadTest; not a credential.
+5afab5abc326390555b9a9f9f1cb9cd00d35bb74:src/test/java/ai/labs/eddi/engine/internal/SseChannelLoadTest.java:generic-api-key:448
