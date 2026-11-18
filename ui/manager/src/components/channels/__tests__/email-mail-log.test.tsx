@@ -119,6 +119,37 @@ describe("EmailMailLog", () => {
     expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
   });
 
+  it("does not revive a 403 that a later successful read already lifted", async () => {
+    let mode: "ok" | "forbidden" | "down" = "ok";
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+        const filtered = new URL(request.url).searchParams.has("state");
+        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        if (mode === "down") return HttpResponse.error();
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+      }),
+    );
+    const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+
+    // "All" itself answers 403 (it keeps its rows and that error in the cache).
+    mode = "forbidden";
+    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
+
+    // Access is back: another filter reads successfully and lifts the denial.
+    mode = "ok";
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
+
+    // Back on "All", whose refetch fails on the network: its old 403 is handled,
+    // so its cached rows show.
+    mode = "down";
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+  });
+
   it("counts a 403 that arrives after the filter has already changed", async () => {
     let refusedFilter: (() => void) | null = null;
     let listDown = false;

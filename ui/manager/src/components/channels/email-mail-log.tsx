@@ -1,4 +1,4 @@
-import { useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
@@ -157,10 +157,15 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   // request still in flight when the filter changed can come back 403 after its
   // query is no longer on screen, and that denial counts all the same.
   const queryClient = useQueryClient();
+  // When a successful read last lifted a denial. A 403 from before then is
+  // handled: a query keeps its old error while it refetches, and seeing it again
+  // must not bring the denial back.
+  const liftedAt = useRef(0);
   useEffect(() => {
     const prefix = JSON.stringify(["channels", channelId, "email-log"]).slice(0, -1);
     const noteDenial = (error: unknown, at: number) => {
-      if (isApiError(error) && error.status === 403) setDeniedAt((prev) => (prev === null || at > prev ? at : prev));
+      if (!isApiError(error) || error.status !== 403 || at <= liftedAt.current) return;
+      setDeniedAt((prev) => (prev === null || at > prev ? at : prev));
     };
     for (const query of queryClient.getQueryCache().getAll()) {
       if (JSON.stringify(query.queryKey).startsWith(prefix)) noteDenial(query.state.error, query.state.errorUpdatedAt);
@@ -174,8 +179,10 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   // A read newer than the denial confirms access: lift it for every filter, so a
   // list cached before it shows again (and a later network error keeps it).
   useEffect(() => {
-    if (accessConfirmed) setDeniedAt(null);
-  }, [accessConfirmed]);
+    if (!accessConfirmed) return;
+    liftedAt.current = log.dataUpdatedAt;
+    setDeniedAt(null);
+  }, [accessConfirmed, log.dataUpdatedAt]);
   const forbidden = deniedAt !== null && !accessConfirmed;
 
   return (
