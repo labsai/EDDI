@@ -92,6 +92,8 @@ connection. `headerName` is required by the connection model but not used by a m
 }
 ```
 
+<a id="gmail-and-google-workspace"></a>
+
 #### Google Workspace (a dedicated mailbox, linked once by an administrator)
 
 Gmail's IMAP and SMTP take OAuth through SASL `XOAUTH2`, and a Workspace user mailbox's token comes from an
