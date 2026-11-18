@@ -119,7 +119,7 @@ Only configuration and EDDI vocabulary: your block message or fix text, the issu
 
 When the configuration is **saved** (HTTP 400): at most 32 entries; `type` present, at most 64 characters; `tools` non-empty, at most 32 valid patterns; at most 16 `fields`, each a valid pointer; `action` exactly one of `block`, `redact`, `reprompt`, `warn` (a typo in a hard block is an error, not a silent block); `disclosure` only with `redact`; `maxRetries` 0–5; `onExhausted` absent or `block`; `blockMessage` at most 1,000 characters.
 
-When the agent is **deployed**: each entry's parameters are checked by its type, and an unknown type, or one that does not run on tool-call arguments, refuses the deploy. (Input and output guardrails skip an unknown type with a warning instead, so a configuration written for a newer EDDI still loads; this field is new, and a skipped hard block is a disabled one.)
+When the agent is **deployed**: each entry's parameters are checked by its type, and an unknown type, or one that does not run on tool-call arguments, refuses the deploy. (Input and output guardrails refuse an unknown type the same way, at save and at deploy.)
 
 An agent cannot remove its own guardrails: an approved call that writes an LLM configuration carrying `toolCallGuardrails` is refused, exactly like one carrying `toolApprovals` ([self-ungating](hitl.md#request-pinning--approval-binds-to-a-request-not-a-tool-name)). Editing them is a human's job, in the Manager.
 

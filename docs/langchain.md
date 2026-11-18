@@ -1070,7 +1070,7 @@ A task can screen the **user's message before the model is called** (`inputGuard
 
 | Field | Description | Default |
 |---|---|---|
-| `type` | The guardrail (table below). An unknown type is skipped with a WARN in the log — never an error, so a config written for a newer EDDI still runs. | — |
+| `type` | The guardrail (table below). An unknown or mistyped type is an error: the save is refused (400) and a stored config carrying one fails to deploy, naming the task, list, index, type and the known types — a typo must not silently switch the protection off. | — |
 | `action` | `block`, `redact`, `reprompt` or `warn` (below). An unknown value is treated as `block`. | `block` |
 | `maxRetries` | `reprompt` only: how many times the model may be asked again. Clamped to 0–5. | `2` |
 | `onExhausted` | `reprompt` on output only: what happens once the retries are spent — `block`, or `deliver-best` to deliver the attempt this guardrail rated best, still screened by the guardrails after it. See [When the retries run out](#when-the-retries-run-out-onexhausted). | `block` |

@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -27,6 +28,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * @author ginccc
  */
@@ -35,9 +39,21 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
 
     private static final Logger LOGGER = Logger.getLogger(LlmStore.class);
 
+    /**
+     * Knows the registered guardrail types, so a mistyped input or output guardrail
+     * is refused at save time. Null (the two-argument constructor) skips that
+     * check.
+     */
+    private final GuardrailService guardrailService;
+
     @Inject
-    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, GuardrailService guardrailService) {
         super(storageFactory, "llms", documentBuilder, LlmConfiguration.class);
+        this.guardrailService = guardrailService;
+    }
+
+    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        this(storageFactory, documentBuilder, null);
     }
 
     @Override
@@ -62,13 +78,14 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
      * strict-mode approval implications only log a warning. Field paths in the
      * messages keep the legacy {@code langchain.task[i]} prefix.
      */
-    private static void validateTaskToolApprovals(LlmConfiguration content) {
+    private void validateTaskToolApprovals(LlmConfiguration content) {
         if (content == null || content.tasks() == null) {
             return;
         }
         for (int i = 0; i < content.tasks().size(); i++) {
             LlmConfiguration.Task task = content.tasks().get(i);
             if (task != null) {
+                validateGuardrailTypes(task, "langchain.task[" + i + "]");
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
                 ToolCallGuardrailConfigValidator.validate(task.getToolCallGuardrails(), "langchain.task[" + i + "].toolCallGuardrails");
@@ -85,6 +102,26 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 // responseSchema, no name collision).
                 AnswerToolConfigValidator.validate(task, "langchain.task[" + i + "]");
             }
+        }
+    }
+
+    /**
+     * An unknown input or output guardrail type is refused: it would otherwise be
+     * skipped at run time and silently disable the protection the author asked for.
+     */
+    private void validateGuardrailTypes(LlmConfiguration.Task task, String taskPath) {
+        if (guardrailService == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (String problem : guardrailService.unknownTypeProblems(GuardrailService.LIST_INPUT, task.getInputGuardrails())) {
+            problems.add(taskPath + "." + problem);
+        }
+        for (String problem : guardrailService.unknownTypeProblems("outputGuardrails", task.getOutputGuardrails())) {
+            problems.add(taskPath + "." + problem);
+        }
+        if (!problems.isEmpty()) {
+            throw new IllegalArgumentException(String.join("; ", problems));
         }
     }
 

@@ -3956,6 +3956,12 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         List<String> problems = new ArrayList<>();
         for (var task : llmConfiguration.tasks()) {
             String taskId = task.getId() != null ? task.getId() : "<unnamed>";
+            for (String problem : guardrailService.unknownTypeProblems("inputGuardrails", task.getInputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
+            for (String problem : guardrailService.unknownTypeProblems("outputGuardrails", task.getOutputGuardrails())) {
+                problems.add("task '" + taskId + "' " + problem);
+            }
             for (String problem : guardrailService.validate("inputGuardrails", task.getInputGuardrails())) {
                 problems.add("task '" + taskId + "' " + problem);
             }
