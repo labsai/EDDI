@@ -1089,7 +1089,14 @@ public class McpToolProviderManager {
                 }
                 return;
             }
-            String expanded = globalVariableResolver.resolveValue(apiKey);
+            String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+            if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
+                // A variable that does not resolve (deleted, nested past the limit, a
+                // cycle) names no secret: a grant check over it would pass vacuously while
+                // a session cached for the credential it used to name is still served.
+                throw new IllegalArgumentException("The apiKey of MCP server '" + serverName + "' names a global variable that does not "
+                        + "resolve to a value, so its vault grant cannot be checked. Restore the variable or use a ${vault:…} reference.");
+            }
             secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
                     "MCP server '" + serverName + "'");
         } catch (SecretResolver.SecretNotGrantedException | ConnectionException e) {
@@ -1135,7 +1142,7 @@ public class McpToolProviderManager {
         if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
             return config;
         }
-        String expanded = globalVariableResolver.resolveValue(apiKey);
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
         if (expanded == null || expanded.equals(apiKey)) {
             return config;
         }

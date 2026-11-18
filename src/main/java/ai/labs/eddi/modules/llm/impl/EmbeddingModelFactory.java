@@ -184,9 +184,29 @@ public class EmbeddingModelFactory {
      *             when a referenced secret is not granted to {@code access}
      */
     public void requireGranted(RagConfiguration config, SecretAccess access) {
+        requireGranted(config, credentialBinding(config), access);
+    }
+
+    /**
+     * The embedding parameters with their global variables expanded: what a model
+     * is built from and cached under. See
+     * {@link EmbeddingStoreFactory#credentialBinding}.
+     */
+    public Map<String, String> credentialBinding(RagConfiguration config) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
-        secretResolver.requireGranted(globalVariableResolver.resolveAll(rawParams), access,
-                "embedding model '" + config.getEmbeddingProvider() + "'");
+        Map<String, String> expanded = globalVariableResolver.resolveAll(rawParams);
+        return expanded != null ? expanded : rawParams;
+    }
+
+    /**
+     * The grant check against a binding recorded earlier; see
+     * {@link #credentialBinding}.
+     */
+    public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
+        if (binding == null) {
+            return;
+        }
+        secretResolver.requireGranted(binding, access, "embedding model '" + config.getEmbeddingProvider() + "'");
     }
 
     private EmbeddingModel build(RagConfiguration config, Map<String, String> expandedParams, EmbeddingInputType inputType, SecretAccess access) {

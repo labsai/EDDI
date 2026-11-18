@@ -347,7 +347,7 @@
     "valuePlaceholder": "Secret मान दर्ज करें…",
     "store": "Secret संग्रहित करें",
     "storeSuccess": "Secret \"{{key}}\" संग्रहित किया गया",
-    "storeWarning": "सीक्रेट \"{{key}}\" सहेजा गया, लेकिन इसकी अनुमति उन तैनात एजेंटों को बाहर रखती है जो इसका उपयोग करते हैं",
+    "storeGrantWarning": "सीक्रेट \"{{key}}\" सहेजा गया — इसकी अनुमति जाँचें",
     "descriptionLabel": "विवरण (वैकल्पिक)",
     "allowedHosts": "अनुमत गंतव्य",
     "allowedHostsAdd": "अनुमत होस्ट जोड़ें",

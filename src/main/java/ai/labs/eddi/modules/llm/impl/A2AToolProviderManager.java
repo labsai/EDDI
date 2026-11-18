@@ -333,7 +333,13 @@ public class A2AToolProviderManager {
             }
             return;
         }
-        String expanded = globalVariableResolver.resolveValue(apiKey);
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
+            // A variable that does not resolve names no secret: refused rather than
+            // checked vacuously while a card fetched with its old value is cached.
+            throw new IllegalArgumentException("The apiKey of the A2A agent at " + config.getUrl() + " names a global variable that does "
+                    + "not resolve to a value, so its vault grant cannot be checked.");
+        }
         secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
                 "A2A agent at " + config.getUrl());
     }
@@ -347,7 +353,7 @@ public class A2AToolProviderManager {
         if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
             return config;
         }
-        String expanded = globalVariableResolver.resolveValue(apiKey);
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
         if (expanded == null || expanded.equals(apiKey)) {
             return config;
         }

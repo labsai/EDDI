@@ -233,9 +233,9 @@ export function SecretsPage() {
             // grant: under enforce they are refused it at their next turn. Kept on
             // screen until dismissed, because it names who to add.
             toast.warning(
-              t("secrets.storeWarning", {
+              t("secrets.storeGrantWarning", {
                 key: keyName,
-                defaultValue: `Secret "${keyName}" stored, but its grant leaves out deployed agents that use it`,
+                defaultValue: `Secret "${keyName}" stored — check its grant`,
               }),
               { description: data.warning, duration: Infinity },
             );

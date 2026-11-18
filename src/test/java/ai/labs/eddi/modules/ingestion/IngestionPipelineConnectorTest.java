@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -184,6 +185,27 @@ class IngestionPipelineConnectorTest {
         assertEquals(0, second.documentsIngested());
         assertEquals(1, second.documentsUnchanged());
         assertTrue(connector.fetched.isEmpty(), "a prefetched document is never fetched");
+    }
+
+    @Test
+    @DisplayName("a vault grant refused for the embedding key fails the run with its message and tombstones nothing, run after run (#1179)")
+    void grantRefusalFailsTheRunAndTombstonesNothing() {
+        var connector = new Scripted();
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+        assertEquals(1, run(connector).documentsIngested());
+
+        // The text changes, so it must be embedded again; the key is no longer granted.
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body, revised"), context.partition()));
+        when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class), any()))
+                .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:embed-key} is not resolved for no agent"));
+
+        for (int attempt = 0; attempt < 3; attempt++) {
+            IngestionReport refused = run(connector);
+            assertTrue(String.valueOf(refused.message()).contains("is not resolved for"), refused.message());
+            assertEquals(0, refused.documentsTombstoned(), "a document the run could not process is not missing");
+        }
+        assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "the chunks of the last good run stay");
+        assertFalse(stateStore.lookup(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), "a").orElseThrow().tombstoned());
     }
 
     @Test

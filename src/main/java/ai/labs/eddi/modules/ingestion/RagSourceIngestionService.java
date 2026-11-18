@@ -18,6 +18,7 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.quarkus.runtime.ShutdownEvent;
 import io.quarkus.runtime.StartupEvent;
@@ -1040,6 +1041,16 @@ public class RagSourceIngestionService {
     private void discardSourceContent(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         try {
             pipeline.forgetSource(ragConfigId, knowledgeBase, source);
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // The grant was narrowed between the check before the save and this cleanup.
+            // The chunks are still in the store, so the files that produced them are kept
+            // too: deleting them would leave content retrievable that nothing lists, while
+            // kept they are evidence, and the chunks can be removed once the grant allows.
+            LOGGER.errorf("Could not remove what source %s put into knowledge base %s: %s. Its chunks stay retrievable; "
+                    + "its uploaded files (state key %s) are kept so they can be cleaned up once the grant allows.",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId), LogSanitizer.sanitize(e.getMessage()),
+                    LogSanitizer.sanitize(IngestionPipeline.stateKey(ragConfigId, source)));
+            return;
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Could not remove what source %s put into knowledge base %s; its chunks stay "
                     + "retrievable", LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));

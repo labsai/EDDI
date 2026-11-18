@@ -400,10 +400,30 @@ public class EmbeddingStoreFactory {
      *             when a referenced secret is not granted to {@code access}
      */
     public void requireGranted(RagConfiguration config, SecretAccess access) {
-        if (isInMemory(config)) {
+        requireGranted(config, isInMemory(config) ? Map.of() : expandedStoreParams(config), access);
+    }
+
+    /**
+     * The store parameters with their global variables expanded and their vault
+     * references not: what a store is built from and cached under. A caller that
+     * holds a store across many calls records this when it acquires the store and
+     * re-checks it with
+     * {@link #requireGranted(RagConfiguration, Map, SecretAccess)}.
+     */
+    public Map<String, String> credentialBinding(RagConfiguration config) {
+        return isInMemory(config) ? Map.of() : expandedStoreParams(config);
+    }
+
+    /**
+     * The grant check against a binding recorded earlier (see
+     * {@link #credentialBinding}), so a variable repointed since then cannot make
+     * the check pass for a secret the held store does not use.
+     */
+    public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
+        if (isInMemory(config) || binding == null) {
             return;
         }
-        secretResolver.requireGranted(expandedStoreParams(config), access, "vector store '" + config.getStoreType() + "'");
+        secretResolver.requireGranted(binding, access, "vector store '" + config.getStoreType() + "'");
     }
 
     /**

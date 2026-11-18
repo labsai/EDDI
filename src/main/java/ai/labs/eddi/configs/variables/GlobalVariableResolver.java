@@ -110,6 +110,31 @@ public class GlobalVariableResolver {
         return value != null && value.contains("${vars:");
     }
 
+    /** How many nested {@code ${vars:…}} levels {@link #expandFully} follows. */
+    static final int MAX_NESTING = 8;
+
+    /**
+     * {@code value} with its {@code ${vars:…}} references expanded until none is
+     * left, or until a pass changes nothing (a missing variable, a cycle) or
+     * {@link #MAX_NESTING} passes have run. {@link #resolveValue} makes one pass,
+     * so a variable holding {@code ${vars:inner}} would otherwise reach a caller
+     * with a reference still in it — and a caller that binds a cache entry or a
+     * grant check to the expansion must see the final credential, not an
+     * intermediate one (#1179). The result may still contain a reference; such a
+     * caller refuses it.
+     */
+    public static String expandFully(GlobalVariableResolver resolver, String value) {
+        String current = value;
+        for (int pass = 0; pass < MAX_NESTING && containsReference(current); pass++) {
+            String next = resolver.resolveValue(current);
+            if (next == null || next.equals(current)) {
+                break;
+            }
+            current = next;
+        }
+        return current;
+    }
+
     /**
      * The full-form references ({@code ${vars:tenantId/key}}) in {@code value}: the
      * ones that select a workspace other than the caller's context.

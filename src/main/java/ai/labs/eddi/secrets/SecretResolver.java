@@ -720,7 +720,7 @@ public class SecretResolver {
         // (see grantOf).
         invalidations.incrementAndGet();
         grantCache.invalidate(cacheKey);
-        LOGGER.infof("Grant cache invalidated for: %s", cacheKey);
+        LOGGER.infof("Grant cache invalidated for: %s", sanitize(cacheKey));
     }
 
     /**

@@ -288,6 +288,40 @@ class SecretGrantCallSitesTest {
         }
 
         @Test
+        @DisplayName("a variable holding another variable is expanded to the final credential; one that does not resolve is refused")
+        void nestedVariablesBindTheFinalCredential() {
+            when(variables.resolveValue(anyString())).thenAnswer(inv -> {
+                String value = inv.getArgument(0);
+                return switch (value) {
+                    case "${vars:outer}" -> "${vars:inner}";
+                    case "${vars:inner}" -> REF;
+                    default -> value;
+                };
+            });
+            var manager = new McpToolProviderManager(variables, secretResolver);
+            var config = new McpServerConfig();
+            config.setName("weather");
+            config.setUrl("https://mcp.example.com/mcp");
+            config.setApiKey("${vars:outer}");
+
+            assertEquals(REF, manager.bindCredential(config).getApiKey(), "bound to the secret, not to the inner variable");
+            assertThrows(IllegalArgumentException.class, () -> manager.validateSecretGrant(config, SecretAccess.agent(AGENT_B)));
+
+            var dangling = new McpServerConfig();
+            dangling.setName("weather");
+            dangling.setUrl("https://mcp.example.com/mcp");
+            dangling.setApiKey("${vars:deleted}");
+            var e = assertThrows(IllegalArgumentException.class, () -> manager.validateSecretGrant(dangling, SecretAccess.agent(AGENT_A)));
+            assertTrue(e.getMessage().contains("does not resolve"), e.getMessage());
+
+            var a2a = new A2AToolProviderManager(variables, secretResolver, false);
+            var peer = new A2AAgentConfig();
+            peer.setUrl("https://peer.example.com");
+            peer.setApiKey("${vars:outer}");
+            assertEquals(REF, a2a.bindCredential(peer).getApiKey());
+        }
+
+        @Test
         void a2aGrantChecked() {
             var manager = new A2AToolProviderManager(variables, secretResolver, false);
             var config = new A2AAgentConfig();

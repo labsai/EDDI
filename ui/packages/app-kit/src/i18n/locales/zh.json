@@ -347,7 +347,7 @@
     "valuePlaceholder": "输入 Secret 值…",
     "store": "存储 Secret",
     "storeSuccess": "Secret \"{{key}}\" 已存储",
-    "storeWarning": "密钥“{{key}}”已保存，但其授权排除了正在使用它的已部署智能体",
+    "storeGrantWarning": "密钥“{{key}}”已保存 — 请检查其授权",
     "descriptionLabel": "描述（可选）",
     "allowedHosts": "允许的目标",
     "allowedHostsAdd": "添加允许的主机",

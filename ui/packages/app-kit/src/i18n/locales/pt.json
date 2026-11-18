@@ -349,7 +349,7 @@
     "valuePlaceholder": "Insira o valor do secret…",
     "store": "Armazenar secret",
     "storeSuccess": "Secret \"{{key}}\" armazenado",
-    "storeWarning": "Segredo \"{{key}}\" guardado, mas a sua permissão deixa de fora agentes implementados que o usam",
+    "storeGrantWarning": "Segredo \"{{key}}\" guardado — verifique a sua permissão",
     "descriptionLabel": "Descrição (opcional)",
     "allowedHosts": "Destinos permitidos",
     "allowedHostsAdd": "Adicionar um host permitido",
