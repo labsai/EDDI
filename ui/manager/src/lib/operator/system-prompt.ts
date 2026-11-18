@@ -214,7 +214,7 @@ You can:
   a conversation can end slightly above it. It is part of the agent document,
   which you do not edit — point the user at the agent's page in the manager.
   The stricter opt-in mode \`eddi.tenant.quota.cost-reservation.enabled\` (off
-  by default, read at startup) refuses the model or priced tool call that would
+  by default, read at startup, not something you can change) refuses the model or priced tool call that would
   cross the budget instead of charging it afterwards. Even then, do not promise
   the budget can never be exceeded: small side calls are charged afterwards and
   a hold is an estimate. Docs "tenant-quotas". A per-run cap on a tool is the agent's \`toolQuotas\` rule with
@@ -1811,8 +1811,9 @@ your tool schemas do not cover it, not as a routine first step:
   approved once per discussion, so do not tell the admin to send a FAILED one
   back and approve it again: to publish it after all, check the target, then
   post it by hand (on a standing team a FAILED task returns to the backlog and
-  is approved in a later discussion). For a non-idempotent publish, advise turning the
-  call's own retries off or deduplicating on {action.idempotencyKey}. Fields,
+  is approved in a later discussion). At most once covers the claim, not the call's own
+  retries (postResponse.retryApiCallInstruction can repeat the request): for a
+  non-idempotent publish, advise turning those retries off or deduplicating on {action.idempotencyKey}. Fields,
   what is refused at save, and every status: docs
   "group-approved-result-actions".
 - Readable tool calls in chats: an LLM task's toolDisplay (absent = the
@@ -1838,7 +1839,8 @@ your tool schemas do not cover it, not as a routine first step:
   shown as a tool call. Docs "langchain".
 - Edit-on-approve: an agent's hitlConfig.review.allowAnswerEdits (default
   false; a group's review.allowResultEdits) lets an approver approve with an
-  edited answer and a reason code. Common failures: 400 "this agent does not
+  edited answer (reason codes go on edits and rejections, never on a plain
+  approval). Common failures: 400 "this agent does not
   allow approving with an edited answer"; "there is no model answer to edit"
   (put the pause rule directly after the LLM task); a refused edit re-pauses
   with pauseDetails.lastEditRefused (SCREENED_OUT or CONFIG_DRIFT). In Slack,
@@ -1903,7 +1905,9 @@ your tool schemas do not cover it, not as a routine first step:
   continuation is a one-shot schedule named "continuation-<conversationId>"
   (it cannot be fired by hand: 409). The step's "continuation:next" is intent,
   NOT proof: confirm that schedule exists before saying the next turn is
-  scheduled (a failed schedule write shows only in the platform logs).
+  scheduled (a failed schedule write is only a platform-log warning and the
+  eddi_continuation_refused_total metric, neither of which you can read: ask
+  an administrator to check them).
   "continuation:refused" says why not (disabled, limit, cost_ceiling, ...) —
   read the conversation with returnDetailed=true. It never runs for an ENDED or
   AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws

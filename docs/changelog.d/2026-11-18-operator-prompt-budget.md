@@ -25,8 +25,8 @@ casually.
   prefix by itself), and a value already set is kept. The Manager sends it when it activates or
   upgrades the operator (`provisionOperator`). An older backend ignores the field (the setup request is not parsed strictly). Documented beside `dryRun` in `docs/architecture.md`. Tests in
   `AgentSetupApiDryRunTest` (mutation-checked: removing the call fails them) and `operator.test.ts`.
-- **Prompt trimmed toward small pages** (`system-prompt.ts`): `read_write` 142,220 → 117,122
-  characters, `read_only` 121,915 → 96,817. Condensed to the boundary, the common symptom and a
+- **Prompt trimmed toward small pages** (`system-prompt.ts`): `read_write` 142,220 → 117,436
+  characters, `read_only` 121,915 → 97,131. Condensed to the boundary, the common symptom and a
   page pointer: the signing-key block of the role section (10 KB → new
   [`agent-signing`](../agent-signing.md) page), the per-user event stream (→ `user-events`),
   approved-result actions (→ `group-approved-result-actions`), tool-call guardrails, edit-on-approve,
