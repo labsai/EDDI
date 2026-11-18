@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import ai.labs.eddi.datastore.postgres.PostgresText;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -36,6 +35,7 @@ import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 import java.time.Duration;
 import java.time.Instant;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -555,6 +555,18 @@ public class AuditLedgerService implements UserErasureParticipant {
             return false;
         entry = pseudonymiseIfErased(entry, false);
 
+        // A store that cannot hold some characters (PostgreSQL and U+0000) stores a
+        // replacement; sign that, not the original, or the row would read back as
+        // tampered. Same rule as the payload and timestamp normalisation below. The
+        // identifiers (every one the canonical form reads) are replaced first, so the
+        // queue reservation and the sequence counters are keyed by what is stored; the
+        // payload once it has been reduced to its JSON-native tree (below). After the
+        // erasure check, which compares the id as the caller gave it.
+        UnaryOperator<String> storableText = auditStore.storableText();
+        if (storableText != null) {
+            entry = withStorableIdentifiers(entry, storableText);
+        }
+
         // Take the queue slot BEFORE a chain position is consumed. G18 puts the
         // sequence inside the signed payload so a deleted row leaves a gap that
         // cannot be closed; G20 drops entries once the queue is full. Assigning
@@ -588,17 +600,6 @@ public class AuditLedgerService implements UserErasureParticipant {
             // Scrub secrets from string values in maps
             AuditEntry scrubbed = scrubSecrets(entry);
 
-            // A store that cannot hold some characters (PostgreSQL and U+0000) stores a
-            // replacement; sign that, not the original, or the row would read back as
-            // tampered. Same rule as the payload and timestamp normalisation below. The
-            // identifiers (conversation id included: every column the canonical form reads)
-            // are replaced here, so the sequence counters are keyed by what is stored; the
-            // payload after it has been reduced to its JSON-native tree.
-            boolean replaceUnstorable = auditStore.replacesNulCharacter();
-            if (replaceUnstorable) {
-                scrubbed = withStorableIdentifiers(scrubbed);
-            }
-
             // Assign the conversation chain position BEFORE signing — the sequence is
             // part of the signed payload, which is what makes a deleted entry's gap
             // impossible to close by renumbering its neighbours.
@@ -607,11 +608,10 @@ public class AuditLedgerService implements UserErasureParticipant {
             // Payload maps must be reduced to their STORED shape before signing, for
             // exactly the same reason as the timestamp below: sign what is stored.
             scrubbed = normalizePayloadsForStorage(scrubbed);
-            if (replaceUnstorable) {
-                // on the fully normalised tree: a POJO, record, array or JsonNode value is a
-                // Map,
-                // List or String by now, so no U+0000 can survive into the signature
-                scrubbed = withStorablePayload(scrubbed);
+            if (storableText != null) {
+                // on the fully normalised tree: a POJO, record, array or JsonNode value is
+                // a Map, List or String by now, so no U+0000 can survive into the signature
+                scrubbed = withStorablePayload(scrubbed, storableText);
             }
 
             // A null timestamp must be stamped BEFORE signing, not by the store. v4
@@ -1182,6 +1182,13 @@ public class AuditLedgerService implements UserErasureParticipant {
                 consecutiveEntryFailures = 0;
                 stored++;
             } catch (Exception e) {
+                if (AuditStoreFailures.isAlreadyStored(e)) {
+                    // a duplicate key: the entry is in the store (written by the failed batch
+                    // or an earlier attempt), so it is neither lost nor poison
+                    consecutiveEntryFailures = 0;
+                    stored++;
+                    continue;
+                }
                 if (AuditStoreFailures.isEntryRejected(e)) {
                     // The store is reachable and refused THIS entry's content (a data error or
                     // a constraint, by SQLState / exception class, not by counting): isolate it.
@@ -2408,49 +2415,99 @@ public class AuditLedgerService implements UserErasureParticipant {
     }
 
     /**
-     * The entry with every string that PostgreSQL cannot store replaced the way the
-     * store will replace it, see {@link PostgresText}. Identifiers the ledger keys
-     * on (the conversation id) are left alone.
+     * The entry with every identifier the canonical form reads replaced by what the
+     * store will hold for it, see {@link IAuditStore#storableText()}. The same
+     * instance when nothing changes.
      */
-    private static AuditEntry withStorableIdentifiers(AuditEntry entry) {
-        return new AuditEntry(entry.id(), PostgresText.text(entry.conversationId()), PostgresText.text(entry.agentId()), entry.agentVersion(),
-                PostgresText.text(entry.userId()), PostgresText.text(entry.environment()), entry.stepIndex(), PostgresText.text(entry.taskId()),
-                PostgresText.text(entry.taskType()), entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(),
-                entry.toolCalls(), entry.actions(), entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
-    }
-
-    private static AuditEntry withStorablePayload(AuditEntry entry) {
-        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
-                entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), storableMap(entry.input()),
-                storableMap(entry.output()), storableMap(entry.llmDetail()), storableMap(entry.toolCalls()), storableList(entry.actions()),
+    static AuditEntry withStorableIdentifiers(AuditEntry entry, UnaryOperator<String> storable) {
+        String id = storable.apply(entry.id());
+        String conversationId = storable.apply(entry.conversationId());
+        String agentId = storable.apply(entry.agentId());
+        String userId = storable.apply(entry.userId());
+        String environment = storable.apply(entry.environment());
+        String taskId = storable.apply(entry.taskId());
+        String taskType = storable.apply(entry.taskType());
+        if (Objects.equals(id, entry.id()) && Objects.equals(conversationId, entry.conversationId()) && Objects.equals(agentId, entry.agentId())
+                && Objects.equals(userId, entry.userId()) && Objects.equals(environment, entry.environment())
+                && Objects.equals(taskId, entry.taskId()) && Objects.equals(taskType, entry.taskType())) {
+            return entry;
+        }
+        return new AuditEntry(id, conversationId, agentId, entry.agentVersion(), userId, environment, entry.stepIndex(), taskId, taskType,
+                entry.taskIndex(), entry.durationMs(), entry.input(), entry.output(), entry.llmDetail(), entry.toolCalls(), entry.actions(),
                 entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
     }
 
-    private static Map<String, Object> storableMap(Map<String, Object> map) {
-        if (map == null || map.isEmpty()) {
-            return map;
+    /**
+     * The entry with every string of its (already normalised) payload, map keys
+     * included, replaced by what the store will hold for it. The same instance when
+     * nothing changes.
+     */
+    @SuppressWarnings("unchecked")
+    static AuditEntry withStorablePayload(AuditEntry entry, UnaryOperator<String> storable) {
+        Map<String, Object> input = (Map<String, Object>) storableValue(entry.input(), storable);
+        Map<String, Object> output = (Map<String, Object>) storableValue(entry.output(), storable);
+        Map<String, Object> llmDetail = (Map<String, Object>) storableValue(entry.llmDetail(), storable);
+        Map<String, Object> toolCalls = (Map<String, Object>) storableValue(entry.toolCalls(), storable);
+        List<String> actions = (List<String>) storableValue(entry.actions(), storable);
+        if (input == entry.input() && output == entry.output() && llmDetail == entry.llmDetail() && toolCalls == entry.toolCalls()
+                && actions == entry.actions()) {
+            return entry;
         }
-        Map<String, Object> result = new LinkedHashMap<>(map.size());
-        for (Map.Entry<String, Object> e : map.entrySet()) {
-            result.put(PostgresText.text(e.getKey()), storableValue(e.getValue()));
-        }
-        return result;
+        return new AuditEntry(entry.id(), entry.conversationId(), entry.agentId(), entry.agentVersion(), entry.userId(), entry.environment(),
+                entry.stepIndex(), entry.taskId(), entry.taskType(), entry.taskIndex(), entry.durationMs(), input, output, llmDetail, toolCalls,
+                actions, entry.cost(), entry.timestamp(), entry.hmac(), entry.agentSignature(), entry.sequence());
     }
 
-    @SuppressWarnings("unchecked")
-    private static Object storableValue(Object value) {
+    /**
+     * {@code value} with {@code storable} applied to every String in it (map keys
+     * too), descending into Maps and Lists; the same instance when nothing changes.
+     * Anything else (numbers, booleans, null) is returned as it is: after
+     * normalisation that is all a payload can contain.
+     */
+    private static Object storableValue(Object value, UnaryOperator<String> storable) {
         if (value instanceof String s) {
-            return PostgresText.text(s);
-        } else if (value instanceof Map<?, ?> nested) {
-            return storableMap((Map<String, Object>) nested);
-        } else if (value instanceof List<?> list) {
-            return list.stream().map(AuditLedgerService::storableValue).toList();
+            String replaced = storable.apply(s);
+            return s.equals(replaced) ? s : replaced;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<Object, Object> result = null;
+            int index = 0;
+            for (Map.Entry<?, ?> e : map.entrySet()) {
+                Object key = storableValue(e.getKey(), storable);
+                Object nested = storableValue(e.getValue(), storable);
+                if (result == null && (key != e.getKey() || nested != e.getValue())) {
+                    // first change: copy what came before, in order
+                    result = new LinkedHashMap<>(map.size());
+                    int copied = 0;
+                    for (Map.Entry<?, ?> before : map.entrySet()) {
+                        if (copied++ == index) {
+                            break;
+                        }
+                        result.put(before.getKey(), before.getValue());
+                    }
+                }
+                if (result != null) {
+                    result.put(key, nested);
+                }
+                index++;
+            }
+            return result == null ? value : result;
+        }
+        if (value instanceof List<?> list) {
+            List<Object> result = null;
+            for (int i = 0; i < list.size(); i++) {
+                Object element = list.get(i);
+                Object replaced = storableValue(element, storable);
+                if (result == null && replaced != element) {
+                    result = new ArrayList<>(list.subList(0, i));
+                }
+                if (result != null) {
+                    result.add(replaced);
+                }
+            }
+            return result == null ? value : result;
         }
         return value;
-    }
-
-    private static List<String> storableList(List<String> values) {
-        return values == null ? null : values.stream().map(PostgresText::text).toList();
     }
 
     /**

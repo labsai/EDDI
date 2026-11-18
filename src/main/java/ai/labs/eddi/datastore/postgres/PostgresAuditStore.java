@@ -22,6 +22,7 @@ import java.time.Instant;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+import java.util.function.UnaryOperator;
 
 /**
  * PostgreSQL implementation of {@link IAuditStore}.
@@ -346,9 +347,14 @@ public class PostgresAuditStore implements IAuditStore {
         return LATE_INDEXES.stream().map(index -> index[0]).toList();
     }
 
+    /**
+     * {@link PostgresText#text}: the function the sanitising data source applies to
+     * every text parameter of this store's statements, and whose result
+     * {@link PostgresText#json} leaves unchanged in the serialised payload.
+     */
     @Override
-    public boolean replacesNulCharacter() {
-        return true;
+    public UnaryOperator<String> storableText() {
+        return PostgresText::text;
     }
 
     @Override

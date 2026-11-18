@@ -44,6 +44,34 @@ final class AuditStoreFailures {
     private AuditStoreFailures() {
     }
 
+    /** SQLState of a unique-constraint violation. */
+    private static final String UNIQUE_VIOLATION = "23505";
+
+    /** MongoDB's duplicate-key error code. */
+    private static final int MONGO_DUPLICATE_KEY = 11000;
+
+    /**
+     * Whether the failure says the entry is already in the store: a unique-key
+     * violation. Both stores make a single insert idempotent on the entry id (the
+     * only unique key of the ledger), so this is not expected; should a store still
+     * report it, for instance on a replay of an entry the failed batch had already
+     * written, the entry is there and must count as stored, not be dead-lettered as
+     * if it were lost. Checked before {@link #isEntryRejected}, which would
+     * otherwise classify it with the other constraint violations.
+     */
+    static boolean isAlreadyStored(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++, current = current.getCause()) {
+            if (current instanceof SQLException sql) {
+                return UNIQUE_VIOLATION.equals(sql.getSQLState());
+            }
+            if (current instanceof MongoWriteException write) {
+                return write.getError().getCode() == MONGO_DUPLICATE_KEY;
+            }
+        }
+        return false;
+    }
+
     /**
      * Whether the failure says the store reached the entry and refused its content.
      * The first classifiable exception in the cause chain decides.

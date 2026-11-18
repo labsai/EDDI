@@ -24,14 +24,17 @@ import java.nio.file.Path;
 import java.sql.SQLException;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
@@ -48,6 +51,9 @@ import static org.mockito.Mockito.times;
  */
 @DisplayName("AuditLedgerService - a poisoned entry does not take its batch down")
 class AuditLedgerPoisonEntryTest {
+
+    /** What PostgresAuditStore answers to {@link IAuditStore#storableText()}. */
+    private static final UnaryOperator<String> POSTGRES_TEXT = PostgresText::text;
 
     @TempDir
     Path tempDir;
@@ -165,7 +171,7 @@ class AuditLedgerPoisonEntryTest {
     @Test
     @DisplayName("for a store that replaces NUL, the entry is made storable BEFORE it is signed")
     void nulIsReplacedBeforeSigning() {
-        doReturn(true).when(store).replacesNulCharacter();
+        doReturn(POSTGRES_TEXT).when(store).storableText();
         var service = ledger();
         service.submit(new AuditEntry("n-1", "conv-a", "agent", 1, "us\u0000er", "production", 0, "task", "LlmTask", 0, 5L,
                 Map.of("text", "a\u0000b", "nested", Map.of("k\u0000", List.of("x\u0000y"))), Map.of(), null, null, List.of("act\u0000"), 0.0,
@@ -201,7 +207,7 @@ class AuditLedgerPoisonEntryTest {
     @Test
     @DisplayName("a POJO payload and a conversation id holding NUL sign what the PostgreSQL layer will store, so the row verifies")
     void aSignedEntryStillVerifiesAfterThePostgresReplacement() throws Exception {
-        doReturn(true).when(store).replacesNulCharacter();
+        doReturn(POSTGRES_TEXT).when(store).storableText();
         var signing = AuditLedgerService.createForTesting(store, true, 60, "test-master-key-for-the-audit-hmac-0123456789", new SimpleMeterRegistry(),
                 1000, deadLetter.toString());
         signing.init();
@@ -253,5 +259,68 @@ class AuditLedgerPoisonEntryTest {
         var captured = ArgumentCaptor.forClass(List.class);
         verify(store).appendBatch(captured.capture());
         assertEquals("a\u0000b", ((AuditEntry) captured.getValue().getFirst()).input().get("text"));
+    }
+
+    @Test
+    @DisplayName("a conversation id holding NUL chains its entries under the id the store holds")
+    void sequencesAreKeyedByTheStoredConversationId() {
+        doReturn(POSTGRES_TEXT).when(store).storableText();
+        var service = ledger();
+        service.submit(entry("c-1", "conv\u0000a", Map.of("text", "x")));
+        service.submit(entry("c-2", "conv�a", Map.of("text", "x")));
+
+        service.flush();
+
+        var captured = ArgumentCaptor.forClass(List.class);
+        verify(store).appendBatch(captured.capture());
+        AuditEntry first = (AuditEntry) captured.getValue().get(0);
+        AuditEntry second = (AuditEntry) captured.getValue().get(1);
+        assertEquals("conv�a", first.conversationId());
+        assertEquals("conv�a", second.conversationId());
+        assertEquals(first.sequence() + 1, second.sequence(), "one chain: the two ids are one row key in the store");
+    }
+
+    @Test
+    @DisplayName("a duplicate key on the single retry means the entry is stored: not dead-lettered, not re-queued")
+    void aDuplicateKeyCountsAsStored() {
+        doThrow(refusal("08006")).when(store).appendBatch(anyList());
+        doAnswer(invocation -> {
+            AuditEntry e = invocation.getArgument(0);
+            if (e.id().startsWith("dup")) {
+                throw refusal("23505");
+            }
+            stored.add(e);
+            return null;
+        }).when(store).appendEntry(any());
+        var service = ledger();
+        service.submit(entry("dup-1", "conv-a", Map.of("text", "x")));
+        service.submit(entry("ok-1", "conv-a", Map.of("text", "x")));
+
+        service.flush();
+
+        assertEquals(List.of("ok-1"), stored.stream().map(AuditEntry::id).toList());
+        assertEquals(0, service.getQueueSize());
+        assertFalse(Files.exists(deadLetter));
+        assertTrue(service.undeliveredSequences("conv-a").isEmpty());
+    }
+
+    @Test
+    @DisplayName("an entry with nothing to replace comes back as the same instance (no copy per entry)")
+    void cleanEntriesAreNotCopied() {
+        AuditEntry clean = entry("x-1", "conv-a", Map.of("text", "plain 😀", "nested", Map.of("k", List.of("v", 1))));
+        assertSame(clean, AuditLedgerService.withStorableIdentifiers(clean, POSTGRES_TEXT));
+        assertSame(clean, AuditLedgerService.withStorablePayload(clean, POSTGRES_TEXT));
+    }
+
+    @Test
+    @DisplayName("replacement keeps the key order of a map and the elements before the first change")
+    void replacementKeepsOrder() {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("a", "1");
+        input.put("b\u0000", List.of("x", "y\u0000", "z"));
+        input.put("c", "3");
+        AuditEntry replaced = AuditLedgerService.withStorablePayload(entry("x-2", "conv-a", input), POSTGRES_TEXT);
+        assertEquals(List.of("a", "b�", "c"), List.copyOf(replaced.input().keySet()));
+        assertEquals(List.of("x", "y�", "z"), replaced.input().get("b�"));
     }
 }
