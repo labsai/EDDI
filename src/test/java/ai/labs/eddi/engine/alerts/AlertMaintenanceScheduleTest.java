@@ -134,6 +134,17 @@ class AlertMaintenanceScheduleTest {
     }
 
     @Test
+    @DisplayName("a schedule read twice by shifting pages is not its own duplicate")
+    void aRowReadTwiceIsNotDeleted() throws Exception {
+        ScheduleConfiguration only = row("only", AlertSchedules.maintenanceMetadata());
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(only, only));
+
+        schedule.removeDuplicates();
+
+        verify(store, never()).deleteSchedule(any());
+    }
+
+    @Test
     @DisplayName("a single maintenance schedule is never deleted")
     void aSingleScheduleIsKept() throws Exception {
         when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean()))

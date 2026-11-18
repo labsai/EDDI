@@ -16,7 +16,9 @@ import org.jboss.logging.Logger;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -70,17 +72,21 @@ public class AlertMaintenanceSchedule {
             return;
         }
         try {
-            List<ScheduleConfiguration> marked = new ArrayList<>();
+            // Offset pages shift when a schedule is inserted mid-scan, so one can be read
+            // twice; keyed by id, a copy is never mistaken for its own duplicate.
+            Map<String, ScheduleConfiguration> found = new LinkedHashMap<>();
             for (int offset = 0; offset < SCAN_LIMIT; offset += SCAN_PAGE) {
                 List<ScheduleConfiguration> page = scheduleStore.readAllSchedules(SCAN_PAGE, offset, true);
-                page.stream().filter(s -> AlertSchedules.isMaintenanceSchedule(s.getMetadata())).forEach(marked::add);
+                page.stream().filter(s -> AlertSchedules.isMaintenanceSchedule(s.getMetadata()))
+                        .forEach(s -> found.putIfAbsent(String.valueOf(s.getId()), s));
                 if (page.size() < SCAN_PAGE) {
                     break;
                 }
             }
-            if (marked.size() < 2) {
+            if (found.size() < 2) {
                 return;
             }
+            List<ScheduleConfiguration> marked = new ArrayList<>(found.values());
             // The survivor is an enabled, not dead-lettered copy if there is one (a
             // healthy younger copy must not be deleted for a disabled older one), then
             // the oldest. Every node applies the same order, so they agree.
