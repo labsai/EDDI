@@ -44,9 +44,23 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   `api.reportUnauthorized`). `no-raw-fetch.ts` (hosted by the Manager's suite) fails on a new bare `fetch(` in
   app-kit outside a documented allow-list (the client, the reconnecting `BearerEventSource`, the boot probe).
 
+- **Workforce session basics.** A user menu in the Workforce top bar (who is signed in, Logout) on the shared
+  `useAuth`; nothing is shown with authentication off. `AuthProvider` (and `AppProviders`) take an `app`: Workforce
+  signs out back to `/workforce` instead of landing in the Manager, and its failed-sign-in text no longer says "The
+  Manager" (`auth.initFailedBodyWorkforce`, eleven locales). `workforce-threads` in `localStorage` was one key for
+  everybody and survived sign-out; it is now `workforce-threads-<principal>`, every thread key (and the old unscoped
+  one, which is deleted unread) is removed at sign-out. `user-display.ts` and the three menu strings (`auth.logout`,
+  `auth.userMenu`, `auth.signedIn`) moved to `@eddi/app-kit` so both apps share them.
+  Files: `ui/workforce/src/components/workforce/workforce-user-menu.tsx`, `hooks/use-workforce-threads.ts`,
+  `ui/packages/app-kit/src/components/auth/auth-provider.tsx`, `lib/workforce-threads-storage.ts`.
+
 ### Behaviour changes an upgrader will notice
 
 - The three UIs send an `Idempotency-Key` header. They run on the EDDI origin, so no CORS rule is involved; a widget
   embedded with an `apiBaseUrl` on another origin needs `idempotency-key` in `quarkus.http.cors.headers` (the
   default list does not have it yet; the backend configuration was out of scope for this branch).
 
+- Workforce thread pointers (`workforce-threads`) are not carried over to the per-user key: after the upgrade each
+  advisor thread starts a new conversation once (the old conversations stay in the history).
+- Signing out of Workforce lands on `/workforce`; the Keycloak client must allow that post-logout redirect (the
+  shipped realm uses `/*`).

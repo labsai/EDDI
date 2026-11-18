@@ -14,6 +14,7 @@ import { getAuthConfig, type AuthConfig } from "../../lib/auth-config";
 import { api } from "../../lib/api-client";
 import { clearWorkforcePins } from "../../lib/workforce-pins";
 import { clearWorkforceHandoffs } from "../../lib/workforce-handoffs";
+import { clearWorkforceThreads } from "../../lib/workforce-threads-storage";
 import { mockRolesOverride } from "../../lib/mock-roles";
 import {
   AuthContext,
@@ -22,13 +23,21 @@ import {
   type AuthContextValue,
 } from "./auth-context";
 
+/** Which app the provider runs in: it decides where sign-out lands and what the errors call it. */
+export type AuthApp = "manager" | "workforce";
+
+/** Where each app's sign-out returns to: a path that serves its shell without a session. */
+export const POST_LOGOUT_PATH: Record<AuthApp, string> = { manager: "/manage", workforce: "/workforce" };
+
 interface AuthProviderProps {
   children: ReactNode;
+  /** The app this provider runs in. Default: the Manager. */
+  app?: AuthApp;
   /** Override config for testing */
   configOverride?: AuthConfig;
 }
 
-export function AuthProvider({ children, configOverride }: AuthProviderProps) {
+export function AuthProvider({ children, configOverride, app = "manager" }: AuthProviderProps) {
   const config = useMemo(
     () => configOverride ?? getAuthConfig(),
     [configOverride]
@@ -53,16 +62,20 @@ export function AuthProvider({ children, configOverride }: AuthProviderProps) {
   }
 
   return (
-    <KeycloakAuthProvider config={config}>{children}</KeycloakAuthProvider>
+    <KeycloakAuthProvider config={config} app={app}>
+      {children}
+    </KeycloakAuthProvider>
   );
 }
 
 /** Internal component that handles Keycloak init lifecycle */
 function KeycloakAuthProvider({
   config,
+  app,
   children,
 }: {
   config: AuthConfig;
+  app: AuthApp;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -237,17 +250,20 @@ function KeycloakAuthProvider({
     clearWorkforcePins();
     // So are the hand-off markers (the start of each handed-over question).
     clearWorkforceHandoffs();
+    // And the pointers to each advisor's conversation, which name this person's chats.
+    clearWorkforceThreads();
     // Keycloak 26 only terminates the SSO session when id_token_hint is present.
     // keycloak.idToken may have been deleted by a token refresh that didn't
     // return a new id_token — restore it from the ref so the hint is always sent.
     if (!keycloak.idToken && idTokenRef.current) {
       keycloak.idToken = idTokenRef.current;
     }
-    // Redirect to /manage (the SPA root), not window.location.origin (bare
-    // origin = "/"), because the EDDI backend returns 401 for the root path
-    // when auth is enabled — only /manage and its sub-paths serve the SPA.
-    keycloak.logout({ redirectUri: `${window.location.origin}/manage` });
-  }, [keycloak]);
+    // Redirect to the app's own root, not window.location.origin (bare origin =
+    // "/"), because the EDDI backend returns 401 for the root path when auth is
+    // enabled — only the SPA paths serve a shell. Signing out of Workforce used
+    // to land in the Manager.
+    keycloak.logout({ redirectUri: `${window.location.origin}${POST_LOGOUT_PATH[app]}` });
+  }, [keycloak, app]);
 
   const contextValue = useMemo<AuthContextValue>(
     () => ({
@@ -289,10 +305,15 @@ function KeycloakAuthProvider({
             {t("auth.initFailedTitle", "Sign-in failed")}
           </h1>
           <p className="text-sm text-muted-foreground">
-            {t(
-              "auth.initFailedBody",
-              "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
-            )}
+            {app === "workforce"
+              ? t(
+                  "auth.initFailedBodyWorkforce",
+                  "Workforce could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+                )
+              : t(
+                  "auth.initFailedBody",
+                  "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
+                )}
           </p>
           <Button onClick={login} data-testid="auth-sign-in-again">
             {t("auth.signInAgain", "Sign in again")}

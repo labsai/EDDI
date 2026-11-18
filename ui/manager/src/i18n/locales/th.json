@@ -33,11 +33,7 @@
     "license": "EDDI เป็นซอฟต์แวร์โอเพนซอร์ส ภายใต้สัญญาอนุญาต Apache License 2.0",
     "licenseLink": "อ่านสัญญาอนุญาต"
   },
-  "auth": {
-    "logout": "ออกจากระบบ",
-    "userMenu": "เมนูผู้ใช้",
-    "signedIn": "เข้าสู่ระบบแล้ว"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "แดชบอร์ด",
     "agents": "เอเจนต์",

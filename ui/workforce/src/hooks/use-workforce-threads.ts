@@ -1,4 +1,6 @@
 import { useState, useCallback } from "react";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { LEGACY_THREADS_KEY, threadsStorageKey } from "@eddi/app-kit/lib/workforce-threads-storage";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -21,13 +23,14 @@ interface UseWorkforceThreadsReturn {
 
 // ─── Constants ───────────────────────────────────────────────────
 
-const STORAGE_KEY = "workforce-threads";
 
 // ─── Helpers ─────────────────────────────────────────────────────
 
-function loadThreads(): ThreadInfo[] {
+function loadThreads(storageKey: string): ThreadInfo[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    // The key older versions wrote for everybody names no one: not this person's.
+    localStorage.removeItem(LEGACY_THREADS_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [];
@@ -46,9 +49,9 @@ function loadThreads(): ThreadInfo[] {
   }
 }
 
-function saveThreads(threads: ThreadInfo[]): void {
+function saveThreads(storageKey: string, threads: ThreadInfo[]): void {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(threads));
+    localStorage.setItem(storageKey, JSON.stringify(threads));
   } catch {
     // localStorage may be full or unavailable — silently ignore
   }
@@ -57,7 +60,10 @@ function saveThreads(threads: ThreadInfo[]): void {
 // ─── Hook ────────────────────────────────────────────────────────
 
 function useWorkforceThreads(): UseWorkforceThreadsReturn {
-  const [threads, setThreads] = useState<ThreadInfo[]>(loadThreads);
+  // The pointers are this person's: the key names the signed-in principal.
+  const { user } = useAuth();
+  const storageKey = threadsStorageKey(user?.username);
+  const [threads, setThreads] = useState<ThreadInfo[]>(() => loadThreads(storageKey));
 
 
 
@@ -85,11 +91,11 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
         } else {
           next = [...prev, entry];
         }
-        saveThreads(next);
+        saveThreads(storageKey, next);
         return next;
       });
     },
-    [],
+    [storageKey],
   );
 
   const updateActivity = useCallback(
@@ -102,11 +108,11 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
 
         const next = [...prev];
         next[idx] = { ...next[idx]!, lastActivity: Date.now() };
-        saveThreads(next);
+        saveThreads(storageKey, next);
         return next;
       });
     },
-    [],
+    [storageKey],
   );
 
   const removeThread = useCallback(
@@ -115,11 +121,11 @@ function useWorkforceThreads(): UseWorkforceThreadsReturn {
         const next = prev.filter(
           (t) => !(t.boardId === boardId && t.memberId === memberId),
         );
-        saveThreads(next);
+        saveThreads(storageKey, next);
         return next;
       });
     },
-    [],
+    [storageKey],
   );
 
   const getThreadsForBoard = useCallback(

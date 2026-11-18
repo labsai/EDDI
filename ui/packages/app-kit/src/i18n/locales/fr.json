@@ -31,7 +31,11 @@
     "initFailedBody": "Le Manager n'a pas pu terminer la connexion. Le service d'authentification est peut-être injoignable ou votre session a été rejetée.",
     "signInAgain": "Se reconnecter",
     "sessionExpiredTitle": "Votre session a expiré.",
-    "sessionExpiredBody": "Les modifications non enregistrées sont toujours sur cette page — copiez ce dont vous avez besoin avant de vous reconnecter."
+    "sessionExpiredBody": "Les modifications non enregistrées sont toujours sur cette page — copiez ce dont vous avez besoin avant de vous reconnecter.",
+    "logout": "Déconnexion",
+    "userMenu": "Menu utilisateur",
+    "signedIn": "Session ouverte",
+    "initFailedBodyWorkforce": "Workforce n’a pas pu terminer la connexion. Le service d’authentification est peut-être injoignable ou votre session a été rejetée."
   },
   "nav": {
     "modeManager": "Gestionnaire",

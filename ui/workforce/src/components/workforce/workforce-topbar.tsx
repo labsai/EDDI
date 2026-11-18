@@ -6,6 +6,7 @@ import { Button } from "@eddi/ui";
 import { useWorkforceAccess } from "@eddi/app-kit/hooks/use-workforce-access";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { ApprovalsIndicator } from "@/components/workforce/approvals-indicator";
+import { WorkforceUserMenu } from "@/components/workforce/workforce-user-menu";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -90,6 +91,8 @@ export function WorkforceTopbar({
             </AppLink>
           </Button>
         )}
+        {/* Who is signed in, and sign-out (nothing with authentication off). */}
+        <WorkforceUserMenu />
       </div>
     </header>
   );

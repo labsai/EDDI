@@ -33,11 +33,7 @@
     "license": "EDDI 是开源软件，采用 Apache License 2.0 许可。",
     "licenseLink": "阅读许可证"
   },
-  "auth": {
-    "logout": "退出",
-    "userMenu": "用户菜单",
-    "signedIn": "已登录"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "仪表盘",
     "agents": "代理",

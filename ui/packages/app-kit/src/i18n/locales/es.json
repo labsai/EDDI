@@ -31,7 +31,11 @@
     "initFailedBody": "El Manager no pudo completar el inicio de sesión. Puede que el servicio de acceso no esté disponible o que se haya rechazado tu sesión.",
     "signInAgain": "Iniciar sesión de nuevo",
     "sessionExpiredTitle": "Tu sesión ha caducado.",
-    "sessionExpiredBody": "Los cambios sin guardar siguen en esta página: copia lo que necesites antes de volver a iniciar sesión."
+    "sessionExpiredBody": "Los cambios sin guardar siguen en esta página: copia lo que necesites antes de volver a iniciar sesión.",
+    "logout": "Cerrar sesión",
+    "userMenu": "Menú de usuario",
+    "signedIn": "Sesión iniciada",
+    "initFailedBodyWorkforce": "Workforce no pudo completar el inicio de sesión. Es posible que el servicio de inicio de sesión no esté disponible o que se haya rechazado tu sesión."
   },
   "nav": {
     "modeManager": "Gestor",

@@ -33,11 +33,7 @@
     "license": "EDDI is open-source software, licensed under the Apache License 2.0.",
     "licenseLink": "Read the license"
   },
-  "auth": {
-    "logout": "Logout",
-    "userMenu": "User menu",
-    "signedIn": "Signed in"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "Dashboard",
     "agents": "Agents",

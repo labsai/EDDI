@@ -31,7 +31,11 @@
     "initFailedBody": "Manager가 로그인을 완료하지 못했습니다. 로그인 서비스에 연결할 수 없거나 세션이 거부되었을 수 있습니다.",
     "signInAgain": "다시 로그인",
     "sessionExpiredTitle": "세션이 만료되었습니다.",
-    "sessionExpiredBody": "저장하지 않은 변경 내용이 이 페이지에 남아 있습니다. 다시 로그인하기 전에 필요한 내용을 복사하세요."
+    "sessionExpiredBody": "저장하지 않은 변경 내용이 이 페이지에 남아 있습니다. 다시 로그인하기 전에 필요한 내용을 복사하세요.",
+    "logout": "로그아웃",
+    "userMenu": "사용자 메뉴",
+    "signedIn": "로그인됨",
+    "initFailedBodyWorkforce": "Workforce에서 로그인을 완료하지 못했습니다. 로그인 서비스에 연결할 수 없거나 세션이 거부되었을 수 있습니다."
   },
   "nav": {
     "modeManager": "매니저",

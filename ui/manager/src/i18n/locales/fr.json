@@ -33,11 +33,7 @@
     "license": "EDDI est un logiciel libre, distribué sous licence Apache 2.0.",
     "licenseLink": "Lire la licence"
   },
-  "auth": {
-    "logout": "Déconnexion",
-    "userMenu": "Menu utilisateur",
-    "signedIn": "Session ouverte"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "Tableau de bord",
     "agents": "Agents",
