@@ -290,3 +290,7 @@ None of these changes behaviour until configured; each has its own page.
 
 6.7 clears the Guava advisory GHSA-xxph-c9ww-hj94 and overrides `minimatch` to 11.0.4 in the
 Manager and Chat UI. Nothing to do besides pulling the new image.
+
+### Java4Shell (CVE-2026-114938): the images start the JVM with `-XX:-UseBASE64Intrinsics`
+
+From 6.7.1, the EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak service in the compose `auth` overlay, Helm (chart 2.14.1) and the kustomize `auth` overlay sets it on `JAVA_OPTS_APPEND`. This is an interim mitigation for a pre-authentication code-execution flaw in the JDK's Base64 decoder, until the base images ship a fixed JDK. If you set `JDK_JAVA_OPTIONS` yourself, add the flag to your value. If you run 6.7.0 or earlier and cannot upgrade yet, add it by hand. [Security → Java4Shell](security.md#jvm-advisory-java4shell-cve-2026-114938) has the details and how to check that the running JVM has it.
