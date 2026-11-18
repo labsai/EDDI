@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, act } from "@testing-library/react";
 import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 
@@ -32,7 +32,7 @@ describe("useSmartAutoScroll", () => {
         data-testid="scroller"
         data-fab={showScrollFab ? "shown" : "hidden"}
       >
-        {tokens}
+        <div data-testid="content">{tokens}</div>
       </div>
     );
   }
@@ -48,16 +48,19 @@ describe("useSmartAutoScroll", () => {
     const view = render(<Harness tokens={0} />);
     const el = view.getByTestId("scroller") as HTMLDivElement;
 
+    let scrollHeight = overflows ? 1000 : 200;
     Object.defineProperty(el, "scrollHeight", {
-      value: overflows ? 1000 : 200,
       configurable: true,
+      get: () => scrollHeight,
     });
     Object.defineProperty(el, "clientHeight", { value: 200, configurable: true });
     let scrollTop = overflows ? 800 : 0;
+    const scrollTopWrites: number[] = [];
     Object.defineProperty(el, "scrollTop", {
       configurable: true,
       get: () => scrollTop,
       set: (v: number) => {
+        scrollTopWrites.push(v);
         scrollTop = v;
       },
     });
@@ -66,7 +69,14 @@ describe("useSmartAutoScroll", () => {
       scrollTop = overflows ? 800 : 0;
     }) as HTMLElement["scrollTo"];
 
-    return { view, el, calls, setScrollTop: (v: number) => (scrollTop = v) };
+    return {
+      view,
+      el,
+      calls,
+      scrollTopWrites,
+      setScrollTop: (v: number) => (scrollTop = v),
+      setScrollHeight: (v: number) => (scrollHeight = v),
+    };
   }
 
   beforeEach(() => {
@@ -224,5 +234,154 @@ describe("useSmartAutoScroll", () => {
     });
 
     expect(calls.length).toBe(paused + 1);
+  });
+
+  /**
+   * Content that grows WITHOUT a `deps` change — the throttled trailing render
+   * of a streaming reply adds lines after the deps effect has scrolled. jsdom
+   * has no ResizeObserver and no layout, so both the observer and the animation
+   * frame are fakes the test drives by hand.
+   */
+  describe("re-pins when the content grows on its own", () => {
+    class FakeResizeObserver {
+      static instances: FakeResizeObserver[] = [];
+      readonly observed = new Set<Element>();
+      disconnected = false;
+      constructor(private readonly callback: ResizeObserverCallback) {
+        FakeResizeObserver.instances.push(this);
+      }
+      observe(target: Element) {
+        this.observed.add(target);
+      }
+      unobserve(target: Element) {
+        this.observed.delete(target);
+      }
+      disconnect() {
+        this.disconnected = true;
+        this.observed.clear();
+      }
+      /** What the browser does after a layout in which an observed box changed size. */
+      fire() {
+        this.callback([], this as unknown as ResizeObserver);
+      }
+    }
+
+    let frames: FrameRequestCallback[] = [];
+    const flushFrames = () => {
+      const pending = frames;
+      frames = [];
+      pending.forEach((cb) => cb(0));
+    };
+
+    beforeEach(() => {
+      FakeResizeObserver.instances = [];
+      frames = [];
+      vi.stubGlobal("ResizeObserver", FakeResizeObserver);
+      vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
+        frames.push(cb);
+        return frames.length;
+      });
+      vi.stubGlobal("cancelAnimationFrame", () => {});
+    });
+
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    function observer(): FakeResizeObserver {
+      const live = FakeResizeObserver.instances.filter((o) => !o.disconnected);
+      expect(live).toHaveLength(1);
+      return live[0]!;
+    }
+
+    it("observes the container and its content once, not per render", () => {
+      const { view, el } = mountScroller();
+      act(() => {
+        view.rerender(<Harness tokens={1} />);
+      });
+      act(() => {
+        view.rerender(<Harness tokens={2} />);
+      });
+
+      expect(FakeResizeObserver.instances).toHaveLength(1);
+      expect(observer().observed.has(el)).toBe(true);
+      expect(observer().observed.has(view.getByTestId("content"))).toBe(true);
+    });
+
+    it("scrolls to the new bottom while pinned, once per frame however often it grows", () => {
+      const { el, setScrollHeight, scrollTopWrites } = mountScroller();
+      flushFrames();
+      scrollTopWrites.length = 0;
+
+      setScrollHeight(1400);
+      act(() => {
+        observer().fire();
+        observer().fire();
+        observer().fire();
+      });
+      expect(frames).toHaveLength(1);
+      act(() => flushFrames());
+
+      expect(scrollTopWrites).toEqual([1400]);
+      expect(el.scrollTop).toBe(1400);
+    });
+
+    it("does nothing when a notification brings no growth", () => {
+      const { scrollTopWrites } = mountScroller();
+      flushFrames();
+      scrollTopWrites.length = 0;
+
+      act(() => {
+        observer().fire();
+      });
+      act(() => flushFrames());
+
+      expect(scrollTopWrites).toEqual([]);
+    });
+
+    it("never pulls down a user who scrolled up", () => {
+      const { el, setScrollHeight, scrollTopWrites } = mountScroller();
+      flushFrames();
+      act(() => {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+      });
+      scrollTopWrites.length = 0;
+
+      setScrollHeight(1400);
+      act(() => {
+        observer().fire();
+      });
+      act(() => flushFrames());
+
+      expect(frames).toHaveLength(0);
+      expect(scrollTopWrites).toEqual([]);
+      expect(el.scrollTop).toBe(800);
+    });
+
+    it("does not scroll if the user leaves the bottom before the frame runs", () => {
+      const { el, setScrollHeight, scrollTopWrites } = mountScroller();
+      flushFrames();
+      scrollTopWrites.length = 0;
+
+      setScrollHeight(1400);
+      act(() => {
+        observer().fire();
+      });
+      act(() => {
+        el.dispatchEvent(new WheelEvent("wheel", { deltaY: -120, bubbles: true }));
+      });
+      act(() => flushFrames());
+
+      expect(scrollTopWrites).toEqual([]);
+    });
+
+    it("disconnects when the hook unmounts", () => {
+      const { view } = mountScroller();
+      const live = observer();
+
+      view.unmount();
+
+      expect(live.disconnected).toBe(true);
+    });
   });
 });

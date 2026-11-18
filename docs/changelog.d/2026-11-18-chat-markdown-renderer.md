@@ -69,3 +69,22 @@ the tags as text, as the Chat UI widget has since 6.7.0.
   tests, and the raw-HTML forms (for an agent with `rawHtml: true`), which keep the attribute as
   written, are what the helper stops.
 - `useThrottledValue` is no longer exported from the package index; nothing outside the package used it.
+
+### Second review follow-up
+
+- **The transcript follows a reply that grows after its last state change.** `ChatPanel` and the
+  Workforce thread scroll when their `deps` change, but the throttled trailing render of a streamed
+  reply (and late math, highlighting or images) adds lines afterwards, which stayed below the
+  viewport. `useSmartAutoScroll` (`@eddi/app-kit/hooks`) now observes the container and its element
+  children with one `ResizeObserver` (a childList-only `MutationObserver` keeps the observed children
+  current) and, while the reader is at the bottom, jumps to the new bottom: at most once per animation
+  frame, instantly (never smooth), and only when the content actually grew. A reader who scrolled up is
+  never moved; nothing runs while the transcript is idle; the observers are released with the
+  container. Tests in `ui/manager/src/hooks/__tests__/use-smart-auto-scroll.test.tsx` drive a fake
+  observer and animation frame.
+- **No placeholder character is forgeable.** `formatMarkdownText` stashes protected regions behind
+  U+E000 and math spans behind U+E001; only U+E000 was stripped from the input, so a literal U+E001
+  in a reply (`a and $x$ **b **(y`) took the real `$x$` and the span itself was deleted. Every
+  placeholder character (`RESERVED_MARKS` in `team/group-utils.ts`) is now removed on entry; a new one
+  must be added there. Tests in `team/format-markdown-text.table.test.ts` cover the review's trigger, a
+  literal mark without any math span, several spans, and forged stash placeholders.

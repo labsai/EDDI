@@ -30,6 +30,8 @@ const UPWARD_KEYS = new Set(["ArrowUp", "PageUp", "Home"]);
  * 2. Scrolls to bottom when new content arrives IF the user is at the bottom.
  * 3. Pauses auto-scroll as soon as the user scrolls up — including mid-stream.
  * 4. Shows floating "Scroll to bottom" button state with new-content indicator.
+ * 5. Re-pins to the bottom when the content grows on its own (a throttled
+ *    streaming render, late images or math) while the user is at the bottom.
  *
  * (3) recognises a wheel, a touch drag and the upward navigation keys. Dragging
  * the scrollbar itself is not among them: it produces nothing but a `scroll`
@@ -155,12 +157,71 @@ export function useSmartAutoScroll<T extends HTMLElement = HTMLDivElement>({
     el.addEventListener("touchmove", onTouchMove, { passive: true });
     el.addEventListener("keydown", onKeyDown);
 
+    // Re-pin when the content grows without a `deps` change: the throttled
+    // trailing render of a streaming reply, late KaTeX / highlighting / images,
+    // the container shrinking under an on-screen keyboard. The `deps` effect
+    // below has already scrolled by then, so the new lines would stay below the
+    // viewport. A ResizeObserver reports only a real size change, so nothing
+    // runs while the transcript is idle. It watches the container (its own
+    // height) and its element children (the content's height — the container's
+    // box does not change when its content grows); a childList-only
+    // MutationObserver on the container keeps that set current, and fires only
+    // when a direct child is added or removed, not per token.
+    let frame: number | null = null;
+    const repin = () => {
+      frame = null;
+      // A reader who left the bottom is never pulled back down.
+      if (!isNearBottomRef.current) return;
+      if (el.scrollHeight - el.scrollTop - el.clientHeight <= 1) return;
+      // Instant, never smooth: this runs mid-stream, where a smooth scroll
+      // never settles (RAPID_UPDATE_MS), and there is no animation for a
+      // reduced-motion setting to object to.
+      el.scrollTop = el.scrollHeight;
+      lastAutoScrollAtRef.current = Date.now();
+    };
+    const scheduleRepin = () => {
+      if (!isNearBottomRef.current || frame !== null) return;
+      // Coalesced: however many size notifications a frame brings, one
+      // measurement and at most one scroll.
+      if (typeof requestAnimationFrame === "function") {
+        frame = requestAnimationFrame(repin);
+      } else {
+        repin();
+      }
+    };
+    const sizes =
+      typeof ResizeObserver === "function" ? new ResizeObserver(scheduleRepin) : null;
+    let children: MutationObserver | null = null;
+    if (sizes) {
+      sizes.observe(el);
+      for (const child of Array.from(el.children)) sizes.observe(child);
+      if (typeof MutationObserver === "function") {
+        children = new MutationObserver((records) => {
+          for (const record of records) {
+            record.removedNodes.forEach((node) => {
+              if (node instanceof Element) sizes.unobserve(node);
+            });
+            record.addedNodes.forEach((node) => {
+              if (node instanceof Element) sizes.observe(node);
+            });
+          }
+        });
+        children.observe(el, { childList: true });
+      }
+    }
+
     listenerElRef.current = el;
     detachListenersRef.current = () => {
       el.removeEventListener("wheel", onWheel);
       el.removeEventListener("touchstart", onTouchStart);
       el.removeEventListener("touchmove", onTouchMove);
       el.removeEventListener("keydown", onKeyDown);
+      sizes?.disconnect();
+      children?.disconnect();
+      if (frame !== null && typeof cancelAnimationFrame === "function") {
+        cancelAnimationFrame(frame);
+      }
+      frame = null;
       listenerElRef.current = null;
       detachListenersRef.current = null;
     };
