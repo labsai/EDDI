@@ -5,7 +5,7 @@
 
 The Audit Ledger provides a **write-once, append-only** trail of every lifecycle task execution. It captures what data each task read, what it produced, LLM-specific details (compiled prompts, model responses, token usage), tool calls, actions, costs, and timing — signed with HMAC-SHA256 for tamper detection when a signing key is configured (off until one is). It also records every administrative REST action (see [Administrative actions](#administrative-actions)) and the GDPR operations.
 
-**What is not in it.** Reads are not recorded — neither REST `GET`s nor MCP reads. The MCP user-memory tools are not recorded. Conversation traffic is recorded per pipeline task, not per HTTP request.
+**What is not in it.** Reads are not recorded — neither REST `GET`s nor MCP reads. Conversation traffic is recorded per pipeline task, not per HTTP request.
 
 ## Overview
 
@@ -227,7 +227,7 @@ That covers configuration changes (every `…store` resource), deployments (`/ad
 
 A record never holds the request body or the query string. A path parameter that names a person (`userId` and the like) is replaced by that person's keyed pseudonym, so erasing a user does not leave their id in a `DELETE /admin/gdpr/…` record. The records have no conversation, so they take no chain position; they are HMAC-signed like every other entry.
 
-**MCP:** tools that act through the REST API — agent, resource, group, schedule and channel administration — reach this filter on the loopback call with the MCP caller's identity. `delete_user_data` and `export_user_data` call the GDPR service directly, so they write the record themselves: method `MCP`, path `/mcp/<tool>/<pseudonym of the subject>`, `resource` `McpGdprTools#deleteUserData` or `#exportUserData`, the MCP caller as `userId`, and as `status` the code the REST surface answers for the same outcome — `200`, `207` (an erasure that lost a step, or an export bundle that is not everything), `400` (no `userId`, no `CONFIRM`), `403` (the caller lacks `eddi-admin`) or `500`. The GDPR service's own compliance event (`GDPR_ERASURE`, `GDPR_EXPORT`) still names the subject's pseudonym only; this record is the one that says who asked. The MCP user-memory tools are not recorded.
+**MCP:** tools that act through the REST API over the loopback — agent, resource, trigger and channel-integration create/update/delete — reach this filter with the MCP caller's identity. `delete_user_data` and `export_user_data` call the GDPR service directly, so they write the record themselves: method `MCP`, path `/mcp/<tool>/<pseudonym of the subject>`, `resource` `McpGdprTools#deleteUserData` or `#exportUserData`, the MCP caller as `userId`, and as `status` the code the REST surface answers for the same outcome — `200`, `207` (an erasure that lost a step, or an export bundle that is not everything), `400` (no `userId`, no `CONFIRM`), `403` (the caller lacks `eddi-admin`) or `500`. The GDPR service's own compliance event (`GDPR_ERASURE`, `GDPR_EXPORT`) still names the subject's pseudonym only; this record is the one that says who asked. The other in-process MCP tools that change state (deploy/undeploy, schedules, groups, team tasks, user memories, setup, team budgets and the like) are recorded the same way by an interceptor (`@McpAudited`), with the outcome read from the tool's error code.
 
 List them with [`GET /auditstore/admin-actions`](#list-administrative-actions). Switch the records off with `eddi.audit.admin-actions.enabled=false`.
 

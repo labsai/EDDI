@@ -661,7 +661,7 @@ class McpAdminToolsCrudTest {
 
     /**
      * End-to-end pin for the parity fix: the strict parser's rejection travels as a
-     * 4xx response entity, and {@code errorJson(prefix, cause)} must surface it —
+     * 4xx response entity, and {@code toolFailure} must surface it —
      * {@code getMessage()} on that exception is only "HTTP 400 Bad Request", which
      * is what MCP callers used to see instead of the field-level diagnosis.
      */

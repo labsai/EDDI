@@ -45,7 +45,7 @@ Every tool publishes its arguments in `tools/list`, and the server enforces that
 | `talk_to_agent`         | Send a message and get the agent's response                                                                                 |
 | `chat_with_agent`       | Create a conversation and send a message in one call                                                                        |
 | `read_conversation`     | Read conversation history, memory, and quick replies                                                                        |
-| `read_conversation_log` | Read conversation log as formatted text                                                                                     |
+| `read_conversation_log` | Read conversation log as formatted text: the newest 50 steps by default (`logSize`, max 500), cut at 100,000 characters with a `[truncated: true …]` line |
 | `list_conversations`    | List all conversations for a specific agent                                                                                 |
 | `get_agent`             | Get an agent's full configuration (workflows, name, description)                                                              |
 | `discover_agents`       | Discover deployed agents enriched with intent mappings from agent triggers. Best way to find agents by purpose              |
@@ -287,9 +287,9 @@ See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, a
 
 | Tool                      | Description                                                                                          |
 | ------------------------- | ---------------------------------------------------------------------------------------------------- |
-| `list_user_memories`      | List all persistent memory entries for a user                                                        |
+| `list_user_memories`      | List a user's persistent memory entries, paged: `limit` (default 50, max 200) and `offset`; `total` and `truncated` say whether more follow |
 | `get_visible_memories`    | Get memories visible to a specific agent, considering self/group/global visibility scopes             |
-| `search_user_memories`    | Search user memories by keyword across keys and values                                               |
+| `search_user_memories`    | Search user memories by keyword across keys and values; `limit` (default 50, max 200), `truncated` when more matched |
 | `get_memory_by_key`       | Get a specific memory entry by key for a user                                                        |
 | `upsert_user_memory`      | Create or update a persistent memory entry for a user                                                |
 | `delete_user_memory`      | Delete a specific memory entry by ID                                                                 |
@@ -297,6 +297,12 @@ See [HITL](hitl.md#mcp-surface) for the full authority model, the kill-switch, a
 | `count_user_memories`     | Count total memory entries for a user                                                                |
 
 See [User Memory](user-memory.md) for visibility scoping, recall order, and dream consolidation.
+
+### Errors, audit and result bounds
+
+- **Errors never carry internals.** A failure the caller caused (a validation message, a 4xx, an unknown id) is described; any other failure answers `"<what> failed with an internal error (reference <id>)"` with `errorCode: INTERNAL`, and the full exception is in the server log under that reference. No tool echoes a datastore, driver or class-name text (`McpToolUtils.toolFailure`; a test scans the tool classes for the old pattern).
+- **Mutating tools are audited.** An in-process tool that changes state (deploy/undeploy, `upgrade_conversations`, schedules, groups and team tasks, user memories, setup, team budgets/handoffs/cadences, rating review, alert acknowledgement, agent-test runs) writes an admin-action entry to the [audit ledger](audit-ledger.md) with the caller, the tool, the user it acted on (pseudonymised) and the outcome — the same kind of entry `AdminActionAuditFilter` writes for a REST request. Tools that call the REST API over the loopback are recorded by that filter; the GDPR, spend-control and HITL tools write their own entries. A test fails when a new tool is neither annotated `@McpAudited` nor classified in `McpToolAuditCoverageTest`.
+- **Results are bounded.** `read_conversation`, `read_group_conversation` and `discuss_with_group` return at most 100,000 characters; a longer result becomes `{"truncated":true,"totalChars":…,"returnedChars":…,"hint":"…","partial":"…"}` and the hint names how to ask for less. `read_conversation_log` returns the newest 50 steps (max 500) and ends in a `[truncated: true …]` line when cut. `export_user_data` over 250,000 characters keeps its counts and completeness flags, drops the bulky sections and says `truncated: true, complete: false` (fetch it over REST). Page-style `limit` arguments are clamped (200 for memories and agent configs, 100 for conversations and groups).
 
 ### GDPR Tools (2)
 

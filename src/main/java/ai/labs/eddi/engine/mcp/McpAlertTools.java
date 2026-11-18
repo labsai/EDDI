@@ -93,6 +93,7 @@ public class McpAlertTools {
     @Tool(name = "acknowledge_alert_event", description = "Acknowledge one alert event: it leaves the open inbox, recording you and the "
             + "time. Needs EDIT permission on the event's agent; a digest over several agents is an administrator's. Acknowledging twice "
             + "changes nothing. Acknowledge only what the person you act for has looked at.")
+    @McpAudited
     public String acknowledgeAlertEvent(@ToolArg(description = "Event id, from list_alert_events (required)") String eventId) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (eventId == null || eventId.isBlank()) {

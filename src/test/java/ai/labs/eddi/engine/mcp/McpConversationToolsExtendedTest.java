@@ -193,7 +193,8 @@ class McpConversationToolsExtendedTest {
         String result = localTools.listConversations(AGENT_ID, null, null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Factory error"));
+        assertFalse(result.contains("Factory error"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     @Test
@@ -205,7 +206,7 @@ class McpConversationToolsExtendedTest {
         String result = tools.listConversations(AGENT_ID, null, null, null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("DB error"));
+        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
     }
 
     // ==================== getAgent ====================
@@ -298,7 +299,7 @@ class McpConversationToolsExtendedTest {
         String result = tools.getAgent(AGENT_ID, 1);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("DB error"));
+        assertFalse(result.contains("DB error"), "an internal failure is not echoed to the caller");
     }
 
     @Test
@@ -407,23 +408,45 @@ class McpConversationToolsExtendedTest {
     }
 
     @Test
-    void readConversationLog_zeroLogSize_treatedAsNull() throws Exception {
-        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull()))
+    void readConversationLog_zeroLogSize_isTheBoundedDefault() throws Exception {
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(50)))
                 .thenReturn(new IConversationService.ConversationLogResult("log", "text/plain"));
 
         tools.readConversationLog(CONV_ID, 0);
 
-        verify(conversationService).readConversationLog(CONV_ID, "text", null);
+        verify(conversationService).readConversationLog(CONV_ID, "text", 50);
     }
 
     @Test
-    void readConversationLog_negativeLogSize_treatedAsNull() throws Exception {
-        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), isNull()))
+    void readConversationLog_negativeLogSize_isTheBoundedDefault() throws Exception {
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(50)))
                 .thenReturn(new IConversationService.ConversationLogResult("log", "text/plain"));
 
         tools.readConversationLog(CONV_ID, -1);
 
-        verify(conversationService).readConversationLog(CONV_ID, "text", null);
+        verify(conversationService).readConversationLog(CONV_ID, "text", 50);
+    }
+
+    @Test
+    void readConversationLog_logSizeIsClamped() throws Exception {
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(500)))
+                .thenReturn(new IConversationService.ConversationLogResult("log", "text/plain"));
+
+        tools.readConversationLog(CONV_ID, 1_000_000);
+
+        verify(conversationService).readConversationLog(CONV_ID, "text", 500);
+    }
+
+    @Test
+    void readConversationLog_longTextIsCutWithAnExplicitMarker() throws Exception {
+        when(conversationService.readConversationLog(eq(CONV_ID), eq("text"), eq(50)))
+                .thenReturn(new IConversationService.ConversationLogResult("x".repeat(100_050), "text/plain"));
+
+        String result = tools.readConversationLog(CONV_ID, null);
+
+        assertTrue(result.contains("[truncated: true"), result.substring(result.length() - 200));
+        assertTrue(result.startsWith("x".repeat(100)));
+        assertTrue(result.length() < 100_400);
     }
 
     // ==================== readAgentLogs — edge cases ====================

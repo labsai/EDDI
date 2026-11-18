@@ -49,6 +49,7 @@ public class McpSetupTools {
             + "This creates all necessary resources (behavior rules, LLM connection, "
             + "output set, workflow, agent), names them, and optionally deploys the agent. "
             + "This is the fastest way to get a new Agent running.")
+    @McpAudited
     public String setupAgent(@ToolArg(description = "Agent name (required)") String agentName,
                              @ToolArg(description = "System prompt / role for the LLM (required). "
                                      + "Describes the agent's personality and purpose.") String systemPrompt,
@@ -105,7 +106,7 @@ public class McpSetupTools {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP setup_agent failed", e);
-            return errorJson("Failed to set up agent", e);
+            return toolFailure(LOGGER, "setup_agent", "Failed to set up agent", e);
         }
     }
 
@@ -114,6 +115,7 @@ public class McpSetupTools {
             + "creates behavior rules with API-specific actions, and deploys a Agent that the LLM "
             + "can use to call the API endpoints. Endpoints are grouped by OpenAPI tag into separate "
             + "ApiCalls resources. Deprecated endpoints are automatically skipped.")
+    @McpAudited
     public String createApIAgent(@ToolArg(description = "Agent name (required)") String agentName,
                                  @ToolArg(description = "System prompt for the LLM (required). "
                                          + "Include instructions on how to use the API.") String systemPrompt,
@@ -160,7 +162,7 @@ public class McpSetupTools {
             return errorJson(e.getMessage());
         } catch (Exception e) {
             LOGGER.error("MCP create_api_agent failed", e);
-            return errorJson("Failed to create API agent", e);
+            return toolFailure(LOGGER, "create_api_agent", "Failed to create API agent", e);
         }
     }
 }

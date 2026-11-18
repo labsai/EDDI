@@ -25,8 +25,11 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static ai.labs.eddi.engine.mcp.McpToolUtils.MAX_PAGE_SIZE;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.clampLimit;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
  * MCP tools for managing persistent user memories. Exposes CRUD, search, and
@@ -68,29 +71,46 @@ public class McpMemoryTools {
         this.authEnabled = authEnabled;
     }
 
-    @Tool(name = "list_user_memories", description = "List all persistent memory entries for a user. "
-            + "Returns structured facts, preferences, and context that agents have remembered about the user.")
+    /** {@link #listUserMemories(String, Integer, Integer)} from the first entry. */
+    public String listUserMemories(String userId, Integer limit) {
+        return listUserMemories(userId, limit, null);
+    }
+
+    @Tool(name = "list_user_memories", description = "List persistent memory entries for a user, one page at a time. "
+            + "Returns structured facts, preferences, and context that agents have remembered about the user. "
+            + "The result carries total, offset, limit and truncated=true when more entries follow: ask for the next page with "
+            + "offset = offset + count.")
     public String listUserMemories(@ToolArg(description = "User ID (required)") String userId,
-                                   @ToolArg(description = "Maximum number of entries to return (default: 50)", required = false) Integer limit) {
+                                   @ToolArg(description = "Maximum number of entries to return (default: 50, max: 200)",
+                                            required = false) Integer limit,
+                                   @ToolArg(description = "Number of entries to skip, for paging (default: 0)", required = false) Integer offset) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
         try {
             var entries = userMemoryStore.getAllEntries(userId);
-            int maxEntries = limit != null && limit > 0 ? limit : 50;
-            if (entries.size() > maxEntries) {
-                entries = entries.subList(0, maxEntries);
-            }
+            int total = entries.size();
+            int maxEntries = clampLimit(limit, 50, MAX_PAGE_SIZE);
+            int from = Math.min(Math.max(offset != null ? offset : 0, 0), total);
+            int to = Math.min(from + maxEntries, total);
+            var page = entries.subList(from, to);
 
             var result = new LinkedHashMap<String, Object>();
             result.put("userId", userId);
-            result.put("count", entries.size());
-            result.put("memories", entries);
+            result.put("count", page.size());
+            result.put("total", total);
+            result.put("offset", from);
+            result.put("limit", maxEntries);
+            result.put("truncated", to < total);
+            if (to < total) {
+                result.put("hint", "More entries follow: call again with offset=" + to + ".");
+            }
+            result.put("memories", page);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_user_memories failed for user: " + userId, e);
-            return errorJson("Failed to list memories", e);
+            return toolFailure(LOGGER, "list_user_memories", "Failed to list memories", e);
         }
     }
 
@@ -120,7 +140,7 @@ public class McpMemoryTools {
                 return errorJson("Access denied: you do not have access to one of the named groups");
             }
             String recallOrder = order != null && !order.isBlank() ? order : "most_recent";
-            int maxEntries = limit != null && limit > 0 ? limit : 50;
+            int maxEntries = clampLimit(limit, 50, MAX_PAGE_SIZE);
 
             var entries = userMemoryStore.getVisibleEntries(userId, agentId, groups, recallOrder, maxEntries);
 
@@ -132,13 +152,23 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_visible_memories failed", e);
-            return errorJson("Failed to get visible memories", e);
+            return toolFailure(LOGGER, "get_visible_memories", "Failed to get visible memories", e);
         }
     }
 
-    @Tool(name = "search_user_memories", description = "Search user memories by keyword. " + "Filters across memory keys and values.")
+    /**
+     * {@link #searchUserMemories(String, String, Integer)} with the default limit.
+     */
+    public String searchUserMemories(String userId, String query) {
+        return searchUserMemories(userId, query, null);
+    }
+
+    @Tool(name = "search_user_memories", description = "Search user memories by keyword. " + "Filters across memory keys and values. "
+            + "At most 'limit' entries are returned (default 50, max 200); truncated=true says more matched — narrow the query.")
     public String searchUserMemories(@ToolArg(description = "User ID (required)") String userId,
-                                     @ToolArg(description = "Search query (required)") String query) {
+                                     @ToolArg(description = "Search query (required)") String query,
+                                     @ToolArg(description = "Maximum number of entries to return (default: 50, max: 200)",
+                                              required = false) Integer limit) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         if (userId == null || userId.isBlank())
             return errorJson("userId is required");
@@ -146,17 +176,25 @@ public class McpMemoryTools {
         if (query == null || query.isBlank())
             return errorJson("query is required");
         try {
-            var entries = userMemoryStore.filterEntries(userId, query);
+            var matches = userMemoryStore.filterEntries(userId, query);
+            int maxEntries = clampLimit(limit, 50, MAX_PAGE_SIZE);
+            var entries = matches.size() > maxEntries ? matches.subList(0, maxEntries) : matches;
 
             var result = new LinkedHashMap<String, Object>();
             result.put("userId", userId);
             result.put("query", query);
             result.put("count", entries.size());
+            result.put("total", matches.size());
+            result.put("limit", maxEntries);
+            result.put("truncated", matches.size() > maxEntries);
+            if (matches.size() > maxEntries) {
+                result.put("hint", "More entries matched: narrow the query.");
+            }
             result.put("memories", entries);
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP search_user_memories failed", e);
-            return errorJson("Failed to search memories", e);
+            return toolFailure(LOGGER, "search_user_memories", "Failed to search memories", e);
         }
     }
 
@@ -178,12 +216,13 @@ public class McpMemoryTools {
             }
         } catch (Exception e) {
             LOGGER.error("MCP get_memory_by_key failed", e);
-            return errorJson("Failed to get memory", e);
+            return toolFailure(LOGGER, "get_memory_by_key", "Failed to get memory", e);
         }
     }
 
     @Tool(name = "upsert_user_memory", description = "Insert or update a user memory entry. "
             + "Upsert semantics: self/group memories are keyed by (userId, key, agentId); " + "global memories are keyed by (userId, key).")
+    @McpAudited(subject = 0)
     public String upsertUserMemory(@ToolArg(description = "User ID (required)") String userId,
                                    @ToolArg(description = "Memory key/name (required)") String key,
                                    @ToolArg(description = "Memory value (required)") String value,
@@ -226,11 +265,12 @@ public class McpMemoryTools {
             return errorJson("Invalid visibility value. Use: self, group, or global");
         } catch (Exception e) {
             LOGGER.error("MCP upsert_user_memory failed", e);
-            return errorJson("Failed to upsert memory", e);
+            return toolFailure(LOGGER, "upsert_user_memory", "Failed to upsert memory", e);
         }
     }
 
     @Tool(name = "delete_user_memory", description = "Delete a specific memory entry by its database ID.")
+    @McpAudited
     public String deleteUserMemory(@ToolArg(description = "Memory entry ID (required)") String entryId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (entryId == null || entryId.isBlank())
@@ -252,13 +292,14 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("entryId", entryId, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_user_memory failed", e);
-            return errorJson("Failed to delete memory", e);
+            return toolFailure(LOGGER, "delete_user_memory", "Failed to delete memory", e);
         }
     }
 
     @Tool(name = "delete_all_user_memories", description = "Delete ALL memories for a user. "
             + "This action is irreversible! GDPR bookkeeping entries (keys starting with '_gdpr_') are kept; "
             + "use delete_user_data for a full GDPR Art. 17 erasure.")
+    @McpAudited(subject = 0)
     public String deleteAllUserMemories(@ToolArg(description = "User ID (required)") String userId,
                                         @ToolArg(description = "Confirmation: must be 'CONFIRM' to proceed") String confirmation) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
@@ -275,7 +316,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("userId", userId, "entriesDeleted", count, "status", "deleted"));
         } catch (Exception e) {
             LOGGER.error("MCP delete_all_user_memories failed", e);
-            return errorJson("Failed to delete memories", e);
+            return toolFailure(LOGGER, "delete_all_user_memories", "Failed to delete memories", e);
         }
     }
 
@@ -290,7 +331,7 @@ public class McpMemoryTools {
             return jsonSerialization.serialize(Map.of("userId", userId, "count", count));
         } catch (Exception e) {
             LOGGER.error("MCP count_user_memories failed", e);
-            return errorJson("Failed to count memories", e);
+            return toolFailure(LOGGER, "count_user_memories", "Failed to count memories", e);
         }
     }
 }

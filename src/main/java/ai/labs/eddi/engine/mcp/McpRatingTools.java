@@ -150,6 +150,7 @@ public class McpRatingTools {
             + "with the time) or reopen it as NEW, and/or set a review note (at most 2000 characters; an empty note clears it). "
             + "Needs EDIT permission on the rating's agent. If the person re-rated or withdrew the rating meanwhile, nothing is "
             + "changed and the error is RATING_CHANGED: read it again and decide again.")
+    @McpAudited
     public String reviewConversationRating(@ToolArg(description = "Rating id, from list_conversation_ratings (required)") String ratingId,
                                            @ToolArg(description = "REVIEWED or NEW; omit to change only the note",
                                                     required = false) String reviewStatus,

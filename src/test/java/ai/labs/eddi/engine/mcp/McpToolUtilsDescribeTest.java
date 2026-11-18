@@ -10,6 +10,7 @@ import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 
@@ -73,11 +74,14 @@ class McpToolUtilsDescribeTest {
     }
 
     @Test
-    @DisplayName("errorJson(prefix, cause) keeps the prefix and adds the description")
-    void errorJsonCombinesBoth() {
-        String json = McpToolUtils.errorJson("Failed to create resource", new IllegalStateException("boom"));
+    @DisplayName("toolFailure keeps what failed, hides a server-side cause and gives a reference that is in the log")
+    void toolFailureHidesInternalText() {
+        String json = McpToolUtils.toolFailure(Logger.getLogger(McpToolUtilsDescribeTest.class), "create_resource",
+                "Failed to create resource", new IllegalStateException("mongodb://db-7.internal:27017 refused"));
 
         assertTrue(json.contains("Failed to create resource"));
-        assertTrue(json.contains("boom"));
+        assertTrue(json.contains("\"errorCode\":\"INTERNAL\""), json);
+        assertTrue(json.contains("reference"), json);
+        assertFalse(json.contains("db-7.internal"), json);
     }
 }

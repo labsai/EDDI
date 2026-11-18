@@ -129,6 +129,7 @@ public class McpAdminTools {
 
     @Tool(name = "deploy_agent", description = "Deploy a Agent to an environment. The Agent must exist and have a valid configuration. "
             + "Returns the deployment status.")
+    @McpAudited
     public String deployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number to deploy (required)") Integer version,
                               @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
@@ -212,6 +213,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "undeploy_agent", description = "Undeploy a Agent from an environment. Optionally end all active conversations.")
+    @McpAudited
     public String undeployAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                                 @ToolArg(description = "Version number to undeploy (required)") Integer version,
                                 @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
@@ -240,6 +242,7 @@ public class McpAdminTools {
             + "number of conversations: when the report says truncated, call again with after=<nextAfter>. After a real run, dry-run "
             + "again before undeploying an old version, and undeploy it only when it reports eligible 0; conversations skipped as busy, "
             + "awaitingHuman or inProgress still run on the old version.")
+    @McpAudited
     public String upgradeConversations(@ToolArg(description = "Agent ID (required)") String agentId,
                                        @ToolArg(description = "Environment: 'production' (default) or 'test'", required = false,
                                                 defaultValue = "production") String environment,
@@ -1016,6 +1019,7 @@ public class McpAdminTools {
             + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
             + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")
+    @McpAudited
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON; HEARTBEAT whenever heartbeatIntervalSeconds is given)",
                                           required = false) String triggerType,
@@ -1187,6 +1191,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "delete_schedule", description = "Delete a scheduled Agent trigger.")
+    @McpAudited
     public String deleteSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
@@ -1209,6 +1214,7 @@ public class McpAdminTools {
             + "a HITL approval timeout or a conversation's continuation never (CONFLICT), a schedule that cannot be claimed "
             + "right now (CONFLICT, with its state), and an ingestion, email-poll, team-cadence or lesson schedule without EDIT "
             + "on what it drives (FORBIDDEN). A fire past its bound answers TIMEOUT. Returns the fire result with conversation ID.")
+    @McpAudited
     public String fireScheduleNow(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())
@@ -1244,6 +1250,7 @@ public class McpAdminTools {
 
     @Tool(name = "retry_failed_schedule", description = "Re-queue a dead-lettered schedule for another fire attempt. "
             + "Use after investigating and fixing the cause of failure.")
+    @McpAudited
     public String retryFailedSchedule(@ToolArg(description = "Schedule ID (required)") String scheduleId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (scheduleId == null || scheduleId.isBlank())

@@ -61,12 +61,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * like) is replaced by the ledger's pseudonym for them, so erasing user X does
  * not leave "DELETE /admin/gdpr/X" in an immutable record.
  * <p>
- * <b>MCP.</b> The MCP tools that act through the REST API (agent, resource,
- * group, schedule and channel administration) reach this filter on the loopback
- * call, carrying the MCP caller's identity. {@code delete_user_data} and
- * {@code export_user_data} call the GDPR service directly and record their
- * calls through {@link AdminActionRecorder} themselves; the MCP user-memory
- * tools are not recorded.
+ * <b>MCP.</b> Only the MCP tools that call the REST API over the loopback
+ * (create/update/delete of agents, resources, triggers and channel
+ * integrations) reach this filter, carrying the MCP caller's identity. A tool
+ * that calls a service or store in-process — deploy/undeploy, schedules,
+ * groups, user memories and the rest — never passes through a JAX-RS filter, so
+ * it is recorded through {@link AdminActionRecorder#recordToolCall} by the
+ * {@code McpAudited} interceptor, and {@code delete_user_data} and
+ * {@code export_user_data} record themselves. {@code McpToolAuditCoverageTest}
+ * fails when a tool is on none of these routes.
  * <p>
  * Switched by {@code eddi.audit.admin-actions.enabled} (default {@code true}).
  */

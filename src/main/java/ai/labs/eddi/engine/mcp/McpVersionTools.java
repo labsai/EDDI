@@ -11,11 +11,12 @@ import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
+import org.jboss.logging.Logger;
 
 import java.io.IOException;
 
-import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
  * MCP tool answering which build of EDDI is running. Same source as
@@ -26,6 +27,8 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireRole;
 @McpErrorResults
 @ApplicationScoped
 public class McpVersionTools {
+
+    private static final Logger LOGGER = Logger.getLogger(McpVersionTools.class);
 
     private final BuildInfo buildInfo;
     private final IJsonSerialization jsonSerialization;
@@ -48,7 +51,7 @@ public class McpVersionTools {
         try {
             return jsonSerialization.serialize(buildInfo.get());
         } catch (IOException e) {
-            return errorJson("Failed to serialize build info", e);
+            return toolFailure(LOGGER, "get_eddi_version", "Failed to serialize build info", e);
         }
     }
 }

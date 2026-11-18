@@ -81,6 +81,7 @@ public class McpTeamHandoffTools {
             + "description or priority first (any edit records the decision as APPROVED_EDITED). This is a human decision recorded "
             + "under your name: accept only what the person you act for has reviewed. Needs EDIT on the group. CONFLICT when the "
             + "backlog is full (200 tasks) or already holds that subject; NOT_FOUND when the handoff was decided meanwhile.")
+    @McpAudited
     public String acceptTeamHandoff(@ToolArg(description = "The receiving group's id (required)") String groupId,
                                     @ToolArg(description = "Handoff id, from list_team_handoffs (required)") String handoffId,
                                     @ToolArg(description = "Replacement subject", required = false) String subject,
@@ -102,6 +103,7 @@ public class McpTeamHandoffTools {
     @Tool(name = "decline_team_handoff", description = "Decline one pending handoff. The same handoff filed again is refused for the decline "
             + "memory (eddi.groups.handoff.decline-memory, 30 days by default). A human decision recorded under your name, with the "
             + "reason code in the audit entry. Needs EDIT on the group.")
+    @McpAudited
     public String declineTeamHandoff(@ToolArg(description = "The receiving group's id (required)") String groupId,
                                      @ToolArg(description = "Handoff id, from list_team_handoffs (required)") String handoffId,
                                      @ToolArg(description = "Short machine-readable reason, e.g. out_of_scope or duplicate",

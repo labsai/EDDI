@@ -16,6 +16,7 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
@@ -61,6 +62,12 @@ public class McpGdprTools {
     static final int OUTCOME_INVALID = 400;
     static final int OUTCOME_REFUSED = 403;
     static final int OUTCOME_FAILED = 500;
+
+    /**
+     * The most characters {@code export_user_data} returns ({@value}); a larger
+     * bundle is replaced by its counts and flags, marked {@code truncated}.
+     */
+    static final int MAX_EXPORT_CHARS = 250_000;
 
     private final GdprComplianceService gdprComplianceService;
     private final IJsonSerialization jsonSerialization;
@@ -221,6 +228,21 @@ public class McpGdprTools {
                 map.put("sharedArtifacts", export.sharedArtifacts());
                 map.put("sharedArtifactsTruncated", export.sharedArtifactsTruncated());
                 map.put("failedCategories", export.failedCategories());
+                String json = jsonSerialization.serialize(map);
+                if (json.length() <= MAX_EXPORT_CHARS) {
+                    return json;
+                }
+                // Too large for an LLM context: the counts and the completeness flags stay,
+                // the bulky sections go, and the bundle says it is not the Art. 15 bundle.
+                for (String bulky : List.of("memories", "conversations", "managedConversations", "connectionGrants", "additionalData",
+                        "groupConversations", "sharedArtifacts")) {
+                    map.remove(bulky);
+                }
+                map.put("complete", false);
+                map.put("truncated", true);
+                map.put("totalChars", json.length());
+                map.put("hint", "The bundle is too large to return here, so its sections are omitted and it is NOT a complete Art. 15 bundle. "
+                        + "Fetch it through the REST export (GET /admin/gdpr/{userId}/export).");
                 return jsonSerialization.serialize(map);
             } catch (Exception e) {
                 // As in delete_user_data: a reply that cannot be written leaves the

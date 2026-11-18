@@ -163,6 +163,63 @@ final class McpToolUtils {
     }
 
     /**
+     * The most characters of one tool result that reaches the caller's LLM context
+     * ({@value}): about 25,000 tokens. A result over it is cut and says so — see
+     * {@link #bounded}. Tools with their own paging arguments keep a smaller
+     * default of their own.
+     */
+    static final int MAX_RESULT_CHARS = 100_000;
+
+    /**
+     * The most conversation steps {@code read_conversation_log} returns by default.
+     */
+    static final int DEFAULT_LOG_STEPS = 50;
+
+    /** The most conversation steps {@code read_conversation_log} will return. */
+    static final int MAX_LOG_STEPS = 500;
+
+    /** The largest page a list-style tool returns, whatever limit was asked for. */
+    static final int MAX_PAGE_SIZE = 200;
+
+    /**
+     * A limit argument as a page size: {@code defaultSize} when absent or not
+     * positive, never above {@code maxSize}.
+     */
+    static int clampLimit(Integer requested, int defaultSize, int maxSize) {
+        if (requested == null || requested <= 0) {
+            return Math.min(defaultSize, maxSize);
+        }
+        return Math.min(requested, maxSize);
+    }
+
+    /**
+     * A JSON result within {@code maxChars}, or — when it is longer — an envelope
+     * saying so: {@code {"truncated":true,"totalChars":N,"returnedChars":M,
+     * "hint":"…","partial":"<the first M characters>"}}. The caller learns that the
+     * answer is incomplete instead of reading a silently cut document, and the hint
+     * names how to ask for less.
+     */
+    static String bounded(String json, int maxChars, String hint) {
+        if (json == null || json.length() <= maxChars) {
+            return json;
+        }
+        return "{\"truncated\":true,\"totalChars\":" + json.length() + ",\"returnedChars\":" + maxChars + ",\"hint\":\"" + escapeJsonString(hint)
+                + "\",\"partial\":\"" + escapeJsonString(json.substring(0, maxChars)) + "\"}";
+    }
+
+    /**
+     * A text result within {@code maxChars}, or its first {@code maxChars}
+     * characters followed by an explicit {@code [truncated: true …]} line with the
+     * hint.
+     */
+    static String boundedText(String text, int maxChars, String hint) {
+        if (text == null || text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, maxChars) + "\n[truncated: true — returned " + maxChars + " of " + text.length() + " characters. " + hint + "]";
+    }
+
+    /**
      * Build an error JSON response with proper escaping. Uses manual construction
      * to avoid serialization dependency in error paths.
      */
@@ -170,20 +227,11 @@ final class McpToolUtils {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
     }
 
-    /**
-     * Build an error JSON response describing a failure, from a caller-supplied
-     * prefix and the exception that caused it.
-     * <p>
-     * Prefer this over {@code errorJson(prefix + ": " + e.getMessage())}: plenty of
-     * exceptions carry no message, and the concatenation then renders literally as
-     * {@code "Failed to chat with agent: null"} — an error that says a call failed
-     * and nothing whatsoever about why. The class name is not a diagnosis either,
-     * but it is the difference between "something threw" and "a
-     * ResourceNotFoundException threw".
-     */
-    static String errorJson(String prefix, Throwable cause) {
-        return errorJson(prefix + ": " + describe(cause));
-    }
+    // There is deliberately no errorJson(prefix, Throwable): it echoed any
+    // exception's text — a datastore or driver message — to the caller. A tool that
+    // catches an exception answers with toolFailure(...), which describes only what
+    // the caller caused and logs the rest under a reference id. A scan in
+    // McpToolErrorLeakScanTest keeps it from coming back.
 
     /**
      * The error a tool answers when its body throws, without leaking internals.

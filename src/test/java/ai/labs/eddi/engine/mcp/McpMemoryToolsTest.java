@@ -14,9 +14,12 @@ import ai.labs.eddi.engine.security.OwnershipValidator;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -69,6 +72,71 @@ class McpMemoryToolsTest {
         when(jsonSerialization.serialize(any())).thenReturn("ok");
         tools.listUserMemories("user1", 2);
         verify(jsonSerialization).serialize(any());
+    }
+
+    @Test
+    void listUserMemories_pagesAndSaysSoWhenMoreFollow() throws Exception {
+        var entries = new ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 5; i++) {
+            entries.add(mock(UserMemoryEntry.class));
+        }
+        when(userMemoryStore.getAllEntries("user1")).thenReturn(entries);
+        when(jsonSerialization.serialize(any())).thenReturn("ok");
+
+        tools.listUserMemories("user1", 2, 1);
+
+        @SuppressWarnings("unchecked")
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        var body = (Map<String, Object>) captor.getValue();
+        assertEquals(2, body.get("count"));
+        assertEquals(5, body.get("total"));
+        assertEquals(1, body.get("offset"));
+        assertEquals(true, body.get("truncated"));
+        assertTrue(String.valueOf(body.get("hint")).contains("offset=3"), String.valueOf(body.get("hint")));
+    }
+
+    @Test
+    void listUserMemories_limitIsClampedAndAnOffsetPastTheEndIsEmpty() throws Exception {
+        var entries = new ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 300; i++) {
+            entries.add(mock(UserMemoryEntry.class));
+        }
+        when(userMemoryStore.getAllEntries("user1")).thenReturn(entries);
+        when(jsonSerialization.serialize(any())).thenReturn("ok");
+
+        tools.listUserMemories("user1", 1_000_000, 0);
+        tools.listUserMemories("user1", 10, 9_999);
+
+        @SuppressWarnings("unchecked")
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(jsonSerialization, times(2)).serialize(captor.capture());
+        var first = (Map<String, Object>) captor.getAllValues().get(0);
+        var second = (Map<String, Object>) captor.getAllValues().get(1);
+        assertEquals(200, first.get("count"));
+        assertEquals(true, first.get("truncated"));
+        assertEquals(0, second.get("count"));
+        assertEquals(false, second.get("truncated"));
+    }
+
+    @Test
+    void searchUserMemories_isLimited() throws Exception {
+        var matches = new ArrayList<UserMemoryEntry>();
+        for (int i = 0; i < 80; i++) {
+            matches.add(mock(UserMemoryEntry.class));
+        }
+        when(userMemoryStore.filterEntries("user1", "q")).thenReturn(matches);
+        when(jsonSerialization.serialize(any())).thenReturn("ok");
+
+        tools.searchUserMemories("user1", "q");
+
+        @SuppressWarnings("unchecked")
+        var captor = ArgumentCaptor.forClass(Object.class);
+        verify(jsonSerialization).serialize(captor.capture());
+        var body = (Map<String, Object>) captor.getValue();
+        assertEquals(50, body.get("count"));
+        assertEquals(80, body.get("total"));
+        assertEquals(true, body.get("truncated"));
     }
 
     @Test
