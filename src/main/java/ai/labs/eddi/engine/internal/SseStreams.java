@@ -24,9 +24,11 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ScheduledThreadPoolExecutor;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -187,6 +189,9 @@ public class SseStreams {
      */
     Executor clientGoneExecutor;
 
+    /** The bounded pool behind {@link #clientGoneExecutor}; stopped on shutdown. */
+    private final ExecutorService disconnectPool;
+
     /** Monotonic clock; replaceable in tests. */
     Clock clock = () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
 
@@ -202,8 +207,9 @@ public class SseStreams {
         this.maxConcurrent = Math.max(0, maxConcurrent);
         this.limits = new Limits(Math.max(1, maxPendingEvents), Math.max(1L, maxPendingBytes));
         this.maxPendingBytesTotal = Math.max(1L, maxPendingBytesTotal);
-        this.clientGoneExecutor = Executors.newFixedThreadPool(Math.max(1, disconnectConcurrency),
+        this.disconnectPool = Executors.newFixedThreadPool(Math.max(1, disconnectConcurrency),
                 Thread.ofVirtual().name("eddi-sse-client-gone-", 0).factory());
+        this.clientGoneExecutor = disconnectPool;
         for (Kind kind : Kind.values()) {
             AtomicInteger count = new AtomicInteger();
             active.put(kind, count);
@@ -239,17 +245,33 @@ public class SseStreams {
     }
 
     /**
+     * The shutdown event of an agent turn stream. Not retryable: the runtime lets
+     * in-flight and queued turns finish ({@code shutdown()}, not
+     * {@code shutdownNow()}), so the turn may still be stored after this event, and
+     * sending it again elsewhere could run it twice.
+     */
+    static final String SHUTDOWN_EVENT_TURN = "{\"message\":\"The server is shutting down; the turn may still finish and be stored - "
+            + "read the conversation before sending it again\",\"code\":\"" + SERVER_SHUTDOWN_CODE + "\",\"retryable\":false}";
+
+    /**
+     * The shutdown event of every other stream (a group discussion persists round
+     * by round; reconnecting shows its state).
+     */
+    static final String SHUTDOWN_EVENT_RECONNECT = "{\"message\":\"The server is shutting down; reconnect to continue\",\"code\":\""
+            + SERVER_SHUTDOWN_CODE + "\",\"retryable\":true}";
+
+    /**
      * Ends every stream still open when the application stops — each with one
-     * retryable {@code error} event ({@value #SERVER_SHUTDOWN_CODE}) first, so a
-     * client can reconnect to another node instead of seeing a bare end of stream.
+     * {@code error} event ({@value #SERVER_SHUTDOWN_CODE}) first, so a client is
+     * told instead of seeing a bare end of stream — and stops the disconnect pool.
      * The shared ticker thread is a daemon and stays.
      */
     @PreDestroy
     void shutdown() {
         for (SseChannel channel : openChannels()) {
-            channel.shutdown("{\"message\":\"The server is shutting down; reconnect to continue\",\"code\":\"" + SERVER_SHUTDOWN_CODE
-                    + "\",\"retryable\":true}");
+            channel.shutdown(channel.kind() == Kind.AGENT ? SHUTDOWN_EVENT_TURN : SHUTDOWN_EVENT_RECONNECT);
         }
+        disconnectPool.shutdown();
     }
 
     private ScheduledExecutorService scheduler() {
@@ -265,11 +287,19 @@ public class SseStreams {
      * tick when it ends.
      */
     private static final class SharedTicker {
-        static final ScheduledExecutorService INSTANCE = Executors.newSingleThreadScheduledExecutor(r -> {
-            Thread t = new Thread(r, "eddi-sse-keepalive");
-            t.setDaemon(true);
-            return t;
-        });
+        static final ScheduledExecutorService INSTANCE = create();
+
+        private static ScheduledExecutorService create() {
+            var executor = new ScheduledThreadPoolExecutor(1, r -> {
+                Thread t = new Thread(r, "eddi-sse-keepalive");
+                t.setDaemon(true);
+                return t;
+            });
+            // A cancelled tick or slot guard leaves the queue at once, not when it would
+            // have fired (a /v1 or A2A leak guard would otherwise sit there 120 s).
+            executor.setRemoveOnCancelPolicy(true);
+            return executor;
+        }
     }
 
     /**
@@ -376,6 +406,32 @@ public class SseStreams {
             pendingBytesTotal.addAndGet(-bytes);
             return false;
         }
+        return true;
+    }
+
+    /**
+     * The node budget refused {@code bytes} for {@code requester}: sheds the open
+     * stream that holds the most unsent data instead of failing whoever happened to
+     * write next, and admits the write. {@code false} when the requester is itself
+     * the largest holder (it is then the one to shed). The budget is therefore soft
+     * by the writes in flight: a shed stream's bytes are returned as its pending
+     * writes settle.
+     */
+    boolean makeRoomFor(SseChannel requester, long bytes) {
+        SseChannel largest = null;
+        long most = -1;
+        for (SseChannel channel : open) {
+            long held = channel.pendingBytes();
+            if (held > most) {
+                most = held;
+                largest = channel;
+            }
+        }
+        if (largest == null || largest == requester || most <= requester.pendingBytes()) {
+            return false;
+        }
+        largest.shedForNodeBudget();
+        pendingBytesTotal.addAndGet(bytes);
         return true;
     }
 

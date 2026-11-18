@@ -58,7 +58,9 @@ model call by the same rules ([`langchain.md` → The streaming contract](../lan
 A new agent field `streamingClientDisconnect` (`cancel` | `finish`) overrides `eddi.streaming.cancel-on-client-disconnect`
 for the agent's `/stream` turns; the global default is unchanged (`true`). The resume stream keeps its own switch. The
 cancel no longer runs on the provider's callback thread under the stream lock: it is handed to a bounded executor
-(`eddi.streaming.disconnect-concurrency`, 16), and the agent's policy arrives with the turn, so a disconnect reads
+(`eddi.streaming.disconnect-concurrency`, 16) — the turn's in-memory cancel flag is raised first, on the thread
+that noticed the disconnect, so the turn stops spending at once while the store work waits its turn — and the agent's
+policy arrives with the turn, so a disconnect reads
 nothing from a store. A client that leaves after the turn finished generating no longer cancels it — the answer is
 stored.
 
@@ -88,8 +90,12 @@ The agent turn stream, its resume and the group discussion streams now write thr
   `{"code":"streams_at_capacity","retryable":true}` before its turn starts and before its access check reads the
   store. `/v1/chat/completions` with `stream: true` and A2A `message/stream` take a slot of the same cap
   (`kind` `openai` / `a2a`); the user-event and admin streams do not.
-- **A node-wide buffer budget**, `eddi.streaming.max-pending-bytes-total` (256 MiB): the stream whose write would
-  exceed it is disconnected like a slow reader.
+- **A node-wide buffer budget**, `eddi.streaming.max-pending-bytes-total` (268,435,456 characters): when it is spent,
+  the stream holding the most unsent data is closed (`backpressure`) without cancelling its turn, and the write that
+  hit the limit goes through — soft by the writes in flight. Keep-alive frames are reserved in the budget like every
+  other write (they were released without being reserved, so the counter drifted below zero). "Bytes" in the
+  streaming settings are characters of event data, not UTF-8 bytes. `/v1` and A2A streams hold a thread each while
+  they run and are outside the buffer bounds; they count against the stream cap.
 - **Certain cleanup.** Every terminal path releases the registry slot, the tick and the sink exactly once.
 - **Meters:** `eddi.streaming.active{kind}`, `eddi.streaming.closed{kind,reason}`, `eddi.streaming.refused{kind}`,
   `eddi.streaming.first_token{kind}`.
@@ -97,7 +103,15 @@ The agent turn stream, its resume and the group discussion streams now write thr
 - **The group stream** gets keep-alive and disconnect detection (a leaving client releases the stream; the
   discussion continues and persists). No silence backstop: a member turn may legitimately run far longer than the
   agent timeout (a nested group, a human member), so the discussion ends its own stream.
-- **Shutdown** sends every open stream a last `error` `{"code":"server_shutdown","retryable":true}` before closing it.
+- **Shutdown** sends every open stream a last `error` `server_shutdown` before closing it: `retryable: false` on a turn
+  stream (the runtime lets running and queued turns finish, so the turn may still be stored; read the conversation
+  first), `retryable: true` on a group discussion stream.
+- **Exactly one terminal event per stream**: the turn, the silence backstop and the shutdown claim it by
+  compare-and-set (`SseChannel.tryMarkTerminal`); a loser only closes.
+- **A lost cluster lease** ends the stream with `turn_timeout`, `retryable: true` (the turn was discarded and is never
+  stored), logged at WARN — not an opaque `internal_error`.
+- **A silent stream whose client stopped reading** is closed by the tick once its keep-alive frames reach
+  `eddi.streaming.max-pending-events`, instead of holding its slot indefinitely.
 - **The tick cannot be killed by one stream**: a sink that throws ends its own stream (`failed`), and an `Error` while
   starting a turn still frees the stream's slot.
 - **Proxy headers (B7):** [`SseResponseHeadersFilter`](../../src/main/java/ai/labs/eddi/engine/internal/SseResponseHeadersFilter.java)
@@ -121,7 +135,8 @@ The agent turn stream, its resume and the group discussion streams now write thr
   `FailureClass` names; `task_failed.error` is the client-facing digest.
 - New `done` field `finishReason`; new `cancelled` event; new conversation-output key `finishReason`. Clients ignore
   unknown events and fields.
-- `cancelled` is sent only for a turn somebody stopped (`/cancel`, a cancelling disconnect, a GDPR stop). A turn the
+- `cancelled` is sent only for a turn somebody stopped (`/cancel`, a cancelling disconnect, a GDPR stop) — recorded on
+  the memory before the cancel flag goes up and read again at completion, so a user's stop never reads as a timeout. A turn the
   agent-timeout watchdog or a lost cluster lease interrupted ends with `error` `{"code":"turn_timeout","retryable":true}`
   and no `done`; it was not stored. The stream's own silence backstop also sends `turn_timeout`, but with
   `retryable: false` — that layer cannot know whether the turn was stored, so the client reads the conversation first.
@@ -179,5 +194,11 @@ through the bounded pool in `RestAgentEngineStreamingContractTest`. Adjusted whe
     answer never depends on the turn;
   - close such a stream as `SseChannel.CloseReason.FAILED` (or add a `NOT_STORED` reason, with its `reason` tag in
     `docs/metrics.md`), never `COMPLETED`;
+  - a deferred `done` or `turn_not_stored` must claim the terminal through `SseChannel.tryMarkTerminal` like every
+    other terminal event;
+  - this branch decides `turn_timeout` `retryable: true` from the turn's cancel flag read at snapshot conversion, before
+    the persist decision; if that branch moves conversion or delivery after the write, `retryable` must come from the
+    write outcome instead (its per-reason value). `server_shutdown` (may be stored) and lease loss (certainly not
+    stored) are the two cases its per-reason `retryable` should own;
   - this branch already guarantees the two things that branch relies on: a disconnect after `onGenerationFinished`
     neither cancels nor discards the turn, and the silence backstop never announces `turn_timeout` as retryable.

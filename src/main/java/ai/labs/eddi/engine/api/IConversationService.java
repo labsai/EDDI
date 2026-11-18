@@ -455,6 +455,19 @@ public interface IConversationService {
             throws ResourceStoreException;
 
     /**
+     * Raises the cancel flag of the turn of {@code conversationId} running on THIS
+     * node, if any — a map lookup and a flag, no store access. For a caller that
+     * must stop the turn's spending at once and does the store work of
+     * {@link #cancelConversation} afterwards.
+     *
+     * @return true when a running turn was signalled
+     * @since 6.7.0
+     */
+    default boolean signalLocalInFlight(String conversationId) {
+        return false;
+    }
+
+    /**
      * Cancels the conversation only if it is awaiting a human decision — one
      * compare-and-set from {@code AWAITING_HUMAN}; an executing turn is neither
      * signalled nor interrupted. This is the cancel an {@code eddi-approver} who is

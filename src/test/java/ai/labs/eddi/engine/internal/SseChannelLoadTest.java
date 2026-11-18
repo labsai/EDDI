@@ -333,6 +333,8 @@ class SseChannelLoadTest {
         var done = open(finished, null);
         done.markTerminal();
         done.send("done", "{}");
+        var groupSink = new FakeSse.Sink(false);
+        streams.open(SseStreams.Kind.GROUP, "group", groupSink, sse, KEEPALIVE_SECONDS, 0, null, null).send("group_start", "{}");
 
         streams.shutdown();
 
@@ -340,11 +342,121 @@ class SseChannelLoadTest {
             assertEquals(1, sink.count("error"));
             String data = String.valueOf(sink.events.getLast().data());
             assertTrue(data.contains("\"code\":\"" + SseStreams.SERVER_SHUTDOWN_CODE + "\""), data);
-            assertTrue(data.contains("\"retryable\":true"), data);
+            // M2: the runtime lets in-flight turns finish, so the turn may still be stored.
+            assertTrue(data.contains("\"retryable\":false"), data);
             assertTrue(sink.isClosed());
         }
+        String groupData = String.valueOf(groupSink.events.getLast().data());
+        assertTrue(groupData.contains("\"retryable\":true"), "a group discussion persists round by round: " + groupData);
         assertEquals(0, finished.count("error"), "a stream that already delivered its end gets nothing more");
         assertEquals(0, streams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S1: a stream has exactly one terminal claim")
+    void oneTerminalClaim() {
+        var sink = new FakeSse.Sink(false);
+        var channel = open(sink, null);
+
+        assertTrue(channel.tryMarkTerminal());
+        assertFalse(channel.tryMarkTerminal());
+        // A shutdown that comes second adds no second terminal event; it only closes.
+        streams.shutdown();
+        assertEquals(0, sink.count("error"));
+        assertTrue(channel.isReleased());
+    }
+
+    @Test
+    @DisplayName("M1: keep-alives on thousands of silent streams leave the node-wide byte budget exactly where it was")
+    void keepAlivesDoNotDriftTheNodeBudget() {
+        List<SseChannel> channels = new ArrayList<>();
+        for (int i = 0; i < 1_000; i++) {
+            var channel = open(new FakeSse.Sink(false), null);
+            channel.send("token", "x");
+            channels.add(channel);
+        }
+        assertEquals(0L, streams.pendingBytesTotal());
+
+        for (int round = 0; round < 20; round++) {
+            now.addAndGet(TimeUnit.SECONDS.toMillis(KEEPALIVE_SECONDS));
+            List.copyOf(ticks).forEach(Runnable::run);
+        }
+
+        assertEquals(0L, streams.pendingBytesTotal(), "every keep-alive reserved what it released");
+        channels.forEach(c -> c.close(SseChannel.CloseReason.COMPLETED));
+    }
+
+    @Test
+    @DisplayName("M1: a keep-alive on a stalled stream holds its bytes in the node budget until it is written, then returns them")
+    void stalledKeepAlivesAreReservedThenReleased() {
+        var sink = new FakeSse.Sink(true);
+        var channel = open(sink, null);
+        channel.send("token", "x");
+
+        for (int round = 0; round < 3; round++) {
+            now.addAndGet(TimeUnit.SECONDS.toMillis(KEEPALIVE_SECONDS));
+            List.copyOf(ticks).forEach(Runnable::run);
+        }
+        long held = streams.pendingBytesTotal();
+        assertEquals(channel.pendingBytes(), held, "the node budget holds exactly the stream's unsent bytes");
+        assertTrue(held > 0);
+
+        sink.unfinished.forEach(stage -> stage.complete(null));
+        assertEquals(0L, streams.pendingBytesTotal());
+        channel.close(SseChannel.CloseReason.COMPLETED);
+    }
+
+    @Test
+    @DisplayName("S5: a silent stream whose client stopped reading is closed by the tick at its bound, and its turn cancelled once")
+    void stalledSilentStreamIsClosedAtItsBound() {
+        var sink = new FakeSse.Sink(true);
+        var gone = new AtomicInteger();
+        var channel = open(sink, gone::incrementAndGet);
+        channel.send("token", "x");
+
+        for (int round = 0; round < MAX_PENDING_EVENTS + 5; round++) {
+            now.addAndGet(TimeUnit.SECONDS.toMillis(KEEPALIVE_SECONDS));
+            List.copyOf(ticks).forEach(Runnable::run);
+        }
+        goneTasks.forEach(Runnable::run);
+
+        assertTrue(channel.isReleased(), "closed for backpressure, not held forever");
+        assertEquals(MAX_PENDING_EVENTS, sink.written(), "never more than the bound handed to the connection");
+        assertEquals(1, gone.get());
+        assertEquals(0, streams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S6: a spent node budget sheds the stream holding the most, without cancelling its turn; the writer goes on")
+    void nodeBudgetShedsTheLargestHolder() {
+        var budgeted = new SseStreams(100, 1_000, 1_000_000L, 300L, 1, null);
+        budgeted.shutdown();
+        budgeted.scheduler = streams.scheduler;
+        budgeted.clientGoneExecutor = goneTasks::add;
+        var hogGone = new AtomicInteger();
+        var writerGone = new AtomicInteger();
+        var hogSink = new FakeSse.Sink(true);
+        var hog = budgeted.open(SseStreams.Kind.AGENT, "hog", hogSink, sse, 0, 0, hogGone::incrementAndGet, null);
+        var writerSink = new FakeSse.Sink(false);
+        var writer = budgeted.open(SseStreams.Kind.AGENT, "writer", writerSink, sse, 0, 0, writerGone::incrementAndGet, null);
+        // 18 x 15 = 270 of the 300 the node may hold, none of it read by its client.
+        for (int i = 0; i < 18; i++) {
+            hog.send("token", "0123456789");
+        }
+        assertEquals(270L, budgeted.pendingBytesTotal());
+
+        assertTrue(writer.send("token", "0123456789abcdefghij0123456789abcdefghij0123456789"), "the healthy writer is not the one kicked");
+        goneTasks.forEach(Runnable::run);
+
+        assertTrue(hog.isReleased(), "the largest holder is shed");
+        assertFalse(writer.isReleased());
+        assertEquals(0, hogGone.get(), "a budget kick never cancels the turn");
+        assertEquals(0, writerGone.get());
+        assertEquals(0L, budgeted.pendingBytesTotal(), "the shed stream's bytes go back at once, not when its dead writes settle");
+        hogSink.unfinished.forEach(stage -> stage.complete(null));
+        writer.close(SseChannel.CloseReason.COMPLETED);
+        assertEquals(0L, budgeted.pendingBytesTotal());
+        assertEquals(0, budgeted.totalActive());
     }
 
     @Test

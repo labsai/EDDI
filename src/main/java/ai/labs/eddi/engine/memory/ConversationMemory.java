@@ -40,6 +40,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.Stack;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -77,7 +78,13 @@ public class ConversationMemory implements IConversationMemory {
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
-    private volatile boolean cancelled;
+    /** Raised by compare-and-set, so the listeners run exactly once. */
+    private final transient AtomicBoolean cancelled = new AtomicBoolean();
+    /**
+     * Somebody asked for the stop (a cancel, not an abandon) — set before
+     * {@link #cancelled}, so whoever sees the turn stopped can tell the two apart.
+     */
+    private final transient AtomicBoolean cancelRequested = new AtomicBoolean();
     /**
      * Called once when {@link #cancelled} is raised; see {@link #onCancel}.
      * Transient.
@@ -699,10 +706,19 @@ public class ConversationMemory implements IConversationMemory {
      * someone asked for ({@code announce}) tells the event sink — a turn the
      * watchdog or a lost lease abandons is not "cancelled" to its client.
      */
-    private void raiseCancel(boolean cancelled, boolean announce) {
-        boolean raised = cancelled && !this.cancelled;
-        this.cancelled = cancelled;
-        if (!raised) {
+    private void raiseCancel(boolean cancel, boolean announce) {
+        if (!cancel) {
+            cancelled.set(false);
+            cancelRequested.set(false);
+            return;
+        }
+        // First, so a completion that sees the flag also sees why; announced once.
+        boolean firstRequest = announce && cancelRequested.compareAndSet(false, true);
+        if (!cancelled.compareAndSet(false, true)) {
+            // Already stopped (an abandon, say): this request still reaches the stream.
+            if (firstRequest) {
+                announce();
+            }
             return;
         }
         // Event-driven, so a streamed model call waiting on the provider stops at
@@ -714,20 +730,31 @@ public class ConversationMemory implements IConversationMemory {
                 // A listener must not keep the cancel from reaching the others.
             }
         }
+        if (firstRequest) {
+            announce();
+        }
+    }
+
+    private void announce() {
         ConversationEventSink sink = eventSink;
-        if (announce && sink != null) {
+        if (sink != null) {
             try {
                 sink.onCancelRequested();
             } catch (RuntimeException e) {
-                // Same: the flag above is what the pipeline acts on.
+                // The flags above are what the pipeline and the completion act on.
             }
         }
     }
 
     @Override
+    public boolean isCancelRequested() {
+        return cancelRequested.get();
+    }
+
+    @Override
     public AutoCloseable onCancel(Runnable listener) {
         cancelListeners.add(listener);
-        if (cancelled) {
+        if (cancelled.get()) {
             listener.run();
         }
         return () -> cancelListeners.remove(listener);
@@ -735,7 +762,7 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public boolean isCancelled() {
-        return cancelled || isLeaseLost();
+        return cancelled.get() || isLeaseLost();
     }
 
     @Override

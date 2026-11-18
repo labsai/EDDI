@@ -285,6 +285,18 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * Whether somebody asked for this turn to stop ({@link #setCancelled
+     * setCancelled(true)}), as opposed to an {@link #abandon()} by the watchdog or
+     * a lost lease. Recorded before the cancel flag goes up, so a completion that
+     * sees the turn stopped always knows which it was.
+     *
+     * @since 6.7.0
+     */
+    default boolean isCancelRequested() {
+        return false;
+    }
+
+    /**
      * Check whether this conversation has been cancelled.
      *
      * @since 6.0.0

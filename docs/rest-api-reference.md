@@ -316,8 +316,13 @@ Rules for clients:
   plus one keep-alive interval is ended by the stream itself with `turn_timeout`
   and `retryable: false`: the stream cannot know whether the turn was stored, so
   read the conversation before sending again. Neither is ever `cancelled`.
-- **`server_shutdown`** (`retryable: true`) ends every open stream of a node
-  that is stopping; reconnect and send again.
+- **`server_shutdown`** ends every open stream of a node that is stopping.
+  On a turn stream it is `retryable: false`: the node lets running and queued
+  turns finish, so the turn may still be stored — read the conversation before
+  sending again. A group discussion stream gets `retryable: true`.
+- **Exactly one terminal event.** Whichever of the turn, the stream's silence
+  backstop and a shutdown ends the stream first writes its `done` or `error`;
+  the others write nothing.
 - **A node at its stream capacity answers `503`** with a `Retry-After` of 3 to 8
   seconds and `{"code":"streams_at_capacity","retryable":true}`, before the
   stream opens.

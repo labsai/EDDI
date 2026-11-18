@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
+import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -18,6 +19,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -26,6 +28,7 @@ import org.mockito.ArgumentCaptor;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -68,6 +71,12 @@ class RestAgentEngineStreamingContractTest {
         streaming.sseStreams = SseStreams.unmetered();
         streaming.sseStreams.clientGoneExecutor = Runnable::run;
         sink = new FakeSse.Sink(false);
+    }
+
+    @AfterEach
+    void stopPools() {
+        // Every SseStreams a test builds owns a disconnect pool.
+        streaming.sseStreams.shutdown();
     }
 
     private IConversationService.StreamingResponseHandler start() throws Exception {
@@ -307,14 +316,25 @@ class RestAgentEngineStreamingContractTest {
         var running = new AtomicInteger();
         var peak = new AtomicInteger();
         var cancels = new CountDownLatch(streams);
+        // The store is slow: every queued cancel waits until the gate opens.
+        var storeGate = new CountDownLatch(1);
         doAnswer(invocation -> {
             int now = running.incrementAndGet();
             peak.accumulateAndGet(now, Math::max);
-            Thread.sleep(1);
+            storeGate.await(60, TimeUnit.SECONDS);
             running.decrementAndGet();
             cancels.countDown();
             return null;
         }).when(conversationService).cancelConversation(anyString(), any(), anyString());
+        // The in-memory part, as ConversationService does it: the live turn's flag.
+        Map<String, ConversationMemory> live = new ConcurrentHashMap<>();
+        for (int i = 0; i < streams; i++) {
+            live.put("conv-" + i, new ConversationMemory("conv-" + i, 0));
+        }
+        doAnswer(invocation -> {
+            live.get(invocation.<String>getArgument(0)).setCancelled(true);
+            return true;
+        }).when(conversationService).signalLocalInFlight(anyString());
 
         var handlers = new ArrayList<IConversationService.StreamingResponseHandler>();
         var sinks = new ArrayList<FakeSse.Sink>();
@@ -335,10 +355,64 @@ class RestAgentEngineStreamingContractTest {
             handlers.get(i).onToken("x");
         }
 
+        // S4: while the store work still queues, every turn has already stopped.
+        assertTrue(live.values().stream().allMatch(ConversationMemory::isCancelled),
+                "each turn's cancel flag is up before its store work runs");
+        assertTrue(cancels.getCount() > 0, "the store work is still queued behind the bounded pool");
+        storeGate.countDown();
+
         assertTrue(cancels.await(60, TimeUnit.SECONDS), "every turn is cancelled");
         assertTrue(peak.get() <= concurrency, "at most " + concurrency + " cancels ran together, saw " + peak.get());
         assertEquals(0, streaming.sseStreams.totalActive());
         verify(conversationService, never()).getConversationMemoryTail(anyString());
+        streaming.sseStreams.shutdown();
+    }
+
+    @Test
+    @DisplayName("S1: a terminal claimed by the shutdown is not followed by the turn's own end")
+    void oneTerminalEventPerStream() throws Exception {
+        var handler = start();
+        handler.onToken("partial");
+        streaming.sseStreams.shutdown();
+        handler.onComplete(snapshot(ConversationState.READY, null));
+        handler.onError(new IllegalStateException("late"));
+
+        var names = sink.events.stream().map(FakeSse.Event::name).toList();
+        assertEquals(1, names.stream().filter(n -> n.equals("error") || n.equals("done")).count(), names.toString());
+        assertEquals(SseStreams.SERVER_SHUTDOWN_CODE, lastData("error").get("code").asText());
+        assertFalse(lastData("error").get("retryable").asBoolean(), "the turn may still be stored");
+        assertEquals(0, streaming.sseStreams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S3: a turn stopped by a lost cluster lease ends with a typed, retryable error")
+    void leaseLossIsTypedAndRetryable() throws Exception {
+        var handler = start();
+        handler.onToken("partial");
+        handler.onError(new ConversationStepRunner.TurnLeaseLostException("conv-1", 7L));
+
+        var error = lastData("error");
+        assertEquals(RestAgentEngineStreaming.TURN_TIMEOUT_CODE, error.get("code").asText());
+        assertTrue(error.get("retryable").asBoolean(), "the turn was discarded, never stored");
+        assertNull(error.get("correlationId"), "not an internal error");
+        assertEquals(0, streaming.sseStreams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S4: a disconnect raises the turn's cancel flag on the noticing thread, before the queued store work")
+    void disconnectRaisesTheFlagAtOnce() throws Exception {
+        var queued = new ArrayList<Runnable>();
+        streaming.sseStreams.clientGoneExecutor = queued::add;
+        var handler = start();
+        handler.onTurnStarted(null);
+        sink.close();
+        handler.onToken("x");
+
+        verify(conversationService).signalLocalInFlight("conv-1");
+        verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        queued.forEach(Runnable::run);
+        verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
+                RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
     }
 
     @Test

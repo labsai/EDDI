@@ -101,6 +101,7 @@ final class SseChannel {
     private volatile long lastEventMillis;
     private volatile boolean eventSent;
     private volatile ScheduledFuture<?> tick;
+    private volatile Runnable onClientGoneNow;
 
     SseChannel(SseStreams streams, SseStreams.Kind kind, String name, SseEventSink sink, Sse sse, long keepAliveSeconds, long backstopSeconds,
             Runnable onClientGone, Runnable onBackstop) {
@@ -141,6 +142,30 @@ final class SseChannel {
         terminal.set(true);
     }
 
+    /**
+     * Claims the stream's one terminal event: {@code true} for the first caller
+     * only. Every path that writes a terminal frame (completion, error, the
+     * backstop, shutdown) claims it first, so a stream never ends with two; a loser
+     * only closes.
+     */
+    boolean tryMarkTerminal() {
+        return terminal.compareAndSet(false, true);
+    }
+
+    /**
+     * Runs on the thread that notices the client is gone, before the queued
+     * {@code onClientGone}: for the cheap, in-memory part of a disconnect (raising
+     * the turn's cancel flag), so the turn stops spending at once even when the
+     * queued store work waits behind thousands of others. Must not block.
+     */
+    void onClientGoneNow(Runnable now) {
+        this.onClientGoneNow = now;
+    }
+
+    SseStreams.Kind kind() {
+        return kind;
+    }
+
     boolean isTerminal() {
         return terminal.get();
     }
@@ -159,7 +184,55 @@ final class SseChannel {
 
     /** Bytes handed to the sink whose write has not completed. */
     long pendingBytes() {
-        return pendingBytes.get();
+        return Math.max(0L, pendingBytes.get());
+    }
+
+    /**
+     * {@link #pendingBytes} once the stream is closed: its unsent bytes were
+     * returned to the node budget at once, and the writes that settle later must
+     * not return them again.
+     */
+    private static final long CLOSED_MARK = Long.MIN_VALUE / 2;
+
+    /** Counts {@code bytes} as unsent; {@code false} once the stream is closed. */
+    private boolean addPending(long bytes) {
+        while (true) {
+            long current = pendingBytes.get();
+            if (current < 0) {
+                return false;
+            }
+            if (pendingBytes.compareAndSet(current, current + bytes)) {
+                return true;
+            }
+        }
+    }
+
+    /**
+     * Takes {@code bytes} off the unsent count; {@code false} when the stream was
+     * closed meanwhile (its bytes already went back to the node budget).
+     */
+    private boolean takePending(long bytes) {
+        while (true) {
+            long current = pendingBytes.get();
+            if (current < 0) {
+                return false;
+            }
+            if (pendingBytes.compareAndSet(current, current - bytes)) {
+                return true;
+            }
+        }
+    }
+
+    /**
+     * Returns everything this stream still holds to the node budget — at close, not
+     * when the dead connection's writes eventually settle, so a closed slow stream
+     * stops counting against every other stream at once.
+     */
+    private void returnPendingBytes() {
+        long held = pendingBytes.getAndSet(CLOSED_MARK);
+        if (held > 0) {
+            streams.releasePendingBytes(held);
+        }
     }
 
     boolean isReleased() {
@@ -181,14 +254,28 @@ final class SseChannel {
         }
         long bytes = data != null ? data.length() + eventName.length() : eventName.length();
         int events = pendingEvents.incrementAndGet();
-        long queued = pendingBytes.addAndGet(bytes);
+        long held = pendingBytes();
         SseStreams.Limits limits = streams.limits();
-        if (events > limits.maxPendingEvents() || queued > limits.maxPendingBytes() || !streams.reservePendingBytes(bytes)) {
+        if (events > limits.maxPendingEvents() || held + bytes > limits.maxPendingBytes()) {
             pendingEvents.decrementAndGet();
-            pendingBytes.addAndGet(-bytes);
             LOGGER.infof("SSE %s: the client fell behind (%d events / %d bytes unsent) — closing the stream instead of buffering more", name,
-                    events - 1, queued - bytes);
+                    events - 1, held);
             overflow();
+            return false;
+        }
+        // The node budget first, then this stream's count: every byte the stream counts
+        // is reserved in the budget, so returning its count at close is exact.
+        if (!streams.reservePendingBytes(bytes) && !streams.makeRoomFor(this, bytes)) {
+            // This stream is itself the largest holder of the spent node budget: it is
+            // shed, without cancelling its turn (see shedForNodeBudget).
+            pendingEvents.decrementAndGet();
+            shedForNodeBudget();
+            return false;
+        }
+        if (!addPending(bytes)) {
+            // Closed meanwhile.
+            pendingEvents.decrementAndGet();
+            streams.releasePendingBytes(bytes);
             return false;
         }
         boolean written = false;
@@ -264,8 +351,9 @@ final class SseChannel {
 
     private void settle(long bytes) {
         pendingEvents.decrementAndGet();
-        pendingBytes.addAndGet(-bytes);
-        streams.releasePendingBytes(bytes);
+        if (takePending(bytes)) {
+            streams.releasePendingBytes(bytes);
+        }
     }
 
     private void overflow() {
@@ -292,9 +380,32 @@ final class SseChannel {
      * only for a stream that had not reached its terminal frame.
      */
     private void signalGone() {
-        if (onClientGone != null && goneSignalled.compareAndSet(false, true)) {
+        if (!goneSignalled.compareAndSet(false, true)) {
+            return;
+        }
+        Runnable now = onClientGoneNow;
+        if (now != null) {
+            try {
+                now.run();
+            } catch (Throwable t) {
+                LOGGER.debugf("Immediate disconnect handling of %s failed: %s", name, t.getMessage());
+            }
+        }
+        if (onClientGone != null) {
             streams.clientGoneExecutor().execute(onClientGone);
         }
+    }
+
+    /**
+     * Ends this stream because the node-wide buffer budget is spent and it holds
+     * the most of it: closed like a reader that fell behind, but its turn is NOT
+     * cancelled — the budget is a property of the node, not a verdict on this
+     * client, and the turn finishes and is stored as usual.
+     */
+    void shedForNodeBudget() {
+        LOGGER.infof("SSE %s: holds the most unsent data (%d bytes) while the node-wide buffer budget is spent — closing it; "
+                + "its turn continues and is stored", name, pendingBytes.get());
+        close(CloseReason.BACKPRESSURE);
     }
 
     /**
@@ -367,12 +478,25 @@ final class SseChannel {
         CompletionStage<?> stage = null;
         long bytes = KEEPALIVE_COMMENT.length();
         boolean counted = false;
+        boolean stalled = false;
         try {
             if (pendingEvents.get() >= streams.limits().maxPendingEvents()) {
+                // A silent stream whose client stopped reading: no send() will ever find
+                // it over the bound, so the tick ends it at the bound.
+                stalled = true;
+                return;
+            }
+            if (!streams.reservePendingBytes(bytes)) {
+                // The node budget is spent: skip this heartbeat (the next tick retries).
+                // A keep-alive frame is released from the budget when it settles, so it
+                // must be reserved in it too.
+                return;
+            }
+            if (!addPending(bytes)) {
+                streams.releasePendingBytes(bytes);
                 return;
             }
             pendingEvents.incrementAndGet();
-            pendingBytes.addAndGet(bytes);
             counted = true;
             stage = sink.send(sse.newEventBuilder().comment(KEEPALIVE_COMMENT).build());
             lastWriteMillis = clock.millis();
@@ -380,6 +504,17 @@ final class SseChannel {
             LOGGER.debugf("Failed to send SSE keep-alive on %s: %s", name, e.getMessage());
         } finally {
             writeLock.unlock();
+            if (stalled) {
+                LOGGER.infof("SSE %s: %d events unsent on a silent stream — the client stopped reading; closing it", name,
+                        pendingEvents.get());
+                if (eventSent) {
+                    overflow();
+                } else {
+                    // Before the stream's first own event its turn may still be queued
+                    // behind another turn of the conversation: close, but cancel nothing.
+                    close(CloseReason.BACKPRESSURE);
+                }
+            }
         }
         if (counted) {
             settleWhenWritten(stage, bytes);
@@ -406,6 +541,7 @@ final class SseChannel {
             return;
         }
         stopTick();
+        returnPendingBytes();
         streams.release(this, kind, CloseReason.REFUSED);
     }
 
@@ -427,6 +563,7 @@ final class SseChannel {
             // Whatever the sink throws, the slot below is released.
             LOGGER.debugf("Error closing SSE sink of %s: %s", name, t.getMessage());
         } finally {
+            returnPendingBytes();
             streams.release(this, kind, reason);
         }
     }

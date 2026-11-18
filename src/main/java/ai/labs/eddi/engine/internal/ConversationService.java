@@ -981,6 +981,7 @@ public class ConversationService implements IConversationService, UserErasurePar
      *
      * @return true when a running turn was signalled
      */
+    @Override
     public boolean signalLocalInFlight(String conversationId) {
         var inFlightMemory = conversationId == null ? null : inFlightConversations.get(conversationId);
         if (inFlightMemory == null) {
@@ -1710,6 +1711,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                             }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
+                            // Read from the memory, not only from the sink's announce: a cancel
+                            // that arrived before the sink was set, or whose announce has not
+                            // run yet, still makes the stream say "cancelled", never "timeout".
+                            if (listener.eventSink() != null && returnConversationMemory.isCancelRequested()) {
+                                listener.eventSink().onCancelRequested();
+                            }
                             completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
                         });
 
