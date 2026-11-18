@@ -75,6 +75,12 @@ The wizard guides you through choosing a database (MongoDB or PostgreSQL), optio
 
 #### Installer options
 
+The one-line install pipes the script into `bash` and keeps no copy. To pass options, download it first:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/labsai/EDDI/main/install.sh -o install.sh
+```
+
 ```bash
 bash install.sh --defaults                 # All defaults, no prompts
 bash install.sh --db=postgres --with-auth  # PostgreSQL + Keycloak
@@ -114,7 +120,12 @@ The installer creates an `eddi` CLI wrapper (`start`, `stop`, `restart`, `status
 eddi update
 ```
 
-This pulls the latest Docker image from the registry and restarts the containers. It works even when the same tag (e.g. `latest`) was re-published — Docker always checks the remote digest for changes.
+This refreshes the compose files, pulls the image and restarts the containers. Which image it pulls is the `EDDI_VERSION` stored in `.env`: an install on `latest` moves to the newest release (it works even when the same tag was re-published, because Docker checks the remote digest), while an install pinned with `--eddi-version=6.5.0` stays on that version. To change the target:
+
+```bash
+eddi update --eddi-version=latest   # follow the newest release
+eddi update --eddi-version=6.7.0    # pin a specific release
+```
 
 > **Upgrading across releases?** Read the upgrade guide first: [Upgrading from 6.5](upgrading-from-6.5.md) covers a 6.5 deployment moving to 6.6 or 6.7, and [Upgrading from 6.4](upgrading-from-6.4.md) lists what an existing deployment must change, because several defaults now fail closed (a Keycloak realm imported from 6.1–6.4 needs a repair that re-running the installer applies and `eddi update` does not). A database that comes from EDDI 5 starts with [Upgrading from 5.x](upgrading-from-5x.md).
 
@@ -128,7 +139,7 @@ This pulls the latest Docker image from the registry and restarts the containers
 > & "$HOME\.eddi\eddi.cmd" update
 > ```
 
-If the `eddi` CLI isn't available, run the equivalent docker commands from your install directory (`~/.eddi` by default):
+If the `eddi` CLI isn't available, you can pull and restart by hand from your install directory (`~/.eddi` by default). This is **not** equivalent to `eddi update`: it does not refresh the compose files or the monitoring assets, so across releases it can run a new image against an older configuration. Use it to re-pull the same version; to move to another release, restore the CLI by re-running the installer.
 
 ```bash
 cd ~/.eddi

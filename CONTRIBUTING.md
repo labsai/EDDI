@@ -51,7 +51,7 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 | **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager, Workforce and Chat UIs. Install it only to run `npm run dev` in `ui/manager`, `ui/workforce` or `ui/chat`, after `npm ci` in `ui/` (one lockfile for all) |
 | **mise**       | Optional | [`mise.toml`](mise.toml) pins the exact JDK, Maven and Node versions and offers the common commands as tasks (`mise run dev`, `mise run test`) |
 
-> **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below.
+> **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below. The commands are written for PowerShell, where the single quotes around `-Djvm.args=…` work as shown. In Command Prompt (`cmd.exe`) single quotes are literal characters, so use double quotes there: `.\mvnw.cmd compile quarkus:dev "-Djvm.args=--add-modules=jdk.incubator.vector"`.
 
 ### Getting Started
 
@@ -89,9 +89,11 @@ Dev mode starts the application with **live reload** — code changes are picked
 > # Windows (PowerShell)
 > $env:EDDI_VAULT_MASTER_KEY = "my-dev-passphrase"
 >
-> # Or in a .env file (already in .gitignore)
-> echo "EDDI_VAULT_MASTER_KEY=my-dev-passphrase" > .env
+> # Or in a .env file (already in .gitignore). >> appends: it keeps what is there
+> echo "EDDI_VAULT_MASTER_KEY=my-dev-passphrase" >> .env
 > ```
+>
+> If `.env` already sets `EDDI_VAULT_MASTER_KEY`, leave it alone: secrets already in the vault are encrypted with a key derived from it, and a different value cannot decrypt them.
 >
 > Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development, where a weak one only logs a warning; a production boot refuses a key shorter than 16 characters or a known placeholder. See [Secrets Vault](docs/secrets-vault.md) for production setup.
 
@@ -137,7 +139,7 @@ JaCoCo runs during `./mvnw test`; the coverage report is at `target/site/jacoco/
 | `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
 | `-Dmongodb.connectionString=<uri>`          | dev: `mongodb://localhost:27017/eddi`  | MongoDB connection, read by `PersistenceModule`. `quarkus.mongodb.connection-string` is a different key that only the health check reads |
 | `-Dmongodb.database=<name>`                 | `eddi`                      | MongoDB database name                          |
-| `-Dquarkus.profile=<profile>`               | `dev`                       | Active Quarkus profile (`dev`, `test`, `prod`) |
+| `-Dquarkus.profile=<profile>`               | by launch mode              | Active Quarkus profile. The default is `dev` under `quarkus:dev`, `test` while tests run, and `prod` for the packaged application and the container image |
 | `-DskipTests`                               | `false`                     | Skip all tests                                 |
 | `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
 | `-DskipUi` | `false` | Skip the npm build of `ui/manager`, `ui/workforce` and `ui/chat` (the jar then serves no UI) |

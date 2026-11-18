@@ -76,7 +76,7 @@ A fresh install has no agents. To get to a first reply:
 1. Check the install: `curl http://localhost:7070/q/health/ready` answers `"status":"UP"`.
 2. Store your model key in the vault, under **Secrets** in the Manager (`/manage/secrets`).
 3. Create an agent with the wizard at `/manage/agents/wizard`, or activate the **Platform Operator** at `/manage/operator` and describe the agent you want. The Operator is an agent too, so it needs a model before it can help.
-4. Chat with the agent from the Manager, or at `/workforce`.
+4. Chat with the agent in the Manager. The wizard deploys to the `test` environment; an agent appears for end users in Workforce once it is deployed to production and [listed in the catalog](docs/catalog.md).
 
 By default the install has no login and is published on `127.0.0.1` only, which suits a laptop. For anything other people can reach, turn authentication on: `install.sh --with-auth` (`install.ps1 -WithAuth`) adds Keycloak.
 

@@ -109,9 +109,12 @@ docker compose up
 
 # PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
 # docker-compose.yml (an overlay cannot un-declare the base's mongodb service).
-# The database password has no default; keep the value stable across runs
-# (install.sh --db=postgres generates one into .env for you)
-POSTGRES_PASSWORD=$(openssl rand -base64 24) docker compose -f docker-compose.postgres-only.yml up
+# The database password has no default. Generate it ONCE into .env, which
+# compose reads on every run: PostgreSQL keeps the first password in its
+# volume, so a new one on a later run is a password the database rejects
+# (install.sh --db=postgres writes it into .env for you)
+grep -q '^POSTGRES_PASSWORD=' .env 2>/dev/null || echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)" >> .env
+docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication. No realm account ships a password (see the
 # header of docker-compose.auth.yml, or let install.sh --with-auth set one)
@@ -134,14 +137,19 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
   -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
 
 # A cluster: three EDDI replicas behind a round-robin load balancer, a
-# three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own
-EDDI_VAULT_MASTER_KEY=$(openssl rand -base64 24) MONGO_PASSWORD=$(openssl rand -base64 24) NATS_PASSWORD=$(openssl rand -base64 24) \
-  docker compose -f docker-compose.cluster.yml up -d
+# three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own.
+# Its three secrets are generated ONCE into .env, for the same reason as above:
+# the MongoDB volume keeps its first password, and the vault's contents can only
+# be decrypted with the master key they were encrypted under
+for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
+  grep -q "^${key}=" .env 2>/dev/null || echo "${key}=$(openssl rand -base64 24)" >> .env
+done
+docker compose -f docker-compose.cluster.yml up -d
 ```
 
 Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (cluster mode with one replica and one NATS server), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](open-webui-integration.md) demo of the OpenAI-compatible API, and `docker-compose.cluster.yml`, the multi-replica stack above (see [Clustering](clustering.md)).
 
-The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty (`OLLAMA_PULL_MODEL=`) to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
 
 `docker-compose.ollama-nvidia.yml` adds GPU access to that Ollama and needs two things of the host, neither of which it degrades gracefully without: **Docker Compose 2.30.0 or newer**, which is where the `gpus` service attribute was introduced — older versions fail on it, so check `docker compose version` — and the **NVIDIA Container Toolkit** configured as a Docker runtime. `gpus: all` is a device *request*: with no GPU driver registered, the daemon cannot satisfy it and the container fails to start (`could not select device driver "" with capabilities: [[gpu]]`) rather than quietly falling back to the CPU. If you want Ollama on the CPU, leave this overlay off.
 

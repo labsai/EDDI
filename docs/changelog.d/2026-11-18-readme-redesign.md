@@ -137,6 +137,32 @@ Not taken: moving the full feature list out to a docs page, and restoring the
 comparison against Python frameworks. Both were decided the other way on
 purpose.
 
+### Review findings on the moved text
+
+Moving the installer, compose and build material put old text in front of a
+reviewer for the first time, and some of it was wrong:
+
+- **`OLLAMA_PULL_MODEL=` did not skip the model pull.**
+  [`docker-compose.ollama.yml`](../../docker-compose.ollama.yml) read it with
+  `${OLLAMA_PULL_MODEL:-llama3.2:3b}`, and `:-` substitutes the default for an
+  empty value as well as an unset one. It is now `-`.
+- **The PostgreSQL and cluster commands generated new secrets on every run.**
+  The database volume keeps its first password and the vault its first master
+  key, so the second run failed or could not decrypt. `docker.md` now writes
+  them into `.env` once.
+- **`eddi update` does not always pull the latest image.** A pinned install
+  stays pinned; the page says so and shows `--eddi-version`. The manual
+  `docker compose pull` is no longer called equivalent, because it does not
+  refresh the compose files.
+- **The installer options could not be used after `curl | bash`**, which keeps
+  no script. A download line comes first.
+- **`echo … > .env` replaced an existing `.env`**, vault key included. It
+  appends now.
+- **`-Dquarkus.profile` does not default to `dev`** outside dev mode.
+- **Single-quoted `-Djvm.args` does not work in `cmd.exe`.**
+- **A wizard-created agent is not in Workforce**: the wizard deploys to `test`,
+  and Workforce lists production agents marked as listed.
+
 ### Not done here
 
 - The repository description and topics on GitHub are settings, not files. The
