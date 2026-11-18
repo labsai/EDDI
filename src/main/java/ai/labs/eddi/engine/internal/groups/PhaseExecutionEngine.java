@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ProtocolConfig;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.configs.groups.model.HumanRequestDetail;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
@@ -884,8 +885,7 @@ public class PhaseExecutionEngine {
             TranscriptEntry entry = memberTurnExecutor.executeAgentTurn(speaker, gc, input, protocol, phaseIdx, phase, null, listener);
             gc.getTranscript().add(entry);
             if (listener != null) {
-                listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                        entry.content(), phaseIdx, phase.name()));
+                listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(), null, null));
             }
         }
     }
@@ -1110,24 +1110,16 @@ public class PhaseExecutionEngine {
                                               GroupDiscussionEventListener listener) {
         gc.getTranscript().add(entry);
         if (listener != null) {
-            String outcome = switch (entry.type()) {
-                case SKIPPED -> entry.errorReason() != null && entry.errorReason().startsWith("Timeout")
-                        ? GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_TIMEOUT
-                        : GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_SKIPPED;
-                case ERROR -> GroupConversationEventSink.SpeakerCompleteEvent.OUTCOME_ERROR;
-                default -> null;
-            };
             // A skipped or failed turn carries no content (its reason is in the
             // transcript's errorReason, never on the wire) and says so by flag.
-            listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(),
-                    outcome == null ? entry.content() : null, phaseIdx, phase.name(), null, null, outcome));
+            listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(), null, null));
         }
     }
 
     /** A parallel speaker released by the batch deadline, attributed to it. */
     private static TranscriptEntry timeoutEntry(GroupMember speaker, int phaseIdx, DiscussionPhase phase) {
-        return new TranscriptEntry(speaker.agentId(), speaker.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                Instant.now(), "Timeout", null);
+        return TranscriptEntry.notAnswered(speaker.agentId(), speaker.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                TurnOutcome.TIMED_OUT, "Timeout", null);
     }
 
     /**
@@ -1195,8 +1187,8 @@ public class PhaseExecutionEngine {
                         listener);
                 gc.getTranscript().add(entry);
                 if (listener != null) {
-                    listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(speaker.agentId(), speaker.displayName(),
-                            entry.content(), phaseIdx, phase.name(), target.agentId(), target.displayName()));
+                    listener.onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent.of(entry, phaseIdx, phase.name(),
+                            target.agentId(), target.displayName()));
                 }
             }
         }

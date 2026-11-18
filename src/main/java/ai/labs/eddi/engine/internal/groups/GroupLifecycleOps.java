@@ -32,7 +32,6 @@ import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.DiscussionControlToken;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment.Environment;
@@ -345,6 +344,9 @@ public class GroupLifecycleOps {
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final GroupConversation followUpGc = gc;
                 final String costKey = resolvedAgentId;
+                // The member's pipeline failed (conversation ERROR, no output): the
+                // follow-up failed — reported as such, never recorded as an answer.
+                final boolean[] memberErrored = {false};
                 try {
                     conversationService.say(DEFAULT_ENV, resolvedAgentId, privateConvId, true, true, null, inputData, false, snapshot -> {
                         // The same bookkeeping as a phase turn (MemberTurnExecutor): the
@@ -356,9 +358,9 @@ public class GroupLifecycleOps {
                         // F6: the follow-up's spend goes to the team like a phase turn's.
                         groupConversationService.chargeTeamBudget(followUpGc);
                         String response = groupConversationService.extractResponse(snapshot);
-                        if ((response == null || response.isEmpty()) && snapshot != null
-                                && snapshot.getConversationState() == ConversationState.ERROR) {
-                            response = "[Agent failed to produce output — conversation entered ERROR state]";
+                        if (MemberTurnExecutor.endedInErrorWithoutAnswer(snapshot, response)) {
+                            memberErrored[0] = true;
+                            response = null;
                         }
                         responseFuture.complete(response);
                     });
@@ -377,6 +379,10 @@ public class GroupLifecycleOps {
                         Thread.currentThread().interrupt();
                     }
                     throw new GroupExecutionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
+                }
+                if (memberErrored[0]) {
+                    throw new GroupExecutionException(
+                            "Follow-up failed for agent '%s': its conversation ended in ERROR without an answer".formatted(resolvedAgentId));
                 }
 
                 // Record the agent's response on the transcript, signed if the agent signs,

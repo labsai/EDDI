@@ -177,6 +177,33 @@ public final class GroupConversationEventSink {
         public SpeakerCompleteEvent(String agentId, String displayName, String response, int phaseIndex, String phaseName) {
             this(agentId, displayName, response, phaseIndex, phaseName, null, null, null);
         }
+
+        /**
+         * The event closing the turn that produced {@code entry}, on every path
+         * (sequential, peer-targeted, parallel): an answered turn carries its content
+         * and no outcome, any other turn no content and its outcome — {@code TIMED_OUT}
+         * → {@link #OUTCOME_TIMEOUT}, {@code SKIPPED} → {@link #OUTCOME_SKIPPED},
+         * {@code FAILED} → {@link #OUTCOME_ERROR}.
+         */
+        public static SpeakerCompleteEvent of(GroupConversation.TranscriptEntry entry, int phaseIndex, String phaseName,
+                                              String targetAgentId, String targetDisplayName) {
+            String outcome = outcomeOf(entry);
+            return new SpeakerCompleteEvent(entry.speakerAgentId(), entry.speakerDisplayName(), outcome == null ? entry.content() : null,
+                    phaseIndex, phaseName, targetAgentId, targetDisplayName, outcome);
+        }
+
+        /** The wire outcome of a transcript entry; {@code null} when it answered. */
+        public static String outcomeOf(GroupConversation.TranscriptEntry entry) {
+            if (entry == null || entry.outcome() == null) {
+                return null;
+            }
+            return switch (entry.outcome()) {
+                case ANSWERED -> null;
+                case TIMED_OUT -> OUTCOME_TIMEOUT;
+                case SKIPPED -> OUTCOME_SKIPPED;
+                case FAILED -> OUTCOME_ERROR;
+            };
+        }
     }
 
     public record PhaseCompleteEvent(int phaseIndex, String phaseName) {

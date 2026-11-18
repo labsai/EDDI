@@ -212,7 +212,9 @@ class MemberTurnExecutorTest {
         assertEquals("unknown", entry.speakerAgentId());
         assertEquals("Unknown", entry.speakerDisplayName());
         assertEquals(TranscriptEntryType.ERROR, entry.type());
-        assertEquals("boom", entry.errorReason());
+        // K9: the exception text is logged, never stored or streamed.
+        assertEquals(MemberTurnExecutor.REASON_EXECUTION_FAILED, entry.errorReason());
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
     }
 
     @Test
@@ -241,7 +243,9 @@ class MemberTurnExecutorTest {
 
         assertEquals(TranscriptEntryType.SKIPPED, entry.type());
         assertEquals("target-x", entry.targetAgentId());
-        assertTrue(entry.errorReason().contains("down"));
+        // K9: the stable reason only — the cause's text stays in the server log.
+        assertEquals("Agent failed", entry.errorReason());
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
     }
 
     // =================================================================

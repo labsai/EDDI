@@ -168,6 +168,19 @@ public class GroupConversation {
      */
     private DecisionRecord decision;
     /**
+     * How the last round ended (see {@link DiscussionOutcome}); {@code null} while
+     * a round runs, after a cancel, and on documents written before this field
+     * existed.
+     */
+    private DiscussionOutcome outcome;
+    /**
+     * A short stable code saying why {@link #outcome} is not {@code ANSWERED} — or,
+     * next to {@code ANSWERED}, that the round was cut short on its way to its
+     * answer ({@code TURN_LIMIT_REACHED}, {@code COST_CEILING_REACHED}). The codes
+     * are listed in {@code DiscussionOutcomes}.
+     */
+    private String outcomeReason;
+    /**
      * The negotiation's proposals + concession ledger (I11). {@code null} until the
      * first PROPOSAL/BARGAIN phase produces state; persisted with the document so a
      * pause/resume keeps the table as it stood.
@@ -707,10 +720,60 @@ public class GroupConversation {
      * @param signatureRound
      *            the discussion round ({@link GroupConversation#getRound()}) the
      *            signature binds the entry to (null if unsigned)
+     * @param outcome
+     *            how the turn that produced this entry ended — see
+     *            {@link TurnOutcome}. Never null once constructed: an entry stored
+     *            before this field existed (or built through one of the shorter
+     *            constructors) gets {@link TurnOutcome#derivedFrom its type's}
+     *            reading. Only an {@link TurnOutcome#ANSWERED} entry carries
+     *            content: any other outcome forces {@code content} to null, so no
+     *            reader of the transcript can quote a failed turn as something the
+     *            member said.
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
             TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
-            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
+            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound,
+            TurnOutcome outcome) {
+
+        public TranscriptEntry {
+            if (outcome == null) {
+                outcome = TurnOutcome.derivedFrom(type);
+            }
+            if (outcome != TurnOutcome.ANSWERED) {
+                content = null;
+            }
+        }
+
+        /**
+         * Constructor without the outcome: it is derived from the type (see
+         * {@link TurnOutcome#derivedFrom}).
+         */
+        public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
+                TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
+                String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
+            this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName, type, timestamp, errorReason, targetAgentId,
+                    signature, signatureNonce, signatureTimestampMs, signatureKeyVersion, signatureRound, null);
+        }
+
+        /**
+         * An entry for a member turn that produced no answer: no content, the given
+         * outcome, and a short stable {@code reason} (never provider or driver text —
+         * that belongs in the server log).
+         */
+        public static TranscriptEntry notAnswered(String speakerAgentId, String speakerDisplayName, int phaseIndex, String phaseName,
+                                                  TranscriptEntryType type, TurnOutcome outcome, String reason, String targetAgentId) {
+            return new TranscriptEntry(speakerAgentId, speakerDisplayName, null, phaseIndex, phaseName, type, Instant.now(), reason,
+                    targetAgentId, null, null, null, null, null, outcome);
+        }
+
+        /**
+         * Whether this entry is a usable contribution: the turn
+         * {@link TurnOutcome#ANSWERED answered} and left content. An abstention is
+         * answered but has no content, so it is not one.
+         */
+        public boolean answered() {
+            return outcome == TurnOutcome.ANSWERED && content != null;
+        }
 
         /**
          * Backward-compatible constructor without any signature fields.
@@ -737,6 +800,68 @@ public class GroupConversation {
         public boolean hasEnvelopeData() {
             return signature != null && signatureNonce != null && signatureTimestampMs != null;
         }
+    }
+
+    /**
+     * How a member turn ended — the value every consumer of the transcript checks
+     * before treating an entry as a position (a peer's prompt, a vote, a stance,
+     * the convergence judge, the synthesized answer). Only {@link #ANSWERED}
+     * entries carry content.
+     */
+    public enum TurnOutcome {
+        /** The member answered (an abstention is an answer too: it has no content). */
+        ANSWERED,
+        /**
+         * The turn did not run by design: the agent is not deployed, a HUMAN member in
+         * an automated sub-round, a member pause the group cannot honour, the turn or
+         * depth limit.
+         */
+        SKIPPED,
+        /**
+         * The turn ran and failed: the provider or pipeline failed (the member's
+         * conversation ended in ERROR without output), an exception, a nested
+         * discussion without an answer. Counts against {@code protocol.onAgentFailure}.
+         */
+        FAILED,
+        /** The turn ran out of {@code protocol.agentTimeoutSeconds}. */
+        TIMED_OUT;
+
+        /**
+         * The reading of an entry that carries no outcome — stored before this field
+         * existed, or built without one: {@code SKIPPED} entries were skipped,
+         * {@code ERROR} entries failed, everything else answered.
+         */
+        public static TurnOutcome derivedFrom(TranscriptEntryType type) {
+            if (type == TranscriptEntryType.SKIPPED) {
+                return SKIPPED;
+            }
+            if (type == TranscriptEntryType.ERROR) {
+                return FAILED;
+            }
+            return ANSWERED;
+        }
+    }
+
+    /**
+     * How a discussion round ended, next to its {@link GroupConversationState}: a
+     * {@code COMPLETED} discussion is not necessarily an answered one. {@code null}
+     * on documents written before this field existed, and while a round runs, is
+     * paused or was cancelled.
+     */
+    public enum DiscussionOutcome {
+        /** The round produced its answer (a synthesis, or a decision record). */
+        ANSWERED,
+        /**
+         * The round ran to its end without an answer — the synthesis failed or never
+         * ran (turn limit, cost ceiling). State stays {@code COMPLETED}; the reason
+         * says why.
+         */
+        NO_ANSWER,
+        /**
+         * No member answered at all, or the discussion failed with an error. State is
+         * {@code FAILED}.
+         */
+        FAILED
     }
 
     public enum TranscriptEntryType {
@@ -1270,6 +1395,22 @@ public class GroupConversation {
 
     public void setDecision(DecisionRecord decision) {
         this.decision = decision;
+    }
+
+    public DiscussionOutcome getOutcome() {
+        return outcome;
+    }
+
+    public void setOutcome(DiscussionOutcome outcome) {
+        this.outcome = outcome;
+    }
+
+    public String getOutcomeReason() {
+        return outcomeReason;
+    }
+
+    public void setOutcomeReason(String outcomeReason) {
+        this.outcomeReason = outcomeReason;
     }
 
     public NegotiationState getNegotiation() {

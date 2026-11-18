@@ -12,6 +12,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationAwaitingApprovalException;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -85,6 +86,29 @@ public class MemberTurnExecutor {
      */
     private static final String MEMBER_PAUSE_NOTE = "member agent requested human approval (PAUSE_CONVERSATION) — not supported inside group "
             + "discussions; configure group-level HITL via requiresApproval instead";
+
+    /*
+     * The errorReason of a turn that produced no answer. Short and stable: the
+     * transcript is stored, shown in every UI and quoted in the SSE stream, so it
+     * never carries provider, driver or exception text — that goes to the log.
+     */
+    /** The member agent is not deployed. */
+    public static final String REASON_NOT_DEPLOYED = "Agent not deployed";
+    /** The deployment lookup for the member agent failed. */
+    public static final String REASON_UNAVAILABLE = "Agent unavailable";
+    /** The member's private conversation could not be started. */
+    public static final String REASON_START_FAILED = "Failed to start conversation";
+    /** The member's turn threw. */
+    public static final String REASON_EXECUTION_FAILED = "Agent execution failed";
+    /**
+     * The member's turn ended with its conversation in ERROR and no output — a
+     * provider outage, an unreachable model, a failing pipeline task.
+     */
+    public static final String REASON_ERROR_STATE = "Agent failed to produce an answer (its conversation ended in ERROR)";
+    /** A nested GROUP member's discussion failed or ended without an answer. */
+    public static final String REASON_SUB_GROUP_FAILED = "Sub-group discussion failed";
+    /** A nested GROUP member could not start: the depth limit. */
+    public static final String REASON_SUB_GROUP_DEPTH = "Sub-group depth exceeded";
 
     private static final Environment DEFAULT_ENV = Environment.production;
 
@@ -307,7 +331,7 @@ public class MemberTurnExecutor {
                     throw new GroupDiscussionException("Agent %s is not deployed and onMemberUnavailable=FAIL".formatted(member.agentId()));
                 }
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Agent not deployed", targetAgentId);
+                        Instant.now(), REASON_NOT_DEPLOYED, targetAgentId);
             }
         } catch (GroupDiscussionException e) {
             throw e;
@@ -315,8 +339,10 @@ public class MemberTurnExecutor {
             if (protocol.onMemberUnavailable() == ProtocolConfig.MemberUnavailablePolicy.FAIL) {
                 throw new GroupDiscussionException("Cannot reach agent %s: %s".formatted(member.agentId(), e.getMessage()), e);
             }
-            return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    Instant.now(), "Agent unavailable: " + e.getMessage(), targetAgentId);
+            LOGGER.warnf("Agent %s unavailable for group %s: %s", LogSanitizer.sanitize(member.agentId()),
+                    LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(e.getMessage()));
+            return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    TurnOutcome.FAILED, REASON_UNAVAILABLE, targetAgentId);
         }
 
         // Snapshot instead of handing out the live list: the groupTranscript context
@@ -362,7 +388,7 @@ public class MemberTurnExecutor {
                 if (e instanceof QuotaRefusal refusal) {
                     throw new GroupDiscussionException(refusal.refusalSummary() + ": " + e.getMessage(), e);
                 }
-                return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Failed to start conversation", targetAgentId);
+                return handleAgentFailure(member, phaseIdx, phase, protocol, e, REASON_START_FAILED, targetAgentId);
             }
         }
 
@@ -420,6 +446,11 @@ public class MemberTurnExecutor {
                 // auto-resolved gracefully (system:group REJECTED), a RULE pause needs
                 // a real human and stays SKIP+cancel.
                 final SimpleConversationMemorySnapshot[] pausedSnapshot = {null};
+                // The member's pipeline failed (e.g. its model is unreachable): the
+                // conversation ends in ERROR with no output keys. That is a FAILED
+                // turn, decided after the callback under onAgentFailure — never text
+                // standing in for an answer.
+                final boolean[] memberErrored = {false};
 
                 Consumer<String> toolObserver = listener == null ? null : tool -> announceToolCall(member, tool, listener, cancellation);
                 ConversationResponseHandler memberHandler = snapshot -> {
@@ -429,12 +460,9 @@ public class MemberTurnExecutor {
                     }
 
                     String response = contextBuilder.extractResponse(snapshot);
-                    // When the agent pipeline fails (e.g. LLM unreachable), extractResponse
-                    // returns empty because there are no output keys — only pipeline metadata.
-                    // Surface the failure as explicit content so the transcript entry is not empty.
-                    if ((response == null || response.isEmpty()) && snapshot != null
-                            && snapshot.getConversationState() == ConversationState.ERROR) {
-                        response = "[Agent failed to produce output — conversation entered ERROR state]";
+                    if (endedInErrorWithoutAnswer(snapshot, response)) {
+                        memberErrored[0] = true;
+                        response = null;
                     }
 
                     // This callback runs on a COORDINATOR thread, not the member-turn
@@ -526,6 +554,18 @@ public class MemberTurnExecutor {
                     return handleMemberPause(member, gc, convId, phaseIdx, phase, targetAgentId, listener);
                 }
 
+                // A failed member turn is a failure like an exception: RETRY retries
+                // it, ABORT aborts, SKIP records it as FAILED with no content.
+                if (memberErrored[0]) {
+                    LOGGER.warnf("Agent %s ended its group turn in ERROR without output (group %s, conversation %s)",
+                            LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(gc.getGroupId()), LogSanitizer.sanitize(convId));
+                    if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
+                        retries++;
+                        continue;
+                    }
+                    return failedTurn(member, phaseIdx, phase, protocol, REASON_ERROR_STATE, targetAgentId);
+                }
+
                 // I4: an abstention replaces the typed contribution entirely — the
                 // member said it has nothing to add, so recording "PASS" as its
                 // OPINION would put a non-answer into the record that peers, the
@@ -561,8 +601,8 @@ public class MemberTurnExecutor {
                     throw new GroupTimeoutException(
                             "Agent %s timed out and onAgentFailure=ABORT".formatted(member.agentId()), null);
                 }
-                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                        Instant.now(), "Timeout after " + timeout + "s", targetAgentId);
+                return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        TurnOutcome.TIMED_OUT, "Timeout after " + timeout + "s", targetAgentId);
 
             } catch (ConversationAwaitingApprovalException e) {
                 // Member's private conversation is (or became) AWAITING_HUMAN before the say
@@ -604,7 +644,7 @@ public class MemberTurnExecutor {
                         if (restartFailure instanceof QuotaRefusal refusal) {
                             throw new GroupDiscussionException(refusal.refusalSummary() + ": " + restartFailure.getMessage(), restartFailure);
                         }
-                        return handleAgentFailure(member, phaseIdx, phase, protocol, restartFailure, "Failed to start conversation",
+                        return handleAgentFailure(member, phaseIdx, phase, protocol, restartFailure, REASON_START_FAILED,
                                 targetAgentId);
                     }
                 }
@@ -613,7 +653,7 @@ public class MemberTurnExecutor {
                     LOGGER.warnf("Agent %s failed (attempt %d/%d): %s", member.agentId(), retries, maxRetries, cause.getMessage());
                     continue;
                 }
-                return handleAgentFailure(member, phaseIdx, phase, protocol, cause, "Agent execution failed", targetAgentId);
+                return handleAgentFailure(member, phaseIdx, phase, protocol, cause, REASON_EXECUTION_FAILED, targetAgentId);
             }
         }
     }
@@ -773,9 +813,13 @@ public class MemberTurnExecutor {
         }
 
         String response = contextBuilder.extractResponse(resumed);
-        if ((response == null || response.isEmpty())
-                && resumed.getConversationState() == ConversationState.ERROR) {
-            response = "[Agent failed to produce output — conversation entered ERROR state]";
+        if (endedInErrorWithoutAnswer(resumed, response)) {
+            // The resumed run failed: a FAILED turn, not text standing in for an
+            // answer. No retry here — the gated call was already rejected once.
+            LOGGER.warnf("Member '%s' ended in ERROR without output after the group's tool rejection (conv %s)",
+                    LogSanitizer.sanitize(member.agentId()), LogSanitizer.sanitize(convId));
+            return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                    TurnOutcome.FAILED, REASON_ERROR_STATE, targetAgentId);
         }
 
         LOGGER.infof("Member '%s' produced a tool-less contribution after group auto-rejection (conv %s)",
@@ -931,11 +975,23 @@ public class MemberTurnExecutor {
                         targetAgentId);
             }
 
-            // Extract the synthesized answer, or concatenate all responses
+            // A child that failed, or that ended without any member answering, is a
+            // failed turn of this member: its "answer" would be nothing at all.
+            if (subConversation.getState() == GroupConversationState.FAILED
+                    || subConversation.getOutcome() == GroupConversation.DiscussionOutcome.FAILED) {
+                LOGGER.warnf("Sub-group '%s' ended %s (%s) — recording a failed turn for member '%s'", LogSanitizer.sanitize(subGroupId),
+                        subConversation.getState(), subConversation.getOutcomeReason(), LogSanitizer.sanitize(member.agentId()));
+                return failedTurn(member, phaseIdx, phase, protocol, REASON_SUB_GROUP_FAILED, targetAgentId);
+            }
+
+            // Extract the synthesized answer, or concatenate the answered contributions
             String response = subConversation.getSynthesizedAnswer();
             if (response == null || response.isBlank()) {
-                response = subConversation.getTranscript().stream().filter(e -> e.content() != null)
+                response = subConversation.getTranscript().stream().filter(TranscriptEntry::answered)
                         .map(e -> "%s: %s".formatted(e.speakerDisplayName(), e.content())).collect(Collectors.joining("\n\n"));
+            }
+            if (response.isBlank()) {
+                return failedTurn(member, phaseIdx, phase, protocol, REASON_SUB_GROUP_FAILED, targetAgentId);
             }
 
             return new TranscriptEntry(member.agentId(), member.displayName(), response, phaseIdx, phase.name(), entryType, Instant.now(), null,
@@ -943,22 +999,43 @@ public class MemberTurnExecutor {
 
         } catch (GroupDepthExceededException e) {
             return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
-                    Instant.now(), "Sub-group depth exceeded: " + e.getMessage(), targetAgentId);
+                    Instant.now(), REASON_SUB_GROUP_DEPTH, targetAgentId);
         } catch (Exception e) {
-            return handleAgentFailure(member, phaseIdx, phase, protocol, e, "Sub-group discussion failed", targetAgentId);
+            return handleAgentFailure(member, phaseIdx, phase, protocol, e, REASON_SUB_GROUP_FAILED, targetAgentId);
         }
     }
 
+    /**
+     * A member turn that failed, under {@code protocol.onAgentFailure}:
+     * {@code ABORT} throws, anything else records a FAILED entry. The cause goes to
+     * the log only — {@code reason} is one of the stable {@code REASON_*} texts,
+     * because the entry is stored, rendered and streamed.
+     */
     public TranscriptEntry handleAgentFailure(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, Throwable cause,
-                                              String prefix, String targetAgentId)
+                                              String reason, String targetAgentId)
             throws GroupDiscussionException {
+        LOGGER.warnf("%s for member %s: %s", reason, LogSanitizer.sanitize(member.agentId()),
+                cause != null ? LogSanitizer.sanitize(cause.getMessage()) : "");
+        return failedTurn(member, phaseIdx, phase, protocol, reason, targetAgentId);
+    }
 
+    private TranscriptEntry failedTurn(GroupMember member, int phaseIdx, DiscussionPhase phase, ProtocolConfig protocol, String reason,
+                                       String targetAgentId)
+            throws GroupDiscussionException {
         if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.ABORT) {
-            throw new GroupDiscussionException(
-                    "%s for agent %s and onAgentFailure=ABORT: %s".formatted(prefix, member.agentId(), cause.getMessage()));
+            throw new GroupDiscussionException("%s for agent %s and onAgentFailure=ABORT".formatted(reason, member.agentId()));
         }
-        return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED, Instant.now(),
-                prefix + ": " + cause.getMessage(), targetAgentId);
+        return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                TurnOutcome.FAILED, reason, targetAgentId);
+    }
+
+    /**
+     * A member conversation that ended in ERROR and left no output: its pipeline
+     * failed, so there is nothing the member said.
+     */
+    static boolean endedInErrorWithoutAnswer(SimpleConversationMemorySnapshot snapshot, String response) {
+        return (response == null || response.isEmpty()) && snapshot != null
+                && snapshot.getConversationState() == ConversationState.ERROR;
     }
 
     /**
@@ -970,9 +1047,16 @@ public class MemberTurnExecutor {
         return signingGuard.sign(gc, entry);
     }
 
+    /**
+     * A FAILED entry for a turn that threw past {@link #executeAgentTurn}. The
+     * {@code message} (exception text) is logged, never stored: the entry carries
+     * {@link #REASON_EXECUTION_FAILED}.
+     */
     public TranscriptEntry errorEntry(GroupMember member, int phaseIdx, DiscussionPhase phase, String message) {
         String agentId = member != null ? member.agentId() : "unknown";
         String displayName = member != null ? member.displayName() : "Unknown";
-        return new TranscriptEntry(agentId, displayName, null, phaseIdx, phase.name(), TranscriptEntryType.ERROR, Instant.now(), message, null);
+        LOGGER.warnf("Member turn of %s failed: %s", LogSanitizer.sanitize(agentId), LogSanitizer.sanitize(message));
+        return TranscriptEntry.notAnswered(agentId, displayName, phaseIdx, phase.name(), TranscriptEntryType.ERROR, TurnOutcome.FAILED,
+                REASON_EXECUTION_FAILED, null);
     }
 }
