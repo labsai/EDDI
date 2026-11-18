@@ -96,7 +96,7 @@ class RuleSetSaveValidatorTest {
 
         var second = new RuleGroupConfiguration();
         second.setName("h");
-        second.setRules(List.of(rule("A")));
+        second.setRules(List.of(rule("B")));
         var twoGroups = set(rule("B"));
         twoGroups.setBehaviorGroups(List.of(twoGroups.getBehaviorGroups().getFirst(), second));
         assertDoesNotThrow(() -> RuleSetSaveValidator.validate(twoGroups));
@@ -125,5 +125,32 @@ class RuleSetSaveValidatorTest {
         assertTrue(problems.size() >= 3, problems.toString());
         var thrown = assertThrows(IllegalArgumentException.class, () -> RuleSetSaveValidator.validate(ruleSet));
         assertTrue(thrown.getMessage().equals(problems.getFirst()));
+    }
+
+    @Test
+    @DisplayName("a dependency nested under another dependency is dropped by the runtime and makes no cycle")
+    void nestedUnderDependencyIsIgnored() {
+        var outer = dependency("B");
+        outer.setConditions(List.of(dependency("A")));
+        assertDoesNotThrow(() -> RuleSetSaveValidator.validate(set(rule("A", outer), rule("B"))));
+    }
+
+    @Test
+    @DisplayName("every independent cycle is reported")
+    void everyCycleIsReported() {
+        var problems = RuleSetSaveValidator
+                .findProblems(set(rule("A", dependency("B")), rule("B", dependency("A")), rule("C", dependency("D")), rule("D", dependency("C"))));
+        assertTrue(problems.stream().anyMatch(p -> p.contains("A -> B -> A")), problems.toString());
+        assertTrue(problems.stream().anyMatch(p -> p.contains("C -> D -> C")), problems.toString());
+    }
+
+    @Test
+    @DisplayName("a very long acyclic chain does not depend on the call stack")
+    void longChain() {
+        var rules = new RuleConfiguration[20000];
+        for (int i = 0; i < rules.length; i++) {
+            rules[i] = i + 1 < rules.length ? rule("r" + i, dependency("r" + (i + 1))) : rule("r" + i);
+        }
+        assertDoesNotThrow(() -> RuleSetSaveValidator.validate(set(rules)));
     }
 }

@@ -12,7 +12,9 @@ import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -44,6 +46,11 @@ public final class RuleSetSaveValidator {
 
     private static final String DEPENDENCY = "dependency";
     private static final String KEY_REFERENCE = "reference";
+    /**
+     * The condition types whose {@code setConditions} keeps the nested conditions
+     * ({@code Connector}, {@code Negation}).
+     */
+    private static final Set<String> RETAINS_CHILDREN = Set.of("connector", "negation");
 
     private RuleSetSaveValidator() {
     }
@@ -111,15 +118,7 @@ public final class RuleSetSaveValidator {
             }
         }
 
-        List<String> cycle;
-        try {
-            cycle = findCycle(dependencies);
-        } catch (StackOverflowError e) {
-            problems.add("Invalid ruleset: the rule dependencies are chained too deeply to be checked; "
-                    + "flatten the chain of dependency conditions.");
-            return problems;
-        }
-        if (cycle != null) {
+        for (List<String> cycle : findCycles(dependencies)) {
             problems.add("Invalid ruleset: the rule dependencies form a cycle (" + String.join(" -> ", cycle)
                     + "). A turn that reaches it fails, so break the cycle by removing one of the dependency conditions.");
         }
@@ -141,57 +140,103 @@ public final class RuleSetSaveValidator {
                     all.add(new String[]{ownerName, reference});
                 }
             }
-            collectReferences(condition.getConditions(), into, ownerName, all);
+            // The runtime keeps the children of a connector and of a negation only
+            // (RuleDeserialization hands them to IRuleCondition.setConditions, which every
+            // other condition ignores), so a dependency nested under any other condition,
+            // a dependency included, is never followed and must not make a cycle.
+            if (RETAINS_CHILDREN.contains(condition.getType())) {
+                collectReferences(condition.getConditions(), into, ownerName, all);
+            }
         }
+    }
+
+    private record Frame(String node, Iterator<String> edges) {
     }
 
     /**
-     * The first cycle found, as the names along it (first name repeated last), or
-     * null.
+     * One cycle per cyclic component of the dependency graph, each as the names
+     * along it (first name repeated last). Strongly connected components by an
+     * iterative Tarjan walk with an explicit work stack, so the depth of a chain of
+     * dependencies cannot overflow the call stack.
      */
-    private static List<String> findCycle(Map<String, Set<String>> dependencies) {
-        Set<String> done = new HashSet<>();
-        for (String start : dependencies.keySet()) {
-            Deque<String> path = new ArrayDeque<>();
-            List<String> cycle = visit(start, dependencies, done, path, new HashSet<>());
-            if (cycle != null) {
-                return cycle;
-            }
-        }
-        return null;
-    }
+    private static List<List<String>> findCycles(Map<String, Set<String>> dependencies) {
+        Map<String, Integer> index = new HashMap<>();
+        Map<String, Integer> low = new HashMap<>();
+        Set<String> onStack = new HashSet<>();
+        Deque<String> stack = new ArrayDeque<>();
+        List<List<String>> cycles = new ArrayList<>();
+        int counter = 0;
 
-    private static List<String> visit(String node, Map<String, Set<String>> dependencies, Set<String> done, Deque<String> path,
-                                      Set<String> onPath) {
-        if (done.contains(node)) {
-            return null;
-        }
-        path.addLast(node);
-        onPath.add(node);
-        for (String next : dependencies.getOrDefault(node, Set.of())) {
-            if (onPath.contains(next)) {
-                List<String> cycle = new ArrayList<>();
-                boolean inCycle = false;
-                for (String element : path) {
-                    if (element.equals(next)) {
-                        inCycle = true;
+        for (String root : dependencies.keySet()) {
+            if (index.containsKey(root)) {
+                continue;
+            }
+            Deque<Frame> work = new ArrayDeque<>();
+            index.put(root, counter);
+            low.put(root, counter++);
+            stack.push(root);
+            onStack.add(root);
+            work.push(new Frame(root, dependencies.getOrDefault(root, Set.of()).iterator()));
+
+            while (!work.isEmpty()) {
+                Frame frame = work.peek();
+                if (frame.edges().hasNext()) {
+                    String next = frame.edges().next();
+                    if (!index.containsKey(next)) {
+                        index.put(next, counter);
+                        low.put(next, counter++);
+                        stack.push(next);
+                        onStack.add(next);
+                        work.push(new Frame(next, dependencies.getOrDefault(next, Set.of()).iterator()));
+                    } else if (onStack.contains(next)) {
+                        low.merge(frame.node(), index.get(next), Math::min);
                     }
-                    if (inCycle) {
-                        cycle.add(element);
+                    continue;
+                }
+                work.pop();
+                String node = frame.node();
+                if (low.get(node).equals(index.get(node))) {
+                    Set<String> component = new LinkedHashSet<>();
+                    String member;
+                    do {
+                        member = stack.pop();
+                        onStack.remove(member);
+                        component.add(member);
+                    } while (!member.equals(node));
+                    boolean cyclic = component.size() > 1 || dependencies.getOrDefault(node, Set.of()).contains(node);
+                    if (cyclic) {
+                        cycles.add(cycleWithin(component, dependencies));
                     }
                 }
-                cycle.add(next);
-                return cycle;
-            }
-            List<String> found = visit(next, dependencies, done, path, onPath);
-            if (found != null) {
-                return found;
+                if (!work.isEmpty()) {
+                    low.merge(work.peek().node(), low.get(node), Math::min);
+                }
             }
         }
-        path.removeLast();
-        onPath.remove(node);
-        done.add(node);
-        return null;
+        return cycles;
+    }
+
+    /**
+     * A cycle through the members of a cyclic component: from any member, follow
+     * edges that stay inside the component until a name repeats.
+     */
+    private static List<String> cycleWithin(Set<String> component, Map<String, Set<String>> dependencies) {
+        List<String> path = new ArrayList<>();
+        String current = component.iterator().next();
+        while (!path.contains(current)) {
+            path.add(current);
+            String following = null;
+            for (String candidate : dependencies.getOrDefault(current, Set.of())) {
+                if (component.contains(candidate)) {
+                    following = candidate;
+                    break;
+                }
+            }
+            current = following;
+        }
+        List<String> cycle = new ArrayList<>(path.subList(path.indexOf(current), path.size()));
+        cycle.add(current);
+        return cycle;
     }
 
     private static boolean isBlank(String value) {

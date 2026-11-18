@@ -205,6 +205,28 @@ class RuleSetStoreSaveTimeValidationTest {
     }
 
     @Test
+    @DisplayName("a lenient write keeps a ruleset with an A -> B -> A cycle and stores it")
+    void cycleOnlyWarnsInALenientWrite() throws Exception {
+        var createdResource = mock(IResourceStorage.IResource.class);
+        when(resourceStorage.newResource(any(RuleSetConfiguration.class))).thenReturn(createdResource);
+        var ruleSet = ruleSetWith("A", "dependency", Map.of("reference", "B"));
+        var b = new RuleConfiguration();
+        b.setName("B");
+        b.setActions(List.of("do_other"));
+        var back = new RuleConditionConfiguration();
+        back.setType("dependency");
+        back.setConfigs(Map.of("reference", "A"));
+        b.setConditions(List.of(back));
+        var rules = new ArrayList<>(ruleSet.getBehaviorGroups().getFirst().getRules());
+        rules.add(b);
+        ruleSet.getBehaviorGroups().getFirst().setRules(rules);
+
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> ruleSetStore.create(ruleSet)));
+
+        verify(resourceStorage).store(createdResource);
+    }
+
+    @Test
     @DisplayName("the lenient write does not excuse a broken condition")
     void lenientWriteStillRefusesBrokenConditions() {
         var ruleSet = ruleSetWith("Start over", "actionmatcher", Map.of("actions", "confirm_creation", "occurrence", "lastSteps"));
