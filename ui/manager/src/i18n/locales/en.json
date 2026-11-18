@@ -300,7 +300,7 @@
     "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page.",
     "deleted": "{{name}} deleted",
     "confirmDeleteNamed": "Delete {{name}}?",
-    "deleteEndAndDelete": "End conversations and delete"
+    "deleteReload": "Reload the current version"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -1691,10 +1691,10 @@
     "agentOpsMaxPending": "Waiting at once",
     "agentOpsHorizon": "Horizon (days, max 90)",
     "agentOpsCostPerFire": "Cost ceiling per fire ($)",
-    "temperatureBlocksSave": "The temperature is not valid — fix it before saving.",
+    "temperatureBlocksSave": "The temperature must be a number, 0 or more — fix it before saving.",
     "grPatternBlocksSave": "A regex-filter guardrail has an invalid pattern (line {{line}}) — fix it before saving.",
     "grPatternInvalid": "Line {{line}} is not a valid regular expression: {{detail}}",
-    "grPatternUnchecked": "Line {{lines}} uses syntax only the server can check; it is validated when the agent is deployed."
+    "grPatternUnchecked": "Line {{lines}} uses syntax this page cannot check. The server does not check patterns when it saves or deploys: a line it cannot compile is ignored at run time."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -2742,7 +2742,7 @@
       "saveFirst": "Save this knowledge base first to search it."
     },
     "legacyIngestionNote": "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead.",
-    "statusTooLarge": "Failed: {{name}} is larger than {{max}} MB and was not read",
+    "statusTooLarge": "Failed: {{name}} is larger than {{max}} MB and was not read here. A Files source under Ingestion Sources takes larger files.",
     "statusUploadRejected": "Failed: the server refused the upload ({{detail}})",
     "reembedWarning": "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
     "reembedProvider": "the embedding provider",

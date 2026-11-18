@@ -21,7 +21,7 @@ describe("useDeleteAgent", () => {
     expect(roots).toEqual(expect.arrayContaining(["agents", "chat", "groups", "channels"]));
   });
 
-  it("sends the end-conversations switch only when asked", async () => {
+  it("sends only the version, never a parameter the backend does not know", async () => {
     const urls: string[] = [];
     server.use(
       http.delete("*/agentstore/agents/a1", ({ request }) => {
@@ -34,11 +34,8 @@ describe("useDeleteAgent", () => {
       <QueryClientProvider client={client}>{children}</QueryClientProvider>
     );
     const { result } = renderHook(() => useDeleteAgent(), { wrapper });
-    result.current.mutate({ id: "a1", version: 1 });
+    result.current.mutate({ id: "a1", version: 3 });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
-    result.current.mutate({ id: "a1", version: 1, endAllActiveConversations: true });
-    await waitFor(() => expect(urls).toHaveLength(2));
-    expect(urls[0]).not.toContain("endAllActiveConversations");
-    expect(urls[1]).toContain("endAllActiveConversations=true");
+    expect(new URL(urls[0]!).search).toBe("?version=3");
   });
 });

@@ -272,7 +272,7 @@
     "createNamingFailed": "Agent créé, mais son nom n'a pas pu être enregistré. Renommez-le depuis sa page.",
     "deleted": "{{name}} supprimé",
     "confirmDeleteNamed": "Supprimer {{name}} ?",
-    "deleteEndAndDelete": "Terminer les conversations et supprimer"
+    "deleteReload": "Recharger la version actuelle"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -1668,10 +1668,10 @@
     "agentOpsMaxPending": "En attente simultanément",
     "agentOpsHorizon": "Horizon (jours, max. 90)",
     "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)",
-    "temperatureBlocksSave": "La température n’est pas valide — corrigez-la avant d’enregistrer.",
+    "temperatureBlocksSave": "La température doit être un nombre supérieur ou égal à 0 — corrigez-la avant d’enregistrer.",
     "grPatternBlocksSave": "Un garde-fou regex-filter contient un motif invalide (ligne {{line}}) — corrigez-le avant d’enregistrer.",
     "grPatternInvalid": "La ligne {{line}} n’est pas une expression régulière valide : {{detail}}",
-    "grPatternUnchecked": "La ligne {{lines}} utilise une syntaxe que seul le serveur peut vérifier ; elle est validée au déploiement de l’agent."
+    "grPatternUnchecked": "La ligne {{lines}} utilise une syntaxe que cette page ne peut pas vérifier. Le serveur ne vérifie pas les motifs à l’enregistrement ni au déploiement : une ligne qu’il ne peut pas compiler est ignorée à l’exécution."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -2688,7 +2688,7 @@
       "saveFirst": "Enregistrez d'abord cette base de connaissances pour la rechercher."
     },
     "legacyIngestionNote": "Pour du texte ponctuel. Les documents ajoutés ici ne peuvent plus être listés, mis à jour ni supprimés — pour les documents que vous maintiendrez, ajoutez plutôt une source Fichiers sous Sources d'ingestion.",
-    "statusTooLarge": "Échec : {{name}} dépasse {{max}} Mo et n’a pas été lu",
+    "statusTooLarge": "Échec : {{name}} dépasse {{max}} Mo et n’a pas été lu ici. Une source Fichiers sous Sources d’ingestion accepte des fichiers plus volumineux.",
     "statusUploadRejected": "Échec : le serveur a refusé l’envoi ({{detail}})",
     "reembedWarning": "Cette base de connaissances contient déjà des documents ingérés, et vous avez modifié {{what}}. L’enregistrement ne les ré-intègre pas : les vecteurs stockés restent inchangés, les recherches peuvent donc donner de mauvais résultats ou aucun tant que les documents ne sont pas ingérés à nouveau (ou qu’une nouvelle base n’est pas créée).",
     "reembedProvider": "le fournisseur d’embeddings",

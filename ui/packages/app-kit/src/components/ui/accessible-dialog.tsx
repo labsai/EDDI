@@ -2,6 +2,13 @@ import { useEffect, useRef, useCallback, useId, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+/**
+ * The open dialogs, oldest first. Escape closes the top-most one only: every
+ * dialog listens on `window`, so two stacked dialogs (a picker's create dialog
+ * over the form that hosts it) used to close together on one key press.
+ */
+const openDialogs: string[] = [];
+
 interface AccessibleDialogProps {
   /** Whether the dialog is open */
   open: boolean;
@@ -91,17 +98,24 @@ export function AccessibleDialog({
   // Escape key handler
   useEffect(() => {
     if (!open) return;
+    openDialogs.push(titleId);
     const handleKeyDown = (e: KeyboardEvent) => {
       // A dialog stacked on top (the unsaved-changes prompt) handles Escape in
-      // the capture phase and marks it handled — leave that one to it.
+      // the capture phase and marks it handled — leave that one to it. Among
+      // AccessibleDialogs only the top-most one answers.
+      if (openDialogs[openDialogs.length - 1] !== titleId) return;
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
         onClose();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [open, onClose]);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      const index = openDialogs.lastIndexOf(titleId);
+      if (index >= 0) openDialogs.splice(index, 1);
+    };
+  }, [open, onClose, titleId]);
 
   // Focus trap
   const handleKeyDown = useCallback(

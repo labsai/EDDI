@@ -18,6 +18,7 @@ import {
   useCascadeSave,
 } from "@/hooks/use-resources";
 import { useJsonSchema } from "@/hooks/use-json-schema";
+import { DOCUMENT_VALIDATORS } from "@/components/editors/document-validators";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
 import { useAgent } from "@eddi/app-kit/hooks/use-agents";
@@ -388,6 +389,7 @@ export function StudioEditorPanel({
         }
         saveWarnings={cascadeSave.data?.warnings}
         renderFormEditor={EDITOR_MAP[slug]}
+        validateDocument={DOCUMENT_VALIDATORS[slug]}
         jsonSchema={jsonSchema}
       />
       </OwningAgentContext.Provider>

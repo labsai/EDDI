@@ -1,5 +1,5 @@
 import { conflictDetails, type ConflictDetails } from "@eddi/app-kit/lib/conflict-details";
-import { ConflictDetailsPanel } from "@eddi/app-kit/components/shared/conflict-details-panel";
+import { DeleteAgentDialog } from "@/components/agents/delete-agent-dialog";
 import { CatalogListingToggle } from "@eddi/app-kit/components/shared/catalog-listing-toggle";
 import { AgentPresentationSection } from "@/components/editors/agent-presentation-section";
 import { ConversationReviewSection } from "@/components/editors/conversation-review-section";
@@ -144,7 +144,6 @@ export function AgentDetailPage() {
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
   /** What the server said still depends on the agent, when it refused the delete (409). */
   const [deleteConflict, setDeleteConflict] = useState<ConflictDetails | null>(null);
-  const [deleteEndConversations, setDeleteEndConversations] = useState(false);
   const [showExportDialog, setShowExportDialog] = useState(false);
   // Undeploy confirmation — tracks which environment is being undeployed plus
   // the two destructive query options (default OFF).
@@ -511,13 +510,12 @@ export function AgentDetailPage() {
     setShowDeleteDialog(open);
     if (!open) {
       setDeleteConflict(null);
-      setDeleteEndConversations(false);
     }
   }
 
   function handleDelete() {
     deleteMutation.mutate(
-      { id: id!, version: resolvedVersion, endAllActiveConversations: deleteEndConversations },
+      { id: id!, version: resolvedVersion },
       {
         onSuccess: () => {
           toast.success(t("agents.deleted", "{{name}} deleted", { name: agentDisplayName }));
@@ -1461,42 +1459,21 @@ export function AgentDetailPage() {
       </AlertDialog>
 
       {/* Delete confirmation dialog */}
-      <AlertDialog
+      <DeleteAgentDialog
         open={showDeleteDialog}
         onOpenChange={closeDeleteDialog}
-        title={t("agents.confirmDeleteNamed", "Delete {{name}}?", { name: agentDisplayName })}
-        description={t("agents.confirmDeleteDescription", "This action cannot be undone. The agent and all its data will be permanently removed.")}
-        confirmLabel={deleteConflict && deleteEndConversations ? t("agents.deleteEndAndDelete", "End conversations and delete") : t("common.delete")}
-        cancelLabel={t("common.cancel")}
-        onConfirm={handleDelete}
+        agentName={agentDisplayName}
+        conflict={deleteConflict}
         isPending={deleteMutation.isPending}
-      >
-        {deleteConflict && (
-          <div className="space-y-3" data-testid="delete-agent-conflict">
-            <ConflictDetailsPanel details={deleteConflict} testId="delete-agent-conflict-details" />
-            <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-border/60 bg-muted/30 p-3 text-start text-sm">
-              <input
-                type="checkbox"
-                className="mt-0.5 h-4 w-4 accent-destructive"
-                checked={deleteEndConversations}
-                onChange={(e) => setDeleteEndConversations(e.target.checked)}
-                data-testid="delete-end-conversations-checkbox"
-              />
-              <span className="text-muted-foreground">
-                <span className="block font-medium text-foreground">
-                  {t("agents.undeployEndConversationsLabel", "End all active conversations")}
-                </span>
-                <span className="mt-0.5 block text-xs text-destructive">
-                  {t(
-                    "agents.undeployEndConversationsHint",
-                    "Immediately terminates every in-progress conversation on this deployment. This cannot be undone."
-                  )}
-                </span>
-              </span>
-            </label>
-          </div>
-        )}
-      </AlertDialog>
+        onConfirm={handleDelete}
+        onReload={() => {
+          // A refused delete is usually a stale version: read the current one
+          // instead of sending the same request again.
+          closeDeleteDialog(false);
+          setVersion(undefined);
+          void refetchVersions();
+        }}
+      />
 
       {/* Export dialog */}
       <ExportAgentDialog

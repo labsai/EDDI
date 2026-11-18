@@ -28,6 +28,7 @@ import {
 } from "@/hooks/use-resources";
 import { useNavigate } from "react-router-dom";
 import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
+import { DOCUMENT_VALIDATORS } from "@/components/editors/document-validators";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
@@ -207,7 +208,11 @@ export function ResourceDetailPage() {
 
   // Save feedback state
   const [saveSuccess, setSaveSuccess] = useState(false);
-  const [saveWarnings, setSaveWarnings] = useState<string[] | undefined>(undefined);
+  // Warnings belong to the save that produced them, and to the resource it saved:
+  // another resource opened through the same route must not show them.
+  const [warningState, setWarningState] = useState<{ id: string | undefined; list: string[] } | undefined>(undefined);
+  const saveWarnings = warningState && warningState.id === id ? warningState.list : undefined;
+  const setSaveWarnings = useCallback((list: string[] | undefined) => setWarningState(list ? { id, list } : undefined), [id]);
 
   // Delete dialog state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -432,7 +437,7 @@ export function ResourceDetailPage() {
         // Invalid JSON — shouldn't happen, ConfigEditorLayout validates
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, adoptCascadeContext, deployWithGrants, reportCascadeError]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, rt, t, adoptPartialCascade, adoptCascadeContext, deployWithGrants, reportCascadeError, setSaveWarnings]
   );
 
   useEffect(() => {
@@ -791,6 +796,7 @@ export function ResourceDetailPage() {
             }
             saveWarnings={saveWarnings}
             renderFormEditor={EDITOR_MAP[type ?? ""]}
+            validateDocument={DOCUMENT_VALIDATORS[type ?? ""]}
             jsonSchema={jsonSchema}
             onCompare={() => setShowDiff(true)}
             onDraftChange={handleDraftChange}

@@ -5,6 +5,7 @@ import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-change
 import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { EditorValidityContext, type EditorValidity } from "@eddi/app-kit/components/editors/editor-validity";
 import { JsonEditor } from "./json-editor";
+import type { DocumentValidator } from "./document-validators";
 import { VersionPicker, type VersionInfo } from "./version-picker";
 import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows, Rocket } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -66,6 +67,12 @@ export interface ConfigEditorLayoutProps {
    * this editor with another stage's, and saves from there if asked to.
    */
   onDraftChange?: (draft: { data: string; dirty: boolean }) => void;
+  /**
+   * Blocking checks on the parsed document, run whichever tab is showing — the
+   * form editor's own reports vanish with the form, so without this a value the
+   * form refuses could be saved from the JSON tab.
+   */
+  validateDocument?: DocumentValidator;
 }
 
 type EditorTab = "form" | "json";
@@ -98,6 +105,7 @@ export function ConfigEditorLayout({
   jsonSchema,
   onCompare,
   onDraftChange,
+  validateDocument,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
   const hasFormEditor = !!(renderFormEditor || children);
@@ -131,7 +139,16 @@ export function ConfigEditorLayout({
     }),
     [],
   );
-  const blockingReason = Object.values(fieldProblems)[0] ?? null;
+  // The document-level check sees the JSON as it will be saved, on either tab.
+  const documentProblem = useMemo(() => {
+    if (!validateDocument) return null;
+    try {
+      return validateDocument(JSON.parse(editedData), t);
+    } catch {
+      return null; // unparseable JSON has its own refusal
+    }
+  }, [validateDocument, editedData, t]);
+  const blockingReason = Object.values(fieldProblems)[0] ?? documentProblem;
   /** The warnings array the user dismissed — a newer save brings a new array. */
   const [dismissedWarnings, setDismissedWarnings] = useState<string[] | undefined>(undefined);
 
@@ -234,6 +251,14 @@ export function ConfigEditorLayout({
   // saves stale data.
   const containerRef = useRef<HTMLDivElement>(null);
   const busy = isSaving || isSaveAndDeploying;
+  // A failed attempt must not leave the "what was saved" marker behind, even when
+  // the parent keeps showing the very same error text across retries: clear it on
+  // the way from in-flight to failed.
+  const wasBusyRef = useRef(false);
+  useEffect(() => {
+    if (wasBusyRef.current && !busy && saveError) savedPayloadRef.current = null;
+    wasBusyRef.current = busy;
+  }, [busy, saveError]);
   useEffect(() => {
     if (readOnly) return;
     function onKeyDown(e: KeyboardEvent) {

@@ -271,7 +271,7 @@
     "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。",
     "deleted": "已删除 {{name}}",
     "confirmDeleteNamed": "删除 {{name}}？",
-    "deleteEndAndDelete": "结束对话并删除"
+    "deleteReload": "重新加载当前版本"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -1650,10 +1650,10 @@
     "agentOpsMaxPending": "同时等待数量",
     "agentOpsHorizon": "时间范围（天，最多 90）",
     "agentOpsCostPerFire": "每次触发的费用上限（$）",
-    "temperatureBlocksSave": "温度值无效——请先修正再保存。",
+    "temperatureBlocksSave": "温度必须是不小于 0 的数字——请先修正再保存。",
     "grPatternBlocksSave": "regex-filter 护栏中有无效的模式（第 {{line}} 行）——请先修正再保存。",
     "grPatternInvalid": "第 {{line}} 行不是有效的正则表达式：{{detail}}",
-    "grPatternUnchecked": "第 {{lines}} 行使用了只有服务器才能检查的语法；将在部署智能体时验证。"
+    "grPatternUnchecked": "第 {{lines}} 行使用了本页面无法检查的语法。服务器在保存或部署时不会检查模式：它无法编译的行会在运行时被忽略。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -2660,7 +2660,7 @@
       "saveFirst": "请先保存此知识库再进行搜索。"
     },
     "legacyIngestionNote": "用于一次性文本。在此添加的文档之后无法列出、更新或删除——对于需要维护的文档，请改为在“摄取来源”下添加一个文件来源。",
-    "statusTooLarge": "失败：{{name}} 大于 {{max}} MB，未读取",
+    "statusTooLarge": "失败：{{name}} 大于 {{max}} MB，此处未读取。“摄取源”下的文件源可接收更大的文件。",
     "statusUploadRejected": "失败：服务器拒绝了上传（{{detail}}）",
     "reembedWarning": "此知识库已有摄取的文档，而你修改了{{what}}。保存不会重新嵌入这些文档：已存储的向量保持不变，因此在重新摄取文档（或创建新的知识库）之前，搜索可能结果很差或没有结果。",
     "reembedProvider": "嵌入提供商",

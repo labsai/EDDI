@@ -3,6 +3,7 @@ import { fireEvent, screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { useReportInvalid } from "@eddi/app-kit/components/editors/editor-validity";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
+import { validateLlmDocument } from "@/components/editors/document-validators";
 
 vi.mock("sonner", () => ({
   toast: { error: vi.fn(), success: vi.fn(), warning: vi.fn() },
@@ -95,5 +96,43 @@ describe("ConfigEditorLayout — field validity and failed saves", () => {
       <ConfigEditorLayout {...base} onSave={vi.fn()} renderFormEditor={form} saveWarnings={["Vectors are stale"]} />,
     );
     expect(screen.getByTestId("save-warnings")).toHaveTextContent("Vectors are stale");
+  });
+
+  it("keeps the draft when a retry fails with the very same error text, then a refetch lands", async () => {
+    const onSave = vi.fn();
+    const user = userEvent.setup();
+    const ui = (extra: Record<string, unknown>, data = base.data) => (
+      <ConfigEditorLayout {...base} data={data} onSave={onSave} renderFormEditor={form} {...extra} />
+    );
+    const { rerender } = renderWithProviders(ui({}));
+    fireEvent.change(screen.getByTestId("temp"), { target: { value: "0.2" } });
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await user.click(screen.getByTestId("save-btn"));
+      rerender(ui({ isSaving: true }));
+      rerender(ui({ isSaving: false, saveError: "Not saved: conflict" }));
+    }
+    rerender(ui({ saveError: "Not saved: conflict" }, JSON.stringify({ temperature: "0.9" }, null, 2)));
+    expect(screen.getByTestId("draft")).toHaveTextContent('{"temperature":"0.2"}');
+  });
+
+  it("blocks an invalid value typed on the JSON tab, where no form editor reports it", () => {
+    const onSave = vi.fn();
+    const doc = (temperature: string, patterns = "ok") =>
+      JSON.stringify({
+        tasks: [{ parameters: { temperature }, inputGuardrails: [{ type: "regex-filter", parameters: { patterns } }] }],
+      });
+    renderWithProviders(
+      <ConfigEditorLayout {...base} data={doc("0.7")} onSave={onSave} validateDocument={validateLlmDocument} />,
+    );
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("hot") } });
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+    expect(screen.getByTestId("save-blocked-reason")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("0.7", "(unclosed") } });
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+
+    // A range overrun is not blocked: stored configs and gateways with wider ranges keep saving.
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("3.5") } });
+    expect(screen.getByTestId("save-btn")).toBeEnabled();
   });
 });

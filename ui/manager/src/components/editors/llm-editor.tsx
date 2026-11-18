@@ -102,6 +102,7 @@ import {
   BUILT_IN_TOOLS,
 } from "@eddi/app-kit/components/editors/llm/types";
 
+import { isTemperatureValue as isTemperature } from "@/components/editors/document-validators";
 import { useReportInvalid } from "@eddi/app-kit/components/editors/editor-validity";
 import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 import { SELF_HOSTED_PROVIDER_ID, getDefaultBaseUrl, getProviderRegions } from "@eddi/app-kit/lib/llm-provider-catalog";
@@ -115,11 +116,6 @@ const SENSITIVE_LLM_PARAM_KEYS = new Set(["apikey", "password", "secret", "token
 /** The model a freshly chosen provider starts with, so a new task is never model-less. */
 function defaultModelFor(type: string | undefined): string {
   return getProviderConfig(type ?? "")?.defaultModel ?? "";
-}
-
-/** Whether `value` is a number the backend can parse as a sampling temperature. */
-function isTemperature(value: string): boolean {
-  return value.trim() === "" || (Number.isFinite(Number(value)) && Number(value) >= 0);
 }
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -272,11 +268,12 @@ function TaskEditor({
       ? numberProblem(temperatureValue, temperatureRange)
       : null;
   const providerInfo = getProviderConfig(task.type ?? "");
-  // An invalid temperature is shown inline; it also blocks Save in the layout,
-  // which would otherwise persist a value the backend cannot parse.
+  // Only a value no provider accepts blocks Save: not a number, or negative. A value
+  // beyond the provider's catalogued range stays the inline warning it was —
+  // stored configs and gateways with wider ranges must keep saving.
   useReportInvalid(
-    temperatureProblem
-      ? t("llmEditor.temperatureBlocksSave", "The temperature is not valid — fix it before saving.")
+    !isTemperature(temperatureValue)
+      ? t("llmEditor.temperatureBlocksSave", "The temperature must be a number, 0 or more — fix it before saving.")
       : null,
     "temperature",
   );

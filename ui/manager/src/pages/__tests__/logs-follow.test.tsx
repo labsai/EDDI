@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ThemeProvider } from "@eddi/ui";
@@ -78,5 +78,17 @@ describe("LogsPage live tail", () => {
     rerender(tree(client));
 
     expect(writes).toContain(99_000);
+  });
+
+  it("offers the New logs button once the user has scrolled away, at the 500-entry cap", () => {
+    const client = new QueryClient();
+    vi.mocked(useLogStream).mockReturnValue(stream(entriesEndingAt(1000)));
+    render(tree(client));
+    const scroller = screen.getByTestId("live-log-scroll");
+    Object.defineProperty(scroller, "scrollHeight", { value: 99_000, configurable: true });
+    Object.defineProperty(scroller, "clientHeight", { value: 500, configurable: true });
+    scroller.scrollTop = 0;
+    fireEvent.scroll(scroller);
+    expect(screen.getByTestId("scroll-to-bottom")).toBeInTheDocument();
   });
 });

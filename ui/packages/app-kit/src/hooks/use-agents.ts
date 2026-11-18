@@ -357,13 +357,12 @@ export function useUpdateAgentDescriptor() {
 }
 
 /**
- * Every cache that lists agents or carries one: the Agents page, the chat pickers
- * (the deployed agents), the group member lists and the channel lists (which name
- * their target agents) and the Studio. A deleted agent left in any of them is
- * offered again until that cache happens to go stale.
+ * What a delete refreshes on top of the agent caches (`agentKeys.all`): the other
+ * places that list agents. The chat pickers (deployed agents), the group member
+ * lists, the channel lists (which name their target agents) and the Studio. A
+ * deleted agent left in any of them is offered again until that cache goes stale.
  */
-const AGENT_DELETE_INVALIDATIONS: readonly (readonly unknown[])[] = [
-  agentKeys.all,
+const AGENT_DELETE_EXTRA_INVALIDATIONS: readonly (readonly unknown[])[] = [
   chatKeys.all,
   ["groups"],
   ["channels"],
@@ -373,21 +372,13 @@ const AGENT_DELETE_INVALIDATIONS: readonly (readonly unknown[])[] = [
 export function useDeleteAgent() {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({
-      id,
-      version,
-      endAllActiveConversations,
-    }: {
-      id: string;
-      version: number;
-      /** Retry of a delete the server refused with 409 because conversations are running. */
-      endAllActiveConversations?: boolean;
-    }) => deleteAgent(id, version, endAllActiveConversations ? { endAllActiveConversations } : undefined),
+    mutationFn: ({ id, version }: { id: string; version: number }) => deleteAgent(id, version),
     onSuccess: (_result, { id }) => {
       // The deleted agent's own entries go, rather than being refetched into a 404.
       queryClient.removeQueries({ queryKey: agentKeys.detail(id) });
       queryClient.removeQueries({ queryKey: agentKeys.descriptor(id) });
-      for (const queryKey of AGENT_DELETE_INVALIDATIONS) {
+      queryClient.invalidateQueries({ queryKey: agentKeys.all });
+      for (const queryKey of AGENT_DELETE_EXTRA_INVALIDATIONS) {
         queryClient.invalidateQueries({ queryKey: [...queryKey] });
       }
     },

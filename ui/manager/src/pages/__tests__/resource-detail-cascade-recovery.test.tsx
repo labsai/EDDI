@@ -149,7 +149,9 @@ describe("ResourceDetailPage — retrying a Save that failed partway", () => {
 
       // The first try wrote the resource, then stopped.
       await waitFor(() => expect(chain.resource).toBe(2));
-      await waitFor(() => expect(screen.getAllByText(new RegExp(`${hop} unavailable`)).length).toBeGreaterThan(0));
+      // The reason is in two places: the toast, and the inline error that stays.
+      await waitFor(() => expect(screen.getAllByText(new RegExp(`${hop} unavailable`))).toHaveLength(2));
+      expect(screen.getByTestId("save-error")).toHaveTextContent(new RegExp(`${hop} unavailable`));
       expect(chain.agent).toBe(1);
 
       // Retry: the page moved onto the version it wrote. Whether the editor

@@ -620,7 +620,7 @@ function ingestionStatusLabel(status: string, t: TFunction): string {
       return t("ragEditor.statusUploadError", "Failed: upload error");
   }
   if (status.startsWith(TOO_LARGE_PREFIX)) {
-    return t("ragEditor.statusTooLarge", "Failed: {{name}} is larger than {{max}} MB and was not read", {
+    return t("ragEditor.statusTooLarge", "Failed: {{name}} is larger than {{max}} MB and was not read here. A Files source under Ingestion Sources takes larger files.", {
       name: status.slice(TOO_LARGE_PREFIX.length),
       max: MAX_INGEST_FILE_BYTES / (1024 * 1024),
     });
@@ -696,10 +696,20 @@ function IngestionPanel({
       const poll = async () => {
         if (!mountedRef.current) return;
         attempts++;
+        // An id that cannot go into a path is a bug in the answer, not a blip: no retry.
+        let statusPath: string;
         try {
-          const result = await api.get<{ status: string; warning?: string }>(
-            `/ragstore/rags/${seg(kbId)}/ingestion/${seg(ingestionId)}/status`,
+          statusPath = `/ragstore/rags/${seg(kbId)}/ingestion/${seg(ingestionId)}/status`;
+        } catch {
+          setIngestions((prev) =>
+            prev.map((ing) =>
+              ing.ingestionId === ingestionId ? { ...ing, status: "failed: polling error" } : ing,
+            ),
           );
+          return;
+        }
+        try {
+          const result = await api.get<{ status: string; warning?: string }>(statusPath);
           if (!mountedRef.current) return;
           consecutiveErrors = 0;
           if (result.status === "completed") onIngested?.();
