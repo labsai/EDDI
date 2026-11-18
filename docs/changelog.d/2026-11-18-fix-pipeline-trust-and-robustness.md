@@ -19,12 +19,11 @@ An integration that sent `properties*` expression context to set properties must
 ### What changed and why
 
 - `property(host(api.openai.com))` stored `openai.com` and `1.2.3` became `2.3`, because the leaf went through `Expression.setExpressionName`, which splits at the first dot. `4915112345678` threw in `Integer.parseInt` and failed the turn, `01234` became `1234`. `PropertySetter` now keeps the leaf as a string, except a plain integer (ASCII digits, no leading zero), which becomes an `Integer`, or a `Long` beyond the int range, and `true`/`false`, which become a boolean. Nothing in it can throw.
-- `CharacterUtilities.isNumber` / `isStringInteger` accepted any Unicode digit (`1` fullwidth, Arabic-Indic), and `Value.equals/hashCode` compared through `Float.parseFloat`, which threw `NumberFormatException` for those and made `unknown(123456789)` match input `123456790`. Both now accept ASCII digits only, and `Value` compares by `BigDecimal` (the text itself for a number over 100 characters); `equals`/`hashCode` are consistent and never throw.
+- `CharacterUtilities.isNumber` / `isStringInteger` accepted any Unicode digit (`1` fullwidth, Arabic-Indic), and `Value.equals/hashCode` compared through `Float.parseFloat`, which threw `NumberFormatException` for those and made `unknown(123456789)` match input `123456790`. Digits of other scripts are now converted to ASCII where the expression or the value is built (`integer(12)` is still produced for `١٢`), and `Value` compares by `BigDecimal` (the text itself for a number over 100 characters); `equals`/`hashCode` are consistent and never throw.
 
 ### Behaviour changes for upgraders
 
-- A decimal leaf in `property(...)` (`3.14`) is now stored as the string `3.14`, not as a float.
-- A Unicode-digit token (for example fullwidth `1`) is no longer read as an integer by the integer dictionary and the word splitter; it is an ordinary word.
+- A decimal leaf in `property(...)` (`3.14`) is now stored as the string `3.14`, not as a float (a float would corrupt `1.10`). A Qute comparison such as `{#if properties.price > 1}` or a body that expects a number changes with it: compare after converting, for example `{#if properties.price.toDouble > 1}`, or keep the number in a `valueDouble` instruction.
 - Numeric rules compare exactly: `unknown(1)` still matches `1`, `1.0` and `1,0`, but integers above 2^24 no longer collide.
 
 Files: `PropertySetter`, `CharacterUtilities`, `Value`; docs in `agent-config-authoring.md`.
@@ -35,17 +34,18 @@ Files: `PropertySetter`, `CharacterUtilities`, `Value`; docs in `agent-config-au
 
 ### What changed and why
 
-- `InputParser.normalize` always trims and collapses runs of spaces, and `InputParserTask` wrote the result over the conversation output `input`, which is what the model's history, the conversation log and `{memory.current.input}` read: pasted code and tables lost their indentation, even for an agent with no normalizers. The overwrite now happens only when the parser has normalizers (or `preserveInput: false`); otherwise the output `input` keeps the user's text as typed. A turn flagged `secretInput` keeps the previous behaviour (the plaintext for the turn, the placeholder re-asserted by `Conversation` at the end), so the vaulting flow is unchanged. `input:normalized` is still written.
+- `InputParser.normalize` always trims and collapses runs of spaces, and `InputParserTask` wrote the result over the conversation output `input`, which is what the model's history, the conversation log and `{memory.current.input}` read: pasted code and tables lost their indentation, even for an agent with no normalizers. The overwrite now happens only when the parser has normalizers (or `preserveInput: false`); otherwise the output `input` keeps the interior of the user's text exactly as typed and only loses leading and trailing whitespace, as it always did (so `{memory.current.input}` in a slot-filling property or an HTTP body, and a `dynamicvaluematcher == 'yes'`, do not see a trailing newline). A turn flagged `secretInput` keeps the previous behaviour (the plaintext for the turn, the placeholder re-asserted by `Conversation` at the end), so the vaulting flow is unchanged. `input:normalized` is still written.
 - One unbroken token over 32,768 characters, or about 200 tokens of 165 characters, produced an `expressions:parsed` string over `eddi.expressions.max-length`; the next rule that read it threw and failed the turn. The parser now reduces an over-long result to one bounded `unknown(...)` expression (and sets `expressions:inputTruncated`), and every reader of the stored string (`InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`, the append merge) treats `ExpressionLimitExceededException` as "no expressions" (`StoredExpressions.parseOrEmpty`).
-- LLM-first fast path: a parser with no normalizers, dictionaries, corrections or semantic fallback, and no quick replies to match, stores one `unknown(<text>)` expression (notation characters removed, at most 1,000 characters) without tokenising. Wizard-created agents keep matching their catch-all `inputmatcher "*"`.
-- `docs/security.md` said conversation memory keeps the input verbatim; that is now true for the output `input` as well, whenever the parser has no normalizers.
+- LLM-first fast path, opt-in with `passThrough: true` (the setup wizard writes it): a parser with no normalizers, dictionaries, corrections or semantic fallback, and no quick replies to match, stores one `unknown(<text>)` expression (notation characters removed, at most 1,000 characters, not cut inside a surrogate pair) without tokenising. Wizard-created agents keep matching their catch-all `inputmatcher "*"`.
+- `docs/security.md` said conversation memory keeps the input verbatim; it now says exactly what is kept: `input:initial` always, and the output `input` minus leading and trailing whitespace whenever the parser has no normalizers.
 
-New parser config keys: `preserveInput` and `passThrough` (both default to automatic; see `docs/semantic-parser.md`).
+New parser config keys: `preserveInput` (automatic by default) and `passThrough` (default off; see `docs/semantic-parser.md`).
 
 ### Behaviour changes for upgraders
 
-- With no normalizers, `{memory.current.input}` and the model's history hold the typed text (leading/trailing whitespace and runs of spaces included) instead of the trimmed, collapsed text. Set `"preserveInput": false` on the parser step to get the old behaviour.
-- A hand-built parser with no extensions now yields one `unknown(<whole text>)` for a multi-word input instead of one `unknown(word)` per word; a rule such as `inputmatcher unknown(hello)` then matches only the exact one-word input. Set `"passThrough": false` to keep per-word expressions.
+- With no normalizers, `{memory.current.input}` and the model's history hold the text with its interior as typed (line breaks, runs of spaces) instead of the collapsed text; the ends are still trimmed. Set `"preserveInput": false` on the parser step to get the old behaviour. A turn flagged `secretInput` is unchanged.
+- Nothing changes for existing parser configs regarding per-word `unknown(...)`: `passThrough` is off unless set.
+- Only an over-long parser result is reduced, to one bounded `unknown(...)`; it was a failed turn before.
 
 Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, `ExpressionProvider`, `StoredExpressions`, `InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`; docs in `semantic-parser.md` and `security.md`.
 
@@ -78,4 +78,20 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 ### Left as it was
 
 `behavior_rules:fail` is still written every turn: `docs/developer-quickstart.md` presents it as a debugging aid, so a reader exists.
+
 
+## 🐛 fix(start,rules,templating): review follow-up (2026-11-18)
+
+**Repo:** EDDI (`fix/pipeline-trust-and-robustness`)
+
+### What changed and why
+
+- **`POST /agents/{id}/start`:** the `catch` in `Conversation.init` that kept the conversation in state `ERROR` is gone; it removed the documented `422 agent_misconfigured` and persisted a conversation for every start of a broken agent. Instead a start turn whose rule evaluation fails (`RuleEvaluationFailedException`, marked `AgentStartFailure`) answers `422 {"error":"agent_start_failed","message":<fixed text>,"retryable":false}` and creates no conversation. A vault outage, a database error and an interrupt stay a 500, as documented; the marker is deliberately not "every task failure". See `docs/rest-api-reference.md`.
+- **Lenient writes:** the rule-graph checks and the `timesOccurred` check refuse an interactive save (REST, MCP, the Manager) only. Import, sync, upgrade and duplicate run inside `LenientConfigWrite` and log one WARN per problem instead, so an archive that imported before still imports.
+- **Quick-reply expressions:** `NotationSafeData` is also applied in the LLM fallback's quick replies, and a data value that is only `*` is dropped (an expression named `*` equals every expression).
+- **Parser:** `passThrough` is opt-in (the setup wizard writes it); a stored over-long `expressions:parsed` reads as one bounded `unknown(...)` and no longer as "the user said nothing"; with `appendExpressions` the earlier results are kept when a new result would pass the limit; the bounded text is never cut inside a surrogate pair.
+
+### Behaviour changes for upgraders
+
+- An agent whose start turn fails because of its rule set now gets the typed 422 instead of a bare 500.
+- Digits of other scripts are numbers again, converted to ASCII where built (reverts the first draft of the number fix).
