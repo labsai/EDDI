@@ -20,4 +20,4 @@ CVE-2026-114938 ("Java4Shell", Red Hat [RHSB-2026-018](https://access.redhat.com
 
 ### What's next
 
-When Red Hat ships a fixed `openjdk-25-runtime` digest, and Keycloak an image with a fixed JDK: move both pins, remove the flag from all five places, and delete `Java4ShellMitigationTest` in the same change. Bump `mise.toml` once Temurin 25.0.5.1 is out.
+Three base images carry a vulnerable JDK, each with its own pin: the UBI `openjdk-25-runtime` digest (production image), the `eclipse-temurin:25-jre` digest (demo image) and `quay.io/keycloak/keycloak:26.8.0`. Remove the flag from all five places, and delete `Java4ShellMitigationTest` in the same change, only when **all three** are fixed (OpenJDK 25.0.5.1 or later, and 21.0.13.1 or later for Keycloak). Moving one pin leaves the others exposed. Bump `mise.toml` once Temurin 25.0.5.1 is out.
