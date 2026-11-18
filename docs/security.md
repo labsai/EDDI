@@ -473,6 +473,19 @@ Tool *arguments* are governed at the tool-execution layer, tool *results* by the
 
 ---
 
+### Files between conversations
+
+A stored attachment's `storageRef` is a capability: whoever holds it, and a conversation that may read it, can have its bytes forwarded to a model. So a model never handles one. Every path that hands a file from one conversation to another (today the nested-group pass-through; delegation, group tasks, handoff, A2A and MCP as they gain file arguments) goes through `AttachmentShareService`, which enforces one rule:
+
+- **Names in, capabilities never.** A model names entries of its *own* conversation's listing — the files `IAttachmentStore.listAccessible` returns for it (owned or granted), minus the ones it withholds because an input guardrail refused the turn they came with. It never supplies a `storageRef`, a source conversation or a target conversation: the source is the conversation the tool is bound to, the target one that server code created.
+- **The read check is re-made at share time.** A selector is accepted only when it is an entry of the listing passed in **and** the source conversation can still read the file (`mayRead`: owner or grantee). A stale listing, or one built for another conversation, widens nothing; a file the source cannot read is refused as `not found`, the same answer as a file that does not exist, and its name is not echoed.
+- **Bounded.** Files per share, shares per turn (counted on the conversation's step, so a model cascade cannot multiply it) and a hop limit; a refusal uses no slot. Parts of a file cannot be shared yet.
+- **Recorded.** Each share is one audit entry (`taskId` `attachment.share`) in the *source* conversation's ledger — target conversation, reason, MIME type, size; no bytes and no file name — and `eddi_attachment_shared_total{path}` / `eddi_attachment_share_refused_total{reason}`.
+
+A grant is on the file's root and lets the receiving conversation read the whole file through `readAttachment`. See [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).
+
+---
+
 ### Cluster control plane (NATS)
 
 In cluster mode the nodes steer each other over NATS: node RPCs (cancel, drain, GDPR stop,

@@ -440,6 +440,16 @@ public final class MemoryKeys {
      */
     public static final MemoryKey<List<String>> ATTACHMENT_EXTRACTS = MemoryKey.of("attachments:extracts");
 
+    /**
+     * Files this conversation shared with another conversation this turn, one row
+     * per file: {@code fileName}, {@code targetAgentId} and {@code reason}
+     * ({@code ShareResult.toStepRecords}). Never a storage reference. Non-public —
+     * written by the tool that shared, for audit and the detailed view.
+     *
+     * @since 6.7.0
+     */
+    public static final MemoryKey<List<Map<String, String>>> ATTACHMENTS_SHARED = MemoryKey.of("attachments:shared");
+
     // ---- Dynamic agents ----
 
     /**
