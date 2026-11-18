@@ -68,6 +68,7 @@ import {
   type TurnFailure,
   type TurnFailureContext,
   turnFailureMessage,
+  DETACHED_TURN_GRACE_MS,
 } from "@eddi/conversation";
 import { ToolActivityLog, TurnNotesLog, turnNoteListener } from "@eddi/conversation/tool-activity";
 import { toolResultListener } from "@eddi/core/tool-events";
@@ -649,7 +650,7 @@ export { UNCONSUMED_STREAM_ERROR_CODES };
  * swallows the terminal frame would otherwise keep the fetch and its mutation
  * open for good, one more per switch.
  */
-export const DETACHED_STREAM_GRACE_MS = 120_000;
+export const DETACHED_STREAM_GRACE_MS = DETACHED_TURN_GRACE_MS;
 
 /* ─── The turn loop: @eddi/conversation's AgentConversation ───────────────
  *

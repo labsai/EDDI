@@ -27,6 +27,16 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
   Files: `ui/packages/conversation/src/controller/turn-failure.ts`, `agent-conversation.ts`, `notices.ts`,
   `ui/packages/app-kit/src/hooks/use-chat.ts`, `ui/workforce/src/pages/workforce/workforce-thread.tsx`.
 
+- **Leaving the page keeps the exchange.** The Workforce member thread reset its controller on unmount, which aborted
+  the fetch so the backend discarded the turn. `ParkedControllers` (`@eddi/conversation`) now parks a controller whose
+  turn is running for the same 120 s grace the Manager's chat has (`DETACHED_TURN_GRACE_MS`, shared with
+  `DETACHED_STREAM_GRACE_MS`); returning within it shows the running turn without re-opening the thread, and the grace
+  running out aborts it as before. `useLeaveGuard` asks before the tab is closed or reloaded, only while a turn is in
+  flight, in `ChatPanel` (Manager chat, Workforce chat), the Workforce thread and the Chat widget.
+  Files: `ui/packages/conversation/src/controller/parked-controllers.ts`, `react/hooks.tsx`,
+  `ui/workforce/src/pages/workforce/workforce-thread.tsx`, `ui/packages/app-kit/src/components/chat/chat-panel.tsx`,
+  `ui/chat/src/components/ChatWidget.tsx`.
+
 ### Behaviour changes an upgrader will notice
 
 - The three UIs send an `Idempotency-Key` header. They run on the EDDI origin, so no CORS rule is involved; a widget

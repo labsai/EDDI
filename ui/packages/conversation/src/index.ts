@@ -10,6 +10,7 @@ export * from "./controller/transport";
 export * from "./controller/agent-conversation";
 export * from "./controller/notices";
 export * from "./controller/turn-failure";
+export * from "./controller/parked-controllers";
 export * from "./controller/composer-mode";
 export * from "./i18n/text";
 export * from "./react/hooks";

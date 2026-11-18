@@ -40,6 +40,7 @@ import {
   ReplyAnnouncer,
   offersQuickReplies,
   resolveComposerMode,
+  useLeaveGuard,
   type AnnouncedMessage,
 } from "@eddi/conversation";
 import {
@@ -209,6 +210,8 @@ export function ChatPanel({
   const isThinking = useChatStore((s) => s.isThinking);
   // Undo, redo and rerun raise isProcessing too; only a turn being answered can be stopped.
   const historyBusy = useChatStore((s) => s.historyBusy);
+  // Closing the tab while a turn is answered discards it on the server.
+  useLeaveGuard(isProcessing && !historyBusy);
   const reconnecting = useChatStore((s) => s.reconnecting);
   const isPaused = useChatStore((s) => s.isPaused);
   const pauseReason = useChatStore((s) => s.pauseReason);

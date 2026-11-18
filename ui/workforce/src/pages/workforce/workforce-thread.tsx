@@ -49,9 +49,11 @@ import {
   AgentConversation,
   RECONNECT_DELAYS_MS,
   STOP_VERIFY_DELAYS_MS,
+  ParkedControllers,
   StreamEndedError,
   turnFailureMessage,
   useAgentConversation,
+  useLeaveGuard,
   type ConversationMessage,
   type Translate,
 } from "@eddi/conversation";
@@ -700,6 +702,31 @@ function firstAttachmentName(context: ContextMap | undefined): string | undefine
   return typeof value?.fileName === "string" ? value.fileName : undefined;
 }
 
+/** What one thread keeps between visits: its controller, its refs and its logs. */
+interface ThreadEntry {
+  controller: AgentConversation;
+  hooksRef: MutableRefObject<ThreadHooks | null>;
+  turnRef: MutableRefObject<ThreadTurn | null>;
+  toolLog: ToolActivityLog;
+  noteLog: TurnNotesLog;
+}
+
+function createThreadEntry(memberId: string): ThreadEntry {
+  const hooksRef: MutableRefObject<ThreadHooks | null> = { current: null };
+  const turnRef: MutableRefObject<ThreadTurn | null> = { current: null };
+  // Files every call under its conversation.
+  const toolLog = new ToolActivityLog({ maxConversations: 5 });
+  const noteLog = new TurnNotesLog();
+  return { controller: createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog), hooksRef, turnRef, toolLog, noteLog };
+}
+
+/**
+ * The threads whose page was left. A turn still running keeps its controller for
+ * the shared grace period (the same one the Manager's chat has), so the exchange
+ * is not discarded by navigating away.
+ */
+const threadRegistry = new ParkedControllers<ThreadEntry>();
+
 /**
  * The member thread on @eddi/conversation's controller (phase 3c): the turn —
  * streaming, the reconcile, dropped vs paused turns — is the controller's, the
@@ -916,17 +943,16 @@ function WorkforceThread() {
   memberNameRef.current = memberName;
 
   // Local state
-  // The thread's conversation runs on the controller; these read it.
-  const hooksRef = useRef<ThreadHooks | null>(null);
-  const turnRef = useRef<ThreadTurn | null>(null);
-  // One for the page: it files every call under its conversation, so another
-  // advisor's thread simply reads other entries.
-  const [toolLog] = useState(() => new ToolActivityLog({ maxConversations: 5 }));
-  const [noteLog] = useState(() => new TurnNotesLog());
-  const controller = useMemo(
-    () => createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog),
-    [memberId, toolLog, noteLog],
+  // The thread's conversation runs on its controller, which outlives this page
+  // for a while when a turn is still running (see `threadRegistry`).
+  const registryKey = `${boardId} ${memberId}`;
+  const { entry, resumed } = useMemo(
+    () => threadRegistry.acquire(registryKey, () => createThreadEntry(memberId)),
+    [registryKey, memberId],
   );
+  const { controller, hooksRef, turnRef, toolLog, noteLog } = entry;
+  /** The page came back to a thread whose turn kept running: show it, do not re-open the thread. */
+  const adoptRef = useRef(resumed);
   const conversation = useAgentConversation(controller);
   const conversationId = conversation.conversationId;
   const messages = conversation.messages;
@@ -968,8 +994,12 @@ function WorkforceThread() {
   /** Which (board, member, attempt) the thread was last initialised for. */
   const initKeyRef = useRef<string | null>(null);
 
-  // Leaving the advisor (or the page) abandons the turn in flight.
-  useEffect(() => () => controller.reset(), [controller]);
+  // Leaving the advisor (or the page) lets a turn in flight finish for a grace
+  // period instead of aborting it: closing the stream makes the server discard the
+  // turn. Coming back within the grace shows it running (or done).
+  useEffect(() => () => threadRegistry.release(registryKey), [registryKey]);
+  // Closing or reloading the tab aborts it too, and nothing can bring it back.
+  useLeaveGuard(conversation.isProcessing && !conversation.historyBusy);
 
   hooksRef.current = {
     t,
@@ -1069,6 +1099,15 @@ function WorkforceThread() {
     initKeyRef.current = key;
     const isCurrent = () => initKeyRef.current === key;
 
+    // Back to a thread whose turn kept running while the page was away: its
+    // controller holds the transcript and the turn, so there is nothing to re-open.
+    if (adoptRef.current) {
+      adoptRef.current = false;
+      if (controller.getSnapshot().conversationId) {
+        setIsStarting(false);
+        return;
+      }
+    }
     controller.reset();
     turnRef.current = null;
     setSendError(null);

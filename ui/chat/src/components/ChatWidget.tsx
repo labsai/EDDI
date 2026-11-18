@@ -26,6 +26,7 @@ import {
   guardrailActive,
   offersQuickReplies,
   resolveComposerMode,
+  useLeaveGuard,
 } from "@eddi/conversation";
 
 import {
@@ -559,6 +560,8 @@ export function ChatWidget() {
   // Esc stops a running turn, as the Stop button does (T1.10). The restart
   // confirmation keeps its own Esc.
   const canStop = state.isProcessing && !state.historyBusy && !isPaused;
+  // Closing the tab while a turn is answered discards it on the server.
+  useLeaveGuard(canStop && !isDemo);
   useEffect(() => {
     if (!canStop) return;
     const onKey = (e: KeyboardEvent) => {
