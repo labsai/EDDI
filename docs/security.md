@@ -520,6 +520,20 @@ executing thread by `CallerIdentityContext`, always cleared in a `finally` —
 those threads are reused across conversations, so a leaked binding would be
 readable by the next caller's turn.
 
+**Team subjects travel as a snapshot.** The captured identity also carries the
+caller's team subjects (`team:<group path>`, the personal space excluded), read
+from the request's token with the same derivation the REST access checks use
+(`CallerSpaces.teamSubjectsOf`). That snapshot is what code running inside a turn
+— a tool on a virtual thread, where no token can be read — asks for the current
+caller's teams. It is taken once at the request boundary, never refreshed during
+the turn, never persisted, and never filled from the user directory's last-seen
+memberships. It fails closed: a turn without a request token behind it
+(a schedule, a team cadence, a HITL resume approved by somebody other than the
+conversation's owner) has no teams. An approver who is not the owner is bound
+without their teams, so the calls they approved run with their token but never
+admit the owner's turn through a team only the approver belongs to.
+`CallerIdentity.toString()` names neither the token nor any team.
+
 Set `eddi.caller-identity.enabled=false` to forbid the feature outright.
 
 ---

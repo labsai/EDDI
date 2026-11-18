@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -40,25 +41,46 @@ import java.util.Map;
  *            access the request-scoped guards give them (see
  *            {@code ResourceAccessGuard.principalMayUse}). Never trusted for a
  *            different principal than {@link #userId}.
+ * @param teamSubjects
+ *            the team subjects ({@code team:<group path>}) on the token of the
+ *            request that captured this identity, in token order, the caller's
+ *            personal space excluded — the same derivation as
+ *            {@code ResourceAccessGuard.currentTeamSubjects()}. A
+ *            <em>snapshot</em>: taken once at the request boundary, never
+ *            refreshed during the turn, never persisted. Like {@link #admin} it
+ *            describes {@link #userId} only. Empty means "no team", not
+ *            "unknown": a turn with no request token behind it (a schedule, a
+ *            cadence, a HITL resume by somebody other than the owner) has no
+ *            teams, so team features fail closed. Never filled from the user
+ *            directory's last-seen memberships.
  *
  * @author ginccc
  */
-public record CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials, boolean admin) {
+public record CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials, boolean admin,
+        List<String> teamSubjects) {
 
     /**
-     * Defensive copy, and {@code null} normalised to empty.
+     * Defensive copies, and {@code null} normalised to empty.
      * <p>
      * This record is handed to a resolver that decides what leaves the process, and
      * it is bound to a {@link ThreadLocal} for the length of a turn. A caller
-     * retaining the map it passed in could otherwise change which credential is
-     * sent after the identity was captured — and a null map would turn every lookup
-     * into an NPE on a path whose whole job is to fail closed with a readable
-     * message.
+     * retaining the map or list it passed in could otherwise change which
+     * credential is sent, or which teams the turn belongs to, after the identity
+     * was captured — and a null would turn every lookup into an NPE on a path whose
+     * whole job is to fail closed with a readable message.
      */
     public CallerIdentity {
         connectionCredentials = connectionCredentials == null || connectionCredentials.isEmpty()
                 ? Map.of()
                 : Map.copyOf(connectionCredentials);
+        teamSubjects = teamSubjects == null || teamSubjects.isEmpty()
+                ? List.of()
+                : teamSubjects.stream().filter(subject -> subject != null && !subject.isBlank()).distinct().toList();
+    }
+
+    /** An identity that belongs to no team. */
+    public CallerIdentity(String token, String userId, String origin, Map<String, String> connectionCredentials, boolean admin) {
+        this(token, userId, origin, connectionCredentials, admin, List.of());
     }
 
     /** An identity carrying no caller-supplied connection credentials. */
@@ -77,6 +99,34 @@ public record CallerIdentity(String token, String userId, String origin, Map<Str
      */
     public boolean isAdminActingAs(String principal) {
         return admin && principal != null && principal.equals(userId);
+    }
+
+    /**
+     * This identity with no teams.
+     * <p>
+     * For an identity that acts in somebody else's turn — the approver of a HITL
+     * resume. Their token and principal are theirs to act with on the call they
+     * approved; their team memberships are not, because the turn belongs to the
+     * conversation's owner, and a team feature must not admit the owner's turn
+     * through a team only the approver is in.
+     */
+    public CallerIdentity withoutTeamSubjects() {
+        return teamSubjects.isEmpty() ? this : new CallerIdentity(token, userId, origin, connectionCredentials, admin, List.of());
+    }
+
+    /**
+     * Names no secret and no team: the token and credential values are redacted,
+     * and connection names and team subjects are counted rather than listed.
+     * <p>
+     * The generated record {@code toString} would print all of them, and a record
+     * that reaches a log line through string concatenation or a debug statement
+     * must not carry a bearer token or a user's team memberships with it.
+     */
+    @Override
+    public String toString() {
+        return "CallerIdentity[token=" + (hasToken() ? "<redacted>" : "none") + ", userId=" + userId + ", origin=" + origin
+                + ", connectionCredentials=" + connectionCredentials.size() + ", admin=" + admin + ", teamSubjects="
+                + teamSubjects.size() + "]";
     }
 
     /** Whether this identity can satisfy a {@code ${caller:token}} reference. */

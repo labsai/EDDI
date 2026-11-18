@@ -101,6 +101,25 @@ and re-sharing stay with whoever created it.
 a different act from letting them *read how it was built* — and the first is by
 far the more common request.
 
+### Team membership inside a conversation
+
+Team membership always comes from the **current token's** groups claim. A REST
+request reads it directly. Inside a conversation turn — a tool runs on a worker
+or virtual thread, where the token is no longer readable — the teams are a
+snapshot taken when the request that started the turn arrived, carried with
+the caller's identity to every thread the turn uses
+(`CallerIdentityContext.current().teamSubjects()`). The snapshot is not
+refreshed mid-turn and is never stored with the conversation, so a membership
+change in Keycloak applies from the caller's next request.
+
+It is empty — "no team", never "unknown" — whenever no token stands behind the
+turn: scheduled runs, team cadences, and a turn resumed after somebody other
+than its owner approved a paused tool call (the approver's own teams are never
+added). Team features fail closed there. The user directory's recorded teams
+(see [Finding people](#finding-people-the-user-directory)) are last-seen
+memberships: they are never a fallback for an empty snapshot and never grant a
+team membership (a schedule uses them only to *narrow* its creator's teams).
+
 ---
 
 ## Sharing
