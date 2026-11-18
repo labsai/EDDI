@@ -151,6 +151,18 @@ public interface IScheduleStore {
     int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
 
     /**
+     * How many enabled schedules were created by an authenticated caller
+     * ({@code createdBy} set) — the figure the per-owner and the overall schedule
+     * caps are judged on. Schedules the engine minted itself carry no
+     * {@code createdBy} and are not counted.
+     *
+     * @param createdBy
+     *            count only this creator's schedules; {@code null} for every
+     *            creator
+     */
+    int countEnabledSchedulesCreatedBy(String createdBy) throws IResourceStore.ResourceStoreException;
+
+    /**
      * Deletes the used-up one-shots with the given name, with their fire logs:
      * exactly the rows {@link #markCompleted} left behind after a one-shot fired
      * (disabled, {@code PENDING}, no next fire, a last fire, unclaimed, no disabled

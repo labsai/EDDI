@@ -1349,6 +1349,25 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(normalized.contains("ORDER BY next_fire ASC, id ASC LIMIT ?"), normalized);
     }
 
+    /**
+     * Dead-lettered rows keep {@code enabled=true} and their old {@code next_fire},
+     * so they sorted first in the due scan. The query names the exclusion that the
+     * partial index {@code idx_schedules_due_live} is built on, which is what lets
+     * the planner use it.
+     */
+    @Test
+    void findDueSchedules_neverLooksAtDeadLetteredRows() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(false);
+
+        sut.findDueSchedules(Instant.now(), Duration.ofMinutes(30), 3);
+
+        ArgumentCaptor<String> sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        String normalized = sql.getValue().replaceAll("\\s+", " ");
+        assertTrue(normalized.contains("enabled = true AND fire_status <> 'DEAD_LETTERED' AND next_fire <= ?"), normalized);
+    }
+
     // ─── readAllSchedules ───────────────────────────────────────
 
     @Test

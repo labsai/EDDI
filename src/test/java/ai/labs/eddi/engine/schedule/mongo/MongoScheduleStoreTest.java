@@ -748,6 +748,24 @@ class MongoScheduleStoreTest {
                         + options.getAllValues().stream().map(IndexOptions::getName).toList());
     }
 
+    /**
+     * Dead-lettered rows keep their old {@code nextFire} and so sort first in
+     * {@code (enabled, nextFire, fireStatus)}; with the status ahead of the time
+     * the due query's three statuses are three ranges that never include them.
+     */
+    @Test
+    @DisplayName("indexes — the due query has an index with fireStatus ahead of nextFire")
+    void scheduleIndexesIncludeTheDueIndexByStatus() {
+        var keys = ArgumentCaptor.forClass(Bson.class);
+        var options = ArgumentCaptor.forClass(IndexOptions.class);
+        verify(scheduleCollection, atLeastOnce()).createIndex(keys.capture(), options.capture());
+        int at = options.getAllValues().stream().map(IndexOptions::getName).toList().indexOf("idx_schedules_due_by_status");
+        assertTrue(at >= 0, "missing index: " + options.getAllValues().stream().map(IndexOptions::getName).toList());
+        var rendered = keys.getAllValues().get(at)
+                .toBsonDocument(Document.class, MongoClientSettings.getDefaultCodecRegistry()).toJson();
+        assertTrue(rendered.indexOf("fireStatus") < rendered.indexOf("nextFire"), rendered);
+    }
+
     // ==================== readAllSchedules ====================
 
     @Test

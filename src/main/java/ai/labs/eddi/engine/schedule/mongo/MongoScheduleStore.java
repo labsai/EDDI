@@ -135,6 +135,13 @@ public class MongoScheduleStore implements IScheduleStore {
         scheduleCollection.createIndex(
                 Indexes.compoundIndex(Indexes.ascending(ENABLED), Indexes.ascending(NEXT_FIRE), Indexes.ascending(FIRE_STATUS)),
                 new IndexOptions().name("idx_schedules_due"));
+        // The due query asks for three fireStatus values (never DEAD_LETTERED). With
+        // fireStatus ahead of nextFire each of them is its own index range, so the
+        // dead-lettered rows — which keep their old nextFire and sort first in the
+        // index above — are never walked.
+        scheduleCollection.createIndex(
+                Indexes.compoundIndex(Indexes.ascending(ENABLED), Indexes.ascending(FIRE_STATUS), Indexes.ascending(NEXT_FIRE)),
+                new IndexOptions().name("idx_schedules_due_by_status"));
         scheduleCollection.createIndex(Indexes.ascending(AGENT_ID), new IndexOptions().name("idx_schedules_agentId"));
         scheduleCollection.createIndex(Indexes.ascending(TENANT_ID), new IndexOptions().name("idx_schedules_tenantId"));
         // HITL timeout schedules are deleted/re-armed by name on every pause,
@@ -175,6 +182,7 @@ public class MongoScheduleStore implements IScheduleStore {
             // marker does not stop Jackson (PROPAGATE_TRANSIENT_MARKER is off), so a PUT
             // that echoed a GET body used to persist a stale description here.
             doc.remove("cronDescription");
+            doc.remove("warnings");
             // Store every Instant field as an epoch-millis Long read straight from
             // the getters — never trusting whatever numeric format the shared mapper
             // produced (see writeScheduleInstants).
@@ -468,6 +476,16 @@ public class MongoScheduleStore implements IScheduleStore {
                     or(eq(ENABLED, true), eq(DISABLED_REASON, ScheduleConfiguration.DISABLED_BY_UNDEPLOY))));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to count pending schedules by name: " + name, e);
+        }
+    }
+
+    @Override
+    public int countEnabledSchedulesCreatedBy(String createdBy) throws IResourceStore.ResourceStoreException {
+        try {
+            Bson creator = createdBy != null ? eq(CREATED_BY, createdBy) : ne(CREATED_BY, null);
+            return (int) scheduleCollection.countDocuments(and(eq(ENABLED, true), creator));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count enabled schedules", e);
         }
     }
 

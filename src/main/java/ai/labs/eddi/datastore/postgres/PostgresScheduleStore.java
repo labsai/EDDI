@@ -216,6 +216,7 @@ public class PostgresScheduleStore implements IScheduleStore {
      */
     private static final String CREATE_INDEXES = """
             CREATE INDEX IF NOT EXISTS idx_schedules_due ON eddi_schedules (enabled, next_fire, fire_status);
+            CREATE INDEX IF NOT EXISTS idx_schedules_due_live ON eddi_schedules (next_fire, id) WHERE enabled = true AND fire_status <> 'DEAD_LETTERED';
             CREATE INDEX IF NOT EXISTS idx_schedules_agent ON eddi_schedules (agent_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_tenant ON eddi_schedules (tenant_id);
             CREATE INDEX IF NOT EXISTS idx_schedules_user ON eddi_schedules (user_id);
@@ -570,6 +571,24 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int countEnabledSchedulesCreatedBy(String createdBy) throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        String sql = createdBy != null
+                ? "SELECT COUNT(*) FROM eddi_schedules WHERE enabled = true AND created_by = ?"
+                : "SELECT COUNT(*) FROM eddi_schedules WHERE enabled = true AND created_by IS NOT NULL";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (createdBy != null) {
+                ps.setString(1, createdBy);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getInt(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count enabled schedules", e);
+        }
+    }
+
+    @Override
     public int deleteSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         int count = deleteWithCascade("name", name, null, "Failed to delete schedules by name: " + name);
@@ -903,7 +922,7 @@ public class PostgresScheduleStore implements IScheduleStore {
 
         String sql = """
                 SELECT * FROM eddi_schedules
-                WHERE enabled = true AND next_fire <= ?
+                WHERE enabled = true AND fire_status <> 'DEAD_LETTERED' AND next_fire <= ?
                 AND (
                     fire_status = 'PENDING'
                     OR (fire_status = 'CLAIMED' AND claimed_at <= %s - ?)
