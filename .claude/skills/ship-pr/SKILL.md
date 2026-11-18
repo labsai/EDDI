@@ -1,6 +1,6 @@
 ---
 name: ship-pr
-description: Take a branch from local commits to a merge-ready PR — push it, write a real PR description, watch CI to green, then work every review comment (CodeRabbit, Copilot, code-quality, humans) including nitpicks until each finding is answered and every bot-opened thread is resolved (a human's own thread stays open for them to close). Load when asked to push and open a PR, to watch CI, or to address review feedback on an existing PR.
+description: Take a branch from local commits to a merge-ready PR and, when asked, through the merge — push it, write a real PR description, watch CI to green, then work every review comment (CodeRabbit, Copilot, code-quality, humans) including nitpicks until each finding is answered and every bot-opened thread is resolved (a human's own thread stays open for them to close). Load when asked to push and open a PR, to watch CI, to address review feedback on an existing PR, or to merge one.
 ---
 
 # Shipping a branch through review
@@ -36,10 +36,11 @@ file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` (today's date, slug unique to you
 commit it on the *same branch* as the work.
 
 > **Do not edit `docs/changelog.md` by hand.** CI's **`Changelog Discipline`** job diffs that
-> file against the base and **fails the PR** if the diff adds a line matching
-> `^\+## .*\(YYYY-MM-DD\)` or a dated register row `^\+\| YYYY-MM-DD \|`. Editing the header
-> or fixing a typo in a past entry is still fine — adding an *entry in place* is the one thing
-> it rejects, because every open PR inserting at the same point in the same file is a conflict
+> file against the base and **fails the PR** if the diff adds more than it removes of: a `## `
+> heading (dated or not), a `---`/`===`-underlined heading, or a dated register row
+> `| YYYY-MM-DD |` — lines inside fenced code blocks do not count. Editing the header or
+> fixing a typo in a past entry nets to zero and is still fine — adding an *entry in place* is
+> the one thing it rejects, because every open PR inserting at the same point in the same file is a conflict
 > git cannot merge.
 
 Inside the fragment, write exactly what used to go at the top of the live file — one or more
@@ -67,8 +68,10 @@ Java sources, not the files their name suggests:**
 #   DocumentationAccuracyTest reads PropertySetterTask, AbstractBackupService,
 #   ScheduleConfiguration, AgentConfiguration, LlmConfiguration, PersistenceModule,
 #   LifecycleManager — adding a field to any of those fails it from a Java-only diff.
-#   ChangelogFragmentTest is here too: it grades new files under docs/changelog.d/.
-./mvnw test -Dtest='DocumentationLinksTest,DocumentationAccuracyTest,DocumentedRestPathsTest,DeploymentManifestsTest,ChangelogFragmentTest'
+#   ChangelogFragmentTest is here too: it grades new files under docs/changelog.d/,
+#   and with BuildQualityGatesTest (above) and JlamaRuntimeFlagsTest it pins sentences
+#   of AGENTS.md itself.
+./mvnw test -Dtest='DocumentationLinksTest,DocumentationAccuracyTest,DocumentedRestPathsTest,DeploymentManifestsTest,ChangelogFragmentTest,JlamaRuntimeFlagsTest'
 
 # added/changed a @ConfigProperty, an application.properties key, k8s/helm, compose, Dockerfile
 ./mvnw test -Dtest='ConfigurationReferenceCoverageTest,DeploymentManifestsTest,ComposeStackTest,EddiImageDockerfileTest,MissingPropertyRenderingTest,StaticAssetCachingTest,AuditRetentionConfigTest'
@@ -187,7 +190,8 @@ is advisory — which makes a red one *your* problem, not the button's. So:
 - **`fail` → fix it**, whether or not it gates.
 - **`skipping` → fine only if `Detect Changes` explains it.** Mind how narrow that is:
   `Build & Test` runs on `backend || operator_docs`, and **`backend` includes `README.md`,
-  `AGENTS.md`, `ui/**/*.md`, `.githooks/**` and `.github/dependabot.yml`** while
+  `AGENTS.md`, `ui/**/*.md`, `docs-site/**/*.md`, `.githooks/**`, `.gitignore` and
+  `.github/dependabot.yml`** (the `backend` filter in `ci.yml` is the full list) while
   `operator_docs` is `docs/kubernetes.md`, `README.md`, `docs/security.md`. A PR touching any
   of those *must* run `Build & Test` — a skip there is a bug, not "fine". A PR touching only
   other `docs/*.md` legitimately skips `Build & Test`, `Integration Tests`, `Build Image`,
@@ -466,3 +470,42 @@ Report: what was fixed, what was pushed back on and why, what was left open for 
 what was deferred, whether CodeRabbit actually reviewed the current head or was rate
 limited, and the CI state you observed. Never claim a green run you did not read. **Do not
 merge** and do not enable auto-merge unless asked.
+
+## 7. Merging — only when asked
+
+AGENTS.md §2 rule 4 holds the three rules; this is how to satisfy them. Go through all of it
+for **every** PR, one PR at a time.
+
+**1. CodeRabbit reviewed the current head.** Compare the commit its latest review is on with
+the PR's head; if commits landed after it, ask again (`@coderabbitai review`, or
+`@coderabbitai full review` after a stretch where pushes went unreviewed) and wait. "Review
+limit reached" and "Review rate limited" mean **not reviewed**, whatever colour the check is
+(§4). Then the §5 audit must be clean: every finding fixed or answered — nitpicks and the
+review-body ones included — and every CodeRabbit thread resolved. Only the user can waive
+this, for a PR they name.
+
+**2. `main` is green at its current commit.** A green run for an older commit says nothing
+about the newest one:
+
+```bash
+gh api repos/labsai/EDDI/commits/main --jq .sha
+gh run list -b main -w CI/CD -L 1 --json headSha,status,conclusion
+```
+
+`headSha` must equal the current `main` SHA, and the run must be **finished and green**. No
+run for that commit yet, or one queued or in progress, means wait — "not red yet" is not
+green. If it is red, the only PR that merges is the one that fixes or reverts the breakage.
+
+**3. The PR was tested against the `main` it merges into.** Branches are not required to be up
+to date, so two PRs that are each green can break `main` together — one renames a method, the
+other adds a caller of the old name. If `main` changed a file this PR touches or depends on
+since its last CI run (a renamed or removed symbol counts), merge `origin/main` into the
+branch and wait for CI again. To land several, first build `main` plus all of them together
+and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
+
+**4. Merge one.** When `main` has a merge queue, only through it:
+`gh pr merge <n> --squash --auto` adds the PR to the queue. Never `--admin`. Clean any AI
+attribution out of the squash message.
+
+**5. Watch `main`'s `CI/CD` run for the merge commit** before starting on the next PR. If it
+goes red, revert or fix it before anything else merges.
