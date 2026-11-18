@@ -6,6 +6,8 @@ package ai.labs.eddi.connections.rest;
 
 import io.quarkus.security.Authenticated;
 import jakarta.annotation.security.PermitAll;
+import jakarta.annotation.security.RolesAllowed;
+import jakarta.ws.rs.Consumes;
 import jakarta.ws.rs.DELETE;
 import jakarta.ws.rs.GET;
 import jakarta.ws.rs.POST;
@@ -36,6 +38,12 @@ import java.util.Map;
  * Both are excluded from operator write scope, and for different reasons that
  * both matter: a config write is an egress channel, and these routes mint and
  * destroy credentials without touching a config document at all.
+ * <p>
+ * The three {@code mailbox-grants} routes are the one administrative part: an
+ * {@code eddi-admin} links a <em>dedicated mailbox</em> to a
+ * {@code MAILBOX}-bound connection by signing in as that mailbox. They reuse
+ * the same state, PKCE, nonce cookie and {@link #callback}, so there is one
+ * flow, not two.
  */
 @Path("/connections")
 @Tag(name = "Connections", description = "Link and unlink your own accounts for per-user connections")
@@ -105,4 +113,54 @@ public interface IRestConnectionAuthorization {
     @Authenticated
     @Operation(summary = "Unlink your account", description = "Deletes the calling user's grant for this connection.")
     Response disconnect(@PathParam("name") String name);
+
+    /** The body of the mailbox-grant routes: the dedicated mailbox's address. */
+    record MailboxRequest(String address) {
+    }
+
+    /**
+     * Starts linking a dedicated mailbox to a {@code MAILBOX}-bound connection.
+     * <p>
+     * {@code eddi-admin} only, and checked in code as well, because
+     * {@code @RolesAllowed} is a no-op with authorization disabled. The address
+     * must not be the administrator's own (their token's {@code email} claim): a
+     * dedicated mailbox is not a person's. The browser then signs in to the
+     * provider <em>as the mailbox</em>; the callback stores the grant under
+     * {@code mailbox:<address>} only after the connection's
+     * {@code oauth.accountCheck} has shown the account is that address.
+     *
+     * @return {@code {"authorizationUrl": "…"}} plus the flow's binding cookie, as
+     *         {@link #authorize}
+     */
+    @POST
+    @Path("/{name}/mailbox-grants/authorize")
+    @RolesAllowed("eddi-admin")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Begin linking a dedicated mailbox", description = "eddi-admin. Returns the provider authorization URL; sign in as the "
+            + "mailbox.")
+    Response authorizeMailbox(@PathParam("name") String name, MailboxRequest request, @QueryParam("returnTo") String returnTo);
+
+    /**
+     * Unlinks a dedicated mailbox: deletes its grant, by connection name, without
+     * requiring the connection to still exist. {@code 204} whether or not one
+     * existed.
+     */
+    @POST
+    @Path("/{name}/mailbox-grants/unlink")
+    @RolesAllowed("eddi-admin")
+    @Consumes(MediaType.APPLICATION_JSON)
+    @Operation(summary = "Unlink a dedicated mailbox", description = "eddi-admin. Deletes the mailbox's grant on this connection.")
+    Response unlinkMailbox(@PathParam("name") String name, MailboxRequest request);
+
+    /**
+     * The mailboxes linked to a connection: address, status and timestamps. Never
+     * token material.
+     */
+    @GET
+    @Path("/{name}/mailbox-grants")
+    @RolesAllowed("eddi-admin")
+    @Produces(MediaType.APPLICATION_JSON)
+    @Operation(summary = "List linked mailboxes", description = "eddi-admin. Address, status and expiry of each mailbox grant — never tokens.")
+    List<Map<String, Object>> listMailboxGrants(@PathParam("name") String name);
 }

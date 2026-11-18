@@ -77,6 +77,25 @@ public class OAuthState {
      */
     private String nonceHash;
 
+    /**
+     * Set only on a <em>mailbox link</em> ({@code POST
+     * /connections/{name}/mailbox-grants/authorize}): the normalised address of the
+     * dedicated mailbox the grant is for. The callback then files the grant under
+     * {@code mailbox:<address>} instead of {@link #principal} — which on such a row
+     * is the linking administrator — and only after the provider account was shown
+     * to be this address. Null on an ordinary per-user link.
+     */
+    private String mailboxAddress;
+
+    /**
+     * Mailbox links only: SHA-256 (base64url) of the linking administrator's own
+     * verified {@code email} claim, normalised, or null when their token carried
+     * none. The callback is a permit path with no identity to read the claim from,
+     * so it is captured at {@code authorize}; a hash rather than the address,
+     * because the callback only needs to compare.
+     */
+    private String linkerEmailHash;
+
     private Instant createdAt;
     private Instant expiresAt;
 
@@ -158,6 +177,27 @@ public class OAuthState {
 
     public void setNonceHash(String nonceHash) {
         this.nonceHash = nonceHash;
+    }
+
+    public String getMailboxAddress() {
+        return mailboxAddress;
+    }
+
+    public void setMailboxAddress(String mailboxAddress) {
+        this.mailboxAddress = mailboxAddress;
+    }
+
+    /** Whether this row starts a mailbox link rather than a user's own link. */
+    public boolean isMailboxLink() {
+        return mailboxAddress != null && !mailboxAddress.isBlank();
+    }
+
+    public String getLinkerEmailHash() {
+        return linkerEmailHash;
+    }
+
+    public void setLinkerEmailHash(String linkerEmailHash) {
+        this.linkerEmailHash = linkerEmailHash;
     }
 
     public Instant getCreatedAt() {

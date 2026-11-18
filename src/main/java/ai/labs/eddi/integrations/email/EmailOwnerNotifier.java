@@ -42,8 +42,9 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * Tells an email integration's owners, once per UTC day and reason, that it
  * stopped taking mail on a limit (the daily cost budget, the per-sender limit
  * or a tenant quota; email plan §13), or that a turn was lost, or a reply
- * failed or was held back (see {@link Reason}). Mail held back by a limit stays
- * in the mailbox for a later poll — nothing goes back to any sender.
+ * failed or was held back, or that its dedicated mailbox is not linked (see
+ * {@link Reason}). Mail held back by a limit stays in the mailbox for a later
+ * poll — nothing goes back to any sender.
  * <p>
  * <b>What "the owners" are, and how they hear it.</b> Always: one WARN log line
  * (integration id and reason only) and the {@code eddi.email.inbound} outcome
@@ -75,7 +76,12 @@ public class EmailOwnerNotifier {
                                                 "a reply could not be delivered after its last attempt (or the relay refused it for good); check the "
                                                         + "email ledger rows of kind REPLY in state FAILED"), THREAD_THROTTLED("thread_throttled",
                                                                 "a thread reached maxRepliesPerThreadPerHour, so further replies in it are not sent "
-                                                                        + "until the hour has passed — possibly a mail loop");
+                                                                        + "until the hour has passed — possibly a mail loop"), MAILBOX_NOT_LINKED(
+                                                                                "mailbox_not_linked",
+                                                                                "its mailbox has no usable grant on its MAILBOX connection (never "
+                                                                                        + "linked, unlinked, or rejected by the provider), so it "
+                                                                                        + "cannot be read; an administrator must link it again under "
+                                                                                        + "Connections → Mailbox grants");
 
         private final String id;
         private final String text;

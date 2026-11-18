@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
 import ai.labs.eddi.engine.mail.SmtpSubmitter;
@@ -159,7 +160,7 @@ public class ImapMailTransport implements MailTransport {
                 return new SmtpSubmitter.Login(basic.username(), basic.password(), "PLAIN LOGIN");
             }
             // XOAUTH2: the mailbox as the user, the token as the secret.
-            return new SmtpSubmitter.Login(settings.address(), resolver.resolveAccessToken(reference, target, null), "XOAUTH2");
+            return new SmtpSubmitter.Login(settings.address(), xoauth2Token(resolver, reference, target, settings), "XOAUTH2");
         } catch (ConnectionException e) {
             throw new MailSendException(MailSendException.Category.AUTHENTICATION, false,
                     "The SMTP credential of connection '" + settings.connection() + "' could not be resolved for " + endpoint.host() + ": "
@@ -227,12 +228,33 @@ public class ImapMailTransport implements MailTransport {
             }
             // XOAUTH2 carries the mailbox as the user and the token as the secret; for a
             // client-credentials grant on Exchange Online that is the shared mailbox.
-            String token = resolver.resolveAccessToken(reference, target, null);
+            String token = xoauth2Token(resolver, reference, target, settings);
             return new String[]{settings.address(), token, "XOAUTH2"};
         } catch (ConnectionException e) {
-            throw new MailboxException(MailboxException.Category.CREDENTIAL,
+            // NOT_CONNECTED is the one an administrator fixes by linking the mailbox;
+            // its own category lets the poller tell the owners exactly that.
+            MailboxException.Category category = e.getReason() == ConnectionException.Reason.NOT_CONNECTED
+                    ? MailboxException.Category.NOT_CONNECTED
+                    : MailboxException.Category.CREDENTIAL;
+            throw new MailboxException(category,
                     "The IMAP credential of connection '" + settings.connection() + "' could not be resolved: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * The XOAUTH2 token: a {@code MAILBOX}-bound connection's grant for this
+     * integration's own address, any other OAuth connection's token as before.
+     * <p>
+     * A mailbox grant is resolved only through
+     * {@link ConnectionResolver#resolveMailboxAccessToken}, which is why the
+     * binding is read first: {@link ConnectionResolver#resolveAccessToken} refuses
+     * it, so that no other caller can ever spend it.
+     */
+    private static String xoauth2Token(ConnectionResolver resolver, String reference, URI target, EmailChannelSettings settings) {
+        if (resolver.bindingOf(reference).orElse(null) == Binding.MAILBOX) {
+            return resolver.resolveMailboxAccessToken(reference, target, settings.address());
+        }
+        return resolver.resolveAccessToken(reference, target, null);
     }
 
     private static String rootMessage(Throwable e) {

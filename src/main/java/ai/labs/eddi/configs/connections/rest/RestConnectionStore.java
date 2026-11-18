@@ -885,6 +885,14 @@ public class RestConnectionStore implements IRestConnectionStore {
                     + "could claim any userId and resolve that user's tokens, so resolution refuses outright — the connection would save "
                     + "and then fail every call. Enable OIDC, or use SERVICE binding.");
         }
+        if (connectionConfiguration.getBinding() == Binding.MAILBOX && !authorizationEnabled) {
+            // A mailbox is linked by an authenticated eddi-admin (the link endpoints
+            // refuse an anonymous caller), so with OIDC off the connection would save
+            // and no mailbox could ever be linked to it.
+            throw new BadRequestException("A MAILBOX connection requires authorization.enabled=true. A dedicated mailbox is linked by an "
+                    + "authenticated eddi-admin signing in as that mailbox, and with OIDC off every caller is anonymous — the connection "
+                    + "would save and no mailbox could ever be linked to it. Enable OIDC.");
+        }
         if (connectionConfiguration.getBinding() == Binding.CALLER_SUPPLIED && !authorizationEnabled) {
             // The credential arrives in a request header, and CallerIdentityContext
             // drops that header for an anonymous identity — deliberately, so an

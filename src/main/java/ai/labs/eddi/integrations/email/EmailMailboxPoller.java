@@ -146,6 +146,11 @@ public class EmailMailboxPoller {
             return pollOnce(integration, settings, started);
         } catch (MailboxException e) {
             outcome = "error";
+            if (e.getCategory() == MailboxException.Category.NOT_CONNECTED) {
+                // Backing off cannot fix this one: an administrator has to link the
+                // mailbox. Said once a day, beside the backoff the failure still gets.
+                ownerNotifier.notifyOnce(integrationId, integration.configuration().getName(), settings, Reason.MAILBOX_NOT_LINKED, started);
+            }
             return fail(integrationId, settings, e, started);
         } catch (RuntimeException e) {
             outcome = "error";

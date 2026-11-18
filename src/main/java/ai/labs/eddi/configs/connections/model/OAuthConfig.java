@@ -42,6 +42,18 @@ public class OAuthConfig {
      */
     public static final String THUMBPRINT_X5T = "x5t";
 
+    /**
+     * {@link #accountCheck} for a Google Workspace mailbox: the Gmail API's
+     * {@code users.getProfile}
+     * ({@code GET https://gmail.googleapis.com/gmail/v1/users/me/profile}) names
+     * the account a token belongs to, and its {@code emailAddress} must be the
+     * linked mailbox's address.
+     */
+    public static final String ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE = "google-gmail-profile";
+
+    /** Every {@link #accountCheck} value this build knows. */
+    public static final List<String> ACCOUNT_CHECKS = List.of(ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE);
+
     /** Null for {@link AuthType#OAUTH2_CLIENT_CREDENTIALS}. */
     private String authorizationUrl;
 
@@ -123,6 +135,23 @@ public class OAuthConfig {
      * SHA-1 thumbprint in {@code x5t#S256} is refused at save time.
      */
     private String certificateThumbprintHeader = THUMBPRINT_X5T_S256;
+
+    /**
+     * How a {@link Binding#MAILBOX} grant's provider account is proven to be the
+     * mailbox it is linked for — required for that binding and refused on every
+     * other one. One of {@link #ACCOUNT_CHECKS}; a named check rather than a URL,
+     * so a connection document cannot point the token it just obtained at a host of
+     * its choosing to "verify" it.
+     */
+    private String accountCheck;
+
+    public String getAccountCheck() {
+        return accountCheck;
+    }
+
+    public void setAccountCheck(String accountCheck) {
+        this.accountCheck = accountCheck;
+    }
 
     public String getAuthorizationUrl() {
         return authorizationUrl;

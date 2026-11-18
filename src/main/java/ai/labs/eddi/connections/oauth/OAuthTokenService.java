@@ -8,10 +8,12 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.connections.AccessTokenSupplier;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
@@ -120,6 +122,15 @@ public class OAuthTokenService implements AccessTokenSupplier {
      * Identifies this replica's claims, so a release cannot clear somebody else's.
      */
     private final String claimantId = UUID.randomUUID().toString();
+
+    /**
+     * Re-proves a {@code MAILBOX} grant's account after every refresh.
+     * Field-injected so the constructor the tests use stays as it is; a service
+     * built without it refuses to refresh a mailbox grant rather than skipping the
+     * check.
+     */
+    @Inject
+    MailboxAccountCheck mailboxAccountCheck;
 
     @Inject
     public OAuthTokenService(IConnectionGrantStore grantStore, OAuthTokenClient tokenClient, ISecretProvider secretProvider,
@@ -394,9 +405,16 @@ public class OAuthTokenService implements AccessTokenSupplier {
                 return unsealAccessToken(tenantId, grant, connection);
             }
             RefreshResult refreshed = requestNewToken(connection, tenantId, grant);
+            if (connection.getBinding() == Binding.MAILBOX) {
+                recheckMailboxAccount(connection, tenantId, principal, grant, refreshed);
+            }
             persist(connection, tenantId, principal, refreshed.token(), refreshed.refreshToken(), grant.getVersion());
             increment("eddi.connection.token.refresh.count", "outcome", "success");
             return refreshed.token().accessToken();
+        } catch (MailboxAccountMismatch e) {
+            // The grant is already deleted; it is neither transient nor a provider
+            // rejection to mark, so handleRefreshFailure must not see it.
+            throw e;
         } catch (ConnectionException e) {
             if (grant != null) {
                 // A grant that vanished is not a refresh failure — there is nothing to
@@ -441,6 +459,80 @@ public class OAuthTokenService implements AccessTokenSupplier {
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not release the refresh lease for connection '%s'; it will expire on its own", sanitize(connectionName));
         }
+    }
+
+    /**
+     * A refreshed {@code MAILBOX} grant whose provider account turned out not to be
+     * the mailbox. The grant has been deleted by the time this is thrown.
+     */
+    static final class MailboxAccountMismatch extends ConnectionException {
+        MailboxAccountMismatch(String message) {
+            super(Reason.NOT_CONNECTED, message);
+        }
+    }
+
+    /**
+     * Proves, before a refreshed mailbox token is used, that it still belongs to
+     * the mailbox the grant is filed under (see {@link MailboxAccountCheck}).
+     * <p>
+     * Three outcomes, three different treatments:
+     * <ul>
+     * <li><b>Match</b> — nothing to do; the caller persists as for any grant.</li>
+     * <li><b>Mismatch</b> — proof the grant is somebody else's mailbox. It is
+     * deleted inside the lease, logged as a security event, and the caller gets
+     * {@code NOT_CONNECTED}, so the next poll fails the same way until an
+     * administrator links the right account.</li>
+     * <li><b>Could not tell</b> — never a reason to delete: a Gmail API hiccup must
+     * not unlink a mailbox. But the new access token must not be served unverified
+     * either, and the refresh token the provider may just have rotated must not be
+     * lost. So the grant is written with an access token that is already expired —
+     * the next request refreshes and checks again — and this request fails
+     * transiently.</li>
+     * </ul>
+     */
+    private void recheckMailboxAccount(ConnectionConfiguration connection, String tenantId, String principal, ConnectionGrant grant,
+                                       RefreshResult refreshed) {
+        String address = MailboxGrants.addressOf(principal).orElse(null);
+        MailboxAccountCheck.Outcome outcome;
+        ConnectionException unverifiable = null;
+        if (address == null) {
+            // A MAILBOX connection's grant under a principal that names no mailbox: no
+            // flow writes one, so it is not the mailbox's.
+            outcome = MailboxAccountCheck.Outcome.MISMATCH;
+        } else if (mailboxAccountCheck == null) {
+            outcome = MailboxAccountCheck.Outcome.UNAVAILABLE;
+        } else {
+            try {
+                outcome = mailboxAccountCheck.check(connection, refreshed.token().accessToken(), address);
+            } catch (ConnectionException e) {
+                outcome = MailboxAccountCheck.Outcome.UNAVAILABLE;
+                unverifiable = e;
+            }
+        }
+        if (outcome == MailboxAccountCheck.Outcome.MATCH) {
+            return;
+        }
+        if (outcome == MailboxAccountCheck.Outcome.MISMATCH) {
+            try {
+                grantStore.delete(tenantId, connection.getName(), principal);
+            } catch (RuntimeException e) {
+                LOGGER.errorf("[SECURITY] Could not delete the mismatched mailbox grant of connection '%s' (%s); it is refused on every "
+                        + "refresh until it is", sanitize(connection.getName()), e.getClass().getSimpleName());
+            }
+            increment("eddi.connection.token.refresh.count", "outcome", "account_mismatch");
+            LOGGER.errorf("[SECURITY] A refreshed mailbox grant of connection '%s' belongs to a different provider account than the mailbox "
+                    + "it was linked for. The grant was deleted; an administrator must link the mailbox again.", sanitize(connection.getName()));
+            throw new MailboxAccountMismatch("The mailbox grant of connection '" + connection.getName() + "' no longer belongs to the "
+                    + "mailbox and was deleted. Link the mailbox again.");
+        }
+        TokenResponse token = refreshed.token();
+        persist(connection, tenantId, principal, new TokenResponse(token.accessToken(), token.refreshToken(), Duration.ZERO, token.scopes()),
+                refreshed.refreshToken(), grant.getVersion());
+        throw new ConnectionException(unverifiable != null ? unverifiable.getReason() : ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE,
+                "The refreshed token of a mailbox grant on connection '" + connection.getName() + "' could not be checked against the "
+                        + "mailbox's account"
+                        + (unverifiable != null ? ": " + unverifiable.getMessage() : "; the grant is kept and the next request checks again."),
+                unverifiable);
     }
 
     /**

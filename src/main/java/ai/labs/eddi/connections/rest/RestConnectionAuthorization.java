@@ -9,23 +9,30 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.CredentialReferenceResolver;
 import ai.labs.eddi.connections.ConnectionsConfig;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.connections.oauth.CredentialEndpointAllowlist;
 import ai.labs.eddi.connections.oauth.IOAuthStateStore;
+import ai.labs.eddi.connections.oauth.MailboxAccountCheck;
 import ai.labs.eddi.connections.oauth.OAuthState;
 import ai.labs.eddi.connections.oauth.OAuthTokenClient;
 import ai.labs.eddi.connections.oauth.OAuthTokenService;
 import ai.labs.eddi.connections.oauth.TokenResponse;
 import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.audit.AuditLedgerService;
+import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.mail.AddressNormalizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.ForbiddenException;
@@ -34,6 +41,7 @@ import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.NewCookie;
 import jakarta.ws.rs.core.Response;
+import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
@@ -49,6 +57,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
 
 /**
  * The per-user grant lifecycle.
@@ -77,6 +86,16 @@ import java.util.Map;
  * <li>a missing or mismatched binding cookie is answered exactly as an invalid
  * state is, for the same reason.</li>
  * </ul>
+ *
+ * <h3>Mailbox links ride the same flow</h3> An {@code eddi-admin} links a
+ * dedicated mailbox to a {@code MAILBOX}-bound connection through
+ * {@link #authorizeMailbox}; its state row carries the mailbox address, and
+ * this one callback branches on it. The row's principal stays the administrator
+ * (so an erasure of the administrator withdraws the pending link like any
+ * other), while the grant is filed under {@code mailbox:<address>} — and only
+ * after two checks: the provider account is the address
+ * ({@link MailboxAccountCheck}), and the address is not the administrator's
+ * own.
  */
 @ApplicationScoped
 public class RestConnectionAuthorization implements IRestConnectionAuthorization {
@@ -108,6 +127,24 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     private final SecurityIdentity securityIdentity;
     private final CredentialReferenceResolver credentialReferenceResolver;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * Verifies a mailbox link's account. Field-injected, like the two below, so the
+     * constructor the tests use is unchanged; without it every mailbox link is
+     * refused rather than stored unverified.
+     */
+    @Inject
+    MailboxAccountCheck mailboxAccountCheck;
+
+    @Inject
+    MailboxGrants mailboxGrants;
+
+    /** Where a mailbox link and unlink are recorded. Optional, as everywhere. */
+    @Inject
+    Instance<AuditLedgerService> auditLedger;
+
+    /** The trail an administrator's mailbox link and unlink are recorded on. */
+    static final String AUDIT_TRAIL = "connection-admin";
 
     @Inject
     public RestConnectionAuthorization(IOAuthStateStore stateStore, IConnectionGrantStore grantStore,
@@ -167,8 +204,113 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         stateStore.create(state);
 
         increment("eddi.connection.oauth.authorize.count", "outcome", "issued", connection);
-        return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier)))
+        return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier, Map.of())))
                 .cookie(bindingCookie(state.getState(), nonce, (int) STATE_TTL.toSeconds())).build();
+    }
+
+    @Override
+    public Response authorizeMailbox(String name, MailboxRequest request, String returnTo) {
+        requireEnabled();
+        String admin = requireAdmin();
+        requirePublicBaseUrl();
+        String address = requireMailboxAddress(request);
+        String linkerEmail = linkerEmail();
+        if (address.equals(linkerEmail)) {
+            // Refused here, where the admin is still looking, and again at the callback
+            // from the hash in the row.
+            throw new BadRequestException("The address is your own mailbox. Only a dedicated mailbox (one that is not a person's) can be "
+                    + "linked to a MAILBOX connection.");
+        }
+        CurrentConnection current = requireCurrentConnection(name);
+        ConnectionConfiguration connection = current.configuration();
+        if (!takesMailboxGrants(connection)) {
+            throw new BadRequestException("Connection '" + name + "' is " + connection.getAuthType() + " / " + connection.getBinding()
+                    + ". Mailboxes are linked only to an OAUTH2_AUTHORIZATION_CODE connection bound MAILBOX.");
+        }
+        endpointAllowlist.require(connection.getOauth().getAuthorizationUrl(), "oauth.authorizationUrl");
+        endpointAllowlist.require(connection.getOauth().getTokenUrl(), "oauth.tokenUrl");
+
+        String codeVerifier = randomUrlSafe(64);
+        String nonce = randomUrlSafe(32);
+        var state = new OAuthState();
+        state.setState(randomUrlSafe(32));
+        state.setTenantId(ConnectionConfiguration.effectiveTenant(connection));
+        state.setConnectionName(connection.getName());
+        state.setConnectionId(current.id());
+        // The administrator, not the mailbox: the row is theirs (an erasure of them
+        // withdraws it), the grant is the mailbox's.
+        state.setPrincipal(admin);
+        state.setMailboxAddress(address);
+        state.setLinkerEmailHash(linkerEmail == null ? null : sha256(linkerEmail));
+        state.setCodeVerifier(codeVerifier);
+        state.setRedirectUri(connectionsConfig.redirectUri());
+        state.setReturnTo(connectionsConfig.isAllowedReturnTo(returnTo) ? returnTo : connectionsConfig.defaultReturnTo());
+        state.setNonceHash(sha256(nonce));
+        state.setCreatedAt(Instant.now());
+        state.setExpiresAt(Instant.now().plus(STATE_TTL));
+        stateStore.create(state);
+
+        increment("eddi.connection.oauth.authorize.count", "outcome", "issued", connection);
+        return Response.ok(Map.of("authorizationUrl", buildAuthorizationUrl(connection, state, codeVerifier, mailboxLinkParams(connection, address))))
+                .cookie(bindingCookie(state.getState(), nonce, (int) STATE_TTL.toSeconds())).build();
+    }
+
+    /**
+     * What the provider needs to hand out a refresh token for the right account.
+     * Google: {@code login_hint} pre-selects the mailbox on the sign-in screen (a
+     * hint only — the account check is what enforces it), and a refresh token is
+     * issued only with {@code access_type=offline}, and on a repeat consent only
+     * with {@code prompt=consent}. They win over {@code extraAuthParams}, which
+     * cannot turn them off.
+     */
+    private static Map<String, String> mailboxLinkParams(ConnectionConfiguration connection, String address) {
+        if (OAuthConfig.ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE.equals(connection.getOauth().getAccountCheck())) {
+            var params = new LinkedHashMap<String, String>();
+            params.put("login_hint", address);
+            params.put("access_type", "offline");
+            params.put("prompt", "consent");
+            return params;
+        }
+        return Map.of("login_hint", address);
+    }
+
+    @Override
+    public Response unlinkMailbox(String name, MailboxRequest request) {
+        requireEnabled();
+        String admin = requireAdmin();
+        if (name == null || name.isBlank()) {
+            throw new BadRequestException("A connection name is required.");
+        }
+        String address = requireMailboxAddress(request);
+        // By name, without requiring the connection to exist — for the reason
+        // disconnect gives: unlinking must never be harder than linking was.
+        boolean deleted = mailboxGrants.delete(name, address);
+        audit("connection.mailbox.unlink", admin, name, address, Map.of("existed", deleted));
+        LOGGER.infof("Mailbox unlinked from connection '%s' by an administrator (existing grant: %s)", sanitize(name), deleted);
+        return Response.noContent().build();
+    }
+
+    @Override
+    public List<Map<String, Object>> listMailboxGrants(String name) {
+        requireEnabled();
+        requireAdmin();
+        if (name == null || name.isBlank()) {
+            throw new BadRequestException("A connection name is required.");
+        }
+        var results = new ArrayList<Map<String, Object>>();
+        for (ConnectionGrant grant : mailboxGrants.list(name)) {
+            // Enumerated, never serialized from the entity — see listMine.
+            var view = new LinkedHashMap<String, Object>();
+            view.put("address", MailboxGrants.addressOf(grant.getPrincipal()).orElse(null));
+            view.put("status", grant.getStatus().name());
+            view.put("usable", MailboxGrants.isUsable(grant));
+            view.put("expiresAt", grant.getExpiresAt() == null ? null : grant.getExpiresAt().toString());
+            view.put("lastRefreshAt", grant.getLastRefreshAt() == null ? null : grant.getLastRefreshAt().toString());
+            view.put("scopes", grant.getScopes());
+            view.put("connectedAt", grant.getCreatedAt() == null ? null : grant.getCreatedAt().toString());
+            results.add(view);
+        }
+        return results;
     }
 
     /**
@@ -205,7 +347,8 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         return COOKIE_PREFIX + state;
     }
 
-    private String buildAuthorizationUrl(ConnectionConfiguration connection, OAuthState state, String codeVerifier) {
+    private String buildAuthorizationUrl(ConnectionConfiguration connection, OAuthState state, String codeVerifier,
+                                         Map<String, String> flowParams) {
         var oauth = connection.getOauth();
         var params = new LinkedHashMap<String, String>();
         params.put("response_type", "code");
@@ -217,6 +360,9 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
         if (oauth.getScopes() != null && !oauth.getScopes().isEmpty()) {
             params.put("scope", String.join(" ", oauth.getScopes()));
         }
+        // The flow's own parameters (a mailbox link's login_hint, access_type and
+        // prompt) before the author's, so extraAuthParams cannot override them.
+        flowParams.forEach(params::putIfAbsent);
         if (oauth.getExtraAuthParams() != null) {
             // Validated at write time to carry no credential-shaped names; put last so
             // it cannot overwrite response_type, redirect_uri, state or the PKCE
@@ -321,24 +467,40 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
                     + "to it; the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
             return redirect(oauthState.getReturnTo(), "error", "connection_removed", expiredBindingCookie(state));
         }
-        // Same connection, but no longer the shape a user grant belongs to: an update
-        // changed its authType or binding while the user was on the consent screen.
-        // Redeeming the code anyway mints a refresh token only to discard it below,
-        // and a provider that counts or notifies linked apps has already seen one.
-        if (!takesPerUserGrants(connection)) {
+        // Same connection, but no longer the shape a grant of THIS flow belongs to: an
+        // update changed its authType or binding while the user was on the consent
+        // screen. Redeeming the code anyway mints a refresh token only to discard it
+        // below, and a provider that counts or notifies linked apps has already seen
+        // one. Keyed on the row's kind: a mailbox link never falls back to filing the
+        // grant under the administrator, nor a user link under a mailbox.
+        if (!takesGrantsOf(connection, oauthState)) {
             increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", null);
-            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; "
-                    + "the authorization code is not redeemed", sanitize(oauthState.getConnectionName()));
+            LOGGER.warnf("Connection '%s' stopped being %s while an account was being linked to it; the authorization code is not redeemed",
+                    sanitize(oauthState.getConnectionName()), expectedShape(oauthState));
             return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
+        }
+        if (oauthState.isMailboxLink() && isLinkersOwnMailbox(oauthState)) {
+            // Checked at authorize too; repeated here, before anything is exchanged,
+            // because the row is what the grant is built from.
+            increment("eddi.connection.oauth.callback.count", "outcome", "own_mailbox", connection);
+            LOGGER.warnf("A mailbox link for connection '%s' named the linking administrator's own address; nothing was exchanged",
+                    sanitize(oauthState.getConnectionName()));
+            return redirect(oauthState.getReturnTo(), "error", "mailbox_is_own", expiredBindingCookie(state));
         }
 
         try {
             TokenResponse token = tokenClient.authorizationCode(connection, resolveClientCredential(connection), code, oauthState.getCodeVerifier(),
                     oauthState.getRedirectUri());
+            if (oauthState.isMailboxLink()) {
+                String refusal = refuseUnverifiedMailbox(connection, oauthState, token);
+                if (refusal != null) {
+                    return redirect(oauthState.getReturnTo(), "error", refusal, expiredBindingCookie(state));
+                }
+            }
             // The principal comes from the CLAIMED ROW. Reading it from a query
             // parameter would let anyone who obtains a state install a grant under
             // somebody else's name.
-            ConnectionGrant stored = tokenService.persistNew(connection, oauthState.getTenantId(), oauthState.getPrincipal(), token,
+            ConnectionGrant stored = tokenService.persistNew(connection, oauthState.getTenantId(), grantPrincipal(oauthState), token,
                     token.refreshToken());
             if (!connectionStillTakesTheGrant(oauthState) || !principalNotErasedMeanwhile(oauthState)) {
                 // An update changed the connection's authType or binding after the
@@ -350,6 +512,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
                 return redirect(oauthState.getReturnTo(), "error", "exchange_failed", expiredBindingCookie(state));
             }
             increment("eddi.connection.oauth.callback.count", "outcome", "success", connection);
+            if (oauthState.isMailboxLink()) {
+                audit("connection.mailbox.link", oauthState.getPrincipal(), connection.getName(), oauthState.getMailboxAddress(), Map.of());
+                LOGGER.infof("A mailbox was linked to connection '%s' by an administrator", sanitize(connection.getName()));
+                return redirect(oauthState.getReturnTo(), "mailboxLinked", connection.getName(), expiredBindingCookie(state));
+            }
             return redirect(oauthState.getReturnTo(), "connected", connection.getName(), expiredBindingCookie(state));
         } catch (ConnectionException e) {
             increment("eddi.connection.oauth.callback.count", "outcome", "exchange_failed", connection);
@@ -447,11 +614,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
             }
             IResourceStore.IResourceId current = connectionStore.getCurrentResourceId(id);
             ConnectionConfiguration connection = connectionStore.read(id, current.getVersion());
-            if (takesPerUserGrants(connection)) {
+            if (takesGrantsOf(connection, oauthState)) {
                 return true;
             }
-            LOGGER.warnf("Connection '%s' stopped being a PER_USER authorization-code connection while an account was being linked to it; the "
-                    + "grant just stored could never be resolved and is discarded", sanitize(oauthState.getConnectionName()));
+            LOGGER.warnf("Connection '%s' stopped being %s while an account was being linked to it; the grant just stored could never be "
+                    + "resolved and is discarded", sanitize(oauthState.getConnectionName()), expectedShape(oauthState));
             return false;
         } catch (IResourceStore.ResourceNotFoundException e) {
             LOGGER.warnf("Connection '%s' was deleted while an account was being linked to it; the grant just stored is discarded",
@@ -559,6 +726,129 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
     }
 
     /**
+     * Whether a connection is the shape a dedicated mailbox's grant is filed under.
+     */
+    private static boolean takesMailboxGrants(ConnectionConfiguration connection) {
+        return connection != null && connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() == Binding.MAILBOX;
+    }
+
+    /** The shape check for the kind of flow a state row started. */
+    private static boolean takesGrantsOf(ConnectionConfiguration connection, OAuthState oauthState) {
+        return oauthState.isMailboxLink() ? takesMailboxGrants(connection) : takesPerUserGrants(connection);
+    }
+
+    private static String expectedShape(OAuthState oauthState) {
+        return oauthState.isMailboxLink() ? "a MAILBOX authorization-code connection" : "a PER_USER authorization-code connection";
+    }
+
+    /**
+     * Whom the grant of this flow is filed under: the mailbox on a mailbox link,
+     * the user who started it otherwise. One helper, so the write and the discard
+     * that may take it back can never name two different principals.
+     */
+    private static String grantPrincipal(OAuthState oauthState) {
+        return oauthState.isMailboxLink() ? MailboxGrants.principalOf(oauthState.getMailboxAddress()) : oauthState.getPrincipal();
+    }
+
+    /** Whether a mailbox link's address is the linking administrator's own. */
+    private static boolean isLinkersOwnMailbox(OAuthState oauthState) {
+        String hash = oauthState.getLinkerEmailHash();
+        return hash != null && MessageDigest.isEqual(hash.getBytes(StandardCharsets.US_ASCII),
+                sha256(oauthState.getMailboxAddress()).getBytes(StandardCharsets.US_ASCII));
+    }
+
+    /**
+     * The account check of a mailbox link, run on the freshly exchanged token
+     * before anything is stored.
+     *
+     * @return the {@code error} code to redirect with, or {@code null} when the
+     *         account is the mailbox
+     */
+    private String refuseUnverifiedMailbox(ConnectionConfiguration connection, OAuthState oauthState, TokenResponse token) {
+        MailboxAccountCheck.Outcome outcome;
+        try {
+            outcome = mailboxAccountCheck == null
+                    ? MailboxAccountCheck.Outcome.UNAVAILABLE
+                    : mailboxAccountCheck.check(connection, token.accessToken(), oauthState.getMailboxAddress());
+        } catch (ConnectionException e) {
+            LOGGER.warnf("The account of a mailbox link for connection '%s' could not be checked: %s", sanitize(connection.getName()),
+                    e.getMessage());
+            outcome = MailboxAccountCheck.Outcome.UNAVAILABLE;
+        }
+        if (outcome == MailboxAccountCheck.Outcome.MATCH) {
+            return null;
+        }
+        if (outcome == MailboxAccountCheck.Outcome.MISMATCH) {
+            increment("eddi.connection.oauth.callback.count", "outcome", "account_mismatch", connection);
+            LOGGER.warnf("[SECURITY] A mailbox link for connection '%s' was completed by a provider account that is not the requested "
+                    + "mailbox; nothing was stored. Sign in as the mailbox itself.", sanitize(connection.getName()));
+            return "mailbox_account_mismatch";
+        }
+        increment("eddi.connection.oauth.callback.count", "outcome", "account_unverified", connection);
+        return "mailbox_account_unverified";
+    }
+
+    /**
+     * The administrator a mailbox route acts for, or a refusal. The role is checked
+     * in code too: {@code @RolesAllowed} is a no-op with authorization disabled,
+     * and there the identity is anonymous and {@link #requirePrincipal} refuses
+     * first.
+     */
+    private String requireAdmin() {
+        String principal = requirePrincipal();
+        if (!securityIdentity.hasRole("eddi-admin")) {
+            throw new ForbiddenException("Linking and unlinking a dedicated mailbox requires the eddi-admin role.");
+        }
+        return principal;
+    }
+
+    private static String requireMailboxAddress(MailboxRequest request) {
+        String raw = request == null ? null : request.address();
+        return AddressNormalizer.tryNormalize(raw)
+                .orElseThrow(() -> new BadRequestException("'address' must be the dedicated mailbox's plain email address."));
+    }
+
+    /**
+     * The linking administrator's own address — the token's {@code email} claim,
+     * normalised — or {@code null} when the token carries none. Without one the
+     * own-mailbox refusal cannot apply; the account check still binds the grant to
+     * the requested address.
+     */
+    private String linkerEmail() {
+        if (securityIdentity == null || !(securityIdentity.getPrincipal() instanceof JsonWebToken jwt)) {
+            return null;
+        }
+        Object email = jwt.getClaim("email");
+        return email == null ? null : AddressNormalizer.tryNormalize(email.toString()).orElse(null);
+    }
+
+    /**
+     * One audit-ledger record of an administrator's mailbox link or unlink. Never
+     * throws: an action's outcome must not depend on whether it was written down.
+     * The address is a dedicated mailbox's, not a person's.
+     */
+    private void audit(String action, String admin, String connectionName, String address, Map<String, Object> outcome) {
+        if (auditLedger == null || !auditLedger.isResolvable()) {
+            return;
+        }
+        try {
+            AuditLedgerService ledger = auditLedger.get();
+            if (!ledger.isEnabled()) {
+                return;
+            }
+            var input = new LinkedHashMap<String, Object>();
+            input.put("action", action);
+            input.put("connection", connectionName);
+            input.put("mailbox", address);
+            ledger.submit(new AuditEntry(UUID.randomUUID().toString(), AUDIT_TRAIL, null, null, admin, null, 0, "ai.labs.connections.mailbox",
+                    "connection-admin", 0, 0, input, new LinkedHashMap<>(outcome), null, null, List.of(action), 0.0, Instant.now(), null, null));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not write the audit entry of %s for connection '%s': %s", action, sanitize(connectionName),
+                    e.getClass().getSimpleName());
+        }
+    }
+
+    /**
      * Takes back the grant this callback stored — and only that write. The
      * principal comes from the claimed state row, as it did for the write, and the
      * delete is conditional on the IV the write was sealed with: a later link of
@@ -567,7 +857,7 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      */
     private void discardGrant(OAuthState oauthState, ConnectionGrant stored) {
         try {
-            boolean discarded = grantStore.deleteIfSealedWith(oauthState.getTenantId(), oauthState.getConnectionName(), oauthState.getPrincipal(),
+            boolean discarded = grantStore.deleteIfSealedWith(oauthState.getTenantId(), oauthState.getConnectionName(), grantPrincipal(oauthState),
                     stored == null ? null : stored.getAccessTokenIv());
             if (!discarded) {
                 LOGGER.infof("The grant just stored for connection '%s' had already been replaced or removed; nothing was discarded",

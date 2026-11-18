@@ -49,5 +49,26 @@ public enum Binding {
      * carries a credential for a different system entirely, to wherever the
      * connection's {@code baseUrlAllowlist} permits.
      */
-    CALLER_SUPPLIED
+    CALLER_SUPPLIED,
+
+    /**
+     * One grant per <em>dedicated mailbox</em>, linked by an administrator, used
+     * only by the email channel's mail transport (IMAP and SMTP {@code XOAUTH2}).
+     * <p>
+     * Legal only with {@code OAUTH2_AUTHORIZATION_CODE}: a Google Workspace user
+     * mailbox can only be reached with the authorization-code flow (domain-wide
+     * delegation is deliberately out), so somebody has to sign in as the mailbox
+     * once. That somebody is an {@code eddi-admin} acting for the mailbox, not a
+     * person acting for themselves, which is why it is not {@link #PER_USER}: the
+     * grant is filed under the principal {@code mailbox:<address>}, a reserved
+     * namespace no user can carry, and the connection's {@code oauth.accountCheck}
+     * proves at link time and on every refresh that the provider account really is
+     * that address.
+     * <p>
+     * A mailbox grant reads and sends the mailbox's whole mail, so every resolver
+     * entry point other than the mail transport's refuses it
+     * ({@code UNSUPPORTED_PLACEMENT}): httpcalls, MCP, A2A, ingestion and the
+     * system mailer can never spend it.
+     */
+    MAILBOX
 }
