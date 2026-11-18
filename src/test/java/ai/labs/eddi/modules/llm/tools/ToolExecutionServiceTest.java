@@ -92,6 +92,21 @@ class ToolExecutionServiceTest {
         }
 
         @Test
+        @DisplayName("an in-band 'Error:' result is not cached; a normal answer still is")
+        void inBandErrorIsNotCached() {
+            when(rateLimiter.tryAcquire("conv-1", "calc", 60)).thenReturn(true);
+            when(cacheService.get(SCOPE, "calc", "args")).thenReturn(null);
+
+            var failed = service.executeToolWrapped("calc", "args", SCOPE, "conv-1", () -> "Error: Division by zero", true, true, true, 60);
+            assertEquals("Error: Division by zero", failed);
+            verify(cacheService, never()).put(any(), any(ToolInvocation.class), any(), any());
+
+            var answered = service.executeToolWrapped("calc", "args", SCOPE, "conv-1", () -> "4", true, true, true, 60);
+            assertEquals("4", answered);
+            verify(cacheService).put(eq(SCOPE), any(ToolInvocation.class), eq("args"), eq("4"));
+        }
+
+        @Test
         @DisplayName("a typed failure wrapped by langchain4j's executor is still recognised")
         void wrappedTypedFailure() {
             var result = service.executeToolWrapped("t", "args", null, "conv-1", () -> {

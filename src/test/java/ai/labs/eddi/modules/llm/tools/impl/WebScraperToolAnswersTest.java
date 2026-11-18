@@ -1,0 +1,112 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.modules.llm.tools.impl;
+
+import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
+import ai.labs.eddi.engine.httpclient.outbound.OutboundResponse;
+import ai.labs.eddi.modules.ingestion.HtmlToMarkdownConverter;
+import ai.labs.eddi.modules.llm.tools.ToolFailureException;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+import java.net.URI;
+import java.nio.charset.Charset;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
+
+/**
+ * The scraper must not present a mis-read page as the page (review P3):
+ * relative links resolve against the fetched URL, the declared charset decodes
+ * the body, and a body that is not text is refused.
+ */
+class WebScraperToolAnswersTest {
+
+    private OutboundHttp http;
+    private WebScraperTool tool;
+
+    @BeforeEach
+    void setUp() {
+        http = mock(OutboundHttp.class);
+        tool = new WebScraperTool(http, new HtmlToMarkdownConverter());
+    }
+
+    private void answer(String finalUri, Map<String, List<String>> headers, byte[] body) throws Exception {
+        when(http.send(any(OutboundRequest.class), any()))
+                .thenReturn(new OutboundResponse<>(200, null, OutboundRequest.caseInsensitiveCopy(headers), URI.create(finalUri), List.of(), body,
+                        false));
+    }
+
+    @Test
+    void relativeLinksResolveAgainstTheFetchedUrlAfterRedirects() throws Exception {
+        answer("https://docs.example.org/guide/index.html", Map.of(),
+                "<html><body><a href='/about'>About</a><a href='intro.html'>Intro</a><a href='https://x.test/abs'>Abs</a></body></html>"
+                        .getBytes(StandardCharsets.UTF_8));
+
+        String result = tool.extractLinks("https://example.com/start", 10);
+
+        assertTrue(result.contains("https://docs.example.org/about"), result);
+        assertTrue(result.contains("https://docs.example.org/guide/intro.html"), result);
+        assertTrue(result.contains("https://x.test/abs"), result);
+        assertFalse(result.contains("No links found"), result);
+    }
+
+    @Test
+    void declaredCharsetDecodesTheBody() throws Exception {
+        String page = "<html><head><title>Grüße</title></head><body><p>Café über</p></body></html>";
+        answer("https://example.test/", Map.of("Content-Type", List.of("text/html; charset=ISO-8859-1")),
+                page.getBytes(Charset.forName("ISO-8859-1")));
+
+        String result = tool.extractWebPageText("https://example.com");
+
+        assertTrue(result.contains("Café über"), result);
+    }
+
+    @Test
+    void metaCharsetIsHonouredWhenTheHeaderDeclaresNone() throws Exception {
+        String page = "<html><head><meta charset=\"windows-1252\"><title>t</title></head><body><p>naïve été</p></body></html>";
+        answer("https://example.test/", Map.of(), page.getBytes(Charset.forName("windows-1252")));
+
+        assertTrue(tool.extractWebPageText("https://example.com").contains("naïve été"));
+    }
+
+    @Test
+    void undeclaredCharsetStaysUtf8() throws Exception {
+        answer("https://example.test/", Map.of(), "<html><body><p>中文</p></body></html>".getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(tool.extractWebPageText("https://example.com").contains("中文"));
+    }
+
+    @Test
+    void nonTextContentIsRefusedWithAClearMessage() throws Exception {
+        answer("https://example.test/file.pdf", Map.of("Content-Type", List.of("application/pdf")), new byte[]{'%', 'P', 'D', 'F', 0, 1, 2});
+
+        ToolFailureException refused = assertThrows(ToolFailureException.class, () -> tool.extractWebPageText("https://example.com/file.pdf"));
+
+        assertTrue(refused.getMessage().startsWith("Error:"), refused.getMessage());
+        assertTrue(refused.getMessage().contains("application/pdf"), refused.getMessage());
+    }
+
+    @Test
+    void contentTypePolicy() {
+        assertNull(WebScraperTool.nonTextRefusal(null));
+        assertNull(WebScraperTool.nonTextRefusal("text/html; charset=utf-8"));
+        assertNull(WebScraperTool.nonTextRefusal("application/xhtml+xml"));
+        assertNull(WebScraperTool.nonTextRefusal("application/ld+json"));
+        assertEquals(StandardCharsets.UTF_8, WebScraperTool.charsetOf("text/html; charset=nonsense-charset", new byte[0]));
+        assertTrue(WebScraperTool.nonTextRefusal("image/png").contains("image/png"));
+        assertTrue(WebScraperTool.nonTextRefusal("application/octet-stream").startsWith("Error:"));
+    }
+}

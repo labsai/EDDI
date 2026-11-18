@@ -10,6 +10,7 @@ import jakarta.enterprise.context.ApplicationScoped;
 import org.jboss.logging.Logger;
 
 import java.math.BigDecimal;
+import java.math.MathContext;
 import java.math.RoundingMode;
 import java.util.function.DoubleBinaryOperator;
 import java.util.function.DoubleUnaryOperator;
@@ -53,20 +54,13 @@ public class CalculatorTool {
 
             double result = new SafeMathParser(expression).parse();
 
-            // Handle special values
-            if (Double.isNaN(result)) {
-                return "NaN";
-            }
-            if (Double.isInfinite(result)) {
-                return result > 0 ? "Infinity" : "-Infinity";
+            // The parser refuses non-finite intermediate results; this is the last guard
+            // so "Infinity" or "NaN" can never be presented as an answer.
+            if (Double.isNaN(result) || Double.isInfinite(result)) {
+                return "Error: " + NOT_FINITE;
             }
 
-            // Round to reasonable precision
-            BigDecimal decimal = BigDecimal.valueOf(result);
-            decimal = decimal.setScale(10, RoundingMode.HALF_UP);
-            decimal = decimal.stripTrailingZeros();
-
-            String resultStr = decimal.toPlainString();
+            String resultStr = format(result);
             LOGGER.debugf("Calculation result: %s = %s", sanitize(expression), resultStr);
             return resultStr;
 
@@ -81,6 +75,23 @@ public class CalculatorTool {
             LOGGER.error("Unexpected calculation error", e);
             return "Error: An unexpected error occurred during calculation.";
         }
+    }
+
+    private static final String NOT_FINITE = "The result is not a finite number (overflow, or an undefined operation such as sqrt of a negative number).";
+
+    /**
+     * Ten decimal places for ordinary magnitudes; below 1e-4 that would print
+     * {@code 0} for a real, small result (anything under 5e-11), so ten significant
+     * digits in scientific notation are used instead.
+     */
+    static String format(double result) {
+        BigDecimal decimal = BigDecimal.valueOf(result);
+        if (result != 0 && Math.abs(result) < 1e-4) {
+            return decimal.round(new MathContext(10, RoundingMode.HALF_UP)).stripTrailingZeros().toString();
+        }
+        decimal = decimal.setScale(10, RoundingMode.HALF_UP);
+        decimal = decimal.stripTrailingZeros();
+        return decimal.toPlainString();
     }
 
     @Tool("Converts between different units of measurement")
@@ -179,10 +190,10 @@ public class CalculatorTool {
                 char c = expression.charAt(pos);
                 if (c == '+') {
                     pos++;
-                    result += parseTerm();
+                    result = finite(result + parseTerm());
                 } else if (c == '-') {
                     pos++;
-                    result -= parseTerm();
+                    result = finite(result - parseTerm());
                 } else {
                     break;
                 }
@@ -198,13 +209,21 @@ public class CalculatorTool {
                 char c = expression.charAt(pos);
                 if (c == '*') {
                     pos++;
-                    result *= parsePower();
+                    result = finite(result * parsePower());
                 } else if (c == '/') {
                     pos++;
-                    result /= parsePower();
+                    double divisor = parsePower();
+                    if (divisor == 0) {
+                        throw new IllegalArgumentException("Division by zero");
+                    }
+                    result = finite(result / divisor);
                 } else if (c == '%') {
                     pos++;
-                    result %= parsePower();
+                    double divisor = parsePower();
+                    if (divisor == 0) {
+                        throw new IllegalArgumentException("Division by zero (modulo)");
+                    }
+                    result = finite(result % divisor);
                 } else {
                     break;
                 }
@@ -219,7 +238,7 @@ public class CalculatorTool {
             if (pos < expression.length() && expression.charAt(pos) == '^') {
                 pos++;
                 double exponent = parsePower(); // Right-recursive for right-associativity
-                return Math.pow(base, exponent);
+                return finite(Math.pow(base, exponent));
             }
             return base;
         }
@@ -278,7 +297,7 @@ public class CalculatorTool {
                 case "abs" -> callOneArg(Math::abs);
                 case "ceil" -> callOneArg(Math::ceil);
                 case "floor" -> callOneArg(Math::floor);
-                case "round" -> callOneArg(v -> (double) Math.round(v));
+                case "round" -> callOneArg(SafeMathParser::roundHalfUp);
                 case "sin" -> callOneArg(Math::sin);
                 case "cos" -> callOneArg(Math::cos);
                 case "tan" -> callOneArg(Math::tan);
@@ -307,7 +326,26 @@ public class CalculatorTool {
             expect('(');
             double arg = parseExpression();
             expect(')');
-            return fn.applyAsDouble(arg);
+            return finite(fn.applyAsDouble(arg));
+        }
+
+        /**
+         * Round half up without {@link Math#round}'s saturation at the {@code long}
+         * range: from 2^52 on every double is already an integer.
+         */
+        static double roundHalfUp(double v) {
+            if (Double.isNaN(v) || Double.isInfinite(v) || Math.abs(v) >= 4503599627370496.0) {
+                return v;
+            }
+            return Math.floor(v + 0.5);
+        }
+
+        /** Refuses NaN and infinities so they cannot propagate into an answer. */
+        private static double finite(double v) {
+            if (Double.isNaN(v) || Double.isInfinite(v)) {
+                throw new IllegalArgumentException(NOT_FINITE);
+            }
+            return v;
         }
 
         private double callTwoArgs(DoubleBinaryOperator fn) {
@@ -316,7 +354,7 @@ public class CalculatorTool {
             expect(',');
             double arg2 = parseExpression();
             expect(')');
-            return fn.applyAsDouble(arg1, arg2);
+            return finite(fn.applyAsDouble(arg1, arg2));
         }
 
         private double parseNumber() {

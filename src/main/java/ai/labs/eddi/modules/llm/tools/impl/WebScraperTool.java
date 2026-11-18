@@ -31,10 +31,12 @@ import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -215,7 +217,7 @@ public class WebScraperTool {
             // dump, which dropped page titles living in <article><header><h1> and
             // merged adjacent blocks into single words. The converter keeps the
             // structure an LLM can actually use — headings, lists, tables, code.
-            return page.annotate(parseBounded(() -> htmlToMarkdownConverter.convert(page.html(), url, MAX_EXTRACTED_CHARACTERS)));
+            return page.annotate(parseBounded(() -> htmlToMarkdownConverter.convert(page.html(), page.baseUri(), MAX_EXTRACTED_CHARACTERS)));
 
         } catch (ToolFailureException e) {
             throw e;
@@ -240,7 +242,9 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting links from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Elements links = parseBounded(() -> Jsoup.parse(page.html()).select("a[href]"));
+            // The base URI is where the page was served (after redirects): without it
+            // abs:href is empty for every relative link and the tool reported "No links".
+            Elements links = parseBounded(() -> Jsoup.parse(page.html(), page.baseUri()).select("a[href]"));
 
             StringBuilder result = new StringBuilder();
             result.append("Links found on ").append(url).append(":\n\n");
@@ -294,7 +298,7 @@ public class WebScraperTool {
             FetchedPage page = fetchUrl(url);
             boolean positional = usesPositionalPseudo(cssSelector);
             Elements elements = parseBounded(() -> {
-                Document doc = Jsoup.parse(page.html());
+                Document doc = Jsoup.parse(page.html(), page.baseUri());
                 return positional && siblingScanWork(doc) > MAX_POSITIONAL_SCAN_WORK ? null : doc.select(cssSelector);
             });
             if (elements == null) {
@@ -603,7 +607,7 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting metadata from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Document doc = parseBounded(() -> Jsoup.parse(page.html()));
+            Document doc = parseBounded(() -> Jsoup.parse(page.html(), page.baseUri()));
 
             StringBuilder result = new StringBuilder();
             result.append("Metadata for ").append(url).append(":\n\n");
@@ -739,8 +743,17 @@ public class WebScraperTool {
             throw new IOException("HTTP " + response.status() + " for URL: " + url);
         }
 
+        // Relative links resolve against where the page ended up, after redirects.
+        String baseUri = response.finalUri() != null ? response.finalUri().toString() : url;
+        String contentType = response.headers() != null ? response.firstHeader("Content-Type").orElse(null) : null;
+        String refusal = nonTextRefusal(contentType);
+        if (refusal != null) {
+            throw new ToolFailureException(refusal);
+        }
+        Charset charset = charsetOf(contentType, response.body());
+
         if (!response.truncated()) {
-            return new FetchedPage(new String(response.body(), StandardCharsets.UTF_8), null);
+            return new FetchedPage(new String(response.body(), charset), null, baseUri);
         }
         // A truncated body is either over the size cap or cut off by the read
         // deadline; the flag does not say which. Both leave a partial page, so the
@@ -750,9 +763,79 @@ public class WebScraperTool {
         LOGGER.warnf("Response from %s was truncated (size cap of %d bytes or read deadline); returning partial content", sanitize(url),
                 maxResponseBytes);
         byte[] body = response.body();
-        String html = new String(body, 0, completeUtf8Length(body), StandardCharsets.UTF_8);
+        int length = StandardCharsets.UTF_8.equals(charset) ? completeUtf8Length(body) : body.length;
+        String html = new String(body, 0, length, charset);
         return new FetchedPage(html, "\n\n[Note: the page response was truncated (it exceeded " + maxResponseBytes
-                + " bytes or the read deadline expired); the content above is partial.]");
+                + " bytes or the read deadline expired); the content above is partial.]", baseUri);
+    }
+
+    private static final Pattern CHARSET_PARAMETER = Pattern.compile("charset\\s*=\\s*[\"']?([A-Za-z0-9_.:\\-]+)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * A clear refusal for a body that is not text (an image, a PDF, a download),
+     * which decoded as text is noise the model would treat as the page. No declared
+     * type is read as HTML.
+     *
+     * @return the message, or {@code null} when the type is readable as text
+     */
+    static String nonTextRefusal(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return null;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        boolean text = mediaType.startsWith("text/") || mediaType.endsWith("+xml") || mediaType.endsWith("+json")
+                || mediaType.equals("application/xml") || mediaType.equals("application/json") || mediaType.equals("application/xhtml+xml");
+        return text
+                ? null
+                : "Error: the URL returned '" + mediaType + "', which is not a text page. This tool reads HTML and other text only.";
+    }
+
+    /**
+     * The charset the page declares: the {@code Content-Type} header first, then a
+     * byte order mark, then a {@code <meta charset>} / {@code http-equiv} in the
+     * first 2 KB; UTF-8 when none is declared or the name is not a charset the JVM
+     * knows.
+     */
+    static Charset charsetOf(String contentType, byte[] body) {
+        if (contentType != null) {
+            var declared = CHARSET_PARAMETER.matcher(contentType);
+            if (declared.find()) {
+                Charset charset = lookup(declared.group(1));
+                if (charset != null) {
+                    return charset;
+                }
+            }
+        }
+        if (body != null && body.length >= 2) {
+            if ((body[0] & 0xFF) == 0xFE && (body[1] & 0xFF) == 0xFF) {
+                return StandardCharsets.UTF_16BE;
+            }
+            if ((body[0] & 0xFF) == 0xFF && (body[1] & 0xFF) == 0xFE) {
+                return StandardCharsets.UTF_16LE;
+            }
+        }
+        if (body != null) {
+            // ASCII-compatible read of the head, where a <meta> declaration lives.
+            String head = new String(body, 0, Math.min(body.length, 2048), StandardCharsets.ISO_8859_1);
+            var meta = META_CHARSET.matcher(head);
+            if (meta.find()) {
+                Charset charset = lookup(meta.group(1));
+                if (charset != null) {
+                    return charset;
+                }
+            }
+        }
+        return StandardCharsets.UTF_8;
+    }
+
+    private static final Pattern META_CHARSET = Pattern.compile("<meta[^>]+charset\\s*=\\s*[\"']?([A-Za-z0-9_.:\\-]+)", Pattern.CASE_INSENSITIVE);
+
+    private static Charset lookup(String name) {
+        try {
+            return Charset.forName(name);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
     }
 
     /**
@@ -778,7 +861,7 @@ public class WebScraperTool {
      * A fetched page and, when the body was truncated, the note to append to the
      * tool's output.
      */
-    private record FetchedPage(String html, String truncationNote) {
+    private record FetchedPage(String html, String truncationNote, String baseUri) {
         String annotate(String output) {
             return truncationNote == null ? output : output + truncationNote;
         }
