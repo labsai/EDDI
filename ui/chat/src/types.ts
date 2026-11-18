@@ -36,6 +36,15 @@ export { END_REASON_AGENT_VERSION_RETIRED } from "@eddi/core";
 export interface ChatConfig {
   /** API base URL. Default: `window.location.origin` */
   apiBaseUrl?: string;
+  /**
+   * Send an `Idempotency-Key` with every turn even though `apiBaseUrl` is on
+   * another origin, so a retry after a timeout is answered from the stored turn
+   * instead of running again. Default: off. The backend must allow the header
+   * (`idempotency-key` in `quarkus.http.cors.headers`, which the default list
+   * has); if it does not, every send fails its preflight. On the page's own
+   * origin the key is always sent.
+   */
+  idempotencyKeys?: boolean;
   /** Theme mode. Default: `"dark"` */
   theme?: "dark" | "light" | "system";
   /**

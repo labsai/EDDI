@@ -31,6 +31,7 @@ import {
 
 import {
   fetchAgentProfile,
+  defaultHttp,
   setBaseUrl,
   setAuthToken,
   parseRatingProfile,
@@ -312,7 +313,8 @@ export function ChatWidget() {
   /* ─── Set base URL + auth on mount ──────────── */
   useEffect(() => {
     setBaseUrl(sanitizeApiServer(apiServer) ?? state.config.apiBaseUrl ?? "");
-  }, [apiServer, state.config.apiBaseUrl]);
+    defaultHttp.setIdempotencyKeys(state.config.idempotencyKeys === true);
+  }, [apiServer, state.config.apiBaseUrl, state.config.idempotencyKeys]);
 
   useEffect(() => {
     // Query param is a convenience for embedding; config is the real channel.

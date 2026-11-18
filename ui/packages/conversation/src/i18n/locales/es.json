@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "La detención no pudo llegar al servidor. Puede que el turno siga ejecutándose allí; vuelve a abrir la conversación para ver cómo terminó.",
   "conversation.diagram.label": "Diagrama",
   "conversation.diagram.source": "Código del diagrama",
-  "conversation.send.unknownOutcome": "⚠️ Todavía no ha llegado ninguna respuesta. Puede que el agente siga trabajando en tu mensaje, por eso se queda arriba. Vuelve a comprobarlo en un momento o envíalo de nuevo: no se procesará dos veces.",
+  "conversation.send.unknownOutcome": "⚠️ Todavía no ha llegado ninguna respuesta. Puede que el agente siga trabajando en tu mensaje, por eso se queda arriba. Vuelve a comprobarlo en un momento. Si lo envías de nuevo en pocos minutos, el agente normalmente no lo responderá dos veces; si ha pasado más tiempo, mira primero la conversación.",
   "conversation.send.turnFailed": "⚠️ El agente no pudo completar este turno. Tu mensaje está arriba: reinténtalo para enviarlo de nuevo.",
   "conversation.send.empty": "El agente terminó sin dar una respuesta a este mensaje. Puedes reformularlo o intentarlo de nuevo.",
-  "conversation.reply.revised": "La respuesta se revisó después de llegar en directo; lo que ves ahora es la versión final."
+  "conversation.reply.revised": "La respuesta final difiere de la vista previa que llegó en directo.",
+  "conversation.send.unknownOutcomeStale": "⚠️ Todavía no ha llegado ninguna respuesta. Puede que el agente siga trabajando en tu mensaje o que ya lo haya respondido. Mira la conversación antes de enviarlo de nuevo.",
+  "conversation.send.notStored": "⚠️ El agente ejecutó este turno, pero no se pudo guardar su respuesta. Tu mensaje se queda arriba. Si lo envías de nuevo, el turno se ejecuta otra vez.",
+  "conversation.send.notStoredTooLarge": "⚠️ El agente ejecutó este turno, pero no se pudo guardar su respuesta porque la conversación es demasiado grande. Empieza una conversación nueva para continuar."
 }

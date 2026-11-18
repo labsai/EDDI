@@ -797,6 +797,9 @@ function patchLastAgent(patch: (last: ChatMessage) => ChatMessage): void {
  */
 async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext): Promise<boolean> {
   const store = useChatStore;
+  // The turn ran and its result was not saved: the controller's notice says so
+  // (and what sending again does); "Retry Last Step" would re-run the step before.
+  if (failure.class === "notStored") return false;
   if (failure.kind === "streamError") {
     // A known code gets a sentence in the reader's language that says what to
     // do next. The backend message is kept as the fallback: an unrecognised

@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou.",
   "conversation.diagram.label": "Diagrama",
   "conversation.diagram.source": "Código do diagrama",
-  "conversation.send.unknownOutcome": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem, por isso ela permanece acima. Verifique novamente daqui a pouco ou envie-a de novo — não será processada duas vezes.",
+  "conversation.send.unknownOutcome": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem, por isso ela permanece acima. Verifique novamente daqui a pouco. Se a enviar de novo dentro de poucos minutos, o agente normalmente não a responderá duas vezes; se já passou mais tempo, veja primeiro a conversa.",
   "conversation.send.turnFailed": "⚠️ O agente não conseguiu concluir este turno. A sua mensagem está acima — tente novamente para a enviar outra vez.",
   "conversation.send.empty": "O agente terminou sem dar uma resposta a esta mensagem. Pode reformulá-la ou tentar novamente.",
-  "conversation.reply.revised": "A resposta foi revista depois de ser transmitida; o que vê agora é a versão final."
+  "conversation.reply.revised": "A resposta final difere da pré-visualização que foi sendo apresentada.",
+  "conversation.send.unknownOutcomeStale": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem ou já a ter respondido. Veja a conversa antes de a enviar de novo.",
+  "conversation.send.notStored": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta. A sua mensagem permanece acima. Enviá-la de novo executa o turno outra vez.",
+  "conversation.send.notStoredTooLarge": "⚠️ O agente executou este turno, mas não foi possível guardar a resposta porque a conversa é demasiado grande. Inicie uma nova conversa para continuar."
 }

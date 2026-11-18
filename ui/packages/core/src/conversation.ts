@@ -96,8 +96,8 @@ export function newIdempotencyKey(): string {
   return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
 }
 
-function keyHeader(key: string | undefined): Record<string, string> {
-  return key ? { [IDEMPOTENCY_KEY_HEADER]: key } : {};
+function keyHeader(http: HttpClient, key: string | undefined): Record<string, string> {
+  return key && http.sendsIdempotencyKeys() ? { [IDEMPOTENCY_KEY_HEADER]: key } : {};
 }
 
 export interface RerunOptions {
@@ -197,7 +197,7 @@ export function createConversationApi(http: HttpClient) {
       `/agents/${encodeSegment(conversationId)}?${params}`,
       {
         method: "POST",
-        headers: { "Content-Type": json ? "application/json" : "text/plain", ...keyHeader(options.idempotencyKey) },
+        headers: { "Content-Type": json ? "application/json" : "text/plain", ...keyHeader(http, options.idempotencyKey) },
         body: json ? JSON.stringify({ input: message, context: options.context }) : message,
         signal: options.signal,
       },
@@ -223,7 +223,7 @@ export function createConversationApi(http: HttpClient) {
       `/agents/${encodeSegment(conversationId)}/stream`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...keyHeader(options.idempotencyKey) },
+        headers: { "Content-Type": "application/json", ...keyHeader(http, options.idempotencyKey) },
         body: JSON.stringify(body),
         signal: options.signal,
       },
@@ -334,7 +334,7 @@ export function createConversationApi(http: HttpClient) {
       managedPath(intent, userId),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json", ...keyHeader(idempotencyKey) },
+        headers: { "Content-Type": "application/json", ...keyHeader(http, idempotencyKey) },
         body: JSON.stringify(body),
         signal,
       },

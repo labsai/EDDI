@@ -18,7 +18,7 @@ vi.mock("@eddi/app-kit/lib/api/chat", async (importOriginal) => {
       for (const frame of h.frames) {
         yield frame as SSEEvent;
       }
-      throw new Error("socket closed");
+      throw new TypeError("socket closed");
     },
   };
 });

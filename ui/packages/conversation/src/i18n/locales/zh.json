@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "停止请求未能到达服务器。这一轮可能仍在运行；请重新打开对话查看结果。",
   "conversation.diagram.label": "图表",
   "conversation.diagram.source": "图表源代码",
-  "conversation.send.unknownOutcome": "⚠️ 尚未收到回复。智能体可能仍在处理你的消息，所以消息保留在上方。请稍后再查看，或重新发送——不会被重复处理。",
+  "conversation.send.unknownOutcome": "⚠️ 尚未收到回复。智能体可能仍在处理你的消息，所以消息保留在上方。请稍后再查看。如果几分钟内重新发送，智能体通常不会对同一条消息回答两次；如果已过去更久，请先查看对话。",
   "conversation.send.turnFailed": "⚠️ 智能体未能完成这一轮。你的消息在上方——重试即可再次发送。",
   "conversation.send.empty": "智能体结束了，但没有回复这条消息。你可以换个说法，或再试一次。",
-  "conversation.reply.revised": "回复在流式显示后做了修订；你现在看到的是最终版本。"
+  "conversation.reply.revised": "最终回复与流式显示的预览不同。",
+  "conversation.send.unknownOutcomeStale": "⚠️ 尚未收到回复。智能体可能仍在处理你的消息，或已经回答过了。重新发送之前请先查看对话。",
+  "conversation.send.notStored": "⚠️ 智能体已执行这一轮，但回复未能保存。你的消息保留在上方。重新发送会再次执行这一轮。",
+  "conversation.send.notStoredTooLarge": "⚠️ 智能体已执行这一轮，但由于对话过大，回复未能保存。请开始新的对话以继续。"
 }

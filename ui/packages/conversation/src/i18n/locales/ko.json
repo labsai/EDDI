@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "중지 요청이 서버에 닿지 못했습니다. 차례가 아직 실행 중일 수 있으니 대화를 다시 열어 결과를 확인하세요.",
   "conversation.diagram.label": "다이어그램",
   "conversation.diagram.source": "다이어그램 소스",
-  "conversation.send.unknownOutcome": "⚠️ 아직 답변이 도착하지 않았습니다. 에이전트가 메시지를 계속 처리하고 있을 수 있어 메시지는 위에 그대로 둡니다. 잠시 후 다시 확인하거나 다시 보내 주세요. 두 번 처리되지 않습니다.",
+  "conversation.send.unknownOutcome": "⚠️ 아직 답변이 도착하지 않았습니다. 에이전트가 메시지를 계속 처리하고 있을 수 있어 메시지는 위에 그대로 둡니다. 잠시 후 다시 확인하세요. 몇 분 안에 다시 보내면 에이전트는 보통 같은 메시지에 두 번 답하지 않습니다. 시간이 더 지났다면 먼저 대화를 확인하세요.",
   "conversation.send.turnFailed": "⚠️ 에이전트가 이번 차례를 완료하지 못했습니다. 메시지는 위에 있습니다. 다시 시도하면 다시 전송됩니다.",
   "conversation.send.empty": "에이전트가 이 메시지에 답하지 않고 끝났습니다. 표현을 바꾸거나 다시 시도해 보세요.",
-  "conversation.reply.revised": "답변이 스트리밍된 뒤에 수정되었습니다. 지금 보이는 것이 최종본입니다."
+  "conversation.reply.revised": "최종 답변이 스트리밍으로 표시된 미리보기와 다릅니다.",
+  "conversation.send.unknownOutcomeStale": "⚠️ 아직 답변이 도착하지 않았습니다. 에이전트가 메시지를 계속 처리하고 있거나 이미 답했을 수 있습니다. 다시 보내기 전에 대화를 확인하세요.",
+  "conversation.send.notStored": "⚠️ 에이전트가 이번 차례를 실행했지만 답변을 저장하지 못했습니다. 메시지는 위에 그대로 있습니다. 다시 보내면 차례가 다시 실행됩니다.",
+  "conversation.send.notStoredTooLarge": "⚠️ 에이전트가 이번 차례를 실행했지만 대화가 너무 커서 답변을 저장하지 못했습니다. 계속하려면 새 대화를 시작하세요."
 }

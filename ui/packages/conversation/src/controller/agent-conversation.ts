@@ -41,7 +41,15 @@ import {
 } from "@eddi/core";
 import { englishText, type Translate } from "../i18n/text";
 import { skippedTurnMessage, startFailureMessage, turnFailureMessage } from "./notices";
-import { classifyTurnFailure, isRefusal, type TurnFailureClass } from "./turn-failure";
+import {
+  classifyTurnFailure,
+  errorBodyOf,
+  isNetworkError,
+  isRefusal,
+  mappedCode,
+  type Reach,
+  type TurnFailureClass,
+} from "./turn-failure";
 import {
   conversationReducer,
   initialConversationState,
@@ -51,6 +59,14 @@ import {
   type MessageAttachment,
 } from "./state";
 import type { AgentTransport } from "./transport";
+
+/**
+ * How long a submission's Idempotency-Key is reused. The backend remembers a turn
+ * for `eddi.turns.idempotency.ttl-seconds` (600 s by default); the client stops a
+ * minute short of it, so a key is never reused after the backend may have
+ * forgotten the turn — a retry then is a new message with a new key.
+ */
+export const SUBMISSION_KEY_MAX_AGE_MS = 540_000;
 
 /** What the user's bubble shows for a secret turn. */
 export const SECRET_BUBBLE = "●●●●●●●●";
@@ -187,6 +203,8 @@ export interface TurnFailure {
   payload?: Record<string, unknown> | null;
   /** Why an ended conversation ended, when the read after a 410 said. */
   endReason?: string | null;
+  /** The error body's or the stream frame's `retryable`, when it said. */
+  retryable?: boolean | null;
   /** The conversation as the read that decided a 409 or a 410 saw it. */
   conversation?: Partial<ConversationSnapshot> | null;
 }
@@ -274,6 +292,10 @@ interface TurnContext {
    * still running, not that this message was dropped.
    */
   reusedKey: boolean;
+  /** The key this turn carries (its submission's), so its end settles only its own submission. */
+  submissionKey: string | null;
+  /** This turn's outcome is not settled: its submission keeps its key for a retry. */
+  keepSubmission: boolean;
   /**
    * The mark of the latest STORED step before this turn (see `latestStepMark`),
    * or null while it is not known. The backend keeps a running say turn in
@@ -302,6 +324,8 @@ function newTurn(stateBeforeSend: ConversationState | null, userMessageId: strin
     taskFailed: false,
     reworked: false,
     reusedKey: false,
+    submissionKey: null,
+    keepSubmission: false,
     baseline: null,
     baselineRead: null,
   };
@@ -381,6 +405,19 @@ function statusOf(err: unknown): number | null {
   if (err instanceof ApiError) return err.status;
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status === "number" ? status : null;
+}
+
+/**
+ * A text for comparing a streamed reply with its final one: reasoning blocks
+ * (`<think>…</think>`, `<reasoning>…</reasoning>`) and the difference in
+ * whitespace and case do not count as a difference.
+ */
+function comparable(text: string): string {
+  return text
+    .replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 /** The JSON object a frame carries, or null. */
@@ -463,9 +500,27 @@ export class AgentConversation {
    * turn once. Anything else (new text, another conversation, a settled turn)
    * gets a new key.
    */
-  private submission: { key: string; signature: string } | null = null;
-  /** Set by the paths that leave the submission unsettled; read when `send` ends. */
-  private keepSubmission = false;
+  private submission: { key: string; signature: string; createdAt: number } | null = null;
+
+  /**
+   * End the submission this turn carried — only if it is still the current one: a
+   * later send (started while this one's post-stream read was still running) owns
+   * `this.submission` by then, and its retry must find its own key.
+   */
+  private settle(turn: TurnContext): void {
+    if (this.submission && this.submission.key === turn.submissionKey) this.submission = null;
+  }
+
+  /** Forget the pending submission: the transcript was reloaded or rewritten, so a repeat is a new message. */
+  private forgetSubmission(): void {
+    this.submission = null;
+  }
+
+  /** The key of the turn is past its age limit (or gone): a notice must not promise it is safe to resend. */
+  private keyStale(turn: TurnContext): boolean {
+    const s = this.submission;
+    return !s || s.key !== turn.submissionKey || Date.now() - s.createdAt >= SUBMISSION_KEY_MAX_AGE_MS;
+  }
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
@@ -742,9 +797,12 @@ export class AgentConversation {
       // A retry of a submission that may still be running (same Idempotency-Key):
       // "busy" here means the first attempt is still working, not that this
       // message was dropped. Keep it; the user is told to look again.
-      this.keepSubmission = true;
+      turn.keepSubmission = true;
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t)) });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t, { stale: this.keyStale(turn) })),
+      });
     } else if (skipped) {
       // The server dropped this turn without consuming it. The payload carries
       // the PREVIOUS step's outputs, so its quick replies must not be applied.
@@ -774,6 +832,9 @@ export class AgentConversation {
       } else if (
         snapshot &&
         !inputField &&
+        // Quick replies, buttons, links, an input field: anything the output holds
+        // is a reply even when it has no text.
+        !(lastOutput && ((lastOutput.output?.length ?? 0) > 0 || (lastOutput.quickReplies?.length ?? 0) > 0)) &&
         !isTurnPaused(snapshot, turn.stateBeforeSend) &&
         snapshot.conversationState !== "ENDED"
       ) {
@@ -802,8 +863,10 @@ export class AgentConversation {
         outputText.trim() !== streamed.content.trim() &&
         outputText.trim().length < streamed.content.trim().length &&
         // Interim commentary before the final round ("Let me look that up… <answer>")
-        // is the designed case of a tool-enabled turn, not a surprise.
-        !streamed.content.trim().endsWith(outputText.trim());
+        // is the designed case of a tool-enabled turn, not a surprise. Neither is a
+        // final text that is the streamed one with its reasoning blocks or
+        // whitespace stripped.
+        !comparable(streamed.content).includes(comparable(outputText));
       if (outputText) dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
       // The final text is SHORTER than what streamed: it replaced the text on
       // screen, which the reader would otherwise take for a glitch.
@@ -948,6 +1011,7 @@ export class AgentConversation {
             message,
             partial: turn.tokenCount > 0,
             payload: parseObject(event.data),
+            retryable: typeof parseObject(event.data)?.retryable === "boolean" ? (parseObject(event.data)?.retryable as boolean) : null,
           };
           return true;
         }
@@ -971,6 +1035,7 @@ export class AgentConversation {
    * greeting grafted onto the new one.
    */
   async open(fresh: boolean): Promise<void> {
+    this.forgetSubmission();
     const gen = this.currentGeneration;
     const dispatch = this.dispatch;
     const transport = this.transport;
@@ -1030,6 +1095,9 @@ export class AgentConversation {
    * lose (the Manager showed none until the next turn).
    */
   async resume(conversationId: string): Promise<boolean> {
+    // The transcript is replaced by what the server has: a pending submission
+    // either completed (its answer is in it) or is a different message now.
+    this.forgetSubmission();
     // A resume switches conversations, so it takes a generation of its own
     // BEFORE it awaits: a slower earlier resume must not land over a newer
     // one, and a turn still streaming must not write into the resumed
@@ -1105,10 +1173,12 @@ export class AgentConversation {
 
     // One key per submission, the same on every retry of it (see `submission`).
     const signature = JSON.stringify([conversationId, text, !!isSecret, staged.map((a) => a.storageRef)]);
+    // A kept key is reused only for the same message in the same conversation and
+    // only while the backend still remembers the turn (SUBMISSION_KEY_MAX_AGE_MS).
+    if (this.submission && Date.now() - this.submission.createdAt >= SUBMISSION_KEY_MAX_AGE_MS) this.submission = null;
     const reusedKey = this.submission?.signature === signature;
-    if (!reusedKey) this.submission = { key: newIdempotencyKey(), signature };
-    const idempotencyKey = this.submission?.key;
-    this.keepSubmission = false;
+    if (!reusedKey) this.submission = { key: newIdempotencyKey(), signature, createdAt: Date.now() };
+    const idempotencyKey = this.submission!.key;
 
     // Attachments are named in the transcript so the user can see what was
     // actually sent: as chips on the message, or as text lines. A file above
@@ -1161,6 +1231,7 @@ export class AgentConversation {
     const stopped = () => this.abort !== abort;
     const turn = newTurn(this.state.conversationState, turnId);
     turn.reusedKey = reusedKey;
+    turn.submissionKey = idempotencyKey;
     this.activeTurn = turn;
     if (conversationId && transport.mode !== "local") this.readBaseline(conversationId, turn);
     const failureContext: TurnFailureContext = {
@@ -1224,7 +1295,7 @@ export class AgentConversation {
       result = await this.handleSendFailure(err, { sendGen, turn, turnId, conversationId, stopped, failureContext });
     } finally {
       // A settled turn ends its submission; an unsettled one keeps its key for the retry.
-      if (!this.keepSubmission && result.outcome === "sent") this.submission = null;
+      if (!turn.keepSubmission && result.outcome === "sent") this.settle(turn);
       this.pendingTurns.delete(turnId);
       if (this.abort === abort) this.abort = null;
       if (this.activeTurn === turn) this.activeTurn = null;
@@ -1351,10 +1422,17 @@ export class AgentConversation {
       const handled = await this.presentHostFailure(failure, failureContext);
       if (!handled && this.isCurrent(sendGen)) {
         // The host declined: the controller's own notices, and the turn ends.
-        this.presentDefaultStreamError(turn, failure.kind === "refused", failure.class, failure.code ?? null, failure.message);
+        this.presentDefaultStreamError(
+          turn,
+          failure.kind === "refused",
+          failure.class,
+          failure.code ?? null,
+          failure.message,
+          failure.retryable ?? null,
+        );
       }
       if (failure.kind === "refused") result = { outcome: "refused", failure };
-      if (failure.class === "ended") this.submission = null;
+      if (failure.class === "ended") this.settle(turn);
       if (!this.isCurrent(sendGen)) return result;
     }
     if (this.options.refreshAfterStream === false && !turn.doneUnreadable) return result;
@@ -1412,6 +1490,7 @@ export class AgentConversation {
     cls: TurnFailureClass,
     code: string | null,
     message: string,
+    retryable: boolean | null = null,
   ): void {
     const dispatch = this.dispatch;
     if (unconsumed && cls === "ended") {
@@ -1420,6 +1499,14 @@ export class AgentConversation {
       this.withdraw(turn.userMessageId);
       dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason: null });
       dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.send.ended")) });
+    } else if (cls === "notStored") {
+      // The turn ran; its result was not saved. The question and any reply on
+      // screen stay, and the notice says what sending again does.
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage("notStored", null, this.t, { retryable })),
+      });
     } else if (unconsumed) {
       // Refused before it ran — the streaming twin of a 409. Withdraw the
       // optimistic bubble and hand the draft (a secret included, masked)
@@ -1476,15 +1563,21 @@ export class AgentConversation {
     const transport = this.transport;
     const status = statusOf(err);
     const partial = turn.tokenCount > 0;
-    let cls = classifyTurnFailure({ status, code: null, partial });
+    // The error body's code decides only where it is mapped (ended, paused, not
+    // stored); any other code leaves the status to classify, as before.
+    const body = errorBodyOf(err);
+    const code = mappedCode(body.code);
+    const reach: Reach | undefined = status === null || status === 0 ? this.reachOf(err, partial) : undefined;
+    let cls = classifyTurnFailure({ status, code, partial, reach });
     const build = (): TurnFailure => ({
       class: cls,
       kind: isRefusal(cls) ? "refused" : "failed",
       status,
-      code: null,
+      code,
       message: errorMessage(err),
       error: err,
       partial,
+      retryable: body.retryable,
     });
     const resultOf = (failure: TurnFailure): TurnResult => ({ outcome: isRefusal(failure.class) ? "refused" : "failed", failure });
     // A failure after New Conversation belongs to the turn the user abandoned.
@@ -1514,7 +1607,12 @@ export class AgentConversation {
         // best effort: a 409 stays a refusal, an ended conversation has no reason
       }
       if (!this.isCurrent(sendGen)) return resultOf(build());
-      if (status === 409) cls = readState?.conversationState === "AWAITING_HUMAN" ? "paused" : "notAccepted";
+      if (status === 409 && cls === "notAccepted") {
+        if (readState?.conversationState === "AWAITING_HUMAN") cls = "paused";
+        // A retry of a submission that may still be running: the server's "busy"
+        // is the first attempt, not a refusal of this one. The message stays.
+        else if (turn.reusedKey && readState?.conversationState === "IN_PROGRESS") cls = "unknownOutcome";
+      }
     }
     const failure = build();
     if (readState) failure.conversation = readState;
@@ -1522,7 +1620,7 @@ export class AgentConversation {
     const result = resultOf(failure);
     // An ended conversation takes no more turns; every other submission that did
     // not end as sent keeps its key for the retry.
-    if (cls === "ended") this.submission = null;
+    if (cls === "ended") this.settle(turn);
 
     // Keep the send locked while the host presents the failure (it may await a
     // read); clear the processing state only once it has finished.
@@ -1544,6 +1642,16 @@ export class AgentConversation {
       if (failure.endReason !== END_REASON_AGENT_VERSION_RETIRED) {
         dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("conversation.send.ended")) });
       }
+      return result;
+    }
+
+    if (cls === "notStored") {
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({ type: "FINISH_STREAMING" });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage("notStored", status, t, { retryable: body.retryable })),
+      });
       return result;
     }
 
@@ -1572,7 +1680,10 @@ export class AgentConversation {
       // placeholder goes.
       dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
       dispatch({ type: "FINISH_STREAMING" });
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", status, t)) });
+      dispatch({
+        type: "ADD_MESSAGE",
+        message: makeNotice(turnFailureMessage("unknownOutcome", status, t, { stale: this.keyStale(turn) })),
+      });
       return result;
     }
     // From here the failure is a server error, or a dropped connection with part
@@ -1608,6 +1719,18 @@ export class AgentConversation {
       }
     }
     return result;
+  }
+
+  /** Could a request that failed without a status have reached the server? */
+  private reachOf(err: unknown, partial: boolean): Reach {
+    // A stream that ended or broke with part of the reply on screen was answered.
+    if (err instanceof StreamEndedError || partial) return "maybeReached";
+    // A plain Error thrown by client code is a bug, not "the agent is still working".
+    if (!isNetworkError(err)) return "bug";
+    if (typeof navigator !== "undefined" && navigator.onLine === false) return "notReached";
+    // Cross-origin with no answer at all: a refused preflight or an unreachable host.
+    if (this.transport.crossOrigin?.()) return "notReached";
+    return "maybeReached";
   }
 
   /**
@@ -1670,6 +1793,8 @@ export class AgentConversation {
     if (!conversationId) return;
     const gen = this.currentGeneration;
     if (this.transport.mode === "local") return;
+    // Undo and redo rewrite the history: the same words next are a new message.
+    this.forgetSubmission();
     const dispatch = this.dispatch;
     try {
       dispatch({ type: "SET_PROCESSING", value: true });
@@ -1714,6 +1839,7 @@ export class AgentConversation {
   async retry(): Promise<void> {
     const conversationId = this.state.conversationId;
     if (!conversationId) return;
+    this.forgetSubmission();
     const gen = this.currentGeneration;
     const dispatch = this.dispatch;
     dispatch({ type: "SET_PROCESSING", value: true });

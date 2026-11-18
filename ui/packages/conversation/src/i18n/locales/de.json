@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "Das Anhalten hat den Server nicht erreicht. Der Zug läuft dort vielleicht weiter; öffne die Unterhaltung erneut, um zu sehen, wie er endete.",
   "conversation.diagram.label": "Diagramm",
   "conversation.diagram.source": "Quelltext des Diagramms",
-  "conversation.send.unknownOutcome": "⚠️ Bisher ist keine Antwort eingetroffen. Der Agent arbeitet möglicherweise noch an Ihrer Nachricht, sie bleibt deshalb oben stehen. Prüfen Sie es gleich noch einmal oder senden Sie sie erneut – sie wird nicht doppelt verarbeitet.",
+  "conversation.send.unknownOutcome": "⚠️ Bisher ist keine Antwort eingetroffen. Der Agent arbeitet möglicherweise noch an Ihrer Nachricht, sie bleibt deshalb oben stehen. Prüfen Sie es gleich noch einmal. Wenn Sie sie innerhalb weniger Minuten erneut senden, beantwortet der Agent sie normalerweise nicht doppelt; ist mehr Zeit vergangen, sehen Sie zuerst in der Unterhaltung nach.",
   "conversation.send.turnFailed": "⚠️ Der Agent konnte diesen Durchgang nicht abschließen. Ihre Nachricht steht oben – wiederholen Sie den Versuch, um sie erneut zu senden.",
   "conversation.send.empty": "Der Agent ist fertig geworden, ohne diese Nachricht zu beantworten. Formulieren Sie sie um oder versuchen Sie es erneut.",
-  "conversation.reply.revised": "Die Antwort wurde nach dem Streamen überarbeitet; was Sie jetzt sehen, ist die endgültige Fassung."
+  "conversation.reply.revised": "Die endgültige Antwort weicht von der Vorschau ab, die gestreamt wurde.",
+  "conversation.send.unknownOutcomeStale": "⚠️ Bisher ist keine Antwort eingetroffen. Der Agent arbeitet möglicherweise noch an Ihrer Nachricht oder hat sie bereits beantwortet. Sehen Sie in der Unterhaltung nach, bevor Sie sie erneut senden.",
+  "conversation.send.notStored": "⚠️ Der Agent hat diesen Durchgang ausgeführt, die Antwort konnte aber nicht gespeichert werden. Ihre Nachricht bleibt oben stehen. Erneutes Senden führt den Durchgang noch einmal aus.",
+  "conversation.send.notStoredTooLarge": "⚠️ Der Agent hat diesen Durchgang ausgeführt, die Antwort konnte aber nicht gespeichert werden, weil die Unterhaltung zu groß ist. Beginnen Sie eine neue Unterhaltung, um fortzufahren."
 }

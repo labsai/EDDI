@@ -32,7 +32,7 @@ export function turnFailureMessage(
   cls: TurnFailureClass,
   status: number | null,
   t: Translate,
-  detail: { code?: string | null; message?: string } = {},
+  detail: { code?: string | null; message?: string; retryable?: boolean | null; stale?: boolean } = {},
 ): string {
   switch (cls) {
     case "ended":
@@ -40,11 +40,18 @@ export function turnFailureMessage(
     case "paused":
       return t("conversation.send.conflict");
     case "unknownOutcome":
-      return t("conversation.send.unknownOutcome");
+      // Past the key's age limit nothing promises that sending again is safe.
+      return detail.stale ? t("conversation.send.unknownOutcomeStale") : t("conversation.send.unknownOutcome");
     case "failed":
       return t("conversation.send.turnFailed");
     case "empty":
       return t("conversation.send.empty");
+    case "notStored":
+      // Too large (507), or the backend says a retry will not help: a new
+      // conversation is the way on. Otherwise sending again runs the turn again.
+      return detail.retryable === false || status === 507
+        ? t("conversation.send.notStoredTooLarge")
+        : t("conversation.send.notStored");
     case "notAccepted":
       break;
   }

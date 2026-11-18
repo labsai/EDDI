@@ -17,6 +17,7 @@
 
 import {
   cancelConversation as coreCancel,
+  defaultHttp,
   endManagedConversation,
   loadManagedConversation,
   readConversation,
@@ -77,6 +78,12 @@ export interface AgentTransport {
   cancel(conversationId: string): Promise<unknown>;
   /** `local`: the quick replies a scripted turn ends with. */
   quickRepliesAfter?(text: string): QuickReply[];
+  /**
+   * Whether the API is on another origin than the page. A request that failed
+   * without any answer there (a refused preflight, an unreachable host) cannot
+   * have reached the agent, so its message was not sent.
+   */
+  crossOrigin?(): boolean;
 }
 
 /** The calls a server-backed transport makes; @eddi/core's by default. */
@@ -132,6 +139,7 @@ export function createConversationTransport(
   return {
     mode: "conversation",
     ...common(calls),
+    crossOrigin: () => !defaultHttp.isSameOrigin(),
     start: () => calls().startConversation(target.environment, target.agentId, target.userId),
     stream: (id, text, { context, signal, idempotencyKey }) =>
       calls().sendMessageStreaming(id ?? "", text, { context, signal, idempotencyKey }),
@@ -148,6 +156,7 @@ export function createManagedTransport(
   return {
     mode: "managed",
     ...common(calls),
+    crossOrigin: () => !defaultHttp.isSameOrigin(),
     openManaged: async (fresh) => {
       if (fresh) await calls().endManagedConversation(target.intent, target.userId);
       return calls().loadManagedConversation(target.intent, target.userId);

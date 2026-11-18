@@ -20,6 +20,11 @@
                       conversation reads AWAITING_HUMAN — not every 409.
    - `failed`         the turn ran and failed (a 5xx, a stream error mid-turn). A
                       visible notice, and a retry that retries this turn.
+   - `notStored`      the turn ran but its result could not be saved
+                      (`turn_not_stored`: 507 conversation too large, 422 data
+                      rejected, 409 conflict, 503 store failure). The message
+                      stays; sending again runs the turn again — or, when the
+                      conversation is too large, a new conversation is the way on.
    - `empty`          the turn finished without an answer.
 
    New backend codes (a "turn was not stored" error event, a redacted
@@ -31,7 +36,14 @@
 
 import { UNCONSUMED_STREAM_ERROR_CODES } from "@eddi/core";
 
-export type TurnFailureClass = "notAccepted" | "unknownOutcome" | "ended" | "paused" | "failed" | "empty";
+export type TurnFailureClass =
+  | "notAccepted"
+  | "unknownOutcome"
+  | "ended"
+  | "paused"
+  | "failed"
+  | "notStored"
+  | "empty";
 
 /**
  * Stream error codes with a class of their own. Everything else falls to the
@@ -40,7 +52,67 @@ export type TurnFailureClass = "notAccepted" | "unknownOutcome" | "ended" | "pau
 export const STREAM_CODE_CLASSES: Readonly<Record<string, TurnFailureClass>> = {
   conversation_ended: "ended",
   awaiting_approval: "paused",
+  // The REST body spells it TURN_NOT_STORED; codes are compared lower-cased.
+  turn_not_stored: "notStored",
 };
+
+/** The class a (stream or REST) code maps to in {@link STREAM_CODE_CLASSES}, or null. */
+export function mappedCode(code: string | null | undefined): string | null {
+  return code && STREAM_CODE_CLASSES[code.toLowerCase()] ? code : null;
+}
+
+/** What an HTTP error's JSON body says, when it says it. */
+export interface ErrorBody {
+  code: string | null;
+  retryable: boolean | null;
+  reason: string | null;
+}
+
+/**
+ * The `code`, `retryable` and `reason` of an HTTP error. Reads both client
+ * shapes (@eddi/core's `ApiError`, whose `body` is the raw text, and the
+ * Manager's `ApiClientError`, whose `body` is parsed) and both envelopes
+ * (`{"error": {"code": …}}` and `{"error": "…", "code": …}`).
+ */
+export function errorBodyOf(err: unknown): ErrorBody {
+  const none: ErrorBody = { code: null, retryable: null, reason: null };
+  if (!err || typeof err !== "object") return none;
+  let body: unknown = (err as { body?: unknown }).body;
+  if (typeof body === "string") {
+    try {
+      body = JSON.parse(body);
+    } catch {
+      body = null;
+    }
+  }
+  const root = body && typeof body === "object" ? (body as Record<string, unknown>) : null;
+  const inner = root && root.error && typeof root.error === "object" ? (root.error as Record<string, unknown>) : null;
+  const pick = (key: string): unknown => inner?.[key] ?? root?.[key];
+  const code = pick("code");
+  const retryable = pick("retryable");
+  const reason = pick("reason");
+  const clientCode = (err as { code?: unknown }).code;
+  return {
+    code: typeof code === "string" ? code : typeof clientCode === "string" ? clientCode : null,
+    retryable: typeof retryable === "boolean" ? retryable : null,
+    reason: typeof reason === "string" ? reason : null,
+  };
+}
+
+/**
+ * Whether an error is a genuine network failure — fetch's `TypeError`, a stream
+ * read that broke, the client's own status-0 error. Anything else without a
+ * status (a plain `Error` thrown by client code) is a bug, not "the agent may
+ * still be working".
+ */
+export function isNetworkError(err: unknown): boolean {
+  if (err instanceof TypeError) return true;
+  if (typeof DOMException !== "undefined" && err instanceof DOMException) return err.name === "NetworkError";
+  return (err as { status?: unknown } | null)?.status === 0;
+}
+
+/** Whether the request can have reached the server before it failed. */
+export type Reach = "notReached" | "maybeReached" | "bug";
 
 /** What the controller saw of a failed turn. */
 export interface FailureSignal {
@@ -50,22 +122,30 @@ export interface FailureSignal {
   code: string | null;
   /** Whether any of the reply had arrived. */
   partial: boolean;
+  /** For a failure without a status: could the request have reached the server? Default: maybe. */
+  reach?: Reach;
 }
 
 /** Statuses after which the server may still have run (or may still be running) the turn. */
 const UNKNOWN_OUTCOME_STATUSES: ReadonlySet<number> = new Set([408, 502, 504]);
 
 /** The class of a turn that did not end with a reply. */
-export function classifyTurnFailure({ status, code, partial }: FailureSignal): TurnFailureClass {
+export function classifyTurnFailure({ status, code, partial, reach }: FailureSignal): TurnFailureClass {
   if (code !== null) {
-    const mapped = STREAM_CODE_CLASSES[code];
+    const mapped = STREAM_CODE_CLASSES[code.toLowerCase()];
     if (mapped) return mapped;
     // A refusal the backend sends before it runs the turn — but not once part of
     // the reply is on screen, then the turn did run.
     if (!partial && UNCONSUMED_STREAM_ERROR_CODES.has(code)) return "notAccepted";
     return "failed";
   }
-  if (status === null || status === 0) return "unknownOutcome";
+  if (status === null || status === 0) {
+    // Nothing can have reached the server (offline, a refused cross-origin
+    // preflight): not sent. A bug in client code is not "still working" either.
+    if (reach === "notReached") return "notAccepted";
+    if (reach === "bug") return "failed";
+    return "unknownOutcome";
+  }
   if (status === 410) return "ended";
   if (UNKNOWN_OUTCOME_STATUSES.has(status)) return "unknownOutcome";
   if (status >= 400 && status < 500) return "notAccepted";

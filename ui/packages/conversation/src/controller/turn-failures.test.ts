@@ -76,7 +76,9 @@ describe("classifyTurnFailure", () => {
     ["code input_too_large", { status: null, code: "input_too_large", partial: false }, "notAccepted"],
     ["code quota_exceeded", { status: null, code: "quota_exceeded", partial: false }, "notAccepted"],
     ["a refusing code after part of the reply", { status: null, code: "input_too_large", partial: true }, "failed"],
-    ["an unknown code (a future backend)", { status: null, code: "turn_not_stored", partial: false }, "failed"],
+    ["an unknown code (a future backend)", { status: null, code: "a_code_from_the_future", partial: false }, "failed"],
+    ["turn_not_stored (the turn ran, its result was not saved)", { status: null, code: "turn_not_stored", partial: false }, "notStored"],
+    ["TURN_NOT_STORED, upper case, as the REST body spells it", { status: 507, code: "TURN_NOT_STORED", partial: false }, "notStored"],
   ];
   it.each(cases)("%s", (_name, signal, expected) => {
     expect(classifyTurnFailure(signal)).toBe(expected);
@@ -236,13 +238,13 @@ describe("a turn that ends without a reply is never silent", () => {
     await c.send("q");
     const last = c.getSnapshot().messages.map((m) => m.content);
     expect(last).toContain("Fallback");
-    expect(last.slice(-1)[0]).toContain("revised after it streamed");
+    expect(last.slice(-1)[0]).toContain("differs from the preview");
   });
 
   it("a `done` text that merely finishes the streamed text adds no notice", async () => {
     const c = await opened(transport(() => events(ev("token", "Hello"), done([reply("Hello world")]))));
     await c.send("q");
-    expect(texts(c).join("|")).not.toContain("revised");
+    expect(texts(c).join("|")).not.toContain("differs from the preview");
   });
 });
 

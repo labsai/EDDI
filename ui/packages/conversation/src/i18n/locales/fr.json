@@ -121,8 +121,11 @@
   "conversation.stop.unreachable": "L’arrêt n’a pas pu joindre le serveur. Le tour s’y exécute peut-être encore ; rouvrez la conversation pour voir comment il s’est terminé.",
   "conversation.diagram.label": "Diagramme",
   "conversation.diagram.source": "Source du diagramme",
-  "conversation.send.unknownOutcome": "⚠️ Aucune réponse n’est encore arrivée. L’agent travaille peut-être toujours sur votre message, qui reste donc affiché. Vérifiez à nouveau dans un instant ou renvoyez-le : il ne sera pas traité deux fois.",
+  "conversation.send.unknownOutcome": "⚠️ Aucune réponse n’est encore arrivée. L’agent travaille peut-être toujours sur votre message, qui reste donc affiché. Vérifiez à nouveau dans un instant. Si vous le renvoyez dans les minutes qui suivent, l’agent n’y répondra normalement pas deux fois ; si plus de temps s’est écoulé, regardez d’abord la conversation.",
   "conversation.send.turnFailed": "⚠️ L’agent n’a pas pu terminer ce tour. Votre message est au-dessus — réessayez pour le renvoyer.",
   "conversation.send.empty": "L’agent a terminé sans répondre à ce message. Vous pouvez le reformuler ou réessayer.",
-  "conversation.reply.revised": "La réponse a été révisée après son affichage progressif ; ce que vous voyez maintenant est la version finale."
+  "conversation.reply.revised": "La réponse finale diffère de l’aperçu affiché progressivement.",
+  "conversation.send.unknownOutcomeStale": "⚠️ Aucune réponse n’est encore arrivée. L’agent travaille peut-être toujours sur votre message, ou y a déjà répondu. Regardez la conversation avant de le renvoyer.",
+  "conversation.send.notStored": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée. Votre message reste affiché. Le renvoyer exécute le tour une nouvelle fois.",
+  "conversation.send.notStoredTooLarge": "⚠️ L’agent a exécuté ce tour, mais sa réponse n’a pas pu être enregistrée, car la conversation est trop volumineuse. Commencez une nouvelle conversation pour continuer."
 }

@@ -814,7 +814,7 @@ function createThreadConversation(
       // Rendered from the controller's classification, shared with the Manager and
       // the widget — never from the status (a 409 is not always a pause, a 408 is
       // not a refusal).
-      const sentence = (detail: { code?: string | null; message?: string } = {}) =>
+      const sentence = (detail: { code?: string | null; message?: string; retryable?: boolean | null } = {}) =>
         turnFailureMessage(failure.class, failure.status, hooks.t as unknown as Translate, detail).replace(/^⚠️\s*/u, "");
       switch (failure.class) {
         case "ended":
@@ -841,6 +841,13 @@ function createThreadConversation(
           // back, and Retry sends it once more.
           ctx.withdraw();
           hooks.failed(sentence({ code: failure.code, message: failure.message }), false, null);
+          return true;
+        case "notStored":
+          // The turn ran; its reply was not saved. The question stays, and Retry
+          // runs the turn again (or, when the conversation is too large, the
+          // notice says to start a new one).
+          controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+          hooks.failed(sentence({ retryable: failure.retryable }), false, failure.partial ? null : ctx.userMessageId);
           return true;
         case "unknownOutcome":
           // The server may have the message and may still be working. It stays on
