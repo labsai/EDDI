@@ -112,6 +112,18 @@ class PostgresTextTest {
     }
 
     @Test
+    void json_boundaries() {
+        // an escaped NUL at index 0, and a lone high escape as the very last six chars
+        assertEquals("\\uFFFD", PostgresText.json("\\u0000"));
+        assertEquals("\"x\\uFFFD", PostgresText.json("\"x\\ud83d"));
+        // a high escape followed by a truncated low escape is unpaired
+        assertEquals("\\uFFFD\\ude0", PostgresText.json("\\ud83d\\ude0"));
+        // only ASCII hex digits make an escape: full-width zeros are ordinary text
+        String fullWidth = "{\"a\":\"\\u\uFF10\uFF10\uFF10\uFF10\"}";
+        assertSame(fullWidth, PostgresText.json(fullWidth));
+    }
+
+    @Test
     void json_leavesOrdinaryEscapesAndUnicodeAlone() {
         String json = "{\"a\":\"line\\nbreak \\\"q\\\" \\u00e9 \\u0001 caf\u00e9\"}";
         assertSame(json, PostgresText.json(json));

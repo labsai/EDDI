@@ -92,7 +92,7 @@ class PostgresSanitizingDataSourceTest {
 
         assertSame(array, result);
         ArgumentCaptor<Object[]> elements = ArgumentCaptor.forClass(Object[].class);
-        verify(connection).createArrayOf(org.mockito.ArgumentMatchers.eq("text"), elements.capture());
+        verify(connection).createArrayOf(eq("text"), elements.capture());
         assertEquals("a" + FFFD, elements.getValue()[0]);
         assertEquals("b", elements.getValue()[1]);
     }
@@ -192,6 +192,37 @@ class PostgresSanitizingDataSourceTest {
         verify(statement).setObject(4, "{\"source\":\"a\\uFFFDb\",\"k\":\"\\\\u0000\"}", Types.OTHER);
         verify(statement).setObject(3, "{\"looks\":\"json\\u0000\"}", Types.VARCHAR);
         verify(statement).setObject(2, "not json \\u0000", Types.OTHER);
+    }
+
+    @Test
+    void setObject_otherThatOnlyStartsLikeJsonIsPlainText() throws SQLException {
+        // an array literal or any brace-led text bound as OTHER: the six characters of
+        // an
+        // escape are the user's text and must survive; a raw NUL is still replaced
+        PreparedStatement ps = prepare("INSERT INTO t (a, b, c) VALUES (?, ?, ?)");
+        ps.setObject(1, "{a,\\u0000b}", Types.OTHER);
+        ps.setObject(2, "{not json \\u0000 \u0000}", Types.OTHER);
+        ps.setObject(3, "[\"ok\\u0000\"] trailing", Types.OTHER);
+
+        verify(statement).setObject(1, "{a,\\u0000b}", Types.OTHER);
+        verify(statement).setObject(2, "{not json \\u0000 " + FFFD + "}", Types.OTHER);
+        verify(statement).setObject(3, "[\"ok\\u0000\"] trailing", Types.OTHER);
+    }
+
+    @Test
+    void cleanUntypedDocument_cleansAValidDocumentAndCopiesNothingWhenClean() {
+        assertEquals("[\"a\\uFFFD\", {\"k\\uFFFD\": 1}]", PostgresSanitizingDataSource.cleanUntypedDocument("[\"a\\u0000\", {\"k\\u0000\": 1}]"));
+        String clean = "{\"k\":\"v \\n \\\"q\\\"\"}";
+        assertSame(clean, PostgresSanitizingDataSource.cleanUntypedDocument(clean));
+    }
+
+    @Test
+    void jsonParameters_aDollarInsideAnIdentifierOpensNoQuote() {
+        // "a$q$b" and "c$q$d" are identifiers; read as quotes, they would swallow the
+        // first parameter and move the cast onto it
+        BitSet json = PostgresSanitizingDataSource.jsonParameters("SELECT a$q$b, ? FROM t WHERE c$q$d = ?::jsonb AND e = $1");
+        assertFalse(json.get(1));
+        assertTrue(json.get(2));
     }
 
     @Test

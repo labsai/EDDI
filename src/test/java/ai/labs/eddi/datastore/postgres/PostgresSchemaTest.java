@@ -26,9 +26,11 @@ import java.util.concurrent.locks.LockSupport;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -141,7 +143,8 @@ class PostgresSchemaTest {
         // the remembered one
         SQLException refused = assertThrows(SQLException.class,
                 () -> PostgresSchema.runOnce(dataSource, "flaky", stmt -> attempts.incrementAndGet()));
-        assertSame(failure, refused.getCause());
+        assertTrue(refused.getMessage().contains(failure.getMessage()), refused.getMessage());
+        assertNull(refused.getCause(), "the failed attempt's exception (and its driver objects) is not kept for the back-off");
         assertEquals("23505", refused.getSQLState());
         assertEquals(1, attempts.get(), "no request storm: the DDL did not run again");
         verify(dataSource, times(1)).getConnection();
@@ -208,6 +211,43 @@ class PostgresSchemaTest {
         }));
 
         verify(statement).executeQuery(contains("set_config('lock_timeout', '0', false)"));
+    }
+
+    @Test
+    void aSessionThatCannotBeUnlockedIsDiscardedNotReturnedToThePool() throws Exception {
+        // e.g. a connection in a transaction that the failed DDL aborted: every later
+        // statement, the unlock included, fails with 25P02 and the session keeps the
+        // lock
+        when(statement.executeQuery(contains("pg_advisory_unlock("))).thenThrow(new SQLException("current transaction is aborted", "25P02"));
+
+        SQLException thrown = assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "aborted", stmt -> {
+            throw new SQLException("boom", "42P07");
+        }));
+
+        assertEquals("42P07", thrown.getSQLState(), "the DDL's failure is what the caller sees");
+        assertEquals(1, thrown.getSuppressed().length);
+        verify(connection).abort(any());
+    }
+
+    @Test
+    void aRestoredSessionGoesBackToThePool() throws Exception {
+        PostgresSchema.run(dataSource, "clean", stmt -> stmt.execute("CREATE TABLE x"));
+
+        verify(connection, never()).abort(any());
+        verify(connection).close();
+    }
+
+    @Test
+    void aSessionWhoseTimeoutCannotBeRestoredIsDiscarded() throws Exception {
+        ResultSet current = mock(ResultSet.class);
+        when(current.next()).thenReturn(true);
+        when(current.getString(1)).thenReturn("5s");
+        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
+        when(statement.executeQuery(contains("set_config('lock_timeout', '5s', false)"))).thenThrow(new SQLException("connection lost", "08006"));
+
+        PostgresSchema.run(dataSource, "unrestorable", stmt -> stmt.execute("CREATE TABLE x"));
+
+        verify(connection).abort(any());
     }
 
     @Test

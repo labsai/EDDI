@@ -4,7 +4,7 @@
  */
 package ai.labs.eddi.connections.grants;
 
-import ai.labs.eddi.datastore.postgres.PostgresSchema;
+import ai.labs.eddi.datastore.postgres.PostgresSchemaTestSupport;
 
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
@@ -272,7 +272,7 @@ class PostgresConnectionGrantStoreUnitTest {
         // not swallowed any more: carrying on only moved the failure to a later, less
         // explicit "relation does not exist"
         assertThrows(IllegalStateException.class, () -> store.delete(TENANT, CONNECTION, PRINCIPAL));
-        PostgresSchema.resetForTests(); // the back-off between two calls is covered by PostgresSchemaTest
+        PostgresSchemaTestSupport.reset(); // the back-off between two calls is covered by PostgresSchemaTest
         assertThrows(IllegalStateException.class, () -> store.delete(TENANT, CONNECTION, PRINCIPAL));
 
         ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);

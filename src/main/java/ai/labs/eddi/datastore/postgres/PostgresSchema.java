@@ -42,7 +42,12 @@ import java.util.regex.Pattern;
  * same tables wait for one another; stores that create different tables do not
  * wait for each other. The wait, and every lock the DDL itself waits for, is
  * bounded by {@link #LOCK_TIMEOUT_SECONDS}, after which the step fails instead
- * of stalling; the session's own {@code lock_timeout} is restored afterwards.
+ * of stalling: an advisory lock is a heavyweight lock of the regular lock
+ * manager (it shows in {@code pg_locks}), so {@code pg_advisory_lock} waits
+ * under {@code lock_timeout} like a table lock does, and fails with SQLState
+ * {@code 55P03}. The session's own {@code lock_timeout} is restored afterwards;
+ * a session that cannot be restored (or unlocked) is discarded, not returned to
+ * the pool.
  * <li><b>Once per JVM and database.</b> Concurrent first requests of the same
  * store run the DDL once; the others wait and find it done.
  * <li><b>Failures surface, with back-off.</b> A failed creation throws
@@ -116,11 +121,18 @@ public final class PostgresSchema {
         void run(Connection connection, Statement statement) throws SQLException;
     }
 
+    /**
+     * One step's state, guarded by the step's monitor ({@code done} is also read
+     * without it). After a failure only its message and SQLState are kept, never
+     * the exception: that would pin the failed attempt's cause chain (driver
+     * objects included) for as long as the back-off lasts.
+     */
     private static final class Step {
         volatile boolean done;
         int failures;
         long retryAtNanos;
-        SQLException lastFailure;
+        String lastMessage;
+        String lastSqlState;
     }
 
     /** Steps already completed or in progress, per database (weakly keyed). */
@@ -132,7 +144,9 @@ public final class PostgresSchema {
     /**
      * Runs {@code work} once for {@code name} on this database, under the schema
      * lock. Returns at once when it has already completed in this JVM. If it fails,
-     * the exception propagates, nothing is recorded, and the next call runs it
+     * the exception propagates and the step is not recorded as done; calls during
+     * the back-off that follows are refused with an {@link SQLException} carrying
+     * the failure's message and SQLState, and the first call after it runs the step
      * again.
      *
      * @param dataSource
@@ -156,21 +170,23 @@ public final class PostgresSchema {
             long now = clock.getAsLong();
             if (step.failures > 0 && now - step.retryAtNanos < 0) {
                 long seconds = Math.max(1, TimeUnit.NANOSECONDS.toSeconds(step.retryAtNanos - now));
-                throw new SQLException(
-                        "Schema step " + name + " failed and is not retried for another " + seconds + " s: " + step.lastFailure.getMessage(),
-                        step.lastFailure.getSQLState(), step.lastFailure);
+                throw new SQLException("Schema step " + name + " failed and is not retried for another " + seconds + " s: " + step.lastMessage,
+                        step.lastSqlState);
             }
             try {
                 run(dataSource, name, work);
             } catch (SQLException e) {
                 step.failures++;
-                step.lastFailure = e;
-                step.retryAtNanos = now + Math.min(MAX_BACKOFF_NANOS, TimeUnit.SECONDS.toNanos(1L << Math.min(step.failures - 1, 5)));
+                step.lastMessage = e.getMessage();
+                step.lastSqlState = e.getSQLState();
+                // from the moment it failed: the attempt itself can take up to a lock timeout
+                step.retryAtNanos = clock.getAsLong() + Math.min(MAX_BACKOFF_NANOS, TimeUnit.SECONDS.toNanos(1L << Math.min(step.failures - 1, 5)));
                 throw e;
             }
             step.done = true;
             step.failures = 0;
-            step.lastFailure = null;
+            step.lastMessage = null;
+            step.lastSqlState = null;
         }
     }
 
@@ -212,8 +228,29 @@ public final class PostgresSchema {
                 LOGGER.errorf(e, "Creating the PostgreSQL schema for %s failed (SQLState %s); retried after a back-off", name, e.getSQLState());
                 throw e;
             } finally {
-                release(statement, locked, key, timeoutSet ? savedTimeout : null, failure);
+                if (!release(statement, locked, key, timeoutSet ? savedTimeout : null, failure)) {
+                    discard(connection, name);
+                }
             }
+        }
+    }
+
+    /**
+     * The session could not be put back the way it was borrowed: it may still hold
+     * the session-level advisory lock (an unlock that failed, for instance in a
+     * transaction the failed DDL aborted) or carry this class's
+     * {@code lock_timeout}. Returned to the pool like that, it would block every
+     * later schema step of every node on this key, or impose the timeout on the
+     * next borrower. {@link Connection#abort} ends the physical session, which
+     * releases the lock, and makes the pool destroy the connection instead of
+     * handing it out again.
+     */
+    private static void discard(Connection connection, String name) {
+        try {
+            connection.abort(Runnable::run);
+            LOGGER.warnf("The connection that ran the PostgreSQL schema step %s could not be restored and was discarded", name);
+        } catch (SQLException | RuntimeException e) {
+            LOGGER.warnf("Discarding the connection that ran the PostgreSQL schema step %s failed: %s", name, e.getMessage());
         }
     }
 
@@ -233,37 +270,49 @@ public final class PostgresSchema {
         return LOCK_KEY ^ hash;
     }
 
-    /** Forgets what every step has done and failed at; for tests only. */
-    public static void resetForTests() {
+    /**
+     * Forgets what every step has done and failed at; for tests only (other
+     * packages reach it through the test tree's {@code PostgresSchemaTestSupport}).
+     */
+    static void resetForTests() {
         STEPS.clear();
         WIDEN_FAILURES.clear();
         clock = System::nanoTime;
     }
 
-    private static void release(Statement statement, boolean locked, long key, String restoreTimeout, SQLException failure) {
+    /**
+     * Unlocks and restores {@code lock_timeout}.
+     *
+     * @return whether the session is back as it was borrowed
+     */
+    private static boolean release(Statement statement, boolean locked, long key, String restoreTimeout, SQLException failure) {
+        boolean clean = true;
         try {
             if (locked) {
                 query(statement, "SELECT pg_advisory_unlock(" + key + ")");
             }
         } catch (SQLException e) {
+            clean = false;
             noteReleaseFailure(e, failure);
         }
         try {
             if (restoreTimeout != null) {
+                // the value as current_setting reported it ("0", "5s", "1min"): set_config
+                // accepts exactly that form back
                 query(statement, "SELECT set_config('lock_timeout', '" + restoreTimeout.replace("'", "''") + "', false)");
             }
         } catch (SQLException e) {
+            clean = false;
             noteReleaseFailure(e, failure);
         }
+        return clean;
     }
 
     private static void noteReleaseFailure(SQLException e, SQLException failure) {
-        // closing the connection ends the session and with it the lock
         if (failure != null) {
             failure.addSuppressed(e);
         } else {
-            LOGGER.debugf("Releasing the PostgreSQL schema lock or restoring lock_timeout failed (the session's end releases the lock): %s",
-                    e.getMessage());
+            LOGGER.debugf("Releasing the PostgreSQL schema lock or restoring lock_timeout failed: %s", e.getMessage());
         }
     }
 

@@ -4,12 +4,16 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.inject.Instance;
 import org.postgresql.util.PGobject;
 
 import javax.sql.DataSource;
+import java.io.IOException;
 import java.lang.reflect.InvocationHandler;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -54,6 +58,10 @@ public final class PostgresSanitizingDataSource {
     private static final Pattern JSON_CAST = Pattern.compile("^\\s*::\\s*jsonb?\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern JSON_CAST_FUNCTION = Pattern.compile("(?i)CAST\\s*\\(\\s*$");
     private static final Pattern JSON_CAST_AS = Pattern.compile("^\\s+AS\\s+jsonb?\\b", Pattern.CASE_INSENSITIVE);
+    /**
+     * Thread-safe; only tells whether a flagged untyped value is one JSON document.
+     */
+    private static final JsonFactory JSON_FACTORY = new JsonFactory();
 
     private PostgresSanitizingDataSource() {
     }
@@ -256,12 +264,18 @@ public final class PostgresSanitizingDataSource {
                     args[1] = clean(value, jsonParameters.get(index));
                 } else if (name.equals("setObject")) {
                     if (args[1] instanceof String value) {
-                        // langchain4j binds its jsonb metadata as setObject(i, json, Types.OTHER) with
-                        // no cast in the SQL
-                        boolean json = jsonParameters.get(index) || (args.length == 3 && args[2] instanceof Integer sqlType && sqlType == Types.OTHER
-                                && looksLikeJsonDocument(value));
+                        String cleaned;
+                        if (jsonParameters.get(index)) {
+                            cleaned = PostgresText.json(value);
+                        } else if (args.length == 3 && args[2] instanceof Integer sqlType && sqlType == Types.OTHER && looksLikeJsonDocument(value)) {
+                            // langchain4j binds its jsonb metadata as setObject(i, json, Types.OTHER)
+                            // with no cast in the SQL
+                            cleaned = cleanUntypedDocument(value);
+                        } else {
+                            cleaned = PostgresText.text(value);
+                        }
                         args = args.clone();
-                        args[1] = clean(value, json);
+                        args[1] = cleaned;
                     } else if (args[1] instanceof PGobject object) {
                         cleanObject(object);
                     }
@@ -303,6 +317,37 @@ public final class PostgresSanitizingDataSource {
     }
 
     /**
+     * A {@code Types.OTHER} string that starts like a JSON document, with no cast
+     * in the SQL saying what it is: an array literal ({@code {a,b}}) or any other
+     * text can start with a brace too. The JSON escapes are rewritten only when
+     * there is something to rewrite AND the value really is one JSON document;
+     * otherwise it is plain text, where the six characters of an escape are
+     * ordinary characters and stay. Either way a raw U+0000 and unpaired surrogates
+     * are replaced. The parse runs only on the rare value the scan flagged, never
+     * on clean ones.
+     */
+    static String cleanUntypedDocument(String value) {
+        String asJson = PostgresText.json(value);
+        if (asJson == value) {
+            return value;
+        }
+        return isJsonDocument(value) ? asJson : PostgresText.text(value);
+    }
+
+    private static boolean isJsonDocument(String value) {
+        try (JsonParser parser = JSON_FACTORY.createParser(value)) {
+            JsonToken first = parser.nextToken();
+            if (first != JsonToken.START_OBJECT && first != JsonToken.START_ARRAY) {
+                return false;
+            }
+            parser.skipChildren();
+            return parser.nextToken() == null;
+        } catch (IOException | RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
      * Statements are fixed strings that run over and over; parse each once. Bounded
      * with eviction, so dynamic SQL (IN lists of every length) cannot fill it and
      * leave the hot statements re-parsed on every execution.
@@ -337,7 +382,8 @@ public final class PostgresSanitizingDataSource {
                 i = skipQuoted(sql, i, c, escapeString);
             } else if (c == '"') {
                 i = skipQuoted(sql, i, c, false);
-            } else if (c == '$') {
+            } else if (c == '$' && (i == 0 || !isIdentifierPart(sql.charAt(i - 1)))) {
+                // a '$' inside an identifier (allowed after its first character) opens nothing
                 i = skipDollarQuoted(sql, i);
             } else if (c == '-' && i + 1 < length && sql.charAt(i + 1) == '-') {
                 int end = sql.indexOf('\n', i);

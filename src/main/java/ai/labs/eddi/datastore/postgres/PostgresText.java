@@ -206,7 +206,10 @@ public final class PostgresText {
             return false;
         }
         for (int i = from; i < from + 4; i++) {
-            if (Character.digit(value.charAt(i), 16) < 0) {
+            char c = value.charAt(i);
+            // ASCII only, as JSON defines the escape: Character.digit would also accept
+            // full-width and other Unicode digits
+            if (!((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))) {
                 return false;
             }
         }
