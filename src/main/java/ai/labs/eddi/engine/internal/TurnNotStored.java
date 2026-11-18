@@ -85,8 +85,11 @@ public final class TurnNotStored {
                         + "before sending it again."),
         /**
          * The turn's outcome was never confirmed: the watchdog gave up on it while it
-         * ran or wrote, or it failed after its answer was produced (S1). It may or may
-         * not be stored.
+         * ran or wrote, or it failed after its answer was produced (S1). After the
+         * watchdog it may or may not be stored; a turn the runtime failed after its
+         * answer never reached its write and is not stored. Both are answered with this
+         * one reason, because for an abandoned turn the two backstops race (see
+         * {@code ConversationStepRunner#flushDeferredDelivery}).
          */
         OUTCOME_UNKNOWN("outcome_unknown", false, null, 503,
                 "The turn ran, but it did not finish in time or failed afterwards, so it may not have been stored. Read the "

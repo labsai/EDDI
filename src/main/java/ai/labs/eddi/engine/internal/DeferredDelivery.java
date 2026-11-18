@@ -28,8 +28,9 @@ import java.util.function.Consumer;
  * answer.
  * <p>
  * <b>Contract.</b> The completion callback {@link #defer defers} the delivery
- * of a paused outcome; the persistence step {@link #deliver delivers} it once
- * the commit outcome is known, passing the state the store really holds. The
+ * of every say turn's outcome; the persistence step {@link #deliver delivers}
+ * it once the write's outcome is known (for a pause, with the state the store
+ * really holds), or {@link #deliverNotStored reports} it as not stored. The
  * delivery runs at most once ({@code getAndSet}), so every exit path of the
  * turn can call {@link #deliver} as a safety net without risking a second
  * terminal event on the stream.

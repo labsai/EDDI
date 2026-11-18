@@ -285,7 +285,7 @@ class ConversationStepRunner {
                     // an entry that is never released leaks into the gauge forever.
                     // release() is one-shot, so releasing twice is a no-op.
                     //
-                    // The same applies to a deferred paused-turn delivery: the runtime
+                    // The same applies to a turn's deferred delivery: the runtime
                     // callbacks flush it, and this is the backstop for a turn that never
                     // reached either (cancelled before it ran, a runtime that dropped
                     // it) — the caller's response/stream must terminate exactly once.

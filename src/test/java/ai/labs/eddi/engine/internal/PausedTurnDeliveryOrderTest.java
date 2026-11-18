@@ -64,7 +64,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -91,6 +93,15 @@ import static org.mockito.Mockito.verify;
  * card with nothing in it. The contract: a turn that ends AWAITING_HUMAN is
  * delivered only after the commit outcome is known, with the state the store
  * really holds, and exactly once on every path.
+ * <p>
+ * Since every say turn is answered only once it is stored (A1, see
+ * {@code ConversationService#completeTurn}), the same order holds for turns
+ * that do not pause: the write first, then the answer. A turn whose persistence
+ * step never ran — the runtime routed it to {@code onFailure} — is not stored,
+ * so its caller is told {@code TURN_NOT_STORED} ({@code outcome_unknown}),
+ * neither the pause nor a {@code READY} answer. The HITL resume path is not
+ * covered by A1 and still answers a settled resume before its write
+ * ({@link ResumeRePause#settled_deliveredImmediately}).
  */
 class PausedTurnDeliveryOrderTest {
 
@@ -134,19 +145,21 @@ class PausedTurnDeliveryOrderTest {
     private ICache<String, ConversationState> conversationStateCache;
 
     private ConversationService conversationService;
+    private SimpleMeterRegistry meterRegistry;
 
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
         doReturn(conversationStateCache).when(cacheFactory).getCache("conversationState", ConversationService.CONVERSATION_STATE_CACHE_TTL);
         doReturn(new HashMap<String, String>()).when(contextLogger).createLoggingContext(any(), any(), any(), any());
+        meterRegistry = new SimpleMeterRegistry();
         conversationService = new ConversationService(
                 agentFactory, conversationMemoryStore, conversationDescriptorStore,
                 userMemoryStore, conversationCoordinator, conversationSetup,
                 cacheFactory, runtime, contextLogger, auditLedgerService,
                 gdprComplianceService, tenantQuotaService, scheduleStore, agentStore,
                 jsonSerialization,
-                new SimpleMeterRegistry(), ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), 30);
+                meterRegistry, ConversationServiceTestFixtures.hitlResumeEvent(), new CallerIdentityContext(null, null), 30);
     }
 
     // =========================================================================
@@ -319,9 +332,20 @@ class PausedTurnDeliveryOrderTest {
             assertNotEquals(ConversationState.AWAITING_HUMAN, delivered.getValue().getConversationState());
         }
 
+        /**
+         * The runtime routes a finished turn to {@code onFailure} instead of
+         * {@code onComplete} (BaseRuntime's one-shot gate: never both), so the
+         * persistence step that would have committed the pause never runs. Nothing of
+         * the turn is written: the store still holds the pre-turn {@code READY}, with
+         * no pause. The backstop flush answers the caller once, as not stored — the
+         * pause it never committed must not be announced, and the turn must not be
+         * answered as done either. It cannot name a more precise reason than
+         * {@code outcome_unknown}: for a turn the watchdog abandoned, this flush races
+         * the task's own, which runs while the write may still be in flight.
+         */
         @Test
-        @DisplayName("runtime routes the finished turn to onFailure (watchdog abandonment): deferred response is flushed once with the stored state")
-        void pause_runtimeFailure_flushesOnce() throws Exception {
+        @DisplayName("runtime routes the finished paused turn to onFailure: no pause stored, the caller is told once 'not stored (outcome_unknown)' — never AWAITING_HUMAN, never READY as done")
+        void pause_runtimeFailure_reportsNotStoredOnce() throws Exception {
             var turn = new SayTurn(ConversationState.AWAITING_HUMAN);
             stubRuntimeInline(new ExecutionAbandonedException("abandoned"));
             ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
@@ -330,23 +354,37 @@ class PausedTurnDeliveryOrderTest {
 
             ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
             verify(handler, times(1)).onComplete(delivered.capture());
-            assertEquals(ConversationState.READY, delivered.getValue().getConversationState(),
-                    "the failure path commits no pause, so the caller hears the stored state");
+            SimpleConversationMemorySnapshot answer = delivered.getValue();
+            assertEquals(ConversationState.ERROR, answer.getConversationState(),
+                    "the turn's outcome is a failure: neither the uncommitted pause nor READY-as-done");
+            assertTrue(TurnNotStored.isNotStored(answer.getError()), "the caller is told the turn was not stored");
+            assertEquals(TurnNotStored.Reason.OUTCOME_UNKNOWN.tag(), answer.getError().errorType());
+            assertTrue(answer.getConversationOutputs().isEmpty(), "a turn that is not stored carries no answer");
+            // Nothing of the turn reached the store: no pause, no step, no state change.
             verify(conversationMemoryStore, never()).storeConversationMemorySnapshotIfState(any(), any());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore, never()).compareAndSetState(anyString(), any(), any());
+            verify(conversationStateCache, never()).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
+            assertEquals(1.0, meterRegistry.counter("eddi.turn.not_stored", "reason", "outcome_unknown").count(),
+                    "counted once, by the one delivery that claimed the answer");
         }
 
         @Test
-        @DisplayName("non-pause turn: delivered immediately from the pipeline callback (latency unchanged), before the persist")
-        void nonPause_deliveredBeforePersist_unchanged() throws Exception {
+        @DisplayName("non-pause turn: answered only after its write succeeded, as READY with no error; delivered once")
+        void nonPause_deliveredAfterPersist() throws Exception {
             var turn = new SayTurn(ConversationState.READY);
             ConversationResponseHandler handler = mock(ConversationResponseHandler.class);
 
             turn.sayAndRun(handler);
 
-            InOrder order = inOrder(handler, conversationMemoryStore);
-            order.verify(handler).onComplete(any());
+            InOrder order = inOrder(conversationMemoryStore, handler);
             order.verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+            order.verify(handler).onComplete(delivered.capture());
             verify(handler, times(1)).onComplete(any());
+            assertEquals(ConversationState.READY, delivered.getValue().getConversationState());
+            assertNull(delivered.getValue().getError(), "a stored turn is answered as done");
+            verify(conversationStateCache).put(CONVERSATION_ID, ConversationState.READY);
         }
     }
 
@@ -396,16 +434,47 @@ class PausedTurnDeliveryOrderTest {
         }
 
         @Test
-        @DisplayName("non-pause turn: done is still sent from the pipeline callback, before the persist")
-        void nonPause_doneBeforePersist_unchanged() throws Exception {
+        @DisplayName("non-pause turn: done is sent only after the write succeeded, as READY; one terminal event")
+        void nonPause_doneAfterPersist() throws Exception {
             var turn = new SayTurn(ConversationState.READY);
             StreamingResponseHandler handler = mock(StreamingResponseHandler.class);
 
             turn.sayStreamingAndRun(handler);
 
-            InOrder order = inOrder(handler, conversationMemoryStore);
-            order.verify(handler).onComplete(any());
+            InOrder order = inOrder(conversationMemoryStore, handler);
             order.verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
+            ArgumentCaptor<SimpleConversationMemorySnapshot> delivered = ArgumentCaptor.forClass(SimpleConversationMemorySnapshot.class);
+            order.verify(handler).onComplete(delivered.capture());
+            assertEquals(ConversationState.READY, delivered.getValue().getConversationState());
+            verify(handler, times(1)).onComplete(any());
+            verify(handler, never()).onError(any());
+        }
+
+        /**
+         * A paused turn whose body threw after the pipeline ran (not an abandonment):
+         * the persistence step never runs, the failure path records {@code ERROR}
+         * against the stored {@code READY}, and the stream ends with one
+         * {@code turn_not_stored} error event — no {@code done}, so no
+         * {@code AWAITING_HUMAN} is announced for a pause that does not exist.
+         */
+        @Test
+        @DisplayName("paused turn failed in the runtime: one error event (turn_not_stored, outcome_unknown), no done, no pause stored, ERROR recorded")
+        void pause_runtimeFailure_errorEventOnce() throws Exception {
+            var turn = new SayTurn(ConversationState.AWAITING_HUMAN);
+            stubRuntimeInline(new IllegalStateException("failed after the pipeline"));
+            StreamingResponseHandler handler = mock(StreamingResponseHandler.class);
+
+            turn.sayStreamingAndRun(handler);
+
+            ArgumentCaptor<Throwable> error = ArgumentCaptor.forClass(Throwable.class);
+            verify(handler, times(1)).onError(error.capture());
+            verify(handler, never()).onComplete(any());
+            TurnNotStored.TurnNotStoredException notStored = assertInstanceOf(TurnNotStored.TurnNotStoredException.class, error.getValue());
+            assertEquals(TurnNotStored.Reason.OUTCOME_UNKNOWN.tag(), notStored.getError().errorType());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshotIfState(any(), any());
+            verify(conversationMemoryStore, never()).storeConversationMemorySnapshot(any());
+            verify(conversationMemoryStore).compareAndSetState(CONVERSATION_ID, ConversationState.READY, ConversationState.ERROR);
+            verify(conversationStateCache, never()).put(CONVERSATION_ID, ConversationState.AWAITING_HUMAN);
         }
     }
 

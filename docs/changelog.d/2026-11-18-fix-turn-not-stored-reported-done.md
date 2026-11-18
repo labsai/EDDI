@@ -144,3 +144,32 @@ An independent review of the branch found one regression and eight gaps.
 - The size check at admission walks the stored snapshot once more per turn (an estimate walk, no serialisation): about 95 ms for a 16 MB document of 2,000 steps x 30 results on a desktop JVM, so roughly 190 ms per turn at that size with the write-time check; small conversations cost well under a millisecond.
 - The scheduler and continuations still treat a refused over-limit conversation like any failure (retry); that is
   another branch.
+
+## 🧪 test(engine): delivery-order tests pin "answered after the write" (2026-11-18)
+
+**Repo:** EDDI (`fix/turn-not-stored-reported-done`)
+
+### What changed and why
+
+Three tests of `PausedTurnDeliveryOrderTest` failed on this branch. They pinned what the branch removes on purpose,
+so the tests were rewritten, not the engine:
+
+- `nonPause_deliveredBeforePersist_unchanged` and `nonPause_doneBeforePersist_unchanged` required a turn that does not
+  pause to be answered from the pipeline callback, before its write. Now `nonPause_deliveredAfterPersist` and
+  `nonPause_doneAfterPersist` pin the opposite: the write first, then one `READY` answer with no error (one `done`, no
+  `error` event on a stream).
+- `pause_runtimeFailure_flushesOnce` expected a paused turn that the runtime routed to `onFailure` to be answered with
+  the stored `READY`. That path never reaches its write (BaseRuntime fires `onComplete` or `onFailure`, never both),
+  so the turn is not stored and answering `READY` would report it as done. `pause_runtimeFailure_reportsNotStoredOnce`
+  pins the answer: once, `ERROR` with `TURN_NOT_STORED` / `outcome_unknown`, no outputs, nothing written, no
+  `AWAITING_HUMAN` cached, counted once. A new streaming twin (`pause_runtimeFailure_errorEventOnce`) pins one `error`
+  event, no `done` and `ERROR` recorded for a failure that is not an abandonment.
+
+### Design decisions
+
+- `outcome_unknown` stays the reason of the `onFailure` backstop although that turn is certainly not stored: for a
+  turn the watchdog abandoned, that backstop races the task's own one, which cannot know whether the write landed, so
+  a more precise reason would depend on which one wins. The `Reason` Javadoc and
+  [conversation-memory](../conversation-memory.md#when-a-turn-is-not-stored) now say so.
+- [hitl.md](../hitl.md) no longer says ordinary turns are answered before their write, and says what the caller of a
+  paused turn that was not stored receives.
