@@ -124,6 +124,7 @@ The id set gets the same query narrowing from the one authoritative copy, with n
 - [`ConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/engine/memory/ConversationMemoryStore.java)
 - [`PostgresConversationMemoryStore.java`](../../src/main/java/ai/labs/eddi/datastore/postgres/PostgresConversationMemoryStore.java)
 - docs: [`rest-api-reference.md`](../rest-api-reference.md#bounded-listings), [`metrics.md`](../metrics.md)
+- dashboard: the listing panel of [`eddi-full-metrics-dashboard.json`](../monitoring/eddi-full-metrics-dashboard.json) charts the new refusal counter; the Kubernetes copies are regenerated with `scripts/sync-monitoring-assets.py`
 
 ```decision-log
 | 2026-11-07 | Conversation listings filter by state through the ids in that state (read off the memory store's state index), not a state copy on the descriptor; admin listings refuse with 422 after rejecting 10,000 rows instead of scanning without bound | #931: a sparse-state admin listing read the whole collection (127 s / 311 s for one deep page at 100,000 conversations) | Syncing the state onto the descriptor: ten-plus write paths, a non-atomic second write, a backfill, and the per-row check still needed |
