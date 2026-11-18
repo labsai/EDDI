@@ -22,8 +22,10 @@ public class CharacterUtilities {
     }
 
     /**
-     * True when every character is a digit — and therefore false for null and for
-     * the empty string, which contain no digits at all.
+     * True when every character is an ASCII digit ({@code 0}-{@code 9}) — and
+     * therefore false for null and for the empty string, which contain no digits at
+     * all. Digits of other scripts (fullwidth, Arabic-Indic, …) do not count: the
+     * number parsers downstream read ASCII.
      * <p>
      * The empty string is explicitly not an integer, so callers need not guard it
      * themselves.
@@ -33,13 +35,21 @@ public class CharacterUtilities {
             return false;
         }
         for (int i = 0; i < lookup.length(); i++)
-            if (!Character.isDigit(lookup.charAt(i))) {
+            if (!isAsciiDigit(lookup.charAt(i))) {
                 return false;
             }
 
         return true;
     }
 
+    private static boolean isAsciiDigit(char c) {
+        return c >= '0' && c <= '9';
+    }
+
+    /**
+     * True for ASCII digits with at most one decimal separator ({@code .} or
+     * {@code ,}) that is not the last character.
+     */
     public static boolean isNumber(String lookup, boolean mustContainComma) {
         if (isNullOrEmpty(lookup)) {
             return false;
@@ -51,7 +61,7 @@ public class CharacterUtilities {
 
         boolean firstComma = true;
         for (int i = 0; i < lookup.length(); i++) {
-            if (!Character.isDigit(lookup.charAt(i))) {
+            if (!isAsciiDigit(lookup.charAt(i))) {
                 if ((lookup.charAt(i) == '.' || lookup.charAt(i) == ',') && i + 1 != lookup.length() && firstComma) {
                     firstComma = false;
                 } else {

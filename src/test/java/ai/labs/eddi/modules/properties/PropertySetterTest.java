@@ -70,4 +70,39 @@ public class PropertySetterTest {
         verify(expressionProvider, times(1)).parseExpressions(testStringExpressions);
         Assertions.assertEquals(expectedPropertyEntries, propertyEntries);
     }
+
+    private static Property single(String leaf) {
+        Expressions expressions = new Expressions(new Expression("property", new Expression("x", new Expression(leaf))));
+        List<Property> result = new PropertySetter(new LinkedList<>()).extractProperties(expressions);
+        Assertions.assertEquals(1, result.size());
+        return result.get(0);
+    }
+
+    @Test
+    public void leafValuesAreKeptVerbatim() {
+        Assertions.assertEquals("api.openai.com", single("api.openai.com").getValueString());
+        Assertions.assertEquals("1.2.3", single("1.2.3").getValueString());
+        Assertions.assertEquals("01234", single("01234").getValueString());
+        Assertions.assertEquals("3.14", single("3.14").getValueString());
+        Assertions.assertEquals("-5", single("-5").getValueString());
+        Assertions.assertEquals("１", single("１").getValueString());
+    }
+
+    @Test
+    public void plainIntegersBecomeNumbers() {
+        Assertions.assertEquals(42, single("42").getValueInt());
+        Assertions.assertEquals(0, single("0").getValueInt());
+        Assertions.assertEquals(4915112345678L, single("4915112345678").getValueLong());
+    }
+
+    @Test
+    public void tooLongIntegerStaysAString() {
+        String huge = "9".repeat(30);
+        Assertions.assertEquals(huge, single(huge).getValueString());
+    }
+
+    @Test
+    public void booleansAreRecognised() {
+        Assertions.assertEquals(Boolean.TRUE, single("TRUE").getValueBoolean());
+    }
 }

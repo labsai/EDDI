@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.nlp.expressions.value;
 
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 
+import java.math.BigDecimal;
 import java.util.regex.Pattern;
 
 import org.jboss.logging.Logger;
@@ -52,11 +53,31 @@ public class Value extends Expression {
     }
 
     public Float toFloat() {
-        return Float.parseFloat(expressionName);
+        return Float.parseFloat(expressionName.replace(',', '.'));
     }
 
     public Boolean toBoolean() {
         return Boolean.parseBoolean(expressionName);
+    }
+
+    /** Numbers longer than this are compared as text instead of parsed. */
+    private static final int MAX_PARSED_NUMBER_LENGTH = 100;
+
+    /**
+     * The value two numeric expressions are compared by: the exact decimal
+     * ({@code 1}, {@code 1.0} and {@code 1,0} are the same, {@code 123456789} and
+     * {@code 123456790} are not), or the text itself for an over-long number. Never
+     * throws.
+     */
+    private Object comparableNumber() {
+        if (expressionName.length() > MAX_PARSED_NUMBER_LENGTH) {
+            return expressionName;
+        }
+        try {
+            return new BigDecimal(expressionName.replace(',', '.')).stripTrailingZeros();
+        } catch (NumberFormatException e) {
+            return expressionName;
+        }
     }
 
     @Override
@@ -64,9 +85,8 @@ public class Value extends Expression {
         if (this == o)
             return true;
 
-        if (o instanceof Value && isNumeric()) {
-            Value value = (Value) o;
-            return value.toFloat().equals(this.toFloat());
+        if (o instanceof Value value && expressionName != null && value.expressionName != null && isNumeric() && value.isNumeric()) {
+            return comparableNumber().equals(value.comparableNumber());
         }
 
         return super.equals(o);
@@ -74,8 +94,8 @@ public class Value extends Expression {
 
     @Override
     public int hashCode() {
-        if (isNumeric()) {
-            return Float.hashCode(toFloat());
+        if (expressionName != null && isNumeric()) {
+            return comparableNumber().hashCode();
         }
         return super.hashCode();
     }

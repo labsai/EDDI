@@ -145,6 +145,10 @@ Matcher:      "actions" : "ask_for_model"
 
 A context entry whose key starts with `properties` and whose type is `expressions` (for example `property(role(admin), longTerm)`) is parsed by the property step like a parser result, and applied **after** `setOnActions`. Because that overrides what the agent computed, a chat client may not use it: such an entry is honoured only when the engine itself wrote it (a server-generated context), and a client-sent one is ignored (logged once per turn at DEBUG). To let callers set conversation properties through the context — only when every caller of the agent is trusted — set `"acceptClientProperties": true` next to `setOnActions` in the property configuration (default `false`). Pass trusted values through ordinary context entries and read them as `{context.x}` or with a `valueString` template instead.
 
+### `property(...)` values
+
+A leaf value inside `property(name(value))` is kept verbatim as a string (`1.2.3`, `01234`, `api.openai.com`, a phone number), except a plain integer without a leading zero or sign, which is stored as a number (an `int`, or a `long` beyond the int range). Nothing in a value can fail the turn.
+
 ### Capturing user input vs. setting fixed values
 
 ```json

@@ -8,11 +8,11 @@ import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.modules.properties.model.SetOnActions;
 import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
-import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import ai.labs.eddi.modules.properties.IPropertySetter;
 
 import java.util.LinkedList;
 import java.util.List;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
@@ -23,6 +23,8 @@ import static ai.labs.eddi.configs.properties.model.Property.Scope.*;
 
 public class PropertySetter implements IPropertySetter {
     private static final String PROPERTY_EXPRESSION = "property";
+    /** At most 18 ASCII digits and no leading zero, so it always fits a long. */
+    private static final Pattern PLAIN_INTEGER = Pattern.compile("0|[1-9][0-9]{0,17}");
 
     private final List<SetOnActions> setOnActionsList;
 
@@ -48,34 +50,45 @@ public class PropertySetter implements IPropertySetter {
                 .filter(expression -> PROPERTY_EXPRESSION.equals(expression.getExpressionName()) && expression.getSubExpressions().length > 0)
                 .map(expression -> {
                     var meanings = new LinkedList<String>();
-                    var propertyValue = new Value();
-                    extractMeanings(meanings, propertyValue, expression.getSubExpressions()[0]);
+                    String leaf = extractMeanings(meanings, expression.getSubExpressions()[0]);
 
                     var propertyScope = extractScopeOrDefault(expression.getSubExpressions());
                     var propertyName = String.join(".", meanings);
 
-                    if (propertyValue.isNumeric()) {
-                        if (propertyValue.isDouble()) {
-                            return new Property(propertyName, propertyValue.toFloat(), propertyScope);
-                        } else {
-                            return new Property(propertyName, propertyValue.toInteger(), propertyScope);
-                        }
-                    } else {
-                        return propertyValue.isBoolean()
-                                ? new Property(propertyName, propertyValue.toBoolean(), propertyScope)
-                                : new Property(propertyName, propertyValue.getExpressionName(), propertyScope);
-                    }
-
+                    return toProperty(propertyName, leaf, propertyScope);
                 }).collect(Collectors.toCollection(LinkedList::new));
     }
 
-    private static void extractMeanings(List<String> meanings, Value value, Expression expression) {
+    /**
+     * The typed property for a leaf value. The text is kept verbatim — host names,
+     * versions ({@code 1.2.3}), codes with a leading zero ({@code 01234}), decimals
+     * and signed numbers stay strings — except a plain integer (ASCII digits, no
+     * leading zero), which becomes an {@code Integer}, or a {@code Long} beyond the
+     * int range, and {@code true}/{@code false}. Nothing here can throw.
+     */
+    static Property toProperty(String name, String leaf, Property.Scope scope) {
+        if (leaf == null) {
+            return new Property(name, (String) null, scope);
+        }
+        if (PLAIN_INTEGER.matcher(leaf).matches()) {
+            long number = Long.parseLong(leaf);
+            if (number <= Integer.MAX_VALUE) {
+                return new Property(name, (int) number, scope);
+            }
+            return new Property(name, number, scope);
+        }
+        if (leaf.equalsIgnoreCase("true") || leaf.equalsIgnoreCase("false")) {
+            return new Property(name, Boolean.parseBoolean(leaf), scope);
+        }
+        return new Property(name, leaf, scope);
+    }
+
+    private static String extractMeanings(List<String> meanings, Expression expression) {
         if (expression.getSubExpressions().length > 0) {
             meanings.add(expression.getExpressionName());
-            extractMeanings(meanings, value, expression.getSubExpressions()[0]);
-        } else {
-            value.setExpressionName(expression.getExpressionName());
+            return extractMeanings(meanings, expression.getSubExpressions()[0]);
         }
+        return expression.getExpressionName();
     }
 
     private static Property.Scope extractScopeOrDefault(Expression[] subExpressions) {

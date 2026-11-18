@@ -164,4 +164,12 @@ class CharacterUtilitiesTest {
     void isStringInteger_null_returnsFalse() {
         assertFalse(CharacterUtilities.isStringInteger(null));
     }
+
+    @Test
+    void isStringInteger_nonAsciiDigits_returnsFalse() {
+        assertFalse(CharacterUtilities.isStringInteger("１"));
+        assertFalse(CharacterUtilities.isStringInteger("٣"));
+        assertFalse(CharacterUtilities.isNumber("１２", false));
+        assertFalse(CharacterUtilities.isNumber("1٣.5", false));
+    }
 }

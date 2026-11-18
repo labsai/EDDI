@@ -168,4 +168,49 @@ class ValueTest {
             assertDoesNotThrow(() -> v.addSubExpressions());
         }
     }
+
+    @Nested
+    @DisplayName("exact numeric comparison and robustness")
+    class ExactComparison {
+
+        @Test
+        @DisplayName("numbers above 2^24 do not collide")
+        void bigNumbersDoNotCollide() {
+            assertNotEquals(new Value("123456789"), new Value("123456790"));
+        }
+
+        @Test
+        @DisplayName("1, 1.0 and 1,0 are equal and hash alike")
+        void sameNumberDifferentSpelling() {
+            assertEquals(new Value("1"), new Value("1.0"));
+            assertEquals(new Value("1"), new Value("1,0"));
+            assertEquals(new Value("1").hashCode(), new Value("1,0").hashCode());
+        }
+
+        @Test
+        @DisplayName("unicode digits are not numeric and never throw")
+        void unicodeDigitsDoNotThrow() {
+            Value fullwidth = new Value("１");
+            assertFalse(fullwidth.isNumeric());
+            assertDoesNotThrow(() -> fullwidth.equals(new Value("1")));
+            assertDoesNotThrow(fullwidth::hashCode);
+            assertNotEquals(new Value("1"), fullwidth);
+        }
+
+        @Test
+        @DisplayName("a numeric value compared with a non-numeric one does not throw")
+        void numericVersusText() {
+            assertDoesNotThrow(() -> new Value("1").equals(new Value("abc")));
+            assertNotEquals(new Value("1"), new Value("abc"));
+        }
+
+        @Test
+        @DisplayName("an over-long number is compared as text and does not throw")
+        void overLongNumber() {
+            String digits = "9".repeat(5000);
+            assertEquals(new Value(digits), new Value(digits));
+            assertEquals(new Value(digits).hashCode(), new Value(digits).hashCode());
+            assertNotEquals(new Value(digits), new Value(digits + "8"));
+        }
+    }
 }
