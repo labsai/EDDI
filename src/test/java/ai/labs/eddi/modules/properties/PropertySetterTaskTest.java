@@ -137,6 +137,7 @@ public class PropertySetterTaskTest {
             IData<List<Property>> expectedPropertyData = new Data<>("properties:extracted", propertyEntries);
 
             IPropertySetter propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.acceptsClientContextProperties()).thenReturn(true);
             final String propertyExpression = "property(someMeaning(someValue))";
             when(currentStep.getLatestData(eq(KEY_EXPRESSIONS_PARSED))).thenReturn(new Data<>(KEY_EXPRESSIONS_PARSED, propertyExpression));
             when(propertySetter.extractProperties(eq(expressions))).thenAnswer(invocation -> {
@@ -473,6 +474,7 @@ public class PropertySetterTaskTest {
         @DisplayName("should extract context properties when context type is 'expressions'")
         void execute_contextExpressions_extractsProperties() throws LifecycleException {
             IPropertySetter propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.acceptsClientContextProperties()).thenReturn(true);
 
             // No expressions from parser, no actions
             when(currentStep.getLatestData(KEY_EXPRESSIONS_PARSED)).thenReturn(null);
@@ -497,6 +499,60 @@ public class PropertySetterTaskTest {
 
             // Verify expressionProvider was called for the context value
             verify(expressionProvider).parseExpressions("property(contextProp(contextVal))");
+        }
+
+        private void runWithContext(Context context, boolean acceptClient) throws LifecycleException {
+            IPropertySetter propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.acceptsClientContextProperties()).thenReturn(acceptClient);
+            when(currentStep.getLatestData(KEY_EXPRESSIONS_PARSED)).thenReturn(null);
+            when(currentStep.getLatestData(KEY_ACTIONS)).thenReturn(null);
+            when(currentStep.getAllData(KEY_CONTEXT)).thenReturn(
+                    Collections.singletonList(new Data<>(KEY_CONTEXT + ":properties", context)));
+            when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
+            when(previousConversationSteps.size()).thenReturn(0);
+            propertySetterTask.execute(conversationMemory, propertySetter);
+        }
+
+        @Test
+        @DisplayName("configure reads acceptClientProperties, default off")
+        void configure_acceptClientProperties() throws Exception {
+            var off = (IPropertySetter) propertySetterTask.configure(new HashMap<>(), Map.of());
+            var on = (IPropertySetter) propertySetterTask.configure(new HashMap<>(Map.of("acceptClientProperties", true)), Map.of());
+            assertFalse(off.acceptsClientContextProperties());
+            assertTrue(on.acceptsClientContextProperties());
+        }
+
+        @Test
+        @DisplayName("client-supplied properties expressions are ignored by default")
+        void clientSuppliedContext_ignored() throws LifecycleException {
+            Context context = new Context(Context.ContextType.expressions, "property(role(admin), longTerm)");
+            runWithContext(context, false);
+            verify(expressionProvider, never()).parseExpressions(anyString());
+        }
+
+        @Test
+        @DisplayName("server-generated properties expressions are honoured")
+        void serverGeneratedContext_honoured() throws LifecycleException {
+            Context context = new Context(Context.ContextType.expressions, "property(role(admin))");
+            context.setServerGenerated(true);
+            runWithContext(context, false);
+            verify(expressionProvider).parseExpressions("property(role(admin))");
+        }
+
+        @Test
+        @DisplayName("client-supplied properties expressions are honoured when the agent opted in")
+        void optedIn_honoured() throws LifecycleException {
+            Context context = new Context(Context.ContextType.expressions, "property(role(admin))");
+            runWithContext(context, true);
+            verify(expressionProvider).parseExpressions("property(role(admin))");
+        }
+
+        @Test
+        @DisplayName("a context without a type or value does not throw")
+        void nullType_noException() {
+            assertDoesNotThrow(() -> runWithContext(new Context(null, "property(a(b))"), true));
+            assertDoesNotThrow(() -> runWithContext(new Context(Context.ContextType.expressions, null), true));
+            verify(expressionProvider, never()).parseExpressions(anyString());
         }
 
         @Test

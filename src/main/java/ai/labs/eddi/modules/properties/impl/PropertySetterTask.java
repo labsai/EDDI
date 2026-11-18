@@ -34,12 +34,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
+import org.jboss.logging.Logger;
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.*;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
 
@@ -49,6 +51,7 @@ import static java.lang.Boolean.parseBoolean;
 @ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
     public static final String ID = "ai.labs.property";
+    private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
     public static final TaskId TASK_ID = new TaskId(ID);
 
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
@@ -61,6 +64,7 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String PROPERTIES_IDENTIFIER = "properties";
     private static final String KEY_SET_ON_ACTIONS = "setOnActions";
     private static final String NAME = "name";
+    private static final String KEY_ACCEPT_CLIENT_PROPERTIES = "acceptClientProperties";
     private static final String VALUE_STRING = "valueString";
     private static final String VALUE_OBJECT = "valueObject";
     private static final String VALUE_LIST = "valueList";
@@ -122,7 +126,7 @@ public class PropertySetterTask implements ILifecycleTask {
         Expressions aggregatedExpressions = new Expressions();
 
         if (contextDataList != null) {
-            aggregatedExpressions.addAll(extractContextProperties(contextDataList));
+            aggregatedExpressions.addAll(extractContextProperties(contextDataList, propertySetter.acceptsClientContextProperties(), memory));
         }
 
         if (expressionsData != null) {
@@ -249,16 +253,39 @@ public class PropertySetterTask implements ILifecycleTask {
         }
     }
 
-    private Expressions extractContextProperties(List<IData<Context>> contextDataList) {
+    /**
+     * Parses the {@code properties*} context entries of type {@code expressions}
+     * into property expressions. Those entries are applied after the trusted
+     * {@code setOnActions}, so one a chat client could send would override a value
+     * the agent computed (and a {@code longTerm} one would persist). They are
+     * therefore honoured only when the engine wrote them itself
+     * ({@link Context#isServerGenerated()}) or the agent designer opted in with
+     * {@code acceptClientProperties}; a client-sent entry is otherwise ignored.
+     */
+    private Expressions extractContextProperties(List<IData<Context>> contextDataList, boolean acceptClientEntries, IConversationMemory memory) {
         Expressions ret = new Expressions();
-        contextDataList.forEach(contextData -> {
+        boolean ignoredLogged = false;
+        for (IData<Context> contextData : contextDataList) {
             String contextKey = contextData.getKey();
             Context context = contextData.getResult();
-            String key = contextKey.substring((CONTEXT_IDENTIFIER + ":").length());
-            if (key.startsWith(PROPERTIES_IDENTIFIER) && context.getType().equals(Context.ContextType.expressions)) {
-                ret.addAll(expressionProvider.parseExpressions(context.getValue().toString()));
+            if (contextKey == null || context == null || context.getType() != Context.ContextType.expressions || context.getValue() == null) {
+                continue;
             }
-        });
+            String key = contextKey.substring(Math.min(contextKey.length(), (CONTEXT_IDENTIFIER + ":").length()));
+            if (!key.startsWith(PROPERTIES_IDENTIFIER)) {
+                continue;
+            }
+            if (!acceptClientEntries && !context.isServerGenerated()) {
+                if (!ignoredLogged) {
+                    ignoredLogged = true;
+                    LOGGER.debugf("Ignoring client-supplied context '%s' of type expressions: the property step accepts it only "
+                            + "for server-generated context or with acceptClientProperties (conversation %s)", sanitize(key),
+                            memory.getConversationId());
+                }
+                continue;
+            }
+            ret.addAll(expressionProvider.parseExpressions(context.getValue().toString()));
+        }
 
         return ret;
     }
@@ -275,6 +302,7 @@ public class PropertySetterTask implements ILifecycleTask {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
 
+        boolean acceptClientProperties = parseBoolean(String.valueOf(configuration.getOrDefault(KEY_ACCEPT_CLIENT_PROPERTIES, false)));
         if (configuration.containsKey(KEY_SET_ON_ACTIONS)) {
             setOnActionsList.addAll(parseRawConfig(configuration));
         }
@@ -287,13 +315,14 @@ public class PropertySetterTask implements ILifecycleTask {
                     var propertySetterConfig = resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
                     setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
                 }
+                    acceptClientProperties |= propertySetterConfig.isAcceptClientProperties();
             }
         } catch (ServiceException e) {
             String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
             throw new WorkflowConfigurationException(message, e);
         }
 
-        return new PropertySetter(new LinkedList<>(setOnActionsList));
+        return new PropertySetter(new LinkedList<>(setOnActionsList), acceptClientProperties);
     }
 
     private List<SetOnActions> parseRawConfig(Map<String, Object> configuration) {

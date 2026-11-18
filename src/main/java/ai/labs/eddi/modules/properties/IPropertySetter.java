@@ -16,5 +16,13 @@ import java.util.List;
 public interface IPropertySetter {
     List<SetOnActions> getSetOnActionsList();
 
+    /**
+     * Whether a {@code properties*} context entry of type {@code expressions} sent
+     * by a client is honoured. Default: no.
+     */
+    default boolean acceptsClientContextProperties() {
+        return false;
+    }
+
     List<Property> extractProperties(Expressions expressions);
 }

@@ -26,8 +26,20 @@ public class PropertySetter implements IPropertySetter {
 
     private final List<SetOnActions> setOnActionsList;
 
+    private final boolean acceptClientContextProperties;
+
     public PropertySetter(List<SetOnActions> setOnActionsList) {
+        this(setOnActionsList, false);
+    }
+
+    public PropertySetter(List<SetOnActions> setOnActionsList, boolean acceptClientContextProperties) {
         this.setOnActionsList = setOnActionsList;
+        this.acceptClientContextProperties = acceptClientContextProperties;
+    }
+
+    @Override
+    public boolean acceptsClientContextProperties() {
+        return acceptClientContextProperties;
     }
 
     @Override

@@ -353,6 +353,7 @@ class PropertySetterTaskTest {
             when(memoryItemConverter.convert(memory)).thenReturn(templateDataObjects);
 
             var propertySetter = mock(IPropertySetter.class);
+            when(propertySetter.acceptsClientContextProperties()).thenReturn(true);
             when(propertySetter.getSetOnActionsList()).thenReturn(List.of());
             when(propertySetter.extractProperties(any())).thenReturn(new LinkedList<>());
 
