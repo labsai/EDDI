@@ -136,3 +136,16 @@ describe("useLeaveGuard", () => {
     expect(fire()).toBe(false);
   });
 });
+
+describe("clear (sign-out, or another person)", () => {
+  it("aborts every running turn and forgets every entry", async () => {
+    const registry = new ParkedControllers<{ controller: AgentConversation }>();
+    const { signals } = await entryWithRunningTurn(registry, "k");
+    registry.release("k");
+    registry.clear();
+    expect(signals[0]?.aborted).toBe(true);
+    expect(registry.isParked("k")).toBe(false);
+    const again = registry.acquire("k", () => ({ controller: new AgentConversation({ transport: slowTransport().transport }) }));
+    expect(again.resumed).toBe(false);
+  });
+});

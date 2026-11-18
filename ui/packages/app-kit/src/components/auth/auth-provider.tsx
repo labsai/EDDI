@@ -14,7 +14,8 @@ import { getAuthConfig, type AuthConfig } from "../../lib/auth-config";
 import { api } from "../../lib/api-client";
 import { clearWorkforcePins } from "../../lib/workforce-pins";
 import { clearWorkforceHandoffs } from "../../lib/workforce-handoffs";
-import { clearWorkforceThreads } from "../../lib/workforce-threads-storage";
+import { clearWorkforceThreads, principalOf } from "../../lib/workforce-threads-storage";
+import { emitSignOut } from "../../lib/session-events";
 import { mockRolesOverride } from "../../lib/mock-roles";
 import {
   AuthContext,
@@ -194,6 +195,7 @@ function KeycloakAuthProvider({
           try {
             const info = await keycloak.loadUserInfo() as Record<string, string>;
             setUser({
+              sub: (info.sub ?? (keycloak.tokenParsed?.sub as string | undefined)) || undefined,
               username: info.preferred_username ?? (keycloak.tokenParsed?.preferred_username as string) ?? "",
               firstName: info.given_name ?? (keycloak.tokenParsed?.given_name as string) ?? "",
               lastName: info.family_name ?? (keycloak.tokenParsed?.family_name as string) ?? "",
@@ -203,6 +205,7 @@ function KeycloakAuthProvider({
           } catch {
             // Fallback to token claims if userinfo request fails
             setUser({
+              sub: (keycloak.tokenParsed?.sub as string | undefined) || undefined,
               username:
                 (keycloak.tokenParsed?.preferred_username as string) ?? "",
               firstName: (keycloak.tokenParsed?.given_name as string) ?? "",
@@ -251,7 +254,9 @@ function KeycloakAuthProvider({
     // So are the hand-off markers (the start of each handed-over question).
     clearWorkforceHandoffs();
     // And the pointers to each advisor's conversation, which name this person's chats.
-    clearWorkforceThreads();
+    clearWorkforceThreads(principalOf(user));
+    // In-memory per-person state (running Workforce threads) goes too.
+    emitSignOut();
     // Keycloak 26 only terminates the SSO session when id_token_hint is present.
     // keycloak.idToken may have been deleted by a token refresh that didn't
     // return a new id_token — restore it from the ref so the hint is always sent.
@@ -263,7 +268,7 @@ function KeycloakAuthProvider({
     // enabled — only the SPA paths serve a shell. Signing out of Workforce used
     // to land in the Manager.
     keycloak.logout({ redirectUri: `${window.location.origin}${POST_LOGOUT_PATH[app]}` });
-  }, [keycloak, app]);
+  }, [keycloak, app, user]);
 
   const contextValue = useMemo<AuthContextValue>(
     () => ({

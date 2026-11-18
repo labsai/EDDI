@@ -8,7 +8,7 @@
  * The same two rules as the pins (`workforce-pins.ts`) now hold here:
  *
  * - **The key names the signed-in principal**, so a second user reads their own.
- * - **Sign-out removes every thread key**, the previous user's included
+ * - **Sign-out removes the signing-out person's key**
  *   ({@link clearWorkforceThreads}), and the unscoped key older versions wrote.
  */
 
@@ -20,21 +20,34 @@ export const WORKFORCE_THREADS_PREFIX = "workforce-threads-";
 /** Used where authentication is off: there is no one to separate threads between. */
 const ANONYMOUS_PRINCIPAL = "anonymous";
 
+/**
+ * Who per-person client state belongs to: the token's stable subject, the
+ * username only when a token carries none. (A username can be renamed or reused;
+ * the subject cannot.)
+ */
+export function principalOf(user: { sub?: string; username?: string } | null | undefined): string | null {
+  const sub = user?.sub?.trim();
+  if (sub) return sub;
+  const name = user?.username?.trim();
+  return name || null;
+}
+
 export function threadsStorageKey(principal: string | null | undefined): string {
   const who = principal && principal.trim() ? principal.trim() : ANONYMOUS_PRINCIPAL;
   return `${WORKFORCE_THREADS_PREFIX}${encodeURIComponent(who)}`;
 }
 
-/** Remove every thread-pointer key. Safe to call when storage is unavailable. */
-export function clearWorkforceThreads(storage?: Storage): void {
+/**
+ * Remove the signing-out person's thread pointers and the unscoped key older
+ * versions wrote. Another person's keys stay: their pointers are theirs, and on a
+ * shared profile they find their conversations again at their next sign-in.
+ * Safe to call when storage is unavailable.
+ */
+export function clearWorkforceThreads(principal: string | null | undefined, storage?: Storage): void {
   try {
     const store = storage ?? localStorage;
-    const doomed: string[] = [];
-    for (let i = 0; i < store.length; i++) {
-      const key = store.key(i);
-      if (key && (key === LEGACY_THREADS_KEY || key.startsWith(WORKFORCE_THREADS_PREFIX))) doomed.push(key);
-    }
-    doomed.forEach((key) => store.removeItem(key));
+    store.removeItem(threadsStorageKey(principal));
+    store.removeItem(LEGACY_THREADS_KEY);
   } catch {
     /* storage blocked (private mode, disabled site data): nothing was kept */
   }

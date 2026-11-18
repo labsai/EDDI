@@ -2,6 +2,8 @@ import { createContext } from "react";
 import type { AuthConfig } from "../../lib/auth-config";
 
 export interface AuthUser {
+  /** The token's stable subject (`sub`): what per-person client state is keyed by. A username can change. */
+  sub?: string;
   username: string;
   firstName: string;
   lastName: string;

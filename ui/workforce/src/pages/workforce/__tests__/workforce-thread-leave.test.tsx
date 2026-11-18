@@ -118,4 +118,38 @@ describe("WorkforceThread – leaving while a turn runs", () => {
     window.dispatchEvent(closing);
     expect(closing.defaultPrevented).toBe(false);
   });
+
+  it("a turn that fails while the page is away is shown when the page comes back, with its question and Retry", async () => {
+    vi.spyOn(useWorkforceThreadsHook, "useWorkforceThreads").mockReturnValue({
+      getThread: () => null,
+      registerThread: vi.fn(),
+      updateActivity: vi.fn(),
+    } as any);
+    vi.spyOn(useGroupsHook, "useGroup").mockReturnValue({
+      data: { id: "board-leave", name: "Board", members: [{ agentId: "agent-fail", displayName: "Fail Agent" }] },
+    } as any);
+    vi.spyOn(chatApi, "startConversation").mockResolvedValue("conv-fail");
+    vi.spyOn(chatApi, "readConversation").mockResolvedValue({ conversationSteps: [] } as any);
+    let fail!: () => void;
+    (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(async function* () {
+      yield { type: "token", data: "Half an answer" };
+      await new Promise<void>((resolve) => (fail = resolve));
+      yield { type: "error", data: JSON.stringify({ message: "upstream died" }) };
+    });
+
+    const first = renderPage("/workforce/board-leave/thread/agent-fail", <WorkforceThread />, ROUTE);
+    await waitFor(() => expect(screen.getByRole("textbox")).not.toBeDisabled());
+    await userEvent.setup().type(screen.getByRole("textbox"), "Will fail");
+    await userEvent.setup().keyboard("{Enter}");
+    await waitFor(() => expect(screen.getByText("Half an answer")).toBeInTheDocument());
+    first.unmount();
+
+    fail(); // the error arrives while nobody is looking
+    await new Promise((r) => setTimeout(r, 50));
+
+    renderPage("/workforce/board-leave/thread/agent-fail", <WorkforceThread />, ROUTE);
+    expect(await screen.findByTestId("thread-send-error")).toHaveTextContent(/upstream died/i);
+    expect(screen.getByText("Will fail")).toBeInTheDocument();
+    expect(screen.getByTestId("thread-retry")).toBeInTheDocument();
+  });
 });

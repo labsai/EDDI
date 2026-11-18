@@ -56,6 +56,8 @@ import {
   useLeaveGuard,
   type ConversationMessage,
   type Translate,
+  type TurnFailure,
+  type TurnFailureContext,
 } from "@eddi/conversation";
 import { extractOutputTexts, lastStepIndex, stepIndexes, type ContextMap, type ConversationSnapshot } from "@eddi/core";
 import { toolResultListener } from "@eddi/core/tool-events";
@@ -83,6 +85,9 @@ import {
 } from "@eddi/app-kit/lib/api/attachments";
 import { getAgentDescriptors } from "@eddi/app-kit/lib/api/agents";
 import { useWorkforceThreads } from "@/hooks/use-workforce-threads";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { onSignOut } from "@eddi/app-kit/lib/session-events";
+import { principalOf } from "@eddi/app-kit/lib/workforce-threads-storage";
 import { extractOutputParts, type ConversationOutput, type SimpleConversationStep } from "@eddi/app-kit/lib/api/conversations";
 import { ContextCard } from "@/components/workforce/context-card";
 import { PauseNotice } from "@eddi/app-kit/components/hitl/pause-notice";
@@ -705,6 +710,8 @@ function firstAttachmentName(context: ContextMap | undefined): string | undefine
 /** What one thread keeps between visits: its controller, its refs and its logs. */
 interface ThreadEntry {
   controller: AgentConversation;
+  /** A failure or pause notice that arrived while the page was away; shown when it returns. */
+  deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null>;
   hooksRef: MutableRefObject<ThreadHooks | null>;
   turnRef: MutableRefObject<ThreadTurn | null>;
   toolLog: ToolActivityLog;
@@ -717,7 +724,15 @@ function createThreadEntry(memberId: string): ThreadEntry {
   // Files every call under its conversation.
   const toolLog = new ToolActivityLog({ maxConversations: 5 });
   const noteLog = new TurnNotesLog();
-  return { controller: createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog), hooksRef, turnRef, toolLog, noteLog };
+  const deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null> = { current: null };
+  return {
+    controller: createThreadConversation(memberId, hooksRef, turnRef, toolLog, noteLog, deferredRef),
+    deferredRef,
+    hooksRef,
+    turnRef,
+    toolLog,
+    noteLog,
+  };
 }
 
 /**
@@ -726,6 +741,12 @@ function createThreadEntry(memberId: string): ThreadEntry {
  * is not discarded by navigating away.
  */
 const threadRegistry = new ParkedControllers<ThreadEntry>();
+
+// What a parked thread holds belongs to one person: nothing of it may outlive their
+// session. Sign-out is a page navigation today; this does not depend on that.
+onSignOut(() => threadRegistry.clear());
+/** The person the registry's entries belong to; a different one empties it. */
+let registryPrincipal: string | null | undefined;
 
 /**
  * The member thread on @eddi/conversation's controller (phase 3c): the turn —
@@ -741,6 +762,7 @@ function createThreadConversation(
   turnRef: MutableRefObject<ThreadTurn | null>,
   tools: ToolActivityLog,
   notes: TurnNotesLog,
+  deferredRef: MutableRefObject<((hooks: ThreadHooks) => void) | null>,
 ): AgentConversation {
   // Filed under the conversation and step on screen when each call finishes.
   const recordToolResult = toolResultListener((result) => {
@@ -751,66 +773,8 @@ function createThreadConversation(
     const { conversationId, messages } = controller.getSnapshot();
     notes.record(conversationId, lastStepIndex(messages), note);
   });
-  const controller: AgentConversation = new AgentConversation({
-    stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
-    reconnectDelaysMs: RECONNECT_DELAYS_MS,
-    transport: {
-      mode: "conversation",
-      // A turn of files only names the first file as its input; the backend
-      // reads the files from the context.
-      stream: (conversationId, text, { context, signal, idempotencyKey }) =>
-        sendMessageStreaming(
-          "production",
-          memberId,
-          conversationId ?? "",
-          context ? { input: text || firstAttachmentName(context) || "attachment", context } : { input: text },
-          signal,
-          { idempotencyKey },
-        ),
-      read: (conversationId, currentStepOnly) =>
-        readConversation("production", memberId, conversationId, currentStepOnly ?? false) as unknown as Promise<
-          ConversationSnapshot
-        >,
-      undo: (conversationId) => undoConversation("production", memberId, conversationId),
-      redo: (conversationId) => redoConversation("production", memberId, conversationId),
-      rerun: (conversationId) => rerunLastStep(conversationId),
-      cancel: (conversationId) => cancelConversation(conversationId),
-    },
-    refreshAfterStream: false,
-    attachmentDisplay: "chips",
-    outputTexts: (output) => {
-      const texts = extractOutputTexts(output.output);
-      return texts.length > 0 ? texts : extractOutputParts(output as ConversationOutput);
-    },
-    onTurnStarting: () => {
-      const { conversationId, messages } = controller.getSnapshot();
-      tools.beginTurn(conversationId, lastStepIndex(messages));
-      notes.beginTurn(conversationId, lastStepIndex(messages));
-    },
-    onStreamEvent: (event) => {
-      recordToolResult(event);
-      recordTurnNote(event);
-      const turn = turnRef.current;
-      if (!turn) return;
-      if (event.type === "token") turn.tokens = true;
-      else if (event.type === "done") turn.done = true;
-      else if (event.type === "error") turn.error = true;
-    },
-    onTurnSnapshot: (snapshot) => {
-      const hooks = hooksRef.current;
-      if (!hooks || snapshot.conversationState !== "AWAITING_HUMAN") return;
-      hooks.failed(
-        hooks.t(
-          "Workforce.thread.pausedForApproval",
-          "This turn is paused waiting for a human decision. It resumes once the request is approved.",
-        ),
-        true,
-        turnRef.current?.tokens ? null : lastUserMessageId(controller),
-      );
-    },
-    presentFailure: (failure, ctx) => {
-      const hooks = hooksRef.current;
-      if (!hooks) return true;
+  /** The failure banner, Retry and pause notice for a turn that did not end with a reply. */
+  const present = (failure: TurnFailure, ctx: TurnFailureContext, hooks: ThreadHooks): boolean => {
       // Rendered from the controller's classification, shared with the Manager and
       // the widget — never from the status (a 409 is not always a pause, a 408 is
       // not a refusal).
@@ -885,6 +849,78 @@ function createThreadConversation(
           : (translateStreamError(failure.code ?? undefined, hooks.t) ?? failure.message);
       hooks.failed(message, false, failure.partial ? null : ctx.userMessageId);
       return true;
+  };
+
+  const controller: AgentConversation = new AgentConversation({
+    stopVerifyDelaysMs: STOP_VERIFY_DELAYS_MS,
+    reconnectDelaysMs: RECONNECT_DELAYS_MS,
+    transport: {
+      mode: "conversation",
+      // A turn of files only names the first file as its input; the backend
+      // reads the files from the context.
+      stream: (conversationId, text, { context, signal, idempotencyKey }) =>
+        sendMessageStreaming(
+          "production",
+          memberId,
+          conversationId ?? "",
+          context ? { input: text || firstAttachmentName(context) || "attachment", context } : { input: text },
+          signal,
+          { idempotencyKey },
+        ),
+      read: (conversationId, currentStepOnly) =>
+        readConversation("production", memberId, conversationId, currentStepOnly ?? false) as unknown as Promise<
+          ConversationSnapshot
+        >,
+      undo: (conversationId) => undoConversation("production", memberId, conversationId),
+      redo: (conversationId) => redoConversation("production", memberId, conversationId),
+      rerun: (conversationId) => rerunLastStep(conversationId),
+      cancel: (conversationId) => cancelConversation(conversationId),
+    },
+    refreshAfterStream: false,
+    attachmentDisplay: "chips",
+    outputTexts: (output) => {
+      const texts = extractOutputTexts(output.output);
+      return texts.length > 0 ? texts : extractOutputParts(output as ConversationOutput);
+    },
+    onTurnStarting: () => {
+      const { conversationId, messages } = controller.getSnapshot();
+      tools.beginTurn(conversationId, lastStepIndex(messages));
+      notes.beginTurn(conversationId, lastStepIndex(messages));
+    },
+    onStreamEvent: (event) => {
+      recordToolResult(event);
+      recordTurnNote(event);
+      const turn = turnRef.current;
+      if (!turn) return;
+      if (event.type === "token") turn.tokens = true;
+      else if (event.type === "done") turn.done = true;
+      else if (event.type === "error") turn.error = true;
+    },
+    onTurnSnapshot: (snapshot) => {
+      if (snapshot.conversationState !== "AWAITING_HUMAN") return;
+      const notify = (hooks: ThreadHooks) =>
+        hooks.failed(
+          hooks.t(
+            "Workforce.thread.pausedForApproval",
+            "This turn is paused waiting for a human decision. It resumes once the request is approved.",
+          ),
+          true,
+          turnRef.current?.tokens ? null : lastUserMessageId(controller),
+        );
+      // Nobody is looking when the page was left while the turn ran: show it on return.
+      const hooks = hooksRef.current;
+      if (hooks) notify(hooks);
+      else deferredRef.current = notify;
+    },
+    presentFailure: (failure, ctx) => {
+      const hooks = hooksRef.current;
+      if (!hooks) {
+        // The page was left while the turn ran and it failed: keep the failure and
+        // present it when the thread is back, with its question and Retry.
+        deferredRef.current = (back) => void present(failure, ctx, back);
+        return true;
+      }
+      return present(failure, ctx, hooks);
     },
   });
   return controller;
@@ -952,12 +988,15 @@ function WorkforceThread() {
   // Local state
   // The thread's conversation runs on its controller, which outlives this page
   // for a while when a turn is still running (see `threadRegistry`).
-  const registryKey = `${boardId} ${memberId}`;
-  const { entry, resumed } = useMemo(
-    () => threadRegistry.acquire(registryKey, () => createThreadEntry(memberId)),
-    [registryKey, memberId],
-  );
-  const { controller, hooksRef, turnRef, toolLog, noteLog } = entry;
+  const principal = principalOf(useAuth().user);
+  // The key names the person too: one person's parked turn is never handed to another.
+  const registryKey = `${principal ?? ""}\u0000${boardId}\u0000${memberId}`;
+  const { entry, resumed } = useMemo(() => {
+    if (registryPrincipal !== undefined && registryPrincipal !== principal) threadRegistry.clear();
+    registryPrincipal = principal;
+    return threadRegistry.acquire(registryKey, () => createThreadEntry(memberId));
+  }, [registryKey, memberId, principal]);
+  const { controller, hooksRef, turnRef, toolLog, noteLog, deferredRef } = entry;
   /** The page came back to a thread whose turn kept running: show it, do not re-open the thread. */
   const adoptRef = useRef(resumed);
   const conversation = useAgentConversation(controller);
@@ -1004,9 +1043,26 @@ function WorkforceThread() {
   // Leaving the advisor (or the page) lets a turn in flight finish for a grace
   // period instead of aborting it: closing the stream makes the server discard the
   // turn. Coming back within the grace shows it running (or done).
-  useEffect(() => () => threadRegistry.release(registryKey), [registryKey]);
+  useEffect(
+    () => () => {
+      // Nobody is looking from here on: a failure that arrives is kept for the return.
+      entry.hooksRef.current = null;
+      threadRegistry.release(registryKey);
+    },
+    [entry, registryKey],
+  );
   // Closing or reloading the tab aborts it too, and nothing can bring it back.
   useLeaveGuard(conversation.isProcessing && !conversation.historyBusy);
+
+  // A failure (or pause) that arrived while the page was away shows now, with the
+  // question and the Retry it belongs to.
+  useEffect(() => {
+    const show = deferredRef.current;
+    if (show && hooksRef.current) {
+      deferredRef.current = null;
+      show(hooksRef.current);
+    }
+  }, [deferredRef, hooksRef]);
 
   hooksRef.current = {
     t,

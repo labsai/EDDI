@@ -1,6 +1,6 @@
 import { useState, useCallback } from "react";
 import { useAuth } from "@eddi/app-kit/hooks/use-auth";
-import { LEGACY_THREADS_KEY, threadsStorageKey } from "@eddi/app-kit/lib/workforce-threads-storage";
+import { LEGACY_THREADS_KEY, principalOf, threadsStorageKey } from "@eddi/app-kit/lib/workforce-threads-storage";
 
 // ─── Types ───────────────────────────────────────────────────────
 
@@ -62,7 +62,7 @@ function saveThreads(storageKey: string, threads: ThreadInfo[]): void {
 function useWorkforceThreads(): UseWorkforceThreadsReturn {
   // The pointers are this person's: the key names the signed-in principal.
   const { user } = useAuth();
-  const storageKey = threadsStorageKey(user?.username);
+  const storageKey = threadsStorageKey(principalOf(user));
   const [threads, setThreads] = useState<ThreadInfo[]>(() => loadThreads(storageKey));
 
 

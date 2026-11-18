@@ -77,6 +77,18 @@ export class ParkedControllers<E extends ParkedEntry> {
     }, this.graceMs);
   }
 
+  /**
+   * Drop every entry, running turns included (they are aborted): the person they
+   * belong to is gone — signed out, or replaced by another.
+   */
+  clear(): void {
+    for (const slot of this.slots.values()) {
+      if (slot.timer !== null) clearTimeout(slot.timer);
+      slot.entry.controller.reset();
+    }
+    this.slots.clear();
+  }
+
   /** Whether a controller is parked for `key` (tests, and the "turn still running" hint). */
   isParked(key: string): boolean {
     return this.slots.get(key)?.timer != null;
