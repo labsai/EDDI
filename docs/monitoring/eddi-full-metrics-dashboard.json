@@ -2315,6 +2315,62 @@
             }
           },
           "description": "Quarkus' own view of its worker pools: blocking REST requests and work dispatched through Vert.x. Turns submitted by the coordinator are on 'Turn executor load'."
+        },
+        {
+          "id": 459,
+          "type": "timeseries",
+          "title": "Failed deployments by reason",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 36
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (reason) (rate(eddi_deployment_failed_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "smooth",
+                "lineWidth": 2,
+                "fillOpacity": 10,
+                "showPoints": "never",
+                "spanNulls": true
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          },
+          "description": "`eddi_deployment_failed_total` by `reason` (VAULT_GRANT_MISSING, STEP_TYPE_UNKNOWN, CONFIG_INVALID, REFERENCE_MISSING, DEPLOYMENT_FAILED): agent deployments that ended in ERROR. The reason is also returned as `failure.code` by the deployment status endpoint."
         }
       ]
     },
