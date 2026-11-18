@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.a2a.A2ATaskHandler.FinalEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.StreamEvent;
 import ai.labs.eddi.engine.a2a.A2ATaskHandler.TaskEvent;
 import ai.labs.eddi.engine.a2a.A2AWireFormat.MethodRef;
+import ai.labs.eddi.engine.internal.SseStreams;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -135,6 +136,13 @@ public class RestA2AEndpoint {
         this.objectMapper = objectMapper;
         this.meterRegistry = meterRegistry;
     }
+
+    /**
+     * The node's stream registry — a streamed send takes one of its slots.
+     * Field-injected so the direct-construction tests keep their constructor.
+     */
+    @Inject
+    SseStreams sseStreams = SseStreams.unmetered();
 
     /**
      * Default Agent Card — returns the first A2A-enabled agent's card.
@@ -477,11 +485,32 @@ public class RestA2AEndpoint {
     private Response stream(String agentId, JsonRpcRequest request, Dialect dialect) throws Exception {
         var send = A2AWireFormat.parseSend(request.params(), dialect);
         BlockingQueue<StreamEvent> events = new LinkedBlockingQueue<>();
-        taskHandler.stream(agentId, send, events::add);
+        // One of the node's stream slots (eddi.streaming.max-concurrent-streams),
+        // taken before the task is accepted: a node at capacity answers 503.
+        SseStreams.Slot slot = sseStreams.acquireSlot(SseStreams.Kind.A2A, SseStreams.SLOT_BODY_START_GRACE_MILLIS);
+        try {
+            taskHandler.stream(agentId, send, events::add);
+        } catch (Throwable refused) {
+            slot.releaseFailed();
+            throw refused;
+        }
         long waitMillis = TimeUnit.SECONDS.toMillis((long) taskHandler.taskTimeoutSeconds() + A2ATaskHandler.SLOT_LEASE_GRACE_SECONDS);
         Object rpcId = request.id();
 
-        StreamingOutput body = out -> drain(out, events, rpcId, dialect, waitMillis);
+        StreamingOutput body = out -> {
+            slot.bodyStarted();
+            boolean completed = false;
+            try {
+                drain(out, events, rpcId, dialect, waitMillis);
+                completed = true;
+            } finally {
+                if (completed) {
+                    slot.releaseCompleted();
+                } else {
+                    slot.releaseFailed();
+                }
+            }
+        };
         return Response.ok(body)
                 .type(MediaType.SERVER_SENT_EVENTS)
                 .header(HttpHeaders.CACHE_CONTROL, "no-cache")

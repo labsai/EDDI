@@ -54,7 +54,7 @@ class StreamingContractParityTest {
 
     /** The provider behaviours of the live findings (mock_llm.py). */
     enum Behaviour {
-        NORMAL, NO_FINISH_REASON, ERROR_BEFORE_TOKEN, TRANSIENT_ERROR_ONCE, ERROR_AFTER_TOKENS, LENGTH, CONTENT_FILTER, EMPTY, IDLE_AFTER_TOKEN
+        NORMAL, NO_FINISH_REASON, NO_FINISH_REASON_LENIENT, ERROR_BEFORE_TOKEN, TRANSIENT_ERROR_ONCE, ERROR_AFTER_TOKENS, LENGTH, CONTENT_FILTER, EMPTY, IDLE_AFTER_TOKEN
     }
 
     /** What a path did, normalised so the three can be compared. */
@@ -64,6 +64,9 @@ class StreamingContractParityTest {
     private static Outcome expected(Behaviour behaviour) {
         return switch (behaviour) {
             case NORMAL -> new Outcome(true, TEXT, null, 1);
+            // a provider that does not always report one (Ollama): the same complete
+            // answer without a finish reason is accepted on every path
+            case NO_FINISH_REASON_LENIENT -> new Outcome(true, TEXT, null, 1);
             case TRANSIENT_ERROR_ONCE -> new Outcome(true, TEXT, null, 2);
             case LENGTH -> new Outcome(true, TEXT, "length", 1);
             case CONTENT_FILTER -> new Outcome(true, TEXT, "content_filter", 1);
@@ -76,10 +79,11 @@ class StreamingContractParityTest {
         };
     }
 
-    private static LlmConfiguration.Task task() {
+    private static LlmConfiguration.Task task(Behaviour behaviour) {
         var task = new LlmConfiguration.Task();
         task.setId("parity");
-        task.setType("openai");
+        // openai always reports a finish reason (strict by default); ollama does not
+        task.setType(behaviour == Behaviour.NO_FINISH_REASON_LENIENT ? "ollama" : "openai");
         var retry = new RetryConfiguration();
         retry.setBackoffDelayMs(1L);
         retry.setJitterRatio(0.0);
@@ -112,6 +116,11 @@ class StreamingContractParityTest {
                     case NO_FINISH_REASON -> {
                         handler.onPartialResponse("Hello ");
                         handler.onCompleteResponse(response("Hello ", null));
+                    }
+                    case NO_FINISH_REASON_LENIENT -> {
+                        handler.onPartialResponse("Hello ");
+                        handler.onPartialResponse("world");
+                        handler.onCompleteResponse(response(TEXT, null));
                     }
                     case ERROR_BEFORE_TOKEN -> handler.onError(new InternalServerException("provider 500"));
                     case TRANSIENT_ERROR_ONCE -> {
@@ -148,7 +157,11 @@ class StreamingContractParityTest {
                 int call = calls.incrementAndGet();
                 return switch (behaviour) {
                     case NORMAL -> response(TEXT, FinishReason.STOP);
+                    // A synchronous body is parsed whole: a connection that breaks off mid-answer
+                    // is an I/O error there, never a short answer. (A complete body without a
+                    // finish reason is accepted - see NO_FINISH_REASON_LENIENT.)
                     case NO_FINISH_REASON -> throw new IllegalStateException("response body ended early", new IOException("premature EOF"));
+                    case NO_FINISH_REASON_LENIENT -> response(TEXT, null);
                     case ERROR_BEFORE_TOKEN -> throw new InternalServerException("provider 500");
                     case TRANSIENT_ERROR_ONCE -> {
                         if (call == 1) {
@@ -173,7 +186,7 @@ class StreamingContractParityTest {
     private static Outcome nonStreaming(Behaviour behaviour) {
         var calls = new AtomicInteger();
         try {
-            var result = new LegacyChatExecutor().execute(synchronous(behaviour, calls), messages(), task());
+            var result = new LegacyChatExecutor().execute(synchronous(behaviour, calls), messages(), task(behaviour));
             return success(result.response(), result.responseMetadata(), calls.get());
         } catch (LifecycleException e) {
             return new Outcome(false, null, null, calls.get());
@@ -183,7 +196,8 @@ class StreamingContractParityTest {
     private static Outcome plainStreaming(Behaviour behaviour) {
         var calls = new AtomicInteger();
         try {
-            var result = new StreamingLegacyChatExecutor().execute(streaming(behaviour, calls), messages(), mock(ConversationEventSink.class), task(),
+            var result = new StreamingLegacyChatExecutor().execute(streaming(behaviour, calls), messages(), mock(ConversationEventSink.class),
+                    task(behaviour),
                     JsonResponseFormatPolicy.DISABLED, null);
             return success(result.response(), result.metadata(), calls.get());
         } catch (LifecycleException e) {
@@ -193,7 +207,7 @@ class StreamingContractParityTest {
 
     private static Outcome toolLoopStreaming(Behaviour behaviour) {
         var calls = new AtomicInteger();
-        var task = task();
+        var task = task(behaviour);
         var bridge = new ToolLoopStreamingChatModel(streaming(behaviour, calls), mock(ConversationEventSink.class),
                 new StreamingLegacyChatExecutor().streamPolicy(task, null), "openai", ToolLoopStreamingChatModel.PATH_TOOL_LOOP);
         try {

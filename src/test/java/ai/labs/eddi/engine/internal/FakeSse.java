@@ -143,7 +143,7 @@ final class FakeSse implements Sse {
      * A sink that records what was written. A stalled sink never completes its
      * writes — a client that stopped reading.
      */
-    static final class Sink implements SseEventSink {
+    static class Sink implements SseEventSink {
         final boolean stalled;
         final List<Event> events = new ArrayList<>();
         final List<CompletableFuture<Void>> unfinished = new ArrayList<>();

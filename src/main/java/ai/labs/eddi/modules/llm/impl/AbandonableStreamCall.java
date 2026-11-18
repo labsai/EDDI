@@ -18,6 +18,7 @@ import org.jboss.logging.Logger;
 
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BooleanSupplier;
 
 /**
@@ -107,6 +108,15 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
     private volatile long lastEventNanos;
     /** Whether any stream event arrived; the idle limit starts with the first. */
     private volatile boolean anyEvent;
+    /**
+     * The call was given up on and the provider must be stopped — also when its
+     * handle only arrives later (with the first partial), see {@link #keepHandle}.
+     */
+    private volatile boolean stopRequested;
+    /** Guarantees the provider's handle is cancelled at most once. */
+    private final AtomicBoolean handleCancelled = new AtomicBoolean();
+    /** The turn was cancelled while the call waited (event-driven wake). */
+    private volatile boolean cancelSignalled;
 
     private AbandonableStreamCall(TokenForwarder forwarder) {
         this.forwarder = forwarder;
@@ -212,10 +222,46 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
         anyEvent = true;
     }
 
+    /**
+     * Keeps the provider's handle — and uses it at once when the call was already
+     * given up on (a cancel, a timeout or an abandoned retry attempt before the
+     * first token): otherwise that provider would stream, and bill, the whole
+     * answer to a handler nobody listens to, in parallel with the retry.
+     */
     private void keepHandle(StreamingHandle handle) {
-        if (handle != null && streamingHandle == null) {
+        if (handle == null) {
+            return;
+        }
+        if (streamingHandle == null) {
             streamingHandle = handle;
         }
+        if (stopRequested) {
+            cancelHandleOnce();
+        }
+    }
+
+    private void cancelHandleOnce() {
+        StreamingHandle handle = streamingHandle;
+        if (handle == null || !handleCancelled.compareAndSet(false, true)) {
+            return;
+        }
+        try {
+            if (!handle.isCancelled()) {
+                handle.cancel();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Cancelling the provider stream failed: %s", e.getMessage());
+        }
+    }
+
+    /**
+     * The turn was cancelled: wake the waiting call now. Registered with the turn's
+     * cancel signal, so {@code /cancel} and a cancelling disconnect take effect at
+     * once rather than at the next poll.
+     */
+    void signalCancel() {
+        cancelSignalled = true;
+        done.countDown();
     }
 
     /**
@@ -240,7 +286,18 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
      * {@link Outcome#FAILED} abandons the call and stops the provider's stream.
      */
     Outcome await(StreamPolicy policy) throws InterruptedException {
-        return await(policy.backstopSeconds(), policy.idleTimeoutSeconds(), policy.cancelled());
+        AutoCloseable subscription = policy.cancelSubscription() != null ? policy.cancelSubscription().apply(this::signalCancel) : null;
+        try {
+            return await(policy.backstopSeconds(), policy.idleTimeoutSeconds(), policy.cancelled());
+        } finally {
+            if (subscription != null) {
+                try {
+                    subscription.close();
+                } catch (Exception e) {
+                    LOGGER.debugf("Releasing the cancel subscription failed: %s", e.getMessage());
+                }
+            }
+        }
     }
 
     /**
@@ -261,6 +318,15 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
         long pollNanos = TimeUnit.MILLISECONDS.toNanos(StreamPolicy.POLL_MILLIS);
         try {
             while (true) {
+                // Before every wait, the first included: a turn already cancelled when
+                // the call starts does not wait at all.
+                if (cancelSignalled || (cancelled != null && cancelled.getAsBoolean())) {
+                    Outcome outcome = terminalOutcomeOrCancelled();
+                    if (outcome == Outcome.CANCELLED) {
+                        abandonAndCancel();
+                    }
+                    return outcome;
+                }
                 if (done.getCount() == 0) {
                     return terminalOutcome();
                 }
@@ -279,12 +345,8 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
                     }
                     wait = Math.min(wait, idleLeft);
                 }
-                if (done.await(wait, TimeUnit.NANOSECONDS)) {
+                if (done.await(wait, TimeUnit.NANOSECONDS) && !cancelSignalled) {
                     return terminalOutcome();
-                }
-                if (cancelled != null && cancelled.getAsBoolean()) {
-                    abandonAndCancel();
-                    return Outcome.CANCELLED;
                 }
             }
         } catch (InterruptedException e) {
@@ -296,6 +358,16 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
     private Outcome terminalOutcome() {
         synchronized (lock) {
             return error != null ? Outcome.FAILED : Outcome.COMPLETED;
+        }
+    }
+
+    /** A provider outcome that came first wins over the cancel. */
+    private Outcome terminalOutcomeOrCancelled() {
+        synchronized (lock) {
+            if (terminated) {
+                return error != null ? Outcome.FAILED : Outcome.COMPLETED;
+            }
+            return Outcome.CANCELLED;
         }
     }
 
@@ -314,16 +386,8 @@ final class AbandonableStreamCall implements StreamingChatResponseHandler {
      */
     void abandonAndCancel() {
         abandon();
-        StreamingHandle handle = streamingHandle;
-        if (handle != null) {
-            try {
-                if (!handle.isCancelled()) {
-                    handle.cancel();
-                }
-            } catch (RuntimeException e) {
-                LOGGER.debugf("Cancelling the provider stream failed: %s", e.getMessage());
-            }
-        }
+        stopRequested = true;
+        cancelHandleOnce();
     }
 
     /** Whether the provider handed out a handle the call can be stopped with. */

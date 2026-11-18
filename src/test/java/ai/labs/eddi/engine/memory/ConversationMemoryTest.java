@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.memory;
 
+import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import org.junit.jupiter.api.Assertions;
@@ -13,6 +14,12 @@ import org.junit.jupiter.api.Test;
 
 import java.util.LinkedList;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 
 /**
  * @author ginccc
@@ -24,6 +31,41 @@ public class ConversationMemoryTest {
     @BeforeEach
     public void setUp() {
         memory = new ConversationMemory("", 0);
+    }
+
+    @Test
+    @DisplayName("a cancel wakes every listener once and tells the event sink; abandon wakes them without telling it")
+    public void cancelListenersAndAnnouncement() throws Exception {
+        ConversationEventSink sink = mock(ConversationEventSink.class);
+        memory.setEventSink(sink);
+        var woken = new AtomicInteger();
+        AutoCloseable subscription = memory.onCancel(woken::incrementAndGet);
+
+        memory.setCancelled(true);
+        memory.setCancelled(true);
+
+        Assertions.assertTrue(memory.isCancelled());
+        Assertions.assertEquals(1, woken.get(), "woken once, when the flag goes up");
+        verify(sink, times(1)).onCancelRequested();
+
+        // A listener registered after the cancel runs at once.
+        var late = new AtomicInteger();
+        memory.onCancel(late::incrementAndGet);
+        Assertions.assertEquals(1, late.get());
+        subscription.close();
+
+        var abandoned = new ConversationMemory("", 0);
+        ConversationEventSink abandonSink = mock(ConversationEventSink.class);
+        abandoned.setEventSink(abandonSink);
+        var abandonWoken = new AtomicInteger();
+        abandoned.onCancel(abandonWoken::incrementAndGet);
+
+        abandoned.abandon();
+
+        Assertions.assertTrue(abandoned.isCancelled());
+        Assertions.assertEquals(1, abandonWoken.get(), "a timed-out turn still stops its model call at once");
+        // ... but its client is not told it was cancelled.
+        verify(abandonSink, never()).onCancelRequested();
     }
 
     @Test

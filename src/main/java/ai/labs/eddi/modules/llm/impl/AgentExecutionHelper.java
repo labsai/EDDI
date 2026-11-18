@@ -13,6 +13,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 
 import java.util.List;
+import java.util.function.BooleanSupplier;
 import java.util.concurrent.Callable;
 
 /**
@@ -55,6 +56,16 @@ class AgentExecutionHelper {
     }
 
     /**
+     * As above, stopping once the turn is cancelled ({@code cancelled};
+     * {@code null} = no cancel flag).
+     */
+    static <T> T executeWithRetry(Callable<T> action, LlmConfiguration.Task task, String actionDescription, long[] sharedBackoffMs,
+                                  TurnDeadline deadline, BooleanSupplier cancelled)
+            throws LifecycleException {
+        return RetryConfiguration.executeWithRetry(action, task.getRetry(), actionDescription, sharedBackoffMs, deadline, cancelled);
+    }
+
+    /**
      * Executes chat model with retry logic based on task configuration.
      */
     static ChatResponse executeChatWithRetry(ChatModel chatModel, List<ChatMessage> messages,
@@ -70,6 +81,13 @@ class AgentExecutionHelper {
                                              LlmConfiguration.Task task, TurnDeadline deadline)
             throws LifecycleException {
 
-        return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution", new long[1], deadline);
+        return executeChatWithRetry(chatModel, messages, task, deadline, null);
+    }
+
+    /** As above, stopping once the turn is cancelled. */
+    static ChatResponse executeChatWithRetry(ChatModel chatModel, List<ChatMessage> messages,
+                                             LlmConfiguration.Task task, TurnDeadline deadline, BooleanSupplier cancelled)
+            throws LifecycleException {
+        return executeWithRetry(() -> chatModel.chat(messages), task, "Chat model execution", new long[1], deadline, cancelled);
     }
 }

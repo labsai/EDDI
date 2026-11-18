@@ -269,6 +269,21 @@ public interface IConversationService {
         default void onGuardrailTriggered(String type, String phase, String action, String taskId) {
         }
 
+        /**
+         * The turn's agent is resolved; see
+         * {@code ConversationEventSink#onTurnStarted}. Default no-op.
+         */
+        default void onTurnStarted(String streamingClientDisconnect) {
+        }
+
+        /** The turn was asked to cancel. Default no-op. */
+        default void onCancelRequested() {
+        }
+
+        /** Every workflow of the turn has run; its write follows. Default no-op. */
+        default void onGenerationFinished() {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);

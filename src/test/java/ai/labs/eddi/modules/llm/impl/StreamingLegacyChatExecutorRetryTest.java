@@ -35,6 +35,7 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -418,7 +419,7 @@ class StreamingLegacyChatExecutorRetryTest {
         }
 
         @Test
-        @DisplayName("a cancelled turn stops the stream and is not retried (B9)")
+        @DisplayName("a turn already cancelled makes no request at all, and is not retried (B9, M3)")
         void cancelledTurnIsNotRetried() {
             var calls = new AtomicInteger();
             var memory = mock(IConversationMemory.class);
@@ -433,8 +434,30 @@ class StreamingLegacyChatExecutorRetryTest {
             var thrown = assertThrows(LifecycleException.class,
                     () -> executor.execute(silent, messages(), eventSink, task(3), JsonResponseFormatPolicy.DISABLED, memory));
 
+            assertEquals(0, calls.get(), "the retry loop sees the cancel before the first attempt");
+            assertInstanceOf(LifecycleException.LifecycleInterruptedException.class, thrown);
+        }
+
+        @Test
+        @DisplayName("a turn cancelled during the stream stops it after one request")
+        void cancelledDuringTheStreamIsNotRetried() {
+            var calls = new AtomicInteger();
+            var cancelled = new AtomicBoolean();
+            var memory = mock(IConversationMemory.class);
+            when(memory.isCancelled()).thenAnswer(inv -> cancelled.get());
+            StreamingChatModel silent = new StreamingChatModel() {
+                @Override
+                public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
+                    calls.incrementAndGet();
+                    cancelled.set(true);
+                }
+            };
+
+            var thrown = assertThrows(LifecycleException.class,
+                    () -> executor.execute(silent, messages(), eventSink, task(3), JsonResponseFormatPolicy.DISABLED, memory));
+
             assertEquals(1, calls.get());
-            assertInstanceOf(ToolLoopStreamingChatModel.StreamCancelledException.class, thrown.getCause());
+            assertInstanceOf(LifecycleException.LifecycleInterruptedException.class, thrown);
         }
     }
 

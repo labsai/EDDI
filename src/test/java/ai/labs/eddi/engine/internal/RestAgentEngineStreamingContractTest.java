@@ -4,13 +4,11 @@
  */
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.lifecycle.TaskId;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.MemoryKeys;
-import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -18,14 +16,19 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.WebApplicationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -35,10 +38,12 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.when;
 
 /**
  * The events a client of {@code POST /agents/{id}/stream} receives under the
@@ -113,6 +118,7 @@ class RestAgentEngineStreamingContractTest {
     void cancelledTurn() throws Exception {
         var handler = start();
         handler.onToken("partial");
+        handler.onCancelRequested();
         handler.onComplete(snapshot(ConversationState.EXECUTION_INTERRUPTED, null));
 
         var cancelled = lastData(RestAgentEngineStreaming.EVENT_CANCELLED);
@@ -178,42 +184,161 @@ class RestAgentEngineStreamingContractTest {
     }
 
     @Test
-    @DisplayName("B8: the agent's streamingClientDisconnect overrides the deployment default")
+    @DisplayName("B8/S4: the agent's streamingClientDisconnect arrives with the turn and overrides the default — no store read")
     void perAgentDisconnectPolicy() throws Exception {
-        var agentStore = mock(IAgentStore.class);
-        streaming.agentStore = agentStore;
-        var stored = new ConversationMemorySnapshot();
-        stored.setAgentId("agent-1");
-        stored.setAgentVersion(2);
-        when(conversationService.getConversationMemoryTail("conv-1")).thenReturn(ConversationMemoryTail.ofFullSnapshot(stored));
-        var agent = new AgentConfiguration();
-        agent.setStreamingClientDisconnect(AgentConfiguration.STREAMING_DISCONNECT_FINISH);
-        when(agentStore.read("agent-1", 2)).thenReturn(agent);
-
         var handler = start();
+        handler.onTurnStarted(AgentConfiguration.STREAMING_DISCONNECT_FINISH);
         handler.onToken("a");
         sink.close();
         handler.onToken("b");
 
         verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
-        assertFalse(streaming.cancelOnDisconnectFor("conv-1", true), "finish lets the turn run and persist");
-        agent.setStreamingClientDisconnect(null);
-        assertTrue(streaming.cancelOnDisconnectFor("conv-1", true), "unset follows the deployment default");
-        assertFalse(streaming.cancelOnDisconnectFor("conv-1", false));
+        verify(conversationService, never()).getConversationMemoryTail(anyString());
+        assertEquals(0, streaming.sseStreams.totalActive());
     }
 
     @Test
-    @DisplayName("an unknown or unreadable policy falls back to the deployment default")
-    void policyFallback() throws Exception {
+    @DisplayName("an agent that sets no policy follows the deployment default (cancel)")
+    void unsetPolicyFollowsTheDefault() throws Exception {
+        var handler = start();
+        handler.onTurnStarted(null);
+        sink.close();
+        handler.onToken("b");
+
+        verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
+                RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
+        verify(conversationService, never()).getConversationMemoryTail(anyString());
+    }
+
+    @Test
+    @DisplayName("an unknown policy falls back to the deployment default")
+    void policyFallback() {
         assertTrue(RestAgentEngineStreaming.resolveCancelOnDisconnect("CANCEL", false));
         assertFalse(RestAgentEngineStreaming.resolveCancelOnDisconnect(" finish ", true));
         assertTrue(RestAgentEngineStreaming.resolveCancelOnDisconnect("sometimes", true));
         assertFalse(RestAgentEngineStreaming.resolveCancelOnDisconnect(null, false));
-        // No agent store (unit construction) or a failing read: the default.
-        assertTrue(streaming.cancelOnDisconnectFor("conv-1", true));
-        streaming.agentStore = mock(IAgentStore.class);
-        when(conversationService.getConversationMemoryTail("conv-1")).thenThrow(new IllegalStateException("store down"));
-        assertTrue(streaming.cancelOnDisconnectFor("conv-1", true));
+    }
+
+    @Test
+    @DisplayName("composition: a client that leaves after generation finished does not cancel or discard the turn")
+    void disconnectAfterGenerationFinishedKeepsTheTurn() throws Exception {
+        var handler = start();
+        handler.onTurnStarted(AgentConfiguration.STREAMING_DISCONNECT_CANCEL);
+        handler.onToken("answer");
+        handler.onGenerationFinished();
+        sink.close();
+        handler.onTaskComplete(new TaskId("t"), "llm", 1, Map.of());
+
+        verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
+        assertEquals(0, streaming.sseStreams.totalActive(), "the vanished client's stream is still released");
+    }
+
+    @Test
+    @DisplayName("S5: an interrupted turn nobody cancelled ends with a retryable turn_timeout error, never 'cancelled'")
+    void interruptedWithoutCancelIsATimeout() throws Exception {
+        var handler = start();
+        handler.onToken("partial");
+        handler.onComplete(snapshot(ConversationState.EXECUTION_INTERRUPTED, null));
+
+        var names = sink.events.stream().map(FakeSse.Event::name).toList();
+        assertFalse(names.contains(RestAgentEngineStreaming.EVENT_CANCELLED), names.toString());
+        assertFalse(names.contains("done"), "the turn was discarded: there is no outcome to present");
+        var error = lastData("error");
+        assertEquals(RestAgentEngineStreaming.TURN_TIMEOUT_CODE, error.get("code").asText());
+        assertTrue(error.get("retryable").asBoolean());
+        assertTrue(sink.isClosed());
+        assertEquals(0, streaming.sseStreams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S7: the stream slot is taken before the access check, which then reads nothing when the node is full")
+    void slotBeforeAccessCheck() throws Exception {
+        var accessGuard = mock(ConversationAccessGuard.class);
+        streaming = new RestAgentEngineStreaming(conversationService, accessGuard, true, 0);
+        streaming.sseStreams = new SseStreams(1, SseStreams.DEFAULT_MAX_PENDING_EVENTS, SseStreams.DEFAULT_MAX_PENDING_BYTES, null);
+        streaming.sseStreams.open(SseStreams.Kind.GROUP, "busy", new FakeSse.Sink(false), sse, 0, 0, null, null);
+        var input = new InputData();
+        input.setInput("Hello");
+
+        assertThrows(WebApplicationException.class, () -> streaming.sayStreaming("conv-1", false, false, List.of(), input, sink, sse));
+
+        verify(accessGuard, never()).requireConversationTurnAccess(anyString());
+    }
+
+    @Test
+    @DisplayName("S7: a turn the access check refuses gives its slot back and writes nothing")
+    void refusedTurnReleasesItsSlot() {
+        var accessGuard = mock(ConversationAccessGuard.class);
+        doThrow(new ForbiddenException()).when(accessGuard).requireConversationTurnAccess("conv-1");
+        streaming = new RestAgentEngineStreaming(conversationService, accessGuard, true, 0);
+        streaming.sseStreams = SseStreams.unmetered();
+        var input = new InputData();
+        input.setInput("Hello");
+
+        assertThrows(ForbiddenException.class,
+                () -> streaming.sayStreaming("conv-1", false, false, List.of(), input, sink, sse));
+
+        assertEquals(0, streaming.sseStreams.totalActive());
+        assertTrue(sink.events.isEmpty());
+    }
+
+    @Test
+    @DisplayName("S9: an Error thrown while starting the turn still ends the stream and frees its slot")
+    void errorOnStartReleases() throws Exception {
+        doThrow(new StackOverflowError()).when(conversationService)
+                .sayStreaming(anyString(), any(), any(), any(), any(), any());
+        var input = new InputData();
+        input.setInput("Hello");
+
+        streaming.sayStreaming("conv-1", false, false, List.of(), input, sink, sse);
+
+        assertEquals(RestAgentEngineStreaming.INTERNAL_ERROR_CODE, lastData("error").get("code").asText());
+        assertTrue(sink.isClosed());
+        assertEquals(0, streaming.sseStreams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S4: thousands of clients vanishing at once cancel through a bounded pool, without a store read each")
+    void massDisconnectIsBounded() throws Exception {
+        int streams = 2_000;
+        int concurrency = 4;
+        streaming.sseStreams = new SseStreams(SseStreams.DEFAULT_MAX_CONCURRENT, SseStreams.DEFAULT_MAX_PENDING_EVENTS,
+                SseStreams.DEFAULT_MAX_PENDING_BYTES, SseStreams.DEFAULT_MAX_PENDING_BYTES_TOTAL, concurrency, null);
+        var running = new AtomicInteger();
+        var peak = new AtomicInteger();
+        var cancels = new CountDownLatch(streams);
+        doAnswer(invocation -> {
+            int now = running.incrementAndGet();
+            peak.accumulateAndGet(now, Math::max);
+            Thread.sleep(1);
+            running.decrementAndGet();
+            cancels.countDown();
+            return null;
+        }).when(conversationService).cancelConversation(anyString(), any(), anyString());
+
+        var handlers = new ArrayList<IConversationService.StreamingResponseHandler>();
+        var sinks = new ArrayList<FakeSse.Sink>();
+        for (int i = 0; i < streams; i++) {
+            var each = new FakeSse.Sink(false);
+            var input = new InputData();
+            input.setInput("Hello");
+            streaming.sayStreaming("conv-" + i, false, false, List.of(), input, each, sse);
+            sinks.add(each);
+        }
+        var captor = ArgumentCaptor.forClass(IConversationService.StreamingResponseHandler.class);
+        verify(conversationService, times(streams)).sayStreaming(anyString(), any(), any(), any(), any(),
+                captor.capture());
+        handlers.addAll(captor.getAllValues());
+        for (int i = 0; i < streams; i++) {
+            handlers.get(i).onTurnStarted(null);
+            sinks.get(i).close();
+            handlers.get(i).onToken("x");
+        }
+
+        assertTrue(cancels.await(60, TimeUnit.SECONDS), "every turn is cancelled");
+        assertTrue(peak.get() <= concurrency, "at most " + concurrency + " cancels ran together, saw " + peak.get());
+        assertEquals(0, streaming.sseStreams.totalActive());
+        verify(conversationService, never()).getConversationMemoryTail(anyString());
     }
 
     @Test
@@ -226,5 +351,24 @@ class RestAgentEngineStreamingContractTest {
         assertNull(RestAgentEngineStreaming.finishReasonOf(List.of(older, latest)));
         assertEquals("length", RestAgentEngineStreaming.finishReasonOf(List.of(latest, older)));
         assertNull(RestAgentEngineStreaming.finishReasonOf(null));
+    }
+
+    @Test
+    @DisplayName("S10: 'empty' is reported only when the whole turn shows nothing")
+    void emptyOnlyForTheWholeTurn() {
+        var silent = new ConversationOutput();
+        silent.put(MemoryKeys.TURN_FINISH_REASON, MemoryKeys.TURN_FINISH_REASON_EMPTY);
+        silent.put("output", List.of());
+        assertEquals(MemoryKeys.TURN_FINISH_REASON_EMPTY, RestAgentEngineStreaming.finishReasonOf(List.of(silent)));
+
+        var answeredByAnotherTask = new ConversationOutput();
+        answeredByAnotherTask.put(MemoryKeys.TURN_FINISH_REASON, MemoryKeys.TURN_FINISH_REASON_EMPTY);
+        answeredByAnotherTask.put("output", List.of("Hello from the output set"));
+        assertNull(RestAgentEngineStreaming.finishReasonOf(List.of(answeredByAnotherTask)));
+
+        var quickRepliesOnly = new ConversationOutput();
+        quickRepliesOnly.put(MemoryKeys.TURN_FINISH_REASON, MemoryKeys.TURN_FINISH_REASON_EMPTY);
+        quickRepliesOnly.put("quickReplies", List.of(Map.of("value", "yes")));
+        assertNull(RestAgentEngineStreaming.finishReasonOf(List.of(quickRepliesOnly)));
     }
 }

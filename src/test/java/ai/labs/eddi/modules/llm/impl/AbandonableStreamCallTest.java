@@ -263,12 +263,73 @@ class AbandonableStreamCallTest {
         assertTrue(handle.cancelled.get());
     }
 
+    @Test
+    @DisplayName("M2: a call abandoned before its first partial cancels the handle that arrives later — exactly once")
+    void lateHandleIsCancelledOnce() throws InterruptedException {
+        var call = recordingCall();
+        var handle = new RecordingHandle();
+
+        // Timed out before the provider said anything: no handle yet.
+        assertEquals(AbandonableStreamCall.Outcome.TIMED_OUT, call.await(0, 0, null));
+        assertFalse(call.cancellable());
+
+        // The first partial brings the handle: the provider is stopped at once.
+        call.onPartialResponse(new PartialResponse("late"), new PartialResponseContext(handle));
+        call.onPartialResponse(new PartialResponse("later"), new PartialResponseContext(handle));
+
+        assertEquals(1, handle.cancels.get(), "cancelled exactly once");
+        assertTrue(sent.isEmpty(), "and nothing of it is forwarded");
+    }
+
+    @Test
+    @DisplayName("S3: a cancel signal wakes a waiting call at once, without waiting for the poll")
+    void cancelSignalWakesTheWait() throws InterruptedException {
+        var call = recordingCall();
+        var handle = new RecordingHandle();
+        call.onPartialResponse(new PartialResponse("token "), new PartialResponseContext(handle));
+        List<Runnable> listeners = new CopyOnWriteArrayList<>();
+        var policy = new StreamPolicy(300, 0, true, () -> false, null, false, listener -> {
+            listeners.add(listener);
+            return () -> listeners.remove(listener);
+        }, "test");
+
+        var canceller = new Thread(() -> {
+            try {
+                Thread.sleep(100);
+            } catch (InterruptedException e) {
+                return;
+            }
+            listeners.forEach(Runnable::run);
+        });
+        canceller.setDaemon(true);
+        long start = System.nanoTime();
+        canceller.start();
+
+        assertEquals(AbandonableStreamCall.Outcome.CANCELLED, call.await(policy));
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < StreamPolicy.POLL_MILLIS,
+                "woken by the signal, not by the next poll");
+        assertTrue(handle.cancelled.get());
+        assertTrue(listeners.isEmpty(), "the subscription is released when the wait ends");
+    }
+
+    @Test
+    @DisplayName("a turn already cancelled when the call starts does not wait at all")
+    void alreadyCancelledDoesNotWait() throws InterruptedException {
+        var call = recordingCall();
+        long start = System.nanoTime();
+
+        assertEquals(AbandonableStreamCall.Outcome.CANCELLED, call.await(300, 0, () -> true));
+        assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < StreamPolicy.POLL_MILLIS);
+    }
+
     /** A provider stream handle that records the cancel. */
     private static final class RecordingHandle implements StreamingHandle {
         final AtomicBoolean cancelled = new AtomicBoolean();
+        final AtomicInteger cancels = new AtomicInteger();
 
         @Override
         public void cancel() {
+            cancels.incrementAndGet();
             cancelled.set(true);
         }
 

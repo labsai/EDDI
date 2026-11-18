@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.EnumSet;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
@@ -241,10 +243,184 @@ class SseChannelLoadTest {
                 () -> capped.open(SseStreams.Kind.AGENT, "c", refusedSink, sse, 0, 0, null, null));
 
         assertEquals(503, refused.getResponse().getStatus());
-        assertEquals("5", String.valueOf(refused.getResponse().getHeaders().getFirst("Retry-After")));
+        int retryAfter = Integer.parseInt(String.valueOf(refused.getResponse().getHeaders().getFirst("Retry-After")));
+        assertTrue(retryAfter >= SseStreams.RETRY_AFTER_MIN_SECONDS
+                && retryAfter < SseStreams.RETRY_AFTER_MIN_SECONDS + SseStreams.RETRY_AFTER_SPREAD_SECONDS,
+                "Retry-After is spread so refused clients do not return together: " + retryAfter);
         assertEquals(0, refusedSink.written());
         first.close(SseChannel.CloseReason.COMPLETED);
         capped.open(SseStreams.Kind.AGENT, "d", new FakeSse.Sink(false), sse, 0, 0, null, null);
         assertEquals(2, capped.totalActive());
+
+        // /v1 and A2A streams count against the same cap, through a slot.
+        assertThrows(WebApplicationException.class, () -> capped.acquireSlot(SseStreams.Kind.OPENAI, 0));
+    }
+
+    @Test
+    @DisplayName("S7: a /v1 or A2A slot is released once, by its owner or by the leak guard of a body that never ran")
+    void slotsAreReleasedOnce() {
+        List<Runnable> guards = new ArrayList<>();
+        ScheduledExecutorService scheduler = mock(ScheduledExecutorService.class);
+        doAnswer(invocation -> {
+            guards.add(invocation.getArgument(0));
+            return mock(ScheduledFuture.class);
+        }).when(scheduler).schedule(any(Runnable.class), anyLong(), any());
+        streams.scheduler = scheduler;
+
+        var owned = streams.acquireSlot(SseStreams.Kind.OPENAI, 1_000);
+        var orphaned = streams.acquireSlot(SseStreams.Kind.A2A, 1_000);
+        assertEquals(1, streams.active(SseStreams.Kind.OPENAI));
+        assertEquals(1, streams.active(SseStreams.Kind.A2A));
+
+        owned.bodyStarted();
+        owned.releaseCompleted();
+        owned.releaseFailed();
+        guards.forEach(Runnable::run); // the orphan's guard fires; the owned one's would be a no-op
+        orphaned.releaseFailed();
+
+        assertTrue(owned.isReleased());
+        assertTrue(orphaned.isReleased());
+        assertEquals(0, streams.totalActive());
+        assertEquals(0, streams.active(SseStreams.Kind.OPENAI));
+        assertEquals(0, streams.active(SseStreams.Kind.A2A));
+    }
+
+    @Test
+    @DisplayName("the shared tick survives a sink that throws: that stream ends, every other keeps its heartbeat")
+    void tickSurvivesAThrowingSink() {
+        var broken = new AtomicBoolean();
+        SseEventSink throwing = new FakeSse.Sink(false) {
+            @Override
+            public boolean isClosed() {
+                if (broken.get()) {
+                    throw new IllegalStateException("connection state unreadable");
+                }
+                return super.isClosed();
+            }
+        };
+        var bad = open(throwing, null);
+        bad.send("token", "a");
+        var healthySink = new FakeSse.Sink(false);
+        var healthy = open(healthySink, null);
+        healthy.send("token", "a");
+        broken.set(true);
+
+        for (int round = 1; round <= 3; round++) {
+            now.addAndGet(TimeUnit.SECONDS.toMillis(KEEPALIVE_SECONDS));
+            // Each tick is what the shared ticker thread runs; none may throw.
+            for (Runnable tick : List.copyOf(ticks)) {
+                tick.run();
+            }
+            assertEquals(round, healthySink.comments(), "the healthy stream got heartbeat " + round);
+        }
+
+        assertTrue(bad.isReleased(), "the stream whose sink threw was ended and released");
+        assertFalse(healthy.isReleased());
+        healthy.close(SseChannel.CloseReason.COMPLETED);
+        assertEquals(0, streams.totalActive());
+    }
+
+    @Test
+    @DisplayName("S6: on shutdown every open stream gets a retryable server_shutdown error, then ends")
+    void shutdownAnnouncesItself() {
+        List<FakeSse.Sink> sinks = new ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            var sink = new FakeSse.Sink(false);
+            sinks.add(sink);
+            open(sink, null).send("token", "a");
+        }
+        var finished = new FakeSse.Sink(false);
+        var done = open(finished, null);
+        done.markTerminal();
+        done.send("done", "{}");
+
+        streams.shutdown();
+
+        for (var sink : sinks) {
+            assertEquals(1, sink.count("error"));
+            String data = String.valueOf(sink.events.getLast().data());
+            assertTrue(data.contains("\"code\":\"" + SseStreams.SERVER_SHUTDOWN_CODE + "\""), data);
+            assertTrue(data.contains("\"retryable\":true"), data);
+            assertTrue(sink.isClosed());
+        }
+        assertEquals(0, finished.count("error"), "a stream that already delivered its end gets nothing more");
+        assertEquals(0, streams.totalActive());
+    }
+
+    @Test
+    @DisplayName("concurrent senders with writes completing on other threads, some exceptionally: counts and budgets settle to zero")
+    void concurrentSendersAndOffThreadCompletions() throws Exception {
+        int streamCount = 200;
+        int senders = 8;
+        int tokens = 100;
+        var completer = Executors.newFixedThreadPool(4);
+        var failures = new AtomicInteger();
+        List<SseChannel> channels = new ArrayList<>();
+        try {
+            for (int i = 0; i < streamCount; i++) {
+                int index = i;
+                var sink = new FakeSse.Sink(false) {
+                    private final AtomicInteger writes = new AtomicInteger();
+
+                    @Override
+                    public CompletionStage<?> send(OutboundSseEvent event) {
+                        super.send(event);
+                        var stage = new CompletableFuture<Void>();
+                        int write = writes.incrementAndGet();
+                        completer.execute(() -> {
+                            // Every 50th write of every 10th stream fails, as a broken
+                            // connection reports it.
+                            if (index % 10 == 0 && write % 50 == 0) {
+                                failures.incrementAndGet();
+                                close();
+                                stage.completeExceptionally(new IOException("connection reset"));
+                            } else {
+                                stage.complete(null);
+                            }
+                        });
+                        return stage;
+                    }
+                };
+                channels.add(open(sink, null));
+            }
+            var start = new CountDownLatch(1);
+            List<Thread> threads = new ArrayList<>();
+            for (int s = 0; s < senders; s++) {
+                int offset = s;
+                threads.add(Thread.ofPlatform().start(() -> {
+                    try {
+                        start.await();
+                    } catch (InterruptedException e) {
+                        return;
+                    }
+                    for (int t = 0; t < tokens; t++) {
+                        for (int i = offset; i < streamCount; i += senders) {
+                            channels.get(i).send("token", "t" + t);
+                        }
+                    }
+                }));
+            }
+            start.countDown();
+            for (Thread thread : threads) {
+                thread.join(TimeUnit.SECONDS.toMillis(60));
+            }
+            completer.shutdown();
+            assertTrue(completer.awaitTermination(60, TimeUnit.SECONDS));
+
+            assertTrue(failures.get() > 0, "some writes failed");
+            for (SseChannel channel : channels) {
+                assertEquals(0, channel.pendingEvents(), "every write settled, failed ones included");
+                assertEquals(0L, channel.pendingBytes());
+            }
+            assertEquals(0L, streams.pendingBytesTotal(), "the node-wide budget is whole again");
+            goneTasks.forEach(Runnable::run);
+            for (SseChannel channel : channels) {
+                channel.close(SseChannel.CloseReason.COMPLETED);
+            }
+            assertEquals(0, streams.totalActive());
+            assertEquals(0, liveTicks.get());
+        } finally {
+            completer.shutdownNow();
+        }
     }
 }

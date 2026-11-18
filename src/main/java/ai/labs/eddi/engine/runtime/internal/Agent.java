@@ -39,6 +39,7 @@ public class Agent implements IAgent {
     private AgentConfiguration.UserMemoryConfig userMemoryConfig;
     private Long turnDeadlineMs;
     private Long turnDeadlineReserveMs;
+    private String streamingClientDisconnect;
     private Double maxCostPerConversationUsd;
     private ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
     private boolean memoryToolsEnabled;
@@ -179,6 +180,15 @@ public class Agent implements IAgent {
 
     public void setContinuationPolicy(ContinuationPolicy continuationPolicy) {
         this.continuationPolicy = continuationPolicy != null ? continuationPolicy : ContinuationPolicy.OFF;
+    }
+
+    @Override
+    public String getStreamingClientDisconnect() {
+        return streamingClientDisconnect;
+    }
+
+    public void setStreamingClientDisconnect(String streamingClientDisconnect) {
+        this.streamingClientDisconnect = streamingClientDisconnect;
     }
 
     public void setTurnDeadline(Long turnDeadlineMs, Long turnDeadlineReserveMs) {

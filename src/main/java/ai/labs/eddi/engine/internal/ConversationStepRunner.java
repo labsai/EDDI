@@ -748,7 +748,7 @@ class ConversationStepRunner {
      */
     static void abandonTurn(IConversationMemory memory) {
         if (memory != null) {
-            memory.setCancelled(true);
+            memory.abandon();
         }
     }
 

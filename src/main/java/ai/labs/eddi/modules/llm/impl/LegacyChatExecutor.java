@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.CallCancelledException;
 import ai.labs.eddi.configs.shared.FailureClass;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
@@ -21,6 +22,7 @@ import org.jboss.logging.Logger;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BooleanSupplier;
 
 /**
  * Executes a simple (no-tools) chat completion against a ChatModel.
@@ -109,6 +111,17 @@ class LegacyChatExecutor {
     ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy,
                        Integer maxOutputTokens, TurnDeadline deadline)
             throws LifecycleException {
+        return execute(chatModel, messages, task, jsonPolicy, maxOutputTokens, deadline, null);
+    }
+
+    /**
+     * As above, stopping once the turn is cancelled ({@code cancelled};
+     * {@code null} = no cancel flag): no further attempt, no JSON-format fallback
+     * request.
+     */
+    ChatResult execute(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy,
+                       Integer maxOutputTokens, TurnDeadline deadline, BooleanSupplier cancelled)
+            throws LifecycleException {
 
         ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
 
@@ -124,14 +137,15 @@ class LegacyChatExecutor {
                         requestBuilder.maxOutputTokens(maxOutputTokens);
                     }
                     return chatModel.chat(requestBuilder.build());
-                }, task, "Chat model execution (JSON mode)", new long[1], deadline);
+                }, task, "Chat model execution (JSON mode)", new long[1], deadline, cancelled);
             } catch (LifecycleException e) {
                 // A transient failure (timeout, 429, 5xx — already retried) or an
                 // interrupt says nothing about JSON support. Falling back on those too
                 // re-sent the request without the format: a second full, billed
                 // attempt against a provider that is rate-limiting or down, doubling
                 // the calls exactly when it hurts most (M-L5).
-                if (e instanceof LifecycleException.LifecycleInterruptedException || RetryConfiguration.isRetryableError(e)) {
+                if (e instanceof LifecycleException.LifecycleInterruptedException || RetryConfiguration.isRetryableError(e)
+                        || CallCancelledException.isCancellation(e) || (cancelled != null && cancelled.getAsBoolean())) {
                     throw e;
                 }
                 // Neither does a refusal that has nothing to do with the format: a prompt
@@ -145,10 +159,10 @@ class LegacyChatExecutor {
                 // Provider may not support ResponseFormat.JSON — fall back to standard call.
                 // System prompt reinforcement still provides JSON enforcement.
                 LOGGER.warn("JSON response format not supported by provider, falling back to standard mode: " + e.getMessage());
-                messageResponse = chatWithRetry(chatModel, messages, task, maxOutputTokens, deadline);
+                messageResponse = chatWithRetry(chatModel, messages, task, maxOutputTokens, deadline, cancelled);
             }
         } else {
-            messageResponse = chatWithRetry(chatModel, messages, task, maxOutputTokens, deadline);
+            messageResponse = chatWithRetry(chatModel, messages, task, maxOutputTokens, deadline, cancelled);
         }
 
         var aiMessage = messageResponse.aiMessage();
@@ -182,12 +196,12 @@ class LegacyChatExecutor {
     }
 
     private static ChatResponse chatWithRetry(ChatModel chatModel, List<ChatMessage> messages, LlmConfiguration.Task task,
-                                              Integer maxOutputTokens, TurnDeadline deadline)
+                                              Integer maxOutputTokens, TurnDeadline deadline, BooleanSupplier cancelled)
             throws LifecycleException {
         if (maxOutputTokens == null) {
-            return AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task, deadline);
+            return AgentExecutionHelper.executeChatWithRetry(chatModel, messages, task, deadline, cancelled);
         }
         ChatRequest request = ChatRequest.builder().messages(messages).maxOutputTokens(maxOutputTokens).build();
-        return AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(request), task, "Chat model execution", new long[1], deadline);
+        return AgentExecutionHelper.executeWithRetry(() -> chatModel.chat(request), task, "Chat model execution", new long[1], deadline, cancelled);
     }
 }

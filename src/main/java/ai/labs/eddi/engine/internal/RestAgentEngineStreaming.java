@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.internal;
 
-import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
@@ -19,7 +18,7 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
-import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.TurnFinishReason;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
@@ -164,7 +163,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * <p>
      * This is the deployment default. An agent overrides it for its own
      * conversations with {@code streamingClientDisconnect} ({@code cancel} or
-     * {@code finish}); see {@link #cancelOnDisconnectFor}.
+     * {@code finish}), delivered with the turn when it starts — a disconnect never
+     * reads a store. Once the turn has finished generating, a disconnect never
+     * cancels it.
      * </p>
      */
     private final boolean cancelOnClientDisconnect;
@@ -266,13 +267,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     @Inject
     RestAgentEngine restAgentEngine;
 
-    /**
-     * Reads an agent's {@code streamingClientDisconnect} when a {@code /stream}
-     * client leaves; nullable in unit tests (the deployment default then applies).
-     */
-    @Inject
-    IAgentStore agentStore;
-
     /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
     @Inject
     TurnDeadlineHeaderReader turnDeadlineHeaderReader;
@@ -337,6 +331,41 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // before the ownership check reads the database for a turn it will refuse.
         conversationService.refuseIfAtCapacity(conversationId);
 
+        // The stream slot comes before the ownership check and its database read: a
+        // node at its stream capacity answers 503 without touching the store. Every
+        // refusal below gives the slot back. The sink is not written to until the
+        // first event, so the refusals still surface as plain HTTP errors.
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, cancelOnClientDisconnect, true);
+        try {
+            admitTurn(conversationId, inputData);
+        } catch (Throwable refusal) {
+            stream.releaseIfUnused();
+            throw refusal;
+        }
+        stream.startKeepAlive();
+
+        try {
+            conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
+                    turnHandler(stream, safeConversationId, false));
+        } catch (Throwable e) {
+            // Throwable, not Exception: an Error here must not leak the slot either.
+            stream.markTerminal();
+            try {
+                stream.send("error", e instanceof Exception exception
+                        ? buildKnownConditionOrOpaqueErrorEvent("Failed to start streaming for conversation " + safeConversationId,
+                                exception)
+                        : logAndBuildOpaqueErrorEvent("Failed to start streaming for conversation " + safeConversationId, e));
+            } finally {
+                stream.close(SseChannel.CloseReason.FAILED);
+            }
+        }
+    }
+
+    /**
+     * The checks a {@code /stream} turn passes before its stream says anything —
+     * each refusal is the plain HTTP error the non-streaming twin answers.
+     */
+    private void admitTurn(String conversationId, InputData inputData) {
         // Same owner-or-admin gate the non-streaming twin applies (RestAgentEngine)
         // — without it, anyone who learns a conversationId could drive a turn under
         // its owner's identity. Runs BEFORE the sink is touched so the denial
@@ -369,22 +398,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                                 new TurnError("INVALID_IDEMPOTENCY_KEY", false, null, e.getMessage())))
                         .build());
             }
-        }
-
-        // Every outbound frame goes through this stream, which doubles as the
-        // client-disconnect detector — see SseStream. The agent may override the
-        // deployment's disconnect policy (streamingClientDisconnect).
-        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, cancelOnClientDisconnect, true);
-        stream.startKeepAlive();
-
-        try {
-            conversationService.sayStreaming(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    turnHandler(stream, safeConversationId, false));
-        } catch (Exception e) {
-            stream.markTerminal();
-            stream.send("error", buildKnownConditionOrOpaqueErrorEvent(
-                    "Failed to start streaming for conversation " + safeConversationId, e));
-            stream.close(SseChannel.CloseReason.FAILED);
         }
     }
 
@@ -424,6 +437,21 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     private StreamingResponseHandler turnHandler(SseStream stream, String safeConversationId, boolean resume) {
         return new StreamingResponseHandler() {
+            @Override
+            public void onTurnStarted(String streamingClientDisconnect) {
+                stream.applyAgentPolicy(streamingClientDisconnect);
+            }
+
+            @Override
+            public void onCancelRequested() {
+                stream.cancelRequested = true;
+            }
+
+            @Override
+            public void onGenerationFinished() {
+                stream.generationFinished = true;
+            }
+
             @Override
             public void onTaskStart(TaskId taskId, String taskType, int index) {
                 stream.send("task_start",
@@ -534,11 +562,23 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             @Override
             public void onComplete(SimpleConversationMemorySnapshot snapshot) {
                 stream.markTerminal();
+                SseChannel.CloseReason closeReason = closeReasonOf(snapshot.getConversationState());
                 try {
-                    // A cancelled turn (/cancel, or a disconnect that cancels) is
-                    // discarded, not stored: say so with its own event before done, as the
-                    // group stream does, so a client can tell "stopped" from "answered".
                     if (snapshot.getConversationState() == ConversationState.EXECUTION_INTERRUPTED) {
+                        if (!stream.cancelRequested) {
+                            closeReason = SseChannel.CloseReason.FAILED;
+                            // Interrupted without anyone asking: the agent-timeout watchdog
+                            // or a lost cluster lease gave up on the turn. That is not
+                            // "cancelled" — the client did not stop it and may simply send
+                            // the same input again. The turn was discarded, so no done.
+                            stream.send("error", typedError("The turn was interrupted before it finished and was not stored",
+                                    TURN_TIMEOUT_CODE, true));
+                            return;
+                        }
+                        // A cancelled turn (/cancel, or a disconnect that cancels) is
+                        // discarded, not stored: say so with its own event before done, as
+                        // the group stream does, so a client can tell "stopped" from
+                        // "answered".
                         stream.sendJson(EVENT_CANCELLED, new CancelledEvent(String.valueOf(snapshot.getConversationState()), false));
                     }
                     // A turn that ends waiting for a human says so, with the id the
@@ -552,7 +592,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     // Send the final snapshot as JSON
                     stream.send("done", toJson(snapshot));
                 } finally {
-                    stream.close(closeReasonOf(snapshot.getConversationState()));
+                    stream.close(closeReason);
                 }
             }
 
@@ -764,16 +804,33 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         private final AtomicBoolean cancelSignalled = new AtomicBoolean();
 
         /**
-         * Whether this stream's vanished client cancels the turn it was following — the
-         * deployment default when {@link #agentMayOverride}.
+         * Whether this stream's vanished client cancels the turn it was following: the
+         * deployment default until the turn starts, then the agent's
+         * {@code streamingClientDisconnect} when it sets one and
+         * {@link #agentMayOverride}. Delivered with the turn ({@code onTurnStarted}),
+         * so a disconnect never reads a store.
          */
-        private final boolean cancelOnDisconnect;
+        private volatile boolean cancelOnDisconnect;
 
         /**
          * Whether the conversation's agent may override {@link #cancelOnDisconnect}
          * ({@code streamingClientDisconnect}); the {@code /stream} turn, not a resume.
          */
         private final boolean agentMayOverride;
+
+        /**
+         * The pipeline is done generating — the turn is being stored. A client that
+         * leaves from here on no longer cancels it: the answer exists, and discarding
+         * it would lose work already paid for.
+         */
+        private volatile boolean generationFinished;
+
+        /**
+         * Somebody asked for the turn to stop ({@code /cancel}, a cancelling
+         * disconnect, a GDPR stop). Only then does an interrupted turn end with
+         * {@code cancelled}; otherwise it timed out.
+         */
+        private volatile boolean cancelRequested;
 
         /**
          * Opens the stream on the shared transport, or refuses it with {@code 503} when
@@ -791,6 +848,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             long backstopSeconds = agentTimeoutSeconds > 0 ? (long) agentTimeoutSeconds + keepAliveIntervalSeconds : 0L;
             this.channel = sseStreams.open(SseStreams.Kind.AGENT, "conversation " + safeConversationId, eventSink, sse,
                     keepAliveIntervalSeconds, backstopSeconds, this::onClientGone, this::sendTurnTimeout);
+        }
+
+        /** Applies the agent's {@code streamingClientDisconnect} for this turn. */
+        void applyAgentPolicy(String streamingClientDisconnect) {
+            if (agentMayOverride) {
+                cancelOnDisconnect = resolveCancelOnDisconnect(streamingClientDisconnect, cancelOnDisconnect);
+            }
         }
 
         /** Starts the keep-alive tick for this stream, unless it is turned off. */
@@ -834,17 +898,21 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
 
         /**
-         * Ends a stream whose turn the watchdog gave up on and whose body never
-         * returned, with an {@code error} event the client can act on. The turn itself
-         * was already abandoned (cancel flag and interrupt), so nothing is cancelled
-         * here. Called by the transport's backstop, which closes the stream afterwards.
+         * Ends a stream whose turn sent nothing for longer than the agent timeout, with
+         * an {@code error} event the client can act on. Called by the transport's
+         * backstop, which closes the stream afterwards; nothing is cancelled here.
+         * <p>
+         * {@code retryable} is {@code false} on purpose: this layer cannot know what
+         * became of the turn. Usually the watchdog abandoned it, but a turn that was
+         * merely slow to report may still be stored — resending the input could run it
+         * twice. The client reads the conversation first.
          */
         private void sendTurnTimeout() {
             LOGGER.warnf("Turn stream of conversation %s carried no event of its turn for longer than "
                     + "systemRuntime.agentTimeoutInSeconds (%d s) plus one keep-alive interval — ending it with a %s error",
                     safeConversationId, agentTimeoutSeconds, TURN_TIMEOUT_CODE);
-            channel.send("error", typedError("The turn did not finish within the agent timeout; its outcome is discarded",
-                    TURN_TIMEOUT_CODE));
+            channel.send("error", typedError("The turn did not report back within the agent timeout; "
+                    + "read the conversation to see whether it was stored before sending it again", TURN_TIMEOUT_CODE, false));
         }
 
         /**
@@ -861,8 +929,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             if (channel.isTerminal() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
-            boolean cancel = agentMayOverride ? cancelOnDisconnectFor(conversationId, cancelOnDisconnect) : cancelOnDisconnect;
-            if (!cancel) {
+            if (generationFinished) {
+                LOGGER.infof("SSE client disconnected from conversation %s after its turn finished generating — "
+                        + "the turn is stored as usual", safeConversationId);
+                return;
+            }
+            if (!cancelOnDisconnect) {
                 LOGGER.infof("SSE client disconnected from conversation %s — letting the turn finish and persist "
                         + "(cancel on client disconnect is disabled for this stream)", safeConversationId);
                 return;
@@ -1018,32 +1090,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     }
 
     /**
-     * Whether a vanished {@code /stream} client cancels the turn of
-     * {@code conversationId}: the agent's {@code streamingClientDisconnect} when it
-     * sets one, else {@code deploymentDefault}. Read only when a client actually
-     * left, off the stream's threads; any failure to read the agent falls back to
-     * the default.
-     */
-    boolean cancelOnDisconnectFor(String conversationId, boolean deploymentDefault) {
-        if (agentStore == null) {
-            return deploymentDefault;
-        }
-        try {
-            var tail = conversationService.getConversationMemoryTail(conversationId);
-            var snapshot = tail != null ? tail.snapshot() : null;
-            if (snapshot == null || snapshot.getAgentId() == null) {
-                return deploymentDefault;
-            }
-            AgentConfiguration agent = agentStore.read(snapshot.getAgentId(), snapshot.getAgentVersion());
-            return resolveCancelOnDisconnect(agent != null ? agent.getStreamingClientDisconnect() : null, deploymentDefault);
-        } catch (Exception e) {
-            LOGGER.debugf("Could not read the client-disconnect policy of conversation %s's agent; using the deployment default: %s",
-                    sanitize(conversationId), e.getMessage());
-            return deploymentDefault;
-        }
-    }
-
-    /**
      * {@code cancel} → {@code true}, {@code finish} → {@code false}, anything else
      * (unset included) → {@code deploymentDefault}.
      */
@@ -1067,20 +1113,29 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /**
      * Error codes a client may simply retry after a moment: the condition is
-     * temporary (a deployment finishing, a store failing over, a busy conversation,
-     * a stalled turn). Every other code needs a change first — a decision, a new
-     * conversation, less input — or is final.
+     * temporary (a deployment finishing, a store failing over, a busy
+     * conversation). Every other code needs a change first — a decision, a new
+     * conversation, less input — or is final. {@code turn_timeout} is not listed:
+     * whether it may be retried depends on what the server knows about the turn, so
+     * each sender states it ({@link #typedError(String, String, boolean)}).
      */
     static final Set<String> RETRYABLE_ERROR_CODES = Set.of("agent_not_ready", "quota_accounting_unavailable", "restriction_status_unavailable",
-            "conversation_busy", TURN_TIMEOUT_CODE);
+            "conversation_busy");
 
     /**
      * An {@code error} event body: {@code message}, a stable {@code code} and
      * whether retrying the same request is sensible ({@code retryable}).
      */
     String typedError(String message, String code) {
-        return String.format("{\"message\":\"%s\",\"code\":\"%s\",\"retryable\":%s}", escapeJson(message), code,
-                RETRYABLE_ERROR_CODES.contains(code));
+        return typedError(message, code, RETRYABLE_ERROR_CODES.contains(code));
+    }
+
+    /**
+     * {@link #typedError(String, String)} with {@code retryable} decided by the
+     * sender.
+     */
+    String typedError(String message, String code, boolean retryable) {
+        return String.format("{\"message\":\"%s\",\"code\":\"%s\",\"retryable\":%s}", escapeJson(message), code, retryable);
     }
 
     /** How a turn stream ended, for {@code eddi.streaming.closed{reason}}. */
@@ -1096,15 +1151,15 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
 
     /**
      * The turn's {@code finishReason} ({@code length}, {@code content_filter},
-     * {@code empty}) from its output, or {@code null} for a plain complete answer.
+     * {@code empty}) from its output, or {@code null} for a plain complete answer
+     * ({@code empty} only when the whole turn shows nothing — see
+     * {@link TurnFinishReason}).
      */
     static String finishReasonOf(List<ConversationOutput> outputs) {
         if (outputs == null || outputs.isEmpty()) {
             return null;
         }
-        ConversationOutput last = outputs.get(outputs.size() - 1);
-        Object reason = last != null ? last.get(MemoryKeys.TURN_FINISH_REASON) : null;
-        return reason instanceof String text && !text.isBlank() ? text : null;
+        return TurnFinishReason.of(outputs.get(outputs.size() - 1));
     }
 
     private String toJson(SimpleConversationMemorySnapshot snapshot) {

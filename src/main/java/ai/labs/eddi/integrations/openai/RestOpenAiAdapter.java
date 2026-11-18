@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.openai;
 
+import ai.labs.eddi.engine.internal.SseStreams;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionRequest;
 import ai.labs.eddi.integrations.openai.model.ChatCompletionResponse;
 import ai.labs.eddi.integrations.openai.model.ChatMessage;
@@ -92,6 +93,14 @@ public class RestOpenAiAdapter {
         this.inFlight = new Semaphore(Math.max(1, config.getMaxConcurrentRequests()));
     }
 
+    /**
+     * The node's stream registry — a {@code stream=true} completion takes one of
+     * its slots. Field-injected so the direct-construction tests keep their
+     * constructor; they get an unmetered registry.
+     */
+    @Inject
+    SseStreams sseStreams = SseStreams.unmetered();
+
     @GET
     @NoCache
     @Path("/models")
@@ -164,13 +173,21 @@ public class RestOpenAiAdapter {
         if (!inFlight.tryAcquire()) {
             throw OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.");
         }
+        // A stream counts against the node's stream cap (eddi.streaming.max-concurrent-
+        // streams) like every other: refused with 503 before the turn is prepared.
+        SseStreams.Slot slot = null;
         try {
+            if (request.isStreaming()) {
+                slot = sseStreams.acquireSlot(SseStreams.Kind.OPENAI, SseStreams.SLOT_BODY_START_GRACE_MILLIS);
+            }
             var turn = bridge.prepare(model, request, headers, userId);
             String completionId = "chatcmpl-eddi-" + UUID.randomUUID();
             long created = Instant.now().getEpochSecond();
 
-            if (request.isStreaming()) {
-                return streamingResponse(turn, completionId, request.model(), created, request.includeUsage());
+            if (slot != null) {
+                Response response = streamingResponse(turn, completionId, request.model(), created, request.includeUsage(), slot);
+                slot = null;
+                return response;
             }
 
             var outcome = bridge.say(turn, model, userId, headers, request);
@@ -189,6 +206,10 @@ public class RestOpenAiAdapter {
             // would 429 permanently after enough of them. The stream acquires its
             // own permit instead (see streamingResponse).
             inFlight.release();
+            if (slot != null) {
+                // Taken, but no response body owns it: prepare refused the turn.
+                slot.releaseFailed();
+            }
         }
     }
 
@@ -206,19 +227,33 @@ public class RestOpenAiAdapter {
      * {@code bridge.stream} would otherwise have ended it.
      */
     private Response streamingResponse(OpenAiConversationBridge.PreparedTurn turn,
-                                       String completionId, String model, long created, boolean includeUsage) {
+                                       String completionId, String model, long created, boolean includeUsage,
+                                       SseStreams.Slot slot) {
         StreamingOutput body = out -> {
-            var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created, includeUsage);
-            if (!inFlight.tryAcquire()) {
-                bridge.abandon(turn);
-                writer.error(OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.")
-                        .toErrorResponse());
-                return;
-            }
+            // The body owns the stream slot from here and frees it in the finally; the
+            // slot frees itself only if this body never runs.
+            slot.bodyStarted();
+            boolean completed = false;
             try {
-                bridge.stream(turn, writer);
+                var writer = new OpenAiSseWriter(out, objectMapper, completionId, model, created, includeUsage);
+                if (!inFlight.tryAcquire()) {
+                    bridge.abandon(turn);
+                    writer.error(OpenAiApiException.busy("Too many concurrent requests. Please retry shortly.")
+                            .toErrorResponse());
+                    return;
+                }
+                try {
+                    bridge.stream(turn, writer);
+                    completed = true;
+                } finally {
+                    inFlight.release();
+                }
             } finally {
-                inFlight.release();
+                if (completed) {
+                    slot.releaseCompleted();
+                } else {
+                    slot.releaseFailed();
+                }
             }
         };
         return Response.ok(body)

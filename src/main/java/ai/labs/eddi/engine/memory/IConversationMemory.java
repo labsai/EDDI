@@ -273,12 +273,37 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * Stops this turn the way {@link #setCancelled setCancelled(true)} does, for a
+     * turn nobody asked to cancel — the agent-timeout watchdog, a lost lease. The
+     * pipeline sees the same flag; a streamed turn's client is told the turn timed
+     * out rather than that it was cancelled.
+     *
+     * @since 6.7.0
+     */
+    default void abandon() {
+        setCancelled(true);
+    }
+
+    /**
      * Check whether this conversation has been cancelled.
      *
      * @since 6.0.0
      */
     default boolean isCancelled() {
         return false;
+    }
+
+    /**
+     * Runs {@code listener} once when this turn is cancelled (at once when it
+     * already is) — so a waiting streamed model call stops immediately instead of
+     * at its next poll. Close the returned handle when the wait is over. A lost
+     * lease is not signalled here; it is read through {@link #isCancelled()}.
+     *
+     * @since 6.7.0
+     */
+    default AutoCloseable onCancel(Runnable listener) {
+        return () -> {
+        };
     }
 
     /**

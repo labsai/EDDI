@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.configs.shared.CallCancelledException;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
 import dev.langchain4j.exception.RetriableException;
 import dev.langchain4j.model.chat.ChatModel;
@@ -16,7 +17,11 @@ import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeoutException;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Adapts a {@link StreamingChatModel} to the synchronous {@link ChatModel}
@@ -127,7 +132,7 @@ class ToolLoopStreamingChatModel implements ChatModel {
      * cancel-on-disconnect) while the call ran. Not retryable: the classifier finds
      * nothing transient in it.
      */
-    static final class StreamCancelledException extends RuntimeException {
+    static final class StreamCancelledException extends CallCancelledException {
         StreamCancelledException(String modelType) {
             super("[" + modelType + "] Streaming model call stopped: the turn was cancelled");
         }
@@ -138,6 +143,13 @@ class ToolLoopStreamingChatModel implements ChatModel {
     private final StreamPolicy policy;
     private final String modelType;
     private final String metricPath;
+    /**
+     * Whether a round with an API-level JSON response format is still forwarded
+     * token by token — the no-tools path and the cascade's live step, where the
+     * tokens are the answer the client renders. The tool loop's JSON rounds are
+     * not: they are an intermediate result, emitted whole if they turn out final.
+     */
+    private boolean forwardJsonRounds;
     /** Where the stream meters go: the caller's registry, else the global one. */
     private final MeterRegistry meters;
 
@@ -182,6 +194,15 @@ class ToolLoopStreamingChatModel implements ChatModel {
     }
 
     /**
+     * Forwards JSON-formatted rounds token by token too (see
+     * {@link #forwardJsonRounds}).
+     */
+    ToolLoopStreamingChatModel forwardingJsonRounds() {
+        this.forwardJsonRounds = true;
+        return this;
+    }
+
+    /**
      * The text token-forwarded by the last completed model call — {@code ""} when
      * that call forwarded nothing (JSON format, buffered provider, or a pure
      * tool-call round). Callers compare this against the turn's final response text
@@ -222,7 +243,7 @@ class ToolLoopStreamingChatModel implements ChatModel {
     public ChatResponse chat(ChatRequest chatRequest) {
         // Partial JSON is not renderable — run over the streaming transport but
         // do not forward tokens for this round.
-        var call = chatRequest.responseFormat() == null
+        var call = chatRequest.responseFormat() == null || forwardJsonRounds
                 ? AbandonableStreamCall.forwardingTo(this::forwardToken)
                 : AbandonableStreamCall.discardingPartials();
         delegate.chat(chatRequest, call);
@@ -233,16 +254,20 @@ class ToolLoopStreamingChatModel implements ChatModel {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             reportPartial(call);
-            throw new RuntimeException(String.format("[%s] Streaming chat request interrupted", modelType), e);
+            // Typed, so no caller retries it or sends another request for it.
+            throw new CallCancelledException(String.format("[%s] Streaming chat request interrupted", modelType), e);
         }
 
         switch (outcome) {
             case COMPLETED -> {
                 ChatResponse response = call.response();
                 FinishReason finishReason = response != null && response.metadata() != null ? response.metadata().finishReason() : null;
-                if (finishReason == null && policy.requireFinishReason()) {
-                    count("eddi.llm.stream.incomplete");
-                    throw partiallyStreamed(call, new IncompleteStreamException(modelType), false);
+                if (finishReason == null) {
+                    if (policy.requireFinishReason()) {
+                        count("eddi.llm.stream.incomplete");
+                        throw partiallyStreamed(call, new IncompleteStreamException(modelType), false);
+                    }
+                    acceptedWithoutFinishReason();
                 }
                 lastForwardedText = call.forwardedText();
                 lastFinishReason = finishReason;
@@ -320,6 +345,29 @@ class ToolLoopStreamingChatModel implements ChatModel {
         String text = call.forwardedText();
         if (!text.isEmpty()) {
             policy.partialTextSink().accept(text);
+        }
+    }
+
+    /**
+     * Endpoints already warned about a completion without a finish reason; bounded
+     * by clearing, like the executor's timeout warnings.
+     */
+    private static final Set<String> LENIENT_WARNED = ConcurrentHashMap.newKeySet();
+
+    /**
+     * A completion without a finish reason, accepted because this endpoint's policy
+     * is lenient: said once per endpoint, counted every time.
+     */
+    private void acceptedWithoutFinishReason() {
+        count("eddi.llm.stream.no_finish_reason_accepted");
+        if (LENIENT_WARNED.size() >= 1_000) {
+            LENIENT_WARNED.clear();
+        }
+        if (LENIENT_WARNED.add(policy.endpoint())) {
+            LOGGER.warnf("[%s] Streamed answers from %s end without a finish reason; they are accepted as complete, so a connection that "
+                    + "breaks off mid-answer cannot be told from a finished one. Set the task's streaming.requireFinishReason "
+                    + "(or eddi.llm.streaming.require-finish-reason) to true if this endpoint does send one.", modelType,
+                    sanitize(policy.endpoint()));
         }
     }
 

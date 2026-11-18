@@ -130,16 +130,25 @@ class RestGroupConversationStreamTransportTest {
     }
 
     @Test
-    @DisplayName("a stream silent past the agent timeout after its first event is ended with group_error")
-    void backstop() throws Exception {
+    @DisplayName("a member turn silent for far longer than the agent timeout does not end the stream (M1)")
+    void longSilentMemberTurnKeepsTheStream() throws Exception {
         var sink = new FakeSse.Sink(false);
         var listener = start(sink);
         listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent("gc-1", "group-1", "q", "round-robin", 1, List.of("a")));
+        listener.onSpeakerStart(new GroupConversationEventSink.SpeakerStartEvent("a", "A", 1, "Discussion"));
 
-        now.addAndGet((rest.agentTimeoutSeconds + rest.keepAliveIntervalSeconds) * 1000L + 1);
-        ticks.forEach(Runnable::run);
+        // Thirty minutes of silence: a slow member, a nested group, a human member.
+        for (int i = 0; i < 30 * 60 / Math.max(1, rest.keepAliveIntervalSeconds); i++) {
+            now.addAndGet(rest.keepAliveIntervalSeconds * 1000L);
+            ticks.forEach(Runnable::run);
+        }
 
-        assertEquals(1, sink.count(GroupConversationEventSink.EVENT_GROUP_ERROR));
+        assertEquals(0, sink.count(GroupConversationEventSink.EVENT_GROUP_ERROR));
+        assertTrue(sink.comments() > 0, "the silence is filled with keep-alive comments");
+        assertEquals(1, rest.sseStreams.totalActive());
+
+        listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(GroupConversation.GroupConversationState.COMPLETED, "answer"));
+        assertEquals(1, sink.count(GroupConversationEventSink.EVENT_GROUP_COMPLETE));
         assertTrue(sink.isClosed());
         assertEquals(0, rest.sseStreams.totalActive());
     }

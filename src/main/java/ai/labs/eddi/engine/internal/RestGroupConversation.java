@@ -123,14 +123,6 @@ public class RestGroupConversation implements IRestGroupConversation {
     @ConfigProperty(name = "eddi.streaming.keepalive-interval-seconds", defaultValue = RestAgentEngineStreaming.DEFAULT_KEEPALIVE_INTERVAL_SECONDS)
     int keepAliveIntervalSeconds = RestAgentEngineStreaming.DEFAULT_KEEPALIVE_INTERVAL;
 
-    /**
-     * {@code systemRuntime.agentTimeoutInSeconds}: every member turn and the
-     * synthesis is bounded by it, so a discussion stream silent for longer (plus a
-     * keep-alive interval) after its first event is stuck and is ended.
-     */
-    @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60")
-    int agentTimeoutSeconds = 60;
-
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
             IJsonSerialization jsonSerialization,
@@ -1439,9 +1431,19 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     /**
      * Opens a discussion stream on the shared SSE transport ({@link SseStreams}):
-     * the same keep-alive, disconnect detection, bounded buffering and silence
-     * backstop as the agent turn stream. Refused with {@code 503} when the node is
-     * at its stream capacity.
+     * the same keep-alive, disconnect detection and bounded buffering as the agent
+     * turn stream. Refused with {@code 503} when the node is at its stream
+     * capacity.
+     * <p>
+     * No silence backstop. Between two events of a discussion lies a whole member
+     * turn, and a member's timeout is its own — a member may be a group, an agent
+     * on a slow model or a human whose turn waits for input — so no single
+     * deployment timeout says when a silent discussion is stuck. Ending the stream
+     * then would leave a live discussion without a stream. The discussion ends its
+     * stream itself ({@code group_complete}, {@code group_error},
+     * {@code cancelled}); a client that leaves frees the slot at once, and the
+     * pending-write bound closes a sink that stops accepting writes (the keep-alive
+     * comments fill it).
      * <p>
      * A client that leaves does not cancel the discussion: a discussion is
      * persisted round by round and costs several turns, so it runs on and the
@@ -1449,13 +1451,9 @@ public class RestGroupConversation implements IRestGroupConversation {
      * at once instead of being written to (and buffered for) nobody.
      */
     private SseChannel openGroupStream(SseEventSink eventSink, Sse sse) {
-        long backstop = agentTimeoutSeconds > 0 ? (long) agentTimeoutSeconds + keepAliveIntervalSeconds : 0L;
-        SseChannel[] holder = new SseChannel[1];
         SseChannel channel = sseStreams.open(SseStreams.Kind.GROUP, "group discussion stream", eventSink, sse, keepAliveIntervalSeconds,
-                backstop, () -> LOGGER.info("Group discussion stream client disconnected — the discussion continues and persists"),
-                () -> holder[0].send(GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(new GroupConversationEventSink.GroupErrorEvent(
-                        "The discussion stream carried no event for longer than the agent timeout; reload the discussion to see its state."))));
-        holder[0] = channel;
+                0L, () -> LOGGER.info("Group discussion stream client disconnected — the discussion continues and persists"), () -> {
+                });
         channel.startKeepAlive();
         return channel;
     }

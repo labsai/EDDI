@@ -39,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -77,6 +78,11 @@ public class ConversationMemory implements IConversationMemory {
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
     private volatile boolean cancelled;
+    /**
+     * Called once when {@link #cancelled} is raised; see {@link #onCancel}.
+     * Transient.
+     */
+    private final transient List<Runnable> cancelListeners = new CopyOnWriteArrayList<>();
     /**
      * Cluster mode: whether this turn's lease is lost; see
      * {@link #setLeaseLostCheck}.
@@ -680,7 +686,51 @@ public class ConversationMemory implements IConversationMemory {
 
     @Override
     public void setCancelled(boolean cancelled) {
+        raiseCancel(cancelled, true);
+    }
+
+    @Override
+    public void abandon() {
+        raiseCancel(true, false);
+    }
+
+    /**
+     * Sets the flag and, when it goes up, wakes the waiting calls; only a cancel
+     * someone asked for ({@code announce}) tells the event sink — a turn the
+     * watchdog or a lost lease abandons is not "cancelled" to its client.
+     */
+    private void raiseCancel(boolean cancelled, boolean announce) {
+        boolean raised = cancelled && !this.cancelled;
         this.cancelled = cancelled;
+        if (!raised) {
+            return;
+        }
+        // Event-driven, so a streamed model call waiting on the provider stops at
+        // once rather than at its next poll.
+        for (Runnable listener : cancelListeners) {
+            try {
+                listener.run();
+            } catch (RuntimeException e) {
+                // A listener must not keep the cancel from reaching the others.
+            }
+        }
+        ConversationEventSink sink = eventSink;
+        if (announce && sink != null) {
+            try {
+                sink.onCancelRequested();
+            } catch (RuntimeException e) {
+                // Same: the flag above is what the pipeline acts on.
+            }
+        }
+    }
+
+    @Override
+    public AutoCloseable onCancel(Runnable listener) {
+        cancelListeners.add(listener);
+        if (cancelled) {
+            listener.run();
+        }
+        return () -> cancelListeners.remove(listener);
     }
 
     @Override

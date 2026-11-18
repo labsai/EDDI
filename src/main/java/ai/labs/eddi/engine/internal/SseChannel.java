@@ -127,7 +127,7 @@ final class SseChannel {
             return;
         }
         long tickMillis = Math.max(1L, keepAliveMillis / 4);
-        tick = streams.schedule(this::keepAliveTick, tickMillis);
+        tick = streams.schedule(this::safeTick, tickMillis);
         if (released.get()) {
             stopTick();
         }
@@ -183,7 +183,7 @@ final class SseChannel {
         int events = pendingEvents.incrementAndGet();
         long queued = pendingBytes.addAndGet(bytes);
         SseStreams.Limits limits = streams.limits();
-        if (events > limits.maxPendingEvents() || queued > limits.maxPendingBytes()) {
+        if (events > limits.maxPendingEvents() || queued > limits.maxPendingBytes() || !streams.reservePendingBytes(bytes)) {
             pendingEvents.decrementAndGet();
             pendingBytes.addAndGet(-bytes);
             LOGGER.infof("SSE %s: the client fell behind (%d events / %d bytes unsent) — closing the stream instead of buffering more", name,
@@ -245,17 +245,27 @@ final class SseChannel {
      */
     private void settleWhenWritten(CompletionStage<?> stage, long bytes) {
         if (stage == null) {
-            pendingEvents.decrementAndGet();
-            pendingBytes.addAndGet(-bytes);
+            settle(bytes);
             return;
         }
         stage.whenComplete((ignored, failure) -> {
-            pendingEvents.decrementAndGet();
-            pendingBytes.addAndGet(-bytes);
-            if (failure != null && sink.isClosed()) {
-                clientGone();
+            settle(bytes);
+            if (failure != null) {
+                try {
+                    if (sink.isClosed()) {
+                        clientGone();
+                    }
+                } catch (Throwable t) {
+                    close(CloseReason.FAILED);
+                }
             }
         });
+    }
+
+    private void settle(long bytes) {
+        pendingEvents.decrementAndGet();
+        pendingBytes.addAndGet(-bytes);
+        streams.releasePendingBytes(bytes);
     }
 
     private void overflow() {
@@ -285,6 +295,36 @@ final class SseChannel {
         if (onClientGone != null && goneSignalled.compareAndSet(false, true)) {
             streams.clientGoneExecutor().execute(onClientGone);
         }
+    }
+
+    /**
+     * The scheduled tick: one stream's failure — a sink that throws from
+     * {@code isClosed()} or {@code send}, say — ends that stream properly
+     * (released, counted) instead of silently leaving it without keep-alive,
+     * backstop and disconnect detection; the shared ticker thread never sees it.
+     */
+    void safeTick() {
+        try {
+            keepAliveTick();
+        } catch (Throwable t) {
+            LOGGER.debugf("SSE tick of %s failed; closing the stream: %s", name, t.getMessage());
+            close(CloseReason.FAILED);
+        }
+    }
+
+    /**
+     * Ends the stream with one last event — the node is shutting down — unless it
+     * already delivered its terminal frame.
+     */
+    void shutdown(String errorEventData) {
+        if (terminal.compareAndSet(false, true)) {
+            try {
+                send("error", errorEventData);
+            } catch (Throwable t) {
+                LOGGER.debugf("Shutdown event of %s failed: %s", name, t.getMessage());
+            }
+        }
+        close(CloseReason.FAILED);
     }
 
     void keepAliveTick() {
@@ -378,13 +418,14 @@ final class SseChannel {
         if (!released.compareAndSet(false, true)) {
             return;
         }
-        stopTick();
         try {
+            stopTick();
             if (!sink.isClosed()) {
                 sink.close();
             }
-        } catch (Exception e) {
-            LOGGER.debugf("Error closing SSE sink of %s: %s", name, e.getMessage());
+        } catch (Throwable t) {
+            // Whatever the sink throws, the slot below is released.
+            LOGGER.debugf("Error closing SSE sink of %s: %s", name, t.getMessage());
         } finally {
             streams.release(this, kind, reason);
         }

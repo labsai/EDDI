@@ -153,11 +153,16 @@ class StreamingLegacyChatExecutor {
                             IConversationMemory memory)
             throws LifecycleException {
         StreamPolicy policy = streamPolicy(task, memory);
-        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry);
+        // JSON-formatted answers are forwarded token by token too, as before 6.7: the
+        // only re-ask that could make that unsafe (responseValidation "retry") buffers
+        // the task and never reaches this path, and the JSON-format fallback only runs
+        // after a refusal that arrives before any token.
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry)
+                .forwardingJsonRounds();
         LegacyChatExecutor.ChatResult result;
         try {
-            result = legacyChatExecutor.execute(bridge, messages, task != null ? task : new LlmConfiguration.Task(), jsonPolicy,
-                    memory != null ? memory.getTurnDeadline() : null);
+            result = legacyChatExecutor.execute(bridge, messages, task != null ? task : new LlmConfiguration.Task(), jsonPolicy, null,
+                    memory != null ? memory.getTurnDeadline() : null, policy.cancelled());
         } catch (LifecycleException e) {
             PartiallyStreamedRoundException partial = partialFailure(e);
             if (partial != null && keepsPartialText(policy, task, partial)) {
@@ -198,8 +203,19 @@ class StreamingLegacyChatExecutor {
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
                                   LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
-        StreamPolicy policy = streamPolicy(task, null);
-        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry);
+        return executeCapturing(streamingModel, messages, eventSink, task, jsonPolicy, null);
+    }
+
+    /**
+     * As above inside {@code memory}'s turn: the turn's cancel stops the step's
+     * stream like on every other path, and a failure after text keeps that text as
+     * error detail.
+     */
+    StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
+                                  LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy, IConversationMemory memory) {
+        StreamPolicy policy = streamPolicy(task, memory);
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry)
+                .forwardingJsonRounds();
         ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
         var requestBuilder = ChatRequest.builder().messages(messages);
         if (responseFormat != null) {

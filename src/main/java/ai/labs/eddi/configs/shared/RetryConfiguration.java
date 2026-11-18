@@ -25,6 +25,7 @@ import java.util.concurrent.Future;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.function.BooleanSupplier;
 
 /**
  * Shared retry configuration and execution utility.
@@ -272,6 +273,25 @@ public class RetryConfiguration {
     public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
                                          long[] sharedBackoffMs, TurnDeadline deadline)
             throws LifecycleException {
+        return executeWithRetry(action, retryConfig, actionDescription, sharedBackoffMs, deadline, null);
+    }
+
+    /**
+     * As
+     * {@link #executeWithRetry(Callable, RetryConfiguration, String, long[], TurnDeadline)},
+     * stopping as soon as the turn is cancelled: no further attempt is started, a
+     * backoff or {@code Retry-After} wait is cut short, and a cancellation anywhere
+     * in the attempt's cause chain ({@link CallCancelledException}, an
+     * {@link InterruptedException}) ends the loop as a
+     * {@link LifecycleException.LifecycleInterruptedException} — never retried,
+     * never classified as a provider failure.
+     *
+     * @param cancelled
+     *            the turn's cancel flag, or {@code null} for none
+     */
+    public static <T> T executeWithRetry(Callable<T> action, RetryConfiguration retryConfig, String actionDescription,
+                                         long[] sharedBackoffMs, TurnDeadline deadline, BooleanSupplier cancelled)
+            throws LifecycleException {
 
         if (retryConfig == null) {
             retryConfig = new RetryConfiguration();
@@ -309,6 +329,10 @@ public class RetryConfiguration {
                             lastException);
                 }
             }
+            if (isCancelled(cancelled)) {
+                throw new LifecycleException.LifecycleInterruptedException(actionDescription + " cancelled before attempt " + (attempt + 1),
+                        lastException);
+            }
             attempt++;
 
             try {
@@ -339,6 +363,12 @@ public class RetryConfiguration {
                 if (e instanceof InterruptedException ie) {
                     Thread.currentThread().interrupt();
                     throw new LifecycleException.LifecycleInterruptedException(actionDescription + " interrupted", ie);
+                }
+                // A cancelled or interrupted call further down the chain (a streamed model
+                // call stopped by the turn's cancel) is the same: typed, never retried and
+                // never a reason for a caller to try another request.
+                if (CallCancelledException.isCancellation(e)) {
+                    throw new LifecycleException.LifecycleInterruptedException(actionDescription + " cancelled", e);
                 }
                 lastException = e;
 
@@ -376,11 +406,8 @@ public class RetryConfiguration {
                         LOGGER.warn(actionDescription + " failed (attempt " + attempt + "/" + maxAttempts
                                 + "), retrying after " + sleepFor + "ms: " + e.getMessage());
 
-                        try {
-                            Thread.sleep(sleepFor);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            throw new LifecycleException("Retry interrupted", ie);
+                        if (!sleepUnlessCancelled(sleepFor, cancelled)) {
+                            throw new LifecycleException.LifecycleInterruptedException(actionDescription + " cancelled during the retry wait", e);
                         }
                         totalBackoff += sleepFor;
                         sharedBackoffMs[0] = totalBackoff;
@@ -455,6 +482,38 @@ public class RetryConfiguration {
                 }
             }
         };
+    }
+
+    private static boolean isCancelled(BooleanSupplier cancelled) {
+        return cancelled != null && cancelled.getAsBoolean();
+    }
+
+    /** How often a retry wait looks at the turn's cancel flag. */
+    static final long CANCEL_CHECK_SLICE_MS = 200L;
+
+    /**
+     * Sleeps {@code sleepFor} ms, in slices that look at {@code cancelled}.
+     *
+     * @return {@code false} when the turn was cancelled or the thread interrupted
+     *         (the flag is restored) — the caller must not retry
+     */
+    private static boolean sleepUnlessCancelled(long sleepFor, BooleanSupplier cancelled) {
+        long end = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(sleepFor);
+        try {
+            while (true) {
+                if (isCancelled(cancelled)) {
+                    return false;
+                }
+                long left = TimeUnit.NANOSECONDS.toMillis(end - System.nanoTime());
+                if (left <= 0) {
+                    return !isCancelled(cancelled);
+                }
+                Thread.sleep(cancelled == null ? left : Math.min(left, CANCEL_CHECK_SLICE_MS));
+            }
+        } catch (InterruptedException ie) {
+            Thread.currentThread().interrupt();
+            return false;
+        }
     }
 
     private static void deadlineExceeded(String stage) {

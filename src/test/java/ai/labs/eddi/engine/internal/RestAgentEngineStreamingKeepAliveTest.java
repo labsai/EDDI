@@ -263,6 +263,9 @@ class RestAgentEngineStreamingKeepAliveTest {
         var data = ArgumentCaptor.forClass(String.class);
         verify(eventBuilder, times(2)).data(eq(String.class), data.capture());
         assertTrue(data.getValue().contains("\"code\":\"" + RestAgentEngineStreaming.TURN_TIMEOUT_CODE + "\""), data.getValue());
+        // This layer cannot know whether the turn was stored: not retryable, read
+        // first.
+        assertTrue(data.getValue().contains("\"retryable\":false"), data.getValue());
         verify(eventSink).close();
         verify(future, atLeastOnce()).cancel(false);
         // The watchdog already abandoned the turn: the backstop only ends the stream.

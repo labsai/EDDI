@@ -17,16 +17,21 @@ import org.eclipse.microprofile.config.ConfigProvider;
  * tests) the built-in defaults apply.
  *
  * @param requireFinishReason
- *            {@code eddi.llm.streaming.require-finish-reason}
+ *            {@code eddi.llm.streaming.require-finish-reason}; {@code null}
+ *            when unset — each provider's own default then applies
  * @param idleTimeoutSeconds
  *            {@code eddi.llm.streaming.idle-timeout-seconds}; {@code 0} = off
  */
-record StreamingSettings(boolean requireFinishReason, long idleTimeoutSeconds) {
+record StreamingSettings(Boolean requireFinishReason, long idleTimeoutSeconds) {
 
     static final String REQUIRE_FINISH_REASON_PROPERTY = "eddi.llm.streaming.require-finish-reason";
     static final String IDLE_TIMEOUT_PROPERTY = "eddi.llm.streaming.idle-timeout-seconds";
 
-    static final boolean DEFAULT_REQUIRE_FINISH_REASON = true;
+    /**
+     * Unset: the provider decides (see
+     * {@code StreamPolicy.STRICT_FINISH_REASON_TYPES}).
+     */
+    static final Boolean DEFAULT_REQUIRE_FINISH_REASON = null;
     static final long DEFAULT_IDLE_TIMEOUT_SECONDS = 30L;
 
     /** The built-in defaults, without reading the configuration. */
@@ -52,7 +57,7 @@ record StreamingSettings(boolean requireFinishReason, long idleTimeoutSeconds) {
     private static StreamingSettings read() {
         try {
             var config = ConfigProvider.getConfig();
-            boolean requireFinishReason = config.getOptionalValue(REQUIRE_FINISH_REASON_PROPERTY, Boolean.class)
+            Boolean requireFinishReason = config.getOptionalValue(REQUIRE_FINISH_REASON_PROPERTY, Boolean.class)
                     .orElse(DEFAULT_REQUIRE_FINISH_REASON);
             long idle = config.getOptionalValue(IDLE_TIMEOUT_PROPERTY, Long.class).orElse(DEFAULT_IDLE_TIMEOUT_SECONDS);
             return new StreamingSettings(requireFinishReason, Math.max(0L, idle));

@@ -25,6 +25,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Handler;
 import java.util.logging.Level;
@@ -184,11 +185,89 @@ class RetryConfigurationTest {
             AtomicInteger attempts = new AtomicInteger();
             long start = System.nanoTime();
 
-            RetryConfiguration.executeWithRetry(failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_200MS)), config, "test-action");
+            // A 20 s hint against a 1 ms backoff: the margin is wide enough that a loaded
+            // build machine cannot blur the two (a 200 ms hint against a 150 ms bound
+            // could, and did).
+            RetryConfiguration.executeWithRetry(failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_20S)), config, "test-action");
 
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
             assertEquals(2, attempts.get());
-            assertTrue(elapsedMs < 150, "the hint must be ignored, but the call took " + elapsedMs + "ms");
+            assertTrue(elapsedMs < 10_000, "the 20 s hint must be ignored, but the call took " + elapsedMs + "ms");
+        }
+
+        @Test
+        @DisplayName("M3: a cancel during the backoff sleep stops the loop at once — no further attempt")
+        void cancelDuringBackoffStopsRetrying() {
+            var config = fastRetryConfig(5);
+            config.setBackoffDelayMs(30_000L);
+            config.setMaxBackoffDelayMs(30_000L);
+            AtomicInteger attempts = new AtomicInteger();
+            var cancelled = new AtomicBoolean();
+            Callable<String> action = () -> {
+                attempts.incrementAndGet();
+                // Cancelled while the loop is about to sleep before attempt 2.
+                cancelled.set(true);
+                throw new SocketTimeoutException("read timed out");
+            };
+            long start = System.nanoTime();
+
+            assertThrows(LifecycleException.LifecycleInterruptedException.class,
+                    () -> RetryConfiguration.executeWithRetry(action, config, "test-action", new long[1], null, cancelled::get));
+
+            assertEquals(1, attempts.get(), "no attempt after the cancel");
+            assertTrue((System.nanoTime() - start) / 1_000_000 < 5_000, "the 30 s backoff is cut short by the cancel");
+        }
+
+        @Test
+        @DisplayName("M3: a cancel during a provider Retry-After wait stops the loop at once")
+        void cancelDuringRetryAfterStopsRetrying() {
+            var config = fastRetryConfig(3);
+            config.setMaxRetryAfterMs(30_000L);
+            AtomicInteger attempts = new AtomicInteger();
+            var cancelled = new AtomicBoolean();
+            var canceller = new Thread(() -> {
+                try {
+                    Thread.sleep(300);
+                } catch (InterruptedException e) {
+                    return;
+                }
+                cancelled.set(true);
+            });
+            canceller.setDaemon(true);
+            canceller.start();
+            long start = System.nanoTime();
+
+            assertThrows(LifecycleException.LifecycleInterruptedException.class, () -> RetryConfiguration.executeWithRetry(
+                    failOnceWith(attempts, new HttpException(429, RATE_LIMIT_BODY_20S)), config, "test-action", new long[1], null, cancelled::get));
+
+            assertEquals(1, attempts.get());
+            assertTrue((System.nanoTime() - start) / 1_000_000 < 5_000, "the 20 s Retry-After is cut short by the cancel");
+        }
+
+        @Test
+        @DisplayName("M3: a turn cancelled before the first attempt makes no request at all")
+        void cancelledBeforeTheFirstAttempt() {
+            AtomicInteger attempts = new AtomicInteger();
+
+            assertThrows(LifecycleException.LifecycleInterruptedException.class, () -> RetryConfiguration.executeWithRetry(() -> {
+                attempts.incrementAndGet();
+                return "ok";
+            }, fastRetryConfig(3), "test-action", new long[1], null, () -> true));
+
+            assertEquals(0, attempts.get());
+        }
+
+        @Test
+        @DisplayName("M3: a typed cancellation is never retried, wherever it sits in the cause chain")
+        void typedCancellationIsNotRetried() {
+            AtomicInteger attempts = new AtomicInteger();
+
+            assertThrows(LifecycleException.LifecycleInterruptedException.class, () -> RetryConfiguration.executeWithRetry(() -> {
+                attempts.incrementAndGet();
+                throw new RuntimeException("wrapped", new CallCancelledException("stream cancelled"));
+            }, fastRetryConfig(3), "test-action"));
+
+            assertEquals(1, attempts.get());
         }
 
         @Test
