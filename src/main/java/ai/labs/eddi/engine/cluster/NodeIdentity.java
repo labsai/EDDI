@@ -16,8 +16,9 @@ import java.util.UUID;
 /**
  * Who this JVM is in the cluster.
  * <p>
- * {@link #nodeId()} is stable across restarts of the same pod (it defaults to
- * the host name, which a StatefulSet or the downward API keeps);
+ * {@link #nodeId()} is stable across restarts of the same pod (it is
+ * {@code eddi.cluster.node-id}, else {@code eddi.schedule.instance-id} with a
+ * WARN, else the host name, which a StatefulSet or the downward API keeps);
  * {@link #bootId()} is new on every start. The pair is what lets a restarted
  * node recognise and delete the leases its previous incarnation still held,
  * instead of waiting for them to expire.

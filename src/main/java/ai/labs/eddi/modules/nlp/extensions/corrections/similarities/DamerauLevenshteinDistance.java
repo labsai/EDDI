@@ -6,8 +6,9 @@ package ai.labs.eddi.modules.nlp.extensions.corrections.similarities;
 
 /**
  * Damerau-Levenshtein Distance Based on the algorithms provided at the
- * following websites:
- * <p/>
+ * following websites. This is the restricted variant (optimal string
+ * alignment): no substring is edited more than once.
+ * <p>
  * http://snippets.dzone.com/posts/show/6942
  * http://en.wikipedia.org/wiki/Damerau%E2%80%93Levenshtein_distance
  *
@@ -17,14 +18,16 @@ package ai.labs.eddi.modules.nlp.extensions.corrections.similarities;
 public class DamerauLevenshteinDistance implements IDistanceCalculator {
     /**
      * Calculate the Damerau-Levenshtein Distance (edit distance) between two
-     * strings.
+     * strings. Two empty strings trip an {@code assert} (only active with
+     * {@code -ea}); without assertions their distance is 0.
      *
      * @param source
      *            Source input string
      * @param target
      *            Target input string
-     * @return The number of substitutions it would take to make the source string
-     *         identical to the target string
+     * @return The number of insertions, deletions, substitutions and adjacent
+     *         transpositions it would take to make the source string identical to
+     *         the target string
      */
     public int calculate(String source, String target) {
         // If both strings are empty, I'm of the opinion that
@@ -111,13 +114,11 @@ public class DamerauLevenshteinDistance implements IDistanceCalculator {
                 // the shortest path to a match (hence the 'minimum'
                 // calculation on distances).
                 distanceMatrix[sourceIndex][targetIndex] = minimum(
-                        // Character match between current character in
-                        // source string and next character in target
+                        // Deletion: drop the current source character
                         distanceMatrix[sourceIndex - 1][targetIndex] + 1,
-                        // Character match between next character in
-                        // source string and current character in target
+                        // Insertion: add the current target character
                         distanceMatrix[sourceIndex][targetIndex - 1] + 1,
-                        // No match, at current, add cumulative penalty
+                        // Substitution (or match): add the cumulative penalty
                         distanceMatrix[sourceIndex - 1][targetIndex - 1] + cost);
 
                 // We don't want to do the next series of calculations on

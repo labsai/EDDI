@@ -77,8 +77,10 @@ import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
  * single conversation.
  * <p>
  * An explicit key is never second-guessed: a new chat produces a new chat key,
- * which is a new intent, which is a new conversation. Nothing is ever ended to
- * make room — a superseded conversation is abandoned, not destroyed.
+ * which is a new intent, which is a new conversation. A new chat never ends the
+ * conversation it supersedes — that one is abandoned, not destroyed. Only the
+ * optional step rollover ({@code eddi.openai-compat.max-conversation-steps})
+ * ends an idle conversation, once it is full.
  *
  * @since 6.1.0
  */
@@ -400,14 +402,14 @@ public class OpenAiConversationBridge {
     String getOrCreateConversation(AgentModelResolver.ResolvedModel model, String userId, String intent, boolean newChat) {
         UserConversation existing = readMapping(intent, userId);
         if (existing != null && newChat) {
-            deleteMapping(intent, userId);
+            deleteMappingIfMatches(intent, userId, existing.getConversationId());
         } else if (existing != null) {
             if (isUsable(existing.getConversationId()) && !rolledOver(existing.getConversationId())) {
                 return existing.getConversationId();
             }
             // Ended or vanished — drop the stale mapping and start over rather
             // than failing every subsequent message in this chat.
-            deleteMapping(intent, userId);
+            deleteMappingIfMatches(intent, userId, existing.getConversationId());
         } else {
             // No mapping under the namespaced id: an Open WebUI chat that predates
             // namespacing may still have one under the raw header id. Adopt it — the
@@ -566,7 +568,7 @@ public class OpenAiConversationBridge {
             return null;
         }
         if (!isUsable(legacy.getConversationId())) {
-            deleteMapping(intent, rawId);
+            deleteMappingIfMatches(intent, rawId, legacy.getConversationId());
             return null;
         }
         try {
@@ -591,7 +593,7 @@ public class OpenAiConversationBridge {
                 return rekeyed.getConversationId();
             }
         }
-        deleteMapping(intent, rawId);
+        deleteMappingIfMatches(intent, rawId, legacy.getConversationId());
         LOGGER.infof("Re-keyed legacy Open WebUI conversation mapping %s to the namespaced user id", sanitize(intent));
         return legacy.getConversationId();
     }
@@ -620,7 +622,7 @@ public class OpenAiConversationBridge {
             String intent = turn.intent() != null
                     ? turn.intent()
                     : buildIntent(model.agentId(), resolveSessionKey(headers, request).key());
-            deleteMapping(intent, userId);
+            deleteMappingIfMatches(intent, userId, turn.conversationId());
             String fresh = getOrCreateConversation(model, userId, intent);
             try {
                 TurnOutcome outcome = render(sendAndWait(fresh, turn.inputData()));
@@ -834,12 +836,15 @@ public class OpenAiConversationBridge {
      * as if the model had said it. The writer drops whatever a still-running
      * pipeline emits after the terminator (see {@link OpenAiSseWriter}), so a
      * timeout can no longer be followed by late tokens.
+     * <p>
+     * Every exit ends a stateless turn's conversation. A turn that is prepared but
+     * never streamed must be handed to {@link #abandon} instead.
      */
     public void stream(PreparedTurn turn, OpenAiSseWriter writer) {
         long start = System.nanoTime();
         AtomicBoolean anyToken = new AtomicBoolean();
         AtomicReference<String> outcomeTag = new AtomicReference<>("ok");
-        // sayStreaming hands the turn to the ConversationCoordinator and returns
+        // sayStreaming hands the turn to the IConversationCoordinator and returns
         // immediately; every handler callback fires later, on another thread. So
         // the terminator cannot be written when sayStreaming returns — the caller
         // would close the response while tokens were still arriving, and the
@@ -980,6 +985,21 @@ public class OpenAiConversationBridge {
         }
     }
 
+    /**
+     * Release a prepared turn that will never run.
+     * <p>
+     * {@link #prepare} starts a stateless turn's conversation up front, and only
+     * {@link #say} and {@link #stream} end it. A caller that gives up between
+     * prepare and run — a stream refused a concurrency permit — ends it here, or
+     * the throwaway conversation stays open. A stateful turn belongs to its chat
+     * and is left alone.
+     */
+    public void abandon(PreparedTurn turn) {
+        if (turn.stateless()) {
+            endQuietly(turn.conversationId());
+        }
+    }
+
     /** Error code for input over {@code eddi.conversations.max-input-chars}. */
     static final String INPUT_TOO_LARGE_CODE = "input_too_large";
 
@@ -1062,9 +1082,19 @@ public class OpenAiConversationBridge {
         }
     }
 
-    private void deleteMapping(String intent, String userId) {
+    /**
+     * Drop a mapping only while it still names {@code conversationId}, the
+     * conversation this request read there and is replacing. Open WebUI sends a
+     * chat's completion and title requests together: when both find the mapping
+     * stale, an unconditional delete by the slower one removed the fresh mapping
+     * the faster one had just written, and the chat split across two conversations.
+     * Matched, the slower delete is a no-op, its create collides, and the
+     * insert-conflict re-read in {@link #getOrCreateConversation} adopts the
+     * winner.
+     */
+    private void deleteMappingIfMatches(String intent, String userId, String conversationId) {
         try {
-            userConversationStore.deleteUserConversation(intent, userId);
+            userConversationStore.deleteUserConversationIfMatches(intent, userId, conversationId);
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.warnf("Could not delete the stale conversation mapping for %s: %s",
                     sanitize(intent), e.getMessage());

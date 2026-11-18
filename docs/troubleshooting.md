@@ -108,7 +108,7 @@ See [LLM Integration](langchain.md) and [Model Cascade](model-cascade.md).
 
 ### A turn fails and the conversation goes to ERROR
 
-- **Log:** `Error while processing user input (conversationId=..., conversationState=ERROR)` with the provider exception attached.
+- **Log:** `Error while processing user input (conversationId=... , conversationState=ERROR)` with the provider exception attached.
 - **Cause:** Anything the LLM task could not recover from: a provider rejecting the key, an unknown model name, a non-retriable 4xx, or retries exhausted.
 - **Fix:** Read the attached exception; it carries the provider's own error. Fix the task config in the `langchain` resource and send the next message; the conversation is not locked by the ERROR state.
 
@@ -130,7 +130,7 @@ See [LLM Integration](langchain.md) and [Model Cascade](model-cascade.md).
 
 ### Rate limits and transient errors
 
-- **Behaviour:** With a `retry` block on the task, EDDI retries only errors it classifies as retriable: socket and connect timeouts, unknown host, and HTTP 429, 502, 503 and 504. Authentication failures and malformed requests are never retried. Retries are clamped to 10 attempts and 60 seconds of total backoff.
+- **Behaviour:** With a `retry` block on the task, EDDI retries only errors it classifies as retriable: timeouts and connection failures, HTTP 408 and 429, and any 5xx (including 529 "overloaded"). Authentication failures, unknown models, malformed requests, and a 429 that reports an exhausted quota (`insufficient_quota`, a per-day limit) are never retried. Retries are clamped to 10 attempts and 60 seconds of total backoff.
 - **Fix for sustained 429s:** lower concurrency, add a `retry` block, or add a cascade step on another provider.
 
 ### Unusable `timeout` parameter
@@ -230,13 +230,13 @@ Secrets are written with `PUT /secretstore/secrets/{tenantId}/{keyName}` and a b
 
 ### A `${vault:...}` reference is not resolved
 
-- **Log:** `Vault reference not found: ${vault:...} — passing through unchanged` (the secret does not exist), or `Failed to resolve vault reference: ${vault:...} — ...` (decryption or persistence failure).
-- **Effect:** LLM tasks and API calls refuse to send the literal reference; for HTTP calls the error ends with `Refusing to send the unresolved reference.`
-- **Fix:** Check the key name and tenant (`${vault:keyName}` means tenant `default`; `${vault:tenantId/keyName}` names one explicitly). The older `${eddivault:...}` prefix is still accepted.
+- **Log:** `Vault reference not found: ${vault:...} (no tenant given, so tenant 'default') — passing through unchanged` (the secret does not exist), or `Failed to resolve vault reference: ${vault:...} — ...` (decryption or persistence failure).
+- **Effect:** LLM tasks and API calls refuse to send the literal reference. Every such error names the tenant the reference was looked up in. For HTTP calls it names the call and says why, e.g. `API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: no secret named 'api-key' exists in tenant 'default'. ... Refusing to send the unresolved reference.` When that happens on the `CONVERSATION_START` turn, `POST /agents/{agentId}/start` answers **`422`** `{"error": "agent_misconfigured", "message": "..."}` (see [REST API errors](rest-api-reference.md#errors)); this mapping covers the diagnosed API-call refusals (a reference naming no secret, a secret sent to a host its `allowedHosts` does not list), not an unresolved LLM parameter, which still answers `500`, and a vault that could not be read also stays a `500`.
+- **Fix:** Check the key name and tenant (`${vault:keyName}` always means tenant `default`; `${vault:tenantId/keyName}` names one explicitly — a secret stored under tenant `eddi` needs `${vault:eddi/keyName}`). The older `${eddivault:...}` prefix is still accepted.
 
 ### Agent deployment refused because of a secret grant
 
-- **Log:** `Agent '<id>' v<n> references vault secret(s) it is not granted: [...]. ... Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).` The deployment status becomes `ERROR`.
+- **Log:** `Agent '<id>' v<n> uses vault secret(s) it is not granted: [...]. ... Deployment BLOCKED (eddi.vault.grant-enforcement=enforce).` The deployment status becomes `ERROR`.
 - **Fix:** Add the agent to the secret's `allowedAgents` with `PUT /secretstore/secrets/{tenantId}/{keyName}/grant`, or remove the reference. `eddi.vault.grant-enforcement=warn` logs instead of blocking.
 
 ### Key rotation
@@ -270,7 +270,7 @@ See [Scheduling](scheduling.md).
 
 ### No schedule fires
 
-- **Log at startup:** `Schedule poller DISABLED (eddi.schedule.enabled=false)`. When enabled you see `Schedule poller initialized (instance=..., leaseTimeout=..., maxRetries=...)`.
+- **Log at startup:** `Schedule poller DISABLED (eddi.schedule.enabled=false)`. When enabled you see `Schedule poller initialized (instance=..., leaseTimeout=..., fireTimeout=..., maxRetries=..., maxConcurrentFires=...)`.
 - **Fix:** Set `eddi.schedule.enabled=true`, the default. The poller checks every `eddi.schedule.poll-interval` (15s). A schedule can also be disabled on its own; re-enable it with `POST /schedulestore/schedules/{scheduleId}/enable`.
 
 ### Schedule rejected on save
@@ -287,7 +287,7 @@ See [Scheduling](scheduling.md).
 - **Log:** `[SCHEDULE] Schedule '<name>' (id=...) failed (attempt n/5), retry at <time>`, and after the last attempt `[SCHEDULE] Schedule '<name>' (id=...) dead-lettered after 5 retries`.
 - **Inspect:** `GET /schedulestore/schedules/{scheduleId}/fires` for one schedule's fire log, `GET /schedulestore/schedules/admin/failed` for every failed and dead-lettered fire.
 - **Recover:** `POST /schedulestore/schedules/{scheduleId}/retry` requeues a dead-lettered schedule; `POST /schedulestore/schedules/{scheduleId}/dismiss` drops it. Retries back off exponentially (`eddi.schedule.backoff-base-seconds`, `eddi.schedule.backoff-multiplier`); `eddi.schedule.max-retries` sets the limit.
-- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (10m); if the instance dies, another instance reclaims it after the lease expires. A fire that outlives its lease logs `[SCHEDULE] Dispatched fire task exceeded the batch lease deadline` and is cancelled.
+- **Cluster:** A claimed schedule is leased for `eddi.schedule.lease-timeout` (10m); if the instance dies, another instance reclaims it after the lease expires and counts the lost fire as a failed attempt (`[SCHEDULE] Schedule '<name>' (id=...) was still claimed when its lease expired`). A fire that runs longer than `eddi.schedule.fire-timeout` (5m) plus a 30 s grace logs `[SCHEDULE] A fire exceeded eddi.schedule.fire-timeout` and is interrupted, then recorded as failed and retried.
 
 ---
 
@@ -360,7 +360,7 @@ See [Security](security.md).
   | `eddi-editor` | Config stores (`/agentstore/agents`, `/workflowstore/workflows`, ...), deployment (`/administration`), schedules |
   | `eddi-user` | Conversations (`/agents/{agentId}/start`, `/agents/{conversationId}`) |
   | `eddi-approver` | HITL decisions (`/agents/{conversationId}/resume`, `/approval-status`, `/cancel`, `/agents/pending-approvals`) |
-  | `eddi-viewer` | Mainly the MCP read tools; over REST only a few read endpoints (documentation, usage, workspaces) accept it |
+  | `eddi-viewer` | Mainly the MCP read tools; over REST only a few read endpoints (documentation, usage, conversation-store reads, workspaces, team budgets, cluster status, update check) accept it |
 
   Give each user the roles they need explicitly.
 - **Cause 2:** The role claim is misconfigured, so the token's roles are never seen. See [Role claim warning](#role-claim-warning-then-every-request-answers-403).

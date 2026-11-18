@@ -251,20 +251,36 @@ class OutboundHttpTest {
         void tooManyRedirects() {
             ScriptedEngine engine = new ScriptedEngine();
             for (int i = 0; i < 3; i++) {
-                engine.redirect(302, "https://api.example.com/loop" + i);
+                // The hop that trips the limit is a redirect target: its query must not
+                // reach the message either.
+                engine.redirect(302, "https://api.example.com/loop" + i + "?key=s3cret");
             }
             IOException e = assertThrows(IOException.class, () -> facade(engine).send(
                     get(ORIGIN).redirects(RedirectPolicy.follow(2, MethodRule.JDK_SAFE)).build(), text()));
 
             assertTrue(e.getMessage().startsWith("Too many redirects"), e.getMessage());
             assertEquals(1.0, meters.get("eddi.http.outbound.blocked").tag("reason", "redirect").counter().count());
+            assertNoQueryInChain(e, "s3cret");
         }
 
         @Test
-        @DisplayName("a 3xx without Location fails")
+        @DisplayName("a 3xx without Location fails, and the message carries no query string")
         void redirectWithoutLocation() {
             ScriptedEngine engine = new ScriptedEngine().respond(302, Map.of(), "no location");
-            assertThrows(IOException.class, () -> facade(engine).send(get(ORIGIN).build(), text()));
+            IOException e = assertThrows(IOException.class, () -> facade(engine).send(get(ORIGIN).build(), text()));
+
+            assertTrue(e.getMessage().contains("without Location header"), e.getMessage());
+            assertNoQueryInChain(e, "s3cret");
+        }
+
+        /**
+         * A tool hands these exceptions to the model and the log, so no message in the
+         * chain may quote the query string, where API keys travel.
+         */
+        private void assertNoQueryInChain(Throwable e, String secret) {
+            for (Throwable t = e; t != null; t = t.getCause()) {
+                assertFalse(String.valueOf(t.getMessage()).contains(secret), "the query leaked: " + t);
+            }
         }
 
         @Test
@@ -348,22 +364,25 @@ class OutboundHttpTest {
         }
 
         @Test
-        @DisplayName("a caller-derived custom header is stripped cross-origin")
-        void callerDerivedStrippedCrossOrigin() throws Exception {
+        @DisplayName("cross-origin, only the safe headers survive: a credential in any header name stays behind")
+        void arbitraryHeaderStrippedCrossOrigin() throws Exception {
             Hop hop = secondHopTo("https://evil.example/", get(ORIGIN)
-                    .callerDerivedHeader("X-Upstream-Token", "user-token")
-                    .header("X-Trace", "keep"));
+                    .header("Ocp-Apim-Subscription-Key", "subscription-key")
+                    .header("X-Trace", "t")
+                    .header("Accept", "application/json"));
 
-            assertFalse(hop.headers().containsKey("X-Upstream-Token"), "a ${caller:token} must never reach another origin");
-            assertEquals(List.of("keep"), hop.headers().get("x-trace"));
+            assertFalse(hop.headers().containsKey("ocp-apim-subscription-key"), "a key in a custom header reached another origin");
+            assertFalse(hop.headers().containsKey("x-trace"), "an unlisted header reached another origin");
+            assertEquals(List.of("application/json"), hop.headers().get("accept"));
+            assertEquals(List.of("EDDI-Agent/1.0"), hop.headers().get("user-agent"));
         }
 
         @Test
-        @DisplayName("a caller-derived header survives a same-origin redirect")
-        void callerDerivedKeptSameOrigin() throws Exception {
-            Hop hop = secondHopTo("/elsewhere", get(ORIGIN).callerDerivedHeader("X-Upstream-Token", "user-token"));
+        @DisplayName("a custom credential header survives a same-origin redirect")
+        void arbitraryHeaderKeptSameOrigin() throws Exception {
+            Hop hop = secondHopTo("/elsewhere", get(ORIGIN).header("Ocp-Apim-Subscription-Key", "subscription-key"));
 
-            assertEquals(List.of("user-token"), hop.headers().get("x-upstream-token"));
+            assertEquals(List.of("subscription-key"), hop.headers().get("ocp-apim-subscription-key"));
         }
 
         @Test

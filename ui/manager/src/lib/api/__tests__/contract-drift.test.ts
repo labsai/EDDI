@@ -1,12 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { isScanComplete, type OrphanReport } from "../orphans";
 import {
   getSchedules,
   mayHaveMoreSchedules,
   SCHEDULE_PAGE_MAX,
-} from "../schedules";
+} from "@eddi/app-kit/lib/api/schedules";
 
 const report = (over: Partial<OrphanReport> = {}): OrphanReport => ({
   totalOrphans: 0,

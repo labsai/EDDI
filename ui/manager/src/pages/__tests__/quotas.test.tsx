@@ -3,9 +3,10 @@ import { fireEvent, render, screen, waitFor, within } from "@testing-library/rea
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { ThemeProvider } from "@/components/layout/theme-provider";
+import { ThemeProvider } from "@eddi/ui";
 import { http, HttpResponse } from "msw";
-import { server } from "@/test/mocks/server";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { sampleSpendControlChange, seedSpendControlMock } from "@eddi/app-kit/test/mocks/spend-control-handlers";
 import { toast } from "sonner";
 
 import { QuotasPage } from "@/pages/quotas";
@@ -16,6 +17,7 @@ vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    info: vi.fn(),
   },
 }));
 
@@ -198,6 +200,44 @@ describe("QuotasPage", () => {
     await waitFor(() => {
       expect(screen.queryByTestId("quotas-dirty-indicator")).not.toBeInTheDocument();
     });
+  });
+
+  it("keeps an edit made while the save was in flight, and stays dirty", async () => {
+    // The success handler used to replace the form with the server's reply and
+    // clear the dirty flag, so a value typed during the PUT vanished silently
+    // and the unsaved-changes guard stopped protecting it.
+    const user = userEvent.setup();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let body: Record<string, unknown> | null = null;
+    server.use(
+      http.put("*/administration/quotas/:tenantId", async ({ request }) => {
+        body = (await request.json()) as Record<string, unknown>;
+        await held;
+        return HttpResponse.json(body);
+      }),
+    );
+    renderQuotas();
+    const conversations = await screen.findByTestId("quota-max-conversations");
+    await user.clear(conversations);
+    await user.type(conversations, "1000");
+    await user.click(screen.getByTestId("quotas-save"));
+    await waitFor(() => expect(body).not.toBeNull());
+
+    const agents = screen.getByTestId("quota-max-agents");
+    await user.clear(agents);
+    await user.type(agents, "42");
+    release();
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Quota saved"));
+    expect(body!.maxConversationsPerDay).toBe(1000);
+    expect(body!.maxAgentsPerTenant).toBe(100);
+    expect(agents).toHaveValue(42);
+    expect(conversations).toHaveValue(1000);
+    expect(screen.getByTestId("quotas-dirty-indicator")).toBeInTheDocument();
+    expect(screen.getByTestId("quotas-save")).toBeEnabled();
   });
 
   it("treats a cleared limit as unlimited (-1), not as a limit of 0", async () => {
@@ -432,6 +472,71 @@ describe("QuotasPage", () => {
   });
 
   // ─── Error handling ──────────────────────────────────────────
+
+  it("blocks approving a pending quota change while the form has unsaved edits", async () => {
+    seedSpendControlMock([{ ...sampleSpendControlChange, id: "q-1", kind: "TENANT_QUOTA", tenantId: "default" }]);
+    try {
+      const user = userEvent.setup();
+      renderQuotas();
+      const approve = await screen.findByTestId("spend-change-approve-q-1");
+      expect(approve).toBeEnabled();
+
+      const input = await screen.findByTestId("quota-max-conversations");
+      await user.clear(input);
+      await user.type(input, "999");
+
+      await waitFor(() => expect(screen.getByTestId("spend-change-approve-q-1")).toBeDisabled());
+      expect(screen.getByTestId("spend-change-approve-blocked-q-1")).toBeInTheDocument();
+    } finally {
+      seedSpendControlMock();
+    }
+  });
+
+  it("blocks Save when the refresh after an approval fails, until the refetch reloads the form", async () => {
+    seedSpendControlMock([{ ...sampleSpendControlChange, id: "q-2", kind: "TENANT_QUOTA", tenantId: "default" }]);
+    let putCalled = false;
+    try {
+      const user = userEvent.setup();
+      renderQuotas();
+      fireEvent.click(await screen.findByTestId("spend-change-approve-q-2"));
+
+      // The post-approval refresh of the quota fails.
+      server.use(
+        http.get("*/administration/quotas/:tenantId", () => new HttpResponse(null, { status: 500 })),
+        http.put("*/administration/quotas/:tenantId", () => {
+          putCalled = true;
+          return HttpResponse.json({});
+        }),
+      );
+      fireEvent.click(screen.getByTestId("alert-dialog-confirm"));
+      await screen.findByTestId("refetch-error-notice");
+
+      // An unrelated edit must not be savable over the (unseen) approved limits.
+      const input = await screen.findByTestId("quota-max-conversations");
+      await user.clear(input);
+      await user.type(input, "123");
+      expect(screen.getByTestId("quotas-save")).toBeDisabled();
+      expect(putCalled).toBe(false);
+      // Invalid text (parent keeps the old number) must not survive the reload either.
+      await user.clear(input);
+      await user.type(input, "-5");
+
+      // Once a refetch succeeds the notice goes away and Save works again.
+      server.resetHandlers();
+      fireEvent.click(within(screen.getByTestId("refetch-error-notice")).getByRole("button"));
+      await waitFor(() => expect(screen.queryByTestId("refetch-error-notice")).not.toBeInTheDocument());
+      // The form is re-initialised from the fresh quota: the stale edit is gone and
+      // there is nothing left to save over the approved limits.
+      await waitFor(() => expect(screen.getByTestId("quota-max-conversations")).not.toHaveValue(-5));
+      expect(screen.getByTestId("quota-max-conversations")).not.toHaveAttribute("aria-invalid");
+      await waitFor(() => expect(screen.getByTestId("quotas-save")).toBeDisabled());
+      expect(screen.queryByTestId("quotas-dirty-indicator")).not.toBeInTheDocument();
+      expect(toast.info).toHaveBeenCalled();
+      expect(putCalled).toBe(false);
+    } finally {
+      seedSpendControlMock();
+    }
+  });
 
   it("does not crash on server error (non-404)", async () => {
     server.use(

@@ -7,6 +7,8 @@ package ai.labs.eddi.engine.internal.groups;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.deployment.model.DeploymentInfo.DeploymentStatus;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
@@ -116,6 +118,7 @@ public class GroupLifecycleOps {
     private final Counter counterGroupContinue;
     private final Counter counterGroupClose;
     private final Counter counterGroupFailure;
+    private GroupSigningGuard signingGuard;
 
     public GroupLifecycleOps(IGroupConversationStore conversationStore, IAgentGroupStore groupStore,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
@@ -149,6 +152,15 @@ public class GroupLifecycleOps {
         this.counterGroupContinue = counterGroupContinue;
         this.counterGroupClose = counterGroupClose;
         this.counterGroupFailure = counterGroupFailure;
+    }
+
+    /**
+     * Wires the guard a follow-up reads the transcript through and signs the
+     * agent's answer with. Without it the follow-up sees the transcript as stored
+     * and its answer is recorded unsigned.
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     public GroupConversation readGroupConversation(String groupConversationId)
@@ -321,11 +333,10 @@ public class GroupLifecycleOps {
                 Map<String, Context> context = new LinkedHashMap<>();
                 // Snapshot, never the live list: the member conversation serialises this
                 // context on its own thread while this one keeps appending to the
-                // transcript (see the same hand-off in executeAgentTurn).
-                List<TranscriptEntry> followUpTranscript;
-                synchronized (gc.getTranscript()) {
-                    followUpTranscript = List.copyOf(gc.getTranscript());
-                }
+                // transcript (see the same hand-off in executeAgentTurn). As the agent may
+                // see it: a member that requires peer verification gets every unverified
+                // peer entry withheld, as in a phase turn.
+                List<TranscriptEntry> followUpTranscript = GroupSigningGuard.viewOf(signingGuard, resolvedAgentId, gc).transcript();
                 context.put("groupTranscript", new Context(Context.ContextType.object, followUpTranscript));
                 context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
@@ -368,10 +379,12 @@ public class GroupLifecycleOps {
                     throw new GroupExecutionException("Follow-up failed for agent '%s': %s".formatted(resolvedAgentId, e.getMessage()), e);
                 }
 
-                // Record the agent's response on the transcript
-                gc.getTranscript().add(new TranscriptEntry(
+                // Record the agent's response on the transcript, signed if the agent signs,
+                // so a peer that verifies sees it in a later continuation
+                TranscriptEntry answer = new TranscriptEntry(
                         resolvedAgentId, displayName, response, -1, "Follow-up",
-                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null));
+                        TranscriptEntryType.FOLLOW_UP, Instant.now(), null, null);
+                gc.getTranscript().add(signingGuard != null ? signingGuard.sign(gc, answer) : answer);
 
                 // Transition back to COMPLETED — atomically (CAS on IN_PROGRESS) so a
                 // follow-up that races a cancel cannot resurrect a CANCELLED terminal
@@ -601,10 +614,10 @@ public class GroupLifecycleOps {
     }
 
     /**
-     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
-     * failure — a broken artifact store must not make discussions undeletable; the
-     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
-     * guarantee, this is the tidy path.
+     * Removes the blobs the discussion's shared attachments live in. Unlike the
+     * artifact cascade below, a failure is rethrown as a
+     * {@code ResourceStoreException} so the delete keeps the document and can be
+     * retried.
      */
     private void deleteAttachmentsForGroupConversation(String groupConversationId) throws IResourceStore.ResourceStoreException {
         if (attachmentStore == null) {
@@ -622,6 +635,12 @@ public class GroupLifecycleOps {
         }
     }
 
+    /**
+     * I17 cascade: removes the discussion's shared artifacts. Warn-and-continue on
+     * failure — a broken artifact store must not make discussions undeletable; the
+     * user-keyed GDPR erasure sweep (which fails loudly) is the completeness
+     * guarantee, this is the tidy path.
+     */
     private void deleteArtifactsForGroupConversation(String groupConversationId) {
         if (sharedArtifactStore == null) {
             return;
@@ -721,6 +740,7 @@ public class GroupLifecycleOps {
                             LogSanitizer.sanitize(agentId));
                 }
                 agentFactory.undeployAgent(DEFAULT_ENV, agentId, null);
+                markDeploymentRecordsUndeployed(agentId);
                 LOGGER.infof("Ephemeral cleanup: undeployed agent '%s'", agentId);
 
                 if (shouldDelete) {
@@ -777,6 +797,28 @@ public class GroupLifecycleOps {
         } catch (Exception e) {
             LOGGER.warnf("Ephemeral agent cleanup failed for group conversation %s: %s",
                     LogSanitizer.sanitize(gc.getId()), e.getMessage());
+        }
+    }
+
+    /**
+     * Marks the agent's {@code DEFAULT_ENV} deployment records undeployed, as a
+     * REST undeploy does. The deployment sweep deploys what is recorded and no
+     * longer served, so a record left saying deployed would undo this undeploy
+     * within about ten seconds. Never fatal.
+     */
+    private void markDeploymentRecordsUndeployed(String agentId) {
+        if (deploymentStore == null) {
+            return;
+        }
+        try {
+            for (DeploymentInfo info : deploymentStore.readDeploymentInfos(DeploymentStatus.deployed)) {
+                if (info.getEnvironment() == DEFAULT_ENV && agentId.equals(info.getAgentId())) {
+                    deploymentStore.setDeploymentInfo(DEFAULT_ENV.toString(), agentId, info.getAgentVersion(), DeploymentStatus.undeployed);
+                }
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Ephemeral cleanup: could not mark the deployment record(s) of agent '%s' undeployed: %s", LogSanitizer.sanitize(agentId),
+                    e.getMessage());
         }
     }
 

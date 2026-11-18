@@ -1,4 +1,4 @@
-import { toEnvironment, type Environment } from "@/lib/constants";
+import { toEnvironment, type Environment } from "@eddi/app-kit/lib/constants";
 
 /**
  * The operator's deployment environment, normalized ONCE per flow.

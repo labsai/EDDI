@@ -4,50 +4,26 @@
 
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 
 import { ChatProvider } from "@/store/chat-store";
-import { ChatWidget } from "@/components/ChatWidget";
-import { ChatRoute } from "@/components/ChatRoute";
+import { ChatApp } from "@/components/ChatApp";
+import { ChatLocationProvider } from "@/components/ChatLocationProvider";
 import { initLocale } from "@/i18n";
 import "@/styles/chat.css";
 
-// Before the first render: the copy helpers outside React read the locale too.
-initLocale(new URLSearchParams(window.location.search).get("lang"));
-
-function App() {
-  return (
-    <ChatProvider>
-      <BrowserRouter>
-        <Routes>
-          {/* Managed agent route */}
-          <Route
-            path="/chat/managed/:intent/:userId"
-            element={<ChatWidget />}
-          />
-          {/* Direct agent route with userId (ChatRoute: the demo is off under a brand) */}
-          <Route
-            path="/chat/:environment/:agentId/:userId"
-            element={<ChatRoute />}
-          />
-          {/* Direct agent route (userId via query param) */}
-          <Route
-            path="/chat/:environment/:agentId"
-            element={<ChatRoute />}
-          />
-          {/* Fallback */}
-          <Route
-            path="*"
-            element={<Navigate to="/chat/production/default" replace />}
-          />
-        </Routes>
-      </BrowserRouter>
-    </ChatProvider>
+// Before the first render: the copy helpers outside React read the locale too,
+// and a non-English locale is its own chunk (src/i18n). Awaiting it is what
+// keeps a German or Arabic user from seeing English first; it never rejects (a
+// chunk that fails to load leaves English).
+void initLocale(new URLSearchParams(window.location.search).get("lang")).then(() => {
+  // No router: the widget's three URL shapes are parsed in src/location.ts.
+  createRoot(document.getElementById("root")!).render(
+    <StrictMode>
+      <ChatProvider>
+        <ChatLocationProvider>
+          <ChatApp />
+        </ChatLocationProvider>
+      </ChatProvider>
+    </StrictMode>,
   );
-}
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
-);
+});

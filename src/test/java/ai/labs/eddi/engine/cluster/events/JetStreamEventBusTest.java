@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.cluster.NatsConnectionManager;
 import ai.labs.eddi.engine.cluster.NodeIdentity;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import io.nats.client.Connection;
 import io.nats.client.JetStream;
 import io.nats.client.api.PublishAck;
 import io.nats.client.impl.Headers;
@@ -31,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.timeout;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -227,5 +229,50 @@ class JetStreamEventBusTest {
         // drainOutbox lowers the count before it publishes, so wait for the publish
         // too.
         verify(jetStream, timeout(3000)).publish(anyString(), any(Headers.class), any(byte[].class));
+    }
+
+    @Test
+    @DisplayName("a transient event goes out on core NATS outside the stream, and is dropped — never queued — while disconnected")
+    void transientEventsBypassStreamAndOutbox() throws Exception {
+        SimpleMeterRegistry registry = new SimpleMeterRegistry();
+        bus = new JetStreamEventBus(connections, registry);
+        bus.startCluster();
+
+        for (int i = 0; i < 5; i++) {
+            bus.publishTransient(ClusterEvent.USER_EVENT, Map.of("i", i));
+        }
+        assertEquals(0, bus.outboxDepth(), "a transient event never takes a place in the invalidation outbox");
+        assertEquals(5.0, registry.counter("eddi.cluster.events.transient.dropped", "type", ClusterEvent.USER_EVENT).count());
+
+        // Many dropped transient events must not set the overflow flag: a reconnect
+        // then asks nobody to resync.
+        when(connections.isConnected()).thenReturn(true);
+        JetStream jetStream = mock(JetStream.class);
+        when(connections.jetStream()).thenReturn(jetStream);
+        bus.flushOutbox();
+        verify(jetStream, never()).publish(anyString(), any(byte[].class));
+
+        Connection connection = mock(Connection.class);
+        when(connections.requireConnected()).thenReturn(connection);
+        bus.publishTransient(ClusterEvent.USER_EVENT, Map.of("k", "v"));
+        ArgumentCaptor<String> subject = ArgumentCaptor.forClass(String.class);
+        verify(connection).publish(subject.capture(), any(byte[].class));
+        assertTrue(subject.getValue().endsWith(".tevt." + ClusterEvent.USER_EVENT), subject.getValue());
+        assertFalse(subject.getValue().contains(".evt."), "outside the event stream's subjects");
+        verify(jetStream, never()).publishAsync(anyString(), any(byte[].class));
+    }
+
+    @Test
+    @DisplayName("a received transient event reaches the subscribed handler and is no stream gap")
+    void transientEventReceived() throws Exception {
+        CountDownLatch flushed = new CountDownLatch(1);
+        bus.onResync(flushed::countDown);
+        CountDownLatch handled = new CountDownLatch(1);
+        bus.subscribe(ClusterEvent.USER_EVENT, e -> handled.countDown());
+        bus.receive(event("x", "n2", "b2"), 10);
+        bus.receive(event(ClusterEvent.USER_EVENT, "n2", "b2"), 0);
+        bus.receive(event("x", "n2", "b2"), 11);
+        assertTrue(handled.await(5, TimeUnit.SECONDS));
+        assertEquals(1, flushed.getCount(), "a transient event carries no stream sequence and causes no resync");
     }
 }

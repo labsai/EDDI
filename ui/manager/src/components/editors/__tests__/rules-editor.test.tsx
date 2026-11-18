@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import {
   RulesEditor,
   type RulesConfig,
@@ -353,6 +353,24 @@ describe("RulesEditor", () => {
     const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
     expect(cond.type).toBe("contentTypeMatcher");
     expect(cond.configs).toEqual({ mimeType: "", minCount: "1" });
+  });
+
+  it("presets deploymentContext without tagMatches, which the backend refuses", async () => {
+    // Agents carry no tags, so DeploymentContextCondition refuses a non-blank
+    // tagMatches on save; the preset must not offer a field to fill in.
+    const user = userEvent.setup();
+    renderWithProviders(
+      <RulesEditor data={populatedConfig} onChange={onChange} />
+    );
+    await user.selectOptions(
+      screen.getByTestId("condition-type-select"),
+      "deploymentContext"
+    );
+    await confirmTypeChange(user);
+    const arg = onChange.mock.lastCall![0] as RulesConfig;
+    const cond = arg.behaviorGroups[0]!.behaviorRules[0]!.conditions[0]!;
+    expect(cond.type).toBe("deploymentContext");
+    expect(cond.configs).toEqual({ when: "production" });
   });
 });
 

@@ -369,14 +369,12 @@ class RestConversationStoreTest {
             // A soft-deleted conversation left READY stayed drivable over
             // POST /agents/{id} and stayed "active", breaking undeploy-with-end.
             when(conversationMemoryStore.getConversationState("conv-1")).thenReturn(ConversationState.READY);
-            when(conversationDescriptorStore.readDescriptor("conv-1", 0)).thenReturn(new ConversationDescriptor());
 
             restConversationStore.deleteConversationLog("conv-1", false);
 
             var order = inOrder(conversationService, conversationDescriptorStore);
             order.verify(conversationService).endConversation("conv-1", "system:delete");
-            order.verify(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0),
-                    argThat(d -> d.getConversationState() == ConversationState.ENDED));
+            order.verify(conversationDescriptorStore).markEnded("conv-1");
             order.verify(conversationDescriptorStore).deleteDescriptor("conv-1", 0);
         }
 
@@ -406,11 +404,12 @@ class RestConversationStoreTest {
         @DisplayName("soft delete still ends the conversation when there is no live descriptor to mark")
         void softDelete_noLiveDescriptor_stillEnds() throws Exception {
             when(conversationMemoryStore.getConversationState("conv-1")).thenReturn(ConversationState.READY);
-            when(conversationDescriptorStore.readDescriptor("conv-1", 0)).thenThrow(new ResourceNotFoundException("gone"));
+            when(conversationDescriptorStore.markEnded("conv-1")).thenReturn(false);
 
             restConversationStore.deleteConversationLog("conv-1", false);
 
             verify(conversationService).endConversation("conv-1", "system:delete");
+            verify(conversationDescriptorStore).markEnded("conv-1");
             verify(conversationDescriptorStore, never()).setDescriptor(anyString(), anyInt(), any());
             verify(conversationDescriptorStore).deleteDescriptor("conv-1", 0);
         }
@@ -1247,8 +1246,7 @@ class RestConversationStoreTest {
         @DisplayName("#5: a descriptor that cannot be marked ENDED does not fail an end that happened")
         void descriptorMarkingFailureIsNotAFailure() throws Exception {
             storedConversation("conv-1", AGENT_A, ConversationState.READY);
-            doThrow(new ResourceStoreException("db"))
-                    .when(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0), any());
+            doThrow(new IllegalStateException("db")).when(conversationDescriptorStore).markEnded("conv-1");
 
             Response response = restConversationStore.endActiveConversations(List.of(statusOf("conv-1", null)), null);
 
@@ -1268,8 +1266,7 @@ class RestConversationStoreTest {
             assertEquals(200, response.getStatus());
             verify(conversationService).endConversation("conv-1", "system:admin-end");
             verify(conversationService).endConversation("conv-2", "system:admin-end");
-            verify(conversationDescriptorStore).setDescriptor(eq("conv-1"), eq(0),
-                    argThat(d -> d.getConversationState() == ConversationState.ENDED));
+            verify(conversationDescriptorStore).markEnded("conv-1");
             // The raw write skipped the in-flight signal and the state cache.
             verify(conversationMemoryStore, never()).setConversationState(anyString(), any());
         }

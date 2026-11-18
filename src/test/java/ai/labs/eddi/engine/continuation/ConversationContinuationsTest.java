@@ -18,6 +18,9 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -274,6 +277,42 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("the last continuation turn of a job tells its owner the job finished, and why it stopped")
+        void lastContinuationTurnAnnouncesFinished() {
+            var publisher = mock(UserEventPublisher.class);
+            continuations.userEventPublisher = publisher;
+            var memory = memoryWith(new ContinuationPolicy(2, ""), IConversation.CONTINUE_CONVERSATION);
+            ranBefore(memory, 1);
+            memory.getCurrentStep().storeData(new Data<>(ConversationContinuations.STEP_NUMBER, 2));
+            continuations.decide(memory); // refused: limit
+
+            continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production);
+
+            var event = ArgumentCaptor.forClass(UserEvent.class);
+            var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+            verify(publisher).publish(event.capture(), audience.capture());
+            assertEquals(UserEvent.KIND_JOB_FINISHED, event.getValue().kind());
+            assertEquals(CONVERSATION_ID, event.getValue().conversationId());
+            assertEquals(UserEvent.JOB_CONTINUATION, event.getValue().jobKind());
+            assertEquals(ConversationContinuations.REASON_LIMIT, event.getValue().state());
+            assertEquals(UserEventAudience.principal("user-1"), audience.getValue());
+        }
+
+        @Test
+        @DisplayName("a turn that arms its successor, or is no continuation at all, announces nothing")
+        void runningJobAnnouncesNothing() {
+            var publisher = mock(UserEventPublisher.class);
+            continuations.userEventPublisher = publisher;
+            var armed = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(armed);
+            continuations.armIfDecided(CONVERSATION_ID, armed, Environment.production);
+            var plain = memoryWith(ContinuationPolicy.OFF);
+            continuations.armIfDecided(CONVERSATION_ID, plain, Environment.production);
+
+            verify(publisher, never()).publish(any(), any());
+        }
+
+        @Test
         @DisplayName("a schedule that cannot be written is counted and logged; it never throws into the committed turn")
         void storeFailure() throws Exception {
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
@@ -283,6 +322,25 @@ class ConversationContinuationsTest {
             assertFalse(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
             assertEquals(1.0, refused(ConversationContinuations.REASON_SCHEDULE_FAILED));
             verify(scheduleStore, times(ConversationContinuations.ARM_ATTEMPTS)).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a schedule that cannot be written ends the job, and its owner hears so: job.finished with schedule_failed")
+        void storeFailureAnnouncesFinished() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            continuations.userEventPublisher = publisher;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createSchedule(any());
+
+            continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production);
+
+            var event = ArgumentCaptor.forClass(UserEvent.class);
+            var audience = ArgumentCaptor.forClass(UserEventAudience.class);
+            verify(publisher).publish(event.capture(), audience.capture());
+            assertEquals(UserEvent.KIND_JOB_FINISHED, event.getValue().kind());
+            assertEquals(ConversationContinuations.REASON_SCHEDULE_FAILED, event.getValue().state());
+            assertEquals(UserEventAudience.principal("user-1"), audience.getValue());
         }
 
         @Test

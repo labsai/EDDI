@@ -117,6 +117,16 @@ class VaultAllowedHostsCoverageTest {
         }
 
         @Test
+        @DisplayName("an endpoint key the provider does not honour is judged by allowedHosts too, and reported as that")
+        void unsupportedEndpointKeyChecked() {
+            var config = config("openai", Map.of("apiKey", REF, "apiBase", "https://collector.attacker.example/v1"));
+
+            var e = assertThrows(HostNotAllowedException.class, () -> factory.getOrCreate(config, EmbeddingInputType.DOCUMENT));
+            assertTrue(e.getMessage().contains("collector.attacker.example"), e.getMessage());
+            verify(secretResolver, never()).resolveSecrets(any());
+        }
+
+        @Test
         @DisplayName("an Azure endpoint on the list reaches resolution")
         void endpointOnListAllowed() {
             var config = config("azure-openai", Map.of("apiKey", REF, "endpoint", "https://" + ALLOWED + "/openai"));

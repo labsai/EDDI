@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
@@ -171,6 +172,41 @@ class KnowledgeBaseStorageGuardTest {
         void allowsACollisionWithEditOnBoth() throws Exception {
             otherKnowledgeBaseUsesTable("team_docs");
             when(accessGuard.hasAccess(OTHER, AccessLevel.EDIT)).thenReturn(true);
+
+            assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+        }
+
+        /**
+         * The neighbour that cannot be read may be the very one that owns the location,
+         * so skipping it let an editor point a knowledge base at another's table on a
+         * transient read error — the same hole the page budget already closes.
+         */
+        @Test
+        @DisplayName("a knowledge base that cannot be read refuses the location rather than being skipped")
+        void unreadableNeighbourFailsClosed() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IResourceStore.ResourceStoreException("connection reset"));
+
+            var e = assertThrows(IllegalStateException.class,
+                    () -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+            assertTrue(e.getMessage().contains(OTHER), e.getMessage());
+            verify(accessGuard, never()).hasAccess(anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a knowledge base whose document fails to load refuses the location too")
+        void neighbourFailingWithARuntimeErrorFailsClosed() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IllegalArgumentException("cannot deserialize"));
+
+            assertThrows(IllegalStateException.class, () -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
+        }
+
+        @Test
+        @DisplayName("a knowledge base deleted since it was listed owns no location and is skipped")
+        void deletedNeighbourIsSkipped() throws Exception {
+            otherKnowledgeBaseUsesTable("team_docs");
+            when(ragStore.read(OTHER, 2)).thenThrow(new IResourceStore.ResourceNotFoundException("deleted"));
 
             assertDoesNotThrow(() -> guard.prepareNew(kb("beta", null, Map.of("table", "team_docs")), true));
         }

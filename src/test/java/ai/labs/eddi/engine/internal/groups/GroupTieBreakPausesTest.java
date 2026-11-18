@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.RejectedExecutionException;
+import java.util.function.UnaryOperator;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
@@ -106,7 +107,7 @@ class GroupTieBreakPausesTest {
         });
         var callers = new CallerIdentityContext(null, null);
         coordinator = new GroupHitlCoordinator(groupStore, conversationStore, mock(IScheduleStore.class), audit,
-                new GroupSigningGuard(null, null, null, "default"), controls, executor, callers, service,
+                new GroupSigningGuard(null, null, "default"), controls, executor, callers, service,
                 meters.counter("pause"), meters.counter("resume"), meters.counter("failure"));
         var engine = new PhaseExecutionEngine(memberTurnExecutor, mock(GroupContextBuilder.class), executor, callers);
         pauses = new GroupTieBreakPauses(groupStore, conversationStore, audit, controls, executor, callers, service, coordinator, engine,
@@ -223,10 +224,13 @@ class GroupTieBreakPausesTest {
             var insert = new FacilitatorEngine.FacilitatorAction(FacilitatorEngine.FacilitatorAction.Kind.INSERT_VOTE,
                     config.getPhases().get(1), null);
 
-            assertNull(GroupTieBreakPauses.yieldEscalation(gc, tieOf(gc), escalate, 1, config.getPhases().get(1)));
+            assertNull(GroupTieBreakPauses.yieldEscalation(gc, tieOf(gc), escalate, 1, config.getPhases().get(1), "facilitator-1",
+                    UnaryOperator.identity()));
             assertEquals(TranscriptEntryType.FACILITATION, gc.getTranscript().getLast().type());
-            assertSame(insert, GroupTieBreakPauses.yieldEscalation(gc, tieOf(gc), insert, 1, config.getPhases().get(1)));
-            assertSame(escalate, GroupTieBreakPauses.yieldEscalation(gc, null, escalate, 1, config.getPhases().get(1)));
+            assertSame(insert, GroupTieBreakPauses.yieldEscalation(gc, tieOf(gc), insert, 1, config.getPhases().get(1), "facilitator-1",
+                    UnaryOperator.identity()));
+            assertSame(escalate,
+                    GroupTieBreakPauses.yieldEscalation(gc, null, escalate, 1, config.getPhases().get(1), "facilitator-1", UnaryOperator.identity()));
         }
     }
 

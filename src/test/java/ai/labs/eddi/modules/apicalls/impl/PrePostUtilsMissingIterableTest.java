@@ -12,7 +12,6 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IDataFactory;
-import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
@@ -56,7 +55,7 @@ class PrePostUtilsMissingIterableTest {
     void setUp() {
         dataFactory = mock(IDataFactory.class);
         var engine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
-        prePostUtils = new PrePostUtils(mock(IJsonSerialization.class), mock(IMemoryItemConverter.class), engine, dataFactory,
+        prePostUtils = new PrePostUtils(mock(IJsonSerialization.class), engine, dataFactory,
                 mock(SecretPropertyVault.class));
 
         memory = mock(IConversationMemory.class);

@@ -24,9 +24,13 @@ public interface IData<T> {
     void setOriginWorkflowId(String workflowId);
 
     /**
-     * Whether or not this data will be send to the client
+     * A marker carried into stored and returned snapshots. It does not filter
+     * anything: what a client sees is decided by key prefix in
+     * {@code ConversationMemoryUtilities.convertSimpleConversationMemory}, so never
+     * rely on this flag to keep data from a client.
      *
-     * @return true if it should be included in the client response
+     * @return the flag as set (initialised from {@link MemoryKey#isPublic()} when
+     *         the data is stored through a key)
      */
     boolean isPublic();
 
