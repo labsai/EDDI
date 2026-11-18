@@ -718,7 +718,7 @@ public class McpHitlTools {
                   + "— this is the member SPEAKING, not an approval. When the pending kind is TIE_BREAK "
                   + "(get_group_approval_status pendingKind/pendingOptions), pass choice = exactly one of the options; "
                   + "content is then an optional rationale.")
-    @McpAudited(target = {0, 1})
+    @McpAudited(target = {0, 1}, subject = 2)
     public String submitGroupHumanInput(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId,

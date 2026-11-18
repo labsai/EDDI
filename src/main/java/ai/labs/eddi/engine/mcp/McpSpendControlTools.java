@@ -60,6 +60,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpSpendControlTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSpendControlTools.class);
@@ -120,6 +121,7 @@ public class McpSpendControlTools {
             + "new price while unpriced calls are refused — is NOT applied: it is filed for an administrator's approval in the Manager "
             + "(result PROPOSED, with the changeId and why it loosens). Lowering a price is raising a budget: propose it only when "
             + "the person you act for asked for it. Each upserted entry needs a source link (http/https) to the provider's price page.")
+    @McpAudited
     public String updateModelPrices(@ToolArg(description = "The catalog revision you read (required)") Long expectedRevision,
                                     @ToolArg(description = "JSON array of entries to add or replace by provider+model, at most 50: "
                                             + "[{\"provider\":\"openai\",\"model\":\"gpt-4o-mini*\",\"inputPricePer1M\":0.15,"
@@ -160,6 +162,7 @@ public class McpSpendControlTools {
             + "once (result APPLIED). Raising a limit, making it unlimited or disabling the quota is NOT applied: it is filed for an "
             + "administrator's approval in the Manager (result PROPOSED). A change with both parts is proposed as a whole. Raising a "
             + "budget is spending the user's money: propose it only when the person you act for asked for this amount.")
+    @McpAudited(target = 0)
     public String updateTenantQuota(@ToolArg(description = "Tenant id (default: the deployment's tenant)", required = false) String tenantId,
                                     @ToolArg(description = "The quota fingerprint you read (required)") String expectedFingerprint,
                                     @ToolArg(description = "Daily conversation limit, -1 = unlimited",
@@ -215,6 +218,7 @@ public class McpSpendControlTools {
 
     @Tool(name = "withdraw_spend_control_change", description = "Administrators only. Withdraw a pending price or quota change you "
             + "proposed yourself — nothing is applied. Someone else's change cannot be withdrawn here.")
+    @McpAudited(target = 0)
     public String withdrawSpendControlChange(@ToolArg(description = "The changeId (required)") String changeId,
                                              @ToolArg(description = "Why (required)") String reason) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);

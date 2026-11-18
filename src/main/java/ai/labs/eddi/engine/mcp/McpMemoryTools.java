@@ -119,6 +119,10 @@ public class McpMemoryTools {
     @Tool(name = "get_visible_memories", description = "Get memories visible to a specific agent, "
             + "considering self/group/global visibility scopes. "
             + "Returns the memories that would be injected into a conversation with this agent.")
+    // Not a pure read: with order=most_accessed the store counts the read
+    // as an access (accessCount + 1), which changes what is recalled into
+    // later conversations — so it is audited like the mutators.
+    @McpAudited(subject = 0, target = 1)
     public String getVisibleMemories(@ToolArg(description = "User ID (required)") String userId,
                                      @ToolArg(description = "Agent ID to check visibility for (required)") String agentId,
                                      @ToolArg(description = "Comma-separated group IDs (optional)", required = false) String groupIds,

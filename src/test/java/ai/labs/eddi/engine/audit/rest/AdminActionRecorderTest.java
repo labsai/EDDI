@@ -15,6 +15,7 @@ import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.logging.Handler;
@@ -138,6 +139,23 @@ class AdminActionRecorderTest {
         String path = (String) recorded().input().get("path");
         assertFalse(path.contains("alice") || path.contains("tenant"), path);
         verify(ledger).pseudonymOf("tenant/alice");
+    }
+
+    @Test
+    @DisplayName("tool-call targets are recorded as single, unambiguous, bounded path segments")
+    void toolCallTargetsAreSafeSegments() {
+        recorder.recordToolCall("delete_schedule", "alice", Arrays.asList("a/b", null, " ", "x%2Fy", "line\nbreak", "z".repeat(500)),
+                "McpAdminTools#deleteSchedule", 200);
+
+        String path = (String) recorded().input().get("path");
+        String[] segments = path.split("/");
+        // "", "mcp", tool, 4 targets (null and blank dropped), the subject's pseudonym
+        assertEquals(8, segments.length, path);
+        assertEquals("a%2Fb", segments[3]);
+        assertEquals("x%252Fy", segments[4], "an id that contains %2F stays distinguishable from one that contained /");
+        assertEquals("line?break", segments[5]);
+        assertEquals(128, segments[6].length());
+        assertFalse(path.contains("alice"), path);
     }
 
     @Test

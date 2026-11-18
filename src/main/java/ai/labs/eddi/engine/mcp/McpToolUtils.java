@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
+import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonParseException;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -226,6 +227,11 @@ final class McpToolUtils {
         if (json == null || json.length() <= maxChars) {
             return json;
         }
+        if (json.length() > MAX_BOUNDABLE_CHARS) {
+            // Too large to re-parse into a tree on a request thread (a tree costs several
+            // times the text): only the envelope, which says how to ask for less.
+            return envelope(json.length(), hint);
+        }
         try {
             JsonNode parsed = BOUNDS_MAPPER.readTree(json);
             if (parsed instanceof ObjectNode root) {
@@ -237,7 +243,10 @@ final class McpToolUtils {
                 }
                 int largest = sizes.values().stream().mapToInt(Integer::intValue).max().orElse(0);
                 for (int keep = largest / 2;; keep = keep / 2) {
-                    ObjectNode shortened = root.deepCopy();
+                    // A shallow copy: the members are shared, not copied — only the shortened
+                    // lists and the added fields are new, and nothing shared is modified.
+                    ObjectNode shortened = root.objectNode();
+                    shortened.setAll(root);
                     for (var entry : sizes.entrySet()) {
                         ArrayNode list = (ArrayNode) shortened.get(entry.getKey());
                         int size = list.size();
@@ -265,7 +274,17 @@ final class McpToolUtils {
         } catch (JsonProcessingException e) {
             // not an object we can shorten: the envelope below
         }
-        return "{\"truncated\":true,\"totalChars\":" + json.length() + ",\"hint\":\"" + escapeJsonString(hint) + "\"}";
+        return envelope(json.length(), hint);
+    }
+
+    /**
+     * The longest result {@link #bounded} shortens entry by entry
+     * ({@value} characters); a longer one gets only the envelope.
+     */
+    static final int MAX_BOUNDABLE_CHARS = 8_000_000;
+
+    private static String envelope(int totalChars, String hint) {
+        return "{\"truncated\":true,\"totalChars\":" + totalChars + ",\"hint\":\"" + escapeJsonString(hint) + "\"}";
     }
 
     private static String capitalised(String field) {
@@ -539,6 +558,11 @@ final class McpToolUtils {
         if (cause == null) {
             return "unknown cause";
         }
+        if (cause instanceof IConversationService.AgentMismatchException) {
+            // Its message quotes the agent id stored with the conversation — which agent
+            // a conversation the caller named belongs to is not theirs to learn.
+            return "The conversation does not belong to the given agent";
+        }
         if (cause instanceof ClientErrorException clientError) {
             var response = clientError.getResponse();
             if (response != null && response.hasEntity() && response.getEntity() instanceof String entity && !entity.isBlank()) {
@@ -547,6 +571,37 @@ final class McpToolUtils {
         }
         String message = cause.getLocalizedMessage();
         return message == null || message.isBlank() ? cause.getClass().getSimpleName() : message;
+    }
+
+    /**
+     * A schedule fire log's {@code errorMessage} as a tool may show it. The fire
+     * executor writes either a sentence of its own ("Conversation ended in state
+     * …") or, for a thrown failure, {@code "<ExceptionSimpleName>: <its message>"}
+     * — a driver's or provider's text, which a tool never repeats. That form keeps
+     * the exception type and loses the text; the full text stays in the fire log
+     * (REST) and the server log.
+     */
+    static String fireErrorForCaller(String errorMessage) {
+        if (errorMessage == null) {
+            return null;
+        }
+        int colon = errorMessage.indexOf(": ");
+        if (colon > 0) {
+            String head = errorMessage.substring(0, colon);
+            if (head.matches("[A-Z][A-Za-z0-9_$]*(Exception|Error|Throwable)")) {
+                return head + " (details in the server log)";
+            }
+        }
+        return errorMessage;
+    }
+
+    /** A fire log with its {@code errorMessage} as {@link #fireErrorForCaller}. */
+    static ScheduleFireLog fireLogForCaller(ScheduleFireLog log) {
+        if (log == null || log.errorMessage() == null) {
+            return log;
+        }
+        return new ScheduleFireLog(log.id(), log.scheduleId(), log.fireId(), log.fireTime(), log.startedAt(), log.completedAt(), log.status(),
+                log.instanceId(), log.conversationId(), fireErrorForCaller(log.errorMessage()), log.attemptNumber(), log.cost());
     }
 
     /**

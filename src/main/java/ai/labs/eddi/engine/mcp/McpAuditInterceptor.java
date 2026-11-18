@@ -9,9 +9,7 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.UnauthorizedException;
-import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.Priority;
-import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.interceptor.AroundInvoke;
 import jakarta.interceptor.Interceptor;
@@ -42,9 +40,6 @@ public class McpAuditInterceptor {
     @Inject
     AdminActionRecorder recorder;
 
-    @Inject
-    Instance<SecurityIdentity> identity;
-
     @AroundInvoke
     Object audit(InvocationContext context) throws Exception {
         Method method = context.getMethod();
@@ -59,7 +54,10 @@ public class McpAuditInterceptor {
         } catch (ToolCallException e) {
             record(method, parameters, statusOf(e.getMessage()));
             throw e;
-        } catch (ForbiddenException | UnauthorizedException e) {
+        } catch (UnauthorizedException e) {
+            record(method, parameters, 401);
+            throw e;
+        } catch (ForbiddenException e) {
             record(method, parameters, 403);
             throw e;
         } catch (Exception e) {
@@ -68,24 +66,18 @@ public class McpAuditInterceptor {
         }
     }
 
+    /**
+     * Every outcome is recorded, a refusal of an anonymous caller included. When
+     * authentication is on, an unauthenticated request never reaches a tool (the
+     * HTTP policy on {@code /mcp} answers 401 first), so the only anonymous callers
+     * here are those of a deployment that runs without authentication — where an
+     * anonymous caller can also succeed, and its refused attempt to mutate (a HITL
+     * decision refused by the kill-switch, say) is exactly what the ledger is for.
+     * Skipping it would let any refusal pass unrecorded.
+     */
     private void record(Method method, Object[] parameters, int status) {
-        // As the REST filter: a request an HTTP path policy refuses (an unauthenticated
-        // caller) is never on record, so a probe cannot fill the ledger. A refusal of
-        // an
-        // authenticated caller is.
-        if (status == 403 && isAnonymous()) {
-            return;
-        }
         recorder.recordToolCall(toolName(method), subjectOf(method, parameters), targetsOf(method, parameters),
                 method.getDeclaringClass().getSimpleName().replaceAll("_.*", "") + "#" + method.getName(), status);
-    }
-
-    private boolean isAnonymous() {
-        try {
-            return identity != null && identity.isResolvable() && identity.get().isAnonymous();
-        } catch (RuntimeException e) {
-            return false;
-        }
     }
 
     private static List<String> targetsOf(Method method, Object[] parameters) {
@@ -128,7 +120,9 @@ public class McpAuditInterceptor {
         return switch (code) {
             case "FORBIDDEN" -> 403;
             case "NOT_FOUND" -> 404;
-            case "CONFLICT" -> 409;
+            case "CONFLICT", "ALREADY_DECIDED", "STALE" -> 409;
+            case "TOO_MANY_PENDING" -> 429;
+            case "APPLY_FAILED" -> 500;
             case "BAD_REQUEST" -> 400;
             case "UNAVAILABLE" -> 503;
             case "TIMEOUT" -> 504;

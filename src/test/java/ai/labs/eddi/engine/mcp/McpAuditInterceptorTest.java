@@ -8,8 +8,7 @@ import ai.labs.eddi.engine.audit.rest.AdminActionRecorder;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
-import io.quarkus.security.identity.SecurityIdentity;
-import jakarta.enterprise.inject.Instance;
+import io.quarkus.security.UnauthorizedException;
 import jakarta.interceptor.InvocationContext;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -26,6 +25,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -69,16 +69,6 @@ class McpAuditInterceptorTest {
         when(context.getMethod()).thenReturn(target);
         when(context.getParameters()).thenReturn(parameters);
         return context;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void caller(boolean anonymous) {
-        var identity = mock(SecurityIdentity.class);
-        when(identity.isAnonymous()).thenReturn(anonymous);
-        Instance<SecurityIdentity> instance = mock(Instance.class);
-        when(instance.isResolvable()).thenReturn(true);
-        when(instance.get()).thenReturn(identity);
-        interceptor.identity = instance;
     }
 
     @Test
@@ -155,24 +145,23 @@ class McpAuditInterceptorTest {
     }
 
     @Test
-    @DisplayName("a refusal of an authenticated caller is recorded; an anonymous caller's refusal is not (a probe cannot fill the ledger)")
-    void anonymousRefusalIsNotRecorded() throws Exception {
-        caller(false);
-        var known = context("erase", "g", "u", "i");
-        when(known.proceed()).thenThrow(new ForbiddenException("no"));
-        assertThrows(ForbiddenException.class, () -> interceptor.audit(known));
-        verify(recorder).recordToolCall(anyString(), anyString(), anyList(), anyString(), eq(403));
+    @DisplayName("every refusal is recorded — a thrown role refusal and a FORBIDDEN result alike, whoever the caller is "
+            + "(an anonymous caller exists only where authentication is off, and there it can also succeed)")
+    void everyRefusalIsRecorded() throws Exception {
+        var thrown = context("erase", "g", "u", "i");
+        when(thrown.proceed()).thenThrow(new ForbiddenException("no"));
+        assertThrows(ForbiddenException.class, () -> interceptor.audit(thrown));
 
-        caller(true);
-        var probe = context("erase", "g", "u", "i");
-        when(probe.proceed()).thenThrow(new ForbiddenException("no"));
-        assertThrows(ForbiddenException.class, () -> interceptor.audit(probe));
-        var probeError = context("erase", "g", "u", "i");
-        when(probeError.proceed()).thenReturn(McpToolUtils.errorJson("no", "FORBIDDEN", null));
-        interceptor.audit(probeError);
+        var returned = context("erase", "g", "u", "i");
+        when(returned.proceed()).thenReturn(McpToolUtils.errorJson("no", "FORBIDDEN", null));
+        interceptor.audit(returned);
 
-        // still only the one entry of the authenticated caller
-        verify(recorder).recordToolCall(anyString(), anyString(), anyList(), anyString(), eq(403));
+        verify(recorder, times(2)).recordToolCall(anyString(), anyString(), anyList(), anyString(), eq(403));
+
+        var unauthenticated = context("erase", "g", "u", "i");
+        when(unauthenticated.proceed()).thenThrow(new UnauthorizedException());
+        assertThrows(UnauthorizedException.class, () -> interceptor.audit(unauthenticated));
+        verify(recorder).recordToolCall(anyString(), anyString(), anyList(), anyString(), eq(401));
     }
 
     @Test
@@ -182,5 +171,13 @@ class McpAuditInterceptorTest {
         assertEquals(500, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("m", "INTERNAL", null)));
         assertEquals(400, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("m", "WRONG_STATE", null)));
         assertEquals(400, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("m")));
+        assertEquals(429, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("m", "TOO_MANY_PENDING", null)));
+        assertEquals(409, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("m", "STALE", null)));
+    }
+
+    @Test
+    @DisplayName("a message that quotes an errorCode does not decide the status: only the payload's own member does")
+    void quotedErrorCodeInMessage() {
+        assertEquals(400, McpAuditInterceptor.statusOf(McpToolUtils.errorJson("x \"errorCode\":\"INTERNAL\" y")));
     }
 }

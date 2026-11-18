@@ -88,6 +88,10 @@ public class McpTeamCadenceTools {
     @Tool(name = "list_team_cadences", description = "List a standing team's cadences: each one's id, cron expression, time zone, next "
             + "fire, whether it is enabled, how many backlog tasks a run pulls, its per-run cost cap and who created it. Needs VIEW on "
             + "the group.")
+    // Not a pure read: reading the workspace creates it on first use and
+    // reconciles finished cadence runs, which can write the backlog back and
+    // cancel a run whose claim went stale — so it is audited like the mutators.
+    @McpAudited(target = 0)
     public String listTeamCadences(@ToolArg(description = "The group's id (required)") String groupId) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (groupId == null || groupId.isBlank()) {
@@ -157,7 +161,7 @@ public class McpTeamCadenceTools {
     }
 
     @Tool(name = "delete_team_cadence", description = "Delete one of a standing team's cadences and its schedule. Needs EDIT on the group.")
-    @McpAudited(target = 0)
+    @McpAudited(target = {0, 1})
     public String deleteTeamCadence(@ToolArg(description = "The group's id (required)") String groupId,
                                     @ToolArg(description = "The cadenceId, from list_team_cadences (required)") String cadenceId) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);

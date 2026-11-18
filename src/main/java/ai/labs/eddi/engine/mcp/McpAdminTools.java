@@ -1021,7 +1021,7 @@ public class McpAdminTools {
             + "Validated, defaulted and stamped with you as its creator exactly as POST /schedulestore/schedules does; a refusal "
             + "answers errorCode invalid_schedule with the reason. "
             + "Returns the created schedule with human-readable description and next fire time.")
-    @McpAudited(target = 0)
+    @McpAudited(target = 0, subject = 8)
     public String createSchedule(@ToolArg(description = "Agent ID to trigger (required)") String agentId,
                                  @ToolArg(description = "Trigger type: 'CRON' or 'HEARTBEAT' (default: CRON; HEARTBEAT whenever heartbeatIntervalSeconds is given)",
                                           required = false) String triggerType,
@@ -1185,7 +1185,7 @@ public class McpAdminTools {
             result.put("conversationStrategy", schedule.getConversationStrategy());
             result.put("environment", schedule.getEnvironment());
             result.put("maxCostPerFire", schedule.getMaxCostPerFire());
-            result.put("recentFires", fireLogs);
+            result.put("recentFires", fireLogs == null ? null : fireLogs.stream().map(McpToolUtils::fireLogForCaller).toList());
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             return toolFailure(LOGGER, "read_schedule", "Failed to read schedule", e);
@@ -1242,7 +1242,7 @@ public class McpAdminTools {
                             ? (fireLog.completedAt().toEpochMilli() - fireLog.startedAt().toEpochMilli()) + "ms"
                             : null);
             if (fireLog.errorMessage() != null) {
-                result.put("error", fireLog.errorMessage());
+                result.put("error", fireErrorForCaller(fireLog.errorMessage()));
             }
             return resultJson("schedule_fired", result);
         } catch (Exception e) {

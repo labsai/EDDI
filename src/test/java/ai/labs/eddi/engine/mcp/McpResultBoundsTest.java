@@ -69,6 +69,38 @@ class McpResultBoundsTest {
     }
 
     @Test
+    @DisplayName("a result too large to re-parse is answered with the envelope alone, without building a tree of it")
+    void oversizedIsNotParsed() throws Exception {
+        // Not even valid JSON: had it been parsed, this would also end in the envelope
+        // —
+        // but through the parse failure. The text length decides first.
+        String huge = "{\"conversationSteps\":[" + "z".repeat(McpToolUtils.MAX_BOUNDABLE_CHARS);
+
+        JsonNode node = MAPPER.readTree(McpToolUtils.bounded(huge, 1_000, "Ask for less.", "conversationSteps"));
+
+        assertTrue(node.get("truncated").asBoolean());
+        assertEquals(huge.length(), node.get("totalChars").asInt());
+        assertEquals(3, node.size(), "only truncated, totalChars and hint");
+    }
+
+    @Test
+    @DisplayName("the kept entries are whole values: a surrogate pair is never split")
+    void shorteningKeepsSurrogatePairsWhole() throws Exception {
+        StringBuilder json = new StringBuilder("{\"conversationSteps\":[");
+        for (int i = 0; i < 300; i++) {
+            json.append(i == 0 ? "" : ",").append("{\"t\":\"").append("😀".repeat(10)).append("\"}");
+        }
+        json.append("]}");
+
+        String bounded = McpToolUtils.bounded(json.toString(), 2_000, "h", "conversationSteps");
+
+        JsonNode node = MAPPER.readTree(bounded);
+        for (JsonNode step : node.get("conversationSteps")) {
+            assertEquals("😀".repeat(10), step.get("t").asText(), "every kept entry is whole, its surrogate pairs too");
+        }
+    }
+
+    @Test
     @DisplayName("a text result over the cap is cut at a line end and ends in an explicit truncated marker with the hint")
     void overCapTextHasAMarker() {
         String text = McpToolUtils.boundedText(("line of text\n").repeat(20), 100, "Use a smaller logSize.");

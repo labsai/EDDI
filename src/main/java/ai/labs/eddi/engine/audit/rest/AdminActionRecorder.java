@@ -130,8 +130,10 @@ public class AdminActionRecorder {
                 + (subjectUserId == null || subjectUserId.isBlank() ? "" : "/" + auditLedger.pseudonymOf(subjectUserId)));
     }
 
-    private static String pathSegment(String id) {
-        String cleaned = id.strip().replace("/", "%2F").replaceAll("\\p{Cntrl}", "?");
+    static String pathSegment(String id) {
+        // "%" first, so an id that already contains "%2F" cannot pass for one that
+        // contained a "/" (the recorded segment stays unambiguous).
+        String cleaned = id.strip().replace("%", "%25").replace("/", "%2F").replaceAll("\\p{Cntrl}", "?");
         return cleaned.length() > 128 ? cleaned.substring(0, 128) : cleaned;
     }
 

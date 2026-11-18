@@ -50,7 +50,7 @@ public class McpAgentTestTools {
             + "version to the 'test' environment if needed (never production) and runs in the background: returns the run id at once — "
             + "poll get_agent_test_run until status is PASSED, FAILED, ERROR, ABORTED or CANCELLED. Tool calls are mocked by the suite; an unmocked call is "
             + "not executed and fails its case.")
-    @McpAudited(target = 0)
+    @McpAudited(target = {0, 1})
     public String runAgentTests(@ToolArg(description = "Test suite id (required)") String suiteId,
                                 @ToolArg(description = "Agent id (required)") String agentId,
                                 @ToolArg(description = "Suite version; omit for the current one", required = false) Integer suiteVersion,

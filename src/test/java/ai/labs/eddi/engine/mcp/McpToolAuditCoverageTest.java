@@ -13,6 +13,7 @@ import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -29,15 +30,16 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * lists fails here — the decision "does this need an admin-action entry" is
  * made when the tool is added, not found in a review.
  * <p>
- * Adding a name to {@link #READ_ONLY} is the statement that the tool changes
- * nothing; the verb check below holds that statement to its name.
+ * The lists are explicit, tool by tool, and were drawn up by reading each
+ * tool's body (and the service it calls): a name is no evidence. Adding a name
+ * to {@link #READ_ONLY} is the statement that the tool changes nothing.
  */
 @DisplayName("MCP tools — admin-action audit coverage")
 class McpToolAuditCoverageTest {
 
     private static final Path MCP = Path.of("src", "main", "java", "ai", "labs", "eddi", "engine", "mcp");
 
-    /** Tools that change nothing. */
+    /** Tools that change nothing — checked body by body. */
     private static final Set<String> READ_ONLY = Set.of(
             // conversations and agents
             "list_agents", "list_agent_configs", "read_conversation", "read_conversation_log", "list_conversations", "get_agent", "read_agent_logs",
@@ -48,42 +50,52 @@ class McpToolAuditCoverageTest {
             // groups
             "describe_discussion_styles", "list_groups", "read_group", "read_group_conversation", "list_group_conversations", "list_team_backlog",
             "list_group_templates",
-            // memory
-            "list_user_memories", "get_visible_memories", "search_user_memories", "get_memory_by_key", "count_user_memories",
-            // the rest
-            "get_eddi_version", "list_vault_keys", "read_model_prices", "read_tenant_quota", "list_spend_control_changes", "list_docs", "read_docs",
-            "list_team_cadences", "read_lesson_consolidation", "read_team_budget", "list_team_budgets", "list_team_handoffs", "list_alert_events",
-            "list_conversation_ratings", "summarize_conversation_ratings", "count_ratings_needing_attention", "summarize_approvals",
-            "list_autonomy_recommendations", "get_autonomy_state", "count_pending_audit_samples", "list_pending_approvals", "get_approval_status",
-            "list_group_pending_approvals", "list_all_group_pending_approvals", "get_group_approval_status", "get_agent_test_run",
-            "list_agent_test_runs");
+            // memory (get_visible_memories is not here: most_accessed counts the read as an
+            // access)
+            "list_user_memories", "search_user_memories", "get_memory_by_key", "count_user_memories",
+            // the rest (list_team_cadences is not here: it reconciles cadence runs)
+            "get_eddi_version", "list_vault_keys", "read_model_prices", "list_docs", "read_docs", "read_lesson_consolidation", "read_team_budget",
+            "list_team_budgets", "list_alert_events", "list_conversation_ratings", "summarize_conversation_ratings",
+            "count_ratings_needing_attention", "summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state",
+            "count_pending_audit_samples", "list_pending_approvals", "get_approval_status", "list_group_pending_approvals",
+            "list_all_group_pending_approvals", "get_group_approval_status", "get_agent_test_run", "list_agent_test_runs");
 
     /**
-     * Mutators that reach the REST API over the loopback, where
+     * Reads with a deterministic, system-driven write the caller does not direct:
+     * {@code list_team_handoffs} inserts an empty workspace the first time a group
+     * is viewed; {@code read_tenant_quota} and {@code list_spend_control_changes}
+     * expire pending changes whose deadline passed (as {@code system:expiry}). Not
+     * an administrative action of the caller, so not recorded as one.
+     */
+    private static final Set<String> READ_WITH_BOOKKEEPING = Set.of("list_team_handoffs", "read_tenant_quota", "list_spend_control_changes");
+
+    /**
+     * Mutators that reach the REST API over the loopback ({@code getRestStore} →
+     * {@code RestInterfaceFactory}, a real HTTP request), where
      * {@code AdminActionAuditFilter} records them with the MCP caller's identity.
+     * Checked by reading the bodies: these change state only through those proxies.
+     * {@code update_agent} (an in-process redeploy) and {@code apply_agent_changes}
+     * (in-process {@code AgentCascadeService}) are NOT here — they are
+     * {@code @McpAudited}.
      */
     private static final Set<String> REST_BACKED = Set.of("create_agent", "delete_agent", "update_resource", "create_resource",
             "delete_resource", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger", "create_channel_integration",
             "update_channel_integration", "delete_channel_integration");
-    // Checked by reading the bodies: these only call getRestStore(...) proxies.
-    // update_agent (an in-process
-    // redeploy) and apply_agent_changes (in-process AgentCascadeService) are NOT
-    // here — they are @McpAudited.
 
-    /** The conversational data plane, audited per turn like a chat message. */
+    /**
+     * The conversational data plane, audited per pipeline task like a chat message
+     * — the REST filter skips the same surface ({@code /agents}, {@code /chat}).
+     */
     private static final Set<String> DATA_PLANE = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
             "discuss_with_group", "start_group_discussion", "followup_with_member", "continue_group_discussion");
 
     /**
-     * Writes its own ledger entry: the GDPR tools record the call themselves
-     * (checked below), and the spend-control tools' changes go through
-     * {@code SpendControlChangeService}, which writes {@code SpendControlAudit}
-     * entries with the actor and the reason.
+     * Writes its own admin-action entry on every path, refusals included (checked
+     * below). The spend-control tools are {@code @McpAudited}: their service writes
+     * a {@code spendcontrol} ledger entry for an applied, proposed or withdrawn
+     * change only, so the refusals would otherwise go unrecorded.
      */
-    private static final Set<String> SELF_RECORDING = Set.of("delete_user_data", "export_user_data", "update_model_prices", "update_tenant_quota",
-            "withdraw_spend_control_change");
-
-    private static final List<String> READ_VERBS = List.of("list_", "read_", "get_", "count_", "search_", "summarize_", "describe_", "discover_");
+    private static final Set<String> SELF_RECORDING = Set.of("delete_user_data", "export_user_data");
 
     private static List<Method> tools() throws IOException, ClassNotFoundException {
         assertTrue(Files.isDirectory(MCP), "run from the project root");
@@ -103,25 +115,27 @@ class McpToolAuditCoverageTest {
     }
 
     @Test
-    @DisplayName("every tool is audited, or named as read-only, REST-backed, data plane or self-recording")
+    @DisplayName("every tool is audited, or named as read-only, read-with-bookkeeping, REST-backed, data plane or self-recording")
     void everyToolIsAccountedFor() throws Exception {
         Set<String> unclassified = new TreeSet<>();
         Set<String> seen = new HashSet<>();
+        List<Set<String>> lists = List.of(READ_ONLY, READ_WITH_BOOKKEEPING, REST_BACKED, DATA_PLANE, SELF_RECORDING);
         for (Method method : tools()) {
             String tool = McpAuditInterceptor.toolName(method);
             seen.add(tool);
             boolean audited = method.isAnnotationPresent(McpAudited.class);
-            boolean exempt = READ_ONLY.contains(tool) || REST_BACKED.contains(tool) || DATA_PLANE.contains(tool) || SELF_RECORDING.contains(tool);
-            if (!audited && !exempt) {
+            long listed = lists.stream().filter(list -> list.contains(tool)).count();
+            if (!audited && listed == 0) {
                 unclassified.add(tool);
             }
-            assertTrue(!(audited && exempt), tool + " is annotated @McpAudited and also on an exemption list — pick one");
+            assertTrue(!(audited && listed > 0), tool + " is annotated @McpAudited and also on an exemption list — pick one");
+            assertTrue(listed <= 1, tool + " is on more than one list");
         }
         assertTrue(unclassified.isEmpty(), "These MCP tools neither carry @McpAudited nor are classified in this test. A tool that changes state "
-                + "needs @McpAudited (an in-process mutator leaves no admin-action entry otherwise); a read-only one goes on READ_ONLY: "
-                + unclassified);
+                + "needs @McpAudited (an in-process mutator leaves no admin-action entry otherwise); a read-only one goes on READ_ONLY, "
+                + "after reading its body and the service it calls: " + unclassified);
         Set<String> stale = new TreeSet<>();
-        for (Set<String> list : List.of(READ_ONLY, REST_BACKED, DATA_PLANE, SELF_RECORDING)) {
+        for (Set<String> list : lists) {
             list.stream().filter(name -> !seen.contains(name)).forEach(stale::add);
         }
         assertTrue(stale.isEmpty(), "Classified here but no such tool exists any more: " + stale);
@@ -145,10 +159,32 @@ class McpToolAuditCoverageTest {
     }
 
     @Test
-    @DisplayName("a tool on the read-only list is named like a read")
-    void readOnlyListHoldsReads() {
-        List<String> misfiled = READ_ONLY.stream().filter(name -> READ_VERBS.stream().noneMatch(name::startsWith)).sorted().toList();
-        assertTrue(misfiled.isEmpty(), "Not named like a read, so not read-only without a second look: " + misfiled);
+    @DisplayName("every audited subject and target index names a String argument of the tool's own signature")
+    void auditedIndicesMatchTheSignature() throws Exception {
+        List<String> wrong = new ArrayList<>();
+        for (Method method : tools()) {
+            McpAudited audited = method.getAnnotation(McpAudited.class);
+            if (audited == null) {
+                continue;
+            }
+            Class<?>[] parameters = method.getParameterTypes();
+            List<Integer> indices = new ArrayList<>();
+            if (audited.subject() != -1) {
+                indices.add(audited.subject());
+            }
+            for (int target : audited.target()) {
+                indices.add(target);
+            }
+            for (int index : indices) {
+                if (index < 0 || index >= parameters.length || parameters[index] != String.class) {
+                    wrong.add(McpAuditInterceptor.toolName(method) + " index " + index);
+                }
+            }
+            if (audited.subject() != -1 && Arrays.stream(audited.target()).anyMatch(target -> target == audited.subject())) {
+                wrong.add(McpAuditInterceptor.toolName(method) + ": the subject is also a target, so it would be recorded raw");
+            }
+        }
+        assertTrue(wrong.isEmpty(), "@McpAudited indices that do not name a String argument: " + wrong);
     }
 
     @Test
