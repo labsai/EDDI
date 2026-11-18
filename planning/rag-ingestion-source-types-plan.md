@@ -1,6 +1,6 @@
 # Implementation Plan — More Knowledge-Base Source Types
 
-**Status:** Partly implemented. The ingestion stack this builds on is on `main` (changelog 2026-09-17/18), and the upload source with the PDF, DOCX, XLSX, PPTX and CSV converters shipped on 2026-09-21. Not started: Phase F and the authenticated sources (SharePoint/OneDrive, Drive, mail) with cursors and ACLs. The "not on `main` yet" note and the §2 "today" table below predate that.
+**Status:** Partly implemented. The ingestion stack this builds on is on `main` (changelog 2026-09-17/18), and the upload source with the PDF, DOCX, XLSX, PPTX and CSV converters shipped on 2026-09-21. Phase G1 (§6a, Google Shared Drives over a `SERVICE` `OAUTH2_JWT_BEARER` connection) shipped on 2026-11-18 as a listing-only source: no `changes.list` cursor until the pipeline stores cursors, and `captureAcl` is refused (see [`docs/rag.md`](../docs/rag.md#google-shared-drive-type-googledrive)). Not started: the rest of Phase F (cursor storage, budgets, meters) and the other authenticated sources (SharePoint/OneDrive, per-user Drive, mail) with cursors and ACLs. The "not on `main` yet" note and the §2 "today" table below predate that.
 **Created:** 2026-09-19
 **Scope:** Backend (EDDI repo) plus the Manager (`ui/manager`)
 **Builds on:** the RAG ingestion stack in labsai/EDDI #783–#787, #789 and #790

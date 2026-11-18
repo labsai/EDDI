@@ -390,14 +390,15 @@ knowledge base (`sources[]` on the RAG configuration), because the vector store 
 knowledge base — a source that named its target by string could, and in an earlier draft did, write to
 one table while retrieval read another.
 
-There are two kinds, set by `type`:
+There are three kinds, set by `type`:
 
 | `type` | Where documents come from | Config block |
 | --- | --- | --- |
 | `web` (default) | A crawl of a website | `web` |
 | `upload` | Files an operator uploaded, held by EDDI | `upload` (optional) |
+| `googleDrive` | A Google Shared Drive, read with a service account | `googleDrive` — see [Google Shared Drive](#google-shared-drive-type-googledrive) |
 
-Everything that is not about *fetching* is the same for both: `settings`, `cron`, run history,
+Everything that is not about *fetching* is the same for all of them: `settings`, `cron`, run history,
 preview, purge, and the deletion rules below.
 
 ```json
@@ -426,7 +427,7 @@ preview, purge, and the deletion rules below.
 ```
 
 **Three fields have no default and are rejected when missing:** `name`, the `web` block, and its
-`startUrl`. Everything else may be omitted — `type` defaults to `web` (the other type is [`upload`](#uploaded-files-type-upload)),
+`startUrl`. Everything else may be omitted — `type` defaults to `web` (the others are [`upload`](#uploaded-files-type-upload) and [`googleDrive`](#google-shared-drive-type-googledrive)),
 `id` is generated and then never changes, and omitting `settings` entirely means "all defaults". Two
 optional fields are simply absent rather than defaulted: without `cron` the source runs only when
 somebody asks, and without `costPerThousandSegments` a run reports no dollar figure.
@@ -816,12 +817,154 @@ outlived its budget would eventually be treated as abandoned, and the next fire 
 worker embedding into the same store — each deleting the other's fresh chunks, because replacement
 filters on the run id.
 
+### Google Shared Drive (`type: "googleDrive"`)
+
+A Drive source reads a Google **Shared Drive**, or folders of one, with a service account. The
+handbook, the runbooks and the policies a team keeps in a Shared Drive become an agent's knowledge
+base, kept current without anyone exporting anything.
+
+```json
+{
+  "name": "support-handbook",
+  "type": "googleDrive",
+  "cron": "0 3 * * *",
+  "googleDrive": {
+    "connection": "google-drive-sa",
+    "sharedDriveId": "0ABcdEFghIJklUk9PVA",
+    "folderIds": ["1xYzAbCdEfGhIjKlMnOpQrStUvWxYz012"],
+    "includeSubfolders": true,
+    "mimeTypes": ["google-docs", "google-sheets", "google-slides", "pdf", "docx", "text"],
+    "excludeNamePatterns": ["*DRAFT*", "~$*"]
+  }
+}
+```
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `connection` | required | A **`SERVICE`-bound** connection, normally `OAUTH2_JWT_BEARER` with the service account's key (below). A `PER_USER` or `CALLER_SUPPLIED` connection is refused when the run starts, by name: an ingestion run has no user and no caller whose credential it could spend. Reading a person's own Drive is a later phase |
+| `sharedDriveId` | required | The Shared Drive's id, from its URL (`drive.google.com/drive/folders/<id>`). There is no "My Drive" option: a service account sees only what it was added to |
+| `folderIds` | `[]` (the whole drive) | At most 50 folders of that drive to read instead of all of it. Each must be a folder of `sharedDriveId`, which is checked before every run |
+| `includeSubfolders` | `true` | Read the folders' subfolders too, breadth-first |
+| `mimeTypes` | `[]` (all) | The formats to read: `google-docs`, `google-sheets`, `google-slides`, `pdf`, `docx`, `xlsx`, `pptx`, `text`, `markdown`, `csv`, `html` |
+| `excludeNamePatterns` | `[]` | File-name globs to skip, **case-insensitive**: `*` is any run of characters (it crosses the `/` a Drive name may contain), `?` exactly one |
+| `maxFiles` | 2,000 (at most 50,000) | Files one run reads; a larger scope is read in part and nothing is concluded deleted |
+| `maxFileBytes` | 25 MB (at most 50 MB) | Per file. A stored file over it is skipped without being downloaded; an export over it is skipped when it arrives |
+| `captureAcl` | — | **Refused when `true`.** Per-document access control (`DOCUMENT_ACL`) is not built yet, and an operator who asks for it would believe retrieval honours each file's sharing |
+
+Ids are checked against `[A-Za-z0-9_-]` when the knowledge base is saved, since they are spliced into
+Drive's listing query; the connection name is held to the connections framework's own rule.
+
+> **Who can read what it indexes.** Every conversation of every agent that uses the knowledge base can
+> retrieve what this source ingested, **whatever each file's sharing says**. Scope the source to the
+> folders meant for that audience. The Manager says so on the source.
+
+#### Setting up the service account
+
+1. In the Google Cloud console, create a **service account** in a project of your organisation. It
+   needs no IAM role on the project.
+2. **Enable the Google Drive API** for that project (APIs & Services → Library → Google Drive API).
+   Without it every call answers `403 accessNotConfigured`.
+3. Create a **JSON key** for the service account and download it.
+4. In Google Drive, open the Shared Drive → **Manage members**, and add the service account's email
+   (`…@….iam.gserviceaccount.com`, the `client_email` of the key file) as a **Viewer**. No Workspace
+   administrator is involved, and no domain-wide delegation: the account sees this drive and nothing
+   else.
+5. Store the **whole key file** as one vault entry. Its `allowedHosts` is the token endpoint, the only
+   place a signature made with it goes:
+
+   ```bash
+   jq -n --rawfile key service-account.json \
+     '{value: $key, allowedAgents: ["*"], allowedHosts: ["oauth2.googleapis.com"]}' |
+   curl -X PUT "$EDDI/secretstore/secrets/default/google-drive-sa-key" \
+     -H 'Content-Type: application/json' -d @-
+   ```
+
+6. Allow the token endpoint for the deployment (an empty list resolves no OAuth connection at all) —
+   `credentialEndpointAllowlist` in the [connection settings](connections.md#enabling-connections):
+
+   ```bash
+   curl -X PUT "$EDDI/connectionstore/settings" -H 'Content-Type: application/json' \
+     -d '{"credentialEndpointAllowlist": ["https://oauth2.googleapis.com"]}'
+   ```
+
+   A `null` field unsets a stored value, so send the settings you already have along with it.
+7. Create the [`OAUTH2_JWT_BEARER` connection](connections.md#a-service-account-that-signs-instead-of-sending-a-secret).
+   Its `baseUrlAllowlist` must list `https://www.googleapis.com`, or every request is refused before
+   it is sent:
+
+   ```json
+   {
+     "name": "google-drive-sa",
+     "authType": "OAUTH2_JWT_BEARER",
+     "binding": "SERVICE",
+     "oauth": {
+       "tokenUrl": "https://oauth2.googleapis.com/token",
+       "privateKey": "${vault:google-drive-sa-key}",
+       "scopes": ["https://www.googleapis.com/auth/drive.readonly"]
+     },
+     "baseUrlAllowlist": ["https://www.googleapis.com"]
+   }
+   ```
+
+   `POST /connectionstore/connections` with that body. Then add the source to a knowledge base and
+   **Preview** it.
+
+#### How a run reads the drive
+
+- **A full listing every run.** The framework does not store cursors yet, so Drive's change feed
+  (`changes.list`) is not used: every run lists the scope with `files.list` (`corpora=drive`,
+  `driveId`, `includeItemsFromAllDrives`, `supportsAllDrives`), breadth-first from the folders or the
+  drive's root, and lets the version comparison skip what has not changed. An unchanged drive costs its
+  listing requests and nothing else. Because the listing is complete, a file that is deleted, trashed
+  or moved out of scope is reconciled like a vanished web page: after `tombstoneAfterMissedRuns`
+  complete runs.
+- **Shortcuts.** Every listing is limited to the Shared Drive, so a shortcut to a folder elsewhere
+  lists nothing and cannot widen the source. A shortcut to a folder inside it is followed once — the
+  visited set is the cycle guard a shortcut back to a parent needs. A shortcut to a file is skipped:
+  the file is listed in its own folder, or it is out of scope.
+- **Versions.** A stored file's version is its `md5Checksum` (its `headRevisionId` where Drive has no
+  checksum), known from the listing, so an unchanged file is not downloaded. A Google Doc, Sheet or
+  Slides file has no checksum: an unchanged `version` skips the export, and a changed one is exported
+  and the hash of the export decides whether to embed — `version` also moves on a rename or a sharing
+  change, which must not re-embed a document.
+- **Content.** A Doc is exported as **Markdown** (HTML when the Markdown export is refused), with the
+  base64 images Google inlines removed. A Sheet is exported as **XLSX**, not CSV: the CSV export
+  carries only the first sheet, and the spreadsheet extractor renders every sheet as a table with its
+  header row and the usual row cap. Slides are exported as plain text. A stored file is downloaded
+  (`files.get?alt=media`) and its type is read from its bytes, as for an upload — Drive's MIME type is
+  only what the uploader's browser claimed.
+- **Citations.** Each chunk's `url` is the file's `webViewLink`, so a cited answer opens the file in
+  Drive under the reader's own permissions — never an EDDI URL that would serve it to anyone.
+- **Skipped, not failed.** A type nothing can read (images, video, Forms), a format left out of
+  `mimeTypes`, an excluded name, a file over `maxFileBytes`, an export over Google's own export limit
+  and a shortcut to a file are counted in the run's **skipped** column. A drive full of images is not a
+  drive full of errors.
+
+#### When it fails
+
+| What happened | What the run does |
+| --- | --- |
+| `403` with reason `rateLimitExceeded` / `userRateLimitExceeded`, or `429` | A throttle: waited out (honouring `Retry-After`, at most 30 s a wait, three retries, never past the run's budget) and retried. A listing still throttled afterwards stops the run as partial; nothing is concluded deleted |
+| `403` with reason `insufficientPermissions`, `accessNotConfigured`, … or `401` | Access, not a rate limit — the reason decides, not the status. The run fails at once and says why; nothing is deleted |
+| A folder of the drive cannot be listed (`5xx` after the retries) | The rest of the drive is read; the run is partial |
+| A root that lists **nothing** | Access is checked again — `drives.get` for the drive, `files.get` for a folder — before the empty listing is believed. A service account removed from the drive, or a folder moved out of it or into the trash, lists nothing rather than failing; believed, two such runs would empty the knowledge base. Access gone fails the run; a drive that really is empty is reconciled |
+| The connection refuses the request (missing, `PER_USER`, target off its `baseUrlAllowlist`, revoked key) | Nothing is sent to Google. The run fails naming the connection and the rule |
+
+Before every run the drive and each listed folder are checked (`drives.get`, `files.get`), so a typo
+in an id or a service account that is not a member fails at once with that explanation.
+
+**Preview lists without downloading.** A Drive preview walks the listing only — no export, no
+download — and its `message` describes what it found: the number of files by format, the bytes of the
+stored ones (Google-native files have no size before export), folders and API requests, and what would
+be skipped and why. Changed Google-native files count as "would ingest" even when their export turns
+out unchanged.
+
 ### Ingestion source endpoints
 
 | Method | Path | Access | Purpose |
 | ------ | ---- | ------ | ------- |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202 with its `runId`, or 409 if one is in flight) |
-| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After` |
+| `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After`. A `googleDrive` preview downloads nothing and returns a listing summary (files by format, bytes, skips) as its `message` |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors — including the run in flight, whose counters move while it works |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
 | `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
@@ -856,7 +999,7 @@ its history and re-embedded everything.
 ### In the Manager
 
 The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, choose between
-**Website** and **Files**, edit the scope and the limits, and for a source that has been saved once,
+**Website**, **Files** and **Google Drive**, edit the scope and the limits, and for a source that has been saved once,
 **Run now**, **Preview**, **Purge state** and the run history with its counters and errors.
 
 A **Files** source shows a drop zone instead of the crawl settings. Files can be dropped or chosen,
@@ -1042,8 +1185,9 @@ Each source `type` is served by one **source connector**, a CDI bean implementin
 same for every source: run claims, change detection, text extraction, embedding, chunk replacement,
 deletion reconciliation, budgets and run history. It never names a provider. A connector owns how to
 list the source, how to read one document, and what the provider's failures mean. `web`
-(`WebSourceConnector`, around the crawler) and `upload` (`UploadSourceConnector`, over the file store)
-are the two today. A new source type is one bean: `SourceConnectors` collects them by `type()` and
+(`WebSourceConnector`, around the crawler), `upload` (`UploadSourceConnector`, over the file store) and
+`googleDrive` (`GoogleDriveSourceConnector`, over the Drive v3 API through `OutboundHttp`) are the three
+today. A new source type is one bean: `SourceConnectors` collects them by `type()` and
 refuses two beans for one type at startup.
 
 | Part | What it is |
@@ -1055,6 +1199,8 @@ refuses two beans for one type at startup.
 | `SourceDocument` | `content`, which is one of three kinds: `HtmlPage` (page converter; blank text means navigation and is skipped), `FileBytes` (extracted by MIME type; no text means a definitive failure that retires older chunks) or `Text`. It also carries `versionToken` (the change key when present, otherwise the text hash), HTTP `validators`, `truncated` and `metadata` under `SourceMetadataKeys` |
 | `Coverage` | `FULL_LISTING`: an authoritative listing, where absence means deletion, even when the listing is empty. `FULL_TRAVERSAL`: a crawl; absence means deletion only if the run learned something definitive. `INCREMENTAL`: a change feed; absence means nothing, and deletions arrive as `DELETE` items. `PARTIAL`: nothing is concluded |
 | `SourceError` | `TRANSIENT`, `THROTTLED` (each with an optional retry-after), `AUTH`, `NOT_FOUND`, `PERMANENT`, `REJECTED`, `CURSOR_INVALID`. Only `NOT_FOUND` and `PERMANENT` count as evidence about a document. Use `PERMANENT` only when the answer concerns the document itself, such as a format that cannot be exported. A request the provider refuses as you made it (malformed, an unknown field) is `REJECTED`: it is a fault in the connector, and counting it would delete every document it touched. The others mean "could not look", and the document is kept. A failure reported without a document id is never evidence. Per-document failures go to `context.reportFailure` or are thrown from `fetch` as `SourceException`. A whole-source failure thrown from `discover` fails the run |
+| `SourceContext.credentials()` | A `SourceCredentials`: the header for one request to an authenticated provider, resolved for that request's exact URL through `ConnectionResolver` with no principal. Only `SERVICE`-bound connections are accepted — `PER_USER` and `CALLER_SUPPLIED` are refused before anything is resolved — and the connection's `baseUrlAllowlist` is checked on every request. The context never holds a token |
+| `reportSkipped` / `DiscoveryResult.summary` | A document discovery chose not to hand over (unreadable type, filtered out, too large) is counted as skipped rather than failed. A connector may describe its listing in one line; a preview returns it as its `message`, a run logs it |
 | Cursor | Opaque to the framework: one string per partition, JSON by convention, versioned and read by the connector. **It is not stored yet**: the pipeline passes no cursor, so every run lists in full |
 
 The connector chooses its own discovery style: (A) a listing plus a change feed, (B) a single delta
