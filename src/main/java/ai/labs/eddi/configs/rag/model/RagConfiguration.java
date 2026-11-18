@@ -272,6 +272,28 @@ public class RagConfiguration {
         if (embeddingProblem != null) {
             throw new IllegalArgumentException(embeddingProblem);
         }
+        // What can only fail later — a store type nothing implements, a port that is
+        // not
+        // one, a vector size that is not a size, an endpoint that is not http(s) — is
+        // refused here, where the author is looking. Writes only: a stored
+        // configuration is never judged by this.
+        String endpointProblem = StoreParameterChecks.findEndpointProblem(embeddingParameters);
+        if (endpointProblem != null) {
+            throw new IllegalArgumentException(endpointProblem);
+        }
+        String storeProblem = StoreParameterChecks.findProblem(storeType, storeParameters);
+        if (storeProblem != null) {
+            throw new IllegalArgumentException(storeProblem);
+        }
+        if (name != null && name.isBlank()) {
+            throw new IllegalArgumentException("name must not be empty");
+        }
+        if (maxResults != null && maxResults < 1) {
+            throw new IllegalArgumentException("maxResults must be at least 1, was " + maxResults);
+        }
+        if (minScore != null && (minScore.isNaN() || minScore < 0.0 || minScore > 1.0)) {
+            throw new IllegalArgumentException("minScore must be between 0.0 and 1.0");
+        }
         if (chunkSize != null && (chunkSize < 1 || chunkSize > MAX_CHUNK_SIZE)) {
             throw new IllegalArgumentException("chunkSize must be between 1 and " + MAX_CHUNK_SIZE + ", was " + chunkSize);
         }

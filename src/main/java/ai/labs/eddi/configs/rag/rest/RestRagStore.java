@@ -11,6 +11,7 @@ import ai.labs.eddi.configs.rag.IRagStore;
 import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -25,6 +26,7 @@ import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
@@ -124,7 +126,45 @@ public class RestRagStore implements IRestRagStore {
         // gone from the document must not leave its documents answering questions.
         discardRemovedSources(id, previous, ragConfiguration);
         syncIngestionSchedules(response, id, ragConfiguration, previousSourceIds);
-        return response;
+        return withEmbeddingSpaceWarning(response, id, previous, ragConfiguration);
+    }
+
+    /**
+     * What an update answers with when it changes the embedding model of a
+     * knowledge base that keeps its vectors where they are.
+     *
+     * <p>
+     * A warning, not a refusal: the save is the only way to fix a model that was
+     * wrong, a knowledge base that holds nothing yet loses nothing by it, and a
+     * refusal would block imports and scripted updates that do not read response
+     * bodies. The body is {@code {"warnings": [...], "code": ...}} next to the
+     * usual {@code Location} header, and the refusal that follows (search and
+     * ingest answer 409 until the knowledge base is re-embedded) is what makes the
+     * change safe. Nothing is warned when the vectors move too — another store
+     * location starts empty.
+     */
+    private Response withEmbeddingSpaceWarning(Response response, String id, RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || updated == null || response == null) {
+            return response;
+        }
+        String location = KnowledgeBaseStorage.vectorSpaceLocation(id, updated);
+        if (location == null || !location.equals(KnowledgeBaseStorage.vectorSpaceLocation(id, previous))) {
+            return response;
+        }
+        VectorSpace before = VectorSpace.of(previous, previous.getEmbeddingParameters());
+        VectorSpace after = VectorSpace.of(updated, updated.getEmbeddingParameters());
+        if (!before.conflictsWith(after)) {
+            return response;
+        }
+        IResourceId resourceId = resourceIdOf(response);
+        String reembed = "POST /ragstore/rags/" + id + "/reembed"
+                + (resourceId == null || resourceId.getVersion() == null ? "" : "?version=" + resourceId.getVersion());
+        String warning = "The embedding model of this knowledge base changed from " + before.describe() + " to "
+                + after.describe() + ". If its vector store already holds vectors, they were made by the old model: "
+                + "searching and ingesting are refused until the knowledge base is re-embedded (" + reembed + ").";
+        LOGGER.warnf("Knowledge base %s: %s", LogSanitizer.sanitize(id), LogSanitizer.sanitize(warning));
+        return Response.fromResponse(response).type(MediaType.APPLICATION_JSON_TYPE)
+                .entity(Map.of("warnings", List.of(warning), "code", "EMBEDDING_SPACE_CHANGED")).build();
     }
 
     /**

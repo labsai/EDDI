@@ -10,6 +10,7 @@ import ai.labs.eddi.modules.ingestion.IIngestionStateStore.DocumentState;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.rag.VectorSpaceGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -68,6 +69,14 @@ public class KnowledgeBaseInspector {
     private final IIngestedFileStore fileStore;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final EmbeddingModelFactory embeddingModelFactory;
+
+    /**
+     * Refuses a search in a vector space other than the store's. Field-injected so
+     * the constructor keeps its shape; null when built by hand, which skips the
+     * check.
+     */
+    @Inject
+    VectorSpaceGuard vectorSpaceGuard;
 
     @Inject
     public KnowledgeBaseInspector(IIngestionStateStore stateStore, IIngestedFileStore fileStore,
@@ -153,15 +162,38 @@ public class KnowledgeBaseInspector {
      */
     public List<Chunk> documentChunks(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
                                       String documentId, int limit) {
+        return documentChunkPage(ragConfigId, knowledgeBase, source, documentId, limit).chunks();
+    }
+
+    /**
+     * A document's chunks, and whether it has more than were returned.
+     *
+     * @param truncated
+     *            the document has more chunks than {@code limit} (at most
+     *            {@link #MAX_CHUNKS}) allowed; the rest are not listed
+     */
+    public record ChunkPage(List<Chunk> chunks, boolean truncated) {
+    }
+
+    /**
+     * As {@link #documentChunks}, saying when the list is not the whole document.
+     * The store has no "list everything", so the chunks come from a similarity
+     * search; asking for one more than the limit is how a cut-off is noticed.
+     */
+    public ChunkPage documentChunkPage(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source,
+                                       String documentId, int limit) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         Filter filter = metadataKey(IngestionPipeline.METADATA_DOCUMENT_ID).isEqualTo(documentId)
                 .and(metadataKey(IngestionPipeline.METADATA_SOURCE_KEY).isEqualTo(sourceKey));
         int max = clamp(limit, 1, MAX_CHUNKS);
-        List<EmbeddingMatch<TextSegment>> matches = search(ragConfigId, knowledgeBase, documentId, filter, max, 0.0);
-        return matches.stream()
+        List<EmbeddingMatch<TextSegment>> matches = search(ragConfigId, knowledgeBase, documentId, filter, max + 1, 0.0);
+        boolean truncated = matches.size() > max;
+        List<Chunk> chunks = matches.stream()
+                .limit(max)
                 .map(match -> toChunk(match, false))
                 .sorted(Comparator.comparing(Chunk::index, Comparator.nullsLast(Comparator.naturalOrder())))
                 .toList();
+        return new ChunkPage(chunks, truncated);
     }
 
     /**
@@ -188,8 +220,16 @@ public class KnowledgeBaseInspector {
 
     private List<EmbeddingMatch<TextSegment>> search(String ragConfigId, RagConfiguration knowledgeBase, String text,
                                                      Filter narrowing, int maxResults, double minScore) {
+        if (vectorSpaceGuard != null) {
+            // Before the query is embedded: no provider call for a search that cannot
+            // be answered.
+            vectorSpaceGuard.requireCompatible(ragConfigId, knowledgeBase);
+        }
         Embedding queryVector = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY)
                 .embed(text).content();
+        if (vectorSpaceGuard != null) {
+            vectorSpaceGuard.verifyDimension(ragConfigId, knowledgeBase, queryVector.dimension(), false);
+        }
         // Retrieval's own isolation, always: a knowledge base in the per-id layout
         // only ever sees the chunks tagged with its own id, even in a shared table.
         Filter isolation = EmbeddingStoreFactory.retrievalFilter(ragConfigId, knowledgeBase);

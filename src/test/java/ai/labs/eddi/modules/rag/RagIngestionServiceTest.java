@@ -26,6 +26,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import java.sql.BatchUpdateException;
 import java.time.Duration;
 import java.util.List;
 import java.time.Duration;
@@ -39,7 +40,10 @@ import org.mockito.ArgumentCaptor;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.*;
 import static org.mockito.MockitoAnnotations.openMocks;
@@ -481,6 +485,60 @@ class RagIngestionServiceTest {
 
     private static final String ALPHA_ID = "65f0aa11bb22cc33dd44ee55";
     private static final String BETA_ID = "65f0aa11bb22cc33dd44ee66";
+
+    private String awaitFinished(String ingestionId) {
+        long deadline = System.currentTimeMillis() + 5000;
+        String status = service.getStatus(KB, ingestionId);
+        while (("pending".equals(status) || "processing".equals(status)) && System.currentTimeMillis() < deadline) {
+            Thread.onSpinWait();
+            status = service.getStatus(KB, ingestionId);
+        }
+        return status;
+    }
+
+    @Test
+    void aKnowledgeBaseWhoseStoreHoldsAnotherEmbeddingSpace_isNotWritten() {
+        wireRealStore(embeddingStore);
+        VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
+        doThrow(new VectorSpaceMismatchException("holds emb-8, configured other-8")).when(guard).requireCompatible(anyString(), any());
+        service.vectorSpaceGuard = guard;
+
+        String id = service.ingest(KB, "Refunds within 47 days.", "policy.txt", createConfig());
+
+        // The reason, in words, reaches whoever polls the status.
+        assertEquals("failed: holds emb-8, configured other-8", awaitFinished(id));
+        verify(embeddingStore, never()).addAll(anyList(), anyList());
+    }
+
+    @Test
+    void theFirstEmbeddingIsCheckedAgainstTheStoreBeforeAnythingIsWritten() {
+        wireRealStore(embeddingStore);
+        VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
+        doThrow(new VectorSpaceMismatchException("vectors of 2 dimensions, table made for 1536")).when(guard)
+                .verifyDimension(anyString(), any(), anyInt(), anyBoolean());
+        service.vectorSpaceGuard = guard;
+
+        String id = service.ingest(KB, "Refunds within 47 days.", "policy.txt", createConfig());
+
+        assertEquals("failed: vectors of 2 dimensions, table made for 1536", awaitFinished(id));
+        // The fake model returns two numbers per segment.
+        verify(guard).verifyDimension(eq(KB), any(), eq(2), eq(true));
+        verify(embeddingStore, never()).addAll(anyList(), anyList());
+    }
+
+    @Test
+    void aDriverFailureIsNotHandedToWhoeverPollsTheStatus() {
+        wireRealStore(embeddingStore);
+        doThrow(new RuntimeException("insert failed", new BatchUpdateException(
+                "Batch entry 0 INSERT INTO eddi_kbid_x (embedding_id, embedding, text, metadata) VALUES (...)", new int[0])))
+                .when(embeddingStore).addAll(anyList(), anyList());
+
+        String id = service.ingest(KB, "Refunds within 47 days.", "policy.txt", createConfig());
+
+        String status = awaitFinished(id);
+        assertTrue(status.startsWith("failed: "), status);
+        assertFalse(status.contains("INSERT") || status.contains("Batch entry"), status);
+    }
 
     private void wireRealStore(EmbeddingStore<TextSegment> store) {
         EmbeddingModel fixed = new EmbeddingModel() {

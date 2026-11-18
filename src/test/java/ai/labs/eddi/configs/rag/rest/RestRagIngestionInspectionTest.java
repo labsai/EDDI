@@ -11,21 +11,29 @@ import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
+import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
+import ai.labs.eddi.modules.ingestion.KnowledgeBaseReembedService;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
+import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.modules.rag.VectorSpaceGuard;
+import ai.labs.eddi.modules.rag.VectorSpaceMismatchException;
 import jakarta.ws.rs.ForbiddenException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.sql.SQLException;
 import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyDouble;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -123,7 +131,7 @@ class RestRagIngestionInspectionTest {
     @Test
     @DisplayName("a store that cannot filter by metadata is 501, said in words")
     void unsupportedStoreIs501() {
-        when(inspector.documentChunks(anyString(), any(), any(), anyString(), anyInt()))
+        when(inspector.documentChunkPage(anyString(), any(), any(), anyString(), anyInt()))
                 .thenThrow(new UnsupportedOperationException("cannot filter"));
 
         Response response = rest.readDocumentChunks(KB_ID, SOURCE_ID, 1, "https://example.com/a", 50);
@@ -133,7 +141,7 @@ class RestRagIngestionInspectionTest {
     }
 
     @Test
-    @DisplayName("a failing embedding provider is a 502 naming the cause")
+    @DisplayName("a failing embedding provider is a 502 with a fixed sentence, never the provider's text")
     void providerFailureIs502() {
         when(inspector.search(anyString(), any(), any(), anyString(), anyInt(), anyDouble()))
                 .thenThrow(new IllegalStateException("401 invalid api key"));
@@ -141,8 +149,107 @@ class RestRagIngestionInspectionTest {
         Response response = rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null));
 
         assertEquals(502, response.getStatus());
-        assertEquals("The embedding model or vector store failed: 401 invalid api key",
-                ((Map<?, ?>) response.getEntity()).get("error"));
+        assertEquals(RagFailures.GENERIC, ((Map<?, ?>) response.getEntity()).get("error"));
+    }
+
+    @Test
+    @DisplayName("a driver failure with SQL in it reaches the caller as a sentence, and the SQL stays in the log")
+    void driverTextNeverReachesTheCaller() {
+        when(inspector.search(anyString(), any(), any(), anyString(), anyInt(), anyDouble()))
+                .thenThrow(new RuntimeException("The embedding model or vector store failed: org.postgresql.util.PSQLException: "
+                        + "ERROR: different vector dimensions 8 and 16", new SQLException("INSERT INTO eddi_kbid_x (embedding)")));
+
+        Response response = rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null));
+
+        assertEquals(502, response.getStatus());
+        String error = (String) ((Map<?, ?>) response.getEntity()).get("error");
+        assertFalse(error.contains("PSQLException") || error.contains("INSERT") || error.contains("dimensions 8"), error);
+    }
+
+    @Test
+    @DisplayName("a knowledge base whose store holds another embedding space is 409 with a stable code")
+    void vectorSpaceMismatchIs409() {
+        when(inspector.search(anyString(), any(), any(), anyString(), anyInt(), anyDouble()))
+                .thenThrow(new VectorSpaceMismatchException("holds emb-8, configured other-8"));
+
+        Response response = rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null));
+
+        assertEquals(409, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals(VectorSpaceMismatchException.CODE, body.get("code"));
+        assertEquals("holds emb-8, configured other-8", body.get("error"));
+    }
+
+    @Test
+    @DisplayName("chunks say when the document has more than were returned")
+    void chunksReportTruncation() {
+        when(inspector.documentChunkPage(anyString(), any(), any(), anyString(), anyInt()))
+                .thenReturn(new KnowledgeBaseInspector.ChunkPage(List.of(), true));
+
+        Response response = rest.readDocumentChunks(KB_ID, SOURCE_ID, 1, "https://example.com/a", 50);
+
+        assertEquals(200, response.getStatus());
+        assertEquals(true, ((Map<?, ?>) response.getEntity()).get("truncated"));
+    }
+
+    @Test
+    @DisplayName("the vector-space endpoint shows both spaces and what to do when they differ")
+    void vectorSpaceStatus() {
+        VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
+        rest.vectorSpaceGuard = guard;
+        when(guard.status(eq(KB_ID), any())).thenReturn(new VectorSpaceGuard.Status(true,
+                new VectorSpace("openai", "emb-8", "", "", 8), new VectorSpace("openai", "other-8", "", "", null), false));
+
+        Response response = rest.readVectorSpace(KB_ID, 1);
+
+        assertEquals(200, response.getStatus());
+        verify(accessGuard).requireAccess(eq(KB_ID), eq(AccessLevel.VIEW), anyString());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals(false, body.get("matches"));
+        assertEquals("emb-8", ((Map<?, ?>) body.get("stored")).get("model"));
+        assertEquals("other-8", ((Map<?, ?>) body.get("configured")).get("model"));
+        assertTrue(((String) body.get("action")).contains("/reembed"));
+    }
+
+    @Test
+    @DisplayName("re-embedding needs EDIT, starts a run per source, and says what it could not rebuild")
+    void reembedStartsRuns() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenReturn(new KnowledgeBaseReembedService.Result(null,
+                List.of(new KnowledgeBaseReembedService.SourceOutcome(SOURCE_ID, "run-9", null)), List.of("direct documents")));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(202, response.getStatus());
+        verify(accessGuard).requireAccess(eq(KB_ID), eq(AccessLevel.EDIT), anyString());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals(List.of("direct documents"), body.get("notReEmbedded"));
+        assertEquals("run-9", ((Map<?, ?>) ((List<?>) body.get("sources")).get(0)).get("runId"));
+    }
+
+    @Test
+    @DisplayName("re-embedding while a run is in flight is 409 and changes nothing")
+    void reembedRefusedWhileARunIsInFlight() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any()))
+                .thenReturn(new KnowledgeBaseReembedService.Result(SOURCE_ID, List.of(), List.of()));
+
+        assertEquals(409, rest.reembed(KB_ID, 1).getStatus());
+    }
+
+    @Test
+    @DisplayName("a store that cannot be emptied is 503 with a sentence, not the driver's text")
+    void reembedStoreFailure() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenThrow(new IllegalStateException("jdbc:postgresql://secret-host/db refused"));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(503, response.getStatus());
+        assertFalse(((String) ((Map<?, ?>) response.getEntity()).get("error")).contains("secret-host"));
     }
 
     @Test

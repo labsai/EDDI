@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.rag.VectorSpaceGuard;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.KnowledgeBaseReference;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.RagDefaults;
 import dev.langchain4j.data.segment.TextSegment;
@@ -56,6 +57,14 @@ public class RagContextProvider {
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final IDataFactory dataFactory;
+
+    /**
+     * Refuses retrieval from a vector store that holds another embedding model's
+     * vectors. Field-injected so the constructor keeps its shape; null when built
+     * by hand, which skips the check.
+     */
+    @Inject
+    VectorSpaceGuard vectorSpaceGuard;
 
     @Inject
     public RagContextProvider(IAgentStore agentStore, IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
@@ -166,6 +175,12 @@ public class RagContextProvider {
                 // configuration's id — never by its name, which another knowledge base
                 // may share.
                 String ragConfigId = ragConfigIdOf(step.stepConfig());
+                if (vectorSpaceGuard != null) {
+                    // Another model's vectors rank by meaningless scores: better no
+                    // knowledge-base context, with the reason in the trace and the log,
+                    // than context that looks right and is not.
+                    vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
+                }
                 EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY);
                 EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
 

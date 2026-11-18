@@ -18,7 +18,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import com.github.benmanes.caffeine.cache.RemovalCause;
 import com.github.benmanes.caffeine.cache.Ticker;
+import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.exception.UnsupportedFeatureException;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingSearchResult;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.chroma.ChromaEmbeddingStore;
@@ -47,7 +51,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.sql.Connection;
+import java.sql.ResultSet;
 import java.sql.SQLException;
+import java.sql.Statement;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -370,6 +376,18 @@ public class EmbeddingStoreFactory {
      *            the RAG configuration's id (the same for every version)
      */
     public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config) {
+        return getOrCreate(ragConfigId, config, false);
+    }
+
+    /**
+     * @param forWrite
+     *            whether the caller is about to write. A read never creates
+     *            anything in the vector database: for pgvector, a knowledge base
+     *            whose table does not exist yet reads as empty
+     *            ({@link #ABSENT_TABLE}) instead of the table being created by a
+     *            search.
+     */
+    private EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config, boolean forWrite) {
         requireId(ragConfigId);
         if (isInMemory(config)) {
             return inMemoryStores.computeIfAbsent(inMemoryKey(ragConfigId, config), key -> newInMemoryStore(config, key)).store();
@@ -379,6 +397,10 @@ public class EmbeddingStoreFactory {
         // no unambiguous entry boundaries ({a='x, b=y'} renders like {a='x', b='y'}),
         // so two configurations could share one store.
         var cacheKey = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
+        if (!forWrite && "pgvector".equals(config.getStoreType()) && cache.getIfPresent(cacheKey) == null
+                && !pgVectorTableExists(ragConfigId, config)) {
+            return ABSENT_TABLE;
+        }
         return cache.get(cacheKey, k -> build(ragConfigId, config));
     }
 
@@ -393,7 +415,7 @@ public class EmbeddingStoreFactory {
         if (isInMemory(config)) {
             return inMemoryStoreForWrite(ragConfigId, config).store();
         }
-        return getOrCreate(ragConfigId, config);
+        return getOrCreate(ragConfigId, config, true);
     }
 
     /**
@@ -945,6 +967,149 @@ public class EmbeddingStoreFactory {
                 // private address later (DNS rebinding).
                 .httpClientBuilder(BoundedJdkHttpClient.builder(targetPolicy))
                 .build();
+    }
+
+    // ──────────────────────────────────────────────────
+    // Removing a knowledge base's vectors, and reads that create nothing
+    // ──────────────────────────────────────────────────
+
+    /**
+     * What a read sees where a pgvector knowledge base has no table yet: nothing.
+     * Not cached, so the first write builds the real store (and creates the table).
+     */
+    static final EmbeddingStore<TextSegment> ABSENT_TABLE = new AbsentTableStore();
+
+    /**
+     * Removes every vector of one knowledge base, to be made again. For an
+     * in-memory knowledge base the store is dropped; for an external one the chunks
+     * tagged with the knowledge base's id are deleted, and a pgvector table that is
+     * then empty is dropped, so that the next write recreates it for the vector
+     * size then configured (a table's column has a fixed size, and the size is
+     * exactly what may have changed). A table that still holds other knowledge
+     * bases' rows is left alone.
+     *
+     * @throws UnsupportedOperationException
+     *             when the store cannot delete by metadata, so nothing was removed
+     */
+    public void removeKnowledgeBaseVectors(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
+        if (isInMemory(config)) {
+            dropInMemoryStore(ragConfigId, config);
+            return;
+        }
+        EmbeddingStore<TextSegment> store = getOrCreate(ragConfigId, config, false);
+        if (store != ABSENT_TABLE) {
+            try {
+                store.removeAll(metadataKey(KnowledgeBaseStorage.METADATA_KB_ID)
+                        .isEqualTo(KnowledgeBaseStorage.chunkKbId(ragConfigId, config)));
+            } catch (UnsupportedFeatureException e) {
+                throw new UnsupportedOperationException("This knowledge base's vector store cannot delete by metadata, so its "
+                        + "vectors cannot be removed from here. Empty its "
+                        + KnowledgeBaseStorage.physicalNameParameter(config.getStoreType()) + " by hand, then re-embed.", e);
+            }
+        }
+        if ("pgvector".equals(config.getStoreType())) {
+            dropPgVectorTableIfEmpty(ragConfigId, config);
+        }
+    }
+
+    /** A pgvector connection and table, as {@link #buildPgVector} resolves them. */
+    private record PgVectorTarget(DataSource dataSource, String table) {
+    }
+
+    private PgVectorTarget pgVectorTarget(String ragConfigId, RagConfiguration config) {
+        Map<String, String> params = resolveParams(config);
+        String host = requirePlainHost(params.getOrDefault("host", "localhost"), "pgvector");
+        int port = parseIntParam(params, "port", 5432);
+        guardStoreHost(host + ":" + port, "pgvector");
+        String database = params.getOrDefault("database", "eddi");
+        String user = params.getOrDefault("user", "eddi");
+        String password = requireParam(params, "password", "pgvector");
+        // Parsed only to be refused in the same words and the same order as the build
+        // refuses them: a read must not get further with settings a write would reject.
+        parseIntParam(params, "dimension", 1536);
+        String table = physicalName(params, "table", ragConfigId, config);
+        PgVectorSchema.settings(params);
+        return new PgVectorTarget(pgVectorPools.get(host, port, database, user, password, pgVectorPoolMaxSize), table);
+    }
+
+    /**
+     * Whether the knowledge base's pgvector table exists. Looks only; used by reads
+     * so that a search does not run {@code CREATE TABLE} (or {@code CREATE
+     * EXTENSION}, or index DDL) on a database it was only asked to read from.
+     */
+    private boolean pgVectorTableExists(String ragConfigId, RagConfiguration config) {
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        try (Connection connection = target.dataSource().getConnection()) {
+            return PgVectorSchema.inspect(connection, target.table()).exists();
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not look up table " + sanitize(target.table()) + ": " + sanitize(e.getMessage()), e);
+        }
+    }
+
+    private void dropPgVectorTableIfEmpty(String ragConfigId, RagConfiguration config) {
+        PgVectorTarget target = pgVectorTarget(ragConfigId, config);
+        String quoted = PgVectorSchema.quotedTable(target.table());
+        try (Connection connection = target.dataSource().getConnection()) {
+            if (!PgVectorSchema.inspect(connection, target.table()).exists()) {
+                return;
+            }
+            try (Statement statement = connection.createStatement();
+                    ResultSet rows = statement.executeQuery("SELECT 1 FROM " + quoted + " LIMIT 1")) {
+                if (rows.next()) {
+                    LOGGER.infof("pgvector table %s still holds rows of other knowledge bases; it is not dropped",
+                            sanitize(target.table()));
+                    return;
+                }
+            }
+            try (Statement statement = connection.createStatement()) {
+                statement.executeUpdate("DROP TABLE " + quoted);
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("pgvector: could not drop table " + sanitize(target.table()) + ": " + sanitize(e.getMessage()), e);
+        }
+        // The cached store was built over the table that is gone.
+        cache.invalidate(new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters()));
+        LOGGER.infof("Dropped the empty pgvector table %s of knowledge base %s; the next write recreates it", sanitize(target.table()),
+                sanitize(ragConfigId));
+    }
+
+    /** See {@link #ABSENT_TABLE}. */
+    private static final class AbsentTableStore implements EmbeddingStore<TextSegment> {
+
+        private static IllegalStateException noTable() {
+            return new IllegalStateException("The knowledge base's table does not exist yet; it is created by the first ingestion");
+        }
+
+        @Override
+        public String add(Embedding embedding) {
+            throw noTable();
+        }
+
+        @Override
+        public void add(String id, Embedding embedding) {
+            throw noTable();
+        }
+
+        @Override
+        public String add(Embedding embedding, TextSegment embedded) {
+            throw noTable();
+        }
+
+        @Override
+        public List<String> addAll(List<Embedding> embeddings) {
+            throw noTable();
+        }
+
+        @Override
+        public void removeAll(Filter filter) {
+            // Nothing there to remove.
+        }
+
+        @Override
+        public EmbeddingSearchResult<TextSegment> search(EmbeddingSearchRequest request) {
+            return new EmbeddingSearchResult<>(List.of());
+        }
     }
 
     // ──────────────────────────────────────────────────

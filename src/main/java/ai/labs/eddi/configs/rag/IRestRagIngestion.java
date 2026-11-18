@@ -337,4 +337,34 @@ public interface IRestRagIngestion {
                          @PathParam("sourceId") String sourceId,
                          @Parameter(name = "version", required = true, example = "1")
                          @QueryParam("version") Integer version);
+
+    @GET
+    @Path("/{id}/vector-space")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "200", description = "The embedding space the vector store holds, the one this knowledge base "
+            + "is configured for, and whether they match.")
+    @Operation(summary = "Read the vector space",
+               description = "Which embedding model (provider, model, vector size) the vectors in this knowledge base's external "
+                       + "vector store were made with, and the one the configuration now names. When they differ, searching and "
+                       + "ingesting are refused until the knowledge base is re-embedded. In-memory knowledge bases are not tracked "
+                       + "(a changed embedding configuration replaces their store).")
+    Response readVectorSpace(@PathParam("id") String ragConfigId,
+                             @Parameter(name = "version", required = true, example = "1")
+                             @QueryParam("version") Integer version);
+
+    @POST
+    @Path("/{id}/reembed")
+    @Produces(MediaType.APPLICATION_JSON)
+    @APIResponse(responseCode = "202", description = "The vectors were removed and a run of every enabled source was started; "
+            + "follow each run with GET /{id}/sources/{sourceId}/runs.")
+    @APIResponse(responseCode = "409", description = "A run is in flight for one of the sources; nothing was changed.")
+    @Operation(summary = "Re-embed a knowledge base",
+               description = "Removes every vector of this knowledge base from its vector store, records the embedding model it is "
+                       + "configured for as the one the store now holds, forgets the ingestion state of every source and starts a "
+                       + "run of each enabled source, which embeds everything again. Documents sent through POST /ingest are "
+                       + "not kept by EDDI: they are removed with the vectors and listed as not re-embedded — send them again. "
+                       + "Needed after the embedding model, provider or vector size of a knowledge base changed.")
+    Response reembed(@PathParam("id") String ragConfigId,
+                     @Parameter(name = "version", required = true, example = "1")
+                     @QueryParam("version") Integer version);
 }
