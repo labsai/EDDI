@@ -222,21 +222,35 @@ public final class UnitBudgetFitter {
             return tokens(node.first, node.last);
         }
 
+        /**
+         * One pass, linear in the list: a tiny node is carried into the next, which is
+         * then judged with it; one left over at the end goes into the last kept node.
+         * Removing from the list in place cost the square of its length — a million
+         * one-page windows.
+         */
         void mergeTiny(List<Node> list) {
-            int i = 0;
-            while (list.size() > 1 && i < list.size()) {
-                Node node = list.get(i);
-                if (tokens(node) >= config.minUnitTokens()) {
-                    i++;
-                } else if (i + 1 < list.size()) {
-                    list.get(i + 1).absorbFromBefore(node);
-                    list.remove(i);
+            List<Node> kept = new ArrayList<>(list.size());
+            Node carried = null;
+            for (Node node : list) {
+                if (carried != null) {
+                    node.absorbFromBefore(carried);
+                    carried = null;
+                }
+                if (tokens(node) < config.minUnitTokens()) {
+                    carried = node;
                 } else {
-                    list.get(i - 1).absorbFromAfter(node);
-                    list.remove(i);
-                    i--;
+                    kept.add(node);
                 }
             }
+            if (carried != null) {
+                if (kept.isEmpty()) {
+                    kept.add(carried);
+                } else {
+                    kept.getLast().absorbFromAfter(carried);
+                }
+            }
+            list.clear();
+            list.addAll(kept);
             for (Node node : list) {
                 if (!node.isLeaf()) {
                     mergeTiny(node.children);

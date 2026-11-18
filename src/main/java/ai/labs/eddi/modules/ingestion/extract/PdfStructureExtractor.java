@@ -59,9 +59,21 @@ import java.util.Set;
  * PDFBox's own outline and name-tree helpers are not used. They follow
  * {@code /Parent} chains and recurse into {@code /Kids} without remembering
  * where they have been, so a file whose tree refers back to itself loops or
- * overflows the stack — an {@link Error}, which no handler here would catch.
- * Both are walked here instead, iteratively, each object visited once, with a
- * cap on how many.
+ * overflows the stack. Both are walked here instead, iteratively, each object
+ * visited once, with a cap on how many, and the deadline checked every
+ * {@value #OBJECTS_PER_DEADLINE_CHECK} objects.
+ *
+ * <p>
+ * The page tree cannot be avoided the same way: PDFBox's page iterator, which
+ * text extraction uses, recurses once per level of the tree. So the tree is
+ * first walked here, iteratively, and refused when it is deeper than
+ * {@value #MAX_PAGE_TREE_DEPTH} levels or lists one page twice — the iterator
+ * would yield that page twice, and the page numbers here and those the text
+ * engine counts would disagree. One recursion is out of reach: when the
+ * cross-reference table is broken, the parser rebuilds it and walks the page
+ * tree recursively before this code has the document. A
+ * {@link StackOverflowError} from there is caught at the boundary and reported
+ * as an unreadable file.
  *
  * <h2>The cut</h2>
  * <ul>
@@ -73,13 +85,14 @@ import java.util.Set;
  * to the page before the next one starts — a chapter that starts mid-page owns
  * that page — and pages before the first chapter form a unit of their own. The
  * first part of a chapter starts where the chapter starts. An outline is usable
- * with two or more top-level chapters; otherwise the document is cut by
+ * when two or more top-level entries point to different pages of the document —
+ * the front-matter unit does not count; otherwise the document is cut by
  * pages.</li>
  * <li>{@link SplitStrategy#PAGES}: windows of
  * {@link SplitConfig#pagesPerUnit()} pages.</li>
  * <li>{@link SplitStrategy#AUTO}: the outline when usable, else pages. A
- * document with no text at all is cut by pages: a scan has no estimates to fit,
- * and pages are what its reader can name.</li>
+ * document with no text in the pages measured is cut by pages: a scan has no
+ * estimates to fit, and pages are what its reader can name.</li>
  * <li>{@link SplitStrategy#HEADINGS}: not available yet, handled as AUTO.</li>
  * </ul>
  * Then {@link UnitBudgetFitter} fits the units to the budget. The estimate for
@@ -101,6 +114,12 @@ public class PdfStructureExtractor {
     /** Named-destination entries and name-tree nodes visited at most. */
     static final int MAX_NAMED_DESTINATIONS = 50_000;
 
+    /**
+     * Levels of {@code /Pages} nodes a page tree may have. Real files have a
+     * handful; PDFBox's page iterator recurses once per level.
+     */
+    static final int MAX_PAGE_TREE_DEPTH = 256;
+
     /** How many objects a walk visits between deadline checks. */
     private static final int OBJECTS_PER_DEADLINE_CHECK = 64;
 
@@ -110,8 +129,6 @@ public class PdfStructureExtractor {
 
     static final String WARNING_HEADINGS = "Cutting by headings is not available yet; the outline or page windows "
             + "were used instead.";
-    static final String WARNING_NO_TEXT = "This PDF has no text layer (a scan, perhaps), so it was cut into page "
-            + "windows and its estimates are zero.";
     static final String WARNING_NO_OUTLINE = "This PDF has no usable outline, so it was cut into page windows.";
     static final String WARNING_OUTLINE_LOOP = "The outline refers back to itself; entries were read once each.";
     static final String WARNING_OUTLINE_TRUNCATED = "The outline has more than " + MAX_OUTLINE_ITEMS
@@ -120,6 +137,16 @@ public class PdfStructureExtractor {
             + "entries pointing past them were skipped.";
 
     static final String FRONT_MATTER = "Front matter";
+
+    /**
+     * The warning for a document with no text in the pages measured — all of them,
+     * or the first {@link ExtractionLimits#maxParts()}.
+     */
+    static String noTextWarning(int measured, int pageCount) {
+        String where = measured < pageCount ? "in the first " + measured + " of its " + pageCount + " pages" : "";
+        return "This PDF has no text layer" + (where.isEmpty() ? "" : " " + where)
+                + " (a scan, perhaps), so it was cut into page windows and its estimates are zero.";
+    }
 
     /**
      * @param pdf
@@ -160,6 +187,11 @@ public class PdfStructureExtractor {
         try (var budget = PdfDecodeBudget.open(bounds.maxDecodedBytes())) {
             try {
                 structure = read(pdf, config, bounds, deadline);
+            } catch (StackOverflowError e) {
+                // Last resort, for the one recursion this code cannot walk ahead of: the
+                // parser's own page-tree check while it rebuilds a broken cross-reference
+                // table. The overflow has unwound by here; nothing is left half-built.
+                throw new UnreadableDocumentException("This PDF's page tree is nested too deeply to be read.");
             } catch (UnreadableDocumentException e) {
                 if (budget.exceeded()) {
                     throw tooMuchToDecode(budget);
@@ -198,6 +230,7 @@ public class PdfStructureExtractor {
             if (document.isEncrypted()) {
                 throw new UnreadableDocumentException("This PDF is encrypted. Upload a copy without a password.");
             }
+            requireShallowPageTree(document, deadline);
             Map<COSDictionary, Integer> pageNumbers = numberPages(document, deadline);
             int pageCount = pageNumbers.size();
             if (pageCount == 0) {
@@ -213,7 +246,7 @@ public class PdfStructureExtractor {
             }
             List<Section> sections = null;
             if (wanted == SplitStrategy.AUTO && hasNoText(tokens)) {
-                warnings.add(WARNING_NO_TEXT);
+                warnings.add(noTextWarning(Math.min(pageCount, limits.maxParts()), pageCount));
             } else if (wanted != SplitStrategy.PAGES) {
                 sections = new OutlineReader(document, pageNumbers, pageCount, deadline, warnings).sections();
                 if (sections == null) {
@@ -236,17 +269,69 @@ public class PdfStructureExtractor {
 
     /**
      * Each page's dictionary to its 1-based number, by identity: the pages as the
-     * page tree really holds them, whatever its {@code /Count} claims.
+     * page tree really holds them, whatever its {@code /Count} claims, in the order
+     * the text engine counts them.
+     *
+     * @throws UnreadableDocumentException
+     *             when the tree lists one page twice: the text engine would count
+     *             it twice, and a page number here would name a different page
+     *             there
      */
     private static Map<COSDictionary, Integer> numberPages(PDDocument document, Instant deadline) {
         Map<COSDictionary, Integer> numbers = new IdentityHashMap<>();
+        int position = 0;
         for (PDPage page : document.getPages()) {
-            if (numbers.size() % OBJECTS_PER_DEADLINE_CHECK == 0) {
+            if (position++ % OBJECTS_PER_DEADLINE_CHECK == 0) {
                 requireBefore(deadline);
             }
-            numbers.putIfAbsent(page.getCOSObject(), numbers.size() + 1);
+            if (numbers.putIfAbsent(page.getCOSObject(), position) != null) {
+                throw new UnreadableDocumentException("This PDF lists the same page more than once in its page "
+                        + "tree, so its pages cannot be numbered reliably.");
+            }
         }
         return numbers;
+    }
+
+    /**
+     * Walks the page tree the way PDFBox's page iterator does — a node with
+     * {@code /Kids} or of type {@code /Pages} is a branch, a branch seen before is
+     * skipped — but iteratively, and refuses it when it is deeper than
+     * {@link #MAX_PAGE_TREE_DEPTH}, before the iterator's recursion is run on it.
+     */
+    private static void requireShallowPageTree(PDDocument document, Instant deadline) {
+        COSDictionary root = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGES);
+        if (root == null) {
+            return;
+        }
+        record Branch(COSDictionary node, int depth) {
+        }
+        Set<COSDictionary> seen = Collections.newSetFromMap(new IdentityHashMap<>());
+        Deque<Branch> pending = new ArrayDeque<>();
+        pending.push(new Branch(root, 1));
+        int visited = 0;
+        while (!pending.isEmpty()) {
+            Branch branch = pending.pop();
+            if (branch.depth() > MAX_PAGE_TREE_DEPTH) {
+                throw new UnreadableDocumentException("This PDF's page tree is nested more than "
+                        + MAX_PAGE_TREE_DEPTH + " levels deep, which no genuine document needs.");
+            }
+            if (++visited % OBJECTS_PER_DEADLINE_CHECK == 0) {
+                requireBefore(deadline);
+            }
+            COSArray kids = branch.node().getCOSArray(COSName.KIDS);
+            if (kids == null) {
+                continue;
+            }
+            for (int i = 0; i < kids.size(); i++) {
+                if (kids.getObject(i) instanceof COSDictionary kid && isBranch(kid) && seen.add(kid)) {
+                    pending.push(new Branch(kid, branch.depth() + 1));
+                }
+            }
+        }
+    }
+
+    private static boolean isBranch(COSDictionary node) {
+        return COSName.PAGES.equals(node.getCOSName(COSName.TYPE)) || node.containsKey(COSName.KIDS);
     }
 
     /**
@@ -292,8 +377,9 @@ public class PdfStructureExtractor {
 
     private static List<Section> pageWindows(int pageCount, int pagesPerUnit) {
         List<Section> windows = new ArrayList<>();
-        for (int first = 1; first <= pageCount; first += pagesPerUnit) {
-            windows.add(Section.of(null, first, Math.min(pageCount, first + pagesPerUnit - 1)));
+        // In long arithmetic: a window of nearly Integer.MAX_VALUE pages would wrap.
+        for (long first = 1; first <= pageCount; first += pagesPerUnit) {
+            windows.add(Section.of(null, (int) first, (int) Math.min(pageCount, first + pagesPerUnit - 1)));
         }
         return windows;
     }
@@ -392,8 +478,10 @@ public class PdfStructureExtractor {
             while (top.size() == 1 && !top.get(0).children.isEmpty()) {
                 top = top.get(0).children;
             }
-            List<Section> sections = place(top, 1, pageCount, true);
-            return sections.size() >= 2 ? sections : null;
+            // Chapters, not placed sections: the front-matter section placed before a
+            // single chapter makes two sections out of an outline with one entry.
+            long chapters = top.stream().mapToInt(entry -> entry.page).distinct().count();
+            return chapters >= 2 ? place(top, 1, pageCount, true) : null;
         }
 
         /**

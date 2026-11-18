@@ -146,6 +146,40 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @DisplayName("treats one chapter after some front matter as no usable outline")
+        void singleChapterAfterFrontMatter() {
+            DocumentManifest manifest = manifest(PdfFixtures.chapterOnPageThree(), unfitted(SplitStrategy.AUTO));
+
+            assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE), manifest.warnings());
+        }
+
+        @Test
+        @DisplayName("follows a page index, a name naming a name, and a name tree that loops; stops at deeper names")
+        void destinationEdgeCases() {
+            DocumentManifest manifest = manifest(PdfFixtures.namedDestinationEdgeCases(),
+                    unfitted(SplitStrategy.OUTLINE));
+
+            assertEquals("u1:1-2 u2:3-4 u3:5-6", shape(manifest));
+            assertEquals(List.of("Tree", "Numeric", "Two names"), titles(manifest));
+            assertEquals(List.of("2 outline entries point to no page of this PDF and were skipped."),
+                    manifest.warnings());
+        }
+
+        @Test
+        @Timeout(60)
+        @DisplayName("reads at most 50,000 named destinations, and says the rest were not read")
+        void namesTruncated() {
+            DocumentManifest manifest = manifest(
+                    PdfFixtures.manyNamedDestinations(PdfStructureExtractor.MAX_NAMED_DESTINATIONS + 10),
+                    unfitted(SplitStrategy.OUTLINE));
+
+            assertEquals("u1:1-1 u2:2-2", shape(manifest));
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NAMES_TRUNCATED,
+                    "1 outline entry points to no page of this PDF and was skipped."), manifest.warnings());
+        }
+
+        @Test
         @DisplayName("treats an outline with one chapter as unusable")
         void singleChapter() {
             DocumentManifest manifest = manifest(PdfFixtures.chapters(5), unfitted(SplitStrategy.AUTO));
@@ -180,6 +214,15 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @DisplayName("takes a window larger than any document as one window, without overflowing")
+        void hugeWindow() {
+            var split = new SplitConfig(SplitStrategy.PAGES, Integer.MAX_VALUE, 100_000, 0, 10);
+            DocumentManifest manifest = manifest(PdfFixtures.plain(3), split);
+
+            assertEquals("u1:1-3", shape(manifest));
+        }
+
+        @Test
         @DisplayName("ignores the outline when asked for pages")
         void pagesRequested() {
             var split = new SplitConfig(SplitStrategy.PAGES, 3, 100_000, 0, 100);
@@ -191,6 +234,18 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @DisplayName("says how many pages were measured when a document has no text in them")
+        void noTextInTheMeasuredPages() {
+            var fewPages = new ExtractionLimits(200_000, 4, 5_000, 64, 64L * 1024 * 1024);
+            DocumentManifest manifest = extractor.manifest(PdfFixtures.blank(12), "ref-1", SplitConfig.defaults(),
+                    fewPages);
+
+            assertTrue(manifest.warnings().contains(PdfStructureExtractor.noTextWarning(4, 12)),
+                    manifest.warnings().toString());
+            assertTrue(PdfStructureExtractor.noTextWarning(4, 12).contains("in the first 4 of its 12 pages"));
+        }
+
+        @Test
         @DisplayName("cuts a document with no text into windows whatever its outline, with zero estimates")
         void noText() {
             DocumentManifest manifest = manifest(PdfFixtures.blank(25), SplitConfig.defaults());
@@ -198,7 +253,7 @@ class PdfStructureExtractorTest {
             assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
             assertEquals("u1:1-10 u2:11-20 u3:21-25", shape(manifest));
             assertTrue(manifest.units().stream().allMatch(u -> u.estimatedTokens() == 0));
-            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_TEXT), manifest.warnings());
+            assertEquals(List.of(PdfStructureExtractor.noTextWarning(25, 25)), manifest.warnings());
         }
     }
 
@@ -486,6 +541,58 @@ class PdfStructureExtractorTest {
                     SplitConfig.defaults(), limits.withMaxDuration(Duration.ofNanos(1)), false));
 
             assertTrue(failure.getMessage().contains("too long"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("refuses a document whose decode budget ran out where PDFBox swallowed the failure")
+        void budgetSpentWherePdfBoxCarriedOn() {
+            // PDFBox measures the space glyph inside catch (Exception); the read
+            // completes, and only the re-check after it refuses the file.
+            byte[] pdf = PdfFixtures.type3SpaceBomb(8 * 1024 * 1024);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> extractor.manifest(pdf, "ref-1", SplitConfig.defaults(), oneMegabyte, false));
+
+            assertTrue(failure.getMessage().contains("while it is read"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("refuses a page tree that lists a page twice, whose page numbers would disagree")
+        void duplicatePage() {
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> manifest(PdfFixtures.duplicatePageInTree(), SplitConfig.defaults()));
+
+            assertTrue(failure.getMessage().contains("same page more than once"), failure.getMessage());
+        }
+
+        @Test
+        @Timeout(60)
+        @DisplayName("refuses a page tree nested too deeply, rather than overflowing the stack")
+        void deepPageTree() {
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> manifest(PdfFixtures.deepPageTree(50_000), SplitConfig.defaults()));
+
+            // Refused by the depth check, before PDFBox's iterator could recurse.
+            assertTrue(failure.getMessage().contains("more than " + PdfStructureExtractor.MAX_PAGE_TREE_DEPTH
+                    + " levels"), failure.getMessage());
+        }
+
+        @Test
+        @Timeout(60)
+        @DisplayName("reports a stack overflow in the parser's own page-tree check as an unreadable file")
+        void deepPageTreeWithBrokenXref() {
+            // The parser rebuilds a broken cross-reference table and walks the page
+            // tree recursively while loading, before this code can check its depth.
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> manifest(PdfFixtures.deepPageTreeWithBrokenXref(50_000), SplitConfig.defaults()));
+
+            assertTrue(failure.getMessage().contains("nested too deeply"), failure.getMessage());
+        }
+
+        @Test
+        @DisplayName("reads a page tree of ordinary depth")
+        void ordinaryPageTree() {
+            assertEquals(1, manifest(PdfFixtures.deepPageTree(20), SplitConfig.defaults()).pageCount());
         }
 
         @Test

@@ -5,8 +5,12 @@
 package ai.labs.eddi.modules.ingestion.extract;
 
 import org.apache.pdfbox.Loader;
+import org.apache.pdfbox.cos.COSArray;
+import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
+import org.apache.pdfbox.cos.COSInteger;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSString;
 import org.apache.pdfbox.pdmodel.PDDocument;
 import org.apache.pdfbox.pdmodel.PDDocumentInformation;
 import org.apache.pdfbox.pdmodel.PDDocumentNameDictionary;
@@ -287,6 +291,162 @@ public final class PdfFixtures {
         });
     }
 
+    /** Five text pages and one outline entry, pointing to page 3. */
+    public static byte[] chapterOnPageThree() {
+        return build(document -> {
+            List<PDPage> pages = addTextPages(document, 5);
+            outline(document).addLast(item("The only chapter", pages.get(2)));
+        });
+    }
+
+    /**
+     * Two text pages A and B whose page tree lists A twice: {@code /Kids [A A B]}.
+     * PDFBox's page iterator yields A twice.
+     */
+    public static byte[] duplicatePageInTree() {
+        return build(document -> {
+            List<PDPage> pages = addTextPages(document, 2);
+            outline(document).addLast(item("B", pages.get(1)));
+            COSDictionary root = document.getDocumentCatalog().getCOSObject().getCOSDictionary(COSName.PAGES);
+            var kids = new COSArray();
+            kids.add(pages.get(0).getCOSObject());
+            kids.add(pages.get(0).getCOSObject());
+            kids.add(pages.get(1).getCOSObject());
+            root.setItem(COSName.KIDS, kids);
+            root.setInt(COSName.COUNT, 3);
+        });
+    }
+
+    /**
+     * One page under a chain of {@code depth} nested {@code /Pages} nodes, each the
+     * only kid of the one above: PDFBox's page iterator recurses once per level.
+     * Written by hand.
+     */
+    public static byte[] deepPageTree(int depth) {
+        List<String> objects = new ArrayList<>();
+        objects.add("<</Type/Catalog/Pages 2 0 R>>");
+        for (int level = 0; level < depth; level++) {
+            objects.add("<</Type/Pages/Kids[" + (level + 3) + " 0 R]/Count 1>>");
+        }
+        objects.add("<</Type/Page/MediaBox[0 0 612 792]>>");
+        return rawPdf(objects.stream().map(o -> o.getBytes(StandardCharsets.US_ASCII)).toList());
+    }
+
+    /**
+     * {@link #deepPageTree(int)} with its {@code startxref} pointing nowhere and
+     * its cross-reference table unrecognisable, so PDFBox's parser rebuilds the
+     * cross-reference table — and, doing so, walks the page tree recursively while
+     * the file is loaded, before any caller has it.
+     */
+    public static byte[] deepPageTreeWithBrokenXref(int depth) {
+        byte[] pdf = deepPageTree(depth);
+        String text = new String(pdf, StandardCharsets.ISO_8859_1);
+        int at = text.lastIndexOf("startxref\n") + "startxref\n".length();
+        int end = text.indexOf('\n', at);
+        String broken = text.substring(0, at) + "999999999" + text.substring(end);
+        // And no table where one is looked for either: only a full rebuild finds the
+        // objects.
+        return broken.replace("xref", "xrex").getBytes(StandardCharsets.ISO_8859_1);
+    }
+
+    /**
+     * One page showing "A" in a Type 3 font whose {@code space} glyph — never
+     * shown, but measured by PDFBox to space words — is a Flate stream inflating to
+     * {@code inflatedBytes}. PDFBox measures that width inside a
+     * {@code catch (Exception)}, so the decode budget's failure is swallowed and
+     * the read completes: only the budget's own record of it refuses the file.
+     */
+    public static byte[] type3SpaceBomb(int inflatedBytes) {
+        byte[] bomb = zlib("q Q\n".repeat(inflatedBytes / 4).getBytes(StandardCharsets.US_ASCII));
+        byte[] content = "BT /F1 12 Tf 72 700 Td (A) Tj ET".getBytes(StandardCharsets.US_ASCII);
+        byte[] glyph = "500 0 d0".getBytes(StandardCharsets.US_ASCII);
+        return rawPdf(List.of(
+                ascii("<</Type/Catalog/Pages 2 0 R>>"),
+                ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</Font<</F1 4 0 R>>>>"
+                        + "/Contents 5 0 R>>"),
+                ascii("<</Type/Font/Subtype/Type3/FontBBox[0 0 1000 1000]/FontMatrix[0.001 0 0 0.001 0 0]"
+                        + "/FirstChar 65/LastChar 65/Widths[500]"
+                        + "/Encoding<</Type/Encoding/Differences[32/space 65/A]>>"
+                        + "/CharProcs<</A 6 0 R/space 7 0 R>>/Resources<<>>>>"),
+                stream("", content),
+                stream("", glyph),
+                stream("/Filter/FlateDecode", bomb)));
+    }
+
+    /**
+     * Six text pages and outline entries reached the odd ways a destination can be
+     * written: a page index where a page belongs ("Numeric", page 3), a name naming
+     * a name naming a page ("Two names", page 5), a name in a {@code /Dests} name
+     * tree whose {@code /Kids} lead back to its root ("Tree", page 1), a chain of
+     * three names ("Three names", deeper than is followed) and a name naming itself
+     * ("Itself").
+     */
+    public static byte[] namedDestinationEdgeCases() {
+        return build(document -> {
+            List<PDPage> pages = addTextPages(document, 6);
+            COSDictionary catalog = document.getDocumentCatalog().getCOSObject();
+
+            var legacy = new COSDictionary();
+            legacy.setItem(COSName.getPDFName("a"), COSName.getPDFName("b"));
+            legacy.setItem(COSName.getPDFName("b"), fitArray(pages.get(4)));
+            legacy.setItem(COSName.getPDFName("x"), COSName.getPDFName("y"));
+            legacy.setItem(COSName.getPDFName("y"), COSName.getPDFName("z"));
+            legacy.setItem(COSName.getPDFName("z"), fitArray(pages.get(5)));
+            legacy.setItem(COSName.getPDFName("self"), COSName.getPDFName("self"));
+            catalog.setItem(COSName.DESTS, legacy);
+
+            var treeRoot = new COSDictionary();
+            var kid = new COSDictionary();
+            var pairs = new COSArray();
+            pairs.add(new COSString("t"));
+            pairs.add(fitArray(pages.get(0)));
+            kid.setItem(COSName.NAMES, pairs);
+            kid.setItem(COSName.KIDS, arrayOf(treeRoot));
+            treeRoot.setItem(COSName.KIDS, arrayOf(kid));
+            var names = new COSDictionary();
+            names.setItem(COSName.DESTS, treeRoot);
+            catalog.setItem(COSName.NAMES, names);
+
+            PDDocumentOutline outline = outline(document);
+            var numeric = new PDOutlineItem();
+            numeric.setTitle("Numeric");
+            var index = new COSArray();
+            index.add(COSInteger.get(2));
+            index.add(COSName.getPDFName("Fit"));
+            numeric.getCOSObject().setItem(COSName.DEST, index);
+            outline.addLast(numeric);
+            outline.addLast(named("Two names", COSName.getPDFName("a")));
+            outline.addLast(named("Tree", new COSString("t")));
+            outline.addLast(named("Three names", COSName.getPDFName("x")));
+            outline.addLast(named("Itself", COSName.getPDFName("self")));
+        });
+    }
+
+    /**
+     * Two text pages, explicit outline entries on each, and a {@code /Dests} name
+     * tree of {@code count} names; a third entry names the last of them.
+     */
+    public static byte[] manyNamedDestinations(int count) {
+        return build(document -> {
+            List<PDPage> pages = addTextPages(document, 2);
+            var pairs = new COSArray();
+            for (int i = 0; i < count; i++) {
+                pairs.add(new COSString(String.format("n%06d", i)));
+                pairs.add(fitArray(pages.get(0)));
+            }
+            var tree = new COSDictionary();
+            tree.setItem(COSName.NAMES, pairs);
+            var names = new COSDictionary();
+            names.setItem(COSName.DESTS, tree);
+            document.getDocumentCatalog().getCOSObject().setItem(COSName.NAMES, names);
+            PDDocumentOutline outline = outline(document);
+            outline.addLast(item("One", pages.get(0)));
+            outline.addLast(item("Two", pages.get(1)));
+            outline.addLast(named("Last name", new COSString(String.format("n%06d", count - 1))));
+        });
+    }
+
     /** The same document, loaded and saved again by PDFBox: different bytes. */
     public static byte[] resaved(byte[] pdf) {
         try (PDDocument document = Loader.loadPDF(pdf)) {
@@ -363,6 +523,63 @@ public final class PdfFixtures {
         item.setTitle(title);
         item.setDestination(page);
         return item;
+    }
+
+    private static PDOutlineItem named(String title, COSBase name) {
+        var item = new PDOutlineItem();
+        item.setTitle(title);
+        item.getCOSObject().setItem(COSName.DEST, name);
+        return item;
+    }
+
+    private static COSArray arrayOf(COSBase element) {
+        var array = new COSArray();
+        array.add(element);
+        return array;
+    }
+
+    private static COSArray fitArray(PDPage page) {
+        var array = new COSArray();
+        array.add(page.getCOSObject());
+        array.add(COSName.getPDFName("Fit"));
+        return array;
+    }
+
+    private static byte[] ascii(String text) {
+        return text.getBytes(StandardCharsets.US_ASCII);
+    }
+
+    private static byte[] stream(String dictionaryEntries, byte[] data) {
+        var out = new ByteArrayOutputStream();
+        out.writeBytes(ascii("<</Length " + data.length + dictionaryEntries + ">>stream\n"));
+        out.writeBytes(data);
+        out.writeBytes(ascii("\nendstream"));
+        return out.toByteArray();
+    }
+
+    /**
+     * A PDF of the given objects, numbered from 1 in order (object 1 is the
+     * catalog), with a correct cross-reference table.
+     */
+    private static byte[] rawPdf(List<byte[]> objects) {
+        var out = new ByteArrayOutputStream();
+        out.writeBytes(ascii("%PDF-1.4\n"));
+        List<Integer> offsets = new ArrayList<>();
+        for (int i = 0; i < objects.size(); i++) {
+            offsets.add(out.size());
+            out.writeBytes(ascii((i + 1) + " 0 obj\n"));
+            out.writeBytes(objects.get(i));
+            out.writeBytes(ascii("\nendobj\n"));
+        }
+        int xref = out.size();
+        var trailer = new StringBuilder("xref\n0 " + (objects.size() + 1) + "\n0000000000 65535 f \n");
+        for (int offset : offsets) {
+            trailer.append(String.format("%010d 00000 n \n", offset));
+        }
+        trailer.append("trailer<</Size ").append(objects.size() + 1).append("/Root 1 0 R>>\nstartxref\n")
+                .append(xref).append("\n%%EOF\n");
+        out.writeBytes(ascii(trailer.toString()));
+        return out.toByteArray();
     }
 
     private static PDPageDestination fit(PDPage page) {
