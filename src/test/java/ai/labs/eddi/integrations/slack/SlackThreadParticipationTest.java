@@ -159,7 +159,9 @@ class SlackThreadParticipationTest {
 
         handler.handleEventAsync(id(), threadReply("100.1", "100.5", "continuing"), BOT, origin());
 
-        verify(router, timeout(2000)).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"), any(ChannelTarget.class));
+        // Written back when the mapping is found (and again when the reply is routed).
+        verify(router, timeout(2000).atLeastOnce()).lockThreadTarget(eq("slack"), eq(CHANNEL), eq("100.1"),
+                any(ChannelTarget.class));
         verify(slackApi, timeout(2000)).postMessage(anyString(), eq(CHANNEL), eq("100.1"), anyString());
     }
 

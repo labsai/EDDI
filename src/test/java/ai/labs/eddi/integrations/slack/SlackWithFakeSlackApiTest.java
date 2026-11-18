@@ -194,6 +194,9 @@ class SlackWithFakeSlackApiTest {
             integration.setChannelType("slack");
             integration.setPlatformConfig(new HashMap<>(Map.of("signingSecret", "secret-a", "botToken", "xoxb-fake")));
             integration.setTargets(List.of(target));
+            // The channel is owned by the integration: the timeout notice, which has no
+            // resolved route to take a token from, looks it up by channel.
+            when(router.getBotToken("slack", CHANNEL)).thenReturn("xoxb-fake");
             when(router.resolveTarget(any(), any(), any()))
                     .thenAnswer(inv -> new ResolvedTarget(target, inv.getArgument(2), integration, null, null));
             this.cacheFactory = cacheFactory;
@@ -300,6 +303,8 @@ class SlackWithFakeSlackApiTest {
 
             assertEquals("the late answer", postedTexts().get(1));
             assertEquals(2, postedTexts().size(), "the answer is posted once");
+            // Counted once the delivery has returned, a moment after the post itself.
+            waitFor(() -> late("posted") == 1.0);
             assertEquals(1.0, late("posted"));
         }
 
