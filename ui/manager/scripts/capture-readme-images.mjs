@@ -3,7 +3,7 @@
 //
 // The screenshots come from the Manager running on its mock API (MSW), so they
 // need no backend and show the same data every time. They went stale once
-// already: the previous set still said "EDDI Manager 6.0.0" at 6.7. Re-run this
+// already: the previous set showed pages as they looked at 6.0. Re-run this
 // after a visible change to a page it captures.
 //
 //   cd ui && npm ci                       # once
@@ -46,14 +46,10 @@ const SHOTS = [
     file: "manager-group-discussion.png",
     route: "/manage/groups/grp1",
     prepare: async (page) => {
-      const question = page.getByPlaceholder(/ask a question/i);
-      await question.fill("What are the key benefits of AI agents?");
-      await page.getByTestId("start-discussion-btn").click();
-      // The mock stream plays a whole peer review; the composer says so until it ends.
-      await page.getByPlaceholder(/in progress/i).waitFor({ timeout: 15_000 });
-      await page.getByPlaceholder(/in progress/i).waitFor({ state: "detached", timeout: 120_000 });
-      // Let the "discussion started / completed" toasts leave.
-      await page.waitForTimeout(7000);
+      // A finished discussion from the list, with the configuration panel out of the way.
+      await page.locator('[data-testid^="discussion-item-"]').first().click();
+      await page.getByRole("button", { name: "Hide config panel" }).click();
+      await page.waitForTimeout(1500);
     },
   },
 ];
@@ -66,9 +62,9 @@ async function captureBanner(browser) {
   const page = await context.newPage();
   await page.goto(pathToFileURL(path.join(repoRoot, "branding", "readme-banner", "banner.html")).href);
   await page.waitForLoadState("networkidle");
-  await page.screenshot({ path: path.join(outDir, "eddi-banner.png") });
+  await page.screenshot({ path: path.join(outDir, "eddi-banner.jpg"), type: "jpeg", quality: 92 });
   await context.close();
-  console.log("wrote screenshots/eddi-banner.png");
+  console.log("wrote screenshots/eddi-banner.jpg");
 }
 
 async function captureShots(browser) {
@@ -101,6 +97,9 @@ async function captureShots(browser) {
       await dismiss.first().click();
       await page.waitForTimeout(300);
     }
+    // The mock API always reports version "6.0.0-demo"; a release number that never
+    // changes would date the picture, so the sidebar's version label is left out.
+    await page.addStyleTag({ content: '[data-testid="sidebar-version"] { visibility: hidden; }' });
     if (shot.prepare) {
       await shot.prepare(page);
     }

@@ -1,9 +1,9 @@
 <!doctype html>
 <!--
-  Source of screenshots/eddi-banner.png, the image at the top of README.md.
+  Source of screenshots/eddi-banner.jpg, the image at the top of README.md.
   Rendered at 1280x380 CSS pixels, device scale factor 2, by
   ui/manager/scripts/capture-readme-images.mjs. Edit this file and re-run the
-  script; do not edit the PNG.
+  script; do not edit the image.
 -->
 <html lang="en">
 <head>
@@ -43,23 +43,23 @@
     mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 100%);
   }
   .left {
-    position: absolute; left: 72px; top: 0; bottom: 0; width: 560px;
+    position: absolute; left: 64px; top: 0; bottom: 0; width: 540px;
     display: flex; flex-direction: column; justify-content: center;
   }
   .wordmark { height: 58px; width: auto; align-self: flex-start; margin-left: -4px; }
   h1 {
     margin-top: 30px;
-    font-size: 33px; line-height: 1.22; font-weight: 600; letter-spacing: -0.01em;
+    font-size: 34px; line-height: 1.22; font-weight: 600; letter-spacing: -0.01em;
   }
   .tags {
     margin-top: 22px;
-    font-size: 15px; font-weight: 500; letter-spacing: 0.04em; color: var(--amber-soft);
+    font-size: 17px; font-weight: 500; letter-spacing: 0.03em; color: var(--amber-soft);
   }
   .tags span { color: #57534e; padding: 0 9px; }
 
   /* The pipeline: what a turn goes through. */
   .right {
-    position: absolute; right: 64px; top: 0; bottom: 0; width: 520px;
+    position: absolute; right: 56px; top: 0; bottom: 0; width: 580px;
     display: flex; flex-direction: column; justify-content: center;
   }
   .card {
@@ -70,16 +70,16 @@
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
   }
   .card-title {
-    font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
     color: var(--muted);
   }
   .steps { margin-top: 16px; display: flex; align-items: center; }
   .step {
     flex: 0 0 auto;
-    padding: 9px 13px;
+    padding: 10px 14px;
     border: 1px solid #44403c; border-radius: 10px;
     background: #0c0a09;
-    font-size: 14px; font-weight: 500; white-space: nowrap;
+    font-size: 17px; font-weight: 500; white-space: nowrap;
   }
   .step.rules { border-color: var(--amber); color: var(--amber-soft); background: rgba(245, 158, 11, 0.10); }
   .arrow { flex: 1 1 auto; height: 1px; min-width: 10px; background: #57534e; position: relative; }
@@ -90,13 +90,13 @@
   .memory {
     margin-top: 14px; padding: 8px 13px;
     border: 1px dashed #44403c; border-radius: 10px;
-    font-size: 12.5px; color: var(--muted); text-align: center; letter-spacing: 0.02em;
+    font-size: 15px; color: var(--muted); text-align: center; letter-spacing: 0.02em;
   }
   pre {
     margin-top: 16px; padding: 13px 15px;
     background: #0c0a09; border: 1px solid var(--line); border-radius: 10px;
     font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
-    font-size: 12.5px; line-height: 1.6; color: #d6d3d1;
+    font-size: 14.5px; line-height: 1.65; color: #d6d3d1;
   }
   .k { color: #7dd3fc; } .s { color: var(--amber-soft); } .p { color: #78716c; }
 </style>
@@ -122,8 +122,8 @@
         <div class="step">Output</div>
       </div>
       <div class="memory">conversation memory, read and written by every step</div>
-<pre><span class="p">behavior rule   emits      </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span>
-<span class="p">LLM task        listens on </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span></pre>
+<pre><span class="p">rule  emits      </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span>
+<span class="p">task  listens on </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span></pre>
     </div>
   </div>
 </body>

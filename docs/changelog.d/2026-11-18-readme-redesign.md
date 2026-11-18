@@ -4,7 +4,7 @@
 
 ### What changed and why
 
-**`README.md` went from 62 KB and 740 lines to about 15 KB and 200.** It had grown
+**`README.md` went from 62 KB and 740 lines to about 14 KB and 200.** It had grown
 by accretion: every feature added a bullet, every deployment fix a paragraph, and
 the result was a page whose first screen was nine badges and a table of contents,
 whose middle was 200 lines of feature bullets and a 43-row index that duplicated
@@ -61,14 +61,16 @@ no multi-file compose command (`ComposeStackTest`); the commands that moved to
 
 ### Images
 
-- **Banner:** `screenshots/eddi-banner.png`, rendered from
+- **Banner:** `screenshots/eddi-banner.jpg`, rendered from
   [`branding/readme-banner/banner.html`](../../branding/readme-banner/banner.html).
   The old one was a 1200×630 social card (tall for a README) whose tagline, "The
   Enterprise AI Orchestrator", matched neither the README nor the repository
   description. The new one is 1280×380, carries the README's own line, and draws
   the pipeline instead of generic artwork.
-- **Screenshots:** retaken from the current Manager on its mock API. The old set
-  still showed "EDDI Manager 6.0.0".
+- **Screenshots:** retaken from the current Manager on its mock API; the old set
+  showed the pages as they looked at 6.0. The mock API always reports version
+  `6.0.0-demo`, so the capture hides the sidebar's version label rather than
+  print a release number that never changes.
 - **[`ui/manager/scripts/capture-readme-images.mjs`](../../ui/manager/scripts/capture-readme-images.mjs)**
   regenerates all of them, so the next refresh is one command rather than a
   manual session.
