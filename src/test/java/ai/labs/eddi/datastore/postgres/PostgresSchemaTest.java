@@ -6,15 +6,20 @@ package ai.labs.eddi.datastore.postgres;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.InOrder;
+import org.mockito.invocation.Invocation;
+import org.mockito.invocation.InvocationOnMock;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,40 +36,129 @@ import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.contains;
-import static org.mockito.Mockito.inOrder;
+import static org.mockito.Mockito.RETURNS_DEFAULTS;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockingDetails;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+/**
+ * {@link PostgresSchema} against a scripted connection: every query the class
+ * runs is answered by {@link #answer}, which hands out a fresh result set per
+ * query (so the test can assert that each one is closed) or throws what the
+ * test configured for a fragment of the SQL. What ran, and in which order, is
+ * read from the recorded invocations.
+ */
 class PostgresSchemaTest {
 
     private DataSource dataSource;
     private Connection connection;
     private Statement statement;
+    private PreparedStatement catalogueLookup;
+
+    /** SQL fragment -> failure, for executeQuery and execute on the statement. */
+    private final Map<String, SQLException> failures = new ConcurrentHashMap<>();
+    /** Every result set handed out, to check that all of them were closed. */
+    private final List<ResultSet> resultSets = new CopyOnWriteArrayList<>();
+    /**
+     * The catalogue's row for the looked-up column (is_nullable, data_type), or
+     * null.
+     */
+    private volatile String[] catalogueRow;
 
     @BeforeEach
     void setUp() throws SQLException {
+        failures.clear();
+        resultSets.clear();
+        catalogueRow = null;
+        statement = mock(Statement.class, this::answer);
+        catalogueLookup = mock(PreparedStatement.class, this::answer);
+        connection = mock(Connection.class, this::answer);
         dataSource = mock(DataSource.class);
-        connection = mock(Connection.class);
-        statement = mock(Statement.class);
         when(dataSource.getConnection()).thenReturn(connection);
-        when(connection.createStatement()).thenReturn(statement);
         PostgresSchema.resetForTests();
+    }
+
+    private Object answer(InvocationOnMock invocation) throws Throwable {
+        String method = invocation.getMethod().getName();
+        Object mock = invocation.getMock();
+        if (mock == connection) {
+            return switch (method) {
+                case "createStatement" -> statement;
+                case "prepareStatement" -> catalogueLookup;
+                default -> RETURNS_DEFAULTS.answer(invocation);
+            };
+        }
+        if (mock == statement && method.equals("getConnection")) {
+            return connection;
+        }
+        if ((method.equals("executeQuery") || method.equals("execute")) && invocation.getArguments().length == 1) {
+            String sql = invocation.getArgument(0);
+            for (var failure : failures.entrySet()) {
+                if (sql.contains(failure.getKey())) {
+                    throw failure.getValue();
+                }
+            }
+        }
+        if (method.equals("executeQuery")) {
+            ResultSet rs = mock(ResultSet.class);
+            String[] row = mock == catalogueLookup ? catalogueRow : null;
+            if (row != null) {
+                when(rs.next()).thenReturn(true, false);
+                when(rs.getString(1)).thenReturn(row[0]);
+                when(rs.getString(2)).thenReturn(row[1]);
+            }
+            resultSets.add(rs);
+            return rs;
+        }
+        return RETURNS_DEFAULTS.answer(invocation);
+    }
+
+    /** The SQL the statement ran, in order: queries and plain executes. */
+    private List<String> statementSql() {
+        List<String> sql = new ArrayList<>();
+        for (Invocation invocation : mockingDetails(statement).getInvocations()) {
+            String method = invocation.getMethod().getName();
+            if ((method.equals("executeQuery") || method.equals("execute")) && invocation.getArguments().length == 1) {
+                sql.add(invocation.getArgument(0));
+            }
+        }
+        return sql;
+    }
+
+    private long count(String fragment) {
+        return statementSql().stream().filter(s -> s.contains(fragment)).count();
+    }
+
+    private void assertEveryResultSetClosed() throws SQLException {
+        assertFalse(resultSets.isEmpty());
+        for (ResultSet rs : resultSets) {
+            verify(rs).close();
+        }
     }
 
     @Test
     void run_takesTheAdvisoryLockAroundTheWorkAndReleasesIt() throws Exception {
         PostgresSchema.run(dataSource, "step", stmt -> stmt.execute("CREATE TABLE x"));
 
-        InOrder order = inOrder(statement);
-        order.verify(statement).executeQuery(contains("set_config('lock_timeout'"));
-        order.verify(statement).executeQuery(contains("pg_advisory_lock(" + PostgresSchema.lockKey("step")));
-        order.verify(statement).execute("CREATE TABLE x");
-        order.verify(statement).executeQuery(contains("pg_advisory_unlock(" + PostgresSchema.lockKey("step")));
+        long key = PostgresSchema.lockKey("step");
+        assertEquals(List.of(PostgresSchema.SAVE_LOCK_TIMEOUT, PostgresSchema.SET_LOCK_TIMEOUT, "SELECT pg_advisory_lock(" + key + ")",
+                "CREATE TABLE x", "SELECT pg_advisory_unlock(" + key + ")", PostgresSchema.RESTORE_LOCK_TIMEOUT), statementSql());
+        assertEveryResultSetClosed();
+        verify(statement).close();
         verify(connection).close();
+        verify(connection, never()).abort(any());
+    }
+
+    @Test
+    void theLockTimeoutStatementsCarryNoValueFromOutside() {
+        // the session's own value is saved and restored inside PostgreSQL; nothing read
+        // back into Java is ever spliced into SQL
+        assertEquals("SELECT set_config('lock_timeout', '" + PostgresSchema.LOCK_TIMEOUT_SECONDS + "s', false)", PostgresSchema.SET_LOCK_TIMEOUT);
+        assertTrue(PostgresSchema.SAVE_LOCK_TIMEOUT.contains("current_setting('lock_timeout')"));
+        assertTrue(PostgresSchema.RESTORE_LOCK_TIMEOUT.contains("current_setting('eddi.schema_saved_lock_timeout')"));
     }
 
     @Test
@@ -97,7 +191,7 @@ class PostgresSchemaTest {
         pool.shutdownNow();
 
         assertEquals(1, executions.get(), "the DDL of one step runs once per JVM and database");
-        verify(statement, times(1)).executeQuery(contains("pg_advisory_lock("));
+        assertEquals(1, count("pg_advisory_lock("));
     }
 
     @Test
@@ -137,10 +231,10 @@ class PostgresSchemaTest {
             throw failure;
         }));
         assertSame(failure, thrown, "the cause reaches the caller");
-        verify(statement).executeQuery(contains("pg_advisory_unlock("));
+        assertEquals(1, count("pg_advisory_unlock("));
 
         // inside the back-off the database is not touched: the same error again, from
-        // the remembered one
+        // the remembered message and SQLState
         SQLException refused = assertThrows(SQLException.class,
                 () -> PostgresSchema.runOnce(dataSource, "flaky", stmt -> attempts.incrementAndGet()));
         assertTrue(refused.getMessage().contains(failure.getMessage()), refused.getMessage());
@@ -180,37 +274,39 @@ class PostgresSchemaTest {
 
     @Test
     void theSessionsLockTimeoutIsRestoredAfterASuccessAndAfterAFailure() throws Exception {
-        ResultSet current = mock(ResultSet.class);
-        when(current.next()).thenReturn(true);
-        when(current.getString(1)).thenReturn("5s");
-        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
-
         PostgresSchema.run(dataSource, "restore-ok", stmt -> stmt.execute("CREATE TABLE x"));
-        InOrder order = inOrder(statement);
-        order.verify(statement).executeQuery(contains("set_config('lock_timeout', '" + PostgresSchema.LOCK_TIMEOUT_SECONDS + "s'"));
-        order.verify(statement).execute("CREATE TABLE x");
-        order.verify(statement).executeQuery(contains("pg_advisory_unlock("));
-        order.verify(statement).executeQuery(contains("set_config('lock_timeout', '5s', false)"));
+        assertEquals(1, count(PostgresSchema.RESTORE_LOCK_TIMEOUT));
 
         assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "restore-fail", stmt -> {
             throw new SQLException("boom");
         }));
-        verify(statement, times(2)).executeQuery(contains("set_config('lock_timeout', '5s', false)"));
-        verify(statement, never()).executeQuery(contains("set_config('lock_timeout', '0', false)"));
+        assertEquals(2, count(PostgresSchema.RESTORE_LOCK_TIMEOUT));
+        assertEquals(0, count("set_config('lock_timeout', '0'"), "the session's own value is restored, never a fixed one");
+        assertEveryResultSetClosed();
     }
 
     @Test
     void aStepThatFailsToGetItsLockStillRestoresTheTimeout() throws Exception {
-        ResultSet current = mock(ResultSet.class);
-        when(current.next()).thenReturn(true);
-        when(current.getString(1)).thenReturn("0");
-        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
-        when(statement.executeQuery(contains("pg_advisory_lock("))).thenThrow(new SQLException("lock timeout", "55P03"));
+        failures.put("pg_advisory_lock(", new SQLException("canceling statement due to lock timeout", "55P03"));
+        AtomicInteger executions = new AtomicInteger();
 
-        assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "no-lock", stmt -> {
+        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "locked-out", stmt -> executions.incrementAndGet()));
+
+        assertEquals(0, executions.get());
+        assertEquals(0, count("pg_advisory_unlock("), "a lock that was not taken is not released");
+        assertEquals(1, count(PostgresSchema.RESTORE_LOCK_TIMEOUT));
+        verify(connection, never()).abort(any());
+    }
+
+    @Test
+    void aTimeoutThatWasNeverSetIsNotRestored() throws Exception {
+        failures.put(PostgresSchema.SET_LOCK_TIMEOUT, new SQLException("connection lost", "08006"));
+
+        assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "no-timeout", stmt -> {
         }));
 
-        verify(statement).executeQuery(contains("set_config('lock_timeout', '0', false)"));
+        assertEquals(0, count("pg_advisory_lock("));
+        assertEquals(0, count(PostgresSchema.RESTORE_LOCK_TIMEOUT));
     }
 
     @Test
@@ -218,7 +314,7 @@ class PostgresSchemaTest {
         // e.g. a connection in a transaction that the failed DDL aborted: every later
         // statement, the unlock included, fails with 25P02 and the session keeps the
         // lock
-        when(statement.executeQuery(contains("pg_advisory_unlock("))).thenThrow(new SQLException("current transaction is aborted", "25P02"));
+        failures.put("pg_advisory_unlock(", new SQLException("current transaction is aborted", "25P02"));
 
         SQLException thrown = assertThrows(SQLException.class, () -> PostgresSchema.run(dataSource, "aborted", stmt -> {
             throw new SQLException("boom", "42P07");
@@ -230,20 +326,8 @@ class PostgresSchemaTest {
     }
 
     @Test
-    void aRestoredSessionGoesBackToThePool() throws Exception {
-        PostgresSchema.run(dataSource, "clean", stmt -> stmt.execute("CREATE TABLE x"));
-
-        verify(connection, never()).abort(any());
-        verify(connection).close();
-    }
-
-    @Test
     void aSessionWhoseTimeoutCannotBeRestoredIsDiscarded() throws Exception {
-        ResultSet current = mock(ResultSet.class);
-        when(current.next()).thenReturn(true);
-        when(current.getString(1)).thenReturn("5s");
-        when(statement.executeQuery(contains("current_setting('lock_timeout')"))).thenReturn(current);
-        when(statement.executeQuery(contains("set_config('lock_timeout', '5s', false)"))).thenThrow(new SQLException("connection lost", "08006"));
+        failures.put(PostgresSchema.RESTORE_LOCK_TIMEOUT, new SQLException("connection lost", "08006"));
 
         PostgresSchema.run(dataSource, "unrestorable", stmt -> stmt.execute("CREATE TABLE x"));
 
@@ -257,64 +341,64 @@ class PostgresSchemaTest {
     }
 
     @Test
-    void aFailureToGetALockFailsTheCreationWithoutRunningTheWork() throws Exception {
-        when(statement.executeQuery(contains("pg_advisory_lock("))).thenThrow(new SQLException("canceling statement due to lock timeout", "55P03"));
-        AtomicInteger executions = new AtomicInteger();
-
-        assertThrows(SQLException.class, () -> PostgresSchema.runOnce(dataSource, "locked-out", stmt -> executions.incrementAndGet()));
-
-        assertEquals(0, executions.get());
-        verify(statement, never()).executeQuery(contains("pg_advisory_unlock("));
-    }
-
-    @Test
-    void columnChecksAnswerFromTheCatalogue() throws Exception {
-        ResultSet exists = mock(ResultSet.class);
-        when(exists.next()).thenReturn(true);
-        when(exists.getString(1)).thenReturn("YES");
-        when(statement.executeQuery(contains("information_schema.columns"))).thenReturn(exists);
-
+    void columnChecksAskTheCatalogueWithBoundNames() throws Exception {
+        catalogueRow = new String[]{"YES", "bigint"};
         assertFalse(PostgresSchema.columnMissing(statement, "audit_ledger", "sequence"));
         assertFalse(PostgresSchema.columnHasNotNull(statement, "audit_ledger", "agent_id"));
 
-        when(exists.getString(1)).thenReturn("NO");
+        catalogueRow = new String[]{"NO", "text"};
         assertTrue(PostgresSchema.columnHasNotNull(statement, "audit_ledger", "agent_id"));
 
-        ResultSet none = mock(ResultSet.class);
-        when(none.next()).thenReturn(false);
-        when(statement.executeQuery(contains("information_schema.columns"))).thenReturn(none);
+        catalogueRow = null;
         assertTrue(PostgresSchema.columnMissing(statement, "audit_ledger", "sequence"));
+
+        verify(catalogueLookup, times(4)).setString(1, "audit_ledger");
+        verify(catalogueLookup, times(2)).setString(2, "sequence");
+        verify(catalogueLookup, times(4)).close();
+        assertEveryResultSetClosed();
+        assertTrue(statementSql().isEmpty(), "no catalogue SQL is built from the names");
+    }
+
+    @Test
+    void columnChecksSayMissingWhenTheCatalogueCannotBeAsked() throws Exception {
+        Statement detached = mock(Statement.class);
+        assertTrue(PostgresSchema.columnMissing(detached, "audit_ledger", "sequence"));
+        assertTrue(PostgresSchema.columnHasNotNull(detached, "audit_ledger", "agent_id"));
+        assertDoesNotThrow(() -> PostgresSchema.widenToText(detached, "eddi_schedules", "name"));
+        verify(detached, never()).execute(any());
     }
 
     @Test
     void widenToText_altersOnlyAVarcharColumn() throws Exception {
-        ResultSet varchar = mock(ResultSet.class);
-        when(varchar.next()).thenReturn(true);
-        when(varchar.getString(1)).thenReturn("character varying");
-        when(statement.executeQuery(contains("data_type"))).thenReturn(varchar);
-
+        catalogueRow = new String[]{"YES", "character varying"};
         PostgresSchema.widenToText(statement, "eddi_schedules", "name");
-        verify(statement).execute("ALTER TABLE eddi_schedules ALTER COLUMN name TYPE TEXT");
+        assertEquals(List.of("ALTER TABLE eddi_schedules ALTER COLUMN name TYPE TEXT"), statementSql());
 
-        when(varchar.getString(1)).thenReturn("text");
+        catalogueRow = new String[]{"YES", "text"};
         PostgresSchema.widenToText(statement, "eddi_schedules", "name");
-        verify(statement, times(1)).execute(contains("ALTER TABLE"));
+        assertEquals(1, count("ALTER TABLE"));
+        assertEveryResultSetClosed();
     }
 
     @Test
-    void widenToText_isBestEffort_aViewOverTheColumnDoesNotFailTheStore() throws Exception {
-        ResultSet varchar = mock(ResultSet.class);
-        when(varchar.next()).thenReturn(true);
-        when(varchar.getString(1)).thenReturn("character varying");
-        when(statement.executeQuery(contains("data_type"))).thenReturn(varchar);
-        when(statement.execute(contains("ALTER TABLE"))).thenThrow(new SQLException("cannot alter type of a column used by a view or rule", "0A000"));
+    void widenToText_isBestEffort_aViewOverTheColumnDoesNotFailTheStore() {
+        catalogueRow = new String[]{"YES", "character varying"};
+        failures.put("ALTER TABLE", new SQLException("cannot alter type of a column used by a view or rule", "0A000"));
 
         assertDoesNotThrow(() -> PostgresSchema.widenToText(statement, "eddi_schedules", "name"));
         assertDoesNotThrow(() -> PostgresSchema.widenToText(statement, "eddi_schedules", "name"));
     }
 
     @Test
-    void columnChecksRejectAnythingButAPlainIdentifier() {
+    void identifiersArePlainLowerCaseNamesOnly() {
+        assertEquals("audit_ledger", PostgresSchema.identifier("audit_ledger"));
+        assertEquals("_x1", PostgresSchema.identifier("_x1"));
+        String longest = "a".repeat(63);
+        assertEquals(longest, PostgresSchema.identifier(longest));
+        for (String bad : new String[]{null, "", "audit_ledger'; DROP TABLE x; --", "Audit", "1abc", "a b", "a\"b", "a-b", "a$b", "a.b",
+                "a".repeat(64), "abc\n", "äbc"}) {
+            assertThrows(IllegalArgumentException.class, () -> PostgresSchema.identifier(bad), String.valueOf(bad));
+        }
         assertThrows(IllegalArgumentException.class, () -> PostgresSchema.columnMissing(statement, "audit_ledger'; DROP TABLE x; --", "c"));
     }
 }

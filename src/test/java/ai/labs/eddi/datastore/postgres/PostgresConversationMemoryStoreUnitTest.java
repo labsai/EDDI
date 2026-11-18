@@ -403,6 +403,9 @@ class PostgresConversationMemoryStoreUnitTest {
         verify(preparedStatement, never()).setInt(anyInt(), anyInt());
         verify(preparedStatement).setString(1, "agent-1");
         verify(preparedStatement).setString(2, "ENDED");
+        // the store closes what it opened
+        verify(resultSet).close();
+        verify(preparedStatement, atLeastOnce()).close();
     }
 
     @Test

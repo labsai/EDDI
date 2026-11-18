@@ -8,11 +8,11 @@ import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.Collections;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -96,6 +96,23 @@ public final class PostgresSchema {
 
     private static final long MAX_BACKOFF_NANOS = TimeUnit.SECONDS.toNanos(30);
 
+    /**
+     * Session variable that holds the borrowed connection's own
+     * {@code lock_timeout} while a step runs (a custom setting needs a dotted
+     * name).
+     */
+    private static final String SAVED_LOCK_TIMEOUT = "eddi.schema_saved_lock_timeout";
+    static final String SAVE_LOCK_TIMEOUT = "SELECT set_config('" + SAVED_LOCK_TIMEOUT + "', current_setting('lock_timeout'), false)";
+    static final String SET_LOCK_TIMEOUT = "SELECT set_config('lock_timeout', '" + LOCK_TIMEOUT_SECONDS + "s', false)";
+    static final String RESTORE_LOCK_TIMEOUT = "SELECT set_config('lock_timeout', current_setting('" + SAVED_LOCK_TIMEOUT + "'), false)";
+
+    /**
+     * One column's catalogue entry; the names are bound as values, they are not
+     * identifiers here.
+     */
+    private static final String COLUMN_INFO = "SELECT is_nullable, data_type FROM information_schema.columns "
+            + "WHERE table_schema = current_schema() AND table_name = ? AND column_name = ?";
+
     /** Test seam for the back-off clock. */
     static LongSupplier clock = System::nanoTime;
 
@@ -104,7 +121,7 @@ public final class PostgresSchema {
      */
     private static final Set<String> WIDEN_FAILURES = ConcurrentHashMap.newKeySet();
 
-    private static final Pattern IDENTIFIER = Pattern.compile("[A-Za-z0-9_]+");
+    private static final Pattern IDENTIFIER = Pattern.compile("[a-z_][a-z0-9_]{0,62}");
 
     /** The DDL of one store, run on a statement that holds the schema lock. */
     @FunctionalInterface
@@ -209,14 +226,15 @@ public final class PostgresSchema {
         try (Connection connection = dataSource.getConnection(); Statement statement = connection.createStatement()) {
             boolean locked = false;
             boolean timeoutSet = false;
-            String savedTimeout = null;
             SQLException failure = null;
             try {
                 // The connection is pooled: its own lock_timeout (a role or database default, a
-                // JDBC option) is saved and put back, whatever happens.
-                savedTimeout = single(statement, "SELECT current_setting('lock_timeout')");
-                query(statement, "SELECT set_config('lock_timeout', '" + LOCK_TIMEOUT_SECONDS + "s', false)");
+                // JDBC option) is saved and put back, whatever happens. Saved in the session
+                // itself, so no value travels through Java into the SQL text.
+                query(statement, SAVE_LOCK_TIMEOUT);
+                query(statement, SET_LOCK_TIMEOUT);
                 timeoutSet = true;
+                // the key is a long: nothing but digits and a sign reaches the SQL text
                 query(statement, "SELECT pg_advisory_lock(" + key + ")");
                 locked = true;
                 // the timeout stays in force during the DDL: an ALTER TABLE queued behind a
@@ -228,7 +246,7 @@ public final class PostgresSchema {
                 LOGGER.errorf(e, "Creating the PostgreSQL schema for %s failed (SQLState %s); retried after a back-off", name, e.getSQLState());
                 throw e;
             } finally {
-                if (!release(statement, locked, key, timeoutSet ? savedTimeout : null, failure)) {
+                if (!release(statement, locked, key, timeoutSet, failure)) {
                     discard(connection, name);
                 }
             }
@@ -285,7 +303,7 @@ public final class PostgresSchema {
      *
      * @return whether the session is back as it was borrowed
      */
-    private static boolean release(Statement statement, boolean locked, long key, String restoreTimeout, SQLException failure) {
+    private static boolean release(Statement statement, boolean locked, long key, boolean restoreTimeout, SQLException failure) {
         boolean clean = true;
         try {
             if (locked) {
@@ -296,10 +314,8 @@ public final class PostgresSchema {
             noteReleaseFailure(e, failure);
         }
         try {
-            if (restoreTimeout != null) {
-                // the value as current_setting reported it ("0", "5s", "1min"): set_config
-                // accepts exactly that form back
-                query(statement, "SELECT set_config('lock_timeout', '" + restoreTimeout.replace("'", "''") + "', false)");
+            if (restoreTimeout) {
+                query(statement, RESTORE_LOCK_TIMEOUT);
             }
         } catch (SQLException e) {
             clean = false;
@@ -316,12 +332,6 @@ public final class PostgresSchema {
         }
     }
 
-    private static String single(Statement statement, String sql) throws SQLException {
-        try (ResultSet rs = statement.executeQuery(sql)) {
-            return rs != null && rs.next() ? rs.getString(1) : null;
-        }
-    }
-
     private static void query(Statement statement, String sql) throws SQLException {
         try (ResultSet ignored = statement.executeQuery(sql)) {
             // a SELECT of one value; only its side effect matters
@@ -334,10 +344,7 @@ public final class PostgresSchema {
      * follows stays the safe fallback.
      */
     public static boolean columnMissing(Statement statement, String table, String column) throws SQLException {
-        try (ResultSet rs = statement.executeQuery("SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = '"
-                + identifier(table) + "' AND column_name = '" + identifier(column) + "'")) {
-            return rs == null || !rs.next();
-        }
+        return columnInfo(statement, table, column) == null;
     }
 
     /**
@@ -345,9 +352,37 @@ public final class PostgresSchema {
      * {@code DROP NOT NULL} has something to do.
      */
     public static boolean columnHasNotNull(Statement statement, String table, String column) throws SQLException {
-        try (ResultSet rs = statement.executeQuery("SELECT is_nullable FROM information_schema.columns WHERE table_schema = current_schema() "
-                + "AND table_name = '" + identifier(table) + "' AND column_name = '" + identifier(column) + "'")) {
-            return rs == null || !rs.next() || !"YES".equals(rs.getString(1));
+        ColumnInfo info = columnInfo(statement, table, column);
+        return info == null || !"YES".equals(info.nullable());
+    }
+
+    private record ColumnInfo(String nullable, String dataType) {
+    }
+
+    /**
+     * The column's catalogue entry, or {@code null} when it does not exist or the
+     * catalogue cannot say. Asked with a prepared statement on the statement's own
+     * connection, the names bound as values. That connection is the pool's (a
+     * statement from {@code createStatement} is not wrapped by
+     * {@link PostgresSanitizingDataSource}), so the lookup costs one round trip and
+     * no SQL parsing on the EDDI side.
+     */
+    private static ColumnInfo columnInfo(Statement statement, String table, String column) throws SQLException {
+        String tableName = identifier(table);
+        String columnName = identifier(column);
+        Connection connection = statement.getConnection();
+        if (connection == null) {
+            return null;
+        }
+        try (PreparedStatement lookup = connection.prepareStatement(COLUMN_INFO)) {
+            if (lookup == null) {
+                return null;
+            }
+            lookup.setString(1, tableName);
+            lookup.setString(2, columnName);
+            try (ResultSet rs = lookup.executeQuery()) {
+                return rs != null && rs.next() ? new ColumnInfo(rs.getString(1), rs.getString(2)) : null;
+            }
         }
     }
 
@@ -360,13 +395,12 @@ public final class PostgresSchema {
      * of the {@code ALTER} itself is reported once and does not fail the caller.
      */
     public static void widenToText(Statement statement, String table, String column) throws SQLException {
-        boolean varchar;
-        try (ResultSet rs = statement.executeQuery("SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() "
-                + "AND table_name = '" + identifier(table) + "' AND column_name = '" + identifier(column) + "'")) {
-            varchar = rs != null && rs.next() && "character varying".equals(rs.getString(1));
-        }
-        if (varchar) {
+        ColumnInfo info = columnInfo(statement, table, column);
+        if (info != null && "character varying".equals(info.dataType())) {
             try {
+                // identifiers cannot be bound; identifier() admits only a plain lower-case
+                // name of at most 63 characters, which needs no quoting and can carry nothing
+                // else
                 statement.execute("ALTER TABLE " + identifier(table) + " ALTER COLUMN " + identifier(column) + " TYPE TEXT");
             } catch (SQLException e) {
                 // Best effort: a view or rule over the column, or a lock that did not come in
@@ -382,10 +416,16 @@ public final class PostgresSchema {
         }
     }
 
-    private static String identifier(String name) {
+    /**
+     * {@code name} when it is a plain, unquoted PostgreSQL identifier in lower case
+     * (a letter or underscore, then letters, digits or underscores; at most 63
+     * characters, PostgreSQL's limit), which names the same object quoted or not.
+     * Anything else is refused, never quoted or escaped.
+     */
+    static String identifier(String name) {
         if (name == null || !IDENTIFIER.matcher(name).matches()) {
             throw new IllegalArgumentException("not a plain identifier: " + name);
         }
-        return name.toLowerCase(Locale.ROOT);
+        return name;
     }
 }

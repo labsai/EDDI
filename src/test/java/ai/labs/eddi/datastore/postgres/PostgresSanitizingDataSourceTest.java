@@ -121,7 +121,9 @@ class PostgresSanitizingDataSourceTest {
         Statement plain = mock(Statement.class);
         when(connection.createStatement()).thenReturn(plain);
 
-        assertSame(plain, wrapped.getConnection().createStatement());
+        try (Connection c = wrapped.getConnection(); Statement created = c.createStatement()) {
+            assertSame(plain, created);
+        }
     }
 
     @Test
@@ -143,7 +145,9 @@ class PostgresSanitizingDataSourceTest {
 
         assertSame(target, PostgresSanitizingDataSource.unwrap(fromInstance));
         assertSame(fromInstance, wrappedInstance.get());
-        fromInstance.getConnection().prepareStatement("SELECT ?").setString(1, "\u0000");
+        try (Connection c = fromInstance.getConnection(); PreparedStatement ps = c.prepareStatement("SELECT ?")) {
+            ps.setString(1, "\u0000");
+        }
         verify(statement).setString(1, FFFD);
     }
 

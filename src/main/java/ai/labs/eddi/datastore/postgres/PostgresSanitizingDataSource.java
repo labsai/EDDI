@@ -133,7 +133,7 @@ public final class PostgresSanitizingDataSource {
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if (method.getDeclaringClass() == Object.class) {
                 return switch (method.getName()) {
-                    case "equals" -> proxy == args[0];
+                    case "equals" -> args != null && args.length == 1 && proxy == args[0];
                     case "hashCode" -> System.identityHashCode(proxy);
                     default -> delegate.toString();
                 };
@@ -167,7 +167,7 @@ public final class PostgresSanitizingDataSource {
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if (method.getDeclaringClass() == Object.class) {
                 return switch (method.getName()) {
-                    case "equals" -> proxy == args[0];
+                    case "equals" -> args != null && args.length == 1 && proxy == args[0];
                     case "hashCode" -> System.identityHashCode(proxy);
                     default -> target.toString();
                 };
@@ -205,7 +205,7 @@ public final class PostgresSanitizingDataSource {
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if (method.getDeclaringClass() == Object.class) {
                 return switch (method.getName()) {
-                    case "equals" -> proxy == args[0];
+                    case "equals" -> args != null && args.length == 1 && proxy == args[0];
                     case "hashCode" -> System.identityHashCode(proxy);
                     default -> target.toString();
                 };
@@ -252,7 +252,7 @@ public final class PostgresSanitizingDataSource {
         public Object invoke(Object proxy, Method method, Object[] args) throws Throwable {
             if (method.getDeclaringClass() == Object.class) {
                 return switch (method.getName()) {
-                    case "equals" -> proxy == args[0];
+                    case "equals" -> args != null && args.length == 1 && proxy == args[0];
                     case "hashCode" -> System.identityHashCode(proxy);
                     default -> target.toString();
                 };
