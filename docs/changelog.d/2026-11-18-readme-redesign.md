@@ -27,7 +27,8 @@ where are the docs, how do I build it. Sections:
    invited argument rather than evaluation.
 3. **Quick start**: the two installer commands, the URL, what is served at which
    path, and how to get a first agent. Options and alternatives are links.
-4. **What it looks like**: three screenshots instead of eleven.
+4. **What it looks like**: three screenshots instead of eleven, one each for
+   run, approve and record.
 5. **How it works**: an LLM agent's configuration (model, prompt, built-in
    tools), copied from [`langchain.md`](../langchain.md#agent-mode-enhanced-features)
    with the key as a vault reference and Claude Sonnet 5.5 as the model, then who writes such documents and a short
@@ -96,6 +97,32 @@ no multi-file compose command (`ComposeStackTest`); the commands that moved to
 - **[`ui/manager/scripts/capture-readme-images.mjs`](../../ui/manager/scripts/capture-readme-images.mjs)**
   regenerates all of them, so the next refresh is one command rather than a
   manual session.
+
+### Three independent reviews
+
+The page was reviewed by three models with the same brief. Where they agreed,
+it changed:
+
+- **The sample ran nothing.** It listened for a `help` action that no rule
+  emitted. It now uses `"actions": ["*"]`, and the text calls it the LLM step of
+  an agent rather than the agent.
+- **Governance claims carry their conditions.** The ledger is "HMAC-signed once
+  a signing key is configured"; agent signing is "optional"; the Red Hat line
+  says what CI does (checks every image against the certification requirements)
+  rather than asserting a status.
+- **The MCP tool count is 120**, which is what `McpToolContractTest` pins. The
+  README said 108, as `AGENTS.md` and `docs/mcp-server.md` still do.
+- **The quick start reaches a reply**: a health check, where the model key goes,
+  the wizard or the Operator, then chat. It says the default install has no
+  login and is loopback-only, and that a hand-run `docker compose up` needs
+  `EDDI_VAULT_MASTER_KEY`.
+- **The screenshots show the pitch**: a group discussion (run), the pending
+  approvals page (approve) and an agent's audit trail (record) replace the
+  dashboard and a rule-driven conversation.
+
+Not taken: moving the full feature list out to a docs page, and restoring the
+comparison against Python frameworks. Both were decided the other way on
+purpose.
 
 ### Not done here
 

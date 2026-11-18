@@ -35,12 +35,12 @@ const TOUR_CHAPTERS = ["dashboard", "agents", "workflows", "chat", "resources", 
 /** Each shot: a route, and optionally what to do on the page before the capture. */
 const SHOTS = [
   {
-    file: "manager-dashboard.png",
-    route: "/manage",
+    file: "manager-approvals.png",
+    route: "/manage/approvals",
   },
   {
-    file: "manager-conversation.png",
-    route: "/manage/conversationview/conv1",
+    file: "manager-audit-trail.png",
+    route: "/manage/audit?agent=agent1",
   },
   {
     file: "manager-group-discussion.png",

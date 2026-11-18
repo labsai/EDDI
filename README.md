@@ -12,29 +12,29 @@
 
 **The open-source AI agent management system.** Run teams of AI agents on your own infrastructure, limit what they may do, put a person in front of the decisions that matter, and keep a record of every step.
 
-EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, ships as a Red Hat-certified container image, and was selected as a UNIDO Trusted Partner for Industrial AI.
+EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, every image is checked against Red Hat's container certification requirements, and EDDI was selected as a UNIDO Trusted Partner for Industrial AI.
 
 [Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Quick start](#quick-start) · [Docker Hub](https://hub.docker.com/r/labsai/eddi) · [Discussions](https://github.com/labsai/EDDI/discussions)
 
 ## Why EDDI
 
-AI agents now take real actions, and their mistakes are expensive. EDDI is built around four things you need before you let them:
+EDDI is built around the four things you need before an agent is allowed to act:
 
-- **Run.** Agents work alone or [as a team](docs/group-conversations.md), with any of 19 model providers or a local model, on your servers. One command with Docker, or Kubernetes and OpenShift; MongoDB or PostgreSQL.
-- **Limit.** An agent holds only the tools its configuration grants, within rate limits and cost budgets. There is no `eval` and no script engine; custom logic runs in external MCP servers. Secrets sit in an envelope-encrypted [vault](docs/secrets-vault.md).
+- **Run.** Agents work alone or [as a team](docs/group-conversations.md), with any of 19 model providers, local models included, on your own servers. It installs with one Docker command or on Kubernetes and OpenShift, on MongoDB or PostgreSQL.
+- **Limit.** An agent holds only the tools its configuration grants, within rate limits and cost budgets. Agents cannot run arbitrary code: there is no `eval` and no script engine, and custom logic runs in external MCP servers. Secrets sit in an envelope-encrypted [vault](docs/secrets-vault.md).
 - **Approve.** Whole turns, single tool calls or phases of a group discussion can [wait for a person](docs/hitl.md), in the Manager, in Slack or over MCP.
-- **Record.** Every step lands in an HMAC-secured [audit ledger](docs/audit-ledger.md), with GDPR/CCPA erasure and export and deployment guides for HIPAA and the EU AI Act.
+- **Record.** Every step lands in an append-only [audit ledger](docs/audit-ledger.md), HMAC-signed once a signing key is configured. GDPR/CCPA erasure and export are built in, and there are deployment guides (guides, not certifications) for HIPAA and the EU AI Act.
 
-Two things make that practical:
+Two design choices make that practical:
 
-- **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without redeploying the service, diff it, export it as a ZIP, or sync it to another instance.
-- **Open protocols, both directions.** EDDI is an [MCP](docs/mcp-server.md) server (108 tools) and client, speaks [A2A](docs/a2a-protocol.md), and can present deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md).
+- **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without rebuilding or restarting EDDI, diff it, export it as a ZIP, or sync it to another instance.
+- **Open protocols.** EDDI is an [MCP](docs/mcp-server.md) server (120 tools) and an MCP client, speaks [A2A](docs/a2a-protocol.md), and can serve deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md) (off by default).
 
 EDDI is a service you deploy, not a library you import. If you want agent logic inside your own Java application, a library such as [LangChain4j](https://github.com/langchain4j/langchain4j), which EDDI itself builds on, is the closer fit. The [project philosophy](docs/project-philosophy.md) explains the design: "the engine is strict so the AI can be creative."
 
 ## Quick start
 
-You need [Docker](https://docs.docker.com/get-docker/). The installer asks which database, authentication and monitoring you want, generates a vault key, and starts everything with Docker Compose.
+You need [Docker](https://docs.docker.com/get-docker/) on an x86-64 host, and a model for your agents: an API key for a hosted provider, or [Ollama](docs/docker.md#compose-files-and-overlays) for a local one. The installer asks which database, authentication and monitoring you want, generates a vault key, and starts everything with Docker Compose.
 
 **Linux / macOS / WSL2**
 
@@ -50,7 +50,7 @@ Unblock-File .\install.ps1
 .\install.ps1
 ```
 
-Then open <http://localhost:7070>. Everything is served from that one port:
+Then open <http://localhost:7070>, which offers a choice between the Manager and Workforce. Everything is served from that one port:
 
 | Path | What it is |
 | --- | --- |
@@ -59,13 +59,21 @@ Then open <http://localhost:7070>. Everything is served from that one port:
 | `/chat` | The standalone chat UI |
 | `/q/swagger-ui` | The REST API |
 
-A fresh install has no agents. Activate the **Platform Operator** at `/manage/operator` and describe the agent you want, or fill in the wizard at `/manage/agents/wizard`. Either way the agent needs a model: an API key for a hosted provider, or a local model through the [Ollama overlay](docs/docker.md#compose-files-and-overlays).
+A fresh install has no agents. To get to a first reply:
+
+1. Check the install: `curl http://localhost:7070/q/health/ready` answers `"status":"UP"`.
+2. Store your model key in the vault, under **Secrets** in the Manager (`/manage/secrets`).
+3. Create an agent with the wizard at `/manage/agents/wizard`, or activate the **Platform Operator** at `/manage/operator` and describe the agent you want. The Operator is an agent too, so it needs a model before it can help.
+4. Chat with the agent from the Manager, or at `/workforce`.
+
+By default the install has no login and is published on `127.0.0.1` only, which suits a laptop. For anything other people can reach, turn authentication on: `install.sh --with-auth` adds Keycloak.
 
 Other ways in:
 
 - **Read the script first, or pass options:** [`install.sh`](install.sh) and [`install.ps1`](install.ps1); flags, updating with `eddi update` and uninstalling are in [Getting Started](docs/getting-started.md#installer-options).
-- **Docker Compose by hand:** clone the repository and run `docker compose up`. The PostgreSQL, Keycloak, monitoring, Ollama and cluster stacks are in the [Docker guide](docs/docker.md#compose-files-and-overlays).
+- **Docker Compose by hand:** clone the repository and run `docker compose up`. Set `EDDI_VAULT_MASTER_KEY` first, or the secrets vault stays disabled. The PostgreSQL, Keycloak, monitoring, Ollama and cluster stacks are in the [Docker guide](docs/docker.md#compose-files-and-overlays).
 - **Kubernetes or OpenShift:** Kustomize overlays and a Helm chart, in the [Kubernetes guide](docs/kubernetes.md).
+- **Upgrading an existing deployment:** read the upgrade guide for your version first ([from 6.5](docs/upgrading-from-6.5.md), [from 6.4](docs/upgrading-from-6.4.md), [from 5.x](docs/upgrading-from-5x.md)). Several defaults now fail closed.
 - **From source:** see [Development](#development).
 
 ## What it looks like
@@ -74,14 +82,16 @@ Other ways in:
   <a href="screenshots/manager-group-discussion.png"><img src="screenshots/manager-group-discussion.png" alt="A group of agents working through a peer-review discussion in the Manager" /></a>
 </p>
 
+<p align="center"><em>Run: a team of agents working a question through, with shared artifacts</em></p>
+
 <table>
 <tr>
-<td width="50%"><a href="screenshots/manager-conversation.png"><img src="screenshots/manager-conversation.png" alt="A conversation in the Manager, with the trace of each turn" /></a></td>
-<td width="50%"><a href="screenshots/manager-dashboard.png"><img src="screenshots/manager-dashboard.png" alt="The Manager dashboard" /></a></td>
+<td width="50%"><a href="screenshots/manager-approvals.png"><img src="screenshots/manager-approvals.png" alt="Pending approvals in the Manager: conversations and a group discussion waiting for a person" /></a></td>
+<td width="50%"><a href="screenshots/manager-audit-trail.png"><img src="screenshots/manager-audit-trail.png" alt="The audit trail for one agent, with verified signatures and the cost of each step" /></a></td>
 </tr>
 <tr>
-<td align="center"><em>Every turn is traceable: what ran, and how long each step took</em></td>
-<td align="center"><em>Agents, workflows and recent conversations at a glance</em></td>
+<td align="center"><em>Approve: actions that wait for a person, in one list</em></td>
+<td align="center"><em>Record: every step of a turn, signed, with its duration and cost</em></td>
 </tr>
 </table>
 
@@ -89,16 +99,16 @@ The [Manager guide](docs/agent-manager-gui.md) and the [Workforce guide](docs/wo
 
 ## How it works
 
-An agent is mostly one document: the model, its prompt, and what it may use. This one answers with Claude and may call three of the built-in tools:
+The heart of an agent is its LLM step: the model, its prompt, and what it may use. This one answers every message with Claude and may call three of the built-in tools:
 
 ```json
 {
   "tasks": [
     {
-      "actions": ["help"],
+      "actions": ["*"],
       "id": "aiAgent",
       "type": "anthropic",
-      "description": "AI agent with calculator and web search",
+      "description": "AI agent with calculator, date and web search",
       "parameters": {
         "apiKey": "${vault:anthropic-key}",
         "modelName": "claude-sonnet-5-5",
@@ -112,7 +122,7 @@ An agent is mostly one document: the model, its prompt, and what it may use. Thi
 }
 ```
 
-Swap `type` and `modelName` for any of the other providers (`openai`, `gemini`, `bedrock`, `ollama` and more). The key is a reference into the secrets vault, never the key itself. The same document is where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
+`actions` says when the step runs, and `*` means on every message. Swap `type` and `modelName` for any of the other providers (`openai`, `gemini`, `bedrock`, `ollama` and more). The key is a reference into the secrets vault, never the key itself. This document is one step of a workflow, and an agent is a list of workflows. It is also where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
 
 You rarely write it by hand. The Manager's wizard, the Platform Operator and the MCP server (from Claude Desktop, Cursor or any other MCP client) create and change agents for you, and every save is a new version you can diff and export.
 
@@ -129,7 +139,7 @@ Underneath, each message runs through a pipeline of steps that share the convers
 | 🛠️ **Tools** | Built-in tools (web search, calculator, web scraper, PDF reader and more), your own REST APIs as tools, external MCP servers, multimodal attachments | [HTTP calls](docs/httpcalls.md) · [MCP client](docs/mcp-client.md) · [Attachments](docs/attachments-guide.md) |
 | 🔗 **Protocols** | MCP server, A2A, an OpenAI-compatible API, SSE streaming, Slack | [MCP server](docs/mcp-server.md) · [A2A](docs/a2a-protocol.md) · [OpenAI-compatible API](docs/open-webui-integration.md) · [Slack](docs/slack-integration.md) |
 | ✋ **Human-in-the-loop** | Approval gates per turn, per tool call and per group phase, with timeout policies; resolved from the Manager, Slack or MCP | [HITL](docs/hitl.md) |
-| 🔐 **Security** | Secrets vault, one credential model including per-user OAuth, SSRF-protected tools, Keycloak/OIDC, workspaces and sharing, signed agents | [Security](docs/security.md) · [Secrets vault](docs/secrets-vault.md) · [Connections](docs/connections.md) · [Workspaces](docs/workspaces.md) |
+| 🔐 **Security** | Secrets vault, one credential model including per-user OAuth, SSRF-protected tools, Keycloak/OIDC, workspaces and sharing, optional agent signing | [Security](docs/security.md) · [Secrets vault](docs/secrets-vault.md) · [Connections](docs/connections.md) · [Workspaces](docs/workspaces.md) |
 | 📋 **Compliance** | Audit ledger, GDPR/CCPA erasure and export, HIPAA and EU AI Act guides | [Audit ledger](docs/audit-ledger.md) · [GDPR](docs/gdpr-compliance.md) · [HIPAA](docs/hipaa-compliance.md) · [EU AI Act](docs/eu-ai-act-compliance.md) · [Privacy](PRIVACY.md) |
 | 🚀 **Operations** | Cron schedules and heartbeats, tenant quotas and cost budgets, Prometheus metrics with a Grafana dashboard, OpenTelemetry traces, clustering | [Scheduling](docs/scheduling.md) · [Quotas](docs/tenant-quotas.md) · [Monitoring](docs/monitoring/monitoring-guide.md) · [Clustering](docs/clustering.md) |
 | 🖥️ **UIs** | The Manager (in 11 languages), Workforce and a standalone chat UI, all inside the same image | [Manager](docs/agent-manager-gui.md) · [Workforce](docs/workforce-guide.md) · [Chat UI](docs/chat-ui-embedding.md) |
@@ -183,7 +193,7 @@ The full command list, code style and the pull-request process are in [CONTRIBUT
 - **Questions and ideas:** [GitHub Discussions](https://github.com/labsai/EDDI/discussions)
 - **Bugs and feature requests:** [GitHub Issues](https://github.com/labsai/EDDI/issues)
 - **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md), [Code of Conduct](CODE_OF_CONDUCT.md) and [Governance](GOVERNANCE.md)
-- **Security:** report vulnerabilities privately as the [Security Policy](SECURITY.md) describes. Production defaults fail closed: EDDI refuses to start without authentication unless you opt out. The details are in the [security guide](docs/security.md).
+- **Security:** report vulnerabilities privately as the [Security Policy](SECURITY.md) describes. The container image refuses to start without authentication unless you opt out; the bundled Compose files opt out for local use and publish on `127.0.0.1` only. The details are in the [security guide](docs/security.md).
 
 ## Full feature list
 
@@ -234,10 +244,10 @@ Everything in one place, for reading or searching without leaving the page. Each
 
 | Standard | Role | What it gives you |
 | --- | --- | --- |
-| [MCP](docs/mcp-server.md) | Server (108 tools) and [client](docs/mcp-client.md) | Operate EDDI from Claude Desktop, Cursor or any MCP client, and connect agents to external MCP tool servers |
+| [MCP](docs/mcp-server.md) | Server (120 tools) and [client](docs/mcp-client.md) | Operate EDDI from Claude Desktop, Cursor or any MCP client, and connect agents to external MCP tool servers |
 | [A2A](docs/a2a-protocol.md) | Full implementation | Agent-to-agent communication across platforms, Agent Cards and skill discovery |
 | OpenAPI 3.1 | Generation and consumption | A generated spec for EDDI, and an API-calling agent from any OpenAPI spec you paste |
-| OAuth 2.0 / OIDC | Keycloak integration | Authentication, authorization and tenant isolation. [Connections](docs/connections.md) give agents per-user OAuth grants to external systems |
+| OAuth 2.0 / OIDC | Keycloak integration | Authentication and authorization. [Connections](docs/connections.md) give agents per-user OAuth grants to external systems |
 | [OpenAI Chat Completions](docs/open-webui-integration.md) | Server at `/v1`, off by default | Deployed agents appear as OpenAI models to Open WebUI, the `openai` SDK and other compatible clients |
 | SSE | Streaming | Token-by-token replies, live tool-call status, group discussion feeds and log streaming |
 | [Slack](docs/slack-integration.md) | Channel | Agents in Slack channels, group discussions in threads, approvals as interactive cards |
@@ -272,7 +282,7 @@ Everything in one place, for reading or searching without leaving the page. Each
 
 | Tool | What it does |
 | --- | --- |
-| Web search | DuckDuckGo, Brave Search API, or Google Custom Search (until 2027-01-01) |
+| Web search | DuckDuckGo instant answers, Brave Search API, or Google Custom Search (until 2027-01-01) |
 | Calculator | A recursive-descent math parser with no `eval` |
 | Web scraper | Size-capped extraction of web pages as Markdown |
 | PDF reader | Document text extraction |
@@ -322,7 +332,7 @@ Everything in one place, for reading or searching without leaving the page. Each
 - **Authentication:** OAuth 2.0 with Keycloak, role-based access, and enforced token audience.
 - **Workspaces and sharing:** opt-in per-user and per-team spaces with `USE`, `VIEW`, `EDIT` and `OWN` shares.
 - **Restricted templates:** runtime templates run in a locked-down engine, and fetched data is never rendered as a template.
-- **Agent signing:** an Ed25519 identity per agent, used to sign audit entries.
+- **Agent signing:** optionally, an Ed25519 identity per agent that signs its messages and audit entries.
 
 ### 📋 Compliance
 
@@ -330,7 +340,7 @@ Everything in one place, for reading or searching without leaving the page. Each
 
 | Regulation | What EDDI provides |
 | --- | --- |
-| EU AI Act | An HMAC-secured audit ledger, decision traceability, and risk classification guidance |
+| EU AI Act | An append-only audit ledger (HMAC-signed once a key is configured), decision traceability, and risk classification guidance |
 | GDPR | Cascading erasure (Art. 17), portability (Art. 15/20), restriction of processing (Art. 18), per-category retention and pseudonymization |
 | CCPA | Right to delete, right to know, and data portability |
 | HIPAA | A deployment guide, a BAA template and an LLM provider BAA matrix |
@@ -354,12 +364,12 @@ Everything in one place, for reading or searching without leaving the page. Each
 - **One-command install:** an interactive installer sets up EDDI and a database with Docker.
 - **Kubernetes and OpenShift:** Kustomize overlays and a Helm chart.
 - **Horizontal scaling:** any number of replicas behind a load balancer, coordinated through NATS JetStream.
-- **Metrics:** more than 50 Micrometer metrics at `/q/metrics`, and a ready-made Grafana dashboard.
+- **Metrics:** Micrometer metrics for tools, vault, memory, scheduling and conversations at `/q/metrics`, and a ready-made Grafana dashboard.
 - **Tracing:** an OpenTelemetry span per pipeline task and per model call.
 - **Health checks:** liveness and readiness probes.
 - **Recovery:** retries with backoff, MCP circuit breakers and model response validation.
 - **Database choice:** MongoDB or PostgreSQL from the same image.
-- **Red Hat certified:** the container image passes certification checks in CI.
+- **Red Hat certification:** every image is checked against Red Hat's container certification requirements in CI, and each stable release is submitted for certification.
 
 ### 🖥️ User interfaces
 
