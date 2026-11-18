@@ -4,7 +4,7 @@
 
 ### What changed and why
 
-**`README.md` went from 62 KB and 740 lines to about 14 KB and 200.** It had grown
+**`README.md` is restructured: a 200-line front page, then the full feature list.** It had grown
 by accretion: every feature added a bullet, every deployment fix a paragraph, and
 the result was a page whose first screen was nine badges and a table of contents,
 whose middle was 200 lines of feature bullets and a 43-row index that duplicated
@@ -20,8 +20,9 @@ where are the docs, how do I build it. Sections:
 1. Banner, name, the badges (the ten the page had, plus the licence), one
    paragraph, link row.
 2. **Why EDDI**: six bullets, and a plain statement that EDDI is a service you
-   deploy rather than a library you import, with the libraries named for readers
-   who want one. This replaces the comparison table, whose concurrency row
+   deploy rather than a library you import, pointing readers who want a library
+   at LangChain4j (which EDDI builds on) rather than at frameworks in other
+   languages. This replaces the comparison table, whose concurrency row
    ("virtual threads — true OS-level parallelism") was wrong and whose tone
    invited argument rather than evaluation.
 3. **Quick start**: the two installer commands, the URL, what is served at which
@@ -35,7 +36,14 @@ where are the docs, how do I build it. Sections:
    more room than their use warrants.
 6. **What's included**: one table, eleven rows, each row linking to its guides.
 7. **Documentation** by intent, **Development** (short), **Community and
-   support**, **License**.
+   support**.
+8. **Full feature list**: every feature the old page listed, kept at the end for
+   readers who want it on one page and for in-page search, but rewritten to be
+   lighter: one short line per feature, plain headings, a link row to the guides
+   under each heading, and no em dashes. Two claims are corrected on the way:
+   virtual threads are not "OS-level" concurrency, and SSRF validation is the
+   built-in tools', not every outbound call's.
+9. **License**.
 
 Headings no longer carry emoji, so their anchors are plain (`#quick-start`,
 `#development`).
@@ -48,7 +56,7 @@ Headings no longer carry emoji, so their anchors are plain (`#quick-start`,
 | The compose command matrix, the overlay list, the Ollama and NVIDIA notes | [`docker.md`](../docker.md#compose-files-and-overlays) |
 | Prerequisites (Node, mise), dev-mode notes, the dev vault key, the Maven Command Reference, the system-property table, the JaCoCo path | [`CONTRIBUTING.md`](../../CONTRIBUTING.md#maven-command-reference) |
 | The Kubernetes install block | already in [`kubernetes.md`](../kubernetes.md); the README links to it |
-| The feature bullets, the docs index, the compliance table, the security bullet list | already in [`docs/README.md`](../README.md), the feature guides and [`security.md`](../security.md) |
+| The docs index, the compliance table, the security bullet list | already in [`docs/README.md`](../README.md), the feature guides and [`security.md`](../security.md) |
 
 `AGENTS.md` pointed at `README.md#️-development` and called the README's Maven
 table canonical; both now point at `CONTRIBUTING.md`.
