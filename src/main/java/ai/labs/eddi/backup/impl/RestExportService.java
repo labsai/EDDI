@@ -54,6 +54,8 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.NotFoundException;
+import jakarta.ws.rs.WebApplicationException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 import static ai.labs.eddi.engine.exception.SneakyThrow.sneakyThrow;
@@ -831,10 +833,24 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 // Scrub secrets before export (defense-in-depth)
                 return secretScrubber.scrubJson(json);
             } catch (IOException ex) {
+                // An empty string used to go into the archive as the config's content.
                 LOGGER.error(ex.getLocalizedMessage(), ex);
-                return "";
+                throw exportIncomplete("a configuration (" + e.getKey().getId() + ") that could not be serialized");
             }
         }));
+    }
+
+    /**
+     * The failure of an export that could not include something. The archive is not
+     * produced at all: a ZIP that looks complete and is not restores as an agent
+     * that cannot answer. The message is stable and carries no exception text; the
+     * cause is in the log.
+     */
+    static WebApplicationException exportIncomplete(String what) {
+        String message = "Export failed: the archive could not include " + what + ", so no archive was produced. "
+                + "See the server log for the cause.";
+        return new WebApplicationException(message, Response.status(Response.Status.INTERNAL_SERVER_ERROR)
+                .entity(Map.of("error", message)).type(MediaType.APPLICATION_JSON).build());
     }
 
     private void writeConfigs(Path path, Map<IResourceId, String> configs, String fileExtension) {
@@ -849,6 +865,7 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 }
             } catch (IOException | IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
+                throw exportIncomplete("the " + fileExtension + " configuration " + resourceId.getId());
             }
         });
     }
@@ -1204,8 +1221,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
             if (exportedCount > 0) {
                 LOGGER.infof("Exported %d snippet(s) (referenced: %s)", exportedCount, referencedNames);
             }
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to export snippets: %s", e.getMessage());
+            LOGGER.errorf(e, "Failed to export snippets: %s", e.getMessage());
+            throw exportIncomplete("the prompt snippets the agent uses");
         }
     }
 
@@ -1395,8 +1415,11 @@ public class RestExportService extends AbstractBackupService implements IRestExp
                 }
             }
             LOGGER.infof("Exported %d schedule(s) for Agent %s", exported, agentId);
+        } catch (WebApplicationException e) {
+            throw e;
         } catch (Exception e) {
-            LOGGER.warnf("Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
+            LOGGER.errorf(e, "Failed to export schedules for Agent %s: %s", agentId, e.getMessage());
+            throw exportIncomplete("the agent's schedules");
         }
     }
 }

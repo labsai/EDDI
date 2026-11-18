@@ -207,6 +207,7 @@ operator can tell what to fix:
 | `403 Forbidden` | The caller may not change the target agent. An upgrade (sync, or `strategy=upgrade` from a ZIP) needs **EDIT** on `targetAgentId` and is refused before anything is written; a preview needs VIEW. Until this was checked up front, a caller without EDIT had snippets, extensions and workflows written before the final agent write refused, and saw a `500` |
 | `404 Not Found` | The named `targetAgentId` does not exist here |
 | `409 Conflict` | No `targetAgentId` was named and more than one local agent was promoted from this source agent. The body lists them; name one, or pass `createNew=true` |
+| `422 Unprocessable Entity` | A **first promotion** (no local target) whose archive names a configuration it does not contain — typically a selective export that left the LLM config out. Nothing is written. The body is `{"error", "missing": [...], "hint": "allowIncomplete=true"}`, listing every missing reference. Pass `allowIncomplete=true` to promote the agent without those steps; see [Incomplete archives](#incomplete-archives) |
 | `502 Bad Gateway` | The source instance could not be read: down, addressed wrongly, or refusing the token. The body carries the underlying reason |
 
 Every error answers with a JSON body, `{"error": "…"}`.
@@ -232,9 +233,14 @@ The body of a single sync is an `UpgradeResult`:
 ```
 
 `warnings` lists what the run wrote differently from the source, and why. Everything in it
-was written, so it does not make the answer a `207`; it is left out when empty. Today its only
-entry is a signing flag the target cannot honour — see the identity bullet under
-[Key Design Decisions](#key-design-decisions).
+was written, so it does not make the answer a `207`; it is left out when empty. It carries a signing
+flag the target cannot honour (see the identity bullet under
+[Key Design Decisions](#key-design-decisions)), the steps a first promotion dropped under
+`allowIncomplete=true`, and what the stores' save-time checks found in the written configs: an LLM
+config naming an unknown provider or a parameter out of range, a workflow step this server does not
+have, a `${vault:…}` reference the target has no secret for. Those checks refuse the same config when
+it is saved by hand (400); an import, sync, upgrade or duplicate only warns, so an archive that
+imported before keeps importing.
 
 `compatible` and `compatibilityGeneration` say how the agent version the sync wrote was declared and which
 [compatibility generation](deployment-management-of-agents.md#the-compatibility-generation) it carries.
@@ -294,6 +300,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | `sourceAgentVersion` | No | Version to sync (null = latest) |
 | `targetAgentId` | No | Local agent to upgrade. When omitted, the target is **the agent an earlier sync or import promoted from this source agent**, recognised by the `originId` its descriptor records — so repeating a sync never creates a second copy. Only when there is none (or `createNew=true`) is the agent created: the source's own export archive is fetched and imported with `strategy=create`, and the new agent records the source's id as its `originId`. The preview marks a target found this way with `matchStrategy: "originId"` on the agent row |
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
+| `allowIncomplete` | No | First promotion only: `true` creates the agent although its archive names configurations it does not contain; the unresolvable steps are dropped and listed in `warnings`. Default `false` = `422` |
 | `selectedResources` | No (execute only) | Comma-separated ids of the preview rows to apply (the row's `sourceId`; for a `REMOVE` row that is the target's id). Omit to apply everything; an empty value is a `400`. A `CONFLICT` row is applied only when named here |
 | `workflowOrder` | No (execute only) | Desired workflow order after sync: comma-separated workflow ids of the target (a list in a `SyncRequest`). Unlisted workflows follow in their current order; without it, new workflows are appended |
 | `compatible` | No (execute only; default `false`) | Declare the agent version this sync writes **compatible** with the one it replaces, so conversations running on the target switch to it on their next turn. By default the version is a breaking change and they stay where they are. A `SyncRequest` takes `"compatible": true` per agent. No effect when the sync creates a new agent or writes nothing. See [Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync) |
@@ -339,6 +346,50 @@ Agent Sync uses **structural matching** — not ID matching — to pair source a
 - **Added and removed steps travel:** a step the source added is created and wired into the target workflow when that workflow is updated, and a step it removed is dropped with it. A workflow the source added arrives with all its resources, named by their ids on the target; one it removed comes off the agent. A new resource is created only when the update that places it is certain to happen — if its workflow, or a sibling step's new resource, was left out of `selectedResources`, it is reported in `failures[]` instead of being created unreferenced
 - **Agent-level settings travel, the identity does not:** HITL configuration, capabilities, memory policy, channels and the rest of the agent document are taken from the source (with the target's secrets kept). The agent's `identity` is bound to its instance — its private key lives in that instance's vault — and is never replaced. So `security.signInterAgentMessages` travels only where the target's own newest key is usable: otherwise the sync writes it off and says so in `warnings` (listed under the result on the Manager's Sync page and in its import dialog) instead of having the agent save refused. A first promotion creates the agent with no identity and signing off (and says so the same way); an admin on the target generates its key (`POST /agentstore/agents/{id}/signing-keys`, `eddi-admin`) and turns signing on, and later syncs then carry the flag
 - **A missing resource is recreated, not refused:** when the target's workflow *does* have the step but the resource it names no longer exists — the store confirms it is gone, not merely unreadable — the resource is created from the source and the step repointed at it
+
+## Incomplete archives
+
+An archive can name a configuration it does not contain: EDDI's selective export writes the
+workflow whole, references to the configs it left out included, because `strategy=merge` answers
+those from the target's own copy. A **create** has no such copy. Dropping the step used to answer
+`201` for an agent that deploys `READY` and then cannot answer (its LLM step is gone), so it is now
+refused with `422` and nothing is written:
+
+```json
+{ "error": "The archive references 1 configuration(s) it does not contain, …",
+  "missing": ["workflow <id> v1, step eddi://ai.labs.llm (step dropped): eddi://ai.labs.llm/llmstore/llms/<id>?version=1 (no .langchain.json file in the archive)"],
+  "hint": "allowIncomplete=true" }
+```
+
+`POST /backup/import?strategy=create&allowIncomplete=true` (and `…/sync?allowIncomplete=true` for a
+first promotion) imports it anyway. The `201` then carries `X-Import-Warnings: <count>` and a JSON
+body `{ "resourceUri", "warnings": [...], "dropped": [...] }`. Nothing deploys an imported agent
+automatically; complete it before you deploy. A `201` with warnings but no dropped step (an unknown
+provider, a missing vault secret) means the same: the configuration was written, and the warning
+tells you what will fail at run time. `strategy=merge` and `strategy=upgrade` are not affected.
+
+## What an export contains, and what it deliberately omits
+
+An export (`POST /backup/export/{agentId}`, then `GET /backup/export/{file}`) is **all or nothing**: when part of it cannot be built
+(a configuration that cannot be serialized or written, the prompt snippets, the schedules), no
+archive is produced and the call answers `500` with `{"error": "Export failed: the archive could not
+include …, so no archive was produced. See the server log for the cause."}`. It used to skip the
+part and answer as if the archive were complete.
+
+An archive **contains**: the agent, its workflows, every configuration those reference (behavior
+rules, HTTP calls, LLM, property, output, MCP calls, RAG, parsers, dictionaries), the prompt
+snippets the agent's templates use, the agent's schedules (not the runtime timers of a pending
+approval or a continuing conversation), and the connections its configs reference by name. Secrets
+are scrubbed.
+
+An archive **deliberately omits**, because it is not part of the agent's own configuration:
+
+- global variables (`${vars:…}` values) — recreate them on the target;
+- channel integrations (Slack, e-mail, webhook) — the mapping from a channel to an agent is recreated there;
+- group configuration and group membership — a group names its member agents by id;
+- agent test suites;
+- agent triggers (intents) and vault secret values — see the sections below;
+- conversations, user memories and the audit ledger — runtime data.
 
 ## What a promotion carries, and what it does not
 
