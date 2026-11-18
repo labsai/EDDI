@@ -244,7 +244,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `task_start` | `{"taskId","taskType","index"}` | A lifecycle task begins. `taskId` is the task's registered id (`eddi://ai.labs.behavior` for a step configured as `ai.labs.rules`, `eddi://ai.labs.httpcalls` for `ai.labs.apicalls`); `index` is its position in the turn |
 | `task_complete` | `{"taskId","taskType","durationMs"}` plus, when present, `actions` (the actions in memory after the task), `toolTrace` (the LLM task's tool calls, arguments redacted) and `confidence` | A task finished |
 | `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` — `errorType` is the failure class (`RATE_LIMITED`, `TRANSIENT`, `TIMEOUT`, `AUTH`, `BAD_REQUEST`, `QUOTA_EXHAUSTED`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND` or `UNKNOWN`), `error` the redacted sentence the turn's `error.message` carries | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead. Not sent for a cancelled turn |
-| `cancelled` | `{"conversationState","persisted"}` — `EXECUTION_INTERRUPTED`, `false` | The turn was cancelled (`/cancel`, or a client disconnect that cancels) and is discarded. Sent immediately before `done`, whose snapshot then carries no `conversationOutputs` |
+| `cancelled` | `{"conversationState","persisted"}` — `EXECUTION_INTERRUPTED`, `false` | Somebody stopped the turn (`/cancel`, a client disconnect that cancels, a GDPR stop) and it is discarded. Sent immediately before `done`, whose snapshot then carries no `conversationOutputs`. A turn interrupted by a timeout gets `error` `turn_timeout` instead |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
 | `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
 | `tool_result` | `{"tool","callId","status","durationMs","ok","summary"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval, or a result that reports `NOT_EXECUTED`) or `rejected` (a human declined it); `ok` is `status == "ok"`; `summary` is the start of the result, or of the refusal, redacted exactly like `task_complete`'s `toolTrace`, whitespace collapsed, at most 200 characters (may be empty) | Sent once for every `tool_call`, always after it in the same stream, whichever way the call ends — except a call cut off by a cancellation or a turn deadline interrupt, which ends the turn without its result; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the raw result** |
@@ -255,7 +255,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `llm_retry` | `{"reason","attempt"}` | The LLM task asks the same model again after an unusable reply ([recovery policies](langchain.md#recovery-policies-retry-where-it-helps)) |
 | `guardrail_triggered` | `{"type","phase","action","taskId"}` — `phase` is `input` or `output`, `action` one of `block`, `redact`, `reprompt`, `warn` | An LLM task's [input or output guardrail](langchain.md#input-and-output-guardrails) fired. Sent before the answer; after a `block` the answer that follows is the block message |
 | `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, `hitlPausedAt` when the turn paused, `error` when it failed, and `finishReason` (`length`, `content_filter` or `empty`) when the answer is not a plain complete one | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags). What a streamed model call must do to count as complete is [the streaming contract](langchain.md#the-streaming-contract) |
-| `error` | `{"message", …}` | **Terminal.** The turn could not run or failed |
+| `error` | `{"message","code","retryable"}`, or the opaque `{"message","code":"internal_error","retryable":false,"correlationId"}` | **Terminal.** The turn could not run, timed out, failed outside a task, or the node is shutting down |
 
 > **`task_complete.toolTrace` carries arguments and results.** The `tool_call` and
 > `tool_result` events are argument-free and result-free by design, but the
@@ -293,7 +293,7 @@ Rules for clients:
   `done`.
 - **An `error` before anything ran carries a `code`.** When the turn is refused
   up front — the cases the blocking endpoint answers with a status — the event is
-  `{"message":"…","code":"…"}` with `code` one of `awaiting_approval`,
+  `{"message":"…","code":"…","retryable":…}` with `code` one of `awaiting_approval`,
   `conversation_not_found`, `input_too_large`, `conversation_ended`,
   `agent_not_ready`, `agent_mismatch`, `quota_exceeded`,
   `quota_accounting_unavailable`, `processing_restricted` or
@@ -301,14 +301,26 @@ Rules for clients:
 
   ```text
   event:error
-  data: {"message":"Conversation has ended","code":"conversation_ended"}
+  data: {"message":"Conversation has ended","code":"conversation_ended","retryable":false}
   ```
 
-  Any other failure is `{"message":"Internal server error","correlationId":"…"}`;
-  the correlation id is in the server log next to the real cause. A started turn
-  that then carries none of its events for `systemRuntime.agentTimeoutInSeconds`
-  plus one keep-alive interval ends with `code` `turn_timeout` (the turn was
-  abandoned and never returned); retry the message.
+  `retryable` says whether sending the same request again after a moment makes
+  sense (`true` for `agent_not_ready`, `quota_accounting_unavailable`,
+  `restriction_status_unavailable` and `conversation_busy`). Any other failure
+  is `{"message":"Internal server error","code":"internal_error","retryable":false,"correlationId":"…"}`;
+  the correlation id is in the server log next to the real cause.
+- **`turn_timeout` comes in two kinds.** A turn the agent-timeout watchdog (or a
+  lost cluster lease) interrupted ends with `error` `turn_timeout`,
+  `retryable: true` and no `done`: it was discarded, send it again. A started
+  turn that carries none of its events for `systemRuntime.agentTimeoutInSeconds`
+  plus one keep-alive interval is ended by the stream itself with `turn_timeout`
+  and `retryable: false`: the stream cannot know whether the turn was stored, so
+  read the conversation before sending again. Neither is ever `cancelled`.
+- **`server_shutdown`** (`retryable: true`) ends every open stream of a node
+  that is stopping; reconnect and send again.
+- **A node at its stream capacity answers `503`** with a `Retry-After` of 3 to 8
+  seconds and `{"code":"streams_at_capacity","retryable":true}`, before the
+  stream opens.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
 - **`/resume/stream` does not cancel on disconnect by default.** A resume is a
@@ -333,14 +345,17 @@ Rules for clients:
   `done` if it settled. A resume that was accepted and then dropped
   (cancelled, ended, busy) ends with `error` and a `code`
   (`conversation_ended`, `awaiting_approval`, `conversation_busy` or
-  `resume_dropped`); a failure, or losing the cluster lease, ends with `error`
-  too, and so does a turn that went silent past `systemRuntime.agentTimeoutInSeconds`
-  plus one keep-alive interval (`turn_timeout`).
+  `resume_dropped`); a failure ends with `error` too, and so do losing the
+  cluster lease and a turn that went silent past `systemRuntime.agentTimeoutInSeconds`
+  plus one keep-alive interval (`turn_timeout`, see above).
 - **Disconnecting cancels the turn** by default
   (`eddi.streaming.cancel-on-client-disconnect=true`; this governs `/stream`
   only, `/resume/stream` has its own switch, below). Set it to `false` to let
   the turn finish and persist when the client goes away; the reply is then there
-  when the conversation is read again.
+  when the conversation is read again. An agent overrides it with
+  `streamingClientDisconnect` (`cancel` or `finish`). A client that leaves after
+  the turn finished generating never cancels it. A cancelled turn is discarded
+  whole — the user's input included.
 - **Silent stretches carry a keep-alive.** A model can work for a minute before
   its first token or tool call. When a stream has carried nothing for
   `eddi.streaming.keepalive-interval-seconds` (default `15`, `0` = off), EDDI

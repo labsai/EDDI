@@ -714,7 +714,8 @@ eddi_llm_recovery_total                     # Recovery actions of the LLM task; 
                                             # every action also writes one INFO line, "LLM recovery conversationId=... action=..." (see llm-resilience.md)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
-eddi_streaming_active                       # Gauge: native SSE streams open on this node; tag: kind (agent|group)
+eddi_llm_stream_no_finish_reason_accepted_total # A lenient endpoint's stream completed without a finish reason and was accepted; tag: path
+eddi_streaming_active                       # Gauge: SSE streams open on this node; tag: kind (agent|group|openai|a2a)
 eddi_streaming_closed_total                 # Native SSE streams ended; tags: kind, reason (completed|failed|cancelled|client_gone|idle_timeout|backpressure|refused)
 eddi_streaming_refused_total                # Streams refused because the node was at eddi.streaming.max-concurrent-streams; tag: kind
 eddi_streaming_first_token_seconds          # Timer: from opening a stream to its first token; tag: kind
