@@ -169,9 +169,11 @@ public class GroupConversation {
      */
     private DecisionRecord decision;
     /**
-     * How the last round ended (see {@link DiscussionOutcome}); {@code null} while
-     * a round runs, after a cancel, and on documents written before this field
-     * existed.
+     * How the <em>latest</em> round ended (see {@link DiscussionOutcome}) — a
+     * continued discussion reports its last round, not the discussion as a whole: a
+     * round 3 that failed during an outage is {@code FAILED} here while the state
+     * stays {@code COMPLETED} because round 1 answered. {@code null} while a round
+     * runs, after a cancel, and on documents written before this field existed.
      */
     private DiscussionOutcome outcome;
     /**
@@ -181,6 +183,13 @@ public class GroupConversation {
      * are listed in {@code DiscussionOutcomes}.
      */
     private String outcomeReason;
+    /**
+     * How many rounds ended {@code ANSWERED}. {@code null} on documents written
+     * before it existed (see {@link #hasAnsweredRound()}); new discussions start at
+     * 0. Decides whether a failed round ends the discussion (only if none
+     * answered).
+     */
+    private Integer answeredRounds;
     /**
      * The turns a parent discussion had left when it ran this nested one as a GROUP
      * member's turn; the child runs under {@code min(own maxTurns, this)}.
@@ -754,7 +763,9 @@ public class GroupConversation {
 
         public TranscriptEntry {
             if (outcome == null) {
-                outcome = TurnOutcome.derivedFrom(type);
+                // A failed turn stored before outcomes existed carried this text as its
+                // "answer"; it reads as what it was.
+                outcome = LEGACY_FAILURE_PLACEHOLDER.equals(content) ? TurnOutcome.FAILED : TurnOutcome.derivedFrom(type);
             }
             if (outcome != TurnOutcome.ANSWERED) {
                 content = null;
@@ -875,8 +886,10 @@ public class GroupConversation {
          */
         NO_ANSWER,
         /**
-         * No member answered at all, or the discussion failed with an error. State is
-         * {@code FAILED}.
+         * Member turns failed and nobody answered, or the run failed with an error, a
+         * gate timed out. State is {@code FAILED} when no round of the discussion ever
+         * answered; a later round that fails leaves it {@code COMPLETED}, so it can be
+         * continued.
          */
         FAILED
     }
@@ -1403,8 +1416,21 @@ public class GroupConversation {
     }
 
     public void setSynthesizedAnswer(String synthesizedAnswer) {
-        this.synthesizedAnswer = synthesizedAnswer;
+        // A discussion stored before outcomes existed may hold the old failure
+        // placeholder as its answer; it never was one.
+        this.synthesizedAnswer = LEGACY_FAILURE_PLACEHOLDER.equals(synthesizedAnswer) ? null : synthesizedAnswer;
     }
+
+    /**
+     * The text earlier versions stored in place of a member turn whose conversation
+     * ended in ERROR without output ("K1" of the November 2026 review): signed and
+     * kept as an OPINION/SYNTHESIS, quoted to peers and taken as the synthesized
+     * answer. Recognised on read only — a stored entry carrying it without an
+     * {@code outcome} reads as FAILED without content, a stored
+     * {@code synthesizedAnswer} equal to it as no answer. Nothing writes it any
+     * more.
+     */
+    private static final String LEGACY_FAILURE_PLACEHOLDER = "[Agent failed to produce output — conversation entered ERROR state]";
 
     public DecisionRecord getDecision() {
         return decision;
@@ -1428,6 +1454,28 @@ public class GroupConversation {
 
     public void setOutcomeReason(String outcomeReason) {
         this.outcomeReason = outcomeReason;
+    }
+
+    public Integer getAnsweredRounds() {
+        return answeredRounds;
+    }
+
+    public void setAnsweredRounds(Integer answeredRounds) {
+        this.answeredRounds = answeredRounds;
+    }
+
+    /** Counts a round that ended {@code ANSWERED}. */
+    public void markRoundAnswered() {
+        answeredRounds = answeredRounds == null ? 1 : answeredRounds + 1;
+    }
+
+    /**
+     * Whether any round of this discussion ended with an answer. A document from
+     * before the count existed has none: a continued one ({@code round > 1}) is
+     * assumed to have answered, as it was continuable.
+     */
+    public boolean hasAnsweredRound() {
+        return answeredRounds != null ? answeredRounds > 0 : round > 1;
     }
 
     public Integer getInheritedMaxTurns() {
@@ -1464,6 +1512,53 @@ public class GroupConversation {
         var counter = legTurnCounter;
         if (counter != null && turns > 0) {
             counter.addAndGet(turns);
+        }
+    }
+
+    /**
+     * How many nested GROUP members of the running parallel batch share the leg's
+     * remaining turns (runtime only); 1 outside a batch.
+     */
+    @JsonIgnore
+    private transient volatile int legNestedShares = 1;
+
+    /**
+     * Sets how many nested members share the remaining turns (a parallel batch).
+     */
+    public void shareLegTurns(int shares) {
+        this.legNestedShares = Math.max(1, shares);
+    }
+
+    /**
+     * Reserves turns for a nested discussion: the leg's remaining turns, divided
+     * among the nested members of a parallel batch. Counted at once, so siblings
+     * see what really remains. {@code null} when no leg is bound.
+     */
+    public Integer claimLegTurns() {
+        var counter = legTurnCounter;
+        if (counter == null) {
+            return null;
+        }
+        while (true) {
+            int used = counter.get();
+            int remaining = legMaxTurns - used;
+            if (remaining <= 0) {
+                return 0;
+            }
+            int claim = Math.max(1, remaining / legNestedShares);
+            if (counter.compareAndSet(used, used + claim)) {
+                return claim;
+            }
+        }
+    }
+
+    /**
+     * Settles a claim: the nested discussion used {@code used} of {@code claimed}.
+     */
+    public void settleLegTurns(int claimed, int used) {
+        var counter = legTurnCounter;
+        if (counter != null && used != claimed) {
+            counter.addAndGet(used - claimed);
         }
     }
 

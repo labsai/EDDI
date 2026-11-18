@@ -24,9 +24,11 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.internal.groups.DiscussionOutcomes;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
@@ -34,14 +36,18 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -50,7 +56,9 @@ import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 
 /**
  * Fault injection per discussion style preset (the review's A+ bar for the
@@ -170,8 +178,125 @@ class GroupFaultInjectionTest {
 
         assertNull(gc.getSynthesizedAnswer(), style.name());
         assertNotEquals(DiscussionOutcome.ANSWERED, gc.getOutcome(), style.name());
-        assertEquals(gc.getOutcome() == DiscussionOutcome.FAILED, gc.getState() == GroupConversationState.FAILED, style.name());
+        if (style == DiscussionStyle.TASK_FORCE) {
+            // The moderator also plans and verifies: whatever the members did, there is
+            // no answer, and FAILED comes with the FAILED state only.
+            assertEquals(gc.getOutcome() == DiscussionOutcome.FAILED, gc.getState() == GroupConversationState.FAILED, style.name());
+        } else {
+            assertEquals(GroupConversationState.COMPLETED, gc.getState(), style.name());
+            assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome(), style.name());
+            assertEquals(DiscussionOutcomes.SYNTHESIS_FAILED, gc.getOutcomeReason(), style.name());
+        }
         assertNoFailedTurnCarriesContent(gc);
+    }
+
+    /** M2: dissent recording leaves a NONE decision record — that is no answer. */
+    @Test
+    void recordDissents_withAFailedSynthesis_isStillNoAnswer() throws Exception {
+        givenGroup(DiscussionStyle.ROUND_TABLE);
+        var config = groupStore.read(GROUP_ID, 1);
+        config.setRecordDissents(true);
+        givenProviderFailureFor(Set.of(MODERATOR));
+
+        GroupConversation gc = service.discuss(GROUP_ID, "Q?", "user", 0);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.SYNTHESIS_FAILED, gc.getOutcomeReason());
+    }
+
+    /**
+     * No failed turn's text or reason reaches another member: not in a peer's
+     * prompt, not in the synthesis prompt, not in the transcript handed along as
+     * context.
+     */
+    @Test
+    void failedTurns_neverReachThePeersOrTheSynthesisPrompt() throws Exception {
+        givenGroup(DiscussionStyle.ROUND_TABLE);
+        givenProviderFailureFor(Set.of("b"));
+
+        service.discuss(GROUP_ID, "Q?", "user", 0);
+
+        var inputs = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService, atLeastOnce()).say(any(), any(), any(), any(), any(), any(), inputs.capture(), anyBoolean(), any());
+        for (InputData input : inputs.getAllValues()) {
+            assertFalse(input.getInput().contains(MemberTurnExecutor.REASON_ERROR_STATE), input.getInput());
+            assertFalse(input.getInput().contains("Agent failed"), input.getInput());
+            var transcript = input.getContext().get("groupTranscript");
+            if (transcript != null && transcript.getValue() instanceof List<?> entries) {
+                for (Object o : entries) {
+                    var e = (TranscriptEntry) o;
+                    assertNotEquals("b", e.speakerAgentId(), "the failed member's record is not handed to peers: " + e);
+                }
+            }
+        }
+    }
+
+    private GroupConversation completedDiscussion(int answeredRounds, TranscriptEntry... entries) throws Exception {
+        var gc = new GroupConversation();
+        gc.setId("gc-old");
+        gc.setGroupId(GROUP_ID);
+        gc.setUserId("user");
+        gc.setState(GroupConversationState.COMPLETED);
+        gc.setRound(1);
+        if (answeredRounds >= 0) {
+            gc.setAnsweredRounds(answeredRounds);
+        }
+        gc.getTranscript().add(new TranscriptEntry("user", "User", "Q1", -1, "Question", GroupConversation.TranscriptEntryType.QUESTION,
+                Instant.now(), null, null));
+        for (var e : entries) {
+            gc.getTranscript().add(e);
+        }
+        doReturn(gc).when(conversationStore).read("gc-old");
+        // The store's CAS moves the stored (here: the same) document to IN_PROGRESS.
+        doAnswer(inv -> {
+            gc.setState(GroupConversationState.IN_PROGRESS);
+            return true;
+        }).when(conversationStore).compareAndSetState("gc-old", GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS);
+        return gc;
+    }
+
+    /**
+     * M1: continuing a discussion stored with the old placeholder never quotes it.
+     */
+    @Test
+    void continuingALegacyDiscussion_neverQuotesThePlaceholder() throws Exception {
+        givenGroup(DiscussionStyle.ROUND_TABLE);
+        givenProviderFailureFor(Set.of());
+        completedDiscussion(-1, new TranscriptEntry("b", "Beta", "[Agent failed to produce output — conversation entered ERROR state]", 0,
+                "Initial Opinions", GroupConversation.TranscriptEntryType.OPINION, Instant.now(), null, null));
+
+        service.continueDiscussion("gc-old", "Q2", null);
+
+        var inputs = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService, atLeastOnce()).say(any(), any(), any(), any(), any(), any(), inputs.capture(), anyBoolean(), any());
+        for (InputData input : inputs.getAllValues()) {
+            assertFalse(input.getInput().contains("Agent failed to produce output"), input.getInput());
+            var transcript = input.getContext().get("groupTranscript");
+            if (transcript != null && transcript.getValue() instanceof List<?> entries) {
+                assertTrue(entries.stream().noneMatch(o -> ((TranscriptEntry) o).content() != null
+                        && ((TranscriptEntry) o).content().contains("Agent failed to produce output")));
+            }
+        }
+    }
+
+    /**
+     * M3: a continuation round that fails during an outage reports FAILED as its
+     * outcome but leaves the discussion COMPLETED — continuable again.
+     */
+    @Test
+    void aFailedContinuationRound_leavesTheDiscussionContinuable() throws Exception {
+        givenGroup(DiscussionStyle.ROUND_TABLE);
+        givenProviderFailureFor(Set.of("a", "b", MODERATOR));
+        completedDiscussion(1, new TranscriptEntry("a", "Alpha", "round 1 view", 0, "Initial Opinions",
+                GroupConversation.TranscriptEntryType.OPINION, Instant.now(), null, null));
+
+        GroupConversation gc = service.continueDiscussion("gc-old", "Q2", null);
+
+        assertEquals(GroupConversationState.COMPLETED, gc.getState());
+        assertEquals(DiscussionOutcome.FAILED, gc.getOutcome(), "the outcome describes the latest round");
+        assertEquals(DiscussionOutcomes.NO_MEMBER_ANSWERED, gc.getOutcomeReason());
+        assertNull(gc.getSynthesizedAnswer());
     }
 
     @ParameterizedTest

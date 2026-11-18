@@ -25,6 +25,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -168,6 +169,65 @@ class DiscussionCancellationTest {
 
         assertSame(MemberTurnCancelledException.class, thrown.getClass());
         verify(service, never()).discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any());
+    }
+
+    /** S1: two nested members of one parallel batch share what remains. */
+    @Test
+    void parallelSiblings_shareTheRemainingTurns_andNeverPassTheCap() {
+        var gc = parent();
+        var counter = new AtomicInteger(2);
+        gc.bindLegTurnBudget(counter, 10);
+        gc.shareLegTurns(2);
+
+        int first = gc.claimLegTurns();
+        int second = gc.claimLegTurns();
+
+        assertEquals(4, first, "half of the 8 that remain");
+        assertEquals(2, second, "half of what remains after the sibling's claim");
+        assertTrue(counter.get() <= 10, "the claims never pass the cap: the synthesis turn stays reserved");
+        gc.settleLegTurns(first, 1);
+        assertEquals(5, counter.get(), "an unused claim is given back");
+    }
+
+    /** S2: a child that throws is charged its whole claim. */
+    @Test
+    void nestedGroup_thatThrows_isStillChargedToTheParent() throws Exception {
+        var service = Mockito.mock(GroupConversationService.class);
+        when(service.discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("child blew up"));
+        var gc = parent();
+        var counter = new AtomicInteger(40);
+        gc.bindLegTurnBudget(counter, 50);
+
+        var entry = executor(service).executeAgentTurn(SUB_GROUP, gc, "input", protocol(), 0, opinion(), null, null);
+
+        assertEquals(GroupConversation.TurnOutcome.FAILED, entry.outcome());
+        assertEquals(50, counter.get(), "its claim of the remaining 10 turns stays spent");
+    }
+
+    /**
+     * S8: a cancelled child, or one that did not answer, is no answer of its
+     * member.
+     */
+    @Test
+    void nestedGroup_cancelledOrUnanswered_isNotAnAnswer() throws Exception {
+        var service = Mockito.mock(GroupConversationService.class);
+        var child = new GroupConversation();
+        child.setId("gc-child");
+        child.setState(GroupConversation.GroupConversationState.CANCELLED);
+        child.getTranscript().add(new GroupConversation.TranscriptEntry("x", "X", "partial", 0, "P", TranscriptEntryType.OPINION,
+                Instant.now(), null, null));
+        when(service.discussNested(any(), any(), any(), anyInt(), any(), any(), any(), any(), any(), any())).thenReturn(child);
+
+        var cancelled = executor(service).executeAgentTurn(SUB_GROUP, parent(), "input", protocol(), 0, opinion(), null, null);
+        assertEquals(GroupConversation.TurnOutcome.SKIPPED, cancelled.outcome());
+        assertEquals(MemberTurnExecutor.REASON_SUB_GROUP_CANCELLED, cancelled.errorReason());
+
+        child.setState(GroupConversation.GroupConversationState.COMPLETED);
+        child.setOutcome(GroupConversation.DiscussionOutcome.NO_ANSWER);
+        var unanswered = executor(service).executeAgentTurn(SUB_GROUP, parent(), "input", protocol(), 0, opinion(), null, null);
+        assertEquals(GroupConversation.TurnOutcome.FAILED, unanswered.outcome());
+        assertNull(unanswered.content(), "its partial entries are not passed off as the member's answer");
     }
 
     @Test

@@ -1722,7 +1722,9 @@ public class GroupConversationService implements IGroupConversationService, User
             // K1/K3: COMPLETED is not "answered" — record how the round ended, and
             // fail a round in which no member answered at all.
             DiscussionOutcomes.settle(gc, phaseList, costCeilingSynthesizeNow);
-            boolean noMemberAnswered = gc.getOutcome() == GroupConversation.DiscussionOutcome.FAILED;
+            // M3: FAILED ends the discussion only if no round of it ever answered; a
+            // continuation that fails stays COMPLETED (continuable, agents kept).
+            boolean noMemberAnswered = DiscussionOutcomes.failsDiscussion(gc);
             if (noMemberAnswered) {
                 counterGroupFailure.increment();
             }
@@ -2937,6 +2939,9 @@ public class GroupConversationService implements IGroupConversationService, User
         // The field initialiser is the LEGACY sentinel so key-less stored documents
         // read as legacy — a genuinely new document must claim current explicitly.
         gc.setSchemaVersion(GroupConversation.CURRENT_SCHEMA_VERSION);
+        // M3: counted from 0, so a later failed round can tell the discussion answered
+        // before.
+        gc.setAnsweredRounds(0);
         gc.setGroupId(groupId);
         gc.setUserId(userId);
         gc.setState(GroupConversationState.IN_PROGRESS);

@@ -75,18 +75,57 @@ GR1–GR4.
 - Entries stored before this change carry no `outcome`; they read as `ANSWERED`
   (`SKIPPED`/`ERROR` entries as `SKIPPED`/`FAILED`). Old placeholder entries keep their text.
 - A follow-up whose member fails answers 502 instead of recording the placeholder.
-- A discussion in which every member turn failed or timed out is `FAILED`, not `COMPLETED`.
+- A first round in which every member turn failed or timed out is `FAILED`, not
+  `COMPLETED`; a later round that fails stays `COMPLETED` with `outcome: FAILED`
+  (`outcome` always describes the latest round).
+- A decision record of type `NONE` is not an answer.
+- Member turns that did not answer are no longer in other members' `groupTranscript` context.
 - `maxTurns`-bound discussions run one opinion turn fewer per remaining synthesis phase.
-- `POST …/cancel` on a running discussion answers `202` (was `200`).
+- `POST …/cancel` on a running discussion answers `202` (was `200`); `200` now means "no
+  longer running", with the state it ended in.
 - Saving a group without members, or starting a discussion on one, is refused.
 - A TASK_FORCE whose verifier is not deployed or fails no longer passes every task.
+
+### Review follow-ups (same day)
+
+- **Legacy placeholder (M1):** a stored entry without `outcome` whose content is the old
+  failure placeholder reads as `FAILED` without content; a stored `synthesizedAnswer`
+  holding it reads as no answer. Recognised on read only (one private constant).
+- **NONE decisions (M2):** a decision record of type `NONE` (dissents only, no quorum, a
+  tie, an unreadable verdict) no longer makes a round `ANSWERED`.
+- **Failed later rounds (M3):** `outcome` describes the latest round. The state becomes
+  `FAILED` only when no round ever answered (new persisted counter `answeredRounds`; a
+  legacy continued document counts as answered); a failed continuation stays
+  `COMPLETED`, continuable, its agents kept.
+- **Turn budget (S1, S2):** a parallel batch is counted before dispatch, nested GROUP
+  members claim a share of what remains (`claimLegTurns`), and a child is charged in a
+  `finally` (its whole claim when it threw).
+- **Cancel everywhere (S4):** every member or engine turn checks the token
+  (`MemberTurnExecutor.executeAgentTurn`) — judge, facilitator, dissent, vote tie-break,
+  task-force plan/verify/bids — and turns without their own cancellation are released by
+  `CANCEL_IMMEDIATE`; released parallel speakers get a `SKIPPED` "Cancelled" entry and
+  `speaker_complete`.
+- **Cancel answer (S5):** `200` means "no longer running — read `state`" (CANCELLED, or
+  COMPLETED/FAILED when it finished first); the MCP tool returns that state.
+- **Verifier (S6):** a SKIPPED verifier fails its tasks once and stops the rework loop.
+- **One vocabulary (S7):** reasons in one enum `DiscussionOutcomes.Reason`, new
+  `REJECTED_BY_HUMAN`, `APPROVAL_TIMED_OUT`, `NO_PROGRESS`; a reject and the no-progress
+  failure set them and `group_complete` carries them; turn-cap skips report
+  `TURN_LIMIT_REACHED`; skipped members with a failed synthesis report `SYNTHESIS_FAILED`.
+- **Nested children (S8):** a child that was cancelled is a `SKIPPED` turn, one that failed
+  or ended without an answer a `FAILED` turn; its partial entries are never the answer.
+- **Peer context:** member turns that did not answer are left out of the `groupTranscript`
+  context handed to other members.
+- **Timeout retry (S3):** documented as cooperative — a retry happens only when the
+  timed-out attempt stops within 5 s.
 
 ### Left open
 
 - Unparseable verdicts still auto-verify by default (PR #1395 adds the option; its
-  default should be `FAIL`). Convergence judge, facilitator and dissent rounds do not read
-  the token per turn (they run after the post-repeat cancel check). A member turn stopped
-  by `CANCEL_IMMEDIATE` is not harvested for its cost or created agents.
+  default should be `FAIL`). A member turn stopped by `CANCEL_IMMEDIATE` is not harvested
+  for its cost or created agents. The timeout retry uses `cancelConversation` (a sibling
+  branch adds an in-flight-only cancel); a timed-out turn that finishes late leaves its
+  reply in the member's private history unmarked.
 
 ```decision-log
 | 2026-11-18 | Discussion outcome is a field (`outcome`/`outcomeReason`) beside the state; only "no member answered" maps to FAILED | A provider outage and a turn-cap cut both ended COMPLETED with no way to tell | A new terminal state (every consumer switches on the state names) |

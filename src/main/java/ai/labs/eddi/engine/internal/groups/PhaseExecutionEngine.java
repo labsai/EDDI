@@ -1033,13 +1033,17 @@ public class PhaseExecutionEngine {
                 cancellation.cancelAndStopInFlight();
             }
         });
+        // S1: the batch's turns are counted before it is dispatched (parallel turns
+        // are atomic batches), so a nested GROUP member in it sees what really
+        // remains — shared with its GROUP siblings — and never the synthesis turn.
+        turnCounter.addAndGet(batchSpeakers.size());
+        gc.shareLegTurns((int) batchSpeakers.stream().filter(s -> s.memberType() == AgentGroupConfiguration.MemberType.GROUP).count());
         try {
             runParallelBatch(gc, config, phase, protocol, question, phaseIdx, listener, batchSpeakers, snapshotTranscript, cancellation, token);
         } finally {
+            gc.shareLegTurns(1);
             unlinkBatch.run();
         }
-        // Count all completed turns for this batch (parallel turns are atomic batches)
-        turnCounter.addAndGet(batchSpeakers.size());
         DiscussionCancellation.checkpoint(token);
 
         // I6: the human tail, prompted against the PRE-fan-out snapshot so a
@@ -1149,8 +1153,12 @@ public class PhaseExecutionEngine {
                 }
                 if (cause instanceof MemberTurnCancelledException) {
                     if (token != null && token.isCancelled()) {
-                        // Released by the discussion's own cancel: not a timeout, and
+                        // Released by the discussion's own cancel: not a timeout. Every
+                        // started turn still gets its closing entry and speaker_complete;
                         // the leg ends as CANCELLED right after the batch.
+                        recordParallelOutcome(gc, TranscriptEntry.notAnswered(speaker.agentId(), speaker.displayName(), phaseIdx,
+                                phase.name(), TranscriptEntryType.SKIPPED, TurnOutcome.SKIPPED, MemberTurnExecutor.REASON_CANCELLED, null),
+                                phaseIdx, phase, listener);
                         continue;
                     }
                     // Already released by the batch deadline above — same outcome as a

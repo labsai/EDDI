@@ -216,6 +216,25 @@ class TaskForceEngineReworkTest {
             assertEquals(1.0, meter(TaskForceEngine.METER_VERIFY_UNANSWERED));
             assertEquals(0.0, meter(TaskForceEngine.METER_VERIFY_UNPARSEABLE), "not an unparseable verdict: there was none");
         }
+
+        @Test
+        @DisplayName("S6: a verifier skipped as not deployed fails the tasks once and triggers no rework")
+        void skippedVerifierTriggersNoRework() throws Exception {
+            reset(memberTurnExecutor);
+            doAnswer(inv -> inv.getArgument(1)).when(memberTurnExecutor).sign(any(), any());
+            doAnswer(inv -> {
+                verifierCalls++;
+                return new TranscriptEntry(MODERATOR, MODERATOR, null, 2, "Verify", TranscriptEntryType.SKIPPED, Instant.now(),
+                        MemberTurnExecutor.REASON_NOT_DEPLOYED, null);
+            }).when(memberTurnExecutor).executeAgentTurn(any(), any(), anyString(), any(), anyInt(), any(), any(), any());
+            var gc = completed();
+
+            verify(gc, config(2), protocol(50, null), new AtomicInteger(), 50);
+
+            assertEquals(TaskStatus.FAILED, task(gc).status());
+            assertEquals(1, verifierCalls, "a deterministic skip is not retried through reworks");
+            assertTrue(workerInputs.isEmpty(), "no member is asked to rework");
+        }
     }
 
     @Nested

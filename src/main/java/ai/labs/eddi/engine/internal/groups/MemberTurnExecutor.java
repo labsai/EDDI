@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDepthExceededException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionException;
+import ai.labs.eddi.engine.api.IGroupConversationService.GroupMembersUnresolvableException;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupTimeoutException;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
@@ -110,6 +111,10 @@ public class MemberTurnExecutor {
     public static final String REASON_SUB_GROUP_FAILED = "Sub-group discussion failed";
     /** A nested GROUP member could not start: the depth limit. */
     public static final String REASON_SUB_GROUP_DEPTH = "Sub-group depth exceeded";
+    /** A nested GROUP member's discussion was cancelled on its own. */
+    public static final String REASON_SUB_GROUP_CANCELLED = "Sub-group discussion was cancelled";
+    /** A turn released by the discussion's immediate cancel. */
+    public static final String REASON_CANCELLED = "Cancelled";
     /** A nested GROUP member could not start: the parent's turn budget is spent. */
     public static final String REASON_TURN_BUDGET = "Turn budget exhausted";
     /**
@@ -194,9 +199,20 @@ public class MemberTurnExecutor {
                                             DiscussionPhase phase, String targetAgentId, GroupDiscussionEventListener listener,
                                             GroupConversationService.MemberTurnCancellation cancellation, String conversationKey)
             throws GroupDiscussionException {
+        // S4: every member or engine turn — phase speakers, convergence judge,
+        // facilitator, dissent round, vote tie-break, task-force plan/verify/bids —
+        // refuses to start once the discussion is cancelled, and a turn without its
+        // own cancellation is released by CANCEL_IMMEDIATE like a phase speaker's.
+        DiscussionControlToken token = groupConversationService != null ? groupConversationService.controlTokenOf(gc.getId()) : null;
+        DiscussionCancellation.checkpoint(token);
+        DiscussionCancellation.Link link = cancellation == null && token != null ? DiscussionCancellation.link(token) : null;
         try {
-            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener, cancellation, conversationKey);
+            return doExecuteAgentTurn(member, gc, input, protocol, phaseIdx, phase, targetAgentId, listener,
+                    link != null ? link.cancellation() : cancellation, conversationKey);
         } finally {
+            if (link != null) {
+                link.close();
+            }
             // I17: announce artifact writes this turn made. In a finally because an
             // accepted write already happened whatever the turn's own outcome —
             // a timeout or cancellation after the write must not swallow the event.
@@ -615,8 +631,10 @@ public class MemberTurnExecutor {
                 }
                 if (protocol.onAgentFailure() == ProtocolConfig.MemberFailurePolicy.RETRY && retries < maxRetries) {
                     // K7: the timed-out turn is still running in the same member
-                    // conversation; a retry would queue behind it and bill twice. Stop it
-                    // and wait for it to end — or record the timeout without a retry.
+                    // conversation; a retry would queue behind it and bill twice. Ask it
+                    // to stop (cooperative: effective at its next task boundary, a running
+                    // model call is not interrupted) and retry only if it ended within the
+                    // wait — otherwise record the timeout without a retry.
                     if (!stopTimedOutAttempt(member, privateConvId, attemptInFlight, timeout)) {
                         return TranscriptEntry.notAnswered(member.agentId(), member.displayName(), phaseIdx, phase.name(),
                                 TranscriptEntryType.SKIPPED, TurnOutcome.TIMED_OUT, REASON_TIMEOUT_NOT_RETRIED, targetAgentId);
@@ -969,18 +987,34 @@ public class MemberTurnExecutor {
                     : Math.max(0.0, bindingCeiling - gc.getTotalCost());
             // K8: the child runs under the turns this discussion has left, and hears
             // its cancel. With no turn left, no child is started at all.
-            Integer remainingTurns = gc.remainingLegTurns();
-            if (remainingTurns != null && remainingTurns <= 0) {
+            DiscussionControlToken parentToken = groupConversationService.controlTokenOf(gc.getId());
+            DiscussionCancellation.checkpoint(parentToken);
+            // S1: claimed up front — in a parallel batch, sibling GROUP members each get
+            // a share of what remains, not each the whole of it.
+            Integer claimedTurns = gc.claimLegTurns();
+            if (claimedTurns != null && claimedTurns <= 0) {
                 return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
                         Instant.now(), REASON_TURN_BUDGET, targetAgentId);
             }
-            DiscussionControlToken parentToken = groupConversationService.controlTokenOf(gc.getId());
-            DiscussionCancellation.checkpoint(parentToken);
             // gc.getId() names where the shared attachments' storageRefs came from: the
             // child accepts a reference only if this discussion can read it.
-            GroupConversation subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
-                    gc.getAttachments(), remainingBudget, gc.getId(), parentToken, remainingTurns);
-            gc.chargeLegTurns(subConversation.legTurnsUsed());
+            GroupConversation subConversation;
+            int childTurns = claimedTurns != null ? claimedTurns : 0;
+            try {
+                subConversation = groupConversationService.discussNested(subGroupId, input, gc.getUserId(), nextDepth, null,
+                        gc.getAttachments(), remainingBudget, gc.getId(), parentToken, claimedTurns);
+                childTurns = subConversation.legTurnsUsed();
+            } catch (GroupDepthExceededException | GroupMembersUnresolvableException e) {
+                // Refused before the child ran a turn.
+                childTurns = 0;
+                throw e;
+            } finally {
+                // S2: the child's turns count against this discussion however it ended;
+                // one that threw mid-run is charged its whole claim.
+                if (claimedTurns != null) {
+                    gc.settleLegTurns(claimedTurns, childTurns);
+                }
+            }
             DiscussionCancellation.checkpoint(parentToken);
 
             // Wave 0, F5: roll the child's cost up into this group's attribution —
@@ -1021,16 +1055,22 @@ public class MemberTurnExecutor {
                         targetAgentId);
             }
 
-            // A child that failed, or that ended without any member answering, is a
-            // failed turn of this member: its "answer" would be nothing at all.
+            // S8: only an ANSWERED child is an answer. A cancelled one is skipped; a
+            // failed one, or one that ended without an answer, is a failed turn of this
+            // member — its partial entries are never passed off as the member's answer.
+            if (subConversation.getState() == GroupConversationState.CANCELLED) {
+                return new TranscriptEntry(member.agentId(), member.displayName(), null, phaseIdx, phase.name(), TranscriptEntryType.SKIPPED,
+                        Instant.now(), REASON_SUB_GROUP_CANCELLED, targetAgentId);
+            }
             if (subConversation.getState() == GroupConversationState.FAILED
-                    || subConversation.getOutcome() == GroupConversation.DiscussionOutcome.FAILED) {
+                    || (subConversation.getOutcome() != null && subConversation.getOutcome() != GroupConversation.DiscussionOutcome.ANSWERED)) {
                 LOGGER.warnf("Sub-group '%s' ended %s (%s) — recording a failed turn for member '%s'", LogSanitizer.sanitize(subGroupId),
                         subConversation.getState(), subConversation.getOutcomeReason(), LogSanitizer.sanitize(member.agentId()));
                 return failedTurn(member, phaseIdx, phase, protocol, REASON_SUB_GROUP_FAILED, targetAgentId);
             }
 
-            // Extract the synthesized answer, or concatenate the answered contributions
+            // The synthesized answer, or — for a style without synthesis — the answered
+            // contributions
             String response = subConversation.getSynthesizedAnswer();
             if (response == null || response.isBlank()) {
                 response = subConversation.getTranscript().stream().filter(TranscriptEntry::answered)
@@ -1082,6 +1122,18 @@ public class MemberTurnExecutor {
      * Stops a timed-out attempt before its retry: cancels the member conversation's
      * running turn and waits (at most {@link #RETRY_DRAIN_SECONDS}, never longer
      * than the turn timeout) for the attempt to end.
+     * <p>
+     * The cancel is cooperative: it takes effect at the turn's next task boundary,
+     * and a model call already running is not interrupted. So a retry happens only
+     * when the first attempt stops within the wait; otherwise the turn is recorded
+     * {@code TIMED_OUT} and not retried. A timed-out turn that finishes later still
+     * writes its reply into the member's private history, which the member's next
+     * turn sees as earlier context (known, not marked).
+     * <p>
+     * It uses {@code cancelConversation}, the narrowest existing API: it would also
+     * cancel a pause the late turn committed — which a group cancels anyway
+     * ({@link #handleMemberPause}). A cancel limited to the in-flight turn
+     * ({@code cancelInFlightTurn}, on a sibling branch) is the follow-up.
      *
      * @return whether the attempt ended, so a retry will not queue behind it
      */

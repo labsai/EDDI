@@ -342,6 +342,7 @@ public class GroupHitlCoordinator {
                 "system", "System", null, phaseIdx, phase.name(),
                 TranscriptEntryType.ERROR, Instant.now(), msg, null));
         gc.setState(GroupConversationState.FAILED);
+        DiscussionOutcomes.noProgress(gc);
         gc.setPausedAt(null);
         gc.setHitlApprovalContext(null);
         gc.setHitlLastPauseFingerprint(null);
@@ -864,6 +865,13 @@ public class GroupHitlCoordinator {
             // and rendering a recorded decision as "Failed" is wrong in a product whose
             // point is the human in the loop.
             gc.setState(GroupConversationState.REJECTED);
+            // S7: the same outcome vocabulary as every other end — a timeout's
+            // AUTO_REJECT is told apart from a person's rejection.
+            if (humanDecision) {
+                DiscussionOutcomes.rejected(gc);
+            } else {
+                DiscussionOutcomes.approvalTimedOut(gc);
+            }
             gc.setPausedAt(null);
             gc.setHitlApprovalContext(null);
             // MAJOR-4: Use CAS to prevent concurrent approve clobbering reject
@@ -874,8 +882,7 @@ public class GroupHitlCoordinator {
             // A rejection is terminal: notify the (SSE) listener so streams close
             // instead of hanging, and release paused-state resources.
             if (listener != null) {
-                listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(
-                        gc.getState(), gc.getSynthesizedAnswer()));
+                listener.onGroupComplete(GroupConversationEventSink.GroupCompleteEvent.of(gc));
             }
             cleanupAfterTerminalState(gc);
             return gc;

@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TurnOutcome;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionStyle;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
@@ -67,6 +68,100 @@ class DiscussionOutcomesTest {
         assertEquals(DiscussionOutcome.FAILED, gc.getOutcome());
         assertEquals(DiscussionOutcomes.NO_MEMBER_ANSWERED, gc.getOutcomeReason());
         assertNull(gc.getSynthesizedAnswer());
+    }
+
+    /** M1: the old placeholder is a failed turn, not a contribution. */
+    @Test
+    void legacyPlaceholder_isNotAContribution() throws Exception {
+        String legacy = """
+                {"transcript":[{"speakerAgentId":"b","speakerDisplayName":"B","phaseIndex":0,"phaseName":"Opinions","type":"OPINION",
+                "content":"[Agent failed to produce output — conversation entered ERROR state]"}],
+                "synthesizedAnswer":"[Agent failed to produce output — conversation entered ERROR state]"}
+                """;
+        var gc = new ObjectMapper().findAndRegisterModules().readValue(legacy, GroupConversation.class);
+
+        assertEquals(TurnOutcome.FAILED, gc.getTranscript().getFirst().outcome());
+        assertNull(gc.getTranscript().getFirst().content());
+        assertNull(gc.getSynthesizedAnswer(), "a stored placeholder answer is no answer");
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.FAILED, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.NO_MEMBER_ANSWERED, gc.getOutcomeReason());
+    }
+
+    /** M2: a NONE decision (dissents only, no quorum, a tie) is not an answer. */
+    @Test
+    void noneDecision_isNotAnAnswer() {
+        var gc = gc(opinion("a"), failed("mod", 1, "Synthesis"));
+        gc.setDecision(new GroupConversation.DecisionRecord(GroupConversation.DecisionType.NONE, "no decision", null, null, List.of(),
+                "dissent", "Synthesis", null));
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.SYNTHESIS_FAILED, gc.getOutcomeReason());
+    }
+
+    @Test
+    void decidingDecision_isAnAnswer() {
+        var gc = gc(opinion("a"));
+        gc.setDecision(new GroupConversation.DecisionRecord(GroupConversation.DecisionType.VOTE, "A wins", "A", null, List.of(), "majority",
+                "Vote", null));
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.ANSWERED, gc.getOutcome());
+    }
+
+    /**
+     * S7: members all skipped and the synthesis failed — the synthesis is the
+     * reason.
+     */
+    @Test
+    void membersSkippedAndSynthesisFailed_isSynthesisFailed() {
+        var gc = gc(new TranscriptEntry("a", "a", null, 0, "Opinions", TranscriptEntryType.SKIPPED, Instant.now(),
+                MemberTurnExecutor.REASON_NOT_DEPLOYED, null), failed("mod", 1, "Synthesis"));
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.SYNTHESIS_FAILED, gc.getOutcomeReason());
+    }
+
+    /** S7: everyone skipped by the turn cap or an inherited budget of 0. */
+    @Test
+    void everyoneSkippedByTheTurnBudget_isTurnLimitReached() {
+        var gc = gc(new TranscriptEntry("sub", "Sub", null, 0, "Opinions", TranscriptEntryType.SKIPPED, Instant.now(),
+                MemberTurnExecutor.REASON_TURN_BUDGET, null));
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.NO_ANSWER, gc.getOutcome());
+        assertEquals(DiscussionOutcomes.TURN_LIMIT_REACHED, gc.getOutcomeReason());
+    }
+
+    /** M3: only a discussion that never answered ends FAILED. */
+    @Test
+    void failedLaterRound_doesNotFailTheDiscussion() {
+        var gc = gc(failed("a", 0, "Opinions"));
+        gc.setAnsweredRounds(1);
+        gc.setRound(2);
+
+        DiscussionOutcomes.settle(gc, OPINION_THEN_SYNTHESIS, false);
+
+        assertEquals(DiscussionOutcome.FAILED, gc.getOutcome());
+        assertFalse(DiscussionOutcomes.failsDiscussion(gc), "round 1 answered: the discussion stays COMPLETED");
+
+        var first = gc(failed("a", 0, "Opinions"));
+        first.setAnsweredRounds(0);
+        DiscussionOutcomes.settle(first, OPINION_THEN_SYNTHESIS, false);
+        assertTrue(DiscussionOutcomes.failsDiscussion(first));
+
+        var legacyContinued = gc(failed("a", 0, "Opinions"));
+        legacyContinued.setRound(3);
+        DiscussionOutcomes.settle(legacyContinued, OPINION_THEN_SYNTHESIS, false);
+        assertFalse(DiscussionOutcomes.failsDiscussion(legacyContinued), "a continued legacy document had answered rounds");
     }
 
     @Test

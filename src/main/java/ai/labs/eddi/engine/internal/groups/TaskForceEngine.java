@@ -883,14 +883,14 @@ public class TaskForceEngine {
 
         GroupMember verifier = speakers.getFirst();
         List<TaskItem> verified = completedTasks;
-        runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+        boolean verifierSkipped = runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
 
         // E2 maxReworks: a task that failed this pass goes back to its member with the
         // verifier's feedback and is checked again, up to maxReworks times per task.
         // Bounded twice: by round (each round reworks at least one task) and per task.
         int maxReworks = config.getMaxReworks();
         var humanTasksNoted = new HashSet<String>();
-        for (int round = 1; round <= maxReworks; round++) {
+        for (int round = 1; round <= maxReworks && !verifierSkipped; round++) {
             List<TaskItem> toRework = GroupHumanTasks.withoutHumanAssignees(gc, config, phase, phaseIdx,
                     failedThisPass(gc, verified, maxReworks), humanTasksNoted);
             if (toRework.isEmpty()) {
@@ -945,7 +945,7 @@ public class TaskForceEngine {
                     || (maxTurns > 0 && turnCounter.get() >= maxTurns)) {
                 return;
             }
-            runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
+            verifierSkipped = runVerificationPass(gc, config, verifier, verified, phase, question, phaseIdx, protocol, listener, turnCounter);
         }
     }
 
@@ -1064,11 +1064,14 @@ public class TaskForceEngine {
      * read (the fail-open path for a verdict that does not parse) or failing it
      * (which sends it to a rework that is withheld again) would both be wrong. With
      * none left, it gets no turn.
+     *
+     * @return whether the verifier's turn was SKIPPED (deterministically, so a
+     *         rework would be skipped again)
      */
-    private void runVerificationPass(GroupConversation gc, AgentGroupConfiguration config, GroupMember verifier, List<TaskItem> completedTasks,
-                                     DiscussionPhase phase,
-                                     String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
-                                     AtomicInteger turnCounter)
+    private boolean runVerificationPass(GroupConversation gc, AgentGroupConfiguration config, GroupMember verifier, List<TaskItem> completedTasks,
+                                        DiscussionPhase phase,
+                                        String question, int phaseIdx, ProtocolConfig protocol, GroupDiscussionEventListener listener,
+                                        AtomicInteger turnCounter)
             throws GroupDiscussionException {
         var records = taskRecords(verifier.agentId(), gc, config);
         List<TaskItem> readable = completedTasks.stream().filter(records::showsWork).toList();
@@ -1078,7 +1081,7 @@ public class TaskForceEngine {
             addVerificationNote(gc, phase, phaseIdx, UNREADABLE_BY_VERIFIER.formatted(completedTasks.size() - readable.size()));
         }
         if (readable.isEmpty()) {
-            return;
+            return false;
         }
         turnCounter.incrementAndGet();
 
@@ -1115,7 +1118,9 @@ public class TaskForceEngine {
         // out) verified nothing. Its tasks used to be "Auto-verified".
         if (!verifyEntry.answered()) {
             failUnverifiedTasks(gc, readable, verifyEntry, phaseIdx, phase, listener);
-            return;
+            // S6: a SKIPPED verifier (not deployed, a pause the group cannot honour) is
+            // skipped again on every rework — reworking would only spend member turns.
+            return verifyEntry.outcome() == GroupConversation.TurnOutcome.SKIPPED;
         }
 
         // Parse verification results — same three-tier fallback, over the tasks the
@@ -1140,6 +1145,7 @@ public class TaskForceEngine {
             listener.onSpeakerComplete(new GroupConversationEventSink.SpeakerCompleteEvent(
                     verifier.agentId(), verifier.displayName(), formattedContent, phaseIdx, phase.name()));
         }
+        return false;
     }
 
     /**
