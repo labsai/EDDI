@@ -14,7 +14,6 @@ import org.jboss.logging.Logger;
 
 import java.util.Arrays;
 import java.util.List;
-import java.util.Map;
 
 /**
  * Deploy-time validation for {@link ModelCascadeConfig} and the task-level
@@ -108,20 +107,14 @@ final class CascadeConfigValidator {
             warn(taskId, "acceptanceCriterion is set but there is no judgeModel with a 'type' — only the judge reads it, so it has no effect");
         }
 
-        // Cross-provider credential check. Step/judge parameters are merged OVER the
-        // task parameters (step wins), so a step targeting a DIFFERENT provider than
-        // the task silently inherits the task's apiKey — the wrong key for that
-        // provider (fails at runtime as a 401 that looks like an escalation). Warn at
-        // deploy time so the step/judge is given its own credentials. Not a hard error
-        // because some providers (e.g. Ollama, Bedrock) don't use apiKey.
-        boolean baseHasApiKey = task.getParameters() != null && task.getParameters().containsKey("apiKey");
-        for (int i = 0; i < steps.size(); i++) {
-            CascadeStep s = steps.get(i);
-            warnIfCrossProviderMissingCredentials(taskId, "step " + i, task.getType(), s.getType(), s.getParameters(), baseHasApiKey);
-        }
-        if (cascade.getJudgeModel() != null) {
-            warnIfCrossProviderMissingCredentials(taskId, "judgeModel", task.getType(), cascade.getJudgeModel().getType(),
-                    cascade.getJudgeModel().getParameters(), baseHasApiKey);
+        // Cross-provider credentials: a step of another provider type never inherits
+        // the task's apiKey, endpoint or headers (CascadeCredentialPolicy), so one
+        // that would have relied on it must bring its own. A hard error — the old
+        // behaviour released one vendor's secret to another vendor's host. The judge
+        // never inherited the task's parameters.
+        List<String> credentialProblems = CascadeCredentialPolicy.problems(new LlmConfiguration(List.of(task)));
+        if (!credentialProblems.isEmpty()) {
+            throw new WorkflowConfigurationException("Invalid modelCascade: " + String.join("; ", credentialProblems));
         }
 
         // convertToObject + structured_output → auto-downgraded at runtime (warn once).
@@ -191,23 +184,6 @@ final class CascadeConfigValidator {
 
     private static void warn(String taskId, String message) {
         LOGGER.warnf("LLM task '%s': modelCascade — %s.", taskId, message);
-    }
-
-    /**
-     * Warn when a step / judge uses a different provider than the task but does not
-     * define its own {@code apiKey}, so it would inherit the task's (wrong) key.
-     */
-    private static void warnIfCrossProviderMissingCredentials(String taskId, String where, String taskType, String stepType,
-                                                              Map<String, String> stepParams, boolean baseHasApiKey) {
-        if (!baseHasApiKey || stepType == null || stepType.equalsIgnoreCase(taskType)) {
-            return; // no key to inherit, or same provider — inheriting is correct
-        }
-        boolean stepHasApiKey = stepParams != null && stepParams.containsKey("apiKey");
-        if (!stepHasApiKey) {
-            LOGGER.warnf("LLM task '%s': %s uses provider '%s' (different from the task provider '%s') but does not define its own 'apiKey' — "
-                    + "it would inherit the task's apiKey, which is likely incorrect for a different provider. "
-                    + "Give the step/judge its own credentials (apiKey, baseUrl, etc.).", taskId, where, stepType, taskType);
-        }
     }
 
     private static WorkflowConfigurationException fail(String taskId, String message) {

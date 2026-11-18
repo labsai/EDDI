@@ -526,6 +526,40 @@ class CascadingModelExecutorTest {
             assertEquals("val2", result.get("key2"));
             assertEquals(2, result.size());
         }
+
+        @Test
+        @DisplayName("a step of another provider type inherits no credential, endpoint or header — but keeps the tuning")
+        void crossProviderDropsCredentials() {
+            var base = Map.of("apiKey", "sk-openai", "baseUrl", "https://api.openai.com", "customHeaders", "X-Org=1", "region", "eu", "temperature",
+                    "0.2", "timeout", "30000");
+            var step = Map.of("modelName", "claude");
+
+            var result = CascadingModelExecutor.mergeParams(base, step, "openai", "anthropic");
+
+            assertNull(result.get("apiKey"));
+            assertNull(result.get("baseUrl"));
+            assertNull(result.get("customHeaders"));
+            assertNull(result.get("region"));
+            assertEquals("0.2", result.get("temperature"));
+            assertEquals("30000", result.get("timeout"));
+            assertEquals("claude", result.get("modelName"));
+        }
+
+        @Test
+        @DisplayName("the step's own credentials survive a provider change")
+        void crossProviderKeepsStepCredentials() {
+            var result = CascadingModelExecutor.mergeParams(Map.of("apiKey", "sk-openai"), Map.of("apiKey", "sk-anthropic"), "openai", "anthropic");
+            assertEquals("sk-anthropic", result.get("apiKey"));
+        }
+
+        @Test
+        @DisplayName("the same provider type (any case) or a step without a type inherits everything")
+        void sameProviderInherits() {
+            var base = Map.of("apiKey", "sk-openai", "baseUrl", "https://api.openai.com");
+            assertEquals("sk-openai", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", "OpenAI").get("apiKey"));
+            assertEquals("sk-openai", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", null).get("apiKey"));
+            assertEquals("https://api.openai.com", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", " openai ").get("baseUrl"));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

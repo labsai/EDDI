@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.impl.CascadeCredentialPolicy;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -81,6 +82,10 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     private void validateTaskToolApprovals(LlmConfiguration content) {
         if (content == null || content.tasks() == null) {
             return;
+        }
+        List<String> credentialProblems = CascadeCredentialPolicy.problems(content);
+        if (!credentialProblems.isEmpty()) {
+            throw new IllegalArgumentException("Invalid modelCascade: " + String.join("; ", credentialProblems));
         }
         for (int i = 0; i < content.tasks().size(); i++) {
             LlmConfiguration.Task task = content.tasks().get(i);
