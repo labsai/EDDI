@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.ingestion.connector.WorkItem;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.IngestedFileStoreException;
 import org.jboss.logging.Logger;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
+import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -69,7 +70,7 @@ public class UploadSourceConnector implements SourceConnector {
         try {
             files = fileStore.list(sourceKey);
         } catch (RuntimeException e) {
-            LOGGER.warnf(e, "Could not list the uploaded files of source %s", sourceKey);
+            LOGGER.warnf(e, "Could not list the uploaded files of source %s", LogSanitizer.sanitize(sourceKey));
             // The store is unavailable, so this run learned nothing about which files
             // exist. Reported as an uncovered run: concluding "no files" here would
             // delete the whole knowledge base over a database blip.
@@ -108,7 +109,7 @@ public class UploadSourceConnector implements SourceConnector {
         try {
             content = fileStore.load(context.sourceKey(), item.documentId()).orElse(null);
         } catch (IngestedFileStoreException e) {
-            LOGGER.warnf(e, "Could not load an uploaded file of source %s", context.sourceKey());
+            LOGGER.warnf(e, "Could not load an uploaded file of source %s", LogSanitizer.sanitize(context.sourceKey()));
             // The bytes could not be fetched this time. Not evidence that the file is
             // gone: the listing just said it is there.
             // The cause is EDDI's own database driver's text: it stays on the exception
