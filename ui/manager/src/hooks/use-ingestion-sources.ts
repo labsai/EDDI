@@ -22,7 +22,7 @@ import {
   type SourceSchedule,
 } from "@/lib/api/ingestion-sources";
 
-const ingestionKeys = {
+export const ingestionKeys = {
   runs: (kbId: string, sourceId: string, version: number) =>
     ["ingestion", "runs", kbId, sourceId, version] as const,
   files: (kbId: string, sourceId: string, version: number) =>

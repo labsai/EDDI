@@ -325,7 +325,9 @@
     "runSkipConflict": "{{codes}} 也在跳过列表中，因此此指令永远不会针对它运行。",
     "httpCodeFilterSkipSet": "“运行状态码”留空时使用 200、201；“跳过状态码”留空时不跳过任何状态码。",
     "useDefaultSkipCodes": "使用默认跳过列表",
-    "scope": "作用域"
+    "scope": "作用域",
+    "retryIdempotency": "{{method}} 不是幂等的：重试的请求可能已被处理（重复的订单、扣款或消息）。仅当端点会忽略重复请求（例如通过幂等键）时才启用重试。",
+    "bodyEscapeHelp": "除非服务器设置为转义，否则值会按原样插入，因此包含引号的值可能跳出 JSON 字符串。若要自行转义，请用 json:serialize 包裹并且不要在外面加引号，例如 {json:serialize(memory.current.input)}。"
   },
   "llmEditor": {
     "unknownType": "{{type}}（自定义）"
@@ -906,7 +908,11 @@
     "restricted_other": "仅限 {{count}} 个智能体",
     "restrictedTooltip": "已授权给：{{agents}}",
     "notGrantedAdmin": "此智能体尚未获授权使用此密钥。部署时会请你将其加入。",
-    "notGrantedNonAdmin": "此智能体尚未获授权使用此密钥。请在部署前让管理员授权。"
+    "notGrantedNonAdmin": "此智能体尚未获授权使用此密钥。请在部署前让管理员授权。",
+    "createAllAgents": "此字段不知道它属于哪个智能体，因此该密钥会为所有智能体创建。之后请在“密钥”中缩小范围。",
+    "literalNudge": "这看起来像以明文输入的密钥。它会被保存到配置、其版本历史和导出文件中。请改为存入保管库并使用引用。",
+    "literalStoreInVault": "存入保管库",
+    "literalKeepPlain": "保留为明文"
   },
   "Workforce": {
     "advisor": {

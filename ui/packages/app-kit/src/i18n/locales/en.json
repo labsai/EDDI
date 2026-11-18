@@ -328,7 +328,9 @@
     "runSkipConflict": "{{codes}} is also in the skip list, so this instruction never runs on it.",
     "httpCodeFilterSkipSet": "An empty \"Run on codes\" uses 200, 201; an empty \"Skip on codes\" skips nothing.",
     "useDefaultSkipCodes": "Use default skip list",
-    "scope": "Scope"
+    "scope": "Scope",
+    "retryIdempotency": "{{method}} is not idempotent: a retried request may already have been processed (a duplicate order, charge or message). Enable retries only if the endpoint ignores repeats, for example through an idempotency key.",
+    "bodyEscapeHelp": "Values are inserted as written unless the server is set to escape them, so a value containing a quote can break out of a JSON string. To escape one yourself, wrap it in json:serialize and leave out the quotes around it, for example {json:serialize(memory.current.input)}."
   },
   "llmEditor": {
     "unknownType": "{{type}} (custom)"
@@ -906,7 +908,11 @@
     "restricted_other": "Restricted to {{count}} agents",
     "restrictedTooltip": "Allowed for: {{agents}}",
     "notGrantedAdmin": "This agent isn't granted this key yet. You'll be asked to add it on deploy.",
-    "notGrantedNonAdmin": "This agent isn't granted this key yet. Ask an administrator to grant it before deploying."
+    "notGrantedNonAdmin": "This agent isn't granted this key yet. Ask an administrator to grant it before deploying.",
+    "createAllAgents": "This field does not know which agent it belongs to, so the secret is created for every agent. Narrow it under Secrets afterwards.",
+    "literalNudge": "This looks like a secret typed in plain text. It would be saved in the configuration, its version history and exports. Store it in the vault and reference it instead.",
+    "literalStoreInVault": "Store in vault",
+    "literalKeepPlain": "Keep as plain text"
   },
   "Workforce": {
     "advisor": {

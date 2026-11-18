@@ -1662,7 +1662,10 @@
     "agentOpsMaxPending": "En attente simultanément",
     "agentOpsHorizon": "Horizon (jours, max. 90)",
     "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)",
-    "temperatureBlocksSave": "La température n’est pas valide — corrigez-la avant d’enregistrer."
+    "temperatureBlocksSave": "La température n’est pas valide — corrigez-la avant d’enregistrer.",
+    "grPatternBlocksSave": "Un garde-fou regex-filter contient un motif invalide (ligne {{line}}) — corrigez-le avant d’enregistrer.",
+    "grPatternInvalid": "La ligne {{line}} n’est pas une expression régulière valide : {{detail}}",
+    "grPatternUnchecked": "La ligne {{lines}} utilise une syntaxe que seul le serveur peut vérifier ; elle est validée au déploiement de l’agent."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",
@@ -2676,7 +2679,14 @@
       "title": "Tester la récupération",
       "saveFirst": "Enregistrez d'abord cette base de connaissances pour la rechercher."
     },
-    "legacyIngestionNote": "Pour du texte ponctuel. Les documents ajoutés ici ne peuvent plus être listés, mis à jour ni supprimés — pour les documents que vous maintiendrez, ajoutez plutôt une source Fichiers sous Sources d'ingestion."
+    "legacyIngestionNote": "Pour du texte ponctuel. Les documents ajoutés ici ne peuvent plus être listés, mis à jour ni supprimés — pour les documents que vous maintiendrez, ajoutez plutôt une source Fichiers sous Sources d'ingestion.",
+    "statusTooLarge": "Échec : {{name}} dépasse {{max}} Mo et n’a pas été lu",
+    "statusUploadRejected": "Échec : le serveur a refusé l’envoi ({{detail}})",
+    "reembedWarning": "Cette base de connaissances contient déjà des documents ingérés, et vous avez modifié {{what}}. L’enregistrement ne les ré-intègre pas : les vecteurs stockés restent inchangés, les recherches peuvent donc donner de mauvais résultats ou aucun tant que les documents ne sont pas ingérés à nouveau (ou qu’une nouvelle base n’est pas créée).",
+    "reembedProvider": "le fournisseur d’embeddings",
+    "reembedModel": "le modèle d’embeddings",
+    "reembedDimension": "la dimension des vecteurs",
+    "reembedChunking": "les paramètres de découpage"
   },
   "onboarding": {
     "welcome": {

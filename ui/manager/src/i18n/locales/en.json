@@ -1685,7 +1685,10 @@
     "agentOpsMaxPending": "Waiting at once",
     "agentOpsHorizon": "Horizon (days, max 90)",
     "agentOpsCostPerFire": "Cost ceiling per fire ($)",
-    "temperatureBlocksSave": "The temperature is not valid — fix it before saving."
+    "temperatureBlocksSave": "The temperature is not valid — fix it before saving.",
+    "grPatternBlocksSave": "A regex-filter guardrail has an invalid pattern (line {{line}}) — fix it before saving.",
+    "grPatternInvalid": "Line {{line}} is not a valid regular expression: {{detail}}",
+    "grPatternUnchecked": "Line {{lines}} uses syntax only the server can check; it is validated when the agent is deployed."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",
@@ -2730,7 +2733,14 @@
       "title": "Test Retrieval",
       "saveFirst": "Save this knowledge base first to search it."
     },
-    "legacyIngestionNote": "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead."
+    "legacyIngestionNote": "For one-off text. Documents added here cannot be listed, updated or removed later — for documents you will maintain, add a Files source under Ingestion Sources instead.",
+    "statusTooLarge": "Failed: {{name}} is larger than {{max}} MB and was not read",
+    "statusUploadRejected": "Failed: the server refused the upload ({{detail}})",
+    "reembedWarning": "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
+    "reembedProvider": "the embedding provider",
+    "reembedModel": "the embedding model",
+    "reembedDimension": "the vector dimension",
+    "reembedChunking": "the chunk settings"
   },
   "onboarding": {
     "welcome": {

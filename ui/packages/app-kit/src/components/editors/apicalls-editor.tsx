@@ -1,3 +1,4 @@
+import { isNonIdempotentMethod } from "../../lib/http-methods";
 import { useState, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { ActionTags } from "./action-tags";
@@ -892,12 +893,16 @@ export function RetryApiCallEditor({
   retry,
   onChange,
   readOnly,
+  method,
 }: {
   retry?: RetryApiCallInstruction;
   onChange: (r: RetryApiCallInstruction | undefined) => void;
   readOnly?: boolean;
+  /** The HTTP method of the call this policy belongs to; decides the default and the warning. */
+  method?: string;
 }) {
   const { t } = useTranslation();
+  const nonIdempotent = isNonIdempotentMethod(method);
 
   if (!retry) {
     if (readOnly) {
@@ -911,12 +916,24 @@ export function RetryApiCallEditor({
       <button
         type="button"
         onClick={() =>
-          onChange({
-            maxRetries: 3,
-            exponentialBackoffDelayInMillis: 1000,
-            retryOnHttpCodes: [502, 503],
-            responseValuePathMatchers: [],
-          })
+          onChange(
+            // A POST or PATCH retried after a 502/503 may already have been
+            // processed: start with no retry, and let the author turn it on
+            // knowing that (the warning below).
+            nonIdempotent
+              ? {
+                  maxRetries: 0,
+                  exponentialBackoffDelayInMillis: 1000,
+                  retryOnHttpCodes: [],
+                  responseValuePathMatchers: [],
+                }
+              : {
+                  maxRetries: 3,
+                  exponentialBackoffDelayInMillis: 1000,
+                  retryOnHttpCodes: [502, 503],
+                  responseValuePathMatchers: [],
+                },
+          )
         }
         className="inline-flex items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
         data-testid="add-retry-instruction"
@@ -928,12 +945,28 @@ export function RetryApiCallEditor({
   }
 
   const matchers = retry.responseValuePathMatchers ?? [];
+  const retriesEnabled =
+    (retry.maxRetries ?? 0) > 0 &&
+    ((retry.retryOnHttpCodes?.length ?? 0) > 0 || matchers.length > 0);
 
   return (
     <div
       className="rounded-lg border border-border/60 bg-card/50 p-3 space-y-2.5"
       data-testid="retry-apicall-editor"
     >
+      {nonIdempotent && (
+        <p
+          className={`text-[10px] ${retriesEnabled ? "text-warn-700 dark:text-warn-300" : "text-muted-foreground"}`}
+          role={retriesEnabled ? "alert" : undefined}
+          data-testid="retry-idempotency-warning"
+        >
+          {t(
+            "apiCallsEditor.retryIdempotency",
+            "{{method}} is not idempotent: a retried request may already have been processed (a duplicate order, charge or message). Enable retries only if the endpoint ignores repeats, for example through an idempotency key.",
+            { method: (method ?? "").toUpperCase() },
+          )}
+        </p>
+      )}
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className="mb-0.5 block text-[10px] text-muted-foreground">
@@ -1166,10 +1199,12 @@ function PostResponseEditor({
   postResponse,
   onChange,
   readOnly,
+  method,
 }: {
   postResponse?: HttpPostResponse;
   onChange: (pr: HttpPostResponse | undefined) => void;
   readOnly?: boolean;
+  method?: string;
 }) {
   const { t } = useTranslation();
   const data = postResponse ?? { propertyInstructions: [], outputBuildInstructions: [], qrBuildInstructions: [] };
@@ -1225,6 +1260,7 @@ function PostResponseEditor({
           retry={data.retryApiCallInstruction}
           onChange={(r) => onChange({ ...data, retryApiCallInstruction: r })}
           readOnly={readOnly}
+          method={method}
         />
       </div>
     </div>
@@ -1493,6 +1529,12 @@ function HttpCallEditor({
               )}
               testId="request-body-editor"
             />
+            <p className="mt-1 text-[10px] leading-relaxed text-muted-foreground" data-testid="request-body-escape-help">
+              {t(
+                "apiCallsEditor.bodyEscapeHelp",
+                "Values are inserted as written unless the server is set to escape them, so a value containing a quote can break out of a JSON string. To escape one yourself, wrap it in json:serialize and leave out the quotes around it, for example {json:serialize(memory.current.input)}.",
+              )}
+            </p>
             <ConnectionReferenceWarning
               value={request.body}
               refused="request"
@@ -1617,6 +1659,7 @@ function HttpCallEditor({
               postResponse={call.postResponse}
               onChange={(pr) => onChange({ ...call, postResponse: pr })}
               readOnly={readOnly}
+              method={call.request?.method}
             />
           </EditorSection>
         </div>

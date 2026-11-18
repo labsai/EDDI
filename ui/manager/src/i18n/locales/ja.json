@@ -1644,7 +1644,10 @@
     "agentOpsMaxPending": "同時に待機できる数",
     "agentOpsHorizon": "期間（日、最大90）",
     "agentOpsCostPerFire": "実行あたりのコスト上限（$）",
-    "temperatureBlocksSave": "temperature が無効です。保存する前に修正してください。"
+    "temperatureBlocksSave": "temperature が無効です。保存する前に修正してください。",
+    "grPatternBlocksSave": "regex-filter ガードレールに無効なパターンがあります（{{line}} 行目）。保存する前に修正してください。",
+    "grPatternInvalid": "{{line}} 行目は有効な正規表現ではありません: {{detail}}",
+    "grPatternUnchecked": "{{lines}} 行目はサーバーだけが検証できる構文を使っています。エージェントのデプロイ時に検証されます。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",
@@ -2648,7 +2651,14 @@
       "title": "検索をテスト",
       "saveFirst": "検索するには、まずこのナレッジベースを保存してください。"
     },
-    "legacyIngestionNote": "一度きりのテキスト用です。ここで追加したドキュメントは後から一覧表示・更新・削除できません。継続して管理するドキュメントは、代わりに「取り込みソース」でファイルソースを追加してください。"
+    "legacyIngestionNote": "一度きりのテキスト用です。ここで追加したドキュメントは後から一覧表示・更新・削除できません。継続して管理するドキュメントは、代わりに「取り込みソース」でファイルソースを追加してください。",
+    "statusTooLarge": "失敗: {{name}} は {{max}} MB を超えているため読み込まれませんでした",
+    "statusUploadRejected": "失敗: サーバーがアップロードを拒否しました（{{detail}}）",
+    "reembedWarning": "このナレッジベースには取り込み済みのドキュメントがあり、{{what}}を変更しました。保存しても再埋め込みは行われません。保存済みのベクトルはそのままなので、ドキュメントを再取り込みする（または新しいナレッジベースを作成する）まで、検索結果が悪くなるか得られない可能性があります。",
+    "reembedProvider": "埋め込みプロバイダー",
+    "reembedModel": "埋め込みモデル",
+    "reembedDimension": "ベクトルの次元数",
+    "reembedChunking": "チャンク設定"
   },
   "onboarding": {
     "welcome": {

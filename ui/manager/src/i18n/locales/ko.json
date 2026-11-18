@@ -1644,7 +1644,10 @@
     "agentOpsMaxPending": "동시 대기 수",
     "agentOpsHorizon": "기간(일, 최대 90)",
     "agentOpsCostPerFire": "실행당 비용 상한($)",
-    "temperatureBlocksSave": "temperature 값이 올바르지 않습니다. 저장하기 전에 수정하세요."
+    "temperatureBlocksSave": "temperature 값이 올바르지 않습니다. 저장하기 전에 수정하세요.",
+    "grPatternBlocksSave": "regex-filter 가드레일에 잘못된 패턴이 있습니다({{line}}번째 줄). 저장하기 전에 수정하세요.",
+    "grPatternInvalid": "{{line}}번째 줄이 올바른 정규식이 아닙니다: {{detail}}",
+    "grPatternUnchecked": "{{lines}}번째 줄은 서버만 확인할 수 있는 구문을 사용합니다. 에이전트를 배포할 때 검증됩니다."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -2648,7 +2651,14 @@
       "title": "검색 테스트",
       "saveFirst": "검색하려면 먼저 이 지식 베이스를 저장하세요."
     },
-    "legacyIngestionNote": "일회성 텍스트용입니다. 여기에 추가한 문서는 나중에 목록 보기, 업데이트, 삭제를 할 수 없습니다. 계속 관리할 문서는 대신 수집 소스에서 파일 소스를 추가하세요."
+    "legacyIngestionNote": "일회성 텍스트용입니다. 여기에 추가한 문서는 나중에 목록 보기, 업데이트, 삭제를 할 수 없습니다. 계속 관리할 문서는 대신 수집 소스에서 파일 소스를 추가하세요.",
+    "statusTooLarge": "실패: {{name}}은(는) {{max}}MB보다 커서 읽지 않았습니다",
+    "statusUploadRejected": "실패: 서버가 업로드를 거부했습니다({{detail}})",
+    "reembedWarning": "이 지식 베이스에는 이미 수집된 문서가 있으며 {{what}}을(를) 변경했습니다. 저장해도 다시 임베딩되지 않습니다. 저장된 벡터는 그대로이므로 문서를 다시 수집하거나 새 지식 베이스를 만들기 전까지 검색 결과가 나쁘거나 없을 수 있습니다.",
+    "reembedProvider": "임베딩 공급자",
+    "reembedModel": "임베딩 모델",
+    "reembedDimension": "벡터 차원",
+    "reembedChunking": "청크 설정"
   },
   "onboarding": {
     "welcome": {

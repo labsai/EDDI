@@ -177,6 +177,13 @@ function extractTenantFromKey(vaultKey: string): string | undefined {
   return slashIdx >= 0 ? vaultKey.slice(0, slashIdx) : undefined;
 }
 
+/** Whether `value` has the shape of a pasted credential rather than a reference or a placeholder. */
+function looksLikeLiteral(value: string): boolean {
+  const v = value.trim();
+  if (v.length < 8 || /\s/.test(v)) return false;
+  return !hasReferencePrefix(v) && !v.includes("${");
+}
+
 /** Create a vault reference string in the canonical `${vault:...}` format */
 function toVaultRef(keyName: string): string {
   return `\${vault:${keyName}}`;
@@ -189,10 +196,13 @@ function CreateSecretModal({
   tenantId,
   agentId,
   initialHost,
+  initialValue,
   onSuccess,
 }: {
   onClose: () => void;
   tenantId: string;
+  /** A literal the user already typed into the field, offered for vaulting. */
+  initialValue?: string;
   /** The agent the new secret is granted to; absent, it is granted to every agent. */
   agentId?: string;
   /** Prefills the destination list; absent, it starts empty. */
@@ -201,7 +211,7 @@ function CreateSecretModal({
 }) {
   const { t } = useTranslation();
   const [newKeyName, setNewKeyName] = useState("");
-  const [newValue, setNewValue] = useState("");
+  const [newValue, setNewValue] = useState(initialValue ?? "");
   const [newDescription, setNewDescription] = useState("");
   const [valueVisible, setValueVisible] = useState(false);
   /* The name a create was refused for because it is already in the vault. */
@@ -379,6 +389,14 @@ function CreateSecretModal({
             />
           </div>
           <AllowedHostsField draft={hosts} onChange={setHosts} testId="create-secret-modal-hosts" />
+          {!agentId && (
+            <p className="text-[11px] text-muted-foreground" data-testid="create-secret-modal-all-agents">
+              {t(
+                "secretPicker.createAllAgents",
+                "This field does not know which agent it belongs to, so the secret is created for every agent. Narrow it under Secrets afterwards.",
+              )}
+            </p>
+          )}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
@@ -723,6 +741,10 @@ export function SecretKeyPicker({
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
+  /** The user chose to keep the typed literal in the config as plain text. */
+  const [literalAccepted, setLiteralAccepted] = useState(false);
+  /** A typed literal handed to the create dialog, so the user does not retype it. */
+  const [vaultifyValue, setVaultifyValue] = useState<string | undefined>(undefined);
   /**
    * The raw text last typed or pasted into this field. The value on screen
    * counts as "edited here" only while it still equals that — so a value the
@@ -791,6 +813,13 @@ export function SecretKeyPicker({
   const currentVaultKey = hasVaultRef ? referenceLabel(value) : "";
   /** A non-empty value that is not (yet) an admissible reference. */
   const literalRejected = referenceOnly && value.trim() !== "" && !isCanonicalRef;
+  /**
+   * A value in an ordinary (non reference-only) field that is not a reference of
+   * any kind and has the shape of a credential: one token, no whitespace, long
+   * enough not to be a placeholder. Never blocks — see the nudge below.
+   */
+  const looksLikeLiteralSecret =
+    !referenceOnly && vaultAvailable && looksLikeLiteral(value) && !connectionPrefix;
   /**
    * A literal this field was LOADED with — a credential stored in plaintext
    * before the field became reference-only (a channel's bot token, say).
@@ -1313,6 +1342,50 @@ export function SecretKeyPicker({
         </p>
       )}
 
+      {/* A literal secret in a field that also takes a reference. The backend
+          allows it, so this does not block — but a literal sits in the saved
+          config, its exports and its version history, outside the vault's
+          grants and host limits, so keeping it must be a deliberate choice. */}
+      {looksLikeLiteralSecret && !literalAccepted && !readOnly && (
+        <div
+          className="mt-1 rounded-md border border-warn-300 bg-warn-50 p-2 text-[11px] text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="status"
+          data-testid={`${testId}-literal-nudge`}
+        >
+          <p className="flex items-start gap-1">
+            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0" />
+            <span>
+              {t(
+                "secretPicker.literalNudge",
+                "This looks like a secret typed in plain text. It would be saved in the configuration, its version history and exports. Store it in the vault and reference it instead.",
+              )}
+            </span>
+          </p>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                closePopup();
+                setVaultifyValue(value);
+                setShowCreateDialog(true);
+              }}
+              className="rounded-md bg-primary px-2 py-1 font-medium text-primary-foreground hover:bg-primary/90"
+              data-testid={`${testId}-literal-vault`}
+            >
+              {t("secretPicker.literalStoreInVault", "Store in vault")}
+            </button>
+            <button
+              type="button"
+              onClick={() => setLiteralAccepted(true)}
+              className="rounded-md border border-input px-2 py-1 font-medium text-foreground hover:bg-muted"
+              data-testid={`${testId}-literal-keep`}
+            >
+              {t("secretPicker.literalKeepPlain", "Keep as plain text")}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Vault suggestion popup */}
       {popupOpen && (
         <VaultPopup
@@ -1342,9 +1415,11 @@ export function SecretKeyPicker({
       {showCreateDialog && (
         <CreateSecretModal
           agentId={agentId}
+          initialValue={vaultifyValue}
           initialHost={hostFromUrl(destinationUrl)}
           onClose={() => {
             setShowCreateDialog(false);
+            setVaultifyValue(undefined);
             // "Create new secret" is the fourth way out of the popup, and it
             // leaves the field too: focus goes to the modal, so the input's
             // deferred blur never comes. Cancel it and the unbraced reference

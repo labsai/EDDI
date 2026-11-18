@@ -1662,7 +1662,10 @@
     "agentOpsMaxPending": "En espera a la vez",
     "agentOpsHorizon": "Horizonte (días, máx. 90)",
     "agentOpsCostPerFire": "Tope de coste por ejecución ($)",
-    "temperatureBlocksSave": "La temperatura no es válida: corrígela antes de guardar."
+    "temperatureBlocksSave": "La temperatura no es válida: corrígela antes de guardar.",
+    "grPatternBlocksSave": "Un guardrail regex-filter tiene un patrón no válido (línea {{line}}): corrígelo antes de guardar.",
+    "grPatternInvalid": "La línea {{line}} no es una expresión regular válida: {{detail}}",
+    "grPatternUnchecked": "La línea {{lines}} usa una sintaxis que solo el servidor puede comprobar; se valida al desplegar el agente."
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",
@@ -2676,7 +2679,14 @@
       "title": "Probar recuperación",
       "saveFirst": "Guarde primero esta base de conocimiento para buscar en ella."
     },
-    "legacyIngestionNote": "Para texto puntual. Los documentos añadidos aquí no se pueden listar, actualizar ni eliminar después; para los documentos que vaya a mantener, añada en su lugar una fuente de Archivos en Fuentes de ingesta."
+    "legacyIngestionNote": "Para texto puntual. Los documentos añadidos aquí no se pueden listar, actualizar ni eliminar después; para los documentos que vaya a mantener, añada en su lugar una fuente de Archivos en Fuentes de ingesta.",
+    "statusTooLarge": "Error: {{name}} supera los {{max}} MB y no se leyó",
+    "statusUploadRejected": "Error: el servidor rechazó la subida ({{detail}})",
+    "reembedWarning": "Esta base de conocimiento ya tiene documentos ingeridos y cambiaste {{what}}. Al guardar no se vuelven a incrustar: los vectores almacenados no cambian, así que las búsquedas pueden dar malos resultados o ninguno hasta que se vuelvan a ingerir los documentos (o se cree una nueva base).",
+    "reembedProvider": "el proveedor de embeddings",
+    "reembedModel": "el modelo de embeddings",
+    "reembedDimension": "la dimensión del vector",
+    "reembedChunking": "la configuración de fragmentos"
   },
   "onboarding": {
     "welcome": {

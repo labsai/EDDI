@@ -1644,7 +1644,10 @@
     "agentOpsMaxPending": "同时等待数量",
     "agentOpsHorizon": "时间范围（天，最多 90）",
     "agentOpsCostPerFire": "每次触发的费用上限（$）",
-    "temperatureBlocksSave": "温度值无效——请先修正再保存。"
+    "temperatureBlocksSave": "温度值无效——请先修正再保存。",
+    "grPatternBlocksSave": "regex-filter 护栏中有无效的模式（第 {{line}} 行）——请先修正再保存。",
+    "grPatternInvalid": "第 {{line}} 行不是有效的正则表达式：{{detail}}",
+    "grPatternUnchecked": "第 {{lines}} 行使用了只有服务器才能检查的语法；将在部署智能体时验证。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
@@ -2648,7 +2651,14 @@
       "title": "测试检索",
       "saveFirst": "请先保存此知识库再进行搜索。"
     },
-    "legacyIngestionNote": "用于一次性文本。在此添加的文档之后无法列出、更新或删除——对于需要维护的文档，请改为在“摄取来源”下添加一个文件来源。"
+    "legacyIngestionNote": "用于一次性文本。在此添加的文档之后无法列出、更新或删除——对于需要维护的文档，请改为在“摄取来源”下添加一个文件来源。",
+    "statusTooLarge": "失败：{{name}} 大于 {{max}} MB，未读取",
+    "statusUploadRejected": "失败：服务器拒绝了上传（{{detail}}）",
+    "reembedWarning": "此知识库已有摄取的文档，而你修改了{{what}}。保存不会重新嵌入这些文档：已存储的向量保持不变，因此在重新摄取文档（或创建新的知识库）之前，搜索可能结果很差或没有结果。",
+    "reembedProvider": "嵌入提供商",
+    "reembedModel": "嵌入模型",
+    "reembedDimension": "向量维度",
+    "reembedChunking": "分块设置"
   },
   "onboarding": {
     "welcome": {

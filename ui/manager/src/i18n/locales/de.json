@@ -1644,7 +1644,10 @@
     "agentOpsMaxPending": "Gleichzeitig wartend",
     "agentOpsHorizon": "Horizont (Tage, max. 90)",
     "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)",
-    "temperatureBlocksSave": "Die Temperatur ist ungültig – bitte vor dem Speichern korrigieren."
+    "temperatureBlocksSave": "Die Temperatur ist ungültig – bitte vor dem Speichern korrigieren.",
+    "grPatternBlocksSave": "Ein Regex-Filter-Guardrail hat ein ungültiges Muster (Zeile {{line}}) – vor dem Speichern korrigieren.",
+    "grPatternInvalid": "Zeile {{line}} ist kein gültiger regulärer Ausdruck: {{detail}}",
+    "grPatternUnchecked": "Zeile {{lines}} verwendet Syntax, die nur der Server prüfen kann; sie wird beim Deployment des Agents validiert."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",
@@ -2648,7 +2651,14 @@
       "title": "Retrieval testen",
       "saveFirst": "Speichern Sie diese Wissensbasis zuerst, um sie zu durchsuchen."
     },
-    "legacyIngestionNote": "Für einmalige Texte. Hier hinzugefügte Dokumente können später weder aufgelistet, aktualisiert noch entfernt werden – für Dokumente, die Sie pflegen werden, fügen Sie stattdessen unter Aufnahmequellen eine Dateien-Quelle hinzu."
+    "legacyIngestionNote": "Für einmalige Texte. Hier hinzugefügte Dokumente können später weder aufgelistet, aktualisiert noch entfernt werden – für Dokumente, die Sie pflegen werden, fügen Sie stattdessen unter Aufnahmequellen eine Dateien-Quelle hinzu.",
+    "statusTooLarge": "Fehlgeschlagen: {{name}} ist größer als {{max}} MB und wurde nicht gelesen",
+    "statusUploadRejected": "Fehlgeschlagen: Der Server hat den Upload abgelehnt ({{detail}})",
+    "reembedWarning": "Diese Wissensbasis enthält bereits eingelesene Dokumente, und Sie haben {{what}} geändert. Beim Speichern werden sie nicht neu eingebettet: Die gespeicherten Vektoren bleiben unverändert, daher liefern Suchen möglicherweise schlechte oder keine Treffer, bis die Dokumente erneut eingelesen werden (oder eine neue Wissensbasis angelegt wird).",
+    "reembedProvider": "den Embedding-Anbieter",
+    "reembedModel": "das Embedding-Modell",
+    "reembedDimension": "die Vektordimension",
+    "reembedChunking": "die Chunk-Einstellungen"
   },
   "onboarding": {
     "welcome": {

@@ -399,6 +399,67 @@ export function expressionProblems(g: GuardrailConfig): ExpressionProblem[] {
   return problems;
 }
 
+/** One line of a multi-pattern parameter that cannot be accepted as written. */
+export interface RegexLineProblem {
+  /** 1-based line number in the parameter. */
+  line: number;
+  /**
+   * `invalid`: the browser's engine rejects it and it uses no Java-only syntax,
+   * so the backend will reject it too. `unchecked`: it uses syntax only Java
+   * understands (or means something different there), which this page cannot
+   * judge — shown as a note, never blocking.
+   */
+  state: "invalid" | "unchecked";
+  /** The engine's own explanation, for `invalid`. */
+  detail?: string;
+}
+
+/**
+ * Syntax Java's `Pattern` accepts (or reads differently) that a JavaScript
+ * `RegExp` does not: possessive quantifiers, atomic groups, inline flags, quoting
+ * (`\Q…\E`), the `\A \z \Z \G \h \R` anchors and escapes, and the `&&`
+ * class intersection.
+ */
+const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHR]|\[[^\]]*&&/;
+
+/**
+ * Checks a regex-filter style `patterns` parameter line by line, the way the
+ * backend reads it (one pattern per line, blank lines skipped, each stripped,
+ * compiled case-insensitively as a Java `Pattern`).
+ *
+ * The browser compiles with `new RegExp`, which is close to Java for everyday
+ * patterns but not identical: a pattern JavaScript rejects that uses Java-only
+ * syntax is reported as `unchecked`, not `invalid`, and a pattern that compiles
+ * here can still be refused by Java — the backend's deploy check is the last word.
+ */
+export function regexPatternProblems(patterns: string | undefined): RegexLineProblem[] {
+  if (!patterns || !patterns.trim()) return [];
+  const problems: RegexLineProblem[] = [];
+  patterns.split(/\r\n|\r|\n/).forEach((raw, i) => {
+    const source = raw.trim();
+    if (!source) return;
+    const javaOnly = JAVA_ONLY_SYNTAX.test(source);
+    try {
+      new RegExp(source, "i");
+      if (javaOnly) problems.push({ line: i + 1, state: "unchecked" });
+    } catch (e) {
+      if (javaOnly) problems.push({ line: i + 1, state: "unchecked" });
+      else problems.push({ line: i + 1, state: "invalid", detail: e instanceof Error ? e.message : String(e) });
+    }
+  });
+  return problems;
+}
+
+/**
+ * Whether a guardrail's patterns must block Save: a regex-filter with a line the
+ * engine rejects. The backend ignores such a line at run time, so a blocking
+ * filter whose lines are all invalid screens nothing — it fails open.
+ */
+export function blockingRegexProblem(g: GuardrailConfig): RegexLineProblem | undefined {
+  if (g.type !== "regex-filter") return undefined;
+  return regexPatternProblems(g.parameters?.patterns).find((p) => p.state === "invalid");
+}
+
 /** One line for the list row: the parameters that say what this guardrail does. */
 export function summarizeGuardrail(g: GuardrailConfig): string {
   const p = g.parameters ?? {};

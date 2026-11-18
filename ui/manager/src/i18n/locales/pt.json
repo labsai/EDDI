@@ -1662,7 +1662,10 @@
     "agentOpsMaxPending": "Em espera em simultâneo",
     "agentOpsHorizon": "Horizonte (dias, máx. 90)",
     "agentOpsCostPerFire": "Teto de custo por execução ($)",
-    "temperatureBlocksSave": "A temperatura não é válida — corrija antes de salvar."
+    "temperatureBlocksSave": "A temperatura não é válida — corrija antes de salvar.",
+    "grPatternBlocksSave": "Um guardrail regex-filter tem um padrão inválido (linha {{line}}) — corrija antes de salvar.",
+    "grPatternInvalid": "A linha {{line}} não é uma expressão regular válida: {{detail}}",
+    "grPatternUnchecked": "A linha {{lines}} usa uma sintaxe que só o servidor pode verificar; ela é validada ao implantar o agente."
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -2676,7 +2679,14 @@
       "title": "Testar recuperação",
       "saveFirst": "Salve esta base de conhecimento primeiro para pesquisá-la."
     },
-    "legacyIngestionNote": "Para textos avulsos. Documentos adicionados aqui não podem ser listados, atualizados nem removidos depois — para documentos que você vai manter, adicione uma fonte de Arquivos em Fontes de ingestão."
+    "legacyIngestionNote": "Para textos avulsos. Documentos adicionados aqui não podem ser listados, atualizados nem removidos depois — para documentos que você vai manter, adicione uma fonte de Arquivos em Fontes de ingestão.",
+    "statusTooLarge": "Falha: {{name}} é maior que {{max}} MB e não foi lido",
+    "statusUploadRejected": "Falha: o servidor recusou o envio ({{detail}})",
+    "reembedWarning": "Esta base de conhecimento já tem documentos ingeridos e você alterou {{what}}. Salvar não os incorpora novamente: os vetores armazenados permanecem como estão, então as buscas podem retornar resultados ruins ou nenhum até que os documentos sejam ingeridos de novo (ou uma nova base seja criada).",
+    "reembedProvider": "o provedor de embeddings",
+    "reembedModel": "o modelo de embeddings",
+    "reembedDimension": "a dimensão do vetor",
+    "reembedChunking": "as configurações de fragmentos"
   },
   "onboarding": {
     "welcome": {

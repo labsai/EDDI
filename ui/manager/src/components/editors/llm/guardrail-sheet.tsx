@@ -24,6 +24,7 @@ import {
   expressionProblems,
   isKnownGuardrailType,
   judgeIssuesProblem,
+  regexPatternProblems,
   parseJudgeIssues,
   serializeJudgeIssues,
   typeHasRewrite,
@@ -71,6 +72,34 @@ function Field({
       {children}
       {hint && <p className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+/** Per-line verdicts on a patterns parameter: rejected lines, and lines this page cannot judge. */
+function PatternProblems({ patterns, t }: { patterns: string | undefined; t: TFunction }) {
+  const problems = regexPatternProblems(patterns);
+  const invalid = problems.filter((p) => p.state === "invalid");
+  const unchecked = problems.filter((p) => p.state === "unchecked");
+  return (
+    <>
+      {invalid.map((p) => (
+        <Warning key={`i${p.line}`} testId="guardrail-pattern-invalid">
+          {t("llmEditor.grPatternInvalid", "Line {{line}} is not a valid regular expression: {{detail}}", {
+            line: p.line,
+            detail: p.detail,
+          })}
+        </Warning>
+      ))}
+      {unchecked.length > 0 && (
+        <p className="text-[10px] leading-relaxed text-muted-foreground" data-testid="guardrail-pattern-unchecked">
+          {t(
+            "llmEditor.grPatternUnchecked",
+            "Line {{lines}} uses syntax only the server can check; it is validated when the agent is deployed.",
+            { lines: unchecked.map((p) => p.line).join(", ") },
+          )}
+        </p>
+      )}
+    </>
   );
 }
 
@@ -423,6 +452,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly, extr
                   data-testid="guardrail-patterns"
                 />
               </Field>
+              <PatternProblems patterns={params.patterns} t={t} />
               <Field label={t("llmEditor.grMode", "Built-in list")} htmlFor={id("mode")}>
                 <select
                   id={id("mode")}
@@ -484,6 +514,7 @@ export function GuardrailSheet({ phase, value, onChange, onClose, readOnly, extr
                   data-testid="guardrail-patterns"
                 />
               </Field>
+              <PatternProblems patterns={params.patterns} t={t} />
               {!params.patterns?.trim() && (
                 <Warning testId="guardrail-patterns-required">
                   {t("llmEditor.grPatternsRequired", "At least one pattern is required; without one this guardrail finds nothing.")}
