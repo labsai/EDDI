@@ -440,6 +440,21 @@ public interface IConversationService {
             throws ResourceStoreException;
 
     /**
+     * Signals the turn running on this node in {@code conversationId} to stop at
+     * its next task boundary, but only if that turn carries the input context
+     * {@code contextKey = contextValue}. Nothing else is touched: no state change,
+     * no pause is cancelled, no continuation is disarmed, no approval audit entry
+     * is written, and a turn that does not carry the context (another caller's,
+     * queued or running) is left alone. For a caller that must stop only the turn
+     * it dispatched.
+     *
+     * @return whether a matching turn was signalled
+     */
+    default boolean cancelInFlightTurn(String conversationId, String contextKey, String contextValue) {
+        return false;
+    }
+
+    /**
      * Cancels the conversation only if it is awaiting a human decision — one
      * compare-and-set from {@code AWAITING_HUMAN}; an executing turn is neither
      * signalled nor interrupted. This is the cancel an {@code eddi-approver} who is

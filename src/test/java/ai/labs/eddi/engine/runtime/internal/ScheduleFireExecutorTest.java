@@ -550,6 +550,124 @@ class ScheduleFireExecutorTest {
         assertEquals(keys.get(0), keys.get(1), "the retries of one due fire must share one key");
     }
 
+    /**
+     * A persistent conversation is shared with humans, other channels and
+     * continuations: the cancel names only the turn carrying this fire's run id,
+     * and never runs the conversation-wide cancel (AWAITING_HUMAN CAS, continuation
+     * disarm, approval audit).
+     */
+    @Test
+    @Timeout(30)
+    void fire_timeout_persistent_signalsOnlyThisFiresTurn_neverTheConversationWideCancel() throws Exception {
+        var schedule = makeCronSchedule("sched-p", "persistent");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-p", null));
+        var sent = new ArrayList<InputData>();
+        doAnswer(inv -> {
+            sent.add(inv.getArgument(6));
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        long before = System.currentTimeMillis();
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        verify(conversationService).cancelInFlightTurn("conv-p", ScheduleConfiguration.CONTEXT_FIRE_ID, runId);
+        verify(conversationService, never()).cancelConversation(any(), any(), any());
+        verify(conversationService, never()).cancelPausedConversation(any(), any());
+        // the turn is stamped with the run id the cancel looks for, and, if it is still
+        // queued behind another turn, with a give-up time that drops it
+        assertEquals(runId, sent.get(0).getContext().get(ScheduleConfiguration.CONTEXT_FIRE_ID).getValue());
+        assertNotNull(sent.get(0).getCallerGivesUpAtEpochMs());
+        assertTrue(sent.get(0).getCallerGivesUpAtEpochMs() >= before, "a queued fire turn must be droppable once the fire gave up");
+    }
+
+    /**
+     * The poller's watchdog interrupt is a give-up too; a shutdown drain is not.
+     */
+    @Test
+    @Timeout(30)
+    void fire_interruptedAfterDispatch_cancelsItsTurn_butNotDuringShutdownDrain() throws Exception {
+        for (boolean draining : new boolean[]{false, true}) {
+            reset(conversationService);
+            var schedule = makeCronSchedule("sched-i" + draining, "persistent");
+            when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-i", null));
+            var dispatched = new java.util.concurrent.CountDownLatch(1);
+            doAnswer(inv -> {
+                dispatched.countDown();
+                return null;
+            }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+            if (draining) {
+                executor.beginShutdown();
+            }
+            var result = new java.util.concurrent.atomic.AtomicReference<ScheduleFireLog>();
+            var thread = new Thread(() -> result.set(executor.fire(schedule, "instance-1", 1)));
+            thread.start();
+            assertTrue(dispatched.await(10, java.util.concurrent.TimeUnit.SECONDS));
+            thread.interrupt();
+            thread.join(10_000);
+
+            assertEquals(FireStatus.FAILED.name(), result.get().status());
+            verify(conversationService, draining ? never() : times(1)).cancelInFlightTurn(eq("conv-i"), any(), any());
+        }
+    }
+
+    /**
+     * An occurrence whose first attempt timed out but committed late: the retry is
+     * answered "skipped" by the idempotency check, and that finishes the
+     * occurrence. The next regular occurrence has a different key and runs.
+     */
+    @Test
+    @Timeout(30)
+    void fire_skippedBecauseTheTurnAlreadyCommitted_completesTheOccurrence_andTheNextOneRuns() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeCronSchedule("sched-late", "persistent");
+        schedule.setPersistentConversationId("conv-late");
+        storedConversation("conv-late", ConversationState.READY, 3);
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(true);
+        var keys = new ArrayList<String>();
+        doAnswer(inv -> {
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 2).status(),
+                "the message was delivered by the first attempt: the retry's skip completes the occurrence");
+
+        // the poller advanced nextFire (markCompleted): the next regular fire is a new
+        // occurrence
+        schedule.setNextFire(schedule.getNextFire().plusSeconds(86_400));
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(false);
+        assertEquals(FireStatus.SKIPPED.name(), executor.fire(schedule, "instance-1", 1).status(),
+                "a genuine skip (busy conversation) stays SKIPPED");
+        assertEquals(2, keys.size());
+        assertNotEquals(keys.get(0), keys.get(1), "two consecutive occurrences must not share a key");
+    }
+
+    @Test
+    void runId_isStableAcrossRetriesOfOneOccurrence_differsPerOccurrence_andPerManualFire() {
+        var s = makeCronSchedule("sched-r", "new");
+        s.setNextFire(Instant.ofEpochMilli(5_000));
+        s.setFireId("sched-r_1");
+        String firstAttempt = ScheduleFireExecutor.runIdOf(s);
+        s.setFireId("sched-r_2"); // a retry claims again, nextFire unchanged
+        assertEquals(firstAttempt, ScheduleFireExecutor.runIdOf(s));
+        s.setNextFire(Instant.ofEpochMilli(9_000)); // completed or skipped: re-armed
+        assertNotEquals(firstAttempt, ScheduleFireExecutor.runIdOf(s));
+
+        s.setManualFire(true);
+        s.setFireId("sched-r_10");
+        String click1 = ScheduleFireExecutor.runIdOf(s);
+        s.setFireId("sched-r_11");
+        assertNotEquals(click1, ScheduleFireExecutor.runIdOf(s));
+    }
+
     @Test
     void fire_timeout_aFailingCancelDoesNotChangeTheOutcome() throws Exception {
         var schedule = makeCronSchedule("sched-slow2", "new");

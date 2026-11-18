@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.schedule.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonInclude;
 
 import java.time.Instant;
@@ -203,6 +204,10 @@ public class ScheduleConfiguration {
     // Warnings the create response carries (a recurring schedule with no cost cap,
     // for one). Response-only like cronDescription: the stores never write it.
     private transient List<String> warnings;
+    // Set on the in-memory copy a manual "fire now" claimed; never serialized or
+    // stored.
+    @JsonIgnore
+    private transient boolean manualFire;
 
     public ScheduleConfiguration() {
     }
@@ -510,6 +515,16 @@ public class ScheduleConfiguration {
 
     public String getCronDescription() {
         return cronDescription;
+    }
+
+    @JsonIgnore
+    public boolean isManualFire() {
+        return manualFire;
+    }
+
+    @JsonIgnore
+    public void setManualFire(boolean manualFire) {
+        this.manualFire = manualFire;
     }
 
     @JsonInclude(JsonInclude.Include.NON_EMPTY)

@@ -550,6 +550,11 @@ public class SchedulePollerService {
     @PreDestroy
     void shutdownFires() {
         stopping = true;
+        if (fireExecutor != null) {
+            // A drain interrupt is not a timeout: the turns it cuts short must not be
+            // cancelled.
+            fireExecutor.beginShutdown();
+        }
         if (fireWorkers == null) {
             return;
         }
@@ -965,7 +970,12 @@ public class SchedulePollerService {
      *             if the claim could not be attempted at all
      */
     public boolean claimForManualFire(ScheduleConfiguration schedule) throws IResourceStore.ResourceStoreException {
-        return tryClaimFor(schedule, Instant.now(), false);
+        boolean claimed = tryClaimFor(schedule, Instant.now(), false);
+        if (claimed) {
+            // Its turn gets a key of its own: a manual fire is one click, not a retry.
+            schedule.setManualFire(true);
+        }
+        return claimed;
     }
 
     /**

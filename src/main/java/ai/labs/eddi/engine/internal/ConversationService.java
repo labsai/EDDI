@@ -3420,6 +3420,25 @@ public class ConversationService implements IConversationService, UserErasurePar
     }
 
     @Override
+    public boolean cancelInFlightTurn(String conversationId, String contextKey, String contextValue) {
+        IConversationMemory memory = conversationId == null ? null : inFlightConversations.get(conversationId);
+        if (memory == null || contextKey == null || contextValue == null) {
+            return false;
+        }
+        try {
+            var step = memory.getCurrentStep();
+            IData<Object> data = step == null ? null : step.getData("context:" + contextKey);
+            if (data != null && data.getResult() instanceof Context context && contextValue.equals(String.valueOf(context.getValue()).strip())) {
+                memory.setCancelled(true);
+                return true;
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not match the in-flight turn of conversation %s: %s", sanitize(conversationId), e.getMessage());
+        }
+        return false;
+    }
+
+    @Override
     public CancelOutcome cancelPausedConversation(String conversationId, String cancelledBy) throws ResourceStoreException {
         return conversationHitlService.cancelPausedConversation(conversationId, cancelledBy);
     }

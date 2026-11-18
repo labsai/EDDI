@@ -1509,6 +1509,25 @@ class SchedulePollerServiceTest {
         verify(fireExecutor, times(1)).fire(any(), any(), anyInt());
     }
 
+    @Test
+    void manualClaim_marksTheScheduleSoItsTurnGetsAKeyOfItsOwn() throws Exception {
+        var schedule = makeCronSchedule("sched-manual", "0 9 * * *", "Hello");
+        when(scheduleStore.tryClaimAnyTime(eq("sched-manual"), eq("test-instance"), any(), any())).thenReturn(true);
+        assertTrue(poller.claimForManualFire(schedule));
+        assertTrue(schedule.isManualFire());
+
+        var refused = makeCronSchedule("sched-busy", "0 9 * * *", "Hello");
+        when(scheduleStore.tryClaimAnyTime(eq("sched-busy"), eq("test-instance"), any(), any())).thenReturn(false);
+        assertFalse(poller.claimForManualFire(refused));
+        assertFalse(refused.isManualFire());
+    }
+
+    @Test
+    void shutdownTellsTheExecutorSoDrainInterruptsCancelNothing() {
+        poller.shutdownFires();
+        verify(fireExecutor).beginShutdown();
+    }
+
     // --- Helpers ---
 
     private static ScheduleConfiguration makeCronSchedule(String id, String cron, String message) {
