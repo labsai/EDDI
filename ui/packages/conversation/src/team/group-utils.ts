@@ -78,6 +78,16 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
  */
 const SENTINEL = String.fromCharCode(0xe000);
 const PLACEHOLDER = new RegExp(SENTINEL + "(\\d+)" + SENTINEL, "g");
+/** Stands in for one stashed `$…$` math span while a line's bold is repaired. */
+const MATH_MARK = String.fromCharCode(0xe001);
+/**
+ * Every Private Use Area character this module uses as a placeholder. Each is
+ * removed from the input before any masking starts (see
+ * {@link maskProtectedRegions}), so a placeholder in the working text was always
+ * put there by us — a literal one in agent output can never be mistaken for it.
+ * A new placeholder character goes in here, or it is forgeable.
+ */
+const RESERVED_MARKS = new RegExp("[" + SENTINEL + MATH_MARK + "]", "g");
 
 /**
  * Replace every protected region with an opaque placeholder, returning the
@@ -167,14 +177,16 @@ function maskProtectedRegions(text: string): {
   restore: (s: string) => string;
 } {
   const stash: string[] = [];
-  // Strip any sentinel already in the input FIRST. Agent output is
-  // attacker-influenceable via prompt injection, and a literal
+  // Strip every placeholder character already in the input FIRST. Agent output
+  // is attacker-influenceable via prompt injection, and a literal
   // U+E000<digits>U+E000 would otherwise be indistinguishable from a real
   // placeholder — restore would substitute an unrelated stashed region into the
-  // message (duplicating it) or, for an out-of-range index, delete the text.
-  // U+E000 is Private Use Area and carries no meaning in real content, so
-  // dropping it loses nothing.
-  let masked = text.split(SENTINEL).join("");
+  // message (duplicating it) or, for an out-of-range index, delete the text. A
+  // literal U+E001 would take the place of a real `$…$` span in the bold repair:
+  // the forged mark got the math back and the real span was deleted. Both are
+  // Private Use Area and carry no meaning in real content, so dropping them
+  // loses nothing.
+  let masked = text.replace(RESERVED_MARKS, "");
   const push = (match: string): string => {
     stash.push(match);
     return SENTINEL + (stash.length - 1) + SENTINEL;
@@ -205,7 +217,6 @@ const TABLE_ROW = /^[ \t]*\|/;
 const LINE_CONTENT_START = /^(?:[ \t]*>)*[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+)?/;
 /** A `$…$` span: math, whose `**` is an operator. Stashed while a line is repaired. */
 const MATH_SPAN = /\$[^$\n]{1,200}\$/g;
-const MATH_MARK = String.fromCharCode(0xe001);
 
 /** What may directly precede an opening `**` that is emphasis rather than an operator or a code flag. */
 const OPENER_BEFORE = /(?:^|[\s\u00a0|>[{"'])$/;
@@ -232,6 +243,9 @@ const CLOSER_AFTER = /^(?:$|[\s\u00a0.,;:!?)\]}|"'([{])/;
  */
 function repairBoldText(text: string, contentStart: number): string {
   if (!text.includes("**")) return text;
+  // `text` holds no literal MATH_MARK: it is reached only through
+  // formatMarkdownText, whose masking strips RESERVED_MARKS on entry, so every
+  // mark below stands for exactly one span in `math`, in order.
   const math: string[] = [];
   const work = text.replace(MATH_SPAN, (m) => {
     math.push(m);

@@ -127,3 +127,37 @@ describe("formatMarkdownText repairs inside structure", () => {
     expect(formatMarkdownText(row)).toBe(row);
   });
 });
+
+/**
+ * Every Private Use Area character the repair uses as a placeholder must be
+ * unforgeable: agent output can contain any of them, and a literal one must
+ * never be read as ours.
+ */
+describe("formatMarkdownText cannot be tricked by a literal placeholder character", () => {
+  const STASH_MARK = String.fromCharCode(0xe000);
+  const MATH_MARK = String.fromCharCode(0xe001);
+
+  it("a literal math mark before a real math span keeps the span (the review's trigger)", () => {
+    expect(formatMarkdownText(`a${MATH_MARK} and $x$ **b **(y`)).toBe("a and $x$ **b** (y");
+  });
+
+  it("a literal math mark with no math span at all is dropped, the rest repaired", () => {
+    expect(formatMarkdownText(`a${MATH_MARK} **b **(y`)).toBe("a **b** (y");
+  });
+
+  it("literal math marks around several math spans keep every span in its place", () => {
+    expect(formatMarkdownText(`${MATH_MARK}$p$ ${MATH_MARK} **q **(r $s$${MATH_MARK}`)).toBe("$p$  **q** (r $s$");
+  });
+
+  it("a forged stash placeholder next to a real code span keeps the code span once", () => {
+    expect(formatMarkdownText(`${STASH_MARK}0${STASH_MARK} and \`code\` **b **(y`)).toBe("0 and `code` **b** (y");
+  });
+
+  it("a forged stash placeholder with nothing stashed loses no text", () => {
+    expect(formatMarkdownText(`keep ${STASH_MARK}7${STASH_MARK} **b **(y`)).toBe("keep 7 **b** (y");
+  });
+
+  it("text with a literal placeholder character and no bold comes out without it", () => {
+    expect(formatMarkdownText(`plain ${MATH_MARK}${STASH_MARK} text`)).toBe("plain  text");
+  });
+});
