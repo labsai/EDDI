@@ -537,6 +537,10 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
 
+### Documents
+
+Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for any other key is ignored with a WARN at deploy. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
+
 ---
 
 ## Backup, export & import

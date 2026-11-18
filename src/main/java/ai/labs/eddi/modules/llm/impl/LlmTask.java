@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
+import ai.labs.eddi.engine.documents.DocumentSettings;
+import ai.labs.eddi.engine.documents.EffectiveDocumentsConfig;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
@@ -192,6 +194,14 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
     // null-guarded at the call site.
     @Inject
     AttachmentForwarder attachmentForwarder;
+
+    /**
+     * Operator defaults and bounds for the {@code documents} block. Field-injected
+     * like its neighbours so that the many hand-built test instances need no
+     * change; {@code null} there means "no operator setting".
+     */
+    @Inject
+    DocumentSettings documentSettings;
 
     /**
      * Input/output guardrails (WS4). Field-injected for the same reason as
@@ -3915,6 +3925,7 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 validateAnswerMode(llmConfiguration);
                 warnOnDeprecatedParameters(llmConfiguration);
+                warnOnDocumentsConfig(llmConfiguration, documentSettings);
                 return llmConfiguration;
             } catch (ServiceException e) {
                 LOGGER.error(e.getLocalizedMessage(), e);
@@ -3923,6 +3934,34 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         }
 
         throw new WorkflowConfigurationException("No resource URI has been defined! [LlmConfiguration]");
+    }
+
+    /**
+     * Resolves each task's {@code documents} block once at deploy time and logs, at
+     * WARN, every value that was ignored (a key not available in this version, an
+     * unknown name) or clamped to an operator bound. Never throws: a stored
+     * configuration, an import or a bound tightened later must not un-deploy an
+     * agent — only the next <em>save</em> of such a value is refused.
+     */
+    static void warnOnDocumentsConfig(LlmConfiguration llmConfiguration, DocumentSettings settings) {
+        if (llmConfiguration == null || llmConfiguration.tasks() == null) {
+            return;
+        }
+        for (var task : llmConfiguration.tasks()) {
+            if (task == null || task.getDocuments() == null) {
+                continue;
+            }
+            String taskId = task.getId() != null ? sanitize(task.getId()) : "<unnamed>";
+            try {
+                var effective = EffectiveDocumentsConfig.resolve(task.getDocuments(), settings != null ? settings : DocumentSettings.none());
+                for (String warning : effective.clampWarnings()) {
+                    LOGGER.warnf("LLM task '%s': %s", taskId, warning);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("LLM task '%s': the documents block could not be resolved (%s); built-in defaults apply", taskId,
+                        e.getClass().getSimpleName());
+            }
+        }
     }
 
     /**
