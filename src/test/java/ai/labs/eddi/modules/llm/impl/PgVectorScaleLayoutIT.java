@@ -34,6 +34,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -414,9 +416,15 @@ class PgVectorScaleLayoutIT {
         return marker;
     }
 
+    private static final Pattern CREATE_INDEX = Pattern.compile("CREATE\\s+(UNIQUE\\s+)?INDEX\\b", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * The {@code CREATE INDEX} statements in {@code log}, whatever their keyword
+     * case or spacing: PostgreSQL accepts and logs them all.
+     */
     private static int createIndexStatements(String log) {
         int count = 0;
-        for (int at = log.indexOf("CREATE INDEX"); at >= 0; at = log.indexOf("CREATE INDEX", at + 1)) {
+        for (Matcher m = CREATE_INDEX.matcher(log); m.find();) {
             count++;
         }
         return count;
