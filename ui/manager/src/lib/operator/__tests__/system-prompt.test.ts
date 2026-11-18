@@ -1308,21 +1308,53 @@ describe.each([
 describe("6.7 feature knowledge in the quick reference (no endpoint needed)", () => {
   const body = buildOperatorPromptBody(READ_ENDPOINTS);
 
+  // Matched on whitespace-normalised text: these pin facts and boundaries, not
+  // where a line happens to wrap.
+  const flat = body.replace(/\s+/g, " ");
+
   it("teaches the SERVICE judge, human tie-breaks and humans in task forces", () => {
-    expect(body).toContain('convergence.judge "SERVICE"');
-    expect(body).toContain('voteConfig.tiePolicy "HUMAN_DECIDES"');
-    expect(body).toContain("pendingKind TASK");
+    expect(flat).toContain('convergence.judge "SERVICE"');
+    expect(flat).toContain('voteConfig.tiePolicy "HUMAN_DECIDES"');
+    expect(flat).toContain("pendingKind TIE_BREAK or TASK");
   });
 
   it("says the operator never answers a tie-break or a human task", () => {
-    expect(body).toContain("You never answer a tie-break or");
+    expect(flat).toContain("You never answer a tie-break or a human task");
   });
 
   it("teaches tool-call guardrails, edit-on-approve and approval card context, and that it writes none of them", () => {
-    expect(body).toContain("You cannot write\n  toolCallGuardrails");
-    expect(body).toContain("You still never\n  approve, reject or edit.");
-    expect(body).toContain("pauseDetails.lastEditRefused");
-    expect(body).toContain("platformConfig.hitlApprovalContext");
+    expect(flat).toContain("You cannot write toolCallGuardrails");
+    expect(flat).toContain("You still never approve, reject or edit.");
+    expect(flat).toContain("pauseDetails.lastEditRefused");
+    expect(flat).toContain("platformConfig.hitlApprovalContext");
+  });
+
+  /**
+   * The detail behind these was moved out of the prompt into pages the operator
+   * reads on demand (the prompt is resent on every tool round). What stays is
+   * the boundary, the common symptom and the page to read — pinned here so a
+   * later trim cannot drop the pointer along with the detail.
+   */
+  it("keeps the boundary and a page pointer for every topic whose detail moved to the docs", () => {
+    for (const [fact, page] of [
+      ["NOT_SENT was never sent", '"group-approved-result-actions"'],
+      ["you have no tool for it", '"email-integration"'],
+      ['a mail loop', '"email-integration"'],
+      ["You have no tool for either, on purpose", '"agent-signing"'],
+      ['"The vote could not run: only 0 option(s) were available"', '"agent-signing"'],
+      ["eddi.user-events.enabled=false", '"user-events"'],
+      ["is intent, NOT proof", '"long-jobs"'],
+      ["do not promise the budget can never be exceeded", '"tenant-quotas"'],
+      ["silently lacks them", '"agent-ops-tools"'],
+    ] as const) {
+      expect(flat).toContain(fact);
+      expect(flat).toContain(page);
+    }
+  });
+
+  it("warns that the largest pages are read whole and prefers the dedicated ones", () => {
+    expect(flat).toContain("A page is read whole and stays in your context for the rest of the turn");
+    expect(flat).toContain('"langchain", "hitl", "security"');
   });
 
   it("maps the new documentation pages", () => {

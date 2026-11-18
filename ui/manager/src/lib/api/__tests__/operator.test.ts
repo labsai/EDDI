@@ -359,6 +359,21 @@ describe("provisionOperator", () => {
     expect(captured?.maxToolIterations).toBe(100);
   });
 
+  /**
+   * The prompt and the generated tools are resent on every round of that
+   * loop and do not change within a turn; caching them is the cost lever the
+   * backend applies per provider.
+   */
+  it("asks setup-api to cache the operator's prompt and tools", async () => {
+    await provisionOperator({
+      agentName: "EDDI Platform Operator",
+      config: config(),
+      apiKey: "sk-test",
+      spec: fetchedSpec(),
+    });
+    expect(captured?.promptCaching).toBe(true);
+  });
+
   it("prepends the non-editable safety preamble to the editable body", async () => {
     await provisionOperator({
       agentName: "Op",

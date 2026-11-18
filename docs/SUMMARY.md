@@ -84,6 +84,7 @@
 
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
+  - [Agent Signing Keys](agent-signing.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
 - [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)

@@ -175,6 +175,41 @@ class AgentSetupApiDryRunTest {
         assertTrue(schema != null && schema.hidden(), "dryRun must stay @Schema(hidden = true)");
     }
 
+    private static CreateApiAgentRequest cachingRequest(String provider, Boolean promptCaching) {
+        return new CreateApiAgentRequest("Ops", "You are ops.", SPEC, provider, "some-model", "${vault:llm-key}", null, null, null, null, null,
+                false, null, null, null, null, null, null, null, null, null, promptCaching, null).asDryRun();
+    }
+
+    private static Map<String, String> llmParameters(SetupResult result) {
+        return ((LlmConfiguration) result.resources().get("llmConfiguration")).tasks().getFirst().getParameters();
+    }
+
+    @Test
+    @DisplayName("promptCaching on anthropic marks the system prompt and the tools as cacheable")
+    void promptCachingOnAnthropic() throws Exception {
+        var params = llmParameters(fixture().service().createApiAgent(cachingRequest("anthropic", true)));
+
+        assertEquals("true", params.get("cacheSystemMessages"));
+        assertEquals("true", params.get("cacheTools"));
+    }
+
+    @Test
+    @DisplayName("promptCaching off, absent, or on a provider that caches by itself writes nothing")
+    void promptCachingWritesNothingOtherwise() throws Exception {
+        for (var request : List.of(cachingRequest("anthropic", null), cachingRequest("anthropic", false), cachingRequest("openai", true),
+                cachingRequest("ollama", true))) {
+            var params = llmParameters(fixture().service().createApiAgent(request));
+            assertFalse(params.containsKey("cacheSystemMessages"), request.provider() + " " + request.promptCaching());
+            assertFalse(params.containsKey("cacheTools"), request.provider() + " " + request.promptCaching());
+        }
+    }
+
+    @Test
+    @DisplayName("asDryRun keeps promptCaching")
+    void asDryRunKeepsPromptCaching() {
+        assertEquals(Boolean.TRUE, cachingRequest("anthropic", true).promptCaching());
+    }
+
     private static CreateApiAgentRequest withKey(String apiKey, String vaultKeyName, List<String> allowedHosts) {
         return new CreateApiAgentRequest("Ops", "You are ops.", SPEC, "openai", "gpt-4o", apiKey, null, null, null, null, null, false, null,
                 null, null, null, null, vaultKeyName, null, null, allowedHosts).asDryRun();

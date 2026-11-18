@@ -716,6 +716,9 @@ public class AgentSetupService {
             if (request.maxToolIterations() != null) {
                 llmConfig.tasks().getFirst().setMaxToolIterations(request.maxToolIterations());
             }
+            if (Boolean.TRUE.equals(request.promptCaching())) {
+                applyPromptCaching(llmConfig.tasks().getFirst(), params.providerType);
+            }
             String langchainLocation = writer.createDescribed(createdResources, "langchainLocation", LLM_PREFIX,
                     () -> getRestStore(IRestLlmStore.class).createLlm(llmConfig), request.agentName());
 
@@ -1097,6 +1100,25 @@ public class AgentSetupService {
                     "maxToolIterations must be between 1 and " + MAX_TOOL_ITERATIONS + " (was " + maxToolIterations
                             + "); omit it to use the engine default");
         }
+    }
+
+    /**
+     * Marks the task's system prompt and tool definitions as cacheable where the
+     * provider has to be asked: on {@code anthropic}, the builder's
+     * {@code cacheSystemMessages} and {@code cacheTools} (see
+     * {@code AnthropicLanguageModelBuilder}). Every other provider is left alone:
+     * the OpenAI family caches a repeated prefix without being asked, and the
+     * others either do the same or have no switch this service can set safely.
+     * Writes nothing a caller already set, so an explicit choice survives.
+     */
+    static void applyPromptCaching(LlmConfiguration.Task task, String providerType) {
+        if (!"anthropic".equals(providerType)) {
+            return;
+        }
+        var params = new LinkedHashMap<>(task.getParameters() == null ? Map.of() : task.getParameters());
+        params.putIfAbsent("cacheSystemMessages", "true");
+        params.putIfAbsent("cacheTools", "true");
+        task.setParameters(params);
     }
 
     /**

@@ -137,6 +137,22 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          */
         List<String> allowedHosts,
         /*
+         * Prompt caching for the generated LLM task. True marks the system prompt and
+         * the tool definitions as cacheable on providers that need to be asked
+         * (anthropic: cacheSystemMessages and cacheTools); every other provider is left
+         * as it is, since the OpenAI family caches a repeated prefix by itself. Null or
+         * false writes nothing.
+         *
+         * It exists for agents whose prompt and toolset are large and resent on every
+         * round of a long tool loop — the Platform Operator sends tens of thousands of
+         * tokens of instructions plus about a hundred generated tools each round, and
+         * uncached that is the bulk of its cost. A cache write costs more than a plain
+         * read, so a small agent that rarely runs more than one round gains nothing.
+         *
+         * Placed before dryRun, which stays last (AgentSetupApiDryRunTest).
+         */
+        Boolean promptCaching,
+        /*
          * Generate only: true returns what the setup would create — the apicalls
          * configurations, the LLM configuration with its tool list, the workflow, the
          * agent with its gate, unusableEndpoints and unmatchedEndpoints — and writes
@@ -152,6 +168,16 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
          */
         @Schema(hidden = true) Boolean dryRun) {
 
+    /** Every field but {@link #promptCaching}, which stays off. */
+    public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
+            String apiBaseUrl, String apiAuth, String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy,
+            String environment, String llmBaseUrl, AgentConfiguration.HitlConfig hitlConfig, String mcpServerUrls, Integer maxToolIterations,
+            String vaultKeyName, String apiAuthHeader, Boolean grantReferencedSecrets, List<String> allowedHosts, Boolean dryRun) {
+        this(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints, enableQuickReplies,
+                enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations, vaultKeyName, apiAuthHeader,
+                grantReferencedSecrets, allowedHosts, null, dryRun);
+    }
+
     /** Every field but {@link #dryRun}, which stays off. */
     public CreateApiAgentRequest(String agentName, String systemPrompt, String openApiSpec, String provider, String model, String apiKey,
             String apiBaseUrl, String apiAuth, String endpoints, Boolean enableQuickReplies, Boolean enableSentimentAnalysis, Boolean deploy,
@@ -166,7 +192,7 @@ public record CreateApiAgentRequest(@JsonProperty(required = true) String agentN
     public CreateApiAgentRequest asDryRun() {
         return new CreateApiAgentRequest(agentName, systemPrompt, openApiSpec, provider, model, apiKey, apiBaseUrl, apiAuth, endpoints,
                 enableQuickReplies, enableSentimentAnalysis, deploy, environment, llmBaseUrl, hitlConfig, mcpServerUrls, maxToolIterations,
-                vaultKeyName, apiAuthHeader, grantReferencedSecrets, allowedHosts, Boolean.TRUE);
+                vaultKeyName, apiAuthHeader, grantReferencedSecrets, allowedHosts, promptCaching, Boolean.TRUE);
     }
 
     /** Every field but {@link #grantReferencedSecrets}, which stays off. */

@@ -85,6 +85,14 @@ export interface CreateApiAgentRequest {
    */
   maxToolIterations?: number;
   /**
+   * Mark the generated LLM task's system prompt and tool definitions as
+   * cacheable on providers that must be asked (`anthropic`: `cacheSystemMessages`
+   * and `cacheTools`). Other providers are left as they are — the OpenAI family
+   * caches a repeated prefix by itself. Omitted writes nothing. An older backend
+   * ignores the field.
+   */
+  promptCaching?: boolean;
+  /**
    * Name of the vault entry the LLM API key lives under, so several agents can
    * share ONE stored credential. Not surfaced as its own form field: the
    * `SecretKeyPicker` on `apiKey` already produces `${vault:<name>}` (and can
