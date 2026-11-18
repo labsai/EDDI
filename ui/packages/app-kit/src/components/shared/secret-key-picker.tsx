@@ -741,8 +741,12 @@ export function SecretKeyPicker({
   const [filter, setFilter] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
-  /** The user chose to keep the typed literal in the config as plain text. */
-  const [literalAccepted, setLiteralAccepted] = useState(false);
+  /**
+   * The literal the user chose to keep as plain text. Bound to that value: a
+   * different credential typed or loaded into the same picker is asked about again.
+   */
+  const [acceptedLiteral, setAcceptedLiteral] = useState<string | null>(null);
+  const literalAccepted = acceptedLiteral !== null && acceptedLiteral === value;
   /** A typed literal handed to the create dialog, so the user does not retype it. */
   const [vaultifyValue, setVaultifyValue] = useState<string | undefined>(undefined);
   /**
@@ -1376,7 +1380,7 @@ export function SecretKeyPicker({
             </button>
             <button
               type="button"
-              onClick={() => setLiteralAccepted(true)}
+              onClick={() => setAcceptedLiteral(value)}
               className="rounded-md border border-input px-2 py-1 font-medium text-foreground hover:bg-muted"
               data-testid={`${testId}-literal-keep`}
             >

@@ -193,8 +193,9 @@ export function AgentWizardPage() {
   /**
    * What the user typed for each provider they left, so switching back (or on to
    * a provider they already filled in) restores it instead of starting blank.
-   * A key stays tied to the provider it was typed for — it is never carried to
-   * another vendor's endpoint.
+   * A key stays tied to the provider AND the endpoint it was typed for — it is
+   * never carried to another vendor's endpoint, and a remembered key comes back
+   * only together with its own base URL. Cleared by "Create another".
    */
   const providerMemory = useRef<Record<string, { model: string; apiKey: string; baseUrl: string }>>({});
   /** Set when a provider switch reset something the user had typed, so it is not silent. */
@@ -210,12 +211,18 @@ export function AgentWizardPage() {
     const keepsUrl = supportsBaseUrl(providerId) && !isCompatibleSwitch(state.provider, providerId);
     const remembered = providerMemory.current[providerId];
     if (remembered) {
-      setResetNote([]);
+      // A proxy URL carried across two non-compatible providers stays — but only
+      // while no key comes back with the provider. A remembered key returns with
+      // the endpoint it was typed for: sent with the carried URL, it would go to a
+      // host it was never entered for.
+      const carryUrl = keepsUrl && state.baseUrl !== "" && remembered.apiKey.trim() === "";
+      const droppedUrl =
+        !carryUrl && state.baseUrl.trim() !== "" && state.baseUrl !== remembered.baseUrl;
+      setResetNote(droppedUrl ? ["baseUrl"] : []);
       update({
         provider: providerId,
         ...remembered,
-        // A proxy URL carried across two non-compatible providers stays.
-        baseUrl: keepsUrl && state.baseUrl ? state.baseUrl : remembered.baseUrl,
+        baseUrl: carryUrl ? state.baseUrl : remembered.baseUrl,
       });
       return;
     }
@@ -536,7 +543,13 @@ export function AgentWizardPage() {
                   provider: result.apiKeyVaultReference ? state.provider : INITIAL_STATE.provider,
                   model: result.apiKeyVaultReference ? state.model : INITIAL_STATE.model,
                   apiKey: result.apiKeyVaultReference ?? "",
+                  // The reference goes on with the endpoint it was created for, never another.
+                  baseUrl: result.apiKeyVaultReference ? state.baseUrl : INITIAL_STATE.baseUrl,
                 });
+                // What was typed for other providers in the finished run — literal
+                // keys included — must not come back in this one.
+                providerMemory.current = {};
+                setResetNote([]);
                 setCurrentStep(0);
                 setResult(null);
                 setError("");

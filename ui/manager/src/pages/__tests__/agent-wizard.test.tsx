@@ -1369,4 +1369,76 @@ describe("AgentWizardPage", () => {
     expect(screen.getByTestId("wizard-model")).toHaveValue("my-custom-model");
     expect(screen.queryByTestId("wizard-provider-reset-note")).not.toBeInTheDocument();
   });
+
+  it("restores a remembered key only with the endpoint it was typed for", async () => {
+    let sent: { provider?: string; apiKey?: string; baseUrl?: string } = {};
+    server.use(
+      http.post("*/administration/agents/setup", async ({ request }) => {
+        sent = (await request.json()) as typeof sent;
+        return HttpResponse.json({ agentId: "a-1", agentName: "Compat Agent", provider: "openai", model: "gpt-4o" });
+      }),
+    );
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    // Key A with endpoint A for OpenAI.
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "key-aaaa");
+    await user.type(screen.getByTestId("wizard-baseurl"), "https://endpoint-a.example/v1");
+
+    // Another base-URL provider, with endpoint B typed over the carried URL.
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "anthropic");
+    await user.clear(screen.getByTestId("wizard-baseurl"));
+    await user.type(screen.getByTestId("wizard-baseurl"), "https://endpoint-b.example/v1");
+
+    // Back to OpenAI: key A comes back with endpoint A, never with endpoint B.
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-apikey-input")).toHaveValue("key-aaaa");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("https://endpoint-a.example/v1");
+    expect(screen.getByTestId("wizard-provider-reset-note")).toBeInTheDocument();
+
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+    await waitFor(() => expect(sent.provider).toBe("openai"));
+    expect(sent.apiKey).toBe("key-aaaa");
+    expect(sent.baseUrl).toBe("https://endpoint-a.example/v1");
+  });
+
+  it("still carries a proxy URL to a remembered provider that brings no key back", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "anthropic");
+    await user.type(screen.getByTestId("wizard-baseurl"), "https://proxy.example/v1");
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-baseurl")).toHaveValue("https://proxy.example/v1");
+  });
+
+  it("Create Another forgets the keys typed for other providers in the finished run", async () => {
+    server.use(
+      http.post("*/administration/agents/setup", () =>
+        HttpResponse.json({ agentId: "a-2", agentName: "Compat Agent", provider: "anthropic", model: "claude-sonnet-4-6" }),
+      ),
+    );
+    const user = userEvent.setup();
+    await openLlmStep(user);
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "key-bbbb");
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "anthropic");
+    await user.type(screen.getByTestId("wizard-apikey-input"), "key-cccc");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.click(screen.getByTestId("wizard-create-only"));
+    await user.click(await screen.findByText("Create Another"));
+
+    await user.click(screen.getByTestId("type-standard"));
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.type(screen.getByTestId("wizard-agent-name"), "Second");
+    await user.type(screen.getByTestId("wizard-system-prompt"), "Prompt");
+    await user.click(screen.getByTestId("wizard-next"));
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "anthropic");
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-apikey-input")).toHaveValue("");
+  });
 });

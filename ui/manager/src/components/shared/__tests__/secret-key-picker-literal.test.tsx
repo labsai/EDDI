@@ -33,6 +33,22 @@ describe("SecretKeyPicker — a literal key typed into the field", () => {
     expect(screen.queryByTestId("secret-key-picker-literal-nudge")).not.toBeInTheDocument();
   });
 
+  it("binds 'Keep as plain text' to the value it was given for: another credential is asked about again", async () => {
+    const user = userEvent.setup();
+    const { rerender } = renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} />);
+    await user.click(screen.getByTestId("secret-key-picker-literal-keep"));
+    expect(screen.queryByTestId("secret-key-picker-literal-nudge")).not.toBeInTheDocument();
+
+    // The credential is replaced, or another resource is loaded into the same picker.
+    const OTHER_KEY = `${FAKE_KEY}-other`;
+    rerender(<SecretKeyPicker value={OTHER_KEY} onChange={vi.fn()} />);
+    expect(screen.getByTestId("secret-key-picker-literal-nudge")).toBeInTheDocument();
+
+    // The value that was accepted stays accepted.
+    rerender(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("secret-key-picker-literal-nudge")).not.toBeInTheDocument();
+  });
+
   it("offers Store in vault, with the typed value already in the create dialog", async () => {
     const user = userEvent.setup();
     renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} />);
@@ -48,6 +64,24 @@ describe("SecretKeyPicker — a literal key typed into the field", () => {
     await user.click(screen.getByTestId("secret-key-picker-literal-vault"));
     await screen.findByTestId("create-secret-modal-value");
     expect(screen.queryByTestId("create-secret-modal-all-agents")).not.toBeInTheDocument();
+  });
+
+  it("creates the secret granted to the owning agent only", async () => {
+    let stored: { allowedAgents?: string[] } | undefined;
+    server.use(
+      http.put("*/secretstore/secrets/:tenant/:key", async ({ request }) => {
+        stored = (await request.json()) as typeof stored;
+        return HttpResponse.json({ reference: "${vault:picker-key}" });
+      }),
+    );
+    const user = userEvent.setup();
+    renderWithProviders(<SecretKeyPicker value={FAKE_KEY} onChange={vi.fn()} agentId="agent-1" />);
+    await user.click(screen.getByTestId("secret-key-picker-literal-vault"));
+    await user.type(await screen.findByTestId("create-secret-modal-key"), "picker-key");
+    await user.click(screen.getByTestId("create-secret-modal-hosts-mode-any"));
+    await user.click(screen.getByTestId("create-secret-modal-submit"));
+    await vi.waitFor(() => expect(stored).toBeDefined());
+    expect(stored!.allowedAgents).toEqual(["agent-1"]);
   });
 
   it("does not nudge for references, placeholders or short values", () => {
