@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.schedule.model;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -176,6 +178,11 @@ public class ScheduleConfiguration {
      * agent.
      */
     public static final String DISABLED_ACCESS_REVOKED = "access-revoked";
+    /**
+     * {@link #disabledReason}: the fire completed but its cron has no further
+     * match, so there is nothing left to arm.
+     */
+    public static final String DISABLED_NO_NEXT_FIRE = "no-next-fire";
 
     // -- Metadata --
     private Map<String, Object> metadata;
@@ -193,6 +200,9 @@ public class ScheduleConfiguration {
     // it also meant a PUT echoing a GET body stored a stale description; the stores
     // therefore strip it explicitly on write.
     private transient String cronDescription;
+    // Warnings the create response carries (a recurring schedule with no cost cap,
+    // for one). Response-only like cronDescription: the stores never write it.
+    private transient List<String> warnings;
 
     public ScheduleConfiguration() {
     }
@@ -500,6 +510,15 @@ public class ScheduleConfiguration {
 
     public String getCronDescription() {
         return cronDescription;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public List<String> getWarnings() {
+        return warnings;
+    }
+
+    public void setWarnings(List<String> warnings) {
+        this.warnings = warnings;
     }
 
     public void setCronDescription(String cronDescription) {

@@ -142,7 +142,7 @@ public final class RagIngestionSchedules {
             return CronParser.computeNextFire(cronExpression, Instant.now(), zone);
         } catch (IllegalStateException e) {
             throw new IllegalArgumentException(
-                    "cron '" + cronExpression + "' has no matching fire time within the next two years", e);
+                    "cron '" + cronExpression + "' has no matching fire time: it can never fire", e);
         }
     }
 

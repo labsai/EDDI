@@ -102,6 +102,28 @@ class CronParserTest {
         assertEquals(ZonedDateTime.of(2026, 3, 20, 10, 31, 0, 0, UTC).toInstant(), next);
     }
 
+    /**
+     * A leap-day cron fires once in four years — and once in eight across 2100,
+     * which is not a leap year. The old two-year scan window threw after its first
+     * fire, which stranded the schedule.
+     */
+    @Test
+    void computeNextFire_leapDayCronFindsTheNextLeapDay_evenAcrossTheCenturyException() {
+        Instant afterFirst = ZonedDateTime.of(2028, 2, 29, 9, 0, 0, 0, UTC).toInstant();
+        assertEquals(ZonedDateTime.of(2032, 2, 29, 9, 0, 0, 0, UTC).toInstant(), CronParser.computeNextFire("0 9 29 2 *", afterFirst, UTC));
+        Instant before2100 = ZonedDateTime.of(2096, 2, 29, 9, 0, 0, 0, UTC).toInstant();
+        assertEquals(ZonedDateTime.of(2104, 2, 29, 9, 0, 0, 0, UTC).toInstant(), CronParser.computeNextFire("0 9 29 2 *", before2100, UTC));
+        // The wildcard walker takes the same window.
+        assertEquals(ZonedDateTime.of(2104, 2, 29, 0, 0, 0, 0, UTC).toInstant(),
+                CronParser.computeNextFire("* * 29 2 *", ZonedDateTime.of(2096, 2, 29, 23, 59, 0, 0, UTC).toInstant(), UTC));
+    }
+
+    @Test
+    void computeNextFire_neverMatchingCronStillThrows() {
+        assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire("0 0 30 2 *", Instant.parse("2027-03-01T00:00:00Z"), UTC));
+        assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire("* * 31 4 *", Instant.parse("2027-03-01T00:00:00Z"), UTC));
+    }
+
     @Test
     void computeNextFire_dailyAt9() {
         Instant now = ZonedDateTime.of(2026, 3, 20, 10, 0, 0, 0, UTC).toInstant();

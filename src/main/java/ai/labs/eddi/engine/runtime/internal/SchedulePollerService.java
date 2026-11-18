@@ -672,16 +672,55 @@ public class SchedulePollerService {
         }
     }
 
+    /**
+     * Release the claim of a fire that completed and arm its next one.
+     * <p>
+     * The fire has already happened, so nothing in here may make it happen again. A
+     * next fire that cannot be computed (a cron with no match any more, or a stored
+     * expression that no longer parses) used to throw before the claim was
+     * released: the row stayed CLAIMED, its lease ran out, and the schedule was
+     * fired again — a real LLM turn each time — until it dead-lettered. Now the
+     * fire is recorded as completed and the schedule ends DISABLED with
+     * {@link ScheduleConfiguration#DISABLED_NO_NEXT_FIRE}. A store write that fails
+     * is retried a few times for the same reason; only a store that stays down
+     * leaves the claim to its lease.
+     */
     private void onFireCompleted(ScheduleConfiguration schedule) {
+        Instant nextFire = null;
+        boolean exhausted = false;
         try {
-            Instant nextFire = computeNextFire(schedule);
-            scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
-            // Note: markCompleted with null nextFire auto-disables (fix #5 in
-            // MongoScheduleStore)
-        } catch (Exception e) {
-            LOGGER.errorf(e, "[SCHEDULE] Failed to mark completed: %s", schedule.getId());
+            nextFire = computeNextFire(schedule);
+        } catch (RuntimeException e) {
+            exhausted = true;
+            meterRegistry.counter("eddi.schedule.nextfire.exhausted").increment();
+            LOGGER.warnf("[SCHEDULE] Schedule '%s' (id=%s) fired, but no next fire time exists (%s) — it is disabled with reason '%s'",
+                    schedule.getName(), schedule.getId(), e.getMessage(), ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+        }
+        // markCompleted with a null nextFire disables the schedule (fix #5 in the
+        // stores).
+        for (int attempt = 1; attempt <= COMPLETE_ATTEMPTS; attempt++) {
+            try {
+                scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
+                if (exhausted) {
+                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+                }
+                return;
+            } catch (Exception e) {
+                LOGGER.errorf(e, "[SCHEDULE] Failed to mark completed (attempt %d/%d): %s", attempt, COMPLETE_ATTEMPTS, schedule.getId());
+                if (attempt < COMPLETE_ATTEMPTS) {
+                    try {
+                        Thread.sleep(COMPLETE_RETRY_PAUSE_MILLIS * attempt);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        return;
+                    }
+                }
+            }
         }
     }
+
+    private static final int COMPLETE_ATTEMPTS = 3;
+    private static final long COMPLETE_RETRY_PAUSE_MILLIS = 200;
 
     /**
      * Compute next fire time based on trigger type. Fix #13: handle heartbeat and

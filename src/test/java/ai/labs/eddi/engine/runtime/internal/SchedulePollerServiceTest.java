@@ -1455,6 +1455,60 @@ class SchedulePollerServiceTest {
         assertTrue(fenced.getValue().startsWith("sched-fenced_"), "the claim rewrote the stale fireId: " + fenced.getValue());
     }
 
+    /**
+     * A cron whose successor cannot be found used to throw before the claim was
+     * released: the row stayed CLAIMED, the lease ran out and the schedule fired
+     * again, about five times, each a real turn. Now the fire completes and the
+     * schedule is disabled with a reason.
+     */
+    @Test
+    void poll_completedFireWithNoNextFire_disablesTheScheduleInsteadOfLeavingItClaimed() throws Exception {
+        var schedule = makeCronSchedule("sched-never", "0 0 30 2 *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-never"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-never", FireStatus.COMPLETED.name()));
+
+        poller.pollAndAwait();
+
+        verify(scheduleStore).markCompleted(eq("sched-never"), eq(schedule.getFireId()), isNull());
+        verify(scheduleStore).setScheduleEnabled("sched-never", false, null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(fireExecutor, times(1)).fire(any(), any(), anyInt());
+        assertEquals(1.0, meterRegistry.counter("eddi.schedule.nextfire.exhausted").count());
+    }
+
+    /** The fire has happened; a failing bookkeeping write must not repeat it. */
+    @Test
+    void poll_storeFailureAfterASuccessfulFire_isRetriedAndNeverRefires() throws Exception {
+        var schedule = makeCronSchedule("sched-blip", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-blip"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-blip", FireStatus.COMPLETED.name()));
+        doThrow(new IResourceStore.ResourceStoreException("blip")).doThrow(new IResourceStore.ResourceStoreException("blip")).doNothing()
+                .when(scheduleStore).markCompleted(eq("sched-blip"), any(), any());
+
+        poller.pollAndAwait();
+
+        verify(scheduleStore, times(3)).markCompleted(eq("sched-blip"), any(), any());
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(fireExecutor, times(1)).fire(any(), any(), anyInt());
+    }
+
+    @Test
+    void poll_storeStaysDownAfterASuccessfulFire_isNeverCountedAsAFailedFire() throws Exception {
+        var schedule = makeCronSchedule("sched-down", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-down"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-down", FireStatus.COMPLETED.name()));
+        doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).markCompleted(eq("sched-down"), any(), any());
+
+        poller.pollAndAwait();
+
+        verify(scheduleStore, never()).markFailed(any(), any(), any());
+        verify(scheduleStore, never()).markDeadLettered(any(), any());
+        verify(fireExecutor, times(1)).fire(any(), any(), anyInt());
+    }
+
     // --- Helpers ---
 
     private static ScheduleConfiguration makeCronSchedule(String id, String cron, String message) {

@@ -43,6 +43,15 @@ public final class CronParser {
             Map.entry("APR", "4"), Map.entry("MAY", "5"), Map.entry("JUN", "6"), Map.entry("JUL", "7"), Map.entry("AUG", "8"), Map.entry("SEP", "9"),
             Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12"));
 
+    /**
+     * How far {@link #computeNextFire} looks ahead before it gives up. The longest
+     * gap a satisfiable expression can have is the one between two 29 Februaries
+     * across a skipped leap year: 8 years (2096-02-29 to 2104-02-29, because 2100
+     * is not a leap year). 9 covers it with a margin. The old two-year window made
+     * {@code 0 9 29 2 *} fire once and then fail to compute its successor.
+     */
+    static final int MAX_SCAN_YEARS = 9;
+
     private CronParser() {
     }
 
@@ -83,8 +92,8 @@ public final class CronParser {
      *             if the expression does not have exactly 5 fields or a field is
      *             invalid
      * @throws IllegalStateException
-     *             if the expression has no fire within two years after
-     *             {@code after}
+     *             if the expression has no fire within {@link #MAX_SCAN_YEARS}
+     *             years after {@code after}
      */
     public static Instant computeNextFire(String cronExpression, Instant after, ZoneId zoneId) {
         String[] parts = cronExpression.trim().split("\\s+");
@@ -116,8 +125,7 @@ public final class CronParser {
         // minutes to match.
         ZonedDateTime candidate = after.atZone(zoneId).withSecond(0).withNano(0).plusMinutes(1);
 
-        // Safety: max 2 years of scanning (covers leap years + DST)
-        ZonedDateTime limit = candidate.plusYears(2);
+        ZonedDateTime limit = candidate.plusYears(MAX_SCAN_YEARS);
 
         while (candidate.isBefore(limit)) {
             boolean dayMatches = dayMatches(candidate.toLocalDate(), daysOfMonth, daysOfWeek, bothDayFieldsRestricted);
@@ -145,7 +153,7 @@ public final class CronParser {
             candidate = candidate.plusMinutes(1);
         }
 
-        throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+        throw new IllegalStateException("Could not compute next fire within " + MAX_SCAN_YEARS + " years for: " + cronExpression);
     }
 
     /**
@@ -176,7 +184,7 @@ public final class CronParser {
                                              Set<Integer> months, Set<Integer> daysOfWeek, boolean bothDayFieldsRestricted, String cronExpression) {
         ZoneRules rules = zoneId.getRules();
         LocalDateTime candidate = LocalDateTime.ofInstant(after, zoneId).withSecond(0).withNano(0).plusMinutes(1);
-        LocalDateTime limit = candidate.plusYears(2);
+        LocalDateTime limit = candidate.plusYears(MAX_SCAN_YEARS);
 
         while (candidate.isBefore(limit)) {
             if (!months.contains(candidate.getMonthValue())) {
@@ -199,7 +207,7 @@ public final class CronParser {
             }
             candidate = candidate.plusMinutes(1);
         }
-        throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+        throw new IllegalStateException("Could not compute next fire within " + MAX_SCAN_YEARS + " years for: " + cronExpression);
     }
 
     /**
