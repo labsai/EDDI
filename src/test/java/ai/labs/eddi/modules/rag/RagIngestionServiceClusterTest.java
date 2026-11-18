@@ -39,6 +39,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static ai.labs.eddi.modules.rag.RagIngestionService.METADATA_KB_ID;
@@ -122,6 +123,7 @@ class RagIngestionServiceClusterTest {
         assertTrue(embedding.await(5, TimeUnit.SECONDS), "A never started embedding");
 
         CompletableFuture<DeleteOutcome> delete = CompletableFuture.supplyAsync(() -> instanceB.delete(RAG_ID, DOC, config));
+        cluster.awaitAttempts(2); // A's replacement, then B's delete: B is at the contested key
         Thread.sleep(200);
         assertFalse(delete.isDone(), "the delete answered while the replacement was still embedding");
 
@@ -161,7 +163,7 @@ class RagIngestionServiceClusterTest {
     }
 
     @Test
-    @DisplayName("a delete whose lease was lost before it starts answers BUSY and leaves the document alone")
+    @DisplayName("a delete whose lease was lost before the removal answers BUSY and leaves the document alone")
     void deleteOnALostLeaseIsBusy() {
         store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
                 Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
@@ -193,6 +195,7 @@ class RagIngestionServiceClusterTest {
         String first = instanceA.ingest(RAG_ID, "Refunds within 30 days.", DOC, config, true);
         assertTrue(embedding.await(5, TimeUnit.SECONDS));
         String second = instanceB.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
+        cluster.awaitAttempts(2); // B is at the key A holds
         Thread.sleep(100);
         embeddingGate.countDown();
 
@@ -243,8 +246,10 @@ class RagIngestionServiceClusterTest {
         doThrow(new RuntimeException("connection reset")).when(failing).removeAll(any(Filter.class));
         when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(failing);
 
-        awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
+        String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true));
 
+        assertTrue(status.startsWith("failed") && status.contains("connection reset"), status);
+        verify(failing).removeAll(any(Filter.class));
         assertEquals(1, cluster.acquired.size());
         assertEquals(1, cluster.released.get());
         assertTrue(cluster.free(cluster.acquired.get(0)), "the document stays held after a failed replacement");
@@ -259,6 +264,32 @@ class RagIngestionServiceClusterTest {
 
         assertTrue(status.startsWith("failed") && status.contains("NATS"), status);
         assertEquals(List.of(), storedTexts());
+        verify(stores, never()).getOrCreateForIngestion(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a document name with line breaks never reaches a status or a log record as one")
+    void lineBreaksInTheNameAreNeutralisedInTheFailureStatus() {
+        cluster.unavailable.set(LeaseUnavailableException.Reason.TIMEOUT);
+
+        String status = awaitFinished(instanceA, instanceA.ingest(RAG_ID, "Refunds within 47 days.", "a\nb\rc.txt", config, true));
+
+        assertTrue(status.startsWith("failed"), status);
+        assertFalse(status.contains("\n") || status.contains("\r"), status);
+    }
+
+    @Test
+    @DisplayName("a lease granted long after the delete's wait is refused: BUSY, nothing removed, the lease released")
+    void aLateGrantIsNotUsed() {
+        store.add(Embedding.from(new float[]{1f, 0f}), TextSegment.from("Refunds within 30 days.",
+                Metadata.from(METADATA_SOURCE, DOC).put(METADATA_KB_ID, kbId)));
+        instanceA.deleteLockTimeout = Duration.ofMillis(50);
+        cluster.grantDelayMillis.set(1_500);
+
+        assertEquals(DeleteOutcome.BUSY, instanceA.delete(RAG_ID, DOC, config));
+
+        assertEquals(List.of("Refunds within 30 days."), storedTexts());
+        assertEquals(1, cluster.released.get(), "the late grant must not stay held");
     }
 
     @Test
@@ -272,13 +303,19 @@ class RagIngestionServiceClusterTest {
     @Test
     @DisplayName("the lease key is per document and never carries the name in clear")
     void leaseKeyIsAHashOfTheDocument() {
-        String key = RagIngestionService.documentLeaseKey(RAG_ID, kbId, "Customer contract ACME.pdf");
+        String key = RagIngestionService.documentLeaseKey(kbId, "Customer contract ACME.pdf");
 
         assertTrue(key.startsWith(IConversationLeaseManager.RAG_DOCUMENT + "h_"), key);
         assertFalse(key.contains("ACME"), key);
         assertTrue(key.matches("[A-Za-z0-9_.=/-]+"), "not a valid NATS KV key: " + key);
-        assertNotEquals(key, RagIngestionService.documentLeaseKey(RAG_ID, kbId, "other.pdf"));
-        assertNotEquals(key, RagIngestionService.documentLeaseKey("65f0aa11bb22cc33dd44ee66", kbId, "Customer contract ACME.pdf"));
+        assertNotEquals(key, RagIngestionService.documentLeaseKey(kbId, "other.pdf"));
+        assertNotEquals(key, RagIngestionService.documentLeaseKey("another-kb", "Customer contract ACME.pdf"));
+        // The scope a cleanup deletes by is the tag and the name — so that is the key.
+        // Two configurations whose names collide share both, and so share the lease.
+        RagConfiguration sameName = new RagConfiguration();
+        sameName.setName("kb");
+        assertEquals(key, RagIngestionService.documentLeaseKey(KnowledgeBaseStorage.chunkKbId("65f0aa11bb22cc33dd44ee66", sameName),
+                "Customer contract ACME.pdf"));
     }
 
     @Test
@@ -321,8 +358,24 @@ class RagIngestionServiceClusterTest {
         final Map<String, Semaphore> permits = new ConcurrentHashMap<>();
         final List<String> acquired = new CopyOnWriteArrayList<>();
         final AtomicInteger released = new AtomicInteger();
+        /** Acquisitions started: one is counted just before it blocks on the key. */
+        final AtomicInteger attempts = new AtomicInteger();
+        /** Delays every grant by this long, whatever the caller's wait. */
+        final AtomicLong grantDelayMillis = new AtomicLong();
         final AtomicBoolean loseEveryLease = new AtomicBoolean();
         final AtomicReference<LeaseUnavailableException.Reason> unavailable = new AtomicReference<>();
+
+        /**
+         * Waits until {@code n} acquisitions have started — B has reached the contested
+         * key.
+         */
+        void awaitAttempts(int n) throws InterruptedException {
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+            while (attempts.get() < n) {
+                assertTrue(System.nanoTime() < deadline, "only " + attempts.get() + " of " + n + " acquisitions started");
+                Thread.sleep(5);
+            }
+        }
 
         boolean free(String key) {
             return permits.get(key).availablePermits() == 1;
@@ -331,6 +384,7 @@ class RagIngestionServiceClusterTest {
         @Override
         public CompletionStage<LeaseHandle> acquireKey(String key, Duration maxWait) {
             return CompletableFuture.supplyAsync(() -> {
+                attempts.incrementAndGet();
                 if (unavailable.get() != null) {
                     throw new LeaseUnavailableException(unavailable.get(), null, "unavailable");
                 }
@@ -341,6 +395,13 @@ class RagIngestionServiceClusterTest {
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw new IllegalStateException(e);
+                }
+                if (grantDelayMillis.get() > 0) {
+                    try {
+                        Thread.sleep(grantDelayMillis.get());
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    }
                 }
                 acquired.add(key);
                 return new FakeHandle(key);

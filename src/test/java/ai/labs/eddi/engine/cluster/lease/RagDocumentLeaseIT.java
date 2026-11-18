@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.cluster.SharedBucket;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.modules.rag.RagIngestionService.DeleteOutcome;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -48,11 +49,13 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
-import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 import static org.junit.jupiter.api.Assertions.*;
+import static org.mockito.AdditionalAnswers.delegatesTo;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -109,8 +112,13 @@ class RagDocumentLeaseIT {
         final NodeIdentity identity;
         final NatsConnectionManager connections;
         final NatsSharedStateFactory shared;
-        final KvLeaseManager leases;
-        final RagIngestionService service;
+        KvLeaseManager leases;
+        /**
+         * The lease manager the service uses: every call is recorded, then passed on to
+         * {@link #leases}.
+         */
+        IConversationLeaseManager observed;
+        RagIngestionService service;
 
         Instance(String id) throws InterruptedException {
             identity = new NodeIdentity(id, UUID.randomUUID().toString().substring(0, 8));
@@ -121,6 +129,17 @@ class RagDocumentLeaseIT {
             connections = new NatsConnectionManager(clusterConfig, identity, meters);
             shared = new NatsSharedStateFactory(connections, meters);
             connections.start();
+            try {
+                init(clusterConfig, id);
+            } catch (Exception | Error e) {
+                // Until setUp registers this instance nothing else owns the client: a
+                // failed readiness check must not leave it reconnecting.
+                connections.shutdown();
+                throw e;
+            }
+        }
+
+        private void init(ClusterConfig clusterConfig, String id) throws InterruptedException {
             ISharedKv leaseBucket = shared.bucket(SharedBucket.LEASES.withTtl(clusterConfig.leaseTtl()));
             long deadline = System.currentTimeMillis() + 15_000;
             while (!connections.isConnected() && System.currentTimeMillis() < deadline) {
@@ -146,7 +165,8 @@ class RagDocumentLeaseIT {
                         }
                     }, new SimpleMeterRegistry());
             leases.start();
-            service = new RagIngestionService(models(), stores(), sharedCaches(), leases);
+            observed = mock(IConversationLeaseManager.class, delegatesTo(leases));
+            service = new RagIngestionService(models(), stores(), sharedCaches(), observed);
             shared.provisionAll();
         }
 
@@ -193,6 +213,7 @@ class RagDocumentLeaseIT {
     private EmbeddingStoreFactory stores() {
         EmbeddingStoreFactory stores = mock(EmbeddingStoreFactory.class);
         when(stores.getOrCreateForIngestion(anyString(), any())).thenReturn(sharedStore);
+        when(stores.getOrCreate(anyString(), any())).thenReturn(sharedStore);
         return stores;
     }
 
@@ -232,11 +253,10 @@ class RagDocumentLeaseIT {
         String replacing = a.service.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
         assertTrue(embedding.await(10, TimeUnit.SECONDS), "A never started embedding");
 
-        CompletableFuture<Void> delete = CompletableFuture.runAsync(() -> b.service.underDocumentLease(RAG_ID, kbId, DOC,
-                Duration.ofSeconds(30), lease -> {
-                    sharedStore.removeAll(metadataKey("source").isEqualTo(DOC).and(metadataKey("kbId").isEqualTo(kbId)));
-                    return null;
-                }));
+        CompletableFuture<DeleteOutcome> delete = CompletableFuture.supplyAsync(() -> b.service.delete(RAG_ID, DOC, config));
+        // B has asked for the document's lease; only then does the TTL clock below mean
+        // something.
+        verify(b.observed, timeout(10_000)).acquireKey(anyString(), any());
         // Twice the lease TTL: without the heartbeat renewing A's lease, B would have
         // taken it over by now.
         Thread.sleep(LEASE_TTL.toMillis() * 2);
@@ -244,7 +264,7 @@ class RagDocumentLeaseIT {
         assertEquals("processing", b.service.getStatus(RAG_ID, replacing), "B reads the status A writes");
 
         embeddingGate.countDown();
-        delete.get(30, TimeUnit.SECONDS);
+        assertEquals(DeleteOutcome.DELETED, delete.get(30, TimeUnit.SECONDS));
 
         assertEquals("completed", awaitFinished(b.service, replacing), "the replacement must not have lost its lease");
         assertEquals(List.of(), storedTexts(), "the replacement's chunks came back after the delete");
@@ -257,10 +277,9 @@ class RagDocumentLeaseIT {
         instances.get(0).service.ingest(RAG_ID, "Refunds within 47 days.", DOC, config, true);
         assertTrue(embedding.await(10, TimeUnit.SECONDS));
 
-        var refused = assertThrows(LeaseUnavailableException.class, () -> instances.get(1).service.underDocumentLease(RAG_ID, kbId, DOC,
-                Duration.ofSeconds(1), lease -> "ran"));
+        instances.get(1).service.setDeleteLockTimeout(Duration.ofSeconds(1));
 
-        assertEquals(LeaseUnavailableException.Reason.TIMEOUT, refused.reason());
+        assertEquals(DeleteOutcome.BUSY, instances.get(1).service.delete(RAG_ID, DOC, config));
     }
 
     @Test
@@ -274,7 +293,7 @@ class RagDocumentLeaseIT {
 
         a.connections.shutdown();
         // B gets the document once A's lease has expired on the server.
-        String took = b.service.underDocumentLease(RAG_ID, kbId, DOC, Duration.ofSeconds(30), lease -> "took");
+        String took = b.service.underDocumentLease(kbId, DOC, Duration.ofSeconds(30), lease -> "took");
         assertEquals("took", took);
 
         embeddingGate.countDown();

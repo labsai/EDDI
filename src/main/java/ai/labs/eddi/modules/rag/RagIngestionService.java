@@ -124,6 +124,9 @@ public class RagIngestionService {
      */
     private static final Duration ACQUIRE_GRACE = Duration.ofSeconds(30);
 
+    /** How far past its wait a grant may arrive and still be taken (scheduling). */
+    private static final Duration LATE_GRANT_TOLERANCE = Duration.ofSeconds(1);
+
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory,
             ICacheFactory cacheFactory, IConversationLeaseManager leases) {
@@ -228,20 +231,23 @@ public class RagIngestionService {
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
             EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
-            // For writing: an in-memory store built under another embedding
-            // configuration is replaced rather than mixed with these vectors.
-            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
-
             if (replace) {
                 // The lease is held from before embedding until the cleanup is done, so
                 // a delete arriving meanwhile — on any instance — waits and then removes
                 // these chunks too, instead of answering "deleted" and being undone by
                 // them a moment later.
-                underDocumentLease(ragConfigId, kbId, documentName, replaceLeaseWait, lease -> {
+                underDocumentLease(kbId, documentName, replaceLeaseWait, lease -> {
+                    // Looked up only once the lease is held: for an in-memory store built
+                    // under another embedding configuration this replaces it, which a
+                    // replacement that is then refused the lease must not have done.
+                    EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
                     storeAndReplace(splitter, model, document, store, ragConfigId, kbId, documentName, ingestionId, lease);
                     return null;
                 });
             } else {
+                // For writing: an in-memory store built under another embedding
+                // configuration is replaced rather than mixed with these vectors.
+                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
                 storeAndReplace(splitter, model, document, store, ragConfigId, kbId, documentName, ingestionId, null);
             }
 
@@ -250,7 +256,7 @@ public class RagIngestionService {
 
         } catch (LeaseUnavailableException e) {
             ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + e.getMessage());
-            LOGGER.warnf("Ingestion %s for KB '%s' did not run: %s", ingestionId, sanitize(kbId), e.getMessage());
+            LOGGER.warnf("Ingestion %s for KB '%s' did not run: %s", ingestionId, sanitize(kbId), sanitize(e.getMessage()));
         } catch (Exception e) {
             ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + e.getMessage());
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
@@ -316,8 +322,8 @@ public class RagIngestionService {
      * a replacement is still embedding cannot be undone by that replacement's
      * chunks arriving a moment later — the delete waits, and then removes them too.
      */
-    ReentrantLock documentLock(String ragConfigId, String kbId, String documentName) {
-        return replaceLocks.get(new ReplaceKey(ragConfigId + "|" + kbId, documentName), key -> new ReentrantLock());
+    ReentrantLock documentLock(String kbId, String documentName) {
+        return replaceLocks.get(new ReplaceKey(kbId, documentName), key -> new ReentrantLock());
     }
 
     /**
@@ -326,18 +332,20 @@ public class RagIngestionService {
      */
     private static void requireHeld(LeaseHandle lease, String documentName, String step) {
         if (lease != null && lease.isLost()) {
-            throw new IllegalStateException("This instance lost the lease on document '" + documentName + "' before " + step
+            throw new IllegalStateException("This instance lost the lease on document '" + sanitize(documentName) + "' before " + step
                     + ", so it stopped rather than overwrite what another instance may have done meanwhile. Retry the ingestion.");
         }
     }
 
     /**
-     * The lease key of a document: the {@code rag.} prefix and a hash of the RAG
-     * configuration, the knowledge base and the name. A name is caller-chosen text
-     * and never lands in a key in clear.
+     * The lease key of a document: the {@code rag.} prefix and a hash of the chunk
+     * {@code kbId} tag and the name — exactly the scope a cleanup deletes by. Not
+     * the RAG configuration id: two configurations whose names collide share their
+     * table and their tag, and so must share the lease. A name is caller-chosen
+     * text and never lands in a key in clear.
      */
-    static String documentLeaseKey(String ragConfigId, String kbId, String documentName) {
-        return IConversationLeaseManager.RAG_DOCUMENT + KvKeys.hashed(ragConfigId + "|" + kbId + "|" + documentName);
+    static String documentLeaseKey(String kbId, String documentName) {
+        return IConversationLeaseManager.RAG_DOCUMENT + KvKeys.hashed(kbId + "|" + documentName);
     }
 
     /**
@@ -362,22 +370,22 @@ public class RagIngestionService {
      *             (NATS unreachable under the {@code reject} degraded policy, the
      *             node shutting down or drained); {@code work} has not run
      */
-    public <T> T underDocumentLease(String ragConfigId, String kbId, String documentName, Duration maxWait, Function<LeaseHandle, T> work) {
+    public <T> T underDocumentLease(String kbId, String documentName, Duration maxWait, Function<LeaseHandle, T> work) {
         long deadline = System.nanoTime() + maxWait.toNanos();
-        ReentrantLock lock = documentLock(ragConfigId, kbId, documentName);
+        ReentrantLock lock = documentLock(kbId, documentName);
         try {
             if (!lock.tryLock(maxWait.toNanos(), TimeUnit.NANOSECONDS)) {
                 throw new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, null,
-                        "Document '" + documentName + "' is being replaced or deleted on this instance");
+                        "Document '" + sanitize(documentName) + "' is being replaced or deleted on this instance");
             }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null,
-                    "Interrupted while waiting for document '" + documentName + "'");
+                    "Interrupted while waiting for document '" + sanitize(documentName) + "'");
         }
         try {
             Duration remaining = Duration.ofNanos(Math.max(0, deadline - System.nanoTime()));
-            LeaseHandle lease = acquire(documentLeaseKey(ragConfigId, kbId, documentName), remaining, documentName);
+            LeaseHandle lease = acquire(documentLeaseKey(kbId, documentName), remaining, deadline, documentName);
             try {
                 return work.apply(lease);
             } finally {
@@ -388,24 +396,34 @@ public class RagIngestionService {
         }
     }
 
-    private LeaseHandle acquire(String key, Duration maxWait, String documentName) {
+    private LeaseHandle acquire(String key, Duration maxWait, long deadlineNanos, String documentName) {
         CompletableFuture<LeaseHandle> pending = leases.acquireKey(key, maxWait).toCompletableFuture();
         try {
-            return pending.get(maxWait.plus(ACQUIRE_GRACE).toMillis(), TimeUnit.MILLISECONDS);
+            LeaseHandle granted = pending.get(maxWait.plus(ACQUIRE_GRACE).toMillis(), TimeUnit.MILLISECONDS);
+            // The grace only keeps a lost answer from blocking forever; it is not extra
+            // time for the caller. A grant that came in well past the wait is refused,
+            // so a delete keeps its documented bound.
+            if (System.nanoTime() - deadlineNanos > LATE_GRANT_TOLERANCE.toNanos()) {
+                leases.release(granted);
+                throw new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, null,
+                        "Document '" + sanitize(documentName) + "' is being replaced or deleted on another instance");
+            }
+            return granted;
         } catch (ExecutionException e) {
             if (e.getCause() instanceof LeaseUnavailableException unavailable) {
                 throw new LeaseUnavailableException(unavailable.reason(), unavailable.holderNode(), describe(unavailable, documentName));
             }
-            throw new IllegalStateException("Could not acquire the lease on document '" + documentName + "': " + e.getCause(), e.getCause());
+            throw new IllegalStateException("Could not acquire the lease on document '" + sanitize(documentName) + "': " + e.getCause(),
+                    e.getCause());
         } catch (TimeoutException e) {
             releaseWhenGranted(pending);
             throw new LeaseUnavailableException(LeaseUnavailableException.Reason.TIMEOUT, null,
-                    "Document '" + documentName + "' is being replaced or deleted on another instance");
+                    "Document '" + sanitize(documentName) + "' is being replaced or deleted on another instance");
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             releaseWhenGranted(pending);
             throw new LeaseUnavailableException(LeaseUnavailableException.Reason.SHUTTING_DOWN, null,
-                    "Interrupted while waiting for document '" + documentName + "'");
+                    "Interrupted while waiting for document '" + sanitize(documentName) + "'");
         }
     }
 
@@ -423,9 +441,9 @@ public class RagIngestionService {
 
     private static String describe(LeaseUnavailableException e, String documentName) {
         return switch (e.reason()) {
-            case TIMEOUT -> "Document '" + documentName + "' is being replaced or deleted on another instance"
+            case TIMEOUT -> "Document '" + sanitize(documentName) + "' is being replaced or deleted on another instance"
                     + (e.holderNode() != null ? " (" + sanitize(e.holderNode()) + ")" : "");
-            case DEGRADED -> "The cluster lease on document '" + documentName + "' cannot be taken while NATS is unreachable";
+            case DEGRADED -> "The cluster lease on document '" + sanitize(documentName) + "' cannot be taken while NATS is unreachable";
             case SHUTTING_DOWN -> "This instance is shutting down";
             case DRAINING -> "This instance is drained and takes no new work";
         };
@@ -457,6 +475,11 @@ public class RagIngestionService {
      * so a test can shorten it.
      */
     Duration deleteLockTimeout = Duration.ofSeconds(30);
+
+    /** Shortens or lengthens the wait of {@link #delete}; for tests and tuning. */
+    public void setDeleteLockTimeout(Duration deleteLockTimeout) {
+        this.deleteLockTimeout = deleteLockTimeout;
+    }
 
     /**
      * Removes what {@link #ingest} stored under {@code documentName} in this
@@ -492,17 +515,19 @@ public class RagIngestionService {
         String kbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, ragConfig);
 
         try {
-            return underDocumentLease(ragConfigId, kbId, documentName, deleteLockTimeout, lease -> {
-                if (lease.isLost()) {
-                    LOGGER.warnf("Delete of document '%s' from KB '%s' not run: the lease was lost before it started", sanitize(documentName),
-                            sanitize(kbId));
-                    return DeleteOutcome.BUSY;
-                }
+            return underDocumentLease(kbId, documentName, deleteLockTimeout, lease -> {
                 try {
                     // Not getOrCreateForIngestion: for an in-memory knowledge base that would
                     // replace a store built under another embedding configuration, and a
                     // delete has no say in which vectors are current.
                     EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
+                    // After the lookup, which can open a connection: a lease lost meanwhile
+                    // means another node may have replaced the document by now.
+                    if (lease.isLost()) {
+                        LOGGER.warnf("Delete of document '%s' from KB '%s' not run: the lease was lost before the removal", sanitize(documentName),
+                                sanitize(kbId));
+                        return DeleteOutcome.BUSY;
+                    }
                     store.removeAll(metadataKey(METADATA_SOURCE).isEqualTo(documentName)
                             .and(metadataKey(METADATA_KB_ID).isEqualTo(kbId)));
                     LOGGER.infof("Deleted document '%s' from KB '%s'", sanitize(documentName), sanitize(kbId));
@@ -515,7 +540,7 @@ public class RagIngestionService {
             });
         } catch (LeaseUnavailableException e) {
             LOGGER.infof("Delete of document '%s' from KB '%s' not run (%s): %s", sanitize(documentName), sanitize(kbId), e.reason(),
-                    e.getMessage());
+                    sanitize(e.getMessage()));
             return DeleteOutcome.BUSY;
         }
     }

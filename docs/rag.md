@@ -290,9 +290,12 @@ another instance`). The lease is renewed for as long as embedding takes. A vecto
 fencing token, so a replacement checks that it still holds the lease before it stores and before it
 removes the previous version: an instance cut off from NATS stops there with `failed: This instance
 lost the lease …` instead of overwriting what another instance did meanwhile — if it had already
-stored the new version, the status also carries the both-versions-may-remain `warning`. While NATS is
-unreachable, leases follow `eddi.cluster.degraded.turns`: `local` (the default) replaces under the
-instance-local lock only, `reject` fails the replacement. Appending (`replace=false`) takes no lease.
+stored the new version, the status also carries the both-versions-may-remain `warning`. The checks narrow
+the window but cannot close it — this is exclusion with checks, not a fence: a write already issued when
+the lease expires still lands, as with any vector store that cannot check a token. While NATS is
+unreachable, leases follow `eddi.cluster.degraded.turns`: `local` (the default) replaces and deletes under
+the instance-local lock only — a node cut off from NATS does not wait for an operation on a connected one —
+and `reject` fails the replacement and answers a delete `409`. Appending (`replace=false`) takes no lease.
 
 #### Deleting a document
 

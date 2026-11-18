@@ -430,7 +430,7 @@ class RagIngestionServiceTest {
 
         assertThrows(RuntimeException.class, () -> service.delete("test-kb", "policy.txt", config));
 
-        var lock = service.documentLock("test-kb", "test-kb", "policy.txt");
+        var lock = service.documentLock("test-kb", "policy.txt");
         assertFalse(lock.isLocked(), "a failed delete must not keep the document locked");
     }
 
