@@ -128,6 +128,9 @@ describe("ConfigEditorLayout — field validity and failed saves", () => {
     expect(screen.getByTestId("save-btn")).toBeDisabled();
     expect(screen.getByTestId("save-blocked-reason")).toBeInTheDocument();
 
+    // Back to a document that saves first, so the pattern alone is what blocks next.
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("0.7", "fixed") } });
+    expect(screen.getByTestId("save-btn")).toBeEnabled();
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("0.7", "(unclosed") } });
     expect(screen.getByTestId("save-btn")).toBeDisabled();
 
@@ -153,9 +156,18 @@ describe("ConfigEditorLayout — field validity and failed saves", () => {
     expect(screen.getByTestId("save-btn")).toBeDisabled();
     expect(screen.getByTestId("save-blocked-reason")).toBeInTheDocument();
 
-    const nullEntry = { tasks: [{ outputGuardrails: [null] }] };
-    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify(nullEntry) } });
-    expect(screen.getByTestId("save-btn")).toBeDisabled();
+    // Each case alone, from a document that saves, so no other value can be what blocks it.
+    const alone = (doc: unknown) => {
+      fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify({ tasks: [{}] }) } });
+      expect(screen.getByTestId("save-btn")).toBeEnabled();
+      fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify(doc) } });
+      expect(screen.getByTestId("save-btn"), JSON.stringify(doc)).toBeDisabled();
+      expect(screen.getByTestId("save-blocked-reason")).toBeInTheDocument();
+    };
+    alone({ tasks: [{ inputGuardrails: {} }] });
+    alone({ tasks: [{ outputGuardrails: "regex-filter" }] });
+    alone({ tasks: [{ outputGuardrails: [null] }] });
+    alone({ tasks: [{ inputGuardrails: ["regex-filter"] }] });
   });
 
   it("refuses Save when a document validator throws", () => {
@@ -167,6 +179,15 @@ describe("ConfigEditorLayout — field validity and failed saves", () => {
     );
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify({ a: 2 }) } });
     expect(screen.getByTestId("save-btn")).toBeDisabled();
+  });
+
+  it("enables Save for the same edit when the validator answers instead of throwing", () => {
+    // The control for the test above: the throw, not the edit, is what disables Save.
+    renderWithProviders(
+      <ConfigEditorLayout {...base} data={JSON.stringify({ a: 1 })} onSave={vi.fn()} validateDocument={() => null} />,
+    );
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify({ a: 2 }) } });
+    expect(screen.getByTestId("save-btn")).toBeEnabled();
   });
 
   it("tells a host that saves from outside why Save is blocked", () => {

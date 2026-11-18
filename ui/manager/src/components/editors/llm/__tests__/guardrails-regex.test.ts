@@ -43,12 +43,38 @@ describe("regexPatternProblems", () => {
       String.raw`\R`,
       String.raw`\X`,
       String.raw`\x{1F600}`,
+      // A control escape takes any character in Java; JavaScript reads `\c[` as `\`, `c`, an open class.
+      String.raw`\c[`,
+      String.raw`\c(`,
+      String.raw`\c)`,
+      String.raw`[\c]]`,
+      // Java quantifies anchors and lookbehinds; JavaScript says "nothing to repeat".
+      "^*abc",
+      "abc$?",
+      String.raw`\B+x`,
+      "(?<=a)*b",
+      "(?<!a){2}b",
+      // Java stacks a `{n}` on a quantifier; JavaScript does not.
+      "a{2}{3}",
+      "a*{2}",
+      "a+?{2}",
     ];
     for (const javaOnly of samples) {
       const problems = regexPatternProblems(javaOnly);
       expect(problems, javaOnly).toHaveLength(1);
       expect(problems[0]?.state, javaOnly).toBe("unchecked");
     }
+  });
+
+  it("still checks what both engines read alike next to that syntax", () => {
+    // Control letters, quantified lookaheads and non-capturing groups, escaped
+    // quantifier characters: ordinary in both, so no note.
+    for (const ordinary of [String.raw`\cM`, "(?=a)*b", "(?:^)*x", String.raw`\*{2}`, String.raw`^\d+$`, "a{2}?b"]) {
+      expect(regexPatternProblems(ordinary), ordinary).toEqual([]);
+    }
+    // An escaped backslash before `c` is not a control escape: `\\c[` is an unclosed class in Java too.
+    expect(regexPatternProblems(String.raw`\\c[`).map((p) => p.state)).toEqual(["invalid"]);
+    expect(regexPatternProblems("a**").map((p) => p.state)).toEqual(["invalid"]);
   });
 });
 
@@ -64,6 +90,13 @@ describe("blockingRegexProblem", () => {
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: "[a-z[-+]]" } })).toBeUndefined();
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: "[z-a]" } })?.line).toBe(1);
     expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: String.raw`\[(` } })?.line).toBe(1);
+  });
+
+  it("never blocks a Java control escape or quantifier JavaScript rejects, and still blocks `(`", () => {
+    for (const javaValid of [String.raw`\c[`, "^*a", "(?<=a)*b", "a{2}{3}"]) {
+      expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: javaValid } }), javaValid).toBeUndefined();
+    }
+    expect(blockingRegexProblem({ type: "regex-filter", parameters: { patterns: "(" } })?.line).toBe(1);
   });
 
   it("reads a non-text patterns value the way the server does, without throwing", () => {

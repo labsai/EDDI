@@ -37,9 +37,13 @@ describe("RagEditor — ingestion robustness", () => {
     renderWithProviders(<RagEditor data={config} onChange={vi.fn()} resourceId="kb1" version={1} />);
     await ingestText(user);
     // The server's own words travel in the status, not a generic "upload error".
-    const status = await screen.findByTestId("ingestion-status");
-    expect(status.getAttribute("data-status")).toContain("HTTP 413: Document too large for this store");
-    expect(status).not.toHaveAttribute("data-status", "failed: upload error");
+    // The status element exists (as "uploading") before the refusal arrives, so wait for its content.
+    await waitFor(() =>
+      expect(screen.getByTestId("ingestion-status").getAttribute("data-status")).toContain(
+        "HTTP 413: Document too large for this store",
+      ),
+    );
+    expect(screen.getByTestId("ingestion-status")).not.toHaveAttribute("data-status", "failed: upload error");
   });
 
   it("does not call an ingestion failed because one status check failed", async () => {

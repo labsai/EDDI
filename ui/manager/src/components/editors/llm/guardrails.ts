@@ -420,7 +420,8 @@ export interface RegexLineProblem {
  * (`\Q…\E`), the `\A \z \Z \G \h \H \v \V \R \X \e \N{…}` anchors and escapes,
  * Unicode and POSIX classes (`\p{…}`, `\pL`, `\p{javaLowerCase}` — literal text
  * to a JavaScript `RegExp` without the `u` flag), `\x{…}` and `\b{g}`. Character
- * classes are scanned separately (`usesJavaOnlyClassSyntax`).
+ * classes (`usesJavaOnlyClassSyntax`), control escapes and quantifier placement
+ * (`usesJavaOnlySequenceSyntax`) are scanned separately.
  */
 const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHvVRXe]|\\[pP]|\\N\{|\\x\{|\\b\{/;
 
@@ -456,9 +457,84 @@ function usesJavaOnlyClassSyntax(source: string): boolean {
   return false;
 }
 
+/**
+ * What Java accepts and a JavaScript `RegExp` (no `u` flag) rejects or reads
+ * differently, but only an escape- and class-aware scan can see. Each case was
+ * checked against `Pattern.compile(…, CASE_INSENSITIVE)` and `new RegExp(…, "i")`:
+ * - `\c` before anything but an ASCII letter (`\c[`, `\c(`, `[\c]]`): a control
+ *   escape in Java; in JavaScript a literal backslash and `c`, so the next
+ *   character is read as syntax (`\c[` opens a class that never closes).
+ * - a quantifier on an anchor or a lookbehind (`^*`, `$?`, `\B+`, `(?<=a)*`).
+ * - a `{n}` quantifier on a quantified atom (`a{2}{3}`, `a*{2}`, `a+?{2}`).
+ */
+function usesJavaOnlySequenceSyntax(source: string): boolean {
+  let inClass = false;
+  /** Per open group: whether it is a lookbehind. */
+  const groups: boolean[] = [];
+  /** What the next quantifier would apply to. */
+  let prev: "none" | "atom" | "assertion" | "quantifier" = "none";
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") {
+      const escaped = source[i + 1];
+      if (escaped === undefined) return false;
+      const after = source[i + 2];
+      if (escaped === "c" && after !== undefined && !/[A-Za-z]/.test(after)) return true;
+      i++;
+      if (!inClass) prev = escaped === "b" || escaped === "B" ? "assertion" : "atom";
+      continue;
+    }
+    if (inClass) {
+      if (c === "]") {
+        inClass = false;
+        prev = "atom";
+      }
+      continue;
+    }
+    if (c === "[") {
+      inClass = true;
+      if (source[i + 1] === "^") i++;
+      // A `]` first in the class is a literal to Java (reported by the class scan).
+      if (source[i + 1] === "]") i++;
+      continue;
+    }
+    const brace = c === "{" && /\d/.test(source[i + 1] ?? "");
+    if (c === "*" || c === "+" || c === "?" || brace) {
+      if (prev === "assertion") return true;
+      if (prev === "quantifier") {
+        if (brace) return true;
+        // `?` makes it lazy, `+` possessive (scanned elsewhere); `**` fails in both.
+        continue;
+      }
+      if (brace) {
+        const close = source.indexOf("}", i);
+        if (close < 0) return false;
+        i = close;
+      }
+      prev = "quantifier";
+      continue;
+    }
+    if (c === "(") {
+      const lookbehind = source.startsWith("(?<=", i) || source.startsWith("(?<!", i);
+      groups.push(lookbehind);
+      // The `?` of a group prefix is not a quantifier.
+      if (source[i + 1] === "?") i++;
+      if (lookbehind) i += 2;
+      prev = "none";
+      continue;
+    }
+    if (c === ")") {
+      prev = groups.pop() ? "assertion" : "atom";
+      continue;
+    }
+    prev = c === "^" || c === "$" ? "assertion" : c === "|" ? "none" : "atom";
+  }
+  return false;
+}
+
 /** Whether a pattern uses syntax this page cannot judge the way Java will. */
 function usesJavaOnlySyntax(source: string): boolean {
-  return JAVA_ONLY_SYNTAX.test(source) || usesJavaOnlyClassSyntax(source);
+  return JAVA_ONLY_SYNTAX.test(source) || usesJavaOnlyClassSyntax(source) || usesJavaOnlySequenceSyntax(source);
 }
 
 /**
