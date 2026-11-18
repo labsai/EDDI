@@ -488,6 +488,46 @@ for existing installs. Webhook delivery de-duplication fails closed while NATS i
 (`eddi.cluster.degraded.nonces=reject`, the default). Details, the threat model and the
 rolling-upgrade order: [Clustering](clustering.md#signed-control-plane).
 
+## JVM Advisory: Java4Shell (CVE-2026-114938)
+
+**Interim mitigation in place; remove once a fixed base image ships.**
+
+[CVE-2026-114938](https://access.redhat.com/security/vulnerabilities/RHSB-2026-018) is memory corruption in OpenJDK's accelerated Base64 decoder (`java.util.Base64.Decoder`). Malformed input can crash the JVM or run code in it, with no login, on hosts where all of these hold:
+
+- **JDK:** OpenJDK 17.0.6 or later without the fix. The fixed builds are 25.0.5.1 and 21.0.13.1.
+- **CPU:** x86-64 with AVX-512 VBMI: Intel Ice Lake or later, AMD Zen 4 or later. This covers AWS C6i/M6i/R6i and C7i/M7i/R7a, and GCP C3/C4/N4. ARM64 is not affected.
+
+EDDI decodes attacker-controlled Base64 before authentication:
+
+- MIME encoded words and DKIM signatures of inbound mail
+- webhook signature headers
+
+Keycloak decodes Base64 before any login too. Code running in the EDDI process can read everything EDDI can: the database, the vault master key and, through it, every stored secret.
+
+| Image | JDK | Mitigation shipped |
+| --- | --- | --- |
+| `labsai/eddi` | OpenJDK 25.0.5 (UBI 10) | `-XX:-UseBASE64Intrinsics` on `JDK_JAVA_OPTIONS` |
+| Demo image | Temurin 25.0.5 | The same flag on the `java` ENTRYPOINT |
+| Keycloak 26.8.0 (compose `auth` overlay, Helm, kustomize `auth` overlay) | OpenJDK 21.0.12.1 | `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` |
+
+The flag switches off only the vulnerable path: Base64 decoding falls back to plain Java. `-XX:UseAVX=2` is Red Hat's alternative, but a JVM on ARM64 refuses to start with it.
+
+**For a deployment running an older image,** add the flag yourself:
+
+- **EDDI:** set `JDK_JAVA_OPTIONS` to `--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics`. Setting the variable replaces the image's value, so keep the first two flags.
+- **Keycloak:** append `-XX:-UseBASE64Intrinsics` to `JAVA_OPTS_APPEND`.
+
+Then check the running JVM, not the environment:
+
+```bash
+docker exec <container> jcmd <java pid> VM.flags -all | grep UseBASE64Intrinsics   # expect: = false
+grep -o avx512vbmi /proc/cpuinfo | head -1                                           # on the host: empty = not affected
+```
+
+`jcmd -l` inside the container lists the Java processes. In the Keycloak image, pid 1 is the start script, not the JVM.
+
+When the pinned base images carry a fixed JDK, remove the flag from all five places and delete `Java4ShellMitigationTest`. The test fails the build if the flag disappears earlier.
+
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
 **Applies to:** apicall headers, and an MCP server's `apiKey`, that reference `${caller:token}` / `${caller:userId}`.

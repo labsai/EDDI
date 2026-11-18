@@ -230,7 +230,18 @@ EXPOSE 7070
 # survive an operator's JAVA_OPTS. A JVM that ran out of heap keeps half-working,
 # holding its conversation leases and in-flight turns; exiting lets the orchestrator
 # restart it and, in cluster mode, lets the leases expire to another node.
-ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError"
+#
+# -XX:-UseBASE64Intrinsics is the interim mitigation for Java4Shell (CVE-2026-114938,
+# Red Hat RHSB-2026-018): on x86-64 CPUs with AVX-512 VBMI the JVM decodes Base64 through
+# an accelerated intrinsic that malformed input turns into memory corruption and code
+# execution. EDDI decodes attacker-controlled Base64 before authentication (MIME encoded
+# words and DKIM signatures of inbound mail, webhook signature headers). The flag removes
+# only that code path; decoding falls back to the plain Java loop. It rides here, not on
+# JAVA_OPTS_APPEND, for the same reason as the two flags above. It is a product flag in
+# this JDK, so no -XX:+UnlockDiagnosticVMOptions is needed. REMOVE it once the base image
+# pin carries an OpenJDK build with the fix (25.0.5.1 or later), together with
+# Java4ShellMitigationTest, which fails the build if the flag is dropped before then.
+ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics"
 # Heap = 75 % of the container memory limit (run-java's default is 50 %). Conversation
 # turns run on virtual threads, so heap, not threads, bounds how many turns a node holds,
 # and half the container idle is wasted capacity. The other 25 % covers metaspace,

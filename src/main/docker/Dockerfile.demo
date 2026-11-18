@@ -117,4 +117,8 @@ EXPOSE 7070
 # run-java.sh and no JAVA_OPTS_APPEND, so the flag has to be spelled out here or the demo
 # image silently runs Jlama on scalar tensor operations. See src/main/docker/Dockerfile
 # and JlamaRuntimeFlagsTest, which grades both images.
-ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
+#
+# -XX:-UseBASE64Intrinsics: the interim Java4Shell (CVE-2026-114938) mitigation, as in
+# src/main/docker/Dockerfile, which explains it. Remove it with the production image's copy
+# once both base images carry a fixed OpenJDK; Java4ShellMitigationTest grades both.
+ENTRYPOINT ["java", "--add-modules=jdk.incubator.vector", "-XX:-UseBASE64Intrinsics", "-Deddi.docs.path=/deployments/docs", "-jar", "/deployments/quarkus-run.jar"]
