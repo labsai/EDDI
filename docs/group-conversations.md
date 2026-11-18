@@ -61,7 +61,7 @@ curl -X POST /groups/<groupId>/conversations \
   -d '{"question": "What is the best architecture for our new service?"}'
 ```
 
-**Save-time limits** (a config over any of them is rejected with `400`): at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5.
+**Save-time limits** (a config over any of them is rejected with `400`): at least one and at most 100 members, `maxRounds` at most 50, `maxTurns` at most 1000, `maxReworks` 0 to 5. A group stored with no members by an older version still loads; starting a discussion on it is refused before anything runs: REST answers **`422`**, the stream sends a `group_error` event, the MCP tools return an error. A group whose members cannot take a turn (every member an undeployed or unknown agent) still runs, records each turn `SKIPPED`, and ends `COMPLETED` with `outcome: NO_ANSWER`, `outcomeReason: NO_MEMBER_ANSWERED` (see [Discussion outcomes](#discussion-outcomes)).
 
 **One agent, one seat.** A member is addressed everywhere by its `agentId` —
 its member conversation, display name, vote weight, `participants` lists and
@@ -818,6 +818,14 @@ Depth tracking prevents infinite recursion (`eddi.groups.max-depth`, default: 3)
 A group that would contain itself through its GROUP members (directly or via
 other groups) is rejected when it is saved.
 
+A sub-group runs inside its parent's budgets, not beside them. It gets the turns
+the parent has left (`min(its own maxTurns, the parent's remaining turns)`), and
+the turns it spends are charged back to the parent's count; a GROUP member whose
+parent has no turn left is recorded `SKIPPED` ("Turn budget exhausted") without
+starting a sub-discussion. A cancel of the parent reaches the sub-group too: it
+stops before its next member turn. A sub-group that fails, or ends without any
+member answering, is a `FAILED` turn of its GROUP member — not an answer.
+
 ## Custom Phases
 
 For full control, define phases directly:
@@ -1035,7 +1043,11 @@ same wave once its dependency completes, and is verified with it.
 - **Feedback is model text.** The verifier's feedback reaches the member as part of its input, as every group
   member already reads its peers' contributions. It is never template source.
 
-**An unparseable verdict** (the verifier did not return the JSON array) still auto-verifies every task of that
+**A verifier that does not answer** — not deployed, skipped, failed (its provider is down) or timed out —
+verifies nothing: every task of that pass is failed with the note *"Not verified: the verifier did not answer"*
+(and reworked, within `maxReworks`). A missing verdict is never a pass.
+
+**An unparseable verdict** (the verifier answered, but not with the JSON array) still auto-verifies every task of that
 pass, as before. The verdict is the first balanced JSON array in the reply that parses, so prose around it —
 including bracketed asides such as `Checked [details]: [...]` — no longer makes it unparseable. It is no longer silent: it is logged as a warning naming the group and counted by
 `eddi_group_verify_unparseable_total`. A steady rate means the moderator's model ignores the verdict format.
@@ -1334,6 +1346,76 @@ summarizer's.
 
 > **Timeout guidance**: 180s covers thinking models (e.g. `claude-sonnet-5`) and synthesis phases comfortably. For tool-calling agents with multiple tool loops, consider `300`–`600`. The timeout is per agent turn, not per phase.
 
+**`RETRY` after a timeout** first stops the timed-out turn (the member's conversation is
+cancelled) and waits up to 5 seconds for it to end; only then is the turn asked again. A
+turn that cannot be stopped in that time is not retried — it is recorded `TIMED_OUT` —
+because a second request would queue behind the first one in the same member
+conversation and be billed twice.
+
+### Turn outcomes
+
+Every member turn ends with an `outcome`, stored on its transcript entry and checked by
+everything that reads the transcript — a peer's prompt, the vote tally, stances, the
+convergence judge, the synthesized answer:
+
+| `outcome` | Meaning | Content |
+|---|---|---|
+| `ANSWERED` | The member answered (an abstention is an answer without content) | the answer |
+| `SKIPPED` | The turn did not run by design: agent not deployed, a HUMAN member in an automated sub-round, a member pause the group cannot honour, the turn or depth limit | none |
+| `FAILED` | The turn ran and failed: the member's provider or pipeline failed (its conversation ended in `ERROR` without output), an exception, a sub-group without an answer | none |
+| `TIMED_OUT` | The turn exceeded `agentTimeoutSeconds` | none |
+
+A turn that is not `ANSWERED` never carries content, so it cannot be quoted as a
+position, counted as a vote or taken as the answer. A `FAILED` turn counts against
+`onAgentFailure` like any failure: `RETRY` asks again, `ABORT` fails the discussion.
+Its `errorReason` is a short fixed text (for example *"Agent failed to produce an
+answer (its conversation ended in ERROR)"*); provider, driver and exception text goes
+to the server log only. Entries stored by an older version carry no `outcome` and
+read as `ANSWERED` (or `SKIPPED`/`FAILED` for `SKIPPED`/`ERROR` entries).
+
+### Discussion outcomes
+
+`COMPLETED` alone does not mean the group answered. When a round ends, the
+discussion records `outcome` and `outcomeReason` (REST, MCP, and the `group_complete`
+event):
+
+| `outcome` | State | When |
+|---|---|---|
+| `ANSWERED` | `COMPLETED` | A synthesis (or a decision record) was produced. `outcomeReason` is `null`, or `TURN_LIMIT_REACHED` / `COST_CEILING_REACHED` when the round was cut short on its way to the answer |
+| `NO_ANSWER` | `COMPLETED` | No synthesis: `SYNTHESIS_FAILED` (the synthesizer's turn did not answer), `TURN_LIMIT_REACHED`, `COST_CEILING_REACHED`, `SYNTHESIS_NOT_RUN`; or `NO_MEMBER_ANSWERED` when every member turn was skipped (agents not deployed or unknown) |
+| `FAILED` | `FAILED` | `NO_MEMBER_ANSWERED` — no member contributed anything and member turns failed or timed out (a provider outage); `DISCUSSION_ERROR` — the run failed with an error |
+
+`outcome` is `null` while a round runs or is paused, after a cancel, and on
+discussions stored by an older version. A style without a synthesis phase (a
+`CUSTOM` list of opinion rounds) is `ANSWERED` as soon as one member contributed.
+
+### The turn limit keeps the synthesis turn
+
+`maxTurns` counts every member turn. One turn per remaining `SYNTHESIS` phase is
+reserved: the phases before it stop one turn earlier, so a 10-member `ROUND_TABLE`
+with `maxRounds: 5` (50 turns, the default limit) still ends with its synthesis. When
+the limit cuts a discussion short, a `System` `SKIPPED` entry says so in the
+transcript (*"Turn limit (protocol.maxTurns) reached — …"*) and `outcomeReason` is
+`TURN_LIMIT_REACHED`.
+
+### Cancel
+
+A cancel is checked before every member turn and every phase repeat, not only between
+phases. `POST …/cancel` (and the MCP `cancel_group_discussion`) sends
+`CANCEL_GRACEFUL`: the member turn already running finishes, nothing new starts, and
+the discussion becomes `CANCELLED` — within one member turn. A discussion that is
+deleted while it runs is stopped with `CANCEL_IMMEDIATE`: the running member turn is
+released at once and its member conversation is cancelled, and no fresh member
+conversation is started for a deleted discussion. A nested sub-group receives the
+cancel of its parent.
+
+The cancel response tells the truth about timing: **`200`** with the conversation when it
+is already `CANCELLED` (a paused discussion), **`202 Accepted`** with the conversation
+(still `IN_PROGRESS` or `SYNTHESIZING`) when the running discussion has been signalled
+and will stop before its next turn — watch for the `cancelled` event or poll for
+`CANCELLED`. The MCP tool answers `{"status":"CANCELLED"}` or
+`{"status":"CANCELLING"}` likewise.
+
 ## REST API
 
 | Method | Path | Description |
@@ -1355,7 +1437,7 @@ summarizer's.
 | `POST` | `/groups/{groupId}/conversations/{id}/continue` | Continue with a new question (same transcript) |
 | `POST` | `/groups/{groupId}/conversations/{id}/continue/stream` | Continue, streaming |
 | `POST` | `/groups/{groupId}/conversations/{id}/close` | Close the conversation to further rounds |
-| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion. A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
+| `POST` | `/groups/{groupId}/conversations/{id}/cancel` | Cancel a running or paused discussion: `200` when it is cancelled, `202` when a running discussion was signalled and stops before its next member turn (see [Cancel](#cancel)). A caller who is only an `eddi-approver` may cancel only a paused one and gets the resulting state, not the transcript — see [HITL](hitl.md#who-may-decide) |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve` | Approve/reject a HITL pause. Returns as soon as the decision is recorded — the resumed run continues asynchronously, so the response typically shows `IN_PROGRESS`; poll the conversation or use `/approve/stream` |
 | `POST` | `/groups/{groupId}/conversations/{id}/approve/stream` | Approve and stream the resumed run |
 | `POST` | `/groups/{groupId}/conversations/{id}/human-input` | Submit a HUMAN member's turn (I6). Asynchronous like `/approve`: the discussion resumes in the background (`IN_PROGRESS`). The owner or an admin gets the conversation back; any other submitter only `{groupConversationId, accepted, state}` (the MCP `submit_group_human_input` likewise). The resumed discussion does not carry a non-owner submitter's identity |
@@ -1385,7 +1467,7 @@ speaker and phase pairs.
 | `group_start` | The discussion begins (carries group id and question) |
 | `phase_start` / `phase_complete` | A phase opens / closes |
 | `round_start` | A continuation round (round 2+) of the whole discussion begins — see `POST .../continue`. Phase repeats fire `phase_start` instead |
-| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn produced none — no content and an `outcome` of `TIMEOUT`, `SKIPPED` or `ERROR`. Every started turn is closed, including a parallel member released by the batch deadline |
+| `speaker_start` / `speaker_complete` | A member's turn opens / closes. `complete` carries the content, or — when the turn did not answer — no content and an `outcome` of `TIMEOUT` (turn outcome `TIMED_OUT`), `SKIPPED` or `ERROR` (turn outcome `FAILED`), on sequential, peer-targeted and parallel phases alike. Every started turn is closed, including a parallel member released by the batch deadline |
 | `token` | Declared but never emitted today: member turns are not streamed, so a client sees a member's answer whole in `speaker_complete`. Do not build on it |
 | `synthesis_start` / `synthesis_complete` | The synthesis phase opens / closes |
 | `convergence_checked` / `convergence_reached` | A convergence judge ran / declared the phase converged (I2) |
@@ -1401,7 +1483,7 @@ speaker and phase pairs.
 | `awaiting_approval` / `hitl_resume` | A HITL pause was committed / released |
 | `member_pause_skipped` | A member turn was skipped rather than paused |
 | `cancelled` | The discussion was cancelled |
-| `group_complete` | Terminal — carries the final state and the synthesized answer |
+| `group_complete` | Terminal — carries the final `state`, `outcome` and `outcomeReason` (see [Discussion outcomes](#discussion-outcomes)); `state` is `FAILED` with `outcome` `FAILED` when no member answered. The REST stream leaves `synthesizedAnswer` out: read it from the conversation |
 | `group_error` | Terminal failure, with a curated (never raw) message |
 
 These events belong to the stream of the request that started or continued the
@@ -1440,7 +1522,7 @@ split is internal.
 | `get_group_approval_status` | Pause coordinates for one discussion — HITL tool set |
 | `submit_group_human_input` | Submit a HUMAN member's turn (I6) — HITL tool set |
 | `approve_group_phase` | Approve or reject a HITL pause — HITL tool set |
-| `cancel_group_discussion` | Cancel a running discussion — HITL tool set |
+| `cancel_group_discussion` | Cancel a running discussion — HITL tool set. `{"status":"CANCELLED"}`, or `{"status":"CANCELLING"}` while a running discussion finishes its current member turn |
 | `add_team_task` | File a task on a standing team's backlog (I13) |
 | `list_team_backlog` | Read a standing team's backlog |
 | `list_group_templates` | List the preset group templates (I10) |

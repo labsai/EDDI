@@ -103,7 +103,13 @@ authoring tool.
 - For long discussions (always for `TASK_FORCE`), `start_group_discussion` returns at once;
   poll `read_group_conversation` sparingly and tell the user it is still running. It has
   finished at `COMPLETED`, `FAILED`, `REJECTED` or `CANCELLED`; at `AWAITING_APPROVAL` or
-  `AWAITING_HUMAN_INPUT` it waits for a person (next section).
+  `AWAITING_HUMAN_INPUT` it waits for a person (next section). `cancel_group_discussion`
+  answers `CANCELLING` while the running member turn finishes; poll for `CANCELLED`.
+- `COMPLETED` is not the same as answered: check `outcome`. `NO_ANSWER` (the synthesis
+  failed, or the turn limit or cost ceiling stopped the run) and `FAILED` (no member
+  answered — often a provider outage) come with a reason code; tell the user there
+  is no answer and why, instead of presenting the transcript as one. A transcript entry
+  whose `outcome` is not `ANSWERED` is a member that did not answer, not something it said.
 - Afterwards: `followup_with_member` asks one member a question with its full context;
   `continue_group_discussion` runs another round on a new question;
   `list_group_conversations` finds earlier ones.
