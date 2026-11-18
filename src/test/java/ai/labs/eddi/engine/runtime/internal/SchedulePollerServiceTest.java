@@ -1477,6 +1477,23 @@ class SchedulePollerServiceTest {
         assertEquals(1.0, meterRegistry.counter("eddi.schedule.nextfire.exhausted").count());
     }
 
+    /** An operator who re-enabled the schedule meanwhile is not overwritten. */
+    @Test
+    void poll_noNextFire_doesNotOverwriteAScheduleReEnabledMeanwhile() throws Exception {
+        var schedule = makeCronSchedule("sched-never2", "0 0 30 2 *", "Hello");
+        var reEnabled = makeCronSchedule("sched-never2", "0 9 * * *", "Hello");
+        reEnabled.setEnabled(true);
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-never2"), eq("test-instance"), any(), any())).thenReturn(true);
+        when(scheduleStore.readSchedule("sched-never2")).thenReturn(reEnabled);
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-never2", FireStatus.COMPLETED.name()));
+
+        poller.pollAndAwait();
+
+        verify(scheduleStore).markCompleted(eq("sched-never2"), eq(schedule.getFireId()), isNull());
+        verify(scheduleStore, never()).setScheduleEnabled(eq("sched-never2"), eq(false), any(), any());
+    }
+
     /** The fire has happened; a failing bookkeeping write must not repeat it. */
     @Test
     void poll_storeFailureAfterASuccessfulFire_isRetriedAndNeverRefires() throws Exception {

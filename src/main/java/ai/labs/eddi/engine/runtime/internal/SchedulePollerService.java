@@ -706,7 +706,7 @@ public class SchedulePollerService {
         for (int attempt = 1; attempt <= COMPLETE_ATTEMPTS; attempt++) {
             try {
                 scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
-                if (exhausted) {
+                if (exhausted && stillDisabledByThisCompletion(schedule.getId())) {
                     scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
                 }
                 return;
@@ -721,6 +721,22 @@ public class SchedulePollerService {
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Whether the row is still the one {@code markCompleted(..., null)} just
+     * disabled: disabled and with no reason. If an operator enabled it, or an
+     * update changed it, between the two writes, the reason must not overwrite
+     * that. This narrows the window rather than closing it (the two writes are not
+     * one store operation); an unreadable row is treated as unchanged.
+     */
+    private boolean stillDisabledByThisCompletion(String scheduleId) {
+        try {
+            ScheduleConfiguration stored = scheduleStore.readSchedule(scheduleId);
+            return stored == null || (!stored.isEnabled() && stored.getDisabledReason() == null);
+        } catch (Exception e) {
+            return true;
         }
     }
 
