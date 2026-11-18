@@ -15,10 +15,11 @@ import java.util.Objects;
  * <p>
  * It lives at the top level of the stored conversation, not in the step, so the
  * recovery sweep ({@code ContinuationRecoverySweep}) can find the conversations
- * that carry one with an index instead of reading their histories. It is
- * removed by a narrow field update once its schedule is known to exist, when
- * the conversation is ended or cancelled, and by the next committed turn, which
- * derives the field from its own step.
+ * that carry one with an index instead of reading their histories. A sweep that
+ * finds its schedule marks it handled by removing {@link #getDecidedAt()} with
+ * a narrow field update, which takes it out of that index; the record itself is
+ * removed only when the conversation is ended or cancelled, or by the next
+ * committed turn, which derives the field from its own step.
  * <p>
  * A plain bean rather than a record: the MongoDB codec and the JSON mapper both
  * need a no-argument constructor and setters.

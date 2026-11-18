@@ -312,9 +312,10 @@ public class ConversationContinuations {
      * Called by the snapshot conversion on every write, which is what removes a
      * record once a later step is committed.
      * <p>
-     * A memory loaded without the record (a projection that left it out) whose
-     * current step did decide is given one rebuilt from the agent's policy, so a
-     * re-store of that step never drops a decision the sweep could still arm.
+     * Only {@link #decide} creates a record. A memory whose record was removed (a
+     * cancel, an end, a sweep that found the conversation not READY) keeps it
+     * removed on a re-store of the same step: rebuilding it from the step would
+     * hand the sweep a job that was stopped.
      */
     public static PendingContinuation pendingOf(IConversationMemory memory) {
         IConversationStep step = memory != null ? memory.getCurrentStep() : null;
@@ -323,15 +324,7 @@ public class ConversationContinuations {
             return null;
         }
         PendingContinuation recorded = memory.getPendingContinuation();
-        if (recorded != null && recorded.getNumber() != null && recorded.getNumber() == number.intValue()) {
-            return recorded;
-        }
-        ContinuationPolicy policy = memory.getContinuationPolicy();
-        if (policy == null || !policy.enabled()) {
-            return null;
-        }
-        long decidedAt = next.getTimestamp() != null ? next.getTimestamp().getTime() : System.currentTimeMillis();
-        return new PendingContinuation(number.intValue(), policy.maxContinuations(), policy.input(), null, decidedAt);
+        return recorded != null && recorded.getNumber() != null && recorded.getNumber() == number.intValue() ? recorded : null;
     }
 
     private static String refusalReason(IConversationMemory memory, IConversationStep step, ContinuationPolicy policy, int used) {
@@ -701,20 +694,35 @@ public class ConversationContinuations {
     }
 
     /**
-     * Removes the stored outbox record. Never throws: a record that could not be
-     * removed is armed by the sweep later only if the conversation is still READY.
+     * Removes the stored outbox record, retrying a failed write like the arm does.
+     * Never throws. A record that still cannot be removed is armed by the sweep
+     * later if the conversation is still READY — which a cancel between two turns
+     * leaves it — so that is logged at ERROR.
      *
-     * @return whether a record was removed
+     * @return whether an unhandled record was removed
      */
     private boolean clearPending(String conversationId, Integer expectedNumber) {
         if (memoryStore == null) {
             return false;
         }
-        try {
-            return memoryStore.clearPendingContinuation(conversationId, expectedNumber);
-        } catch (Exception e) {
-            LOGGER.warnf("Could not clear the pending continuation record of conversation %s: %s", sanitize(conversationId), e.toString());
-            return false;
+        for (int attempt = 1;; attempt++) {
+            try {
+                return memoryStore.clearPendingContinuation(conversationId, expectedNumber);
+            } catch (Exception e) {
+                if (attempt >= ARM_ATTEMPTS) {
+                    LOGGER.errorf("Could not clear the pending continuation record of conversation %s after %d attempts (%s); while the "
+                            + "conversation stays READY the recovery sweep may still arm it", sanitize(conversationId), ARM_ATTEMPTS, e.toString());
+                    return false;
+                }
+                LOGGER.warnf("Clearing the pending continuation record of conversation %s failed (attempt %d of %d), retrying: %s",
+                        sanitize(conversationId), attempt, ARM_ATTEMPTS, e.toString());
+                try {
+                    Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    return false;
+                }
+            }
         }
     }
 

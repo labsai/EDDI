@@ -18,8 +18,9 @@ sweep** on the existing schedule machinery:
   `pendingContinuation` of the stored conversation — in the same document write
   as the step, on the append path and the full-replace path of both stores. It
   is derived from the current step on every write, so the next committed turn
-  replaces or removes it, and a memory loaded without it rebuilds it from the
-  agent's policy.
+  replaces or removes it. Only `decide` creates one: a record a cancel or an end
+  removed stays removed when the same step is stored again, since rebuilding it
+  from the step would hand the sweep a job that was stopped.
 - **Deterministic schedule ids.** A continuation's schedule id is a name-based
   UUID of conversation and number, written through the new
   `IScheduleStore.createScheduleIfAbsent` (MongoDB unique `_id`, PostgreSQL
@@ -43,12 +44,18 @@ sweep** on the existing schedule machinery:
   schedules, so every interleaving with a sweep ends without a live row. A
   cancel of a job whose arm was lost answers `200 CANCELLED`, as for any job
   between two turns. `decide` now also refuses a turn already cancelled
-  (`interrupted`) so its decision never reaches the store.
+  (`interrupted`) so its decision never reaches the store. Removing the record
+  is retried like the arm's write (three attempts), because a cancel between
+  two turns leaves the conversation READY: a record left behind would be armed
+  by the sweep. It is one round trip per store (`findOneAndUpdate` returning the
+  record as it was; a locking CTE on PostgreSQL), since every end runs it.
 - **Indexes are built without blocking writes**: PostgreSQL `CREATE INDEX
   CONCURRENTLY` on a background thread under an advisory lock (INVALID builds
   dropped and rebuilt, like the audit ledger's late indexes), MongoDB on a
   background thread; both start with the first sweep. Until the index is valid the sweep
-  reads nothing, so it never scans the collection.
+  reads nothing, so it never scans the collection. A PostgreSQL build that still
+  fails after its three retries is started again by a later sweep, not only by a
+  restart, so recovery comes back once the cause is gone.
 - **`job.finished` on a failed write.** Main meanwhile raised `job.finished`
   with state `schedule_failed` when the arm's write failed, since that used to
   end the job. With the sweep on it no longer does, so the event is raised only

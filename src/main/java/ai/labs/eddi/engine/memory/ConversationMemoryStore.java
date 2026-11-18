@@ -24,9 +24,11 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
@@ -1432,14 +1434,13 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         if (!isStorableId(conversationId)) {
             return false;
         }
-        Bson filter = pendingContinuationFilter(conversationId, expectedNumber);
-        // Two narrow updates: the first removes a record that was still unhandled and
-        // reports it, the second removes a handled one. Neither moves _rev or _fence.
-        boolean unhandled = conversationCollectionDocument
-                .updateOne(Filters.and(filter, Filters.exists(KEY_PENDING_CONTINUATION_DECIDED_AT)), Updates.unset(KEY_PENDING_CONTINUATION))
-                .getModifiedCount() > 0;
-        conversationCollectionDocument.updateOne(filter, Updates.unset(KEY_PENDING_CONTINUATION));
-        return unhandled;
+        // One narrow update that hands back the record as it was, so whether it was
+        // still unhandled is read from the same write that removed it. Neither _rev
+        // nor _fence moves.
+        Document before = conversationCollectionDocument.findOneAndUpdate(pendingContinuationFilter(conversationId, expectedNumber),
+                Updates.unset(KEY_PENDING_CONTINUATION), new FindOneAndUpdateOptions()
+                        .projection(Projections.include(KEY_PENDING_CONTINUATION_DECIDED_AT)).returnDocument(ReturnDocument.BEFORE));
+        return before != null && before.get(KEY_PENDING_CONTINUATION) instanceof Document record && record.get("decidedAt") != null;
     }
 
     private static Bson pendingContinuationFilter(String conversationId, Integer number) {

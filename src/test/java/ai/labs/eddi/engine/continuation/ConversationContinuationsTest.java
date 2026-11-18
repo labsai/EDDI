@@ -590,31 +590,24 @@ class ConversationContinuationsTest {
         }
 
         @Test
-        @DisplayName("a memory loaded without the record whose step did decide gets one rebuilt from the policy")
-        void recordRebuiltFromThePolicy() {
+        @DisplayName("a record that was removed (cancel, end) stays removed when the same step is stored again, policy or not")
+        void removedRecordIsNotRebuilt() {
             var memory = memoryWith(new ContinuationPolicy(4, "go"), IConversation.CONTINUE_CONVERSATION);
             continuations.decide(memory, Environment.production);
             memory.setPendingContinuation(null);
 
-            PendingContinuation rebuilt = ConversationContinuations.pendingOf(memory);
-            assertNotNull(rebuilt);
-            assertEquals(1, rebuilt.getNumber());
-            assertEquals(4, rebuilt.getMaxContinuations());
-            assertEquals("go", rebuilt.getInput());
-            assertNotNull(rebuilt.getDecidedAt());
-
-            memory.setContinuationPolicy(ContinuationPolicy.OFF);
-            assertNull(ConversationContinuations.pendingOf(memory), "no policy: nothing to rebuild it from");
+            assertNull(ConversationContinuations.pendingOf(memory), "a stopped job must not be handed back to the sweep");
+            assertNull(ConversationMemoryUtilities.convertConversationMemory(memory).getPendingContinuation());
         }
 
         @Test
-        @DisplayName("a record that names another number than the step's decision is not carried")
+        @DisplayName("a record that names another number than the step's decision is not carried, nor replaced by one built from the step")
         void staleRecordIsNotCarried() {
             var memory = memoryWith(new ContinuationPolicy(4, "go"), IConversation.CONTINUE_CONVERSATION);
             continuations.decide(memory, Environment.production);
             memory.setPendingContinuation(new PendingContinuation(3, 4, "old", null, 5L));
 
-            assertEquals(1, ConversationContinuations.pendingOf(memory).getNumber());
+            assertNull(ConversationContinuations.pendingOf(memory));
         }
 
         @Test
@@ -745,6 +738,21 @@ class ConversationContinuationsTest {
             doReturn(1).when(scheduleStore).deleteSchedulesByName(name);
 
             assertEquals(1, withStore.disarm(CONVERSATION_ID));
+        }
+
+        @Test
+        @DisplayName("a record removal that fails once is retried, so a cancel between two turns still takes the lost arm's record")
+        void disarmRetriesTheRecordRemoval() throws Exception {
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
+            String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
+            doThrow(new IResourceStore.ResourceStoreException("blip")).doReturn(true).when(memoryStore).clearPendingContinuation(CONVERSATION_ID,
+                    null);
+            doReturn(0).when(scheduleStore).countPendingSchedulesByName(name);
+            doReturn(0).when(scheduleStore).deleteSchedulesByName(name);
+
+            assertEquals(1, withStore.disarm(CONVERSATION_ID), "the retry removed the unhandled record");
+            verify(memoryStore, times(2)).clearPendingContinuation(CONVERSATION_ID, null);
         }
     }
 

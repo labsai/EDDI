@@ -36,13 +36,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * oldest first, at most {@code eddi.continuation.recovery.batch-size} per pass,
  * from an index that holds only the records. Each one is handed to
  * {@link ConversationContinuations#recover}, which writes the schedule only if
- * it is missing and then removes the record. A healthy job's record is removed
- * by the first pass that finds its schedule, so the index stays the size of the
- * jobs in flight.
+ * it is missing and then marks the record handled, which takes it out of the
+ * index. A healthy job's record is marked by the first pass that finds its
+ * schedule, so the index stays the size of the jobs in flight. Sweeps never
+ * remove a record: only a cancel, an end or a newer turn does, which is how a
+ * sweep tells a stopped job from a faster sweep.
  * <p>
  * <b>Cluster.</b> Correctness does not depend on one node sweeping: the
  * schedule id is derived from the continuation, so two nodes write one row
- * between them, and the record is removed conditionally on its number. The
+ * between them, and the record is marked conditionally on its number. The
  * {@code leader.continuation-recovery} lease only saves the other nodes the
  * reads; on a single node it is always granted.
  */

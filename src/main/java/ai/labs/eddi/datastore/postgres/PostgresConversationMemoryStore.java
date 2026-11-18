@@ -161,9 +161,12 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                 return;
             } catch (SQLException e) {
                 if (attempt >= INDEX_RETRY_DELAYS_MILLIS.length) {
-                    LOGGER.warnf("Could not build the index %s (%s). Continuation crash recovery stays off until it exists: "
-                            + "the next restart retries, or build it by hand (docs/long-jobs.md#crash-recovery).",
+                    LOGGER.warnf("Could not build the index %s (%s). Continuation crash recovery waits for it: the next sweep "
+                            + "starts another round of attempts, or build it by hand (docs/long-jobs.md#crash-recovery).",
                             PENDING_CONTINUATION_INDEX, e.getMessage());
+                    // Not for good: a sweep that finds no index starts the next round, so
+                    // recovery comes back without a restart once the cause is gone.
+                    indexBuildStarted.set(false);
                     return;
                 }
                 LOGGER.infof("Index %s build failed (%s); retrying in %d s", PENDING_CONTINUATION_INDEX, e.getMessage(),
@@ -172,6 +175,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                     Thread.sleep(INDEX_RETRY_DELAYS_MILLIS[attempt]);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
+                    indexBuildStarted.set(false);
                     return;
                 }
             }
@@ -1527,27 +1531,22 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             return false;
         }
         ensureSchema();
-        // Two narrow updates: the first removes a record that was still unhandled and
-        // reports it, the second removes a handled one. Neither moves _rev or _fence.
-        String base = "UPDATE conversation_memories SET data = data - 'pendingContinuation' WHERE id = ?::uuid AND "
-                + PENDING_CONTINUATION_PRESENT + (expectedNumber != null ? PENDING_CONTINUATION_NUMBER : "");
-        try (Connection conn = dataSourceInstance.get().getConnection()) {
-            boolean unhandled = clearPendingContinuation(conn, base + " AND " + PENDING_CONTINUATION_UNHANDLED, conversationId,
-                    expectedNumber) > 0;
-            clearPendingContinuation(conn, base, conversationId, expectedNumber);
-            return unhandled;
-        } catch (SQLException e) {
-            throw new IResourceStore.ResourceStoreException("Failed to clear the pending continuation", e);
-        }
-    }
-
-    private static int clearPendingContinuation(Connection conn, String sql, String conversationId, Integer expectedNumber) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+        // One statement: the row is locked and read as it was, then the record is
+        // removed, so whether it was still unhandled comes from the same write. Neither
+        // _rev nor _fence moves.
+        String sql = "WITH old AS (SELECT id, " + PENDING_CONTINUATION_UNHANDLED + " AS unhandled FROM conversation_memories WHERE id = ?::uuid AND "
+                + PENDING_CONTINUATION_PRESENT + (expectedNumber != null ? PENDING_CONTINUATION_NUMBER : "") + " FOR UPDATE)"
+                + " UPDATE conversation_memories c SET data = c.data - 'pendingContinuation' FROM old WHERE c.id = old.id RETURNING old.unhandled";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             if (expectedNumber != null) {
                 ps.setInt(2, expectedNumber);
             }
-            return ps.executeUpdate();
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to clear the pending continuation", e);
         }
     }
 
