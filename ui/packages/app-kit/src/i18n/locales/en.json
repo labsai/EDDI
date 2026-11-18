@@ -351,6 +351,7 @@
     "descriptionLabel": "Description (optional)",
     "store": "Store Secret",
     "storeSuccess": "Secret \"{{key}}\" stored",
+    "storeWarning": "Secret \"{{key}}\" stored, but its grant leaves out deployed agents that use it",
     "allowedHosts": "Allowed destinations",
     "allowedHostsAdd": "Add an allowed host",
     "allowedHostsScheme": "Enter the host only, without https:// or a path — e.g. api.openai.com or api.openai.com:443.",

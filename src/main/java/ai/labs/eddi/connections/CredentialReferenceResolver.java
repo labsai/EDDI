@@ -208,6 +208,14 @@ public class CredentialReferenceResolver {
         }
         String expanded = globalVariableResolver.resolveValue(template);
         String effective = expanded == null ? template : expanded;
+        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(effective)) {
+            // A ${vars:…} the expansion left in place (a deleted variable) names no
+            // secret, so a grant check over it would pass while a token minted from the
+            // credential the variable used to hold is still in the grant store (#1179).
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "The " + what + " for connection '"
+                    + connectionName + "' names a global variable that does not resolve, so its vault grant cannot be checked. "
+                    + "Restore the variable or point the connection at a ${vault:…} reference.");
+        }
         try {
             secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(effective)), access,
                     "the " + what + " of connection '" + connectionName + "'");

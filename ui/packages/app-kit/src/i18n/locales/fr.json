@@ -349,6 +349,7 @@
     "valuePlaceholder": "Entrer la valeur du secret…",
     "store": "Enregistrer le secret",
     "storeSuccess": "Secret \"{{key}}\" enregistré",
+    "storeWarning": "Secret « {{key}} » enregistré, mais son autorisation exclut des agents déployés qui l’utilisent",
     "descriptionLabel": "Description (facultatif)",
     "allowedHosts": "Destinations autorisées",
     "allowedHostsAdd": "Ajouter un hôte autorisé",

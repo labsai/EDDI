@@ -4,8 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import java.util.Set;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.ArgumentMatchers.anyIterable;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.secrets.SecretAccess;
@@ -362,7 +362,8 @@ class A2AToolProviderManagerTest {
             cards.put(HOST, hop -> Map.of("name", "peer", "skills", List.of(skill("lookup"))));
             SecretResolver secrets = mock(SecretResolver.class);
             SecretAccess refused = SecretAccess.agent("bbbbbbbbbbbbbbbbbbbbbbbb");
-            doThrow(new SecretResolver.SecretNotGrantedException("not granted")).when(secrets).requireGranted(anyIterable(), eq(refused),
+            doThrow(new SecretResolver.SecretNotGrantedException("not granted")).when(secrets).requireGranted(eq(Set.of("${vault:key-a}")),
+                    eq(refused),
                     anyString());
             var manager = managerAgainstPeers(secrets);
             var config = peer(HOST, "peer", "${vault:key-a}");

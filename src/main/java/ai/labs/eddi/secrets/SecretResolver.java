@@ -170,7 +170,12 @@ public class SecretResolver {
                 if (Boolean.TRUE.equals(event.get("all"))) {
                     invalidateAllLocal();
                 } else if (event.getString("tenantId") != null && event.getString("keyName") != null) {
-                    invalidateLocal(new SecretReference(event.getString("tenantId"), event.getString("keyName")));
+                    var reference = new SecretReference(event.getString("tenantId"), event.getString("keyName"));
+                    if (Boolean.TRUE.equals(event.get(GRANT_ONLY))) {
+                        invalidateGrantLocal(reference);
+                    } else {
+                        invalidateLocal(reference);
+                    }
                 }
             });
             clusterEvents.onResync(this::invalidateAllLocal);
@@ -681,6 +686,41 @@ public class SecretResolver {
         grantCache.invalidate(cacheKey);
         LOGGER.infof("Cache invalidated for: %s", cacheKey);
         fireInvalidationListeners(reference);
+    }
+
+    /**
+     * Event field marking a {@code SECRET_CHANGED} that changed the agent grant
+     * only.
+     */
+    static final String GRANT_ONLY = "grantOnly";
+
+    /**
+     * Evicts the cached agent grant of {@code reference}, on every node, and
+     * nothing else: for a write that changed {@code allowedAgents} alone. The value
+     * and the host list are unchanged, so the plaintext cache and every client
+     * built from the secret stay valid; the grant is read again at the next
+     * resolution and at the next pre-cache check (#1179). Unlike
+     * {@link #invalidateCache}, no invalidation listener runs, so a grant edit does
+     * not close the MCP sessions or drop the models that other agents are using. A
+     * node of an older version reads the event as a full invalidation, which is
+     * merely more than needed.
+     */
+    public void invalidateGrant(SecretReference reference) {
+        invalidateGrantLocal(reference);
+        if (clusterEvents != null) {
+            clusterEvents.publish(ClusterEvent.SECRET_CHANGED,
+                    Map.of("tenantId", reference.tenantId(), "keyName", reference.keyName(), GRANT_ONLY, true));
+        }
+    }
+
+    /** The local half of {@link #invalidateGrant}. */
+    public void invalidateGrantLocal(SecretReference reference) {
+        String cacheKey = cacheKey(reference);
+        // The generation moves too, so a grant read racing this write is not kept
+        // (see grantOf).
+        invalidations.incrementAndGet();
+        grantCache.invalidate(cacheKey);
+        LOGGER.infof("Grant cache invalidated for: %s", cacheKey);
     }
 
     /**

@@ -235,23 +235,29 @@ public class ChatModelRegistry {
     }
 
     /**
-     * Refuses {@code access} a model whose parameters name a vault secret it is not
-     * granted — directly, or through a {@code ${vars:…}} that expands to one. Runs
-     * before the cache lookup; see {@link #getOrCreate}. Parameters that carry no
-     * reference at all skip the variable expansion.
+     * The parameters with every {@code ${vars:…}} expanded and every
+     * {@code ${vault:…}} still a reference: what the grant is checked against, what
+     * the model is cached under and what it is built from. Using one snapshot for
+     * all three binds a cached model to the credential it was checked for, so an
+     * edit that repoints a variable to another secret misses the cache instead of
+     * handing out a model built with the old one (#1179). Parameters that carry no
+     * reference at all skip the expansion.
      */
-    private void requireGranted(String type, Map<String, String> filteredParams, SecretAccess access) {
-        boolean mayReference = false;
+    private Map<String, String> expandVariables(Map<String, String> filteredParams) {
         for (String value : filteredParams.values()) {
             if (value != null && value.contains("${")) {
-                mayReference = true;
-                break;
+                return globalVariableResolver.resolveAll(filteredParams);
             }
         }
-        if (!mayReference) {
-            return;
-        }
-        secretResolver.requireGranted(globalVariableResolver.resolveAll(builderParams(filteredParams)), access, "LLM provider '" + type + "'");
+        return filteredParams;
+    }
+
+    /**
+     * Refuses {@code access} a model whose expanded parameters name a vault secret
+     * it is not granted. Runs before the cache lookup; see {@link #getOrCreate}.
+     */
+    private void requireGranted(String type, Map<String, String> expandedParams, SecretAccess access) {
+        secretResolver.requireGranted(builderParams(expandedParams), access, "LLM provider '" + type + "'");
     }
 
     /**
@@ -329,10 +335,12 @@ public class ChatModelRegistry {
      * A freshly built model is published to the cache only if no invalidation raced
      * the build — see {@link #publishIfCurrent}.
      * <p>
-     * The cache is keyed on the unresolved parameters, so two agents whose
-     * configurations name the same key share one model, built with whichever asked
-     * first. {@code access} is therefore checked against every vault secret the
-     * parameters name BEFORE the lookup, on every call, hit or miss (#1179).
+     * The cache is keyed on the parameters with their global variables expanded and
+     * their vault references unresolved, so two agents whose configurations name
+     * the same key share one model, built with whichever asked first.
+     * {@code access} is therefore checked against every vault secret those
+     * parameters name BEFORE the lookup, on every call, hit or miss (#1179); a
+     * variable repointed to another secret is another key.
      *
      * @param access
      *            the agent (or other caller) the model is for; see
@@ -347,8 +355,9 @@ public class ChatModelRegistry {
         var logReq = processedParams.get(KEY_LOG_REQUESTS);
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
-        requireGranted(type, filteredParams, access);
-        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
+        var expandedParams = expandVariables(filteredParams);
+        requireGranted(type, expandedParams, access);
+        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, expandedParams));
 
         ChatModel cached = modelCache.get(cacheKey);
         if (cached != null) {
@@ -367,9 +376,9 @@ public class ChatModelRegistry {
         // it is being built.
         long generationAtBuildStart = invalidationGeneration.get();
 
-        // Resolve global variable references, then vault secrets (late-binding:
-        // after Qute, before builder.build())
-        var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
+        // Vault secrets of the expansion the grant was checked against and the model
+        // is cached under (late-binding: after Qute, before builder.build())
+        var resolvedParams = builderParams(expandedParams);
         ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
         requireSecretsAllowedAt(type, resolvedParams);
         resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams, access), "LLM provider '" + type + "'");
@@ -408,8 +417,9 @@ public class ChatModelRegistry {
         var logResp = processedParams.get(KEY_LOG_RESPONSES);
 
         var filteredParams = filterParams(processedParams);
-        requireGranted(type, filteredParams, access);
-        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, filteredParams));
+        var expandedParams = expandVariables(filteredParams);
+        requireGranted(type, expandedParams, access);
+        var cacheKey = new ModelCacheKey(type, cacheKeyParams(type, expandedParams));
 
         StreamingChatModel cached = streamingModelCache.get(cacheKey);
         if (cached != null) {
@@ -427,9 +437,9 @@ public class ChatModelRegistry {
             // invalidation could make stale (see publishIfCurrent), as on the sync path.
             long generationAtBuildStart = invalidationGeneration.get();
 
-            // Resolve global variable references, then vault secrets (late-binding:
-            // after Qute, before builder.build())
-            var resolvedParams = globalVariableResolver.resolveAll(builderParams(filteredParams));
+            // Vault secrets of the expansion the grant was checked against and the model
+            // is cached under (late-binding: after Qute, before builder.build())
+            var resolvedParams = builderParams(expandedParams);
             ConnectionParameterGuard.rejectConnectionReferences(resolvedParams);
             requireSecretsAllowedAt(type, resolvedParams);
             resolvedParams = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolvedParams, access),
@@ -696,12 +706,10 @@ public class ChatModelRegistry {
      * given vault reference forms (new and legacy prefixes) — or any
      * {@code ${vars:...}} reference.
      * <p>
-     * The cache key holds the parameters before global variables are expanded, so a
-     * vault reference reached through a variable is invisible here. A cache hit
-     * does not re-check {@code allowedHosts} either, so a model built that way
-     * would otherwise keep sending the secret to a host its new list excludes. Not
-     * knowing which secret a variable expands to, every variable-bearing model is
-     * evicted: a rebuild is cheap, a stale credentialed client is not.
+     * The cache key holds the parameters with global variables expanded, so a vault
+     * reference reached through a variable is matched here directly. A variable the
+     * expansion left unresolved still evicts its model: not knowing which secret it
+     * stands for, a rebuild is cheap and a stale credentialed client is not.
      */
     private <T> int evictMatching(Map<ModelCacheKey, T> cache, String... refs) {
         int count = 0;

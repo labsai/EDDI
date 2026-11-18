@@ -960,6 +960,41 @@ public class RagSourceIngestionService {
     }
 
     /**
+     * Refuses an update whose removed sources could not be cleaned up: when the
+     * vault grant withholds the store key from knowledge-base work, the update
+     * would save, the cleanup would fail, and the removed sources' content would
+     * stay retrievable with nothing left to list it (#1179). Called before the
+     * write. Throws {@code SecretResolver.SecretNotGrantedException} when the
+     * cleanup could not run.
+     */
+    public void requireRemovalAuthorized(RagConfiguration previous, RagConfiguration updated) {
+        if (!sourcesToDiscard(previous, updated).isEmpty()) {
+            pipeline.requireCanForget(previous);
+        }
+    }
+
+    /**
+     * The sources of {@code previous} that {@code updated} removes or changes in
+     * kind.
+     */
+    private static List<IngestionSource> sourcesToDiscard(RagConfiguration previous, RagConfiguration updated) {
+        if (previous == null || previous.getSources() == null) {
+            return List.of();
+        }
+        List<IngestionSource> discarded = new ArrayList<>();
+        for (IngestionSource source : previous.getSources()) {
+            if (source == null) {
+                continue;
+            }
+            IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
+            if (now == null || now.isUpload() != source.isUpload()) {
+                discarded.add(source);
+            }
+        }
+        return discarded;
+    }
+
+    /**
      * Takes back everything sources that are no longer there put into the knowledge
      * base.
      *
@@ -987,17 +1022,8 @@ public class RagSourceIngestionService {
      * {@link #cleanUpAfterRun}.
      */
     public void discardRemovedSources(String ragConfigId, RagConfiguration previous, RagConfiguration updated) {
-        if (previous == null || previous.getSources() == null) {
-            return;
-        }
-        for (IngestionSource source : previous.getSources()) {
-            if (source == null) {
-                continue;
-            }
+        for (IngestionSource source : sourcesToDiscard(previous, updated)) {
             IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
-            if (now != null && now.isUpload() == source.isUpload()) {
-                continue;
-            }
             LOGGER.warnf("Source '%s' of knowledge base %s %s. Everything the knowledge base learned from it%s "
                     + "is being removed.", LogSanitizer.sanitize(source.getName()),
                     LogSanitizer.sanitize(ragConfigId),

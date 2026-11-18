@@ -2101,7 +2101,7 @@
     "grantEmptyError": "Add at least one agent, or choose “All agents”. An empty list is not allowed.",
     "grantCheckingImpact": "Checking deployed agents…",
     "grantLosingAccessTitle": "Deployed agents that use this secret and would lose access ({{count}})",
-    "grantLosingAccessBody": "They lose access immediately — the grant is checked whenever a secret is used, not only when an agent is deployed — so their next turn that needs it fails, and so does their next deployment.",
+    "grantLosingAccessBody": "In enforce mode (the default) they lose access — on this server at once, on other cluster nodes as the change reaches them — because the grant is checked whenever a secret is used, not only when an agent is deployed: their next turn that needs it fails, and so does their next deployment. In warn mode this is only logged.",
     "grantAcknowledge": "I understand these agents will not deploy again until they are added back or their configuration stops using this secret.",
     "grantSaved": "Access updated for “{{key}}”",
     "grantImpactFailed": "Could not check which deployed agents use this secret, so any of them may lose access.",

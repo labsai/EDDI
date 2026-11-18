@@ -231,7 +231,11 @@ class EmbeddingStoreFactoryBranchTest {
         @Test
         @DisplayName("same kbId but different storeParameters → different store instances")
         void differentParams() throws Exception {
-            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(mock(GlobalVariableResolver.class),
+            // The key is the parameters with variables expanded (#1179): the resolver
+            // passes them through, as the real one does for values without references.
+            GlobalVariableResolver variables = mock(GlobalVariableResolver.class);
+            when(variables.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
+            var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(variables,
                     mock(SecretResolver.class), 50_000, Ticker.systemTicker());
             // An external store: in-memory stores are keyed by knowledge base alone,
             // because they have no parameters that mean anything.

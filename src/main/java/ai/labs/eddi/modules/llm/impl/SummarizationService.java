@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatModel;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.modules.llm.bootstrap.LlmModule;
@@ -24,6 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Shared LLM summarization infrastructure.
@@ -241,8 +243,14 @@ public class SummarizationService {
 
             List<ChatMessage> messages = List.of(SystemMessage.from(instructions), UserMessage.from(content));
 
-            var response = RetryConfiguration.executeWithRetryUnwrapped(() -> model.chat(ChatRequest.builder().messages(messages).build()),
-                    retry, "Summarization");
+            // A retry asks for the model again, so the grant is read again too: a retry
+            // after a backoff must not send the content with a credential whose grant
+            // was narrowed meanwhile (#1179). A hit on the registry's cache.
+            var attempts = new AtomicInteger();
+            var response = RetryConfiguration.executeWithRetryUnwrapped(() -> {
+                ChatModel attemptModel = attempts.getAndIncrement() == 0 ? model : chatModelRegistry.getOrCreate(llmProvider, params, access);
+                return attemptModel.chat(ChatRequest.builder().messages(messages).build());
+            }, retry, "Summarization");
 
             callCounter.increment();
 

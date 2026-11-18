@@ -16,6 +16,7 @@ import ai.labs.eddi.configs.mcpcalls.model.McpToolDiscoveryRequest;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.apicalls.impl.RequestRedactor;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager;
@@ -202,15 +203,19 @@ public class RestMcpCallsStore implements IRestMcpCallsStore {
         }
         // The probe connects to a URL the caller chose. Resolving a vault reference
         // here — directly, or through a global variable that holds one — sent the
-        // secret's plaintext there: the resolver checks no agent grant on this path,
+        // secret's plaintext there: a probe runs for no agent,
         // and the destination list is the only other control, so any editor could
         // read any unrestricted secret (security review 2026-10-17, H1). A probe takes
-        // the credential itself.
-        if (SecretReference.isVaultReference(apiKey) || GlobalVariableResolver.containsReference(apiKey)) {
-            return badRequest(MCP_AUTHORIZATION_HEADER + " must carry the credential itself: a ${vault:…} or ${vars:…} reference is not "
-                    + "resolved on a discovery probe, because the probe connects to whatever URL the request names. Save the MCP "
-                    + "configuration with the reference instead; it is resolved, and checked against the secret's allowedHosts, when an "
-                    + "agent uses it.");
+        // the credential itself. A ${connection:…} is refused for the same reason: its
+        // stored credential belongs to the agents that name the connection, and an
+        // allowed origin does not make the editor one of them.
+        if (SecretReference.isVaultReference(apiKey) || GlobalVariableResolver.containsReference(apiKey)
+                || ConnectionResolver.containsReference(apiKey)) {
+            return badRequest(
+                    MCP_AUTHORIZATION_HEADER + " must carry the credential itself: a ${vault:…}, ${vars:…} or ${connection:…} reference is not "
+                            + "resolved on a discovery probe, because the probe connects to whatever URL the request names. Save the MCP "
+                            + "configuration with the reference instead; it is resolved, and checked against the secret's allowedHosts, when an "
+                            + "agent uses it.");
         }
         return probe(request.url(), request.transport(), apiKey);
     }

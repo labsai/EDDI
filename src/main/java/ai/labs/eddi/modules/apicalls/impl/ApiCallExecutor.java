@@ -1031,6 +1031,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", refused);
             }
             throw refused;
+        } catch (SecretResolver.SecretNotGrantedException refused) {
+            // A vault grant that leaves the agent out (#1179): as deterministic as a
+            // refused reference — execute() resolves with the same agent's access and
+            // would refuse it again — and its message names the secret and the agent,
+            // never a value. Refused at the gate, before a human approves a call that
+            // cannot run; a call that can diverge falls back as above.
+            if (canExecuteDivergeFromResolve(call)) {
+                throw new LifecycleException(
+                        "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", refused);
+            }
+            throw new ConfigReferenceRefusedException(refused.getMessage());
         } catch (Exception e) {
             // Deliberately NOT logged here — throw only. Unlike execute(), the sole
             // caller of resolve() is the gate-time/pre-execution pinning path, which

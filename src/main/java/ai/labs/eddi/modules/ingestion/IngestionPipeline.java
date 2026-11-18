@@ -34,6 +34,7 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
 import ai.labs.eddi.modules.rag.RagIngestionService;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -624,6 +625,10 @@ public class IngestionPipeline {
                                         IngestionSource source, String documentId) {
 
         String sourceKey = stateKey(ragConfigId, source);
+        // A key the vault grant withholds from knowledge-base work is not an outage:
+        // thrown before the state changes, so nothing is tombstoned and the caller
+        // reports the refusal instead of asking for a retry that cannot succeed.
+        embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
         // The state row goes first. If the removal below fails, a tombstoned row
         // means the next run re-ingests the document rather than reporting it
         // unchanged over vectors that were never deleted.
@@ -677,6 +682,20 @@ public class IngestionPipeline {
      *         are still there
      */
     public boolean forgetSource(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        return forgetSourceChecked(ragConfigId, knowledgeBase, source);
+    }
+
+    /**
+     * Throws when the vault grant withholds the knowledge base's store key from
+     * knowledge-base work, so the caller can refuse a change whose cleanup could
+     * not run: {@link #forgetSource} would fail, and the content would stay
+     * retrievable with nothing left to list it (#1179).
+     */
+    public void requireCanForget(RagConfiguration knowledgeBase) {
+        embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+    }
+
+    private boolean forgetSourceChecked(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
         String sourceKey = stateKey(ragConfigId, source);
         try {
             embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION)
@@ -1067,6 +1086,10 @@ public class IngestionPipeline {
                 // For writing: an in-memory store built under another embedding
                 // configuration is replaced rather than mixed with this run's vectors.
                 store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+            } else {
+                // The same store for the whole run, but its grant read again on each use:
+                // a run can take hours, and a grant narrowed meanwhile must stop it (#1179).
+                embeddingStoreFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return store;
         }
@@ -1076,6 +1099,8 @@ public class IngestionPipeline {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
                 model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+            } else {
+                embeddingModelFactory.requireGranted(knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
             return model;
         }
@@ -1440,8 +1465,12 @@ public class IngestionPipeline {
         }
 
         private void recordDocumentFailure(RuntimeException e) {
-            // Either refusal ends the run: no later document could be stored either.
-            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
+            // Each refusal ends the run: no later document could be stored either. A
+            // vault grant that withholds the embedding or store key from knowledge-base
+            // work (#1179) is one of them: the run fails with the grant's message, and,
+            // stopped short, it tombstones nothing.
+            if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException
+                    || e instanceof SecretResolver.SecretNotGrantedException) && storeRefused == null) {
                 storeRefused = e.getMessage();
                 LOGGER.errorf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
                         LogSanitizer.sanitize(storeRefused));

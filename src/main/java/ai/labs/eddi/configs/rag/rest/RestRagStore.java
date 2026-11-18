@@ -117,6 +117,9 @@ public class RestRagStore implements IRestRagStore {
         RagConfiguration previous = readQuietly(id, version);
         storageGuard.prepareUpdate(id, previous, ragConfiguration);
         Set<String> previousSourceIds = sourceIdsOf(previous);
+        // Before the write: a removal whose cleanup the vault grant would refuse is
+        // refused here (403), rather than saved with its content left retrievable.
+        sourceIngestionService.requireRemovalAuthorized(previous, ragConfiguration);
         Response response = restVersionInfo.update(id, version, ragConfiguration);
         releaseSupersededInMemoryStore(id, previous, ragConfiguration);
         forgetIngestionStateOnMove(id, previous, ragConfiguration);

@@ -485,7 +485,8 @@ public class VaultGrantChecker {
         } catch (Exception e) {
             // Let through, as the class contract chooses, but not quietly: the deploy
             // check did not run. The resolver still checks the grant at every
-            // resolution and refuses one it cannot read (#1179).
+            // resolution: under enforce it refuses one it cannot read, under warn it
+            // logs and resolves, under off it does not read the grant (#1179).
             LOGGER.warnf("Could not verify the vault grant of %s for agent '%s' (%s); treating it as granted",
                     sanitize(reference), sanitize(agentId), e.getClass().getSimpleName());
             return true;

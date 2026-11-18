@@ -256,6 +256,10 @@ public class VaultGrantImpactAnalyzer {
             message = "Deployed agent(s) " + agentIds(impact.agentsLosingAccess()) + " already reference " + secret.toReferenceString()
                     + ", and the grant it was created with leaves them out: " + consequence + ". Add them to allowedAgents if they "
                     + "should use it.";
+            if (!impact.complete()) {
+                // Both at once: a named casualty must not hide that the list may be short.
+                message += " The deployed agents could not all be checked, so others may be affected too.";
+            }
         } else if (!impact.complete()) {
             String cause = impact.unverifiedAgents().isEmpty()
                     ? "the deployed agents could not all be listed"
@@ -271,9 +275,20 @@ public class VaultGrantImpactAnalyzer {
         return message;
     }
 
+    /**
+     * How many agent ids a warning names before it summarises the rest. The warning
+     * also travels as a response header ({@code X-Eddi-Warnings}), and a proxy with
+     * a default 4–8 KB header buffer answers 502 to a longer one — after the secret
+     * was stored.
+     */
+    static final int MAX_NAMED_AGENTS = 20;
+
     private static String agentIds(List<AffectedAgent> agents) {
         Set<String> ids = new LinkedHashSet<>();
         agents.forEach(agent -> ids.add(agent.agentId()));
-        return String.join(", ", ids);
+        if (ids.size() <= MAX_NAMED_AGENTS) {
+            return String.join(", ", ids);
+        }
+        return String.join(", ", ids.stream().limit(MAX_NAMED_AGENTS).toList()) + " and " + (ids.size() - MAX_NAMED_AGENTS) + " more";
     }
 }

@@ -84,7 +84,7 @@ class EmbeddingStoreFactoryInMemoryTest {
                                                 int maxInMemorySegments, Ticker ticker) {
         return new EmbeddingStoreFactory(variables, secrets, maxInMemorySegments, ticker) {
             @Override
-            EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config, SecretAccess access) {
+            EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config, Map<String, String> expanded, SecretAccess access) {
                 return new InMemoryEmbeddingStore<>();
             }
         };

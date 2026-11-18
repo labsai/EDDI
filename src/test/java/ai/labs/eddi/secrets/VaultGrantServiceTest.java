@@ -129,10 +129,11 @@ class VaultGrantServiceTest {
         service.secretResolver = resolver;
 
         service.grantAgent(SECRET, NEW_AGENT, "admin", "rest", true);
-        verify(resolver, never()).invalidateCache(any());
+        verify(resolver, never()).invalidateGrant(any());
 
         service.grantAgent(SECRET, NEW_AGENT, "admin", "rest", false);
-        verify(resolver).invalidateCache(SECRET);
+        verify(resolver).invalidateGrant(SECRET);
+        verify(resolver, never()).invalidateCache(any());
     }
 
     @Test

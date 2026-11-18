@@ -105,7 +105,9 @@ class RestSecretStoreGrantOnCreateTest {
             // create no longer has to stand in for that check.
             assertEquals(201, resp.getStatus());
             assertTrue(String.valueOf(entityOf(resp).get("warning")).contains("agentTwo"));
-            verify(secretProvider).store(any(), any(), any(), any(), any());
+            // The warning is safe to return only because the write keeps both lists it
+            // was computed from.
+            verify(secretProvider).store(new SecretReference("default", "k"), "v", null, grant, List.of("api.example.com"));
         }
 
         @Test
@@ -325,8 +327,10 @@ class RestSecretStoreGrantOnCreateTest {
                     new IRestSecretStore.GrantRequest(List.of("agentOne"), null));
             assertEquals(200, resp.getStatus());
             verify(secretProvider, never()).updateAllowedHosts(any(), any());
-            // Invalidated once for the grant (#1179), not a second time for hosts.
-            verify(secretResolver).invalidateCache(any());
+            // The grant evicted once (#1179), and nothing else: no host list was written,
+            // so the clients built from the secret stay.
+            verify(secretResolver).invalidateGrant(any());
+            verify(secretResolver, never()).invalidateCache(any());
             assertEquals(List.of("api.openai.com"), entityOf(resp).get("allowedHosts"));
 
             Response dryRun = rest(VaultGrantGate.Mode.ENFORCE).updateGrant("default", "k", true,

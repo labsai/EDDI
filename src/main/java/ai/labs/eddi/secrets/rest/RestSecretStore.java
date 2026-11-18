@@ -316,9 +316,11 @@ public class RestSecretStore implements IRestSecretStore {
                 // of the grant (#1179), so the new one must reach every node's cache
                 // now: a narrowed grant that waited for the TTL would leave a removed
                 // agent resolving the secret for minutes, and a widened one would keep
-                // refusing the agent just added. invalidateCache reaches the cluster.
+                // refusing the agent just added. Only the grant cache: the value and the
+                // host list are unchanged, so the clients built from the secret stay, and
+                // other agents' MCP sessions are not closed. The event reaches the cluster.
                 if (!hostsWritten) {
-                    secretResolver.invalidateCache(ref);
+                    secretResolver.invalidateGrant(ref);
                 }
             }
 
@@ -459,9 +461,12 @@ public class RestSecretStore implements IRestSecretStore {
         var warnings = new ArrayList<String>();
         if (!losingAccess.isEmpty()) {
             warnings.add(losingAccess.size() + " deployed agent(s) reference this secret and are not on the new grant list. "
-                    + "Under eddi.vault.grant-enforcement=enforce they are refused the secret from now on — the grant is checked "
-                    + "whenever a secret is resolved — and their next deployment is refused too. Add them to allowedAgents, or "
-                    + "remove the reference from their configuration first.");
+                    + (dryRun
+                            ? "If this change is applied, under eddi.vault.grant-enforcement=enforce they would be refused the secret — "
+                                    + "the grant is checked whenever a secret is resolved — and their next deployment would be refused too. "
+                            : "Under eddi.vault.grant-enforcement=enforce they are refused the secret from now on — the grant is checked "
+                                    + "whenever a secret is resolved — and their next deployment is refused too. ")
+                    + "Add them to allowedAgents, or remove the reference from their configuration first.");
         }
         if (!impact.complete()) {
             warnings.add("The deployed agents could not be listed in full, so this list may be short. Treat it as unknown "

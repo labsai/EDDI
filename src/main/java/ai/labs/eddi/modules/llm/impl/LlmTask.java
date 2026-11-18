@@ -63,6 +63,7 @@ import ai.labs.eddi.engine.lifecycle.IAnswerEditingTask;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -2307,7 +2308,16 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             resolvedType = stepModel.modelType();
             processedParams = stepModel.params();
         }
-        var chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams, secretAccessOf(memory));
+        // A key whose grant was narrowed while the call waited for approval (#1179) is
+        // refused here; it is raised inside the model phase below, before any approved
+        // tool runs, so onError=fallback serves its answer as for any model failure.
+        ChatModel chatModel = null;
+        SecretResolver.SecretNotGrantedException modelRefused = null;
+        try {
+            chatModel = chatModelRegistry.getOrCreate(resolvedType, processedParams, secretAccessOf(memory));
+        } catch (SecretResolver.SecretNotGrantedException refused) {
+            modelRefused = refused;
+        }
 
         // R12: the recovery policies a resumed turn shares with a live one. The model
         // phase below runs under the same onError guard, the final answer is re-asked
@@ -2349,11 +2359,16 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         boolean outputGuarded = guardrailService != null && !isNullOrEmpty(task.getOutputGuardrails());
         boolean bufferOutput = retryPolicy != null || RescueOptions.of(task).wraps()
                 || (outputGuarded && GuardrailService.requiresBuffering(task.getOutputGuardrails()));
-        var resumeBridge = bufferOutput
-                ? null
-                : createToolLoopStreamingBridge(memory.getEventSink(),
+        ChatModel resumeBridge = null;
+        if (!bufferOutput && modelRefused == null) {
+            try {
+                resumeBridge = createToolLoopStreamingBridge(memory.getEventSink(),
                         "false".equalsIgnoreCase(processedParams.get(KEY_ADD_TO_OUTPUT)), resolvedType, processedParams, task,
                         secretAccessOf(memory));
+            } catch (SecretResolver.SecretNotGrantedException refused) {
+                modelRefused = refused;
+            }
+        }
 
         // Spend gate: the same preflight as the live path, asked before the approved
         // tools run and before the first resumed model request. A conversation (or a
@@ -2371,6 +2386,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
         try {
             if (spendRefusal != null) {
                 throw new LlmSpendGate.SpendRefusedException(spendRefusal);
+            }
+            if (modelRefused != null) {
+                throw modelRefused;
             }
             result = agentOrchestrator.resumeToolLoop(resumeBridge != null ? resumeBridge : chatModel, task, memory, batch, resumeDecision,
                     toolHitlEnabled, jsonPolicy);
@@ -3737,7 +3755,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             ChatModel stepChat;
             try {
                 stepChat = chatModelRegistry.getOrCreate(stepModel.modelType(), stepModel.params(), secretAccessOf(memory));
-            } catch (ChatModelRegistry.UnsupportedLlmTaskException e) {
+            } catch (ChatModelRegistry.UnsupportedLlmTaskException | SecretResolver.SecretNotGrantedException e) {
+                // A refused key (#1179) goes through the reprompt's failure path like any
+                // other failure, so onError and the cascade's recorded spend still apply.
                 throw new LifecycleException(e.getLocalizedMessage(), e);
             }
             var stepPolicy = JsonResponseFormatPolicy.of(jsonMode, stepModel.modelType(), task.getJsonResponseFormat(),

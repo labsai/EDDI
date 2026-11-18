@@ -19,6 +19,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -180,6 +181,43 @@ class SecretResolverGrantTest {
             grant(List.of(AGENT_A));
             bus.deliver(ClusterEvent.SECRET_CHANGED, Map.of("tenantId", "default", "keyName", "openai-key"));
             assertThrows(SecretResolver.SecretNotGrantedException.class, () -> clustered.resolveValue(REF, SecretAccess.agent(AGENT_B)));
+        }
+
+        @Test
+        @DisplayName("a grant-only change evicts the grant, on every node, without notifying the listeners that close clients")
+        void grantOnlyChangeKeepsClients() throws Exception {
+            var bus = new RecordingEventBus();
+            var clustered = new SecretResolver(provider, meters, 5, 100, "enforce");
+            clustered.clusterEvents = bus;
+            clustered.init();
+            var notified = new ArrayList<SecretReference>();
+            clustered.registerInvalidationListener(notified::add);
+            grant(List.of(AGENT_A, AGENT_B));
+            clustered.resolveValue(REF, SecretAccess.agent(AGENT_B));
+            grant(List.of(AGENT_A));
+
+            bus.deliver(ClusterEvent.SECRET_CHANGED, Map.of("tenantId", "default", "keyName", "openai-key", "grantOnly", true));
+
+            assertThrows(SecretResolver.SecretNotGrantedException.class, () -> clustered.resolveValue(REF, SecretAccess.agent(AGENT_B)));
+            assertTrue(notified.isEmpty(), "no client may be closed for a grant-only edit");
+            verify(provider, times(1)).resolve(KEY); // the plaintext cache was kept
+        }
+
+        @Test
+        @DisplayName("invalidateGrant takes effect locally and announces a grant-only change")
+        void invalidateGrantIsLocalAndAnnounced() throws Exception {
+            var bus = new RecordingEventBus();
+            var clustered = new SecretResolver(provider, meters, 5, 100, "enforce");
+            clustered.clusterEvents = bus;
+            clustered.init();
+            grant(List.of(AGENT_A, AGENT_B));
+            clustered.resolveValue(REF, SecretAccess.agent(AGENT_B));
+            grant(List.of(AGENT_A));
+
+            clustered.invalidateGrant(KEY);
+
+            assertThrows(SecretResolver.SecretNotGrantedException.class, () -> clustered.resolveValue(REF, SecretAccess.agent(AGENT_B)));
+            assertTrue(bus.published.stream().anyMatch(p -> Boolean.TRUE.equals(p.payload().get("grantOnly"))), "the cluster is told");
         }
     }
 

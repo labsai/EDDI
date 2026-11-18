@@ -227,13 +227,26 @@ export function SecretsPage() {
         createOnly: true,
       },
       {
-        onSuccess: () => {
-          toast.success(
-            t("secrets.storeSuccess", {
-              key: keyName,
-              defaultValue: `Secret "${keyName}" stored`,
-            }),
-          );
+        onSuccess: (data) => {
+          if (data?.warning) {
+            // Stored, but deployed agents that reference the key are not on its
+            // grant: under enforce they are refused it at their next turn. Kept on
+            // screen until dismissed, because it names who to add.
+            toast.warning(
+              t("secrets.storeWarning", {
+                key: keyName,
+                defaultValue: `Secret "${keyName}" stored, but its grant leaves out deployed agents that use it`,
+              }),
+              { description: data.warning, duration: Infinity },
+            );
+          } else {
+            toast.success(
+              t("secrets.storeSuccess", {
+                key: keyName,
+                defaultValue: `Secret "${keyName}" stored`,
+              }),
+            );
+          }
           setShowCreate(false);
           setNewKeyName("");
           setNewValue("");

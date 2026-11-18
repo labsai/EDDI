@@ -251,7 +251,7 @@ class EmbeddingStoreFactoryExtendedTest {
         }
 
         @Test
-        @DisplayName("Same type and kbId with null vs empty params should produce different stores")
+        @DisplayName("Same type and kbId with null vs empty params is one store: both describe no parameters")
         void nullVsEmptyParams() {
             var factory = EmbeddingStoreFactoryInMemoryTest.offlineFactory(globalVariableResolver, secretResolver, 50_000,
                     Ticker.systemTicker());
@@ -267,9 +267,9 @@ class EmbeddingStoreFactoryExtendedTest {
             var store1 = factory.getOrCreate("kb1", config1, SecretAccess.outsideAgentGrants("test"));
             var store2 = factory.getOrCreate("kb1", config2, SecretAccess.outsideAgentGrants("test"));
 
-            // null and empty map produce different cache keys, so different store instances
-            assertNotSame(store1, store2,
-                    "null and empty storeParameters should produce different cache keys");
+            // The key is the parameters the store is built from (variables expanded,
+            // #1179), and absent parameters are built as an empty map: one store.
+            assertSame(store1, store2, "null and empty storeParameters describe the same store");
         }
     }
 

@@ -589,7 +589,7 @@ function GrantEditor({
           <p className="ps-6 text-xs text-warning">
             {t(
               "secrets.grantLosingAccessBody",
-              "They lose access immediately — the grant is checked whenever a secret is used, not only when an agent is deployed — so their next turn that needs it fails, and so does their next deployment.",
+              "In enforce mode (the default) they lose access — on this server at once, on other cluster nodes as the change reaches them — because the grant is checked whenever a secret is used, not only when an agent is deployed: their next turn that needs it fails, and so does their next deployment. In warn mode this is only logged.",
             )}
           </p>
           <label className="flex items-start gap-2 ps-6 text-xs text-warning">

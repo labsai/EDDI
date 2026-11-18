@@ -40,6 +40,12 @@ export interface SecretStoreResponse {
   reference: string;
   tenantId: string;
   keyName: string;
+  /**
+   * Set when a create stored a secret whose grant leaves out deployed agents that
+   * already reference it (or the check could not see every deployment). The
+   * secret IS stored; under enforce those agents are refused it at resolution.
+   */
+  warning?: string;
 }
 
 /** Why an `allowedHosts` entry was refused before it was sent. */

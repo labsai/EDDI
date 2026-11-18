@@ -138,8 +138,9 @@ public class VaultGrantService {
             try {
                 SecretMetadata after = secretProvider.updateGrant(secret, next, null, current);
                 if (secretResolver != null) {
-                    // Every node, not only this one: the event reaches the cluster.
-                    secretResolver.invalidateCache(secret);
+                    // Every node, not only this one: the event reaches the cluster. The
+                    // grant only: the value and its clients are unchanged.
+                    secretResolver.invalidateGrant(secret);
                 }
                 audit(secret, agentId, actor, origin, current, after.allowedAgents());
                 return new AppendResult(before, after, true);

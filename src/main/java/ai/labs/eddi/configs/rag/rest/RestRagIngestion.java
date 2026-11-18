@@ -910,7 +910,12 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         }
 
-        var outcome = ingestedFileService.delete(ragConfigId, resolved.knowledgeBase(), resolved.source(), fileId);
+        IngestedFileService.DeleteOutcome outcome;
+        try {
+            outcome = ingestedFileService.delete(ragConfigId, resolved.knowledgeBase(), resolved.source(), fileId);
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            return secretRefused(e);
+        }
         return switch (outcome) {
             case NOT_FOUND -> Response.status(Response.Status.NOT_FOUND)
                     .entity(Map.of("error", "No file '" + fileId + "' on this source")).build();

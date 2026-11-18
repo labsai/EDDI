@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.llm.impl.SummaryCitations;
 import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultGrantGate;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.core.io.JsonStringEncoder;
@@ -1042,6 +1043,11 @@ public class DreamService {
         Throwable current = throwable;
         // Bounded walk — a self-referential cause chain must not spin forever.
         for (int depth = 0; current != null && depth < 10; depth++, current = current.getCause()) {
+            if (current instanceof SecretResolver.SecretNotGrantedException) {
+                // A vault grant refusal is configuration, never a blip — even when the
+                // secret's name happens to contain "429" or "timeout" (#1179).
+                return false;
+            }
             if (current instanceof SocketTimeoutException || current instanceof TimeoutException || current instanceof ConnectException) {
                 return true;
             }

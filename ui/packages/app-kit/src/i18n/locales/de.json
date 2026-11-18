@@ -347,6 +347,7 @@
     "valuePlaceholder": "Secret-Wert eingeben…",
     "store": "Secret speichern",
     "storeSuccess": "Secret \"{{key}}\" gespeichert",
+    "storeWarning": "Secret „{{key}}“ gespeichert, aber seine Berechtigung schließt bereitgestellte Agenten aus, die es verwenden",
     "descriptionLabel": "Beschreibung (optional)",
     "allowedHosts": "Erlaubte Ziele",
     "allowedHostsAdd": "Erlaubten Host hinzufügen",

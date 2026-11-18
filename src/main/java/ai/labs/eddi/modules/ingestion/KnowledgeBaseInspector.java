@@ -195,6 +195,10 @@ public class KnowledgeBaseInspector {
 
     private List<EmbeddingMatch<TextSegment>> search(String ragConfigId, RagConfiguration knowledgeBase, String text,
                                                      Filter narrowing, int maxResults, double minScore) {
+        // The store's grant first: a store key the grant withholds would refuse the
+        // search anyway, after the query had been sent to (and paid for at) the
+        // embedding provider. The lookup below checks again.
+        embeddingStoreFactory.requireGranted(knowledgeBase, INSPECTION);
         Embedding queryVector = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.QUERY, INSPECTION)
                 .embed(text).content();
         // Retrieval's own isolation, always: a knowledge base in the per-id layout

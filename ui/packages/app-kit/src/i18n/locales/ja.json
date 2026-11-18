@@ -347,6 +347,7 @@
     "valuePlaceholder": "Secret 値を入力…",
     "store": "Secret を保存",
     "storeSuccess": "Secret \"{{key}}\" を保存しました",
+    "storeWarning": "シークレット「{{key}}」を保存しましたが、その権限は使用中のデプロイ済みエージェントを除外しています",
     "descriptionLabel": "説明 (任意)",
     "allowedHosts": "許可された送信先",
     "allowedHostsAdd": "許可するホストを追加",

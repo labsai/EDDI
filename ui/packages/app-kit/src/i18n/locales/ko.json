@@ -347,6 +347,7 @@
     "valuePlaceholder": "Secret 값 입력…",
     "store": "Secret 저장",
     "storeSuccess": "Secret \"{{key}}\" 저장됨",
+    "storeWarning": "시크릿 \"{{key}}\"을(를) 저장했지만, 그 권한이 이를 사용하는 배포된 에이전트를 제외합니다",
     "descriptionLabel": "설명 (선택)",
     "allowedHosts": "허용된 대상",
     "allowedHostsAdd": "허용 호스트 추가",

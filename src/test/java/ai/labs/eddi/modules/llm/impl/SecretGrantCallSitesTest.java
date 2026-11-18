@@ -16,6 +16,7 @@ import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretMetadata;
 import ai.labs.eddi.secrets.model.SecretReference;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -23,6 +24,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+import dev.langchain4j.service.tool.ToolExecutor;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import jakarta.inject.Provider;
 import org.junit.jupiter.api.BeforeEach;
@@ -35,10 +37,12 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNotSame;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -146,6 +150,29 @@ class SecretGrantCallSitesTest {
         }
 
         @Test
+        @DisplayName("a variable repointed to another secret is another cache key: the model built with the old one is not handed out")
+        void repointedVariableMissesTheCache() throws Exception {
+            var keyB = new SecretReference("default", "other-key");
+            when(provider.resolve(keyB)).thenReturn("sk-other");
+            when(provider.getMetadata(keyB))
+                    .thenReturn(new SecretMetadata("default", "other-key", Instant.now(), null, null, "c", null, List.of(AGENT_A, AGENT_B)));
+            Map<String, String> params = Map.of("apiKey", "${vars:llm-key}", "modelName", "gpt-x");
+            var binding = new AtomicReference<>(REF);
+            when(variables.resolveAll(any())).thenAnswer(inv -> {
+                Map<String, String> resolved = new HashMap<>(inv.getArgument(0));
+                resolved.replaceAll((k, v) -> "${vars:llm-key}".equals(v) ? binding.get() : v);
+                return resolved;
+            });
+
+            ChatModel builtWithA = registry.getOrCreate("openai", params, SecretAccess.agent(AGENT_A));
+            binding.set("${vault:other-key}");
+            ChatModel forB = registry.getOrCreate("openai", params, SecretAccess.agent(AGENT_B));
+
+            assertNotSame(builtWithA, forB, "B is granted the new secret only, and must not get the model built with the old one");
+            assertEquals(2, builds.get());
+        }
+
+        @Test
         void conversationMemoryNamesTheAgent() {
             IConversationMemory memory = mock(IConversationMemory.class);
             when(memory.getAgentId()).thenReturn(AGENT_B);
@@ -236,6 +263,28 @@ class SecretGrantCallSitesTest {
             // way).
             assertTrue(result.failures().getFirst().message().contains("allowedAgents"), result.failures().getFirst().message());
             verify(provider, never()).resolve(KEY);
+        }
+
+        @Test
+        @DisplayName("an MCP tool handed to an agent reads that agent's grant again when it is called")
+        void mcpToolCallChecksTheGrant() {
+            var manager = new McpToolProviderManager(variables, secretResolver);
+            var config = new McpServerConfig();
+            config.setName("weather");
+            config.setUrl("https://mcp.example.com/mcp");
+            config.setApiKey(REF);
+            var calls = new AtomicInteger();
+            Map<String, ToolExecutor> executors = Map.of("weather_now", (request, memoryId) -> {
+                calls.incrementAndGet();
+                return "sunny";
+            });
+            var request = ToolExecutionRequest.builder().name("weather_now").arguments("{}").build();
+
+            assertEquals("sunny", manager.grantChecked(executors, config, SecretAccess.agent(AGENT_A)).get("weather_now").execute(request, "m"));
+            String refused = manager.grantChecked(executors, config, SecretAccess.agent(AGENT_B)).get("weather_now").execute(request, "m");
+
+            assertTrue(refused.startsWith("Error:"), refused);
+            assertEquals(1, calls.get(), "the shared executor never ran for the agent the grant leaves out");
         }
 
         @Test

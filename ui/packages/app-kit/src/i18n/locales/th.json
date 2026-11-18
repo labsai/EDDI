@@ -347,6 +347,7 @@
     "valuePlaceholder": "ป้อนค่า Secret…",
     "store": "บันทึก Secret",
     "storeSuccess": "บันทึก Secret \"{{key}}\" แล้ว",
+    "storeWarning": "บันทึกความลับ \"{{key}}\" แล้ว แต่สิทธิ์ของมันไม่รวมเอเจนต์ที่ดีพลอยแล้วซึ่งใช้งานอยู่",
     "descriptionLabel": "คำอธิบาย (ไม่จำเป็น)",
     "allowedHosts": "ปลายทางที่อนุญาต",
     "allowedHostsAdd": "เพิ่มโฮสต์ที่อนุญาต",

@@ -2088,7 +2088,7 @@
     "grantEmptyError": "Adicione pelo menos um agente ou escolha “Todos os agentes”. Uma lista vazia não é permitida.",
     "grantCheckingImpact": "A verificar os agentes implementados…",
     "grantLosingAccessTitle": "Agentes implementados que usam este segredo e perderiam o acesso ({{count}})",
-    "grantLosingAccessBody": "Perdem o acesso de imediato — a permissão é verificada sempre que o segredo é usado, não só quando um agente é implementado — por isso o próximo turno que precisar dele falha, tal como a próxima implementação.",
+    "grantLosingAccessBody": "No modo enforce (o predefinido) perdem o acesso — de imediato neste servidor e nos outros nós do cluster quando a alteração lá chegar — porque a permissão é verificada sempre que o segredo é usado, não só quando um agente é implementado: o próximo turno que precisar dele falha, tal como a próxima implementação. No modo warn isto é apenas registado.",
     "grantAcknowledge": "Compreendo que estes agentes não voltarão a ser implementados até serem adicionados de novo ou a sua configuração deixar de usar este segredo.",
     "grantSaved": "Acesso atualizado para “{{key}}”",
     "grantImpactFailed": "Não foi possível verificar que agentes implementados usam este segredo, pelo que qualquer um pode perder o acesso.",

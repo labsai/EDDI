@@ -161,20 +161,36 @@ public class EmbeddingModelFactory {
      */
     public EmbeddingModel getOrCreate(RagConfiguration config, EmbeddingInputType inputType, SecretAccess access) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
-        secretResolver.requireGranted(globalVariableResolver.resolveAll(rawParams), access,
-                "embedding model '" + config.getEmbeddingProvider() + "'");
+        // One expansion for the grant check, the cache key and the build: a variable
+        // repointed to another secret is another key, so a model built with the old
+        // secret is never handed to an agent checked against the new one (#1179).
+        Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        secretResolver.requireGranted(params, access, "embedding model '" + config.getEmbeddingProvider() + "'");
         // The role is part of the key: to an asymmetric provider the two roles are
         // two different models, and sharing one entry is precisely the defect.
         // A structural key, not a concatenated TreeMap.toString(): that rendering has
         // no unambiguous entry boundaries ({a='x, b=y'} looks like {a='x', b='y'}), so
         // two configurations could share one client — and its endpoint.
-        var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), config.getEmbeddingParameters(), inputType);
-        return cache.get(cacheKey, k -> build(config, inputType, access));
+        var cacheKey = new ModelCacheKey(config.getEmbeddingProvider(), params, inputType);
+        return cache.get(cacheKey, k -> build(config, params, inputType, access));
     }
 
-    private EmbeddingModel build(RagConfiguration config, EmbeddingInputType inputType, SecretAccess access) {
+    /**
+     * The grant check of {@link #getOrCreate}, without building or looking up a
+     * model: for a caller that holds a model across many calls (an ingestion run)
+     * and must notice a grant narrowed meanwhile.
+     *
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
+     */
+    public void requireGranted(RagConfiguration config, SecretAccess access) {
         Map<String, String> rawParams = config.getEmbeddingParameters() != null ? config.getEmbeddingParameters() : Map.of();
-        Map<String, String> params = globalVariableResolver.resolveAll(rawParams);
+        secretResolver.requireGranted(globalVariableResolver.resolveAll(rawParams), access,
+                "embedding model '" + config.getEmbeddingProvider() + "'");
+    }
+
+    private EmbeddingModel build(RagConfiguration config, Map<String, String> expandedParams, EmbeddingInputType inputType, SecretAccess access) {
+        Map<String, String> params = expandedParams;
         ConnectionParameterGuard.rejectConnectionReferences(params);
         // Trimmed, as RagConfiguration validates it: " openai" must not save and then
         // fail here as an unsupported provider.

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
@@ -69,12 +70,14 @@ class A2AToolsProviderTest {
         var agentConfig = new A2AAgentConfig();
         var spec = ToolSpecification.builder().name("peer_tool").build();
         var result = new A2AToolProviderManager.A2AToolsResult(List.of(spec), Map.of());
-        when(manager.discoverTools(eq(List.of(agentConfig)), any())).thenReturn(result);
+        when(manager.discoverTools(eq(List.of(agentConfig)), eq(SecretAccess.agent("agent-1")))).thenReturn(result);
         var provider = new A2AToolsProvider(manager);
 
         var contribution = provider.contribute(context(List.of(agentConfig)));
 
         assertEquals(List.of(spec), contribution.specs());
-        verify(manager).discoverTools(eq(List.of(agentConfig)), any());
+        // The tools are assembled for the conversation's agent: its grant is what is
+        // checked.
+        verify(manager).discoverTools(eq(List.of(agentConfig)), eq(SecretAccess.agent("agent-1")));
     }
 }

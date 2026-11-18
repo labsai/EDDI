@@ -147,16 +147,26 @@ public class SemanticFallback {
         if (isNullOrEmpty(input) || examples.isEmpty() || Thread.currentThread().isInterrupted()) {
             return Optional.empty();
         }
+        // Nothing embedded yet and a failed build still backing off: do not ask the
+        // factory again on every turn.
+        if (exampleEmbeddings == null && backingOff && clock.getAsLong() - retryNotBefore < 0) {
+            return Optional.empty();
+        }
+        // The model is asked for once per classification, for this agent, and that
+        // one answer is used below: a refusal is handled here, before anything shared
+        // is touched, so it can neither clear the vectors nor start the back-off that
+        // the agents still granted would then sit out.
+        EmbeddingModel current;
         try {
-            model.apply(access);
+            current = model.apply(access);
         } catch (SecretResolver.SecretNotGrantedException e) {
             LOGGER.warnf("Semantic parser fallback skipped: %s", e.getMessage());
             return Optional.empty();
         } catch (RuntimeException e) {
-            // any other failure is the provider's, handled (and backed off) below
+            current = null; // the provider's failure, handled (and backed off) below
         }
 
-        EmbeddedExamples embedded = exampleEmbeddings(access);
+        EmbeddedExamples embedded = exampleEmbeddings(current);
         if (embedded == null) {
             return Optional.empty();
         }
@@ -208,14 +218,14 @@ public class SemanticFallback {
      * when the model changes; {@code null} while unavailable. Synchronized so that
      * concurrent turns embed the examples once.
      */
-    private EmbeddedExamples exampleEmbeddings(SecretAccess access) {
+    private EmbeddedExamples exampleEmbeddings(EmbeddingModel current) {
         EmbeddedExamples embedded = exampleEmbeddings;
-        if (embedded != null && isCurrent(embedded, access)) {
+        if (embedded != null && current != null && embedded.model() == current) {
             return embedded;
         }
         synchronized (this) {
             embedded = exampleEmbeddings;
-            if (embedded != null && isCurrent(embedded, access)) {
+            if (embedded != null && current != null && embedded.model() == current) {
                 return embedded;
             }
             // nanoTime has an arbitrary origin: compare differences, and only once a
@@ -224,7 +234,10 @@ public class SemanticFallback {
                 return null;
             }
             try {
-                EmbeddingModel embeddingModel = model.apply(access);
+                if (current == null) {
+                    throw new IllegalStateException("the embedding model could not be obtained");
+                }
+                EmbeddingModel embeddingModel = current;
                 List<Embedding> built = new ArrayList<>(examples.size());
                 for (int from = 0; from < examples.size(); from += EMBEDDING_BATCH_SIZE) {
                     if (Thread.currentThread().isInterrupted()) {
@@ -251,18 +264,6 @@ public class SemanticFallback {
                         RETRY_AFTER_FAILURE.toSeconds(), e.getMessage());
                 return null;
             }
-        }
-    }
-
-    /**
-     * Whether the supplier still hands out the model that embedded the examples. A
-     * supplier failure counts as a change: the rebuild then fails and backs off.
-     */
-    private boolean isCurrent(EmbeddedExamples embedded, SecretAccess access) {
-        try {
-            return model.apply(access) == embedded.model();
-        } catch (RuntimeException e) {
-            return false;
         }
     }
 }

@@ -391,7 +391,11 @@ public class McpToolProviderManager {
         Map<String, ToolExecutor> allExecutors = new HashMap<>();
         List<McpServerFailure> failures = new ArrayList<>();
 
-        for (McpServerConfig serverConfig : mcpServers) {
+        for (McpServerConfig configured : mcpServers) {
+            // Validated, grant-checked, cached and connected with ONE expansion of a
+            // ${vars:…} apiKey: a variable repointed to another secret is another
+            // cache key, never a hit on a session built with the old secret (#1179).
+            McpServerConfig serverConfig = bindCredential(configured);
             String url = serverConfig.getUrl();
             String serverName = serverConfig.getName() != null ? serverConfig.getName() : url;
 
@@ -450,7 +454,8 @@ public class McpToolProviderManager {
             if (cached != null && (System.currentTimeMillis() - cached.timestamp()) < toolCacheTtlMillis) {
                 LOGGER.debugf("Serving %d cached tools for MCP server '%s'", cached.toolSpecs().size(), sanitize(serverName));
                 count("cache_hit");
-                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), cached.executors(), serverName);
+                mergeServerTools(allSpecs, allExecutors, cached.toolSpecs(), grantChecked(cached.executors(), serverConfig, access),
+                        serverName);
                 continue;
             }
 
@@ -502,7 +507,7 @@ public class McpToolProviderManager {
 
                 toolCache.put(cacheKey(serverConfig), new CachedTools(List.copyOf(serverSpecs), Map.copyOf(serverExecutors),
                         System.currentTimeMillis()));
-                mergeServerTools(allSpecs, allExecutors, serverSpecs, serverExecutors, serverName);
+                mergeServerTools(allSpecs, allExecutors, serverSpecs, grantChecked(serverExecutors, serverConfig, access), serverName);
 
                 // Success — clear failure history for this server
                 recordSuccess(circuitKey);
@@ -660,7 +665,8 @@ public class McpToolProviderManager {
      *             static-configuration rejections {@link #discoverTools} applies,
      *             so the caller reports them identically
      */
-    public McpResourceBridge resourceBridgeTools(McpServerConfig serverConfig, SecretAccess access) {
+    public McpResourceBridge resourceBridgeTools(McpServerConfig configured, SecretAccess access) {
+        McpServerConfig serverConfig = bindCredential(configured);
         String url = serverConfig.getUrl();
         if (isNullOrEmpty(url)) {
             throw new IllegalArgumentException("MCP server URL must not be empty");
@@ -714,7 +720,7 @@ public class McpToolProviderManager {
         };
 
         return new McpResourceBridge(List.of(listSpec, readSpec),
-                Map.of(listName, listExecutor, readName, readExecutor));
+                grantChecked(Map.of(listName, listExecutor, readName, readExecutor), serverConfig, access));
     }
 
     /** The {@code uri} argument of a read_resource call, or null. */
@@ -1089,6 +1095,57 @@ public class McpToolProviderManager {
         } catch (SecretResolver.SecretNotGrantedException | ConnectionException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
         }
+    }
+
+    /**
+     * The executors handed to one agent, each reading that agent's grant again when
+     * it is called. The executors themselves are cached and shared by every agent
+     * naming the server, and their session resolves the credential under
+     * {@link #MCP_SESSION}; without this a grant narrowed between tool assembly and
+     * the call, or a connection repointed to a secret the agent is not granted,
+     * would still let the call carry the credential (#1179). The check reads the
+     * grant cache, so it costs no store round trip.
+     */
+    Map<String, ToolExecutor> grantChecked(Map<String, ToolExecutor> executors, McpServerConfig config, SecretAccess access) {
+        if (executors.isEmpty() || isNullOrEmpty(config.getApiKey()) || access == null || !access.checksGrant()) {
+            return executors;
+        }
+        String serverName = config.getName() != null ? config.getName() : config.getUrl();
+        Map<String, ToolExecutor> checked = new HashMap<>();
+        executors.forEach((name, executor) -> checked.put(name, (request, memoryId) -> {
+            try {
+                validateSecretGrant(config, access);
+            } catch (IllegalArgumentException e) {
+                LOGGER.warnf("MCP tool '%s' of server '%s' refused: %s", sanitize(name), sanitize(serverName), sanitize(e.getMessage()));
+                return "Error: the MCP server '" + serverName + "' cannot be used by this agent: " + e.getMessage();
+            }
+            return executor.execute(request, memoryId);
+        }));
+        return Map.copyOf(checked);
+    }
+
+    /**
+     * {@code config} with a {@code ${vars:…}} apiKey replaced by its expansion, or
+     * {@code config} itself when there is nothing to expand. Everything downstream
+     * (validation, the grant check, the tool and client cache keys, the transport)
+     * then reads the same credential binding.
+     */
+    McpServerConfig bindCredential(McpServerConfig config) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
+            return config;
+        }
+        String expanded = globalVariableResolver.resolveValue(apiKey);
+        if (expanded == null || expanded.equals(apiKey)) {
+            return config;
+        }
+        var bound = new McpServerConfig();
+        bound.setUrl(config.getUrl());
+        bound.setName(config.getName());
+        bound.setTransport(config.getTransport());
+        bound.setTimeoutMs(config.getTimeoutMs());
+        bound.setApiKey(expanded);
+        return bound;
     }
 
     /**

@@ -628,7 +628,6 @@ class CascadingModelExecutor {
                 StreamingChatModel streamingModel = streamLiveCandidate
                         ? registry.getOrCreateStreaming(modelType, mergedParams, LlmTask.secretAccessOf(memory))
                         : null;
-                stepStreamedLive = streamingModel != null;
 
                 // A live stream is terminal and MUST NOT be cancelled mid-flight: cancelling
                 // the awaiting virtual thread does not stop the provider's callback thread, so
@@ -658,6 +657,10 @@ class CascadingModelExecutor {
                 ChatModel chatModel = registry.getOrCreate(modelType,
                         streamingModel != null ? mergedParams : clampModelTimeout(mergedParams, stepTimeout, stepTrace),
                         LlmTask.secretAccessOf(memory));
+                // Only once both models are in hand: a lookup refused between the two
+                // (a grant narrowed meanwhile, #1179) has streamed nothing yet, and the
+                // reply carried forward must still be emitted.
+                stepStreamedLive = streamingModel != null;
 
                 // Per-step policy: the provider is the STEP's provider, not the task
                 // default, so an escalation from e.g. mistral to gemini stops sending the
