@@ -17,8 +17,8 @@ The new page answers, in order, what a visitor asks: what is this and is it for
 me, how do I run it, what does it look like, how does it work, what is in it,
 where are the docs, how do I build it. Sections:
 
-1. Banner, name, one-line description, six badges (release, Docker pulls,
-   licence, CI, OpenSSF Best Practices, Scorecard), one paragraph, link row.
+1. Banner, name, the badges (the ten the page had, plus the licence), one
+   paragraph, link row.
 2. **Why EDDI**: six bullets, and a plain statement that EDDI is a service you
    deploy rather than a library you import, with the libraries named for readers
    who want one. This replaces the comparison table, whose concurrency row
@@ -27,9 +27,12 @@ where are the docs, how do I build it. Sections:
 3. **Quick start**: the two installer commands, the URL, what is served at which
    path, and how to get a first agent. Options and alternatives are links.
 4. **What it looks like**: three screenshots instead of eleven.
-5. **How it works**: the pipeline, and a behaviour rule plus the LLM task that
-   listens for its action, copied from
-   [`developer-quickstart.md`](../developer-quickstart.md).
+5. **How it works**: an LLM agent's configuration (model, prompt, built-in
+   tools), copied from [`langchain.md`](../langchain.md#agent-mode-enhanced-features)
+   with the key as a vault reference, then who writes such documents and a short
+   paragraph on the pipeline. Behaviour rules get one sentence: most agents are
+   an LLM task with tools, and a first draft that led with a rule gave them far
+   more room than their use warrants.
 6. **What's included**: one table, eleven rows, each row linking to its guides.
 7. **Documentation** by intent, **Development** (short), **Community and
    support**, **License**.
@@ -65,8 +68,8 @@ no multi-file compose command (`ComposeStackTest`); the commands that moved to
   [`branding/readme-banner/banner.html`](../../branding/readme-banner/banner.html).
   The old one was a 1200×630 social card (tall for a README) whose tagline, "The
   Enterprise AI Orchestrator", matched neither the README nor the repository
-  description. The new one is 1280×380, carries the README's own line, and draws
-  the pipeline instead of generic artwork.
+  description. The new one is 1280×380, carries the README's own line, and shows
+  an agent's configuration instead of generic artwork.
 - **Screenshots:** retaken from the current Manager on its mock API; the old set
   showed the pages as they looked at 6.0. The mock API always reports version
   `6.0.0-demo`, so the capture hides the sidebar's version label rather than

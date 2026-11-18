@@ -4,16 +4,20 @@
 
 # EDDI
 
-[![Latest release](https://img.shields.io/github/v/release/labsai/EDDI?label=release&color=blue)](https://github.com/labsai/EDDI/releases) [![Docker pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![License](https://img.shields.io/github/license/labsai/EDDI)](LICENSE) [![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI)
+[![OpenSSF Best Practices](https://www.bestpractices.dev/projects/12355/badge?v=2)](https://www.bestpractices.dev/projects/12355) [![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/labsai/EDDI/badge)](https://securityscorecards.dev/viewer/?uri=github.com/labsai/EDDI) [![Codacy Badge](https://app.codacy.com/project/badge/Grade/2c5d183d4bd24dbaa77427cfbf5d4074)](https://app.codacy.com/organizations/gh/labsai/dashboard?utm_source=github.com&utm_medium=referral&utm_content=labsai/EDDI&utm_campaign=Badge_Grade)
 
-EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: the engine takes every turn through a deterministic pipeline of rules, API calls and model calls, keeps conversation and user memory, and records what happened. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, ships as a Red Hat-certified container image, and was selected as a UNIDO Trusted Partner for Industrial AI.
+[![CI](https://github.com/labsai/EDDI/actions/workflows/ci.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/ci.yml) [![CodeQL](https://github.com/labsai/EDDI/actions/workflows/codeql.yml/badge.svg)](https://github.com/labsai/EDDI/actions/workflows/codeql.yml) ![Tests](https://img.shields.io/badge/tests-20%2C000%2B-brightgreen) ![Coverage](https://img.shields.io/badge/coverage-%3E90%25%20instr%20%2F%20%3E80%25%20branch-brightgreen)
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![License](https://img.shields.io/github/license/labsai/EDDI)](LICENSE) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
+
+EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. The engine runs every turn through the same pipeline, enforces those settings, and records what happened. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, ships as a Red Hat-certified container image, and was selected as a UNIDO Trusted Partner for Industrial AI.
 
 [Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Quick start](#quick-start) · [Docker Hub](https://hub.docker.com/r/labsai/eddi) · [Discussions](https://github.com/labsai/EDDI/discussions)
 
 ## Why EDDI
 
-- **Agent logic is configuration.** Behavior rules, prompts, tools and API calls are versioned JSON documents. Change an agent without redeploying the service, diff it, export it as a ZIP, or sync it to another instance.
-- **A strict engine around a creative model.** Rules decide when a model is called and with which tools, and which turns or tool calls wait for [a human's approval](docs/hitl.md). The [project philosophy](docs/project-philosophy.md) puts it as "the engine is strict so the AI can be creative."
+- **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without redeploying the service, diff it, export it as a ZIP, or sync it to another instance.
+- **A strict engine around a creative model.** The engine, not the model, decides which tools an agent holds, what a conversation may cost, and which turns or tool calls wait for [a human's approval](docs/hitl.md). The [project philosophy](docs/project-philosophy.md) puts it as "the engine is strict so the AI can be creative."
 - **No dynamic code execution.** There is no `eval` and no script engine; custom logic runs in external MCP servers. Secrets sit in an envelope-encrypted vault, and the built-in tools refuse private and internal addresses (SSRF protection).
 - **Open protocols, both directions.** EDDI is an [MCP](docs/mcp-server.md) server (108 tools) and client, speaks [A2A](docs/a2a-protocol.md), and can present deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md).
 - **Built for regulated deployments.** An HMAC-secured [audit ledger](docs/audit-ledger.md), GDPR/CCPA erasure and export, and deployment guides for HIPAA and the EU AI Act.
@@ -65,11 +69,11 @@ Other ways in:
 
 <table>
 <tr>
-<td width="50%"><a href="screenshots/manager-conversation.png"><img src="screenshots/manager-conversation.png" alt="A conversation in the Manager, showing the actions each turn emitted" /></a></td>
+<td width="50%"><a href="screenshots/manager-conversation.png"><img src="screenshots/manager-conversation.png" alt="A conversation in the Manager, with the trace of each turn" /></a></td>
 <td width="50%"><a href="screenshots/manager-dashboard.png"><img src="screenshots/manager-dashboard.png" alt="The Manager dashboard" /></a></td>
 </tr>
 <tr>
-<td align="center"><em>Every turn shows the actions it emitted and how long each step took</em></td>
+<td align="center"><em>Every turn is traceable: what ran, and how long each step took</em></td>
 <td align="center"><em>Agents, workflows and recent conversations at a glance</em></td>
 </tr>
 </table>
@@ -78,50 +82,34 @@ The [Manager guide](docs/agent-manager-gui.md) and the [Workforce guide](docs/wo
 
 ## How it works
 
-Every user message runs through a pipeline of tasks, and each task reads and writes the conversation's memory:
-
-```
-Input → Parser → Behavior Rules → API calls / LLM → Output
-```
-
-Tasks do not call each other. A behavior rule emits **actions**, and a task runs when it listens for one of them. This rule hands anything the parser did not recognise to the model:
-
-```json
-{
-  "name": "Ask AI",
-  "conditions": [
-    {
-      "type": "inputmatcher",
-      "configs": { "expressions": "unknown(*)", "occurrence": "currentStep" }
-    }
-  ],
-  "actions": ["send_to_ai"]
-}
-```
-
-And this LLM task listens for that action:
+An agent is mostly one document: the model, its prompt, and what it may use. This one answers with OpenAI and may call three of the built-in tools:
 
 ```json
 {
   "tasks": [
     {
-      "id": "assistant",
-      "type": "ollama",
-      "description": "Local Ollama chat",
-      "actions": ["send_to_ai"],
+      "actions": ["help"],
+      "id": "aiAgent",
+      "type": "openai",
+      "description": "AI agent with calculator and web search",
       "parameters": {
-        "baseUrl": "http://host.docker.internal:11434",
-        "model": "llama3.2:3b",
-        "temperature": "0.7",
-        "systemMessage": "You are a helpful assistant.",
-        "addToOutput": "true"
-      }
+        "apiKey": "${vault:openai-key}",
+        "modelName": "gpt-4o",
+        "systemMessage": "You are a helpful assistant with access to tools."
+      },
+      "enableBuiltInTools": true,
+      "builtInToolsWhitelist": ["calculator", "datetime", "websearch"],
+      "conversationHistoryLimit": 10
     }
   ]
 }
 ```
 
-An agent is a list of workflows; a workflow is an ordered list of such steps, each pointing at a stored, versioned document. You rarely write them by hand: the Manager's wizard, the Platform Operator and the MCP server all create them for you. The [Developer Quickstart](docs/developer-quickstart.md) builds a complete agent over the REST API, and [Architecture](docs/architecture.md) explains the engine.
+The key is a reference into the secrets vault, never the key itself. The same document is where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
+
+You rarely write it by hand. The Manager's wizard, the Platform Operator and the MCP server (from Claude Desktop, Cursor or any other MCP client) create and change agents for you, and every save is a new version you can diff and export.
+
+Underneath, each message runs through a pipeline of steps that share the conversation's memory: parse the input, call APIs and the model, produce the output. Where a step must not be left to a model, such as a fixed reply or a mandatory check, deterministic [behavior rules](docs/behavior-rules.md) can decide it instead. [Architecture](docs/architecture.md) explains the engine, and the [Developer Quickstart](docs/developer-quickstart.md) builds an agent step by step over the REST API.
 
 ## What's included
 

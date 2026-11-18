@@ -57,7 +57,7 @@
   }
   .tags span { color: #57534e; padding: 0 9px; }
 
-  /* The pipeline: what a turn goes through. */
+  /* What an agent is: a config document, and what the engine adds around it. */
   .right {
     position: absolute; right: 56px; top: 0; bottom: 0; width: 580px;
     display: flex; flex-direction: column; justify-content: center;
@@ -73,13 +73,13 @@
     font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
     color: var(--muted);
   }
-  .steps { margin-top: 16px; display: flex; align-items: center; }
+  .steps { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; }
   .step {
     flex: 0 0 auto;
     padding: 10px 14px;
     border: 1px solid #44403c; border-radius: 10px;
     background: #0c0a09;
-    font-size: 17px; font-weight: 500; white-space: nowrap;
+    font-size: 16px; font-weight: 500; white-space: nowrap; color: #e7e5e4;
   }
   .step.rules { border-color: var(--amber); color: var(--amber-soft); background: rgba(245, 158, 11, 0.10); }
   .arrow { flex: 1 1 auto; height: 1px; min-width: 10px; background: #57534e; position: relative; }
@@ -113,17 +113,18 @@
 
   <div class="right">
     <div class="card">
-      <div class="card-title">One turn, one pipeline</div>
+      <div class="card-title">An agent is a JSON document</div>
+<pre><span class="k">"type"</span><span class="p">:</span> <span class="s">"openai"</span><span class="p">,</span>
+<span class="k">"modelName"</span><span class="p">:</span> <span class="s">"gpt-4o"</span><span class="p">,</span>
+<span class="k">"systemMessage"</span><span class="p">:</span> <span class="s">"You are a helpful assistant…"</span><span class="p">,</span>
+<span class="k">"builtInToolsWhitelist"</span><span class="p">:</span> <span class="p">[</span><span class="s">"calculator"</span><span class="p">,</span> <span class="s">"websearch"</span><span class="p">]</span></pre>
       <div class="steps">
-        <div class="step">Input</div><div class="arrow"></div>
-        <div class="step">Parser</div><div class="arrow"></div>
-        <div class="step rules">Rules</div><div class="arrow"></div>
-        <div class="step">API / LLM</div><div class="arrow"></div>
-        <div class="step">Output</div>
+        <div class="step">Tools</div>
+        <div class="step">Memory</div>
+        <div class="step">RAG</div>
+        <div class="step">Approvals</div>
+        <div class="step">Audit</div>
       </div>
-      <div class="memory">conversation memory, read and written by every step</div>
-<pre><span class="p">rule  emits      </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span>
-<span class="p">task  listens on </span><span class="k">"actions"</span><span class="p">:</span> <span class="p">[</span><span class="s">"send_to_ai"</span><span class="p">]</span></pre>
     </div>
   </div>
 </body>
