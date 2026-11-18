@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -260,9 +261,13 @@ class HitlTimeoutRearmSweepTest {
             armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(30));
             Instant firedAt = Instant.now();
             assertEquals(1, pollAt(firedAt));
+            var meters = new SimpleMeterRegistry();
+            observer.meterRegistry = meters;
 
             sweeps(SWEEPS);
 
+            assertEquals(1.0, meters.counter(HitlCrashRecoveryObserver.METRIC_REARMED_SPENT, "surface", "regular").count(),
+                    "the spent re-arm is counted once");
             verify(scheduleStore, times(1)).createSchedule(any());
             List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
             assertEquals(1, named.size());

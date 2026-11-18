@@ -6571,7 +6571,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_timeout_count_total` — nobody answered in time and the timeout policy fired. `eddi_hitl_timeout_arm_failures_total` — a pause whose timeout could not be scheduled; it waits without one until crash recovery re-creates it (a single node at its next start, a cluster within one sweep). `eddi_hitl_timeout_undecidable_total` — a timeout decision that can never apply (the stored plan changed, or it was refused as invalid), so the pause was cancelled.",
+          "description": "`eddi_hitl_timeout_count_total` — nobody answered in time and the timeout policy fired. `eddi_hitl_timeout_arm_failures_total` — a pause whose timeout could not be scheduled; it waits without one until crash recovery re-creates it (a single node at its next start, a cluster within one sweep). `eddi_hitl_timeout_undecidable_total` — a timeout decision that can never apply (the stored plan changed), so the pause was cancelled. `eddi_hitl_timeout_rearmed_spent_total` — a timeout that fired and completed while its pause still waits, re-armed an hour later.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -6611,6 +6611,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "{{surface}} — undecidable ({{reason}})"
+            },
+            {
+              "refId": "D",
+              "expr": "sum by (surface) (rate(eddi_hitl_timeout_rearmed_spent_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{surface}} — spent timeout re-armed"
             }
           ],
           "fieldConfig": {

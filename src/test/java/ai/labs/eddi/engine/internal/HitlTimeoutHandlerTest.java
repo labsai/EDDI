@@ -480,17 +480,41 @@ class HitlTimeoutHandlerTest {
         }
 
         @Test
-        @DisplayName("regular: a decision refused as invalid → the pause is cancelled, not left waiting")
-        void invalidDecision_cancelsThePause() throws Exception {
-            doThrow(new IllegalArgumentException("invalid"))
+        @DisplayName("regular: a generic IllegalArgumentException from the resume never cancels the pause — it is retried")
+        void genericIllegalArgument_doesNotCancel() throws Exception {
+            doThrow(new IllegalArgumentException("a bug somewhere in the resume"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_REJECT")));
+
+            verify(conversationService, never()).cancelPausedConversation(anyString(), anyString(), any());
+            verify(conversationService, never()).cancelPausedConversation(anyString(), anyString());
+        }
+
+        @Test
+        @DisplayName("regular: plan changed, but a decision on the pause is in flight (NOTHING_TO_CANCEL, IN_PROGRESS) → retried")
+        void planChangedCancelLostToInFlightDecision_isRetried() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
                     .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
             when(conversationService.cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID))
-                    .thenReturn(IConversationService.CancelOutcome.CANCELLED);
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.IN_PROGRESS);
 
-            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_REJECT")));
+            assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_APPROVE")));
+            assertEquals(0.0, undecidable("regular", HitlTimeoutHandler.REASON_PLAN_CHANGED), "counted only when cancelled");
+        }
 
-            verify(conversationService).cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID);
-            assertEquals(1.0, undecidable("regular", HitlTimeoutHandler.REASON_INVALID_DECISION));
+        @Test
+        @DisplayName("regular: plan changed, and the pause is no longer the one the timeout was armed for → completes")
+        void planChangedPauseGone_isDone() throws Exception {
+            doThrow(new IConversationService.PlanMismatchException("plan changed"))
+                    .when(conversationService).resumeConversation(eq("conv-1"), any(), isNull());
+            when(conversationService.cancelPausedConversation("conv-1", "system:timeout", PAUSE_ID))
+                    .thenReturn(IConversationService.CancelOutcome.NOTHING_TO_CANCEL);
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+
+            assertDoesNotThrow(() -> handler.handleTimeout(regular("AUTO_APPROVE")));
         }
 
         @Test
@@ -503,19 +527,6 @@ class HitlTimeoutHandlerTest {
             when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
 
             assertThrows(HitlTimeoutHandler.RetryLaterException.class, () -> handler.handleTimeout(regular("AUTO_REJECT")));
-        }
-
-        @Test
-        @DisplayName("group: a plan mismatch → the discussion's pause is cancelled, bound to the pause id")
-        void groupPlanChanged_cancelsThePause() throws Exception {
-            var md = HitlSchedules.timeoutMetadata("AUTO_APPROVE", HitlSchedules.SURFACE_GROUP, "gc-1", "42");
-            doThrow(new IGroupConversationService.GroupPlanMismatchException("plan changed"))
-                    .when(groupConversationService).resumeDiscussion(eq("gc-1"), any(), isNull());
-
-            assertDoesNotThrow(() -> handler.handleTimeout(md));
-
-            verify(groupConversationService).cancelPausedDiscussion("gc-1", ControlSignal.CANCEL_GRACEFUL, "42");
-            assertEquals(1.0, undecidable("group", HitlTimeoutHandler.REASON_PLAN_CHANGED));
         }
 
         @Test

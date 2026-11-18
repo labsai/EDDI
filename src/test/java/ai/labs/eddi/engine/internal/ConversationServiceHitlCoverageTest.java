@@ -15,10 +15,12 @@ import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService.CancelOutcome;
+import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
+import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -826,6 +828,48 @@ class ConversationServiceHitlCoverageTest {
         output.put("input", "hello");
         snapshot.getConversationOutputs().add(output);
         return snapshot;
+    }
+
+    // =========================================================================
+    // A timeout whose decision can never apply: the plan stored with the pause no
+    // longer matches its committed hash. Driven through the real resume and
+    // cancel code, with only the stores mocked.
+    // =========================================================================
+
+    @Nested
+    @DisplayName("HITL timeout on a pause whose stored plan changed")
+    class TimeoutOnChangedPlan {
+
+        @Test
+        @DisplayName("the resume refuses with PlanMismatchException, and the timeout cancels the pause it was armed for")
+        void planMismatchCancelsThePause() throws Exception {
+            Instant pausedAt = Instant.ofEpochMilli(1_700_000_000_000L);
+            var snapshot = rulePauseSnapshot();
+            snapshot.setHitlPausedAt(pausedAt);
+            snapshot.setHitlPlanHash("v1:" + "0".repeat(64)); // what the stored plan no longer hashes to
+            doReturn(snapshot).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+            doReturn(ConversationState.AWAITING_HUMAN).when(conversationMemoryStore).getConversationState(CONVERSATION_ID);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.IN_PROGRESS);
+            doReturn(true).when(conversationMemoryStore).compareAndSetState(
+                    CONVERSATION_ID, ConversationState.AWAITING_HUMAN, ConversationState.EXECUTION_INTERRUPTED);
+
+            var handler = new HitlTimeoutHandler();
+            handler.conversationService = conversationService;
+            handler.groupConversationService = mock(IGroupConversationService.class);
+            handler.meterRegistry = meterRegistry;
+
+            assertDoesNotThrow(() -> handler.handleTimeout(HitlSchedules.timeoutMetadata("AUTO_APPROVE", HitlSchedules.SURFACE_REGULAR,
+                    CONVERSATION_ID, HitlDecision.pauseIdOf(pausedAt))));
+
+            // Nothing ran: the resume was refused before the agent was even looked up
+            verify(agentFactory, never()).getAgent(any(), anyString(), anyInt());
+            // ...and the pause was ended explicitly instead of waiting forever
+            verify(conversationMemoryStore).compareAndSetState(CONVERSATION_ID, ConversationState.AWAITING_HUMAN,
+                    ConversationState.EXECUTION_INTERRUPTED);
+            assertEquals(1.0, meterRegistry.counter(HitlTimeoutHandler.METRIC_UNDECIDABLE, "surface", "regular", "reason",
+                    HitlTimeoutHandler.REASON_PLAN_CHANGED).count());
+        }
     }
 
     /** Stubs a single-step snapshot (no undo/redo available) in the given state. */

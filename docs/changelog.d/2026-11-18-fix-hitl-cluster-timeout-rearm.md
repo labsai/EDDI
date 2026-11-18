@@ -30,12 +30,19 @@
   `countPendingSchedulesByName` and `readScheduleByName` are unchanged.
 - **A timeout decision that can never apply ends the pause.** `HitlTimeoutHandler` used to complete the fire — and
   so leave the pause waiting forever — when the regular resume refused the decision because the plan stored with the
-  pause no longer matches the approved one (`PlanMismatchException`, which it mistook for a stale pause) or as
-  invalid (`IllegalArgumentException`); a group `GroupPlanMismatchException` likewise. It now cancels the pause the
-  timeout was armed for (the paused-only cancel bound to its pause id, audited as `system:timeout`), logs at `ERROR`
-  and counts `eddi_hitl_timeout_undecidable_total{surface,reason}`; a cancel that cannot be applied yet is retried.
-  A group or human-turn `ABORT` whose paused-only cancel returns `false` while the same pause still waits (a lost
-  race) is now retried instead of completed.
+  pause no longer hashes to the committed one (`PlanMismatchException`, which it mistook for a stale pause). It now
+  cancels the pause the timeout was armed for (the paused-only cancel bound to its pause id, audited as
+  `system:timeout`; the conversation ends `EXECUTION_INTERRUPTED`), logs at `ERROR` and counts
+  `eddi_hitl_timeout_undecidable_total{surface="regular",reason="plan_changed"}`. A cancel that does not apply while
+  a decision on the same pause is in flight (`NOTHING_TO_CANCEL` while `IN_PROGRESS`), or fails while the pause
+  waits, is retried. Every other failure of the timeout's resume — an `IllegalArgumentException` included, which
+  used to be logged and completed — is now retried while the pause waits, never turned into a cancel: it can come
+  from a broken deployment as well as from the decision. The group surface has no such case: `HitlPlanBinding.check`
+  accepts a `system:*` decision without a plan hash, so a group timeout never meets a plan mismatch. A group or
+  human-turn `ABORT` whose paused-only cancel returns `false` while the same pause still waits (a lost race) is now
+  retried instead of completed.
+- **A spent timeout re-armed by the sweep is counted**: `eddi_hitl_timeout_rearmed_spent_total{surface}`, so a pause
+  re-armed every hour forever is visible.
 - **A timeout that could not be scheduled at pause time is visible (review C7, that part only).**
   `ConversationHitlService.scheduleHitlTimeout` and the group approval and human-turn schedulers in
   `GroupHitlCoordinator` logged a failure at `WARN` and swallowed it. They now log at `ERROR` and count
@@ -78,12 +85,19 @@
   undeploy-disabled, unreadable and stale rows are replaced once; claimed, retrying, hand-disabled and legacy live
   rows are untouched; spent rows (also legacy) are re-armed once after the backoff; a restored pause replaces its
   spent row.
-- `HitlTimeoutHandlerTest`: plan mismatch and invalid decision cancel the pause and are counted; a failing cancel is
-  retried; group plan mismatch; group and human-turn `ABORT` lost races are retried, a newer pause completes.
+- `HitlTimeoutHandlerTest`: a plan mismatch cancels the pause and is counted; a cancel lost to an in-flight
+  decision or a failing cancel is retried, a pause that is gone completes; a generic `IllegalArgumentException` is
+  retried and never cancels; group and human-turn `ABORT` lost races are retried, a newer pause completes.
+- `ConversationServiceHitlCoverageTest.TimeoutOnChangedPlan`: the plan-mismatch path end to end through the real
+  `ConversationHitlService` resume and cancel (stores mocked) — nothing runs, the pause ends
+  `EXECUTION_INTERRUPTED`.
 - `MongoScheduleStoreTest`, `PostgresScheduleStoreUnitTest`: `readSchedulesByName`.
-- `ConversationServiceHitlCoverageTest`, `GroupHitlCoordinatorTest`: the arm-failure counter.
+- `ConversationServiceHitlCoverageTest`, `GroupHitlCoordinatorTest`: the arm-failure counter (the group one also
+  without a registry).
 
 ### Left open
 
 - On a single node a timeout that could not be scheduled stays missing until the next restart (no periodic repair
   without a cluster).
+- `readSchedulesByName` has no ordering and the sweep reads at most 100 rows per name; with more rows the decision
+  would run on an arbitrary subset. Harmless in practice: timeout names are unique per conversation or discussion.

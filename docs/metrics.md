@@ -754,7 +754,8 @@ eddi_hitl_pause_count_total                 # Turn-level pauses; tag: surface
 eddi_hitl_resume_count_total                # Turn-level resumes; tag: surface
 eddi_hitl_timeout_count_total               # Approvals that expired unanswered
 eddi_hitl_timeout_arm_failures_total        # Timeouts that could not be scheduled at pause time; tag: surface (regular, group, group-human) — crash recovery re-creates them
-eddi_hitl_timeout_undecidable_total         # Timeout decisions that can never apply, so the pause was cancelled; tags: surface, reason (plan_changed, invalid_decision)
+eddi_hitl_timeout_undecidable_total         # Timeout decisions that can never apply (the stored plan changed), so the pause was cancelled; tags: surface (regular), reason (plan_changed)
+eddi_hitl_timeout_rearmed_spent_total       # Timeouts that fired and completed while their pause still waits, re-armed an hour later by crash recovery; tag: surface
 eddi_hitl_tool_pause_count_total            # Per-tool-call pauses
 eddi_hitl_tool_resume_count_total           # Per-tool-call resumes; tag: verdict
 eddi_hitl_tool_guard_count_total            # Guard evaluations; tag: guard

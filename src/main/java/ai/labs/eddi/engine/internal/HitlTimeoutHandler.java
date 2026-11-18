@@ -170,11 +170,11 @@ public class HitlTimeoutHandler {
         } catch (IConversationService.PauseMismatchException e) {
             LOGGER.infof("HITL timeout for conversation %s skipped — it was armed for an earlier pause; "
                     + "the current pause has its own timeout", conversationId);
-        } catch (IllegalArgumentException e) {
-            // Refused as invalid: retrying the same decision cannot succeed, and
-            // completing the fire silently would leave the pause waiting forever.
-            endUndecidableRegularPause(conversationId, decision, REASON_INVALID_DECISION, e);
         } catch (Exception e) {
+            // Anything else — an IllegalArgumentException included — is not a verdict
+            // on this pause: it may be a broken deployment, and cancelling every pause
+            // whose timeout fires would turn that into data loss. Retried while the
+            // pause waits.
             if (!regularPauseStillWaiting(conversationId)) {
                 LOGGER.infof("HITL timeout for conversation %s skipped — it is no longer awaiting a decision (%s)",
                         conversationId, e.getMessage());
@@ -191,41 +191,44 @@ public class HitlTimeoutHandler {
      */
     static final String METRIC_UNDECIDABLE = "eddi_hitl_timeout_undecidable";
     static final String REASON_PLAN_CHANGED = "plan_changed";
-    static final String REASON_INVALID_DECISION = "invalid_decision";
 
     /**
-     * The timeout's decision was refused for a reason no retry and no reviewer can
-     * fix. The pause the timeout was armed for is cancelled — the paused-only
-     * cancel, bound to that pause and audited as {@code system:timeout} — so it
-     * ends with an explicit outcome instead of waiting forever. If the cancel
-     * cannot be applied yet, the fire is retried like any other.
+     * The regular resume refused the timeout's decision because the plan stored
+     * with the pause no longer hashes to the committed one — no decision, the
+     * timeout's or a reviewer's, can ever apply to it. The pause the timeout was
+     * armed for is cancelled (the paused-only cancel, bound to that pause and
+     * audited as {@code system:timeout}; the conversation ends
+     * {@code EXECUTION_INTERRUPTED}) so it ends with an explicit outcome instead of
+     * waiting forever.
+     * <p>
+     * Only this verdict leads here. The group surface has no equivalent:
+     * {@code HitlPlanBinding.check} accepts a {@code system:*} decision without a
+     * plan hash, so a group timeout never meets a plan mismatch.
+     * <p>
+     * A cancel that does not apply while the pause still waits is retried, by the
+     * same rule as {@link #cancelRegular}: a decision on the pause still in flight
+     * (IN_PROGRESS) may fail and restore it, and only this fire would then end it.
      */
     private void endUndecidableRegularPause(String conversationId, HitlDecision decision, String reason, Exception cause) {
         LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) — cancelling the pause it was armed for",
                 decision.getVerdict(), conversationId, reason, cause.getMessage());
-        countUndecidable(HitlSchedules.SURFACE_REGULAR, reason);
         try {
             var outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout", decision.getPauseId());
-            LOGGER.infof("HITL timeout for conversation %s: cancel of the undecidable pause → %s", conversationId, outcome);
+            if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+                countUndecidable(HitlSchedules.SURFACE_REGULAR, reason);
+                LOGGER.infof("HITL timeout for conversation %s: the undecidable pause was cancelled", conversationId);
+            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
+                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
+                throw new IllegalStateException("a decision on the pause is still in flight");
+            } else {
+                LOGGER.infof("HITL timeout for conversation %s: the undecidable pause is no longer waiting (%s)", conversationId,
+                        outcome);
+            }
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 return;
             }
             throw new RetryLaterException("Undecidable HITL pause could not be cancelled yet: " + e.getMessage(), e);
-        }
-    }
-
-    private void endUndecidableGroupPause(String gcId, HitlDecision decision, String reason, Exception cause) {
-        LOGGER.errorf("HITL timeout auto-%s for group conversation %s can never apply (%s: %s) — cancelling the pause it was armed "
-                + "for", decision.getVerdict(), gcId, reason, cause.getMessage());
-        countUndecidable(HitlSchedules.SURFACE_GROUP, reason);
-        try {
-            groupConversationService.cancelPausedDiscussion(gcId, ControlSignal.CANCEL_GRACEFUL, decision.getPauseId());
-        } catch (Exception e) {
-            if (!groupPauseStillWaiting(gcId, GroupConversation.GroupConversationState.AWAITING_APPROVAL)) {
-                return;
-            }
-            throw new RetryLaterException("Undecidable group HITL pause could not be cancelled yet: " + e.getMessage(), e);
         }
     }
 
@@ -276,8 +279,6 @@ public class HitlTimeoutHandler {
             request.setDecision(decision);
             groupConversationService.resumeDiscussion(gcId, request, null);
             LOGGER.infof("HITL timeout auto-%s for group conversation %s", decision.getVerdict(), gcId);
-        } catch (IGroupConversationService.GroupPlanMismatchException e) {
-            endUndecidableGroupPause(gcId, decision, REASON_PLAN_CHANGED, e);
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             LOGGER.infof("HITL timeout for group conversation %s skipped — it was armed for an earlier pause", gcId);
         } catch (Exception e) {

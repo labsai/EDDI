@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -621,6 +622,13 @@ public class HitlCrashRecoveryObserver {
      */
     static final Duration SPENT_REARM_BACKOFF = Duration.ofHours(1);
 
+    /** Counter: a spent timeout re-armed for a pause that still waits. */
+    static final String METRIC_REARMED_SPENT = "eddi_hitl_timeout_rearmed_spent";
+
+    /** Field-injected; null in tests built with {@code new} (nothing counted). */
+    @Inject
+    MeterRegistry meterRegistry;
+
     /** Upper bound of rows read per schedule name — normally one or two. */
     private static final int ROWS_PER_NAME = 100;
 
@@ -757,6 +765,7 @@ public class HitlCrashRecoveryObserver {
             fireAt = earliest;
         }
 
+        boolean spentRearm = false;
         try {
             if (!replace) {
                 List<ScheduleConfiguration> rows;
@@ -783,6 +792,7 @@ public class HitlCrashRecoveryObserver {
                     }
                     LOGGER.warnf("HITL timeout for %s (%s) fired at %s but the pause is still waiting — re-arming it for %s",
                             conversationId, surface, lastFired, fireAt);
+                    spentRearm = true;
                 }
             }
             // Clears every row under the name — rows of earlier pauses, rows that can
@@ -817,6 +827,10 @@ public class HitlCrashRecoveryObserver {
 
             LOGGER.infof("Re-armed HITL timeout for %s (%s) at %s (policy: %s)",
                     conversationId, surface, fireAt, policyName);
+            if (spentRearm && meterRegistry != null) {
+                // A pause re-armed this way every hour, forever, shows up here.
+                meterRegistry.counter(METRIC_REARMED_SPENT, "surface", surface).increment();
+            }
             return true;
         } catch (Exception e) {
             LOGGER.warnf("Failed to re-arm HITL timeout for %s: %s", conversationId, e.getMessage());
