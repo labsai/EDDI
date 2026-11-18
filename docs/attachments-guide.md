@@ -162,7 +162,7 @@ Content-Type: multipart/form-data
 | `DELETE` | `/{storageRef}` | Delete one blob |
 | `DELETE` | `` | Delete all of the conversation's attachments |
 
-An unknown `storageRef` answers `404` (`ATTACHMENT_NOT_FOUND`), and so does a blob the conversation may not access — with the identical body, so a caller cannot use the endpoint to learn whether someone else's reference exists, and no response names the owning conversation.
+An unknown `storageRef` answers `404` (`ATTACHMENT_NOT_FOUND`), and so does a blob the conversation may not access — with the identical body, so a caller cannot use the endpoint to learn whether someone else's reference exists, and no response names the owning conversation. The same holds inside a conversation: a `storageRef` that cannot be read is noted in `attachments:errors` and told to the model with one fixed reason ("it does not exist or is not part of this conversation").
 
 Text the engine inlines from an attachment (text files, extracted PDF text) is third-party data: it is wrapped in the same `[retrieved context …]` envelope as retrieved (RAG) context, and the file name and media type shown in front of it are stripped of line breaks, control characters and brackets and capped at 100 characters.
 

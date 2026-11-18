@@ -407,7 +407,10 @@ public class AttachmentForwarder {
                 try {
                     bytes = attachmentStore.load(att.getStorageRef(), conversationId);
                 } catch (IAttachmentStore.AttachmentStoreException e) {
-                    throw new ForwardSkipException("Stored attachment '" + name + "' could not be loaded: " + e.getMessage());
+                    // The store's message tells "not found" from "another conversation's";
+                    // the model (and the conversation record) get one fixed reason.
+                    throw new ForwardSkipException(
+                            "Stored attachment '" + name + "' could not be loaded: " + AttachmentContextExtractor.UNRESOLVABLE_STORED_ATTACHMENT);
                 }
             }
             case URL -> bytes = download(att.getUrl(), name);
@@ -488,8 +491,8 @@ public class AttachmentForwarder {
 
     /**
      * A file name as it may appear in text the model reads: user-chosen, so it
-     * cannot carry line breaks or control characters, brackets (which would forge
-     * the envelope delimiters) or unbounded length.
+     * cannot carry line breaks or control characters, invisible format characters,
+     * brackets (which would forge the envelope delimiters) or unbounded length.
      */
     static String safeName(String fileName) {
         if (fileName == null || fileName.isBlank()) {
@@ -499,7 +502,9 @@ public class AttachmentForwarder {
         fileName.codePoints().limit(MAX_NAME_CHARS).forEach(cp -> {
             if (Character.isISOControl(cp) || Character.isWhitespace(cp) && cp != ' ' || cp == ' ' || cp == ' ') {
                 cleaned.append('_');
-            } else if (cp == '[' || cp == ']') {
+            } else if (cp == '[' || cp == ']' || Character.getType(cp) == Character.FORMAT) {
+                // FORMAT: bidi overrides (U+202E), zero-width characters (U+200B,
+                // U+FEFF) — invisible text that makes a name read as something else.
                 cleaned.append('_');
             } else {
                 cleaned.appendCodePoint(cp);
