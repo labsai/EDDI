@@ -32,6 +32,18 @@ Two design choices make that practical:
 
 EDDI is a service you deploy, not a library you import. If you want agent logic inside your own Java application, a library such as [LangChain4j](https://github.com/langchain4j/langchain4j), which EDDI itself builds on, is the closer fit. The [project philosophy](docs/project-philosophy.md) explains the design: "the engine is strict so the AI can be creative."
 
+## Works with the AI you already use
+
+EDDI does not replace ChatGPT, Claude or the assistant in your IDE. It gives them somewhere governed to work.
+
+Everything in EDDI can be set up and inspected by hand in the Manager. The better experience is to connect the assistant you already use, over [MCP](docs/mcp-server.md#quick-start) or the REST API, and let it do the work:
+
+- **It builds and runs agents for you.** Ask Claude, Cursor or a local model to create an agent, test it, read its logs or change its prompt. Every change is a new version in EDDI, and the ones you gate wait for your approval.
+- **It consults agents that can reach what it cannot.** An EDDI agent can hold a connection to a database, an internal API or a knowledge base that your personal assistant has no access to. Your assistant asks the agent, or a whole group of agents, and works with the answer. The credentials stay in EDDI's vault and the exchange lands in the audit ledger.
+- **It collaborates across systems.** Other agent platforms reach EDDI agents the same way, over [A2A](docs/a2a-protocol.md) or the [OpenAI-compatible API](docs/open-webui-integration.md).
+
+EDDI also stands on its own. End users can talk to agents and teams of agents directly in [Workforce](docs/workforce-guide.md), in the embeddable [chat UI](docs/chat-ui-embedding.md), or in Slack. For Claude Code there is a [plugin](integrations/claude-plugin/README.md) with ready-made skills.
+
 ## Quick start
 
 You need [Docker](https://docs.docker.com/get-docker/) on an x86-64 host, and a model for your agents: an API key for a hosted provider, or [Ollama](docs/docker.md#compose-files-and-overlays) for a local one. The installer asks which database, authentication and monitoring you want, generates a vault key, and starts everything with Docker Compose.

@@ -98,6 +98,19 @@ no multi-file compose command (`ComposeStackTest`); the commands that moved to
   regenerates all of them, so the next refresh is one command rather than a
   manual session.
 
+### "Works with the AI you already use"
+
+A new section after **Why EDDI** answers a question the page left open: is EDDI
+a replacement for ChatGPT or Claude? It is not. The Manager lets you do
+everything by hand, but the intended experience is to connect the assistant you
+already use over MCP or REST and have it build and operate agents, or consult
+EDDI agents that hold access (a database, an internal API) the assistant does
+not. The section also says EDDI works alone, through Workforce, the chat UI or
+Slack.
+
+`AGENTS.md`, `docs/README.md` and `docs/mcp-server.md` said 108 MCP tools; all
+now say 120.
+
 ### Three independent reviews
 
 The page was reviewed by three models with the same brief. Where they agreed,
@@ -111,7 +124,7 @@ it changed:
   says what CI does (checks every image against the certification requirements)
   rather than asserting a status.
 - **The MCP tool count is 120**, which is what `McpToolContractTest` pins. The
-  README said 108, as `AGENTS.md` and `docs/mcp-server.md` still do.
+  README said 108, as `AGENTS.md`, `docs/README.md` and `docs/mcp-server.md` did.
 - **The quick start reaches a reply**: a health check, where the model key goes,
   the wizard or the Operator, then chat. It says the default install has no
   login and is loopback-only, and that a hand-run `docker compose up` needs
