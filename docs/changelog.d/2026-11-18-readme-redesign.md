@@ -19,7 +19,7 @@ where are the docs, how do I build it. Sections:
 
 1. Banner, name, the badges (the ten the page had, plus the licence), one
    paragraph, link row.
-2. **Why EDDI**: six bullets, and a plain statement that EDDI is a service you
+2. **Why EDDI**: run, limit, approve, record, then two design choices, and a plain statement that EDDI is a service you
    deploy rather than a library you import, pointing readers who want a library
    at LangChain4j (which EDDI builds on) rather than at frameworks in other
    languages. This replaces the comparison table, whose concurrency row

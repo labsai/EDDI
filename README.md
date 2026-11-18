@@ -38,7 +38,7 @@ EDDI does not replace ChatGPT, Claude or the assistant in your IDE. It gives the
 
 Everything in EDDI can be set up and inspected by hand in the Manager. The better experience is to connect the assistant you already use, over [MCP](docs/mcp-server.md#quick-start) or the REST API, and let it do the work:
 
-- **It builds and runs agents for you.** Ask Claude, Cursor or a local model to create an agent, test it, read its logs or change its prompt. Every change is a new version in EDDI, and the ones you gate wait for your approval.
+- **It builds and runs agents for you.** Ask Claude, Cursor or any other MCP-capable assistant, including one running locally, to create an agent, test it, read its logs or change its prompt. Every change is a new version in EDDI, and the ones you gate wait for your approval.
 - **It consults agents that can reach what it cannot.** An EDDI agent can hold a connection to a database, an internal API or a knowledge base that your personal assistant has no access to. Your assistant asks the agent, or a whole group of agents, and works with the answer. The credentials stay in EDDI's vault and the exchange lands in the audit ledger.
 - **It collaborates across systems.** Other agent platforms reach EDDI agents the same way, over [A2A](docs/a2a-protocol.md) or the [OpenAI-compatible API](docs/open-webui-integration.md).
 
@@ -78,7 +78,7 @@ A fresh install has no agents. To get to a first reply:
 3. Create an agent with the wizard at `/manage/agents/wizard`, or activate the **Platform Operator** at `/manage/operator` and describe the agent you want. The Operator is an agent too, so it needs a model before it can help.
 4. Chat with the agent from the Manager, or at `/workforce`.
 
-By default the install has no login and is published on `127.0.0.1` only, which suits a laptop. For anything other people can reach, turn authentication on: `install.sh --with-auth` adds Keycloak.
+By default the install has no login and is published on `127.0.0.1` only, which suits a laptop. For anything other people can reach, turn authentication on: `install.sh --with-auth` (`install.ps1 -WithAuth`) adds Keycloak.
 
 Other ways in:
 
@@ -134,7 +134,11 @@ The heart of an agent is its LLM step: the model, its prompt, and what it may us
 }
 ```
 
-`actions` says when the step runs, and `*` means on every message. Swap `type` and `modelName` for any of the other providers (`openai`, `gemini`, `bedrock`, `ollama` and more). The key is a reference into the secrets vault, never the key itself. This document is one step of a workflow, and an agent is a list of workflows. It is also where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
+- `actions` says when the step runs; `*` means on every message.
+- `type` and `modelName` pick the model. Any of the other providers works the same way (`openai`, `gemini`, `bedrock`, `ollama` and more).
+- `apiKey` is a reference into the secrets vault, never the key itself.
+
+This document is one step of a workflow, and an agent is a list of workflows. It is also where you add your own REST APIs and MCP servers as tools, a knowledge base, model cascading and approval gates; [LLM configuration](docs/langchain.md) lists every field.
 
 You rarely write it by hand. The Manager's wizard, the Platform Operator and the MCP server (from Claude Desktop, Cursor or any other MCP client) create and change agents for you, and every save is a new version you can diff and export.
 
