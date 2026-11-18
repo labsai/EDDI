@@ -508,7 +508,7 @@ public class SecretResolver {
                 continue;
             }
             if (!grantAdmits(ref, asking, usedFor)) {
-                // Not a grant refusal (not counted as one, refused in every mode): there
+                // Not a grant refusal (not counted as one, refused under warn too): there
                 // is nothing to admit, and a cached client may still carry the old value.
                 throw new SecretMissingException((usedFor != null ? usedFor + " uses " : "") + ref.toReferenceString()
                         + ", which does not exist (it may just have been deleted), so its grant cannot be checked for "

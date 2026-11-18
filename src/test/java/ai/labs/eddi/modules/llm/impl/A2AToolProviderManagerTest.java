@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.anyIterable;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -206,8 +209,11 @@ class A2AToolProviderManagerTest {
      * socket.
      */
     private A2AToolProviderManager managerAgainstPeers() {
+        return managerAgainstPeers(mock(SecretResolver.class));
+    }
+
+    private A2AToolProviderManager managerAgainstPeers(SecretResolver secrets) {
         GlobalVariableResolver globals = mock(GlobalVariableResolver.class);
-        SecretResolver secrets = mock(SecretResolver.class);
         when(globals.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
         when(secrets.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         OutboundEngine engine = hop -> {
@@ -348,6 +354,24 @@ class A2AToolProviderManagerTest {
             assertEquals(3, cardFetches(), "each credential needs its own card");
             assertEquals(List.of("tenant_a_public", "tenant_a_private", "tenant_b_public", "tenant_c_public", "tenant_c_private"),
                     names(result));
+        }
+
+        @Test
+        @DisplayName("a card cached for a granted agent is not handed to an agent the key's vault grant leaves out (#1179)")
+        void cachedCardRefusedToUngrantedAgent() {
+            cards.put(HOST, hop -> Map.of("name", "peer", "skills", List.of(skill("lookup"))));
+            SecretResolver secrets = mock(SecretResolver.class);
+            SecretAccess refused = SecretAccess.agent("bbbbbbbbbbbbbbbbbbbbbbbb");
+            doThrow(new SecretResolver.SecretNotGrantedException("not granted")).when(secrets).requireGranted(anyIterable(), eq(refused),
+                    anyString());
+            var manager = managerAgainstPeers(secrets);
+            var config = peer(HOST, "peer", "${vault:key-a}");
+
+            assertEquals(List.of("peer_lookup"), names(manager.discoverTools(List.of(config), SecretAccess.agent("aaaaaaaaaaaaaaaaaaaaaaaa"))));
+            assertEquals(1, manager.getActiveConnectionCount(), "the card is cached");
+
+            assertTrue(manager.discoverTools(List.of(config), refused).toolSpecs().isEmpty(), "the cached card must not reach the refused agent");
+            assertEquals(1, cardFetches());
         }
 
         @Test

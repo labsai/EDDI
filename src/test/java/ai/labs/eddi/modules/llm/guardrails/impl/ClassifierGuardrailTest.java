@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.guardrails.impl;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.pricing.ModelPriceCatalogs;
 import ai.labs.eddi.engine.pricing.PriceCatalogSnapshot;
@@ -314,6 +315,16 @@ class ClassifierGuardrailTest {
                 () -> classifier.evaluate("hello", input(params("safeLabel", "no", "inputPricePer1M", "2.0"))));
         assertEquals(ClassifierGuardrail.REASON_UNPARSEABLE, ex.reason());
         assertEquals(0.002, ex.costUsd(), 1e-12);
+    }
+
+    @Test
+    @DisplayName("a model key the vault grant withholds from the agent is undecided, recorded as a refusal rather than an unreachable model (#1179)")
+    void grantRefusal_undecided() throws Exception {
+        when(registry.getOrCreate(eq("ollama"), any(), any())).thenThrow(new SecretResolver.SecretNotGrantedException("not granted"));
+        var ex = assertThrows(GuardrailUndecidedException.class, () -> classifier.evaluate("hello", input(params())));
+        assertEquals(ClassifierGuardrail.REASON_UNAVAILABLE, ex.reason());
+        assertEquals(1, meterRegistry.find(ClassifierGuardrail.METRIC_DURATION).tag("provider", "secret_refused").timers().size(),
+                "the refusal is told apart from a model that could not be reached");
     }
 
     // === transport ===

@@ -169,10 +169,11 @@ public class VaultGrantChecker {
      * <p>
      * An absent secret has no grant to check yet, and deploying before it exists is
      * a supported flow (agent sync promotes a workflow to an instance that does not
-     * hold the source's secrets). The resolver does not check grants, so the grant
-     * such a secret is later created with is checked when it is created: the create
-     * endpoints ask {@link VaultGrantImpactAnalyzer} which deployed agents already
-     * reference it, and refuse a grant that leaves one out.
+     * hold the source's secrets). Such an agent meets the secret's grant when it
+     * resolves the secret: {@link SecretResolver} checks the grant at every
+     * resolution (#1179). When the secret is created, the create endpoints ask
+     * {@link VaultGrantImpactAnalyzer} which deployed agents already reference it
+     * and warn about a grant that leaves one out.
      * <p>
      * A <em>connection</em>, workflow or extension config that cannot be read is
      * the opposite case and fails closed. The hop exists because a connection is an
@@ -482,9 +483,9 @@ public class VaultGrantChecker {
             // checked when it is created.
             return true;
         } catch (Exception e) {
-            // Let through, as the class contract chooses, but not quietly: the resolver
-            // checks no grants, so a deploy is the one place a grant on this secret
-            // is enforced, and here it was not.
+            // Let through, as the class contract chooses, but not quietly: the deploy
+            // check did not run. The resolver still checks the grant at every
+            // resolution and refuses one it cannot read (#1179).
             LOGGER.warnf("Could not verify the vault grant of %s for agent '%s' (%s); treating it as granted",
                     sanitize(reference), sanitize(agentId), e.getClass().getSimpleName());
             return true;
