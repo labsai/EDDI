@@ -158,6 +158,15 @@ public class ContinuationRecoverySweep {
             if (outcomes.containsKey(Recovery.RECOVERED)) {
                 LOGGER.infof("Continuation recovery pass: %s", outcomes);
             }
+            if (backedOff.size() >= MAX_BACKED_OFF) {
+                // The cap bounds this node's memory and the read; past it, failing
+                // candidates are retried every pass again and can fill the batch, so
+                // records behind them may wait. Said once a pass, at WARN: this many
+                // records failing each on their own is a fault to look at.
+                LOGGER.warnf("Continuation recovery holds back %d failing candidates, its maximum; further failing ones are retried "
+                        + "every pass and may delay the records behind them. See the per-conversation warnings for the cause.",
+                        MAX_BACKED_OFF);
+            }
         } catch (Exception e) {
             LOGGER.warnf("Continuation recovery pass failed: %s", e.toString());
         } finally {
