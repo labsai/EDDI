@@ -7,6 +7,7 @@ package ai.labs.eddi.connections.oauth;
 import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.getUtc;
 import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -88,7 +89,7 @@ public class PostgresOAuthStateStore implements IOAuthStateStore {
 
     @Inject
     public PostgresOAuthStateStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void createSchema() {

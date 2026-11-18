@@ -42,7 +42,7 @@ public class PostgresAgentTriggerStore implements IAgentTriggerStore {
 
     @Inject
     public PostgresAgentTriggerStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
     }
 

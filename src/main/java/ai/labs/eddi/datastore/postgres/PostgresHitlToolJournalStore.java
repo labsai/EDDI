@@ -74,7 +74,7 @@ public class PostgresHitlToolJournalStore implements IHitlToolJournalStore {
     @Inject
     public PostgresHitlToolJournalStore(Instance<DataSource> dataSourceInstance,
             @ConfigProperty(name = "eddi.hitl.tool.journal-retention", defaultValue = "30d") Duration journalRetention) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.retentionMillis = journalRetention == null || journalRetention.isNegative() || journalRetention.isZero()
                 ? Duration.ofDays(30).toMillis()
                 : journalRetention.toMillis();

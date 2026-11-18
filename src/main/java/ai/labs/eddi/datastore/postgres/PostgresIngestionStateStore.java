@@ -124,7 +124,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
 
     @Inject
     public PostgresIngestionStateStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     /**

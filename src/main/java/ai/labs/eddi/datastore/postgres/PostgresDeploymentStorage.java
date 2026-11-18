@@ -42,7 +42,7 @@ public class PostgresDeploymentStorage implements IDeploymentStorage {
 
     @Inject
     public PostgresDeploymentStorage(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

@@ -167,7 +167,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
 
     @Inject
     public PostgresUserMemoryStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

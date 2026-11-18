@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -74,7 +75,7 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     @Inject
     public PostgresEmailMailboxStateStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private Connection connection() throws SQLException {

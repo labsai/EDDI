@@ -147,7 +147,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             String... indexes) {
         checkNotNull(dataSource, "dataSource");
         checkNotNull(collectionName, "collectionName");
-        this.dataSource = dataSource;
+        this.dataSource = PostgresSanitizingDataSource.wrap(dataSource);
         this.collectionName = collectionName;
         this.jsonSerialization = jsonSerialization;
         this.documentType = documentType;

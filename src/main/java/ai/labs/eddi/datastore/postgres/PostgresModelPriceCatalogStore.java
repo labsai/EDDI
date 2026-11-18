@@ -54,7 +54,7 @@ public class PostgresModelPriceCatalogStore implements IModelPriceCatalogStore {
 
     @Inject
     public PostgresModelPriceCatalogStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

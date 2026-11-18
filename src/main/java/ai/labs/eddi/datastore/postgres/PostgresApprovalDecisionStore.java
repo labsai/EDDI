@@ -75,7 +75,7 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
 
     @Inject
     public PostgresApprovalDecisionStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

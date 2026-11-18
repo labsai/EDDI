@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.settings;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -57,7 +58,7 @@ public class PostgresWorkspaceSettingsStore implements IWorkspaceSettingsStore {
 
     @Inject
     public PostgresWorkspaceSettingsStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {

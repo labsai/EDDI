@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections.settings;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -72,7 +73,7 @@ public class PostgresConnectionSettingsStore implements IConnectionSettingsStore
 
     @Inject
     public PostgresConnectionSettingsStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {

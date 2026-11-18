@@ -76,7 +76,7 @@ public class PostgresIngestedFileStore implements IIngestedFileStore {
 
     @Inject
     public PostgresIngestedFileStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     /**

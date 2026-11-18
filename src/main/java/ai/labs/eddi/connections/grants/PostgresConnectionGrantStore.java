@@ -8,6 +8,7 @@ import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.getUtc;
 import static ai.labs.eddi.datastore.postgres.PostgresTimestamps.setUtc;
 import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import ai.labs.eddi.datastore.postgres.PostgresTimestamps;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -101,7 +102,7 @@ public class PostgresConnectionGrantStore implements IConnectionGrantStore {
 
     @Inject
     public PostgresConnectionGrantStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void createSchema() {

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.connections.names;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -93,7 +94,7 @@ public class PostgresConnectionNameClaimStore implements IConnectionNameClaimSto
 
     @Inject
     public PostgresConnectionNameClaimStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void createSchema() {

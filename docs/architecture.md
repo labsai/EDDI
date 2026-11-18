@@ -880,6 +880,12 @@ Switching databases is configuration, not code. MongoDB is the default; PostgreS
 
 See [Configuration Reference → Settings operators set first](configuration-reference.md#settings-operators-set-first).
 
+### Differences the PostgreSQL boundary hides
+
+Both backends store what the engine hands them, with one exception: **PostgreSQL cannot hold the character U+0000** in `TEXT` or `jsonb` (it also refuses unpaired surrogates written as JSON escapes), while MongoDB stores it as it is. A user message, a model answer, a tool result or a user id containing one used to fail the statement on PostgreSQL and lose the turn, the resource or the whole log batch.
+
+Every PostgreSQL store now wraps the data source it is given with `PostgresSanitizingDataSource`, which cleans each string at the moment a statement binds it (`setString`, `setObject`, `PGobject`, `TEXT[]` elements; a parameter cast to `jsonb`/`json` is treated as JSON text, escaped `\u0000` included). **U+0000 and every unpaired surrogate are replaced with U+FFFD** (not removed, so the rest of the text keeps its length and two different ids never collapse into one). The same replacement is applied to lookups, so a key that contained the character still finds its own row. Everything else round-trips unchanged; a literal `\u0000` typed as text is not a NUL and is left alone. On MongoDB nothing is replaced. A new PostgreSQL store adopts this with one line in its constructor: `this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);`.
+
 ---
 
 ## Multi-Agent Orchestration

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.updatecheck;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -52,7 +53,7 @@ public class PostgresSystemSettingStore implements ISystemSettingStore {
 
     @Inject
     public PostgresSystemSettingStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {

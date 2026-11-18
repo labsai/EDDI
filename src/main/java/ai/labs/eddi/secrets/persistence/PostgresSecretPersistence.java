@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.persistence;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import ai.labs.eddi.secrets.model.EncryptedDek;
 import ai.labs.eddi.secrets.model.EncryptedSecret;
 import ai.labs.eddi.secrets.model.SecretMetadata;
@@ -111,7 +112,7 @@ public class PostgresSecretPersistence implements ISecretPersistence {
 
     @Inject
     public PostgresSecretPersistence(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

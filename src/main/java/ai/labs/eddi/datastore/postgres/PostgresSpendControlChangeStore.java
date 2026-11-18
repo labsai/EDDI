@@ -58,7 +58,7 @@ public class PostgresSpendControlChangeStore implements ISpendControlChangeStore
 
     @Inject
     public PostgresSpendControlChangeStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

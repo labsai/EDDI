@@ -70,7 +70,7 @@ public class PostgresAuditSampleStore implements IAuditSampleStore {
 
     @Inject
     public PostgresAuditSampleStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

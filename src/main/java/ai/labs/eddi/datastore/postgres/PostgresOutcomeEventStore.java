@@ -67,7 +67,7 @@ public class PostgresOutcomeEventStore implements IOutcomeEventStore {
 
     @Inject
     public PostgresOutcomeEventStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

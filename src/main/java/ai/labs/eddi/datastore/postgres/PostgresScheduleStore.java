@@ -237,7 +237,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Inject
     public PostgresScheduleStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization,
             @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }

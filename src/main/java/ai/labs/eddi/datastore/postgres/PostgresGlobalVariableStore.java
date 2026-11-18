@@ -58,7 +58,7 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
 
     @Inject
     public PostgresGlobalVariableStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

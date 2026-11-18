@@ -71,7 +71,7 @@ public class PostgresBrandingStore implements IBrandingStore {
 
     @Inject
     public PostgresBrandingStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

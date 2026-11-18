@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.security.spaces.directory;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -86,7 +87,7 @@ public class PostgresUserDirectoryStore implements IUserDirectoryStore {
 
     @Inject
     public PostgresUserDirectoryStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {

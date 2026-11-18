@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.tenancy;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.engine.tenancy.model.TenantQuota;
 import ai.labs.eddi.engine.tenancy.model.UsageSnapshot;
@@ -231,7 +232,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
             @ConfigProperty(name = "eddi.tenant.quota.max-api-calls-per-minute", defaultValue = "-1") int maxApiCalls,
             @ConfigProperty(name = "eddi.tenant.quota.max-monthly-cost-usd", defaultValue = "-1") double maxCost) {
 
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.defaultTenantId = defaultTenantId;
         this.defaultQuota = new TenantQuota(defaultTenantId, maxConvPerDay, maxAgents, maxApiCalls, maxCost, enabled);
         this.clock = Clock.systemUTC();
@@ -248,7 +249,7 @@ public class PostgresTenantQuotaStore implements ITenantQuotaStore {
      * Test-only constructor taking the clock, so a test can pin "now".
      */
     PostgresTenantQuotaStore(Instance<DataSource> dataSourceInstance, Clock clock) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.defaultTenantId = null;
         this.defaultQuota = null;
         this.clock = clock;

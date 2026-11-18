@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -86,7 +87,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     @Inject
     public PostgresEmailMessageLedger(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private Connection connection() throws SQLException {

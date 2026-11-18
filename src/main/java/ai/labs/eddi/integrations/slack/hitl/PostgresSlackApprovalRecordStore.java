@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.slack.hitl;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -70,7 +71,7 @@ public class PostgresSlackApprovalRecordStore implements ISlackApprovalRecordSto
     @Inject
     public PostgresSlackApprovalRecordStore(Instance<DataSource> dataSourceInstance,
             @ConfigProperty(name = "eddi.slack.hitl.approval-record-retention", defaultValue = "30d") Duration retention) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.retention = SlackApprovalRecordRetention.sanitize(retention);
     }
 

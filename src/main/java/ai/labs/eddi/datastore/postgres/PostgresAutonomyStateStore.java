@@ -56,7 +56,7 @@ public class PostgresAutonomyStateStore implements IAutonomyStateStore {
 
     @Inject
     public PostgresAutonomyStateStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

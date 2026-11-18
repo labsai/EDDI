@@ -208,7 +208,7 @@ public class PostgresAuditStore implements IAuditStore {
 
     @Inject
     public PostgresAuditStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization, Instance<AuditKeyring> keyring) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
         this.keyring = keyring;
     }

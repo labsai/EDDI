@@ -57,7 +57,7 @@ public class PostgresConversationCheckpointStore implements IConversationCheckpo
 
     @Inject
     public PostgresConversationCheckpointStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
     }
 

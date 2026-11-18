@@ -125,7 +125,7 @@ public class PostgresConversationRatingStore implements IConversationRatingStore
 
     @Inject
     public PostgresConversationRatingStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {

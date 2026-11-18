@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.groups.budget;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,7 +74,7 @@ public class PostgresTeamBudgetStore implements ITeamBudgetStore {
 
     @Inject
     public PostgresTeamBudgetStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void createSchema() {
