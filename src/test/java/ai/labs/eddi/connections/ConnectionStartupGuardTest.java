@@ -402,6 +402,38 @@ class ConnectionStartupGuardTest {
     }
 
     @Test
+    @DisplayName("a MAILBOX authorization-code connection is accepted, not reported as the legacy SERVICE binding")
+    void mailboxAuthorizationCodeIsNotReportedAsLegacy() throws Exception {
+        storedConnections(connection("gws-mailbox", AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.MAILBOX));
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertFalse(logged(LEGACY_BINDING_REPORT), logRecords.toString());
+        assertFalse(logged("bound MAILBOX with authType"), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a MAILBOX connection on any flow but authorization-code is reported — no mailbox can ever be linked to it")
+    void mailboxOnClientCredentialsIsReported() throws Exception {
+        storedConnections(connection("bad-mailbox", AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.MAILBOX));
+
+        assertDoesNotThrow(() -> start(enabledGuard()));
+
+        assertTrue(logged("bound MAILBOX with authType OAUTH2_CLIENT_CREDENTIALS"), logRecords.toString());
+        assertTrue(logged("bad-mailbox"), logRecords.toString());
+    }
+
+    @Test
+    @DisplayName("a stored MAILBOX connection is reported when no administrator can be authenticated to link it")
+    void mailboxWithoutAuthorizationIsReported() throws Exception {
+        storedConnections(connection("gws-mailbox", AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.MAILBOX));
+
+        assertDoesNotThrow(() -> start(enabledGuard(openAiCompatOff(), false)));
+
+        assertTrue(logged("A MAILBOX connection is stored, but authorization.enabled=false"), logRecords.toString());
+    }
+
+    @Test
     @DisplayName("a correctly bound authorization-code connection is not reported as legacy")
     void perUserAuthorizationCodeIsNotReportedAsLegacy() throws Exception {
         storedConnections(perUserConnection());

@@ -213,8 +213,11 @@ public class ImapMailTransport implements MailTransport {
         return new ImapSession(integrationId, store, folder);
     }
 
-    /** {@code [user, secret, mechanisms]}. */
-    private String[] login(EmailChannelSettings settings) throws MailboxException {
+    /**
+     * {@code [user, secret, mechanisms]}. Package-private for the login-choice
+     * test.
+     */
+    String[] login(EmailChannelSettings settings) throws MailboxException {
         if (connectionResolver == null || !connectionResolver.isResolvable()) {
             throw new MailboxException(MailboxException.Category.CREDENTIAL, "Connections are not available in this deployment.", null);
         }
