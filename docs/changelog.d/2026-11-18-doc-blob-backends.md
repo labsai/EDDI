@@ -30,8 +30,9 @@ backend. Nothing changes for users or existing data.
   `attachment_chunks(blob_key, seq, data)`, one row per chunk of
   `eddi.attachments.blob.pg-chunks.chunk-bytes` (4 MiB), each committed on its own
   so a 500 MB upload is not one transaction. Reads fetch one chunk per query on its
-  own connection, in binary transfer (text mode would hex-encode each chunk to
-  twice its size). Range reads take the chunk size from the object's first chunk,
+  own connection, asking pgjdbc for binary transfer (text mode hex-encodes each
+  chunk to twice its size; no test pins that request). GridFS reads likewise cap a read batch at
+  about 4 MiB of chunks, equally untested. Range reads take the chunk size from the object's first chunk,
   so changing the setting affects new writes only.
 - **Tests:** `BlobBackendContract` (sizes 0, 1, chunk−1, chunk, chunk+1, several
   chunks; overrun past declared length and past `maxBytes`, short stream and
