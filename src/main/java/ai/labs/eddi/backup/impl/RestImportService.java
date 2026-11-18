@@ -81,6 +81,8 @@ import ai.labs.eddi.configs.propertysetter.model.PropertySetterConfiguration;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
+import ai.labs.eddi.configs.validation.ConfigValidationPolicy;
+import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
@@ -147,6 +149,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * Absent when it left out none, which is every import that does not filter.
      */
     static final String HEADER_SCHEDULES_SKIPPED = "X-Schedules-Skipped";
+
+    /**
+     * Count of warnings a create import answers with; the 201 body lists them (what
+     * was dropped, what was written although it cannot work as it stands).
+     */
+    static final String HEADER_IMPORT_WARNINGS = "X-Import-Warnings";
     /**
      * How many of the archive's connections were not imported — because a
      * connection of that name already exists here, or because this deployment
@@ -732,7 +740,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     @Override
     public Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds,
-                                String targetAgentId, String workflowOrder, Boolean compatible) {
+                                String targetAgentId, String workflowOrder, Boolean compatible, Boolean allowIncomplete) {
         boolean declaredCompatible = Boolean.TRUE.equals(compatible);
         metrics.importAttempted();
         try {
@@ -758,7 +766,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             Set<String> selectedSet = parseSelectedResources(selectedOriginIds);
             boolean isMerge = STRATEGY_MERGE.equals(requestedStrategy);
 
-            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, declaredCompatible);
+            return importAgentZipFile(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, declaredCompatible,
+                    Boolean.TRUE.equals(allowIncomplete));
         } catch (WebApplicationException e) {
             // 400/404 raised deliberately above (or by the upgrade path) must not be
             // repackaged as a 500 by the catch-all below.
@@ -844,11 +853,15 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * extensions permanently in the database.
      */
     private Response importAgentZipFile(InputStream zippedAgentConfigFiles, File targetDir, boolean isMerge,
-                                        Set<String> selectedSet, boolean compatible)
+                                        Set<String> selectedSet, boolean compatible, boolean allowIncomplete)
             throws IOException {
 
         var transaction = new ImportTransaction();
-        try {
+        transaction.allowIncomplete = allowIncomplete;
+        // The stores' save-time checks warn instead of refusing while an archive is
+        // imported: it may come from an older release or another instance.
+        try (var validation = ConfigValidationPolicy.lenient()) {
+            transaction.validation = validation;
             return unpackAndImportAgent(zippedAgentConfigFiles, targetDir, isMerge, selectedSet, compatible, transaction);
         } catch (Throwable failure) {
             rollbackCreatedResources(transaction);
@@ -908,6 +921,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 agentConfig.setWorkflows(sameSpellingPerResource(agentConfig.getWorkflows()));
                 new LinkedHashSet<>(agentConfig.getWorkflows())
                         .forEach(workflowUri -> parseWorkflow(targetDirPath, workflowUri, agentConfig, isMerge, selectedSet, transaction));
+                // Every workflow has been read: refuse an archive that names configs it
+                // does not contain, unless the caller asked for an incomplete agent.
+                requireCompleteArchive(transaction);
 
                 URI newAgentUri;
                 if (isMerge && isSelected(selectedSet, agentOriginId)) {
@@ -967,6 +983,14 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (transaction.signingTurnedOff != null) {
                 // And so is a security setting the import could not carry over.
                 created.header(HEADER_SIGNING_TURNED_OFF, transaction.signingTurnedOff.replaceAll("[\\r\\n]+", " "));
+            }
+            List<String> warnings = transaction.warnings();
+            if (!warnings.isEmpty()) {
+                // What was dropped, and what was written although it cannot work as it
+                // stands: the 201 would otherwise say a hollow agent is fine.
+                created.header(HEADER_IMPORT_WARNINGS, warnings.size());
+                created.type(MediaType.APPLICATION_JSON).entity(Map.of("resourceUri", lastAgentUri.toString(), "warnings", warnings,
+                        "dropped", List.copyOf(transaction.dropped)));
             }
             return created.build();
         }
@@ -1072,7 +1096,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         // reference to do it, so this only ever runs on a create — where
                         // there is nothing to answer them with.
                         if (!isMerge) {
-                            workflowFileString = withoutUnresolvableReferences(workflowFileString, workflowPath);
+                            workflowFileString = withoutUnresolvableReferences(workflowFileString, workflowPath, transaction);
                         }
 
                         // loading old resources, creating/updating them,
@@ -2007,7 +2031,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewLlm(List<LlmConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction)).toList();
+        return configs.stream().map(c -> {
+            warnOnMissingVaultReferences(c);
+            return createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction);
+        }).toList();
     }
 
     private List<URI> createNewProperties(List<PropertySetterConfiguration> configs, ImportTransaction transaction) {
@@ -2080,7 +2107,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // local one's store.
             applyStorageRulesToNewRag(config);
             URI created = createResourceDirect(IRagStore.class, config, IRestRagStore.resourceURI, transaction);
-            syncImportedRagSchedules(created, config);
+            syncImportedRagSchedules(created, config, transaction);
             return created;
         }).toList();
     }
@@ -2128,13 +2155,16 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
     }
 
-    private void syncImportedRagSchedules(URI created, RagConfiguration config) {
+    private void syncImportedRagSchedules(URI created, RagConfiguration config, ImportTransaction transaction) {
         if (config.getSources() == null || config.getSources().isEmpty()) {
             return;
         }
         try {
             IResourceId resourceId = RestUtilities.extractResourceId(created);
             ragSourceIngestionService.syncSchedules(resourceId.getId(), resourceId.getVersion(), config, Set.of());
+            // A later failure deletes the knowledge base; its schedules would otherwise
+            // stay behind, firing against a resource that no longer exists.
+            transaction.recordCompensation(() -> ragSourceIngestionService.removeSchedules(resourceId.getId(), config));
         } catch (RuntimeException e) {
             // Surfaced, never swallowed: a source with a cron that has no schedule
             // looks scheduled on every screen and never runs.
@@ -2451,6 +2481,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                         Response createResp = restSnippetStore.createSnippet(snippet);
                         checkIfCreatedResponse(createResp);
                         recordCreatedSnippet(createResp, snippetName, transaction);
+                        // Two archive files may carry one name: the second must meet the
+                        // snippet just created, not create a duplicate of it.
+                        rememberCreatedSnippet(existingSnippetsByName, snippetName, createResp);
                         importedCount++;
                         LOGGER.debugf("Created new snippet '%s'", LogSanitizer.sanitize(snippetName));
                     } catch (Exception e) {
@@ -2463,6 +2496,21 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             }
         } catch (Exception e) {
             LOGGER.warnf("Failed to import snippets: %s", e.getMessage());
+        }
+    }
+
+    private static void rememberCreatedSnippet(Map<String, IResourceId> byName, String snippetName, Response createResponse) {
+        String header = createResponse.getHeaderString("X-Resource-URI");
+        if (header == null || header.isBlank()) {
+            return;
+        }
+        try {
+            IResourceId created = RestUtilities.extractResourceId(URI.create(header));
+            if (created != null && created.getId() != null) {
+                byName.put(snippetName, created);
+            }
+        } catch (IllegalArgumentException e) {
+            LOGGER.debugf("Could not read the id of snippet '%s' just created: %s", LogSanitizer.sanitize(snippetName), e.getMessage());
         }
     }
 
@@ -3006,6 +3054,32 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         private final List<CreatedResource> created = new ArrayList<>();
 
+        /** The caller accepts an agent whose unresolvable steps were dropped. */
+        private boolean allowIncomplete;
+
+        /**
+         * The save-time findings the stores reported as warnings during this import.
+         */
+        private ConfigValidationPolicy.Scope validation;
+
+        /**
+         * Every reference the archive names but does not contain, as one line each —
+         * the steps a create dropped.
+         */
+        private final List<String> dropped = new ArrayList<>();
+
+        /**
+         * What the caller should read: dropped steps first, then validation findings.
+         */
+        List<String> warnings() {
+            List<String> all = new ArrayList<>();
+            dropped.forEach(line -> all.add("dropped (not in the archive): " + line));
+            if (validation != null) {
+                all.addAll(validation.warnings());
+            }
+            return all;
+        }
+
         /**
          * A resource this import updated in place: the version its latest update
          * produced, which is where the one compensation for it restores over.
@@ -3291,6 +3365,91 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     private static final int MAX_PRUNE_DEPTH = 10;
 
     /**
+     * Notes every reference of a step that names a file the archive lacks, so the
+     * caller learns exactly what the import could not resolve.
+     */
+    private void recordDropped(ImportTransaction transaction, Path workflowPath, WorkflowConfiguration.WorkflowStep step,
+                               boolean wholeStep) {
+        List<String> missing = new ArrayList<>();
+        collectMissing(step.getConfig(), workflowPath, 0, missing);
+        collectMissing(step.getExtensions(), workflowPath, 0, missing);
+        String where = (workflowPath.getParent() != null ? "workflow " + workflowPath.getParent().getFileName() + " v" : "workflow v")
+                + workflowPath.getFileName();
+        for (String reference : missing) {
+            transaction.dropped.add(where + ", step " + step.getType() + (wholeStep ? " (step dropped)" : " (entry dropped)") + ": "
+                    + reference);
+        }
+    }
+
+    private void collectMissing(Object node, Path workflowPath, int depth, List<String> sink) {
+        if (node == null || depth > MAX_PRUNE_DEPTH) {
+            return;
+        }
+        if (node instanceof Map<?, ?> map) {
+            if (map.get(WorkflowExtensions.KEY_URI) instanceof String uriString && isMissingFromArchive(uriString, workflowPath)) {
+                sink.add(describeMissing(uriString));
+            }
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                if (!WorkflowExtensions.KEY_URI.equals(entry.getKey())) {
+                    collectMissing(entry.getValue(), workflowPath, depth + 1, sink);
+                }
+            }
+        } else if (node instanceof List<?> list) {
+            list.forEach(element -> collectMissing(element, workflowPath, depth + 1, sink));
+        }
+    }
+
+    private static String describeMissing(String uriString) {
+        WorkflowExtensions.ExtensionType type = WorkflowExtensions.typeOf(URI.create(uriString));
+        return LogSanitizer.sanitize(uriString) + (type == null ? "" : " (no ." + type.fileExtension() + ".json file in the archive)");
+    }
+
+    /**
+     * Refuses a create whose archive names configurations it does not contain,
+     * listing every one. An agent imported without them deploys and then cannot
+     * answer (its LLM step is gone), which is worse than a refusal the operator can
+     * act on; {@code allowIncomplete=true} is the explicit way to take it anyway.
+     */
+    private static void requireCompleteArchive(ImportTransaction transaction) {
+        if (transaction.dropped.isEmpty() || transaction.allowIncomplete) {
+            return;
+        }
+        String message = "The archive references " + transaction.dropped.size() + " configuration(s) it does not contain, so the "
+                + "imported agent would be incomplete. Export the agent again with everything it uses, or pass "
+                + "allowIncomplete=true to import it without those steps.";
+        throw new WebApplicationException(message, Response.status(422)
+                .entity(Map.of("error", message, "missing", List.copyOf(transaction.dropped), "hint", "allowIncomplete=true"))
+                .type(MediaType.APPLICATION_JSON).build());
+    }
+
+    /**
+     * Warns about vault references in an imported LLM config this instance cannot
+     * resolve.
+     */
+    private void warnOnMissingVaultReferences(LlmConfiguration config) {
+        try {
+            var provider = CDI.current().select(ISecretProvider.class);
+            if (provider.isUnsatisfied() || !provider.get().isAvailable()) {
+                return;
+            }
+            ConfigValidationPolicy.report("imported LLM configuration",
+                    ImportVaultReferences.missing(jsonSerialization.serialize(config), ImportVaultReferences.existsIn(provider.get())));
+        } catch (IllegalArgumentException e) {
+            throw e;
+        } catch (Exception e) {
+            LOGGER.debugf("Could not check vault references of an imported LLM config: %s", LogSanitizer.sanitize(e.getMessage()));
+        }
+    }
+
+    /** The warnings a create import answered with; empty when it had none. */
+    private static List<String> importWarningsOf(Response imported) {
+        if (imported.getEntity() instanceof Map<?, ?> body && body.get("warnings") instanceof List<?> list) {
+            return list.stream().map(String::valueOf).toList();
+        }
+        return List.of();
+    }
+
+    /**
      * The archived workflow with every reference this archive cannot satisfy
      * removed — for the <em>create</em> strategy only.
      * <p>
@@ -3316,7 +3475,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * @return the serialized workflow, and the string unchanged when nothing had to
      *         be dropped
      */
-    private String withoutUnresolvableReferences(String workflowFileString, Path workflowPath) throws IOException {
+    private String withoutUnresolvableReferences(String workflowFileString, Path workflowPath, ImportTransaction transaction)
+            throws IOException {
         WorkflowConfiguration workflow = jsonSerialization.deserialize(workflowFileString, WorkflowConfiguration.class);
         if (workflow == null || workflow.getWorkflowSteps() == null) {
             return workflowFileString;
@@ -3331,8 +3491,12 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             if (referencesMissingFile(step.getConfig(), workflowPath, 0)) {
                 LOGGER.warnf("Import drops the '%s' step: the archive references a configuration it does not contain",
                         LogSanitizer.sanitize(String.valueOf(step.getType())));
+                recordDropped(transaction, workflowPath, step, true);
                 dropped = true;
                 continue;
+            }
+            if (referencesMissingFile(step.getExtensions(), workflowPath, 0)) {
+                recordDropped(transaction, workflowPath, step, false);
             }
             dropped |= pruneMissingEntries(step.getExtensions(), workflowPath, 0);
             kept.add(step);
@@ -3863,7 +4027,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     @Override
     public Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion,
                                 String targetAgentId, String selectedResources, String workflowOrder,
-                                String sourceAuth, Boolean createNew, Boolean compatible) {
+                                String sourceAuth, Boolean createNew, Boolean compatible, Boolean allowIncomplete) {
         validateSourceUrl(sourceUrl);
         requireSourceAgentId(sourceAgentId);
         Set<String> selectedSet = parseSelectedResources(selectedResources);
@@ -3875,7 +4039,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             throw withErrorBody(e);
         }
         if (resolvedTarget == null) {
-            return upgradeResponse(syncNewAgent(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, selectedSet));
+            return upgradeResponse(syncNewAgent(sourceUrl, sourceAgentId, sourceVersion, sourceAuth, selectedSet,
+                    Boolean.TRUE.equals(allowIncomplete)));
         }
         targetAgentId = resolvedTarget;
 
@@ -3924,7 +4089,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * @return what landed, in the same shape a sync onto an existing agent answers
      */
     private UpgradeResult syncNewAgent(String sourceUrl, String sourceAgentId, Integer sourceVersion,
-                                       String sourceAuth, Set<String> selectedSet) {
+                                       String sourceAuth, Set<String> selectedSet, boolean allowIncomplete) {
         metrics.upgradeAttempted();
         byte[] archive;
         try {
@@ -3939,7 +4104,8 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
         File targetDir = new File(FileUtilities.buildPath(tmpPath.toString(), UUID.randomUUID().toString()));
         try {
-            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet, false);
+            Response imported = importAgentZipFile(new ByteArrayInputStream(archive), targetDir, false, selectedSet, false,
+                    allowIncomplete);
             URI createdAgentUri = locationOf(imported);
             LOGGER.infof("Sync created agent %s from %s", LogSanitizer.sanitize(String.valueOf(createdAgentUri)),
                     LogSanitizer.sanitize(sourceUrl));
@@ -3948,8 +4114,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // importer rolls the whole archive back rather than leaving part of it.
             // What the import wrote differently from the source is still worth saying.
             String signingTurnedOff = imported.getHeaderString(HEADER_SIGNING_TURNED_OFF);
+            List<String> warnings = new ArrayList<>();
+            if (signingTurnedOff != null) {
+                warnings.add(signingTurnedOff);
+            }
+            warnings.addAll(importWarningsOf(imported));
             UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of(), null, null,
-                    signingTurnedOff == null ? List.of() : List.of(signingTurnedOff));
+                    warnings);
             metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(), 0);
             return result;
         } catch (WebApplicationException e) {
@@ -4104,7 +4275,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         String targetAgentId = resolveTarget(request.targetAgentId(), request.sourceAgentId(), request.createNew());
         if (targetAgentId == null) {
             return syncNewAgent(sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(), sourceAuth,
-                    request.selectedResources());
+                    request.selectedResources(), false);
         }
         try (var source = new RemoteApiResourceSource(
                 sourceUrl, request.sourceAgentId(), request.sourceAgentVersion(),

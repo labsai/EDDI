@@ -15,6 +15,7 @@ import ai.labs.eddi.backup.model.ImportPreview;
 import ai.labs.eddi.backup.model.ImportPreview.DiffAction;
 import ai.labs.eddi.backup.model.ImportPreview.ResourceDiff;
 import ai.labs.eddi.backup.model.UpgradeResult;
+import ai.labs.eddi.configs.validation.ConfigValidationPolicy;
 import ai.labs.eddi.backup.model.UpgradeResult.ResourceFailure;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -205,6 +206,30 @@ public class UpgradeExecutor {
                                         Set<String> selectedSourceIds,
                                         List<String> workflowOrder,
                                         boolean compatible) {
+        // Configs from another instance or an older release keep importing: the
+        // save-time checks the stores run warn here instead of refusing, and what
+        // they found travels in the result's warnings (see ConfigValidationPolicy).
+        try (var validation = ConfigValidationPolicy.lenient()) {
+            UpgradeResult result = runUpgrade(source, targetAgentId, selectedSourceIds, workflowOrder, compatible);
+            return withValidationWarnings(result, validation.warnings());
+        }
+    }
+
+    private static UpgradeResult withValidationWarnings(UpgradeResult result, List<String> validationWarnings) {
+        if (validationWarnings.isEmpty()) {
+            return result;
+        }
+        List<String> all = new ArrayList<>(result.warnings());
+        validationWarnings.stream().filter(warning -> !all.contains(warning)).forEach(all::add);
+        return new UpgradeResult(result.agentUri(), result.agentUpdated(), result.updated(), result.created(), result.skipped(),
+                result.failures(), result.compatible(), result.compatibilityGeneration(), all);
+    }
+
+    private UpgradeResult runUpgrade(IResourceSource source,
+                                     String targetAgentId,
+                                     Set<String> selectedSourceIds,
+                                     List<String> workflowOrder,
+                                     boolean compatible) {
         var outcome = new Outcome();
         metrics.upgradeAttempted();
         try {

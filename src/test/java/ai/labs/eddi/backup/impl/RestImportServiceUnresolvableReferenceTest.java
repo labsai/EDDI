@@ -160,7 +160,7 @@ class RestImportServiceUnresolvableReferenceTest {
                 IRuleSetStore.class, ruleSetStore,
                 ILlmStore.class, llmStore)) {
             Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
 
             assertEquals(201, response.getStatus(),
                     "an archive EDDI's own selective export wrote must import, not 400");
@@ -172,6 +172,70 @@ class RestImportServiceUnresolvableReferenceTest {
         assertEquals("eddi://ai.labs.behavior", steps.getFirst().getType().toString());
         // Creating the LLM anyway would have written a resource nothing references.
         verify(llmStore, never()).create(any(LlmConfiguration.class));
+    }
+
+    /**
+     * The default: an archive that names a configuration it does not carry is
+     * refused, listing every missing file, and nothing is written. Dropping the LLM
+     * step used to answer 201 for an agent that deploys READY and cannot answer.
+     */
+    @Test
+    @DisplayName("without allowIncomplete a create naming a missing config is refused with 422 listing it")
+    void refusesAnIncompleteArchiveByDefault() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.behavior","config":{"uri":"%s"}},
+                {"type":"eddi://ai.labs.llm","config":{"uri":"%s"}}
+                """.formatted(BEHAVIOR_URI, MISSING_LLM_URI), true);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("7777111122223333444455bb", 1));
+        var ruleSetStore = mock(IRuleSetStore.class);
+        when(ruleSetStore.create(any())).thenReturn(resourceId("1111111122223333444455cc", 1));
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IRuleSetStore.class, ruleSetStore)) {
+            var refused = assertThrows(jakarta.ws.rs.WebApplicationException.class,
+                    () -> importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null));
+
+            assertEquals(422, refused.getResponse().getStatus());
+            @SuppressWarnings("unchecked")
+            var body = (java.util.Map<String, Object>) refused.getResponse().getEntity();
+            assertEquals("allowIncomplete=true", body.get("hint"));
+            var missing = (List<?>) body.get("missing");
+            assertEquals(1, missing.size(), "every missing reference is listed: " + missing);
+            assertTrue(missing.getFirst().toString().contains(MISSING_LLM_ID), missing.getFirst().toString());
+            assertTrue(missing.getFirst().toString().contains(".langchain.json") || missing.getFirst().toString().contains(".llm.json")
+                    || missing.getFirst().toString().contains("file in the archive"), missing.getFirst().toString());
+        }
+        verify(metrics).importFailed();
+    }
+
+    @Test
+    @DisplayName("with allowIncomplete the 201 lists what was dropped")
+    void allowIncompleteListsWhatWasDropped() throws Exception {
+        archiveWithWorkflowSteps("""
+                {"type":"eddi://ai.labs.behavior","config":{"uri":"%s"}},
+                {"type":"eddi://ai.labs.llm","config":{"uri":"%s"}}
+                """.formatted(BEHAVIOR_URI, MISSING_LLM_URI), true);
+
+        var workflowStore = mock(IWorkflowStore.class);
+        when(workflowStore.create(any())).thenReturn(resourceId("7777111122223333444455bb", 1));
+        var ruleSetStore = mock(IRuleSetStore.class);
+        when(ruleSetStore.create(any())).thenReturn(resourceId("1111111122223333444455cc", 1));
+
+        try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
+                IWorkflowStore.class, workflowStore,
+                IRuleSetStore.class, ruleSetStore)) {
+            Response response = importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
+
+            assertEquals(201, response.getStatus());
+            assertEquals("1", response.getHeaderString(RestImportService.HEADER_IMPORT_WARNINGS));
+            @SuppressWarnings("unchecked")
+            var body = (java.util.Map<String, Object>) response.getEntity();
+            assertEquals(1, ((List<?>) body.get("dropped")).size());
+            assertTrue(body.get("warnings").toString().contains(MISSING_LLM_ID), body.get("warnings").toString());
+        }
     }
 
     /**
@@ -197,7 +261,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -235,7 +299,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IDictionaryStore.class, dictionaryStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -271,7 +335,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -309,7 +373,7 @@ class RestImportServiceUnresolvableReferenceTest {
         var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(), IWorkflowStore.class, workflowStore)) {
             Response response = importService.importAgent(
-                    new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                    new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
             assertEquals(201, response.getStatus());
         }
 
@@ -363,7 +427,7 @@ class RestImportServiceUnresolvableReferenceTest {
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                 IWorkflowStore.class, workflowStore,
                 IRuleSetStore.class, ruleSetStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -397,7 +461,7 @@ class RestImportServiceUnresolvableReferenceTest {
 
         var stored = ArgumentCaptor.forClass(WorkflowConfiguration.class);
         try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(), IWorkflowStore.class, workflowStore)) {
-            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+            importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
         }
 
         verify(workflowStore).create(stored.capture());
@@ -435,7 +499,7 @@ class RestImportServiceUnresolvableReferenceTest {
         var thrown = assertThrows(BadRequestException.class, () -> {
             try (var cdi = stubCdi(IAgentStore.class, stubAgentCreation(),
                     IWorkflowStore.class, mock(IWorkflowStore.class))) {
-                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null);
+                importService.importAgent(new ByteArrayInputStream(new byte[0]), "create", null, null, null, false, true);
             }
         });
 
