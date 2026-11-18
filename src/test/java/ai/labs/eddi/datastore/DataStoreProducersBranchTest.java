@@ -498,15 +498,26 @@ class DataStoreProducersBranchTest {
     }
 
     @Test
-    @DisplayName("isPostgres returns false for unknown type")
+    @DisplayName("an unknown type is refused, not taken for MongoDB")
     void isPostgres_unknownType() throws Exception {
         producers.datastoreType = "redis";
         Instance<MongoScheduleStore> mongo = mock(Instance.class);
         Instance<PostgresScheduleStore> pg = mock(Instance.class);
-        var mongoStore = mock(MongoScheduleStore.class);
-        when(mongo.get()).thenReturn(mongoStore);
 
-        IScheduleStore result = producers.scheduleStore(mongo, pg);
-        assertSame(mongoStore, result);
+        assertThrows(IllegalArgumentException.class, () -> producers.scheduleStore(mongo, pg));
+    }
+
+    @Test
+    @DisplayName("Postgres, postgresql and padded values select PostgreSQL")
+    void isPostgres_spellings() throws Exception {
+        for (String spelling : new String[]{"Postgres", "POSTGRESQL", " postgres "}) {
+            producers.datastoreType = spelling;
+            Instance<MongoScheduleStore> mongo = mock(Instance.class);
+            Instance<PostgresScheduleStore> pg = mock(Instance.class);
+            var pgStore = mock(PostgresScheduleStore.class);
+            when(pg.get()).thenReturn(pgStore);
+
+            assertSame(pgStore, producers.scheduleStore(mongo, pg), spelling);
+        }
     }
 }

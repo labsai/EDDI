@@ -163,7 +163,7 @@ docker run --name eddi \
 | Variable                   | Default                                       | Description |
 | -------------------------- | --------------------------------------------- | ----------- |
 | `MONGODB_CONNECTIONSTRING` | `mongodb://mongodb:27017/eddi?...`            | MongoDB connection string |
-| `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` |
+| `EDDI_DATASTORE_TYPE`      | `mongodb`                                     | `mongodb` or `postgres` (`postgresql` is an alias; not case-sensitive; anything else stops EDDI at startup). `docker-compose.postgres-only.yml` fixes it to `postgres` and ignores this variable |
 | `EDDI_VAULT_MASTER_KEY`    | *(empty)*                                     | Enables the [secrets vault](secrets-vault.md). Without it EDDI starts, but the vault is disabled, and the audit ledger is unsigned unless the independent `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. Production refuses a weak key (under 16 characters, fewer than 6 distinct characters, or a known default/placeholder) unless `EDDI_VAULT_ALLOW_WEAK_MASTER_KEY=true` |
 | `POSTGRES_PASSWORD`        | *(required)*                                  | `docker-compose.postgres-only.yml` only: the database password for both PostgreSQL and EDDI. No default — the file used to ship `eddi`/`eddi`. The postgres image reads it at first init only, so keep it stable; `install.sh --db=postgres` generates one into `.env` |
 | `MONGO_INITDB_ROOT_USERNAME` / `MONGO_INITDB_ROOT_PASSWORD` | `eddi` / `changeme` | MongoDB's root user, created on first init. Only `mongod` and the one-shot `mongodb-app-user` service see it; EDDI does not connect with it |

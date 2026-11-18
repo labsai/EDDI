@@ -2671,15 +2671,19 @@ class DeploymentManifestsTest {
         @Test
         @DisplayName("the datastore type is compared as exactly as the Java that reads it")
         void datastoreTypeIsComparedTheWayJavaComparesIt() throws IOException {
+            // EDDI reads the type through DatastoreType: trimmed, case-insensitive, \"mongodb\", \"postgres\"
+            // and the alias \"postgresql\", anything else refused at startup. The chart may be stricter
+            // than that (it renders only the two lower-case names) but never looser.
             String producers = read(DATASTORE_PRODUCERS);
-            assertTrue(producers.contains("\"postgres\".equals(datastoreType)"),
-                    DATASTORE_PRODUCERS + " no longer selects the store with an exact equals(). The chart's "
-                            + "guard is written to that comparison — if this became case-insensitive the "
-                            + "guard may relax with it, but the two must be changed together, never one of "
-                            + "them");
-            assertFalse(producers.contains("equalsIgnoreCase"),
-                    DATASTORE_PRODUCERS + " matches the datastore type case-insensitively now; update the "
-                            + "chart guard and this test together");
+            assertTrue(producers.contains("DatastoreType.isPostgres(datastoreType)"),
+                    DATASTORE_PRODUCERS + " no longer selects the store through DatastoreType. The chart's "
+                            + "guard is written to the names that class accepts; change them together");
+            assertFalse(producers.contains("\"postgres\".equals(datastoreType)"),
+                    DATASTORE_PRODUCERS + " compares the raw datastore type again; every reader must go through DatastoreType");
+            String datastoreType = read(DATASTORE_PRODUCERS.resolveSibling("DatastoreType.java"));
+            assertTrue(datastoreType.contains("case \"mongodb\" -> MONGODB;") && datastoreType.contains("case \"postgres\", \"postgresql\" -> POSTGRES;"),
+                    "DatastoreType no longer accepts exactly mongodb, postgres and postgresql; the chart renders only "
+                            + "the first two and must stay within what EDDI accepts");
 
             String configmap = stripGoComments(read(HELM_TEMPLATES.resolve("configmap.yaml")));
             assertTrue(configmap.contains("$declaredType := toString (default \"\" .Values.eddi.datastoreType)"),

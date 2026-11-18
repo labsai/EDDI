@@ -12,6 +12,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -77,12 +78,13 @@ class V6MigrationsOnPostgresTest {
     }
 
     @Test
-    @DisplayName("the datastore type is matched exactly, as DataStoreProducers matches it")
-    void datastoreTypeIsMatchedExactly() {
-        // "Postgres" selects the MongoDB stores in DataStoreProducers, so it must not
-        // switch these migrations off either.
+    @DisplayName("the datastore type is read as DataStoreProducers reads it: not case-sensitive, and an unknown value is refused")
+    void datastoreTypeIsReadLikeEveryOtherReader() {
+        // "Postgres" selects the PostgreSQL stores in DataStoreProducers, so it must switch
+        // these migrations to the PostgreSQL behaviour as well.
         var migration = new V6RenameMigration(unreachableMongo(), mock(IMigrationLogStore.class), false, "Postgres");
 
-        assertTrue(migration.holdsRetention());
+        assertFalse(migration.holdsRetention());
+        assertThrows(IllegalArgumentException.class, () -> new V6RenameMigration(unreachableMongo(), mock(IMigrationLogStore.class), false, "mongo"));
     }
 }

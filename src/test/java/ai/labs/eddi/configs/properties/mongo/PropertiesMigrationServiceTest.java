@@ -36,6 +36,7 @@ import java.util.stream.Collectors;
 import com.mongodb.client.ListCollectionNamesIterable;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
@@ -67,8 +68,10 @@ class PropertiesMigrationServiceTest {
 
     @Test
     void runsForEveryDatastoreTypeTheRestOfEddiTreatsAsMongo() {
-        // DataStoreProducers treats anything but "postgres" as MongoDB
-        var service = service("mongo");
+        // DatastoreType (the one reader, also used by DataStoreProducers) reads "MongoDB" like "mongodb";
+        // a value it does not know is refused instead of being taken for MongoDB
+        assertThrows(IllegalArgumentException.class, () -> service("mongo"));
+        var service = service(" MongoDB ");
         var iterable = mockIterableOf("users");
         when(database.listCollectionNames()).thenReturn(iterable);
 

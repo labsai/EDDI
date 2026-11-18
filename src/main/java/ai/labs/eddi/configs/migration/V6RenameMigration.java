@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.datastore.DatastoreType;
 import ai.labs.eddi.utils.ProgressLogger;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoCommandException;
@@ -217,7 +218,7 @@ public class V6RenameMigration {
         this.database = database;
         this.migrationLogStore = migrationLogStore;
         this.enabled = enabled;
-        this.postgres = "postgres".equals(datastoreType);
+        this.postgres = DatastoreType.isPostgres(datastoreType);
     }
 
     /**

@@ -90,7 +90,7 @@ See [Architecture](architecture.md) and the [Configuration Reference](configurat
 
 ### PostgreSQL profile does not take effect
 
-- **Cause:** The datastore is chosen by `eddi.datastore.type` (default `mongodb`). The `postgres` profile sets it to `postgres` and activates the datasource (`quarkus.datasource.active` is `false` otherwise).
+- **Cause:** The datastore is chosen by `eddi.datastore.type` (default `mongodb`). The `postgres` profile sets it to `postgres` and activates the datasource (`quarkus.datasource.active` is `false` otherwise). An `EDDI_DATASTORE_TYPE` environment variable outranks the profile's setting; EDDI refuses to start when the `postgres` profile and a MongoDB type meet (for example the `EDDI_DATASTORE_TYPE=mongodb` of a copied `.env.example`), and on any value that is not `mongodb`, `postgres` or `postgresql`.
 - **Fix:** Start with `QUARKUS_PROFILE=postgres` (or `-Dquarkus.profile=postgres`) and set `QUARKUS_DATASOURCE_JDBC_URL`, `QUARKUS_DATASOURCE_USERNAME` and `QUARKUS_DATASOURCE_PASSWORD` explicitly; outside tests nothing provides them. `docker-compose.postgres-only.yml` is a working example.
 - **Check:** `/q/health/ready` shows a `PostgreSQL connection` check. When it is DOWN the server log has `PostgreSQL readiness check failed` with the cause (the JDBC detail is not exposed over HTTP).
 

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.datastore.DatastoreType;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -31,17 +32,17 @@ public class GridFsIndexInitializer {
     private static final Logger LOGGER = Logger.getLogger(GridFsIndexInitializer.class);
 
     private final Instance<GridFsAttachmentStore> attachmentStore;
-    private final String datastoreType;
+    private final boolean postgres;
 
     @Inject
     public GridFsIndexInitializer(Instance<GridFsAttachmentStore> attachmentStore,
             @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType) {
         this.attachmentStore = attachmentStore;
-        this.datastoreType = datastoreType;
+        this.postgres = DatastoreType.isPostgres(datastoreType);
     }
 
     void onStart(@Observes StartupEvent event) {
-        if ("postgres".equals(datastoreType)) {
+        if (postgres) {
             return;
         }
         try {

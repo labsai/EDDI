@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.datastore.DatastoreType;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.annotation.PreDestroy;
 import jakarta.annotation.Priority;
@@ -49,7 +50,7 @@ public class PostgresStartupSchemaLock {
     static final long LOCK_KEY = 0x4544444953434847L;
 
     private final Instance<DataSource> dataSource;
-    private final String datastoreType;
+    private final boolean postgres;
     private final int timeoutSeconds;
     private volatile Connection held;
 
@@ -58,7 +59,7 @@ public class PostgresStartupSchemaLock {
             @ConfigProperty(name = "eddi.datastore.type", defaultValue = "mongodb") String datastoreType,
             @ConfigProperty(name = "eddi.datastore.postgres.startup-lock-timeout", defaultValue = "180") int timeoutSeconds) {
         this.dataSource = dataSource;
-        this.datastoreType = datastoreType;
+        this.postgres = DatastoreType.isPostgres(datastoreType);
         this.timeoutSeconds = timeoutSeconds;
     }
 
@@ -73,7 +74,7 @@ public class PostgresStartupSchemaLock {
     }
 
     void acquire() {
-        if (!"postgres".equals(datastoreType)) {
+        if (!postgres) {
             return;
         }
         Connection connection = null;
