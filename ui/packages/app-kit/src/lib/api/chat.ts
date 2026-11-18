@@ -53,6 +53,16 @@ export type { SSEEvent, SSEEventType };
 
 // --- Types ---
 
+/**
+ * What a turn request may carry besides its text: the `Idempotency-Key` the
+ * conversation controller generated for this submission (the same on every
+ * retry of it), and the abort signal of a non-streamed say.
+ */
+export interface TurnRequestOptions {
+  idempotencyKey?: string;
+  signal?: AbortSignal;
+}
+
 export interface InputData {
   input: string;
   context?: Record<string, unknown>;
@@ -201,9 +211,10 @@ export async function sendMessage(
   _environment: string,
   _agentId: string,
   conversationId: string,
-  message: string
+  message: string,
+  options: TurnRequestOptions = {},
 ): Promise<SimpleConversationMemorySnapshot> {
-  const snapshot: unknown = await conversation.sendMessage(checkedId(conversationId), message);
+  const snapshot: unknown = await conversation.sendMessage(checkedId(conversationId), message, options);
   return snapshot as SimpleConversationMemorySnapshot;
 }
 
@@ -212,10 +223,12 @@ export async function sendMessageWithContext(
   _environment: string,
   _agentId: string,
   conversationId: string,
-  inputData: InputData
+  inputData: InputData,
+  options: TurnRequestOptions = {},
 ): Promise<SimpleConversationMemorySnapshot> {
   const snapshot: unknown = await conversation.sendMessage(checkedId(conversationId), inputData.input, {
     context: inputData.context as ContextMap | undefined,
+    ...options,
   });
   return snapshot as SimpleConversationMemorySnapshot;
 }
@@ -230,10 +243,12 @@ export async function* sendMessageStreaming(
   conversationId: string,
   inputData: InputData,
   signal?: AbortSignal,
+  options: Pick<TurnRequestOptions, "idempotencyKey"> = {},
 ): AsyncGenerator<SSEEvent> {
   yield* conversation.sendMessageStreaming(checkedId(conversationId), inputData.input, {
     context: inputData.context as ContextMap | undefined,
     signal,
+    idempotencyKey: options.idempotencyKey,
   });
 }
 

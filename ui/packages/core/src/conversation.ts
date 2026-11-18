@@ -61,6 +61,13 @@ export interface SendOptions {
   /** Sent as `?userId=`. */
   userId?: string;
   /**
+   * Sent as the `Idempotency-Key` header: the same key on the same conversation
+   * is one turn, however many times the request arrives (a retry after a
+   * timeout gets the stored answer instead of running again). Generate one per
+   * user submission with {@link newIdempotencyKey} and reuse it on every retry.
+   */
+  idempotencyKey?: string;
+  /**
    * Context entries. When present (and non-empty) the turn is sent as JSON
    * `InputData` instead of plain text — attachments reach the model ONLY this
    * way, through `attachment_N` keys.
@@ -72,6 +79,25 @@ export interface SendOptions {
 export interface StreamOptions {
   context?: ContextMap;
   signal?: AbortSignal;
+  /** See {@link SendOptions.idempotencyKey}. */
+  idempotencyKey?: string;
+}
+
+/** The request header the backend reads a turn's idempotency key from. */
+export const IDEMPOTENCY_KEY_HEADER = "Idempotency-Key";
+
+/**
+ * A key for one user submission: a UUID (the backend takes 1 to 128 printable
+ * ASCII characters), with a random fallback where `crypto.randomUUID` is absent.
+ */
+export function newIdempotencyKey(): string {
+  const c = (globalThis as { crypto?: { randomUUID?: () => string } }).crypto;
+  if (c?.randomUUID) return c.randomUUID();
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}${Math.random().toString(36).slice(2)}`;
+}
+
+function keyHeader(key: string | undefined): Record<string, string> {
+  return key ? { [IDEMPOTENCY_KEY_HEADER]: key } : {};
 }
 
 export interface RerunOptions {
@@ -171,7 +197,7 @@ export function createConversationApi(http: HttpClient) {
       `/agents/${encodeSegment(conversationId)}?${params}`,
       {
         method: "POST",
-        headers: { "Content-Type": json ? "application/json" : "text/plain" },
+        headers: { "Content-Type": json ? "application/json" : "text/plain", ...keyHeader(options.idempotencyKey) },
         body: json ? JSON.stringify({ input: message, context: options.context }) : message,
         signal: options.signal,
       },
@@ -197,7 +223,7 @@ export function createConversationApi(http: HttpClient) {
       `/agents/${encodeSegment(conversationId)}/stream`,
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...keyHeader(options.idempotencyKey) },
         body: JSON.stringify(body),
         signal: options.signal,
       },
@@ -299,6 +325,7 @@ export function createConversationApi(http: HttpClient) {
     message: string,
     context?: ContextMap,
     signal?: AbortSignal,
+    idempotencyKey?: string,
   ): Promise<ConversationSnapshot> {
     const body: Record<string, unknown> = { input: message };
     if (hasContext(context)) body.context = context;
@@ -307,7 +334,7 @@ export function createConversationApi(http: HttpClient) {
       managedPath(intent, userId),
       {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...keyHeader(idempotencyKey) },
         body: JSON.stringify(body),
         signal,
       },

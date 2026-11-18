@@ -39,6 +39,12 @@ export interface TurnOptions {
   context?: ContextMap;
   /** Stop and New conversation abort the turn through it, on every transport. */
   signal: AbortSignal;
+  /**
+   * One per user submission, the same on every retry of it: sent as the
+   * `Idempotency-Key` header so the backend runs the turn once. Absent on the
+   * local (demo) transport.
+   */
+  idempotencyKey?: string;
 }
 
 export interface LocalWelcome {
@@ -127,9 +133,10 @@ export function createConversationTransport(
     mode: "conversation",
     ...common(calls),
     start: () => calls().startConversation(target.environment, target.agentId, target.userId),
-    stream: (id, text, { context, signal }) => calls().sendMessageStreaming(id ?? "", text, { context, signal }),
-    say: (id, text, { context, signal }) =>
-      calls().sendMessage(id ?? "", text, { userId: target.userId, context, signal }),
+    stream: (id, text, { context, signal, idempotencyKey }) =>
+      calls().sendMessageStreaming(id ?? "", text, { context, signal, idempotencyKey }),
+    say: (id, text, { context, signal, idempotencyKey }) =>
+      calls().sendMessage(id ?? "", text, { userId: target.userId, context, signal, idempotencyKey }),
   };
 }
 
@@ -145,7 +152,7 @@ export function createManagedTransport(
       if (fresh) await calls().endManagedConversation(target.intent, target.userId);
       return calls().loadManagedConversation(target.intent, target.userId);
     },
-    say: (_id, text, { context, signal }) =>
-      calls().sendManagedAgentMessage(target.intent, target.userId, text, context, signal),
+    say: (_id, text, { context, signal, idempotencyKey }) =>
+      calls().sendManagedAgentMessage(target.intent, target.userId, text, context, signal, idempotencyKey),
   };
 }

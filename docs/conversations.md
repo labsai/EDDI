@@ -68,6 +68,10 @@ or a streaming `say`, and the retry is answered instead of refused:
 - Keys are scoped to the conversation, 1 to 128 printable ASCII characters; anything else is a `400`
   (`INVALID_IDEMPOTENCY_KEY`).
 - A turn that **failed** is not remembered: retrying a failed request with the same key runs it again.
+- The Manager, Workforce and the Chat UI send a key with every `say` and streaming `say`: one per submission, the
+  same on every retry of it (the Retry button, a draft sent again after a `408` or a dropped connection), a new
+  one for the next submission. They run on the EDDI origin, so no CORS rule is involved; a browser client of
+  your own on another origin must have `idempotency-key` in `quarkus.http.cors.headers` before it can send one.
 - Waiting for a running turn works on the node that runs it; behind a multi-node (NATS) coordinator a
   duplicate that lands on another node still meets `409` until the turn completes, after which the stored
   answer is served everywhere. `0` for the TTL switches the feature off.

@@ -731,18 +731,25 @@ const selectedAgent = () => useChatStore.getState().selectedAgentId ?? "";
 /** The Manager's API binding as a transport (its token refresh, its errors, its mocks in tests). */
 const chatTransport: AgentTransport = {
   mode: "conversation",
-  stream: (conversationId, text, { context, signal }) =>
+  stream: (conversationId, text, { context, signal, idempotencyKey }) =>
     sendMessageStreaming(
       "production",
       selectedAgent(),
       conversationId ?? "",
       context ? { input: text, context } : { input: text },
       signal,
+      { idempotencyKey },
     ),
-  say: (conversationId, text, { context }) =>
+  say: (conversationId, text, { context, signal, idempotencyKey }) =>
     (context
-      ? sendMessageWithContext("production", selectedAgent(), conversationId ?? "", { input: text, context })
-      : sendMessage("production", selectedAgent(), conversationId ?? "", text)) as unknown as Promise<
+      ? sendMessageWithContext("production", selectedAgent(), conversationId ?? "", { input: text, context }, {
+          idempotencyKey,
+          signal,
+        })
+      : sendMessage("production", selectedAgent(), conversationId ?? "", text, {
+          idempotencyKey,
+          signal,
+        })) as unknown as Promise<
       Partial<ConversationSnapshot>
     >,
   read: (conversationId, currentStepOnly) =>

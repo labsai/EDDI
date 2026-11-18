@@ -729,13 +729,14 @@ function createThreadConversation(
       mode: "conversation",
       // A turn of files only names the first file as its input; the backend
       // reads the files from the context.
-      stream: (conversationId, text, { context, signal }) =>
+      stream: (conversationId, text, { context, signal, idempotencyKey }) =>
         sendMessageStreaming(
           "production",
           memberId,
           conversationId ?? "",
           context ? { input: text || firstAttachmentName(context) || "attachment", context } : { input: text },
           signal,
+          { idempotencyKey },
         ),
       read: (conversationId, currentStepOnly) =>
         readConversation("production", memberId, conversationId, currentStepOnly ?? false) as unknown as Promise<

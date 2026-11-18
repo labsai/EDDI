@@ -23,6 +23,7 @@ import {
   isSkippedTurn,
   isTurnPaused,
   lastStepIndex,
+  newIdempotencyKey,
   outputsCarryStepIndexes,
   parseDoneSnapshot,
   parseErrorEvent,
@@ -409,6 +410,19 @@ export class AgentConversation {
   private turnsSent = 0;
   /** The turn in flight, so Stop can tell its own step from the one before it. */
   private activeTurn: TurnContext | null = null;
+  /**
+   * The submission whose outcome is not settled, and its `Idempotency-Key`. A
+   * key is generated once per user submission and kept while the submission
+   * did not end as sent — a refused or failed turn, or one whose outcome is
+   * unknown (a 408, a connection that dropped after the send) — so every retry
+   * of the same text, files and conversation (the Retry button, the draft sent
+   * again, an automatic retry) carries the same key and the backend runs the
+   * turn once. Anything else (new text, another conversation, a settled turn)
+   * gets a new key.
+   */
+  private submission: { key: string; signature: string } | null = null;
+  /** Set by the paths that leave the submission unsettled; read when `send` ends. */
+  private keepSubmission = false;
 
   constructor(options: AgentConversationOptions, initial: AgentConversationState = initialConversationState) {
     this.options = options;
@@ -1000,6 +1014,13 @@ export class AgentConversation {
         ? { ...secretContext, ...attachmentContext }
         : undefined;
 
+    // One key per submission, the same on every retry of it (see `submission`).
+    const signature = JSON.stringify([conversationId, text, !!isSecret, staged.map((a) => a.storageRef)]);
+    const reusedKey = this.submission?.signature === signature;
+    if (!reusedKey) this.submission = { key: newIdempotencyKey(), signature };
+    const idempotencyKey = this.submission?.key;
+    this.keepSubmission = false;
+
     // Attachments are named in the transcript so the user can see what was
     // actually sent: as chips on the message, or as text lines. A file above
     // the forward limit was stored but will not be inlined; the model gets a
@@ -1082,7 +1103,7 @@ export class AgentConversation {
         if (!localDone) dispatch({ type: "FINISH_STREAMING" });
         dispatch({ type: "SET_QUICK_REPLIES", replies: transport.quickRepliesAfter?.(text) ?? [] });
       } else if (transport.mode === "managed" && transport.say) {
-        const snapshot = await transport.say(null, text, { context, signal: abort.signal });
+        const snapshot = await transport.say(null, text, { context, signal: abort.signal, idempotencyKey });
         // Stopped, or the conversation was replaced, while the reply was in
         // flight: it belongs to a turn nobody is waiting for any more.
         if (!this.isCurrent(sendGen) || stopped()) return result;
@@ -1091,9 +1112,19 @@ export class AgentConversation {
         dispatch({ type: "SET_PROCESSING", value: false });
       } else if (this.options.streaming !== false && transport.stream && conversationId) {
         dispatch({ type: "ADD_MESSAGE", message: streamingPlaceholder() });
-        result = await this.readStream(transport, conversationId, text, context, abort, turn, sendGen, turnNumber, failureContext);
+        result = await this.readStream(
+          transport,
+          conversationId,
+          text,
+          { context, idempotencyKey },
+          abort,
+          turn,
+          sendGen,
+          turnNumber,
+          failureContext,
+        );
       } else if (transport.say && conversationId) {
-        const snapshot = await transport.say(conversationId, text, { context, signal: abort.signal });
+        const snapshot = await transport.say(conversationId, text, { context, signal: abort.signal, idempotencyKey });
         if (!this.isCurrent(sendGen) || stopped()) return result;
         dispatch({ type: "SET_THINKING", value: false });
         this.applyTurnSnapshot(snapshot);
@@ -1102,7 +1133,8 @@ export class AgentConversation {
     } catch (err) {
       result = await this.handleSendFailure(err, { sendGen, turn, turnId, conversationId, stopped, failureContext });
     } finally {
-      // Release this turn's record; only the failure paths deleted it.
+      // A settled turn ends its submission; an unsettled one keeps its key for the retry.
+      if (!this.keepSubmission && result.outcome === "sent") this.submission = null;
       this.pendingTurns.delete(turnId);
       if (this.abort === abort) this.abort = null;
       if (this.activeTurn === turn) this.activeTurn = null;
@@ -1142,7 +1174,7 @@ export class AgentConversation {
     transport: AgentTransport,
     conversationId: string,
     text: string,
-    context: Record<string, { type: "string" | "object"; value: unknown }> | undefined,
+    request: { context: Record<string, { type: "string" | "object"; value: unknown }> | undefined; idempotencyKey: string | undefined },
     abort: AbortController,
     turn: TurnContext,
     sendGen: number,
@@ -1174,7 +1206,11 @@ export class AgentConversation {
     let streamDone = false;
     try {
       try {
-        for await (const event of stream(conversationId, text, { context, signal: abort.signal })) {
+        for await (const event of stream(conversationId, text, {
+          context: request.context,
+          signal: abort.signal,
+          idempotencyKey: request.idempotencyKey,
+        })) {
           // New Conversation mid-stream: stop writing into its replacement.
           if (!this.isCurrent(sendGen)) {
             if (grace === undefined) break;
@@ -1822,6 +1858,7 @@ export class AgentConversation {
     if (this.options.detachedGraceMs === undefined) this.abort?.abort();
     this.abort = null;
     this.generation += 1;
+    this.submission = null;
     this.pendingTurns.clear();
     this.forgetSecrets();
     this.dispatch({ type: "CLEAR_MESSAGES" });
