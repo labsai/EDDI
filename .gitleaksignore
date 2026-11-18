@@ -221,3 +221,17 @@ a7bd541e7e9c66569db78909a0afad3c64b730f7:install.sh:curl-auth-user:1805
 8517d700ef070377b08facea7d6e57a631308a89:src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorEncodedEchoRedactionTest.java:generic-api-key:33
 8517d700ef070377b08facea7d6e57a631308a89:src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorEncodedEchoRedactionTest.java:generic-api-key:88
 8517d700ef070377b08facea7d6e57a631308a89:src/test/java/ai/labs/eddi/modules/apicalls/impl/ApiCallExecutorEncodedEchoRedactionTest.java:generic-api-key:163
+
+# Manager test fixtures of PR #1470 (fix/manager-pages-and-editors): made-up keys handed to the
+# secret picker and to the diff-masking test so the tests have a literal to warn about and to
+# mask. Not credentials. A later commit of the same branch rebuilt them so the current tree no
+# longer matches the rule, but gitleaks scans every commit of the range and reads this file
+# from the base branch, so the commit that introduced them is named here (values not quoted --
+# the rule would match this file too).
+# secret-key-picker-literal.test.tsx: the literal typed into <SecretKeyPicker value=...>
+eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__tests__/secret-key-picker-literal.test.tsx:generic-api-key:20
+eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__tests__/secret-key-picker-literal.test.tsx:generic-api-key:28
+eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__tests__/secret-key-picker-literal.test.tsx:generic-api-key:35
+eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/components/shared/__tests__/secret-key-picker-literal.test.tsx:generic-api-key:44
+# mask-credentials.test.ts: the apiKey of the fixture document the mask is applied to
+eb9c4afa65cb4d20b206f5db743659cb68962d35:ui/manager/src/lib/__tests__/mask-credentials.test.ts:generic-api-key:7
