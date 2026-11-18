@@ -1349,8 +1349,8 @@ describe("6.7 feature knowledge in the quick reference (no endpoint needed)", ()
     ] as const) {
       // The page must be named in the same passage as the fact, not merely
       // somewhere in the docs map further down.
+      expect(flat).toContain(fact);
       const at = flat.indexOf(fact);
-      expect(at, fact).toBeGreaterThanOrEqual(0);
       expect(flat.slice(at, at + 1200), `${page} near "${fact}"`).toContain(page);
     }
   });
