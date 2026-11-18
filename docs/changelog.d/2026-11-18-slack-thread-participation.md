@@ -40,6 +40,15 @@ and a reply that opened with another person's mention was dropped.
   tokens serving one agent is ambiguous and posts nothing, and a channel an integration owns but
   left tokenless never borrows another app's token.
 
+- **Configurable Slack API base URL (G5).** `SlackWebApiClient` hard-coded `https://slack.com/api/`,
+  so no test could run a successful Slack call. `eddi.slack.api-base-url` (default unchanged) is
+  validated when `SlackConfig` is created at startup: `https`, or `http` to a literal loopback
+  address, no credentials, query or fragment; a bad value stops the startup with a message that
+  names the property and never echoes the value. The request keeps the same outbound policy
+  (`Profile.DEFAULT`, no redirect followed with the token). `FakeSlackApi` is an in-process
+  `OutboundEngine` behind the real facade, so `SlackWithFakeSlackApiTest` is a plain unit test and
+  needs no socket. The vault `allowedHosts` check for a vaulted bot token still judges slack.com.
+
 **Files:** [`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
 [`SlackThreadParticipationTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/SlackThreadParticipationTest.java),
 [`slack-integration.md`](../slack-integration.md), [`metrics.md`](../metrics.md)

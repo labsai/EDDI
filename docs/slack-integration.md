@@ -561,6 +561,10 @@ earlier with one gets approval cards without buttons until it is renamed). See
 
 All Slack API calls use **exponential backoff** (3 attempts by default, waiting 500 ms and then 1 s between them; `eddi.slack.api-max-retries` and `eddi.slack.api-retry-base-ms`). Failed messages are logged but don't crash the event handler.
 
+### Testing against a fake Slack
+
+`eddi.slack.api-base-url` (default `https://slack.com/api/`) is where EDDI sends every Web API call, so a Slack-compatible test double can stand in for Slack: point it at `http://localhost:<port>/api/` (plain `http` is accepted for a loopback address only; anything else must be `https`). The value is checked at startup. EDDI's own tests use an in-process fake of this API (`FakeSlackApi`) to run the client and the event handler through posted answers, `ok:false`, rate limits and late answers. See the [Configuration Reference](configuration-reference.md#slack).
+
 ### Event Deduplication
 
 Slack retries webhook deliveries on timeout. EDDI uses an in-memory cache (`ICache`) to deduplicate events by `event_id`, preventing duplicate processing.

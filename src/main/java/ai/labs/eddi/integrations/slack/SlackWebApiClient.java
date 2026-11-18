@@ -61,7 +61,7 @@ public class SlackWebApiClient {
      * vaulted token's {@code allowedHosts} against this destination before it
      * resolves it.
      */
-    public static final String SLACK_API_BASE = "https://slack.com/api/";
+    public static final String SLACK_API_BASE = SlackConfig.DEFAULT_API_BASE_URL;
 
     /** HTTP status codes that are worth retrying. */
     private static final Set<Integer> RETRYABLE_STATUS_CODES = Set.of(429, 500, 502, 503, 504);
@@ -73,11 +73,25 @@ public class SlackWebApiClient {
 
     private final OutboundHttp http;
     private final ObjectMapper objectMapper;
+    private final SlackConfig slackConfig;
 
-    @Inject
+    /** Against the real Slack API. */
     public SlackWebApiClient(ObjectMapper objectMapper, OutboundHttp http) {
+        this(objectMapper, http, new SlackConfig(SlackConfig.DEFAULT_REQUEST_TIMEOUT_SECONDS,
+                SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS, SlackConfig.DEFAULT_API_MAX_RETRIES,
+                SlackConfig.DEFAULT_API_RETRY_BASE_MS));
+    }
+
+    /**
+     * @param slackConfig
+     *            names the API base URL ({@code eddi.slack.api-base-url}); the
+     *            outbound policy is the same whatever it is
+     */
+    @Inject
+    public SlackWebApiClient(ObjectMapper objectMapper, OutboundHttp http, SlackConfig slackConfig) {
         this.objectMapper = objectMapper;
         this.http = http;
+        this.slackConfig = slackConfig;
     }
 
     /**
@@ -215,9 +229,12 @@ public class SlackWebApiClient {
         try {
             String jsonBody = objectMapper.writeValueAsString(body);
 
-            // A fixed host: no SSRF check, and no redirect is followed — a 3xx is
-            // answered like any other non-200 status, never replayed with the bot token.
-            var request = OutboundRequest.builder(Profile.DEFAULT, URI.create(SLACK_API_BASE + endpoint))
+            // A host the operator chose (eddi.slack.api-base-url, https or loopback,
+            // checked
+            // at startup), not one a user or a model supplied: no SSRF check, and no
+            // redirect is followed — a 3xx is answered like any other non-200 status,
+            // never replayed with the bot token.
+            var request = OutboundRequest.builder(Profile.DEFAULT, URI.create(slackConfig.getApiBaseUrl() + endpoint))
                     .ssrf(SsrfPolicy.NONE)
                     .redirects(RedirectPolicy.NEVER)
                     .header("Content-Type", "application/json; charset=utf-8")
