@@ -65,10 +65,11 @@ public interface IUserDirectoryStore {
      *            only entries whose {@code lastSeen} is at or after this instant —
      *            the {@code eddi.workspaces.directory.stale-after} window, applied
      *            in the query so a page is never filled with people who are no
-     *            longer suggested. Compared at millisecond precision, the finest
-     *            both stores keep: a sub-millisecond part is ignored, so pass a
-     *            millisecond-aligned instant (as {@link UserDirectory} does).
-     *            {@code null} applies no window
+     *            longer suggested. Must be millisecond-aligned (as
+     *            {@link UserDirectory} passes it): MongoDB compares at millisecond
+     *            precision and PostgreSQL at microsecond, so a sub-millisecond part
+     *            would draw the line differently per store. {@code null} applies no
+     *            window
      */
     List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, Instant seenSince, int limit);
 
