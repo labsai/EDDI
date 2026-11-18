@@ -5,6 +5,8 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import io.micrometer.core.instrument.Metrics;
+import org.jboss.logging.Logger;
 
 import java.util.Locale;
 
@@ -21,13 +23,50 @@ import java.util.Locale;
  * trailing {@code %} up to 100%, is a percentage (85 and 85% are 0.85);</li>
  * <li>everything else — a fraction above 1 ({@code 1.5}, {@code 1.2}: a 1-5
  * scale or a slip, not a percentage), a negative, above 100, NaN, infinite, not
- * a number — is <em>no usable confidence</em> ({@code null}), and the caller
- * fails towards escalation.</li>
+ * a number ({@code "high"}), JSON {@code null} — is <em>no usable
+ * confidence</em> ({@code null}), and the caller fails towards escalation.</li>
  * </ul>
+ * A JSON number and a numeric string read the same; so does a decimal comma
+ * ({@code "0,85"}). The one ambiguity left is a whole number from 2 to 10
+ * written on a 1-10 scale ({@code 7}): it reads as 7 % and escalates. The
+ * prompts ask for 0.0-1.0, and reading 2..100 as a percentage is what keeps
+ * {@code 85} from passing as certain; {@value #UNUSABLE_METER} counts every
+ * unusable value, so a model that answers on another scale shows up there.
  */
 public final class ReportedConfidence {
 
+    /**
+     * Counter of confidences that could not be used and made the caller fail
+     * towards escalation (or a bid towards 0.0); tag {@code source}.
+     */
+    public static final String UNUSABLE_METER = "eddi.llm.confidence.unusable";
+
+    /** A structured-output wrapper carried a confidence that is not one. */
+    public static final String SOURCE_STRUCTURED_OUTPUT = "structured_output";
+    /** The judge answered without a usable confidence. */
+    public static final String SOURCE_JUDGE_VALUE = "judge_value";
+    /** The judge call failed. */
+    public static final String SOURCE_JUDGE_FAILED = "judge_failed";
+    /** No judge model could be built (none configured, no type, a build error). */
+    public static final String SOURCE_JUDGE_UNAVAILABLE = "judge_unavailable";
+    /** A task-force bid carried no usable confidence and bids 0.0. */
+    public static final String SOURCE_BID = "bid";
+
+    private static final Logger LOGGER = Logger.getLogger(ReportedConfidence.class);
+
     private ReportedConfidence() {
+    }
+
+    /**
+     * Counts one unusable confidence under {@link #UNUSABLE_METER}. Never throws: a
+     * metric must not change the outcome.
+     */
+    public static void countUnusable(String source) {
+        try {
+            Metrics.counter(UNUSABLE_METER, "source", source).increment();
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count an unusable confidence: %s", e.getClass().getSimpleName());
+        }
     }
 
     /** A reported number, or null when unusable. */
@@ -54,6 +93,9 @@ public final class ReportedConfidence {
         boolean percent = text.endsWith("%");
         if (percent) {
             text = text.substring(0, text.length() - 1).trim();
+        }
+        if (text.indexOf(',') >= 0 && text.indexOf('.') < 0 && text.indexOf(',') == text.lastIndexOf(',')) {
+            text = text.replace(',', '.'); // a decimal comma: "0,85"
         }
         double value;
         try {

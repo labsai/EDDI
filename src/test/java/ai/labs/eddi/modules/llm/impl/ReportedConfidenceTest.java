@@ -63,4 +63,19 @@ class ReportedConfidenceTest {
         assertNull(ReportedConfidence.of(mapper.readTree("null")));
         assertNull(ReportedConfidence.of((JsonNode) null));
     }
+
+    @Test
+    @DisplayName("the values real models answer with: 0.85, 85, 85%, \"0.85\", 0.850000001, 1, 100, a decimal comma — all usable")
+    void realWorldAnswers() throws Exception {
+        var mapper = new ObjectMapper();
+        for (String json : new String[]{"0.85", "85", "\"85%\"", "\"0.85\"", "\"85\"", "\"0,85\"", "\" 0,85 \""}) {
+            assertEquals(0.85, ReportedConfidence.of(mapper.readTree(json)), 1e-12, json);
+        }
+        assertEquals(0.850000001, ReportedConfidence.of(mapper.readTree("0.850000001")), 1e-12);
+        assertEquals(1.0, ReportedConfidence.of(mapper.readTree("1")), 1e-12, "1 is certain, not 1 %");
+        assertEquals(1.0, ReportedConfidence.of(mapper.readTree("100")), 1e-12);
+        assertEquals(0.07, ReportedConfidence.of(mapper.readTree("7")), 1e-12, "a 1-10 answer reads as a percentage — documented, and counted");
+        assertNull(ReportedConfidence.of("1,0,5"), "not a decimal comma");
+        assertNull(ReportedConfidence.of("0,8.5"));
+    }
 }

@@ -680,6 +680,7 @@ eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
 eddi_llm_cascade_cost_total                 # Dollars spent; tag: provider
 eddi_llm_cascade_step_latency_seconds       # Per-step latency (timer); tag: provider
 eddi_llm_cascade_confidence                 # Confidence scores (distribution summary — `_count`/`_sum`/`_max`, no `_seconds`)
+eddi_llm_confidence_unusable_total          # Confidences that could not be read, so the step escalated (a task-force bid counts 0.0); tag: source (judge_unavailable|judge_failed|judge_value|structured_output|bid). Counted also when heuristic.fallbackWhenJudgeUnavailable scores the answer instead
 ```
 
 **`accepted_step` is the metric that says whether cascading is working.** Mass at

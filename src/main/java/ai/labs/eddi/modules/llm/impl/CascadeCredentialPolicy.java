@@ -20,19 +20,34 @@ import java.util.Set;
  * <p>
  * A secret can be restricted to one vendor's host. If a step of a
  * <em>different</em> provider type inherited the task's {@code apiKey}, that
- * key would be sent to the other vendor. So credentials, endpoints and
- * credential-bearing headers are inherited only when the step's provider type
- * equals the task's; the vendor-neutral tuning parameters (temperature,
- * timeouts, ...) and the model keys still inherit.
+ * key would be sent to the other vendor. So a step of another provider type
+ * inherits only the parameters on an <b>allow-list</b> ({@link #MAY_CROSS}):
+ * vendor-neutral sampling and output limits, timeouts, request logging and the
+ * model name. Everything else — every credential, endpoint, header, account,
+ * region, project, deployment, organisation, end-user id and vendor-specific
+ * option, including the ones a future builder adds — stays with the task's
+ * provider. A deny-list had to name every such key of every builder, and a key
+ * it missed was a credential sent to another vendor. Same-type steps inherit
+ * everything.
  */
 public final class CascadeCredentialPolicy {
 
-    private static final Set<String> CREDENTIAL_BOUND = Set.of("apikey", "accesstoken", "authtoken", "nonazureapikey", "signingsecret", "apppassword",
-            "bottoken", "compartmentid", "configprofile", "projectid", "region", "location", "organizationid", "serviceversion", "customheaders",
-            "customqueryparams", "customparameters",
-            // account-bound resources of one vendor: a Bedrock guardrail, a Gemini cached
-            // content
-            "guardrailid", "guardrailversion", "guardrailstreammode", "cachedcontentname");
+    /**
+     * The task parameters (lower-case) a step of <em>another</em> provider type
+     * inherits. Each means the same thing to every provider and carries nothing
+     * account-bound.
+     */
+    static final Set<String> MAY_CROSS = Set.of(
+            // sampling and output limits
+            "temperature", "topp", "topk", "maxtokens", "maxoutputtokens", "maxcompletiontokens", "maxnewtokens", "seed", "stopsequences",
+            "frequencypenalty", "presencepenalty", "responseformat", "jsonmode",
+            // the call itself
+            "timeout", "logrequests", "logresponses", "logrequestsandresponses",
+            // the model name: wrong for another vendor at worst (the call fails), never a
+            // credential
+            "model", "modelname", "modelid",
+            // the task's own settings, which travel in the same map
+            "systemmessage", "prompt", "addtooutput", "converttoobject", "logsizelimit", "includefirstagentmessage");
 
     /** The keys that are a credential in their own right (not an endpoint). */
     private static final Set<String> SECRET_KEYS = Set.of("apikey", "accesstoken", "authtoken", "nonazureapikey");
@@ -47,9 +62,12 @@ public final class CascadeCredentialPolicy {
     private CascadeCredentialPolicy() {
     }
 
-    /** Whether a parameter key is bound to the provider that holds it. */
-    public static boolean isCredentialBound(String key) {
-        return key != null && (EndpointParameters.isEndpointKey(key) || CREDENTIAL_BOUND.contains(key.toLowerCase(Locale.ROOT)));
+    /**
+     * Whether a task parameter may be inherited by a step of another provider type
+     * — only the keys on {@link #MAY_CROSS} (case-insensitive), never an endpoint.
+     */
+    public static boolean mayCrossProviders(String key) {
+        return key != null && !EndpointParameters.isEndpointKey(key) && MAY_CROSS.contains(key.toLowerCase(Locale.ROOT));
     }
 
     /**

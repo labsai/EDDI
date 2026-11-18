@@ -550,6 +550,22 @@ class CascadingModelExecutorTest {
         }
 
         @Test
+        @DisplayName("an allow-list, not a deny-list: account-bound keys a deny-list missed, and keys no builder reads yet, stay behind")
+        void crossProviderInheritsOnlyTheAllowList() {
+            // Azure deployment and api version, Vertex project/publisher, an end-user id,
+            // provider-specific options, and a key invented after this test was written.
+            for (String bound : List.of("deploymentName", "apiVersion", "project", "publisher", "user", "safetyIdentifier", "logitBias",
+                    "additionalModelRequestFields", "promptCacheKey", "requestMetadata", "labels", "someFutureAccountId")) {
+                assertNull(CascadingModelExecutor.mergeParams(Map.of(bound, "x"), Map.of(), "azure-openai", "anthropic").get(bound), bound);
+            }
+            var neutral = Map.of("temperature", "0.2", "topP", "0.9", "maxTokens", "512", "timeout", "30000", "logRequests", "true", "model",
+                    "m", "systemMessage", "s");
+            assertEquals(neutral, CascadingModelExecutor.mergeParams(neutral, Map.of(), "openai", "anthropic"));
+            assertTrue(CascadeCredentialPolicy.mayCrossProviders("MaxOutputTokens"), "case-insensitive");
+            assertFalse(CascadeCredentialPolicy.mayCrossProviders(null));
+        }
+
+        @Test
         @DisplayName("the step's own credentials survive a provider change")
         void crossProviderKeepsStepCredentials() {
             var result = CascadingModelExecutor.mergeParams(Map.of("apiKey", "sk-openai"), Map.of("apiKey", "sk-anthropic"), "openai", "anthropic");

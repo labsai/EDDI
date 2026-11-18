@@ -1630,10 +1630,11 @@ class CascadingModelExecutor {
 
     /**
      * Merge step parameters over the task's. When the step runs on a different
-     * provider type than the task, the task's credentials, endpoint and
-     * credential-bearing headers are <b>not</b> inherited
-     * ({@link CascadeCredentialPolicy}): a secret restricted to one vendor's host
-     * must not be released to another vendor's. The step then has to bring its own
+     * provider type than the task, only the task's vendor-neutral parameters are
+     * inherited — an allow-list, {@link CascadeCredentialPolicy#mayCrossProviders};
+     * credentials, endpoints, headers and every account-bound or vendor-specific
+     * key stay behind: a secret restricted to one vendor's host must not be
+     * released to another vendor's. The step then has to bring its own
      * ({@link CascadeConfigValidator} refuses it otherwise).
      *
      * @param taskType
@@ -1647,7 +1648,7 @@ class CascadingModelExecutor {
         if (baseParams != null) {
             boolean inherit = CascadeCredentialPolicy.sameProvider(taskType, stepType);
             baseParams.forEach((key, value) -> {
-                if (inherit || !CascadeCredentialPolicy.isCredentialBound(key)) {
+                if (inherit || CascadeCredentialPolicy.mayCrossProviders(key)) {
                     merged.put(key, value);
                 }
             });

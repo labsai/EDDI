@@ -2921,11 +2921,18 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         }
 
         /**
-         * What a {@code judge_model} cascade does when it has no usable judge (none
-         * configured, no {@code type}, or it failed to build). Default {@code false}:
-         * the answer scores 0.0, so the step escalates — the heuristic's default score
-         * accepts, and falling back to it would let every answer through unjudged.
-         * {@code true} scores it with this heuristic instead.
+         * What the cascade does when it gets <b>no usable confidence</b>. Despite the
+         * name, this covers every such case, not only a missing judge: a
+         * {@code judge_model} cascade with no judge (none configured, no {@code type},
+         * it failed to build), a judge call that fails, a judge reply without a usable
+         * confidence, and a {@code structured_output} wrapper whose {@code confidence}
+         * is present but unusable ({@code null}, {@code "high"}, {@code 7.5}). Default
+         * {@code false}: the answer scores 0.0, so the step escalates — the heuristic's
+         * default score accepts, and falling back to it would let every such answer
+         * through unjudged. {@code true} scores it with this heuristic instead. A
+         * structured-output reply with no wrapper at all (the model ignored the format)
+         * is scored by the heuristic either way. Each case is counted in
+         * {@code eddi.llm.confidence.unusable}.
          */
         private Boolean fallbackWhenJudgeUnavailable;
 

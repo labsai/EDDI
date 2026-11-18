@@ -200,6 +200,7 @@ class ConfidenceEvaluator {
                         // Neither a 0..1 score nor a percentage: the model gave a confidence and it
                         // is not one, so fail towards escalation (unless the heuristic is opted in).
                         LOGGER.debugf("Unusable confidence %s in structured output", confidenceMatcher.group(1));
+                        ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_STRUCTURED_OUTPUT);
                         return unusableWrapper(actualResponse, heuristicConfig);
                     }
                     return new EvaluationResult(actualResponse, confidence);
@@ -215,14 +216,16 @@ class ConfidenceEvaluator {
     }
 
     /**
-     * Parse a single JSON object string and, if it carries a numeric
-     * {@code confidence} field, return the extracted response + clamped confidence.
+     * Parse a single JSON object string and, if it carries a {@code confidence}
+     * member, return the extracted response and the confidence as
+     * {@link ReportedConfidence} reads it. A member that is present but holds no
+     * usable confidence ({@code null}, {@code "high"}, {@code 7.5}) is a wrapper
+     * with an unusable confidence, not a missing wrapper.
      */
     private static EvaluationResult parseWrapperObject(String json, HeuristicConfig heuristicConfig) {
         try {
             JsonNode node = MAPPER.readTree(json);
-            if (node != null && node.isObject() && node.has("confidence")
-                    && (node.get("confidence").isNumber() || node.get("confidence").isTextual())) {
+            if (node != null && node.isObject() && node.has("confidence")) {
                 Double confidence = ReportedConfidence.of(node.get("confidence"));
                 JsonNode responseNode = node.get("response");
                 String actualResponse;
@@ -238,7 +241,8 @@ class ConfidenceEvaluator {
                 if (confidence == null) {
                     // A value that is neither a 0..1 score nor a percentage (a 1-5 scale, a
                     // negative, "high"): fail towards escalation, as a missing judge does.
-                    LOGGER.debugf("Unusable confidence %s in structured output", node.get("confidence").asText());
+                    LOGGER.debugf("Unusable confidence %s in structured output", node.get("confidence"));
+                    ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_STRUCTURED_OUTPUT);
                     return unusableWrapper(actualResponse, heuristicConfig);
                 }
                 return new EvaluationResult(actualResponse, confidence);
@@ -345,6 +349,7 @@ class ConfidenceEvaluator {
      */
     static EvaluationResult evaluateWithJudge(String response, ChatModel judgeModel, HeuristicConfig heuristicConfig, JudgeRequest judgeRequest) {
         if (judgeModel == null) {
+            ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_JUDGE_UNAVAILABLE);
             // No judge (none configured, no type, or it failed to build). The heuristic's
             // default score accepts, so falling back to it would let every answer through
             // unjudged: fail towards escalation unless the author opted in.
@@ -382,6 +387,7 @@ class ConfidenceEvaluator {
                                 return new EvaluationResult(response, usable, judgeUsage);
                             }
                             LOGGER.warnf("Judge returned an unusable confidence %s (expected 0.0-1.0)", node.get("confidence").asText());
+                            ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_JUDGE_VALUE);
                             return judgeUnusable(response, heuristicConfig, judgeUsage);
                         }
                     } catch (Exception ignored) {
@@ -402,8 +408,11 @@ class ConfidenceEvaluator {
                     LOGGER.warnf("Judge returned an unusable confidence %s (expected 0.0-1.0)", matcher.group(1));
                 }
             }
+            // A reply with no usable confidence in it at all.
+            ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_JUDGE_VALUE);
         } catch (Exception e) {
             LOGGER.warn("Judge model evaluation failed: " + e.getMessage());
+            ReportedConfidence.countUnusable(ReportedConfidence.SOURCE_JUDGE_FAILED);
         }
 
         // The judge threw, or said nothing usable: the same fail-closed answer as a
