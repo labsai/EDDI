@@ -816,8 +816,8 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
   // The controller classified the failure (`failure.class`); the Manager renders
   // from that, not from the status. An ended conversation and a turn whose
   // outcome is unknown (a 408, a drop after the send) are the controller's own
-  // handling: the ENDED footer, and the message kept with a notice.
-  if (failure.class === "ended" || failure.class === "unknownOutcome") return false;
+  // handling: the ENDED footer (a turn of unknown outcome returned above).
+  if (failure.class === "ended") return false;
 
   const refusal = failure.class === "notAccepted" || failure.class === "paused";
   if (refusal) {
