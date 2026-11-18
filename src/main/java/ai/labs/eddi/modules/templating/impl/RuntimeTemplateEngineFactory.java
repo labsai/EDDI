@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.templating.impl;
 
+import ai.labs.eddi.modules.templating.NotationSafeData;
 import io.quarkus.qute.Engine;
 import io.quarkus.qute.EngineBuilder;
 import io.quarkus.qute.EvalContext;
@@ -162,6 +163,21 @@ public final class RuntimeTemplateEngineFactory {
      *            rendering settings and limits
      */
     public static Engine build(Engine source, Settings settings) {
+        return build(source, settings, false);
+    }
+
+    /**
+     * The same engine with one more result mapper: every value a data expression
+     * substitutes into the output loses the characters of the expression notation
+     * (see {@link NotationStrippingMapper}). Conditions, loops and filters are
+     * evaluated on the original values and the template's literal text is not
+     * touched, because only the value an expression emits is mapped.
+     */
+    public static Engine buildNotationSafe(Engine source, Settings settings) {
+        return build(source, settings, true);
+    }
+
+    private static Engine build(Engine source, Settings settings, boolean notationSafe) {
         EngineBuilder builder = Engine.builder()
                 .strictRendering(settings.strictRendering())
                 .removeStandaloneLines(settings.removeStandaloneLines())
@@ -207,6 +223,9 @@ public final class RuntimeTemplateEngineFactory {
         }
         builder.addResultMapper(new NotFoundRendersNothing());
         builder.addResultMapper(new PlainDecimalRendering());
+        if (notationSafe) {
+            builder.addResultMapper(new NotationStrippingMapper());
+        }
 
         return builder.build();
     }
@@ -283,6 +302,37 @@ public final class RuntimeTemplateEngineFactory {
             // From toString(), not from the binary value: 0.1 stays 0.1, and a Float keeps
             // its own shortest representation instead of a widened double's digits.
             return new BigDecimal(result.toString()).stripTrailingZeros().toPlainString();
+        }
+    }
+
+    /**
+     * Strips expression notation from every value an expression emits, for the
+     * engine that renders a quick reply's {@code expressions} field. Runs above the
+     * other mappers except the not-found one (a missing value is not a value: it
+     * renders as nothing). A literal inside an expression ({@code {'a,b'}}) is
+     * author text and is kept.
+     */
+    static final class NotationStrippingMapper implements ResultMapper {
+        static final int PRIORITY = 2000;
+        private final PlainDecimalRendering decimals = new PlainDecimalRendering();
+
+        @Override
+        public int getPriority() {
+            return PRIORITY;
+        }
+
+        @Override
+        public boolean appliesTo(Origin origin, Object result) {
+            return result != null && !Results.isNotFound(result);
+        }
+
+        @Override
+        public String map(Object result, Expression expression) {
+            if (expression != null && expression.isLiteral()) {
+                return result.toString();
+            }
+            String text = decimals.appliesTo(null, result) ? decimals.map(result, expression) : result.toString();
+            return NotationSafeData.stripNotation(text);
         }
     }
 

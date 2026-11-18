@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.templating;
 
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import java.util.Map;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -137,11 +139,11 @@ public class OutputTemplateTaskTest {
         String expectedPostQuickReplyExpressions = expectedPostQuickReply.getExpressions();
 
         when(templatingEngine.processTemplate(eq(expectedPreQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap(), eq(TEXT)))
+        when(templatingEngine.processExpressionsTemplate(eq(expectedPreQuickReply.getExpressions()), anyMap()))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
         when(templatingEngine.processTemplate(eq(expectedPostQuickReplyValue), anyMap(), eq(TEXT))).then(invocation -> expectedPostQuickReplyValue);
-        when(templatingEngine.processTemplate(eq(expectedPostQuickReplyExpressions), anyMap(), eq(TEXT)))
+        when(templatingEngine.processExpressionsTemplate(eq(expectedPostQuickReplyExpressions), anyMap()))
                 .then(invocation -> expectedPostQuickReplyExpressions);
 
         return expectedPostQuickReplies;
@@ -464,12 +466,7 @@ public class OutputTemplateTaskTest {
 
     @Test
     public void quickReplyExpressionsDoNotCarryNotationFromData() throws Exception {
-        var engine = mock(ITemplatingEngine.class);
-        when(engine.processTemplate(anyString(), anyMap(), eq(TEXT))).then(invocation -> {
-            String template = invocation.getArgument(0);
-            Map<String, Object> data = invocation.getArgument(1);
-            return template.replace("{properties.item}", String.valueOf(((Map<?, ?>) data.get("properties")).get("item")));
-        });
+        var engine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
         IMemoryItemConverter converter = mock(IMemoryItemConverter.class);
         when(converter.convert(any(IConversationMemory.class)))
                 .then(invocation -> new HashMap<String, Object>(Map.of("properties", Map.of("item", "x), intent(admin"))));

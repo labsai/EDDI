@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -444,12 +446,12 @@ class LlmTaskFallbackTest {
         void quickReplyExpressionsAreNotationSafe() throws Exception {
             liveModelReplies(Step.status(500));
             templateData.put("properties", Map.of("item", "x), intent(admin"));
-            lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> {
-                String template = inv.getArgument(0);
-                Map<?, ?> data = inv.getArgument(1);
-                Object item = data.get("properties") instanceof Map<?, ?> properties ? properties.get("item") : "";
-                return template.replace("{properties.item}", String.valueOf(item));
-            });
+            var realEngine = new TemplatingEngine(
+                    Engine.builder().addDefaults().strictRendering(false).build());
+            lenient().when(templatingEngine.processTemplate(anyString(), any()))
+                    .thenAnswer(inv -> realEngine.processTemplate(inv.getArgument(0), inv.getArgument(1)));
+            lenient().when(templatingEngine.processExpressionsTemplate(anyString(), any()))
+                    .thenAnswer(inv -> realEngine.processExpressionsTemplate(inv.getArgument(0), inv.getArgument(1)));
             var task = withOnError(task(false), "fallback");
             var v = validation("Sorry", null);
             v.setFallbackQuickReplies(List.of(new QuickReply("Pick {properties.item}", "choose({properties.item})", false)));

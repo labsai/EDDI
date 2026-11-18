@@ -17,7 +17,6 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import ai.labs.eddi.modules.templating.NotationSafeData;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
@@ -202,7 +201,7 @@ final class LlmFallbackHandler {
                 continue;
             }
             rendered.add(new QuickReply(renderOrKeep(quickReply.getValue(), templateData),
-                    renderOrKeep(quickReply.getExpressions(), NotationSafeData.wrap(templateData)),
+                    renderExpressionsOrKeep(quickReply.getExpressions(), templateData),
                     quickReply.getIsDefault()));
         }
         if (rendered.isEmpty()) {
@@ -217,6 +216,22 @@ final class LlmFallbackHandler {
         data.setVerbatim(true);
         step.storeData(data);
         step.addConversationOutputList(MemoryKeys.QUICK_REPLIES_PREFIX, rendered);
+    }
+
+    /**
+     * The {@code expressions} field becomes a trusted dictionary phrase on the next
+     * turn: the engine strips expression notation from the values it substitutes.
+     */
+    private String renderExpressionsOrKeep(String template, Map<String, Object> templateData) {
+        if (isNullOrEmpty(template)) {
+            return template;
+        }
+        try {
+            String rendered = templatingEngine.processExpressionsTemplate(template, templateData);
+            return rendered != null ? rendered : template;
+        } catch (Exception e) {
+            return template;
+        }
     }
 
     private String renderOrKeep(String template, Map<String, Object> templateData) {

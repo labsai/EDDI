@@ -23,7 +23,6 @@ import ai.labs.eddi.modules.properties.impl.PropertyInstructionExecutor;
 import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.output.model.types.TextOutputItem;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
-import ai.labs.eddi.modules.templating.NotationSafeData;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -323,22 +322,24 @@ public class PrePostUtils {
             throws ITemplatingEngine.TemplateEngineException {
 
         List<Object> quickReplies = new LinkedList<>();
-        var renderedRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
-                List.of(nullToEmpty(quickReplyValue), nullToEmpty(quickReplyExpressions)), templateDataObjects);
+        var valueRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                List.of(nullToEmpty(quickReplyValue)), templateDataObjects, false);
         // The expressions field becomes a trusted dictionary phrase on the next turn,
-        // so
-        // data an upstream API returned must not be able to add expression notation to
-        // it: it is rendered once more against a notation-free view of the data. The
-        // value, which the user sees and types, keeps the data as it is. If the filter
-        // selects other rows on the cleaned data the rows cannot be paired, and the
-        // quick reply gets no expressions (the parser then derives them from its
-        // value).
-        var safeRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
-                List.of(nullToEmpty(quickReplyValue), nullToEmpty(quickReplyExpressions)), NotationSafeData.wrap(templateDataObjects));
-        boolean paired = safeRows.size() == renderedRows.size();
-        for (int i = 0; i < renderedRows.size(); i++) {
-            var renderedRow = renderedRows.get(i);
-            quickReplies.add(createQuickReply(renderedRow.get(0), paired ? safeRows.get(i).get(1) : ""));
+        // so data an upstream API returned must not be able to add expression notation
+        // to it. It is rendered by the engine that strips notation from the values an
+        // expression substitutes (and from nothing else), over the same original data
+        // and with the same filter: conditions, loops and the filter select exactly
+        // the rows the value pass selected, and the two passes pair up row by row. The
+        // value, which the user sees and types, keeps the data as it is.
+        var expressionRows = renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression,
+                List.of(nullToEmpty(quickReplyExpressions)), templateDataObjects, true);
+        // Both passes render the same template over the same data, so the counts match.
+        // A template that is not deterministic could break that; then no row may get
+        // another row's expressions, and the parser derives them from the value.
+        boolean paired = expressionRows.size() == valueRows.size();
+        var expressions = expressionRows.iterator();
+        for (var valueRow : valueRows) {
+            quickReplies.add(createQuickReply(valueRow.getFirst(), paired ? expressions.next().getFirst() : ""));
         }
         return quickReplies;
     }
@@ -381,6 +382,17 @@ public class PrePostUtils {
     private List<List<String>> renderPerIteration(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
                                                   List<String> valueTemplates, Map<String, Object> templateDataObjects)
             throws ITemplatingEngine.TemplateEngineException {
+        return renderPerIteration(iterationObjectName, pathToTargetArray, templateFilterExpression, valueTemplates, templateDataObjects, false);
+    }
+
+    /**
+     * @param notationSafe
+     *            render with the engine that strips expression notation from the
+     *            values it substitutes (for a quick reply's {@code expressions})
+     */
+    private List<List<String>> renderPerIteration(String iterationObjectName, String pathToTargetArray, String templateFilterExpression,
+                                                  List<String> valueTemplates, Map<String, Object> templateDataObjects, boolean notationSafe)
+            throws ITemplatingEngine.TemplateEngineException {
 
         var nonce = UUID.randomUUID().toString().replace("-", "");
         var fieldDelimiter = "eddiField" + nonce;
@@ -414,7 +426,9 @@ public class PrePostUtils {
         renderData.put(KEY_FIELD_DELIMITER, fieldDelimiter);
         renderData.put(KEY_ROW_DELIMITER, rowDelimiter);
 
-        var rendered = templatingEngine.processTemplate(template.toString(), renderData);
+        var rendered = notationSafe
+                ? templatingEngine.processExpressionsTemplate(template.toString(), renderData)
+                : templatingEngine.processTemplate(template.toString(), renderData);
         if (isNullOrEmpty(rendered)) {
             return List.of();
         }

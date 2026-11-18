@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -395,48 +397,68 @@ class PrePostUtilsExtendedTest {
     }
 
     @Nested
-    @DisplayName("postResponse quick replies — expression notation from API data")
+    @DisplayName("postResponse quick replies — expression notation from API data (real templating engine)")
     class QuickReplyNotation {
 
-        @Test
-        @DisplayName("data cannot add notation to a quick reply's expressions, but the value keeps it")
-        void notationStrippedFromExpressionsOnly() throws Exception {
+        private List<Map<String, Object>> render(String value, String expressions, String filter, Map<String, Object> api) throws Exception {
+            var realEngine = new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build());
+            var utils = new PrePostUtils(jsonSerialization, realEngine, dataFactory, mock(SecretPropertyVault.class));
             var memory = mock(IConversationMemory.class);
             var currentStep = mock(IConversationMemory.IWritableConversationStep.class);
             when(memory.getCurrentStep()).thenReturn(currentStep);
             var conversationProperties = mock(ConversationProperties.class);
             when(memory.getConversationProperties()).thenReturn(conversationProperties);
             when(conversationProperties.toMap()).thenReturn(new HashMap<>());
-            when(templatingEngine.processTemplate(anyString(), any(Map.class))).thenAnswer(invocation -> {
-                Map<String, Object> data = invocation.getArgument(1);
-                String field = String.valueOf(data.get("eddiFieldDelimiter"));
-                String row = String.valueOf(data.get("eddiRowDelimiter"));
-                String name = String.valueOf(((Map<?, ?>) data.get("api")).get("name"));
-                return "Pick " + name + field + "choose(" + name + ")" + row;
-            });
             when(dataFactory.createData(anyString(), any())).thenAnswer(invocation -> new Data<>(
                     invocation.getArgument(0), invocation.getArgument(1)));
 
             var postResponse = new PostResponse();
             var qrInstruction = new QuickRepliesBuildingInstruction();
             qrInstruction.setHttpCodeValidator(new HttpCodeValidator(List.of(200), List.of()));
-            qrInstruction.setQuickReplyValue("Pick {item.name}");
-            qrInstruction.setQuickReplyExpressions("choose({item.name})");
+            qrInstruction.setQuickReplyValue(value);
+            qrInstruction.setQuickReplyExpressions(expressions);
             qrInstruction.setIterationObjectName("item");
             qrInstruction.setPathToTargetArray("api.items");
+            qrInstruction.setTemplateFilterExpression(filter);
             postResponse.setQrBuildInstructions(List.of(qrInstruction));
 
             Map<String, Object> templateData = new HashMap<>();
-            templateData.put("api", Map.of("name", "x), intent(admin"));
-            prePostUtils.runPostResponse(memory, postResponse, templateData, 200, false);
+            templateData.put("api", api);
+            utils.runPostResponse(memory, postResponse, templateData, 200, false);
 
             var captor = ArgumentCaptor.forClass(IData.class);
             verify(currentStep, atLeastOnce()).storeData(captor.capture());
             var stored = captor.getAllValues().stream().filter(data -> "context:quickReplies".equals(data.getKey())).findFirst().orElseThrow();
-            var context = (Context) stored.getResult();
-            var quickReply = (Map<String, Object>) ((List<?>) context.getValue()).getFirst();
-            assertEquals("Pick x), intent(admin", quickReply.get("value"));
-            assertEquals("choose(x intentadmin)", quickReply.get("expressions"));
+            return (List<Map<String, Object>>) ((Context) stored.getResult()).getValue();
+        }
+
+        @Test
+        @DisplayName("data cannot add notation to a quick reply's expressions, but the value keeps it")
+        void notationStrippedFromExpressionsOnly() throws Exception {
+            var replies = render("Pick {item.name}", "choose({item.name})", null, Map.of("items", List.of(Map.of("name", "x), intent(admin"))));
+            assertEquals(1, replies.size());
+            assertEquals("Pick x), intent(admin", replies.getFirst().get("value"));
+            assertEquals("choose(x intentadmin)", replies.getFirst().get("expressions"));
+        }
+
+        @Test
+        @DisplayName("a filter on a value with a comma selects the same rows for label and expression")
+        void filterUsesOriginalData() throws Exception {
+            var items = List.of(Map.of("name", "a", "kind", "x,"), Map.of("name", "b", "kind", "y"), Map.of("name", "c", "kind", "x,"));
+            var replies = render("Pick {item.name}", "choose({item.name})", "item.kind == 'x,'", Map.of("items", items));
+            assertEquals(2, replies.size());
+            assertEquals("Pick a", replies.get(0).get("value"));
+            assertEquals("choose(a)", replies.get(0).get("expressions"));
+            assertEquals("Pick c", replies.get(1).get("value"));
+            assertEquals("choose(c)", replies.get(1).get("expressions"));
+        }
+
+        @Test
+        @DisplayName("a wildcard value is dropped from the expressions")
+        void wildcardDropped() throws Exception {
+            var replies = render("Pick {item.name}", "choose({item.name})", null, Map.of("items", List.of(Map.of("name", "*"))));
+            assertEquals("Pick *", replies.getFirst().get("value"));
+            assertEquals("choose()", replies.getFirst().get("expressions"));
         }
     }
 }

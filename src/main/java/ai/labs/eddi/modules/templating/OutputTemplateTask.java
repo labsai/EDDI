@@ -173,6 +173,25 @@ public class OutputTemplateTask implements ILifecycleTask {
         };
     }
 
+    /**
+     * Same failure behaviour as {@link #templatingFunction}, for the
+     * {@code expressions} field of a quick reply: the engine strips expression
+     * notation from the values it substitutes, and from nothing else.
+     */
+    private UnaryOperator<String> expressionsTemplatingFunction(Map<String, Object> contextMap, String dataKey) {
+        return value -> {
+            if (isNullOrEmpty(value)) {
+                return value;
+            }
+            try {
+                return templatingEngine.processExpressionsTemplate(value, contextMap);
+            } catch (ITemplatingEngine.TemplateEngineException e) {
+                log.errorf(e, "Template processing failed for '%s' (expressions), substituting an empty string. Template was: %s", dataKey, value);
+                return FAILED_TEMPLATE_SUBSTITUTE;
+            }
+        };
+    }
+
     private Map<String, Object> convertObjectToMap(Object preTemplated) {
         return objectMapper.convertValue(preTemplated, new TypeReference<>() {
         });
@@ -188,7 +207,7 @@ public class OutputTemplateTask implements ILifecycleTask {
             var templating = templatingFunction(contextMap, TemplateMode.TEXT, quickReplyData.getKey());
             // The expressions field becomes a trusted dictionary phrase on the next turn:
             // data substituted into it must not carry expression notation.
-            var expressionsTemplating = templatingFunction(NotationSafeData.wrap(contextMap), TemplateMode.TEXT, quickReplyData.getKey());
+            var expressionsTemplating = expressionsTemplatingFunction(contextMap, quickReplyData.getKey());
             var postTemplating = copyQuickReplies(preTemplating).stream().map(quickReply -> {
                 // Same failure behaviour as the output path — a failed template can no
                 // longer turn a quick reply into a null entry in the list.
