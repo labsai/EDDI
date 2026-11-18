@@ -333,7 +333,7 @@ public class SlackEventHandler {
                                     + "ask again in a moment, or raise eddi.slack.request-timeout-seconds."
                             : "⚠️ Sorry, I encountered an error processing your message. Please try again.";
                     try {
-                        postMessage(channelId, threadTs, notice, null);
+                        postMessage(channelId, threadTs, notice, botTokenFor(channelId, effectiveOrigin));
                     } catch (Exception ignored) {
                         // Can't post error — nothing more we can do
                     }
@@ -451,7 +451,7 @@ public class SlackEventHandler {
         String threadTs = getThreadTs(event);
 
         if (text.isBlank()) {
-            postHelp(channelId, threadTs, null);
+            postHelp(channelId, threadTs, botTokenFor(channelId, origin));
             return;
         }
 
@@ -518,7 +518,7 @@ public class SlackEventHandler {
         }
 
         if (resolved == null) {
-            postHelp(channelId, threadTs, null);
+            postHelp(channelId, threadTs, botTokenFor(channelId, origin));
             return;
         }
 
@@ -1678,6 +1678,30 @@ public class SlackEventHandler {
                 break;
             }
         }
+    }
+
+    /**
+     * The bot token to answer in {@code channelId} with, for a message sent before
+     * (or without) a resolved route — an error notice, the help text.
+     * <p>
+     * A channel an integration owns has its token. A DM's channel id belongs to no
+     * integration, so it has none; the DM is answered with the token of the app
+     * that signed it, as the normal answer path does ({@code resolved.botToken()}).
+     * Without this a DM got nothing back on these paths: the notice, the help text
+     * and the timeout line all vanished.
+     *
+     * @return the token, or {@code null} when none can be determined
+     */
+    private String botTokenFor(String channelId, EventOrigin origin) {
+        String token = channelTargetRouter.getBotToken("slack", channelId);
+        if (token != null && !token.isBlank()) {
+            return token;
+        }
+        if (origin == null) {
+            return null;
+        }
+        return channelTargetRouter.getBotTokenForSigner("slack", origin.signingIntegrationName(),
+                origin.verifiedSigningSecret());
     }
 
     /**

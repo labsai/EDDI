@@ -30,6 +30,16 @@ and a reply that opened with another person's mention was dropped.
 - **Metric and dashboard.** `eddi.slack.thread.replies.ignored` (documented in `docs/metrics.md`),
   one panel on the Full Metrics Reference dashboard and its Kubernetes copy.
 
+- **Direct messages on the error, help and resume paths (G3).** A DM's channel id belongs to no
+  integration, so `getBotToken` found nothing for it and the timeout/error notice, the help text and
+  the continuation after an approval were never sent. The handler's two `postHelp` calls and the
+  error notice now take the token of the app that signed the event
+  (`ChannelTargetRouter.getBotTokenForSigner`, by integration name or legacy signing secret). The
+  resume observer, which has no event, takes the token of the one app serving the thread's agent
+  (`getBotTokenForTarget`, narrowed by the workspace in the user id); two apps with different
+  tokens serving one agent is ambiguous and posts nothing, and a channel an integration owns but
+  left tokenless never borrows another app's token.
+
 **Files:** [`SlackEventHandler.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackEventHandler.java),
 [`SlackThreadParticipationTest.java`](../../src/test/java/ai/labs/eddi/integrations/slack/SlackThreadParticipationTest.java),
 [`slack-integration.md`](../slack-integration.md), [`metrics.md`](../metrics.md)

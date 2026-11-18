@@ -282,6 +282,8 @@ Hello, what can you do?
 
 DMs are automatically routed to the default agent of the Slack integration whose signing secret signed the event — i.e. the Slack app the user DMed. Since DM channel IDs are dynamic (unique per user-bot pair), they don't need explicit channel configuration. A DM signed by a legacy per-agent connector goes to the legacy connector holding that secret, never to a new-style integration. Replies in a DM thread keep the thread's agent and are answered with the credentials of the app that signed them, provided that app serves the agent.
 
+A DM's channel id belongs to no integration, so there is no channel to read a bot token from. Every message the bot sends into a DM — the answer, an error or timeout notice, the help text — uses the bot token of the app that signed the DM. The outcome of an approval for a conversation started in a DM is posted with the token of the one app that serves the conversation's agent; if two apps with different tokens serve the same agent, EDDI cannot tell which one the user talked to and posts nothing rather than guess.
+
 > **Note**: DMs use `message.im` events (Slack does not fire `app_mention` in DMs). Make sure `message.im` is subscribed in your Slack app's event settings.
 
 ### Trigger Keywords

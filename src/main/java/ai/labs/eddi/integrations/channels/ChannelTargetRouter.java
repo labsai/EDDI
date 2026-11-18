@@ -786,6 +786,90 @@ public class ChannelTargetRouter {
     }
 
     /**
+     * The bot token of the app that signed an event in a channel no integration
+     * owns — a DM, whose D-prefixed id is never configured, so {@link #getBotToken}
+     * finds nothing for it.
+     * <p>
+     * The webhook establishes who signed: an integration (by name) or a legacy
+     * connector (by secret). Only that app's token is returned, so a DM to one app
+     * is never answered with another app's credentials.
+     *
+     * @return the signing app's bot token, or {@code null} when it cannot be
+     *         determined or the app has none
+     */
+    public String getBotTokenForSigner(String channelType, String signingIntegrationName, String verifiedSigningSecret) {
+        refreshIfNeeded();
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        if (signingIntegrationName != null) {
+            return getIntegrationByName(normalizedType, signingIntegrationName)
+                    .map(cfg -> cfg.getPlatformConfig() != null ? cfg.getPlatformConfig().get("botToken") : null)
+                    .filter(token -> token != null && !token.isBlank())
+                    .orElse(null);
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType) && verifiedSigningSecret != null && !verifiedSigningSecret.isBlank()) {
+            return legacyMap.entrySet().stream()
+                    .filter(entry -> secretsEqual(entry.getValue().signingSecret(), verifiedSigningSecret))
+                    .sorted(Map.Entry.comparingByKey())
+                    .map(entry -> entry.getValue().botToken())
+                    .filter(token -> token != null && !token.isBlank())
+                    .findFirst()
+                    .orElse(null);
+        }
+        return null;
+    }
+
+    /**
+     * The bot token to answer a conversation of {@code targetId} (an agent or a
+     * group) with, when the channel it ran in is owned by no integration — a DM,
+     * seen from a place that has no event to read the signer from (a resumed
+     * approval). Slack's {@code team_id} narrows the candidates: an integration
+     * that declares another workspace is skipped.
+     * <p>
+     * Answers only when it is unambiguous: if the integrations and legacy
+     * connectors that serve the target hold more than one distinct token, nothing
+     * is returned — guessing would post one app's answer with another app's
+     * credentials.
+     *
+     * @return the one bot token that serves the target, or {@code null}
+     */
+    public String getBotTokenForTarget(String channelType, String targetId, String teamId) {
+        refreshIfNeeded();
+        if (targetId == null || targetId.isBlank()) {
+            return null;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        String prefix = normalizedType + ":";
+        Set<String> tokens = new TreeSet<>();
+        for (var entry : integrationMap.entrySet()) {
+            if (!entry.getKey().startsWith(prefix)) {
+                continue;
+            }
+            var cfg = entry.getValue();
+            if (cfg.getTargets() == null || cfg.getTargets().stream().noneMatch(target -> targetId.equals(target.getTargetId()))) {
+                continue;
+            }
+            Map<String, String> platform = cfg.getPlatformConfig() != null ? cfg.getPlatformConfig() : Map.of();
+            String declaredTeam = platform.get("teamId");
+            if (teamId != null && declaredTeam != null && !declaredTeam.isBlank() && !declaredTeam.equals(teamId)) {
+                continue;
+            }
+            String token = platform.get("botToken");
+            if (token != null && !token.isBlank()) {
+                tokens.add(token);
+            }
+        }
+        if (CHANNEL_TYPE_SLACK.equals(normalizedType)) {
+            for (var legacy : legacyMap.values()) {
+                if ((targetId.equals(legacy.agentId()) || targetId.equals(legacy.groupId()))
+                        && legacy.botToken() != null && !legacy.botToken().isBlank()) {
+                    tokens.add(legacy.botToken());
+                }
+            }
+        }
+        return tokens.size() == 1 ? tokens.iterator().next() : null;
+    }
+
+    /**
      * Check if any channel integrations are configured (new or legacy).
      */
     public boolean hasAnyChannels(String channelType) {

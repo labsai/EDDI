@@ -506,6 +506,99 @@ class ChannelTargetRouterDeepBranchTest {
         }
     }
 
+    // ─── bot token of a DM (no integration owns the channel) ───────────
+
+    @Nested
+    @DisplayName("bot token for a DM")
+    class BotTokenForDm {
+
+        private ChannelIntegrationConfiguration app(String name, String agentId, Map<String, String> platform) {
+            var target = createTarget("default", List.of());
+            target.setTargetId(agentId);
+            var integration = createIntegration("default", List.of(target), platform);
+            integration.setName(name);
+            return integration;
+        }
+
+        @Test
+        @DisplayName("getBotTokenForSigner: the named integration's token, not another's")
+        void signerByIntegrationName() throws Exception {
+            var a = app("app-a", "agent-a", Map.of("botToken", "xoxb-a"));
+            var b = app("app-b", "agent-b", Map.of("botToken", "xoxb-b"));
+            setField(router, "integrationMap", Map.of("slack:C1", a, "slack:C2", b));
+
+            assertEquals("xoxb-b", router.getBotTokenForSigner("slack", "app-b", "any"));
+            assertEquals("xoxb-a", router.getBotTokenForSigner("slack", "app-a", null));
+            assertNull(router.getBotTokenForSigner("slack", "unknown", "any"));
+        }
+
+        @Test
+        @DisplayName("getBotTokenForSigner: a legacy connector is found by the secret that signed")
+        void signerByLegacySecret() throws Exception {
+            setField(router, "legacyMap", Map.of("C1", new LegacyTarget("agent1", "xoxb-l1", "secret-1", null),
+                    "C2", new LegacyTarget("agent2", "xoxb-l2", "secret-2", null)));
+
+            assertEquals("xoxb-l2", router.getBotTokenForSigner("slack", null, "secret-2"));
+            assertNull(router.getBotTokenForSigner("slack", null, "secret-unknown"));
+            assertNull(router.getBotTokenForSigner("slack", null, null));
+            assertNull(router.getBotTokenForSigner("teams", null, "secret-2"));
+        }
+
+        @Test
+        @DisplayName("getBotTokenForSigner: an integration without a token, or without platform config, gives none")
+        void signerWithoutToken() throws Exception {
+            setField(router, "integrationMap", Map.of("slack:C1", app("no-token", "agent-a", Map.of()),
+                    "slack:C2", app("no-config", "agent-b", null)));
+
+            assertNull(router.getBotTokenForSigner("slack", "no-token", "x"));
+            assertNull(router.getBotTokenForSigner("slack", "no-config", "x"));
+        }
+
+        @Test
+        @DisplayName("getBotTokenForTarget: the one app serving the agent")
+        void targetServedByOneApp() throws Exception {
+            setField(router, "integrationMap", Map.of(
+                    "slack:C1", app("app-a", "agent-a", Map.of("botToken", "xoxb-a")),
+                    "slack:C2", app("app-b", "agent-b", Map.of("botToken", "xoxb-b"))));
+
+            assertEquals("xoxb-b", router.getBotTokenForTarget("slack", "agent-b", "T1"));
+            assertNull(router.getBotTokenForTarget("slack", "agent-unknown", "T1"));
+            assertNull(router.getBotTokenForTarget("slack", null, "T1"));
+        }
+
+        @Test
+        @DisplayName("getBotTokenForTarget: two apps serving the agent with different tokens is ambiguous — none")
+        void targetServedByTwoApps() throws Exception {
+            setField(router, "integrationMap", Map.of(
+                    "slack:C1", app("app-a", "shared-agent", Map.of("botToken", "xoxb-a")),
+                    "slack:C2", app("app-b", "shared-agent", Map.of("botToken", "xoxb-b"))));
+
+            assertNull(router.getBotTokenForTarget("slack", "shared-agent", "T1"));
+        }
+
+        @Test
+        @DisplayName("getBotTokenForTarget: the user's workspace tells two apps apart; one integration over many channels is one token")
+        void targetNarrowedByWorkspace() throws Exception {
+            var teamOne = app("app-a", "shared-agent", Map.of("botToken", "xoxb-a", "teamId", "T1"));
+            var teamTwo = app("app-b", "shared-agent", Map.of("botToken", "xoxb-b", "teamId", "T2"));
+            // The same integration is registered once per channel it covers.
+            setField(router, "integrationMap", Map.of("slack:C1", teamOne, "slack:C3", teamOne, "slack:C2", teamTwo));
+
+            assertEquals("xoxb-a", router.getBotTokenForTarget("slack", "shared-agent", "T1"));
+            assertEquals("xoxb-b", router.getBotTokenForTarget("slack", "shared-agent", "T2"));
+            assertNull(router.getBotTokenForTarget("slack", "shared-agent", null),
+                    "without a workspace both apps qualify: ambiguous");
+        }
+
+        @Test
+        @DisplayName("getBotTokenForTarget: a legacy connector for the agent counts")
+        void targetServedByLegacyConnector() throws Exception {
+            setField(router, "legacyMap", Map.of("C1", new LegacyTarget("agent-l", "xoxb-l", "secret", null)));
+
+            assertEquals("xoxb-l", router.getBotTokenForTarget("slack", "agent-l", null));
+        }
+    }
+
     // ─── hasAnyChannels ─────────────────────────────────────────────────
 
     @Nested

@@ -108,6 +108,16 @@ public class SlackHitlResumeObserver {
         }
 
         String botToken = channelTargetRouter.getBotToken("slack", route.channelId());
+        if ((botToken == null || botToken.isBlank()) && route.agentId() != null
+                && !channelTargetRouter.isChannelOwned("slack", route.channelId())) {
+            // A DM's channel id belongs to no integration, so it has no token of its
+            // own. Take that of the one app that serves the thread's agent — the app
+            // the user DMed — so the outcome of an approval reaches the DM instead of
+            // vanishing. More than one candidate is ambiguous and yields nothing. A
+            // channel an integration owns but left without a token is not a DM: it
+            // stays silent rather than borrowing another app's credentials.
+            botToken = channelTargetRouter.getBotTokenForTarget("slack", route.agentId(), teamOf(mapping.getUserId()));
+        }
         if (botToken == null || botToken.isBlank()) {
             LOGGER.debugf("No bot token for Slack channel %s — cannot deliver HITL outcome", sanitize(route.channelId()));
             return;
@@ -245,7 +255,7 @@ public class SlackHitlResumeObserver {
             return null;
         }
         String threadTs = THREAD_KEY_MAIN.equals(threadKey) ? null : threadKey;
-        return new SlackRoute(channelId, threadTs);
+        return new SlackRoute(channelId, threadTs, parts[3].isBlank() ? null : parts[3]);
     }
 
     /** @return whether Slack accepted the message */
@@ -258,7 +268,29 @@ public class SlackHitlResumeObserver {
         }
     }
 
-    /** Parsed Slack routing from a stored managed-conversation intent. */
-    record SlackRoute(String channelId, String threadTs) {
+    /**
+     * Parsed Slack routing from a stored managed-conversation intent.
+     *
+     * @param agentId
+     *            the agent or group the thread runs, from a {@code channel:slack:}
+     *            intent; {@code null} for a follow-up intent, which does not carry
+     *            it
+     */
+    record SlackRoute(String channelId, String threadTs, String agentId) {
+        SlackRoute(String channelId, String threadTs) {
+            this(channelId, threadTs, null);
+        }
+    }
+
+    /**
+     * The workspace of an EDDI user id {@code slack:<team>:<user>}, or {@code null}
+     * for a team-less {@code slack:<user>}.
+     */
+    static String teamOf(String eddiUserId) {
+        if (eddiUserId == null || !eddiUserId.startsWith(SlackUserIdentity.PREFIX)) {
+            return null;
+        }
+        String[] parts = eddiUserId.substring(SlackUserIdentity.PREFIX.length()).split(":", 2);
+        return parts.length == 2 && !parts[0].isBlank() ? parts[0] : null;
     }
 }
