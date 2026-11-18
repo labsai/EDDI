@@ -112,8 +112,11 @@ docker compose up
 # The database password has no default. Generate it ONCE into .env, which
 # compose reads on every run: PostgreSQL keeps the first password in its
 # volume, so a new one on a later run is a password the database rejects
-# (install.sh --db=postgres writes it into .env for you)
-grep -q '^POSTGRES_PASSWORD=' .env 2>/dev/null || echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)" >> .env
+# (install.sh --db=postgres writes it into .env for you).
+# .env holds secrets, so only you may read it. The leading \n keeps the entry
+# on its own line when the file's last line has no newline.
+touch .env && chmod 600 .env
+grep -q '^POSTGRES_PASSWORD=' .env || printf '\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
 docker compose -f docker-compose.postgres-only.yml up
 
 # With Keycloak authentication. No realm account ships a password (see the
@@ -140,9 +143,12 @@ docker compose -f docker-compose.yml -f docker-compose.auth.yml \
 # three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own.
 # Its three secrets are generated ONCE into .env, for the same reason as above:
 # the MongoDB volume keeps its first password, and the vault's contents can only
-# be decrypted with the master key they were encrypted under
+# be decrypted with the master key they were encrypted under.
+# -hex, not -base64: MONGO_PASSWORD goes into the MongoDB connection string as
+# written, and base64's `/` and `+` change the meaning of a URI.
+touch .env && chmod 600 .env
 for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
-  grep -q "^${key}=" .env 2>/dev/null || echo "${key}=$(openssl rand -base64 24)" >> .env
+  grep -q "^${key}=" .env || printf '\n%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
 done
 docker compose -f docker-compose.cluster.yml up -d
 ```

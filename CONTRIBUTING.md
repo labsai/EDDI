@@ -88,10 +88,9 @@ Dev mode starts the application with **live reload** — code changes are picked
 >
 > # Windows (PowerShell)
 > $env:EDDI_VAULT_MASTER_KEY = "my-dev-passphrase"
->
-> # Or in a .env file (already in .gitignore). >> appends: it keeps what is there
-> echo "EDDI_VAULT_MASTER_KEY=my-dev-passphrase" >> .env
 > ```
+>
+> Or put it in a `.env` file in the repository root (already in `.gitignore`): open the file in an editor, saved as UTF-8, and add the line `EDDI_VAULT_MASTER_KEY=my-dev-passphrase` on a line of its own. Editing is deliberate. A shell redirect can replace the file, join the new entry onto a last line that has no newline, or, with `>>` in Windows PowerShell 5.1, append UTF-16 to a UTF-8 file.
 >
 > If `.env` already sets `EDDI_VAULT_MASTER_KEY`, leave it alone: secrets already in the vault are encrypted with a key derived from it, and a different value cannot decrypt them.
 >

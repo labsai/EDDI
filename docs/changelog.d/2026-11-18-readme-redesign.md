@@ -149,15 +149,18 @@ reviewer for the first time, and some of it was wrong:
 - **The PostgreSQL and cluster commands generated new secrets on every run.**
   The database volume keeps its first password and the vault its first master
   key, so the second run failed or could not decrypt. `docker.md` now writes
-  them into `.env` once.
+  them into `.env` once, into a file only its owner can read, and as hex: the
+  base64 the old command produced contains `/` and `+`, which break the MongoDB
+  connection string the cluster stack builds from `MONGO_PASSWORD`.
 - **`eddi update` does not always pull the latest image.** A pinned install
   stays pinned; the page says so and shows `--eddi-version`. The manual
   `docker compose pull` is no longer called equivalent, because it does not
   refresh the compose files.
 - **The installer options could not be used after `curl | bash`**, which keeps
   no script. A download line comes first.
-- **`echo … > .env` replaced an existing `.env`**, vault key included. It
-  appends now.
+- **`echo … > .env` replaced an existing `.env`**, vault key included.
+  `CONTRIBUTING.md` now says to add the line in an editor instead of through a
+  redirect.
 - **`-Dquarkus.profile` does not default to `dev`** outside dev mode.
 - **Single-quoted `-Djvm.args` does not work in `cmd.exe`.**
 - **A wizard-created agent is not in Workforce**: the wizard deploys to `test`,
