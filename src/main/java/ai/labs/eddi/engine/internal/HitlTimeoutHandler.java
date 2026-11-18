@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -210,6 +211,13 @@ public class HitlTimeoutHandler {
      * A cancel that does not apply while the pause still waits is retried, by the
      * same rule as {@link #cancelRegular}: a decision on the pause still in flight
      * (IN_PROGRESS) may fail and restore it, and only this fire would then end it.
+     * <p>
+     * A row armed by an older build names no pause and is not allowed to end one:
+     * its fire is counted ({@code reason=unbound_plan_changed}) and completes. The
+     * pause keeps waiting; the next recovery pass finds the spent row and arms a
+     * timeout bound to the pause {@code SPENT_REARM_BACKOFF} after this fire, and
+     * that one ends it — on a cluster about an hour later, on a single node at its
+     * next start, unless a person cancels the conversation first.
      */
     private void endUndecidableRegularPause(String conversationId, HitlDecision decision, String reason, Exception cause) {
         if (decision.getPauseId() == null) {
@@ -217,33 +225,37 @@ public class HitlTimeoutHandler {
             // current, so it has no standing to END one — the cancel would skip the
             // pause-identity check and could end a newer pause nobody timed out on.
             LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) but it names no pause — "
-                    + "not cancelling the current pause; it needs a person's attention",
+                    + "not cancelling the current pause: recovery arms a timeout bound to it about an hour after this fire "
+                    + "(on a single node: at its next start); cancel the conversation to end it now",
                     decision.getVerdict(), conversationId, reason, cause.getMessage());
             countUndecidable(HitlSchedules.SURFACE_REGULAR, REASON_UNBOUND);
             return;
         }
         LOGGER.errorf("HITL timeout auto-%s for conversation %s can never apply (%s: %s) — cancelling the pause it was armed for",
                 decision.getVerdict(), conversationId, reason, cause.getMessage());
+        IConversationService.CancelOutcome outcome;
         try {
-            var outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout", decision.getPauseId());
-            if (outcome == IConversationService.CancelOutcome.CANCELLED) {
-                countUndecidable(HitlSchedules.SURFACE_REGULAR, reason);
-                LOGGER.infof("HITL timeout for conversation %s: the undecidable pause was cancelled", conversationId);
-            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL && regularPauseStillWaiting(conversationId)) {
-                // IN_PROGRESS: a decision is in flight and may fail and restore the pause.
-                // AWAITING_HUMAN: that restore already happened, or the state read is stale.
-                // A pause that was replaced meanwhile is refused as PauseMismatch on the
-                // retry and completes then.
-                throw new IllegalStateException("the pause is still waiting or a decision on it is still in flight");
-            } else {
-                LOGGER.infof("HITL timeout for conversation %s: the undecidable pause is no longer waiting (%s)", conversationId,
-                        outcome);
-            }
+            outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout", decision.getPauseId());
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 return;
             }
             throw new RetryLaterException("Undecidable HITL pause could not be cancelled yet: " + e.getMessage(), e);
+        }
+        if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+            countUndecidable(HitlSchedules.SURFACE_REGULAR, reason);
+            LOGGER.infof("HITL timeout for conversation %s: the undecidable pause was cancelled", conversationId);
+        } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
+                && regularStillOnPause(conversationId, decision.getPauseId())) {
+            // IN_PROGRESS: a decision is in flight and may fail and restore the pause.
+            // AWAITING_HUMAN on this very pause: that restore already happened. Read
+            // fresh from the store and bound to the pause id, so a newer pause (or a
+            // stale cached state) completes the fire instead of retrying it.
+            throw new RetryLaterException("Undecidable HITL pause could not be cancelled yet: the pause is still waiting "
+                    + "or a decision on it is still in flight", null);
+        } else {
+            LOGGER.infof("HITL timeout for conversation %s: the undecidable pause is no longer waiting (%s)", conversationId,
+                    outcome);
         }
     }
 
@@ -329,25 +341,10 @@ public class HitlTimeoutHandler {
      */
     private void cancelRegular(Map<String, Object> metadata) {
         String conversationId = (String) metadata.get(HitlSchedules.METADATA_CONVERSATION_ID_KEY);
-        Object pauseId = metadata.get(HitlSchedules.METADATA_PAUSE_ID_KEY);
+        String pauseId = pauseIdOf(metadata);
+        IConversationService.CancelOutcome outcome;
         try {
-            var outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout",
-                    pauseId != null ? pauseId.toString() : null);
-            if (outcome == IConversationService.CancelOutcome.CANCELLED) {
-                LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
-            } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL
-                    && conversationService.getConversationState(conversationId) == ConversationState.IN_PROGRESS) {
-                // A decision on this pause is in flight (a resume's AWAITING_HUMAN ->
-                // IN_PROGRESS CAS). If it fails before running it restores the pause and
-                // counts on this timeout, whose row it has not deleted yet; if it succeeds
-                // it deletes the row and the retry never fires. Completing here would
-                // consume the one-shot fire and leave a restored pause with no timeout at
-                // all — the rule resumeRegular applies through regularPauseStillWaiting.
-                throw new IllegalStateException("a decision on the pause is still in flight");
-            } else {
-                LOGGER.infof("HITL timeout ABORT for conversation %s skipped — the pause it was armed for is no longer waiting (%s)",
-                        conversationId, outcome);
-            }
+            outcome = conversationService.cancelPausedConversation(conversationId, "system:timeout", pauseId);
         } catch (Exception e) {
             if (!regularPauseStillWaiting(conversationId)) {
                 LOGGER.infof("HITL timeout ABORT for conversation %s skipped — it is no longer awaiting a decision (%s)",
@@ -358,6 +355,51 @@ public class HitlTimeoutHandler {
                     + "the pause is kept and the timeout stays armed", conversationId, e.getMessage());
             throw new RetryLaterException("HITL timeout abort could not be applied yet: " + e.getMessage(), e);
         }
+        if (outcome == IConversationService.CancelOutcome.CANCELLED) {
+            LOGGER.infof("HITL timeout ABORT for conversation %s", conversationId);
+        } else if (outcome == IConversationService.CancelOutcome.NOTHING_TO_CANCEL && regularStillOnPause(conversationId, pauseId)) {
+            // A decision on this pause is in flight (a resume's AWAITING_HUMAN ->
+            // IN_PROGRESS CAS), or it already failed and restored the pause between the
+            // cancel's compare-and-set and this read (AWAITING_HUMAN on this very pause).
+            // A failed decision counts on this timeout, whose row it has not deleted; a
+            // successful one deletes the row and the retry never fires. Completing here
+            // would consume the one-shot fire and leave a restored pause with no timeout.
+            LOGGER.warnf("HITL timeout ABORT for conversation %s could not be applied yet (a decision on the pause is in flight) — "
+                    + "the pause is kept and the timeout stays armed", conversationId);
+            throw new RetryLaterException("HITL timeout abort could not be applied yet: a decision on the pause is in flight", null);
+        } else {
+            LOGGER.infof("HITL timeout ABORT for conversation %s skipped — the pause it was armed for is no longer waiting (%s)",
+                    conversationId, outcome);
+        }
+    }
+
+    /**
+     * Whether the regular conversation is still on the pause {@code pauseId} (any
+     * pause when the timeout carries none) or a decision on it is in flight — read
+     * from the store, not the state cache, since it decides whether a one-shot fire
+     * is consumed. A paused-only cancel that found nothing to cancel there lost a
+     * race and is retried; a conversation paused again on another request is not
+     * this fire's, so it completes. A read that fails counts as still waiting.
+     */
+    private boolean regularStillOnPause(String conversationId, String pauseId) {
+        ConversationMemorySnapshot snapshot;
+        try {
+            var tail = conversationService.getConversationMemoryTail(conversationId);
+            snapshot = tail != null ? tail.snapshot() : null;
+        } catch (IResourceStore.ResourceNotFoundException notFound) {
+            return false;
+        } catch (Exception readFailure) {
+            return true;
+        }
+        if (snapshot == null) {
+            return false;
+        }
+        ConversationState state = snapshot.getConversationState();
+        if (state == ConversationState.IN_PROGRESS) {
+            return true;
+        }
+        return state == ConversationState.AWAITING_HUMAN
+                && (pauseId == null || pauseId.equals(HitlDecision.pauseIdOf(snapshot.getHitlPausedAt())));
     }
 
     private void cancelGroup(Map<String, Object> metadata) {
