@@ -31,6 +31,28 @@ public interface IInputParser {
         return null;
     }
 
+    /**
+     * Whether the parser has nothing to understand text with: no normalizers,
+     * dictionaries, corrections or semantic fallback, and
+     * {@link Config#getPassThrough()} does not switch it off. Such a parser only
+     * has to produce one {@code unknown} expression so that a catch-all rule
+     * matches, and {@code InputParserTask} skips tokenising for it.
+     */
+    default boolean isPassThrough() {
+        return false;
+    }
+
+    /**
+     * Whether the conversation output {@code input} — the copy the model, the
+     * conversation log and {@code {memory.current.input}} read — keeps the user's
+     * text as typed instead of being replaced with the normalised text. On when the
+     * parser has no normalizers, unless {@link Config#getPreserveInput()} says
+     * otherwise.
+     */
+    default boolean preservesInput() {
+        return false;
+    }
+
     String normalize(String sentence, String userLanguage) throws InterruptedException;
 
     List<RawSolution> parse(String sentence) throws InterruptedException;
@@ -73,6 +95,18 @@ public interface IInputParser {
          * {@code expressions:alternatives}. {@code 0} stores none.
          */
         private int maxAlternatives = 0;
+        /**
+         * {@code null}: automatic — keep the user's text as typed in the conversation
+         * output {@code input} when the parser has no normalizers. {@code true}: always
+         * keep it. {@code false}: always replace it with the normalised text.
+         */
+        private Boolean preserveInput;
+        /**
+         * {@code null}: automatic — a parser without normalizers, dictionaries,
+         * corrections and semantic fallback yields a single {@code unknown} expression
+         * for the whole text. {@code false}: one {@code unknown} per word as before.
+         */
+        private Boolean passThrough;
 
         public Config() {
         }
@@ -135,6 +169,22 @@ public interface IInputParser {
             return maxAlternatives;
         }
 
+        public Boolean getPreserveInput() {
+            return preserveInput;
+        }
+
+        public void setPreserveInput(Boolean preserveInput) {
+            this.preserveInput = preserveInput;
+        }
+
+        public Boolean getPassThrough() {
+            return passThrough;
+        }
+
+        public void setPassThrough(Boolean passThrough) {
+            this.passThrough = passThrough;
+        }
+
         public void setMaxAlternatives(int maxAlternatives) {
             this.maxAlternatives = maxAlternatives;
         }
@@ -149,13 +199,14 @@ public interface IInputParser {
             return appendExpressions == that.appendExpressions && includeUnused == that.includeUnused && includeUnknown == that.includeUnknown
                     && matchPartialPhrases == that.matchPartialPhrases
                     && Double.compare(minPartialPhraseCoverage, that.minPartialPhraseCoverage) == 0
-                    && Double.compare(minMatchingAccuracy, that.minMatchingAccuracy) == 0 && maxAlternatives == that.maxAlternatives;
+                    && Double.compare(minMatchingAccuracy, that.minMatchingAccuracy) == 0 && maxAlternatives == that.maxAlternatives
+                    && Objects.equals(preserveInput, that.preserveInput) && Objects.equals(passThrough, that.passThrough);
         }
 
         @Override
         public int hashCode() {
             return Objects.hash(appendExpressions, includeUnused, includeUnknown, matchPartialPhrases, minPartialPhraseCoverage, minMatchingAccuracy,
-                    maxAlternatives);
+                    maxAlternatives, preserveInput, passThrough);
         }
 
         @Override

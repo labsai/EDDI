@@ -55,6 +55,11 @@ public class ExpressionProvider implements IExpressionProvider {
     }
 
     @Override
+    public int maxExpressionLength() {
+        return limits.maxLength();
+    }
+
+    @Override
     public Expression createExpression(String predicate, Object... values) {
         StringBuilder sb = new StringBuilder(predicate);
         if (values != null && values.length > 0) {

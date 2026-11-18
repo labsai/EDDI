@@ -90,6 +90,17 @@ public class InputParser implements IInputParser {
         return semanticFallback;
     }
 
+    @Override
+    public boolean isPassThrough() {
+        return !Boolean.FALSE.equals(config.getPassThrough()) && isNullOrEmpty(normalizers) && isNullOrEmpty(dictionaries)
+                && isNullOrEmpty(corrections) && semanticFallback == null;
+    }
+
+    @Override
+    public boolean preservesInput() {
+        return config.getPreserveInput() != null ? config.getPreserveInput() : isNullOrEmpty(normalizers);
+    }
+
     /** The configured dictionaries, in lookup order. */
     public List<IDictionary> getDictionaries() {
         return Collections.unmodifiableList(dictionaries);

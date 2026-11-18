@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rules.impl;
 
+import ai.labs.eddi.modules.nlp.expressions.utilities.StoredExpressions;
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.rules.model.RuleSetConfiguration;
 import ai.labs.eddi.datastore.serialization.DeserializationException;
@@ -131,7 +132,7 @@ public class RulesEvaluationTask implements ILifecycleTask {
 
         Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
-            inputExpressions = expressionProvider.parseExpressions(data.getResult());
+            inputExpressions = StoredExpressions.parseOrEmpty(expressionProvider, data.getResult());
         }
 
         return inputExpressions.stream().map(Expression::getExpressionName).toList();

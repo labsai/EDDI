@@ -28,3 +28,24 @@ An integration that sent `properties*` expression context to set properties must
 - Numeric rules compare exactly: `unknown(1)` still matches `1`, `1.0` and `1,0`, but integers above 2^24 no longer collide.
 
 Files: `PropertySetter`, `CharacterUtilities`, `Value`; docs in `agent-config-authoring.md`.
+
+## 🐛 fix(nlp): the model sees what the user typed; a long token cannot fail a turn (2026-11-18)
+
+**Repo:** EDDI (`fix/pipeline-trust-and-robustness`)
+
+### What changed and why
+
+- `InputParser.normalize` always trims and collapses runs of spaces, and `InputParserTask` wrote the result over the conversation output `input`, which is what the model's history, the conversation log and `{memory.current.input}` read: pasted code and tables lost their indentation, even for an agent with no normalizers. The overwrite now happens only when the parser has normalizers (or `preserveInput: false`); otherwise the output `input` keeps the user's text as typed. A turn flagged `secretInput` keeps the previous behaviour (the plaintext for the turn, the placeholder re-asserted by `Conversation` at the end), so the vaulting flow is unchanged. `input:normalized` is still written.
+- One unbroken token over 32,768 characters, or about 200 tokens of 165 characters, produced an `expressions:parsed` string over `eddi.expressions.max-length`; the next rule that read it threw and failed the turn. The parser now reduces an over-long result to one bounded `unknown(...)` expression (and sets `expressions:inputTruncated`), and every reader of the stored string (`InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`, the append merge) treats `ExpressionLimitExceededException` as "no expressions" (`StoredExpressions.parseOrEmpty`).
+- LLM-first fast path: a parser with no normalizers, dictionaries, corrections or semantic fallback, and no quick replies to match, stores one `unknown(<text>)` expression (notation characters removed, at most 1,000 characters) without tokenising. Wizard-created agents keep matching their catch-all `inputmatcher "*"`.
+- `docs/security.md` said conversation memory keeps the input verbatim; that is now true for the output `input` as well, whenever the parser has no normalizers.
+
+New parser config keys: `preserveInput` and `passThrough` (both default to automatic; see `docs/semantic-parser.md`).
+
+### Behaviour changes for upgraders
+
+- With no normalizers, `{memory.current.input}` and the model's history hold the typed text (leading/trailing whitespace and runs of spaces included) instead of the trimmed, collapsed text. Set `"preserveInput": false` on the parser step to get the old behaviour.
+- A hand-built parser with no extensions now yields one `unknown(<whole text>)` for a multi-word input instead of one `unknown(word)` per word; a rule such as `inputmatcher unknown(hello)` then matches only the exact one-word input. Set `"passThrough": false` to keep per-word expressions.
+
+Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, `ExpressionProvider`, `StoredExpressions`, `InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`; docs in `semantic-parser.md` and `security.md`.
+

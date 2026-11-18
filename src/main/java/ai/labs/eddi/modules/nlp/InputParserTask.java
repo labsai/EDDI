@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.nlp;
 
+import ai.labs.eddi.modules.nlp.expressions.utilities.StoredExpressions;
 import ai.labs.eddi.engine.lifecycle.ResourceUris;
 import ai.labs.eddi.configs.parser.model.ParserConfiguration;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
@@ -16,7 +17,9 @@ import ai.labs.eddi.engine.lifecycle.exceptions.UnrecognizedExtensionException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.modules.nlp.model.Unknown;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserCorrectionExtensions;
@@ -90,6 +93,15 @@ public class InputParserTask implements ILifecycleTask {
     private static final String CONFIG_MIN_MATCHING_ACCURACY = "minMatchingAccuracy";
     private static final String CONFIG_MAX_ALTERNATIVES = "maxAlternatives";
     private static final String CONFIG_SEMANTIC_FALLBACK = "semanticFallback";
+    private static final String CONFIG_PRESERVE_INPUT = "preserveInput";
+    private static final String CONFIG_PASS_THROUGH = "passThrough";
+    /**
+     * How much of the text a degraded or pass-through {@code unknown(...)}
+     * expression carries. The expression is only there so that a catch-all rule
+     * matches; the text itself is kept in {@code input:normalized} and the output
+     * {@code input}.
+     */
+    static final int MAX_UNKNOWN_PAYLOAD_CHARS = 1000;
     /**
      * Upper bound on {@code maxAlternatives}: each one is a string in conversation
      * memory.
@@ -192,7 +204,13 @@ public class InputParserTask implements ILifecycleTask {
             List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory, parser, userLanguage);
             String userInput = inputData.getResult();
             normalizedUserInput = parser.normalize(userInput, userLanguage);
-            storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput);
+            storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput, !parser.preservesInput());
+            if (temporaryDictionaries.isEmpty() && parser.isPassThrough() && parser.getConfig().isIncludeUnknown()) {
+                // Nothing to understand the text with: one unknown expression for the
+                // whole text, no tokenising, no expression round trip.
+                storePassThroughResult(memory.getCurrentStep(), normalizedUserInput, parser.getConfig(), parser.getLimits());
+                return;
+            }
             parsedSolutions = parser.parse(normalizedUserInput, userLanguage, temporaryDictionaries);
         } catch (InterruptedException e) {
             // B2: the pipeline's graceful-stop signal IS the thread's interrupt flag —
@@ -229,8 +247,30 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         if (solution != null) {
-            storeResultInMemory(currentStep, solution, solutions, config);
+            storeResultInMemory(currentStep, solution, solutions, config, normalizedUserInput);
         }
+    }
+
+    /**
+     * The single {@code unknown} expression of a parser that has nothing to
+     * understand the text with. Empty text yields none, as the tokeniser would.
+     */
+    private void storePassThroughResult(IWritableConversationStep currentStep, String normalizedInput, IInputParser.Config config,
+                                        Limits limits) {
+        if (isNullOrEmpty(normalizedInput)) {
+            return;
+        }
+        // The flag keeps its meaning: the text has more tokens than the parser's limit.
+        if (limits != null && InputParser.exceedsTokenLimit(normalizedInput, limits)) {
+            currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
+        }
+        Expressions expressions = boundedUnknown(normalizedInput);
+        storeResultInMemory(currentStep, new Solution(expressions), List.of(), config, normalizedInput);
+    }
+
+    private static Expressions boundedUnknown(String text) {
+        String bounded = text.length() > MAX_UNKNOWN_PAYLOAD_CHARS ? text.substring(0, MAX_UNKNOWN_PAYLOAD_CHARS) : text;
+        return new Unknown(bounded).getExpressions();
     }
 
     /**
@@ -373,16 +413,31 @@ public class InputParserTask implements ILifecycleTask {
         return WHITESPACE.matcher(sanitized).replaceAll("_").toLowerCase(Locale.ROOT);
     }
 
-    private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput) {
+    private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput,
+                                                      boolean overwriteInputOutput) {
         if (!isNullOrEmpty(normalizedInput)) {
             IData<String> expressionsData = new Data<>(INPUT_NORMALIZED.key(), normalizedInput);
             currentStep.storeData(expressionsData);
-            currentStep.addConversationOutputString(INPUT.key(), normalizedInput);
+            // The output "input" is what the model, the conversation log and
+            // {memory.current.input} read. It already holds the user's text as typed (or
+            // the secret-input placeholder, see Conversation.storeUserInputInMemory), and
+            // normalising always trims and collapses whitespace — it destroyed pasted
+            // code and tables. A turn flagged secret still gets the normalised text for
+            // the turn, as before: a template (or the vaulting instruction) reads it, and
+            // Conversation re-asserts the placeholder when the turn ends.
+            if (overwriteInputOutput || isSecretInputPlaceholder(currentStep)) {
+                currentStep.addConversationOutputString(INPUT.key(), normalizedInput);
+            }
         }
     }
 
+    private static boolean isSecretInputPlaceholder(IWritableConversationStep currentStep) {
+        var output = currentStep.getConversationOutput();
+        return output != null && MemoryKeys.SECRET_INPUT_PLACEHOLDER.equals(output.get(INPUT.key(), String.class));
+    }
+
     private void storeResultInMemory(IWritableConversationStep currentStep, Solution solution, List<Solution> solutions,
-                                     IInputParser.Config parserConfig) {
+                                     IInputParser.Config parserConfig, String sourceText) {
         Expressions newExpressions = solution.getExpressions();
         if (newExpressions.isEmpty()) {
             return;
@@ -395,7 +450,7 @@ public class InputParserTask implements ILifecycleTask {
         if (parserConfig.isAppendExpressions()) {
             IData<String> latestExpressions = currentStep.getLatestData(EXPRESSIONS_PARSED);
             if (latestExpressions != null) {
-                Expressions currentExpressions = expressionProvider.parseExpressions(latestExpressions.getResult());
+                Expressions currentExpressions = StoredExpressions.parseOrEmpty(expressionProvider, latestExpressions.getResult());
                 currentExpressions.addAll(newExpressions);
                 newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
             }
@@ -409,6 +464,18 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         String expressionString = joinStrings(", ", newExpressions);
+        int maxLength = expressionProvider.maxExpressionLength();
+        if (maxLength > 0 && expressionString.length() > maxLength && !isNullOrEmpty(sourceText)) {
+            // The parsed form is longer than the expression parser will read back (one
+            // unbroken token, or a couple of hundred long ones): every rule that looks at
+            // it would fail the turn. Degrade to one bounded unknown expression — the
+            // text itself is untouched.
+            log.debugf("Parser result of %d characters exceeds the expression limit of %d; reduced to one unknown expression",
+                    expressionString.length(), maxLength);
+            newExpressions = boundedUnknown(sourceText);
+            expressionString = joinStrings(", ", newExpressions);
+            currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
+        }
         IData<String> expressionsData = new Data<>(EXPRESSIONS_PARSED.key(), expressionString);
         currentStep.storeData(expressionsData);
         currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);
@@ -475,6 +542,8 @@ public class InputParserTask implements ILifecycleTask {
                 parseFraction(configuration.get(CONFIG_MIN_PARTIAL_PHRASE_COVERAGE), IInputParser.Config.DEFAULT_MIN_PARTIAL_PHRASE_COVERAGE, false));
         config.setMinMatchingAccuracy(parseFraction(configuration.get(CONFIG_MIN_MATCHING_ACCURACY), 0.0, true));
         config.setMaxAlternatives(parseAlternatives(configuration.get(CONFIG_MAX_ALTERNATIVES)));
+        config.setPreserveInput(parseOptionalBoolean(configuration.get(CONFIG_PRESERVE_INPUT)));
+        config.setPassThrough(parseOptionalBoolean(configuration.get(CONFIG_PASS_THROUGH)));
 
         var limits = new Limits(parsePositiveInt(configuration.get(CONFIG_MAX_INPUT_TOKENS), Limits.DEFAULT.maxInputTokens()),
                 parsePositiveInt(configuration.get(CONFIG_MAX_SUGGESTIONS), Limits.DEFAULT.maxSuggestions()),
@@ -645,6 +714,11 @@ public class InputParserTask implements ILifecycleTask {
         }
     }
 
+    /** A boolean setting that may be absent: {@code null} means "automatic". */
+    private static Boolean parseOptionalBoolean(Object value) {
+        return isNullOrEmpty(value) ? null : Boolean.valueOf(value.toString().trim());
+    }
+
     /** {@code maxAlternatives}, clamped to 0..{@link #MAX_ALTERNATIVES_LIMIT}. */
     private static int parseAlternatives(Object value) {
         if (isNullOrEmpty(value)) {
@@ -803,6 +877,8 @@ public class InputParserTask implements ILifecycleTask {
                 new ConfigValue("Min Partial Phrase Coverage", DOUBLE, true, IInputParser.Config.DEFAULT_MIN_PARTIAL_PHRASE_COVERAGE));
         extensionConfigs.put(CONFIG_MIN_MATCHING_ACCURACY, new ConfigValue("Min Matching Accuracy", DOUBLE, true, 0.0));
         extensionConfigs.put(CONFIG_MAX_ALTERNATIVES, new ConfigValue("Max Alternatives Stored", INT, true, 0));
+        extensionConfigs.put(CONFIG_PRESERVE_INPUT, new ConfigValue("Preserve Input As Typed", BOOLEAN, true, true));
+        extensionConfigs.put(CONFIG_PASS_THROUGH, new ConfigValue("Pass-Through (no dictionaries)", BOOLEAN, true, true));
         extensionDescriptor.setConfigs(extensionConfigs);
 
         return extensionDescriptor;

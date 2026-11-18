@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.rules.impl.conditions;
 
+import ai.labs.eddi.modules.nlp.expressions.utilities.StoredExpressions;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.modules.rules.impl.Rule;
@@ -93,7 +94,7 @@ public class InputMatcher extends BaseMatcher {
     private ExecutionState evaluateInputExpressions(IData<String> data) {
         Expressions inputExpressions = new Expressions();
         if (data != null && data.getResult() != null) {
-            inputExpressions = expressionProvider.parseExpressions(data.getResult());
+            inputExpressions = StoredExpressions.parseOrEmpty(expressionProvider, data.getResult());
         }
 
         if (isInputEmpty(inputExpressions) || Collections.indexOfSubList(inputExpressions, expressions) > -1) {

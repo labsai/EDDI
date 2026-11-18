@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.properties.impl;
 
+import ai.labs.eddi.modules.nlp.expressions.utilities.StoredExpressions;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyInstruction;
@@ -130,7 +131,7 @@ public class PropertySetterTask implements ILifecycleTask {
         }
 
         if (expressionsData != null) {
-            aggregatedExpressions.addAll(expressionProvider.parseExpressions(expressionsData.getResult()));
+            aggregatedExpressions.addAll(StoredExpressions.parseOrEmpty(expressionProvider, expressionsData.getResult()));
         }
 
         var properties = propertySetter.extractProperties(aggregatedExpressions);
