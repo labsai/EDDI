@@ -847,7 +847,8 @@ export const MOCK_EMAIL_LOG = [
     id: "log-3",
     kind: "REPLY",
     direction: "OUT",
-    messageId: "<CAF0002@mail.supplier-a.example>",
+    // EDDI mints its own Message-ID for a reply; the conversation links the two.
+    messageId: "<eddi.3f2c9a1e-5b7d-4c11-9e0a-2d4b6f8a1c33@contoso.example>",
     state: "SENT",
     reason: null,
     reasonCategory: null,
@@ -5797,6 +5798,33 @@ export const backupSyncHandlers = [
           },
         ],
         defaultTargetName: "default",
+      },
+      // Reachable by URL only (not in the descriptor list), so the channel
+      // list's counts stay as they are; its page shows the Mail log.
+      "ch-email": {
+        name: "Invoice intake",
+        channelType: "email",
+        platformConfig: {
+          mode: "trigger",
+          transport: "imap",
+          connection: "exo-invoices-mailbox",
+          host: "outlook.office365.com",
+          address: "invoices@contoso.example",
+          senderAllowlist: "*@supplier-a.example",
+          ownerNotifyAddresses: "ops@contoso.example",
+          ownerDigest: "daily",
+        },
+        targets: [
+          {
+            name: "intake",
+            type: "AGENT",
+            targetId: "agent1",
+            triggers: [],
+            observeMode: false,
+            observeConfig: null,
+          },
+        ],
+        defaultTargetName: "intake",
       },
       ch1: {
         name: "Engineering Slack",

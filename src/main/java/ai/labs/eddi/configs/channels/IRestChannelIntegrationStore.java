@@ -125,7 +125,7 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Consumes(MediaType.APPLICATION_JSON)
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(description = "Look up one message in an email integration's mail log by its Message-ID — why EDDI did or did not answer "
-            + "a mail. The body is {\"messageId\": \"<...@...>\"}; returns its rows (the inbound mail and EDDI's reply, if any), 404 when the "
+            + "a mail. The body is {\"messageId\": \"<...@...>\"}; returns the row of that id (an inbound mail, or a reply or notice EDDI sent, which has its own Message-ID; the conversationId links a mail to its reply), 404 when the "
             + "ledger has none. Read-only. Needs edit access.")
     List<EmailLogView> lookupEmailLog(@PathParam("id") String id, EmailLogView.LookupRequest request);
 }

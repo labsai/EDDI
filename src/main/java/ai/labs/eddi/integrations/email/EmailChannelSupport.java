@@ -212,10 +212,11 @@ public class EmailChannelSupport {
     }
 
     /**
-     * The integration's ledger rows of one message — the inbound mail and, under
-     * the same Message-ID, an outbound one — inbound first. {@code <left@right>}, a
-     * bare {@code left@right}, and the synthetic keys the ledger gives a mail
-     * without a Message-ID are accepted.
+     * The integration's ledger rows of one Message-ID, inbound first: a mail it
+     * received, or a reply or notice it sent (EDDI mints its own Message-IDs, so
+     * the two directions rarely share one; {@code conversationId} links a mail to
+     * its reply). {@code <left@right>}, a bare {@code left@right}, and the
+     * synthetic keys the ledger gives a mail without a Message-ID are accepted.
      *
      * @throws BadRequestException
      *             when {@code messageId} is blank or too long

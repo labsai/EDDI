@@ -65,8 +65,9 @@ describe("EmailMailLog", () => {
     await userEvent.type(input, "<CAF0002@mail.supplier-a.example>");
     await userEvent.click(screen.getByTestId("email-log-lookup-btn"));
     const result = await screen.findByTestId("email-log-lookup-result");
-    expect(result).toHaveTextContent("SENT");
     expect(result).toHaveTextContent("DONE");
+    expect(result).toHaveTextContent("6a1b2c3d4e5f60718293a4b5");
+    expect(result).not.toHaveTextContent("SENT");
 
     await userEvent.clear(input);
     await userEvent.type(input, "<gone@x.example>");

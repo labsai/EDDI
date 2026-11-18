@@ -376,8 +376,9 @@ the rows (none shows a subject or a body, since the ledger stores neither):
   instants; `until` is exclusive). `limit` is 1–200. An unknown value, or a cursor this log did not issue, is a 400.
   A row has `id, kind, direction, messageId, state, reason, reasonCategory, conversationId, counterpart` (the sender
   of an inbound mail, the recipient of an outbound one), `attempts, createdAt, updatedAt`. The lookup is a POST so
-  the Message-ID, which usually names a domain, stays out of access logs. It returns the inbound row and any outbound
-  row under that id, or 404.
+  the Message-ID, which usually names a domain, stays out of access logs. It returns the row with that id, or 404: an
+  inbound mail's, or that of a reply or notice EDDI sent (which carries a Message-ID of its own; the reply to a
+  mail shares its `conversationId`).
 - **The daily digest** (`ownerDigest: daily`): from 00:05 UTC, one mail per day to the `ownerNotifyAddresses` that
   pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
   (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
@@ -401,6 +402,7 @@ What the reason means. The category is the part before the first `:`:
 | `stranded`, `stranded:not_in_mailbox` | `REFUSED` | A node stopped mid-turn; see the crash table above (owners get the `lost` notice) |
 | `auth_temporary`, `budget`, `throttled`, `quota`, `busy`, `agent_not_ready`, `conversation_busy`, `store_unavailable`, `conversation_ended` | `RECEIVED` | **Deferred, not refused**: the mail waits in the mailbox and is tried again, at the next poll or, for `budget` and `throttled`, on the next UTC day |
 | `requeued_stale_claim` | `RECEIVED` | A claim outlived its node; the next poll processes the mail |
+| `unauthenticated:unsigned_message_id`, `duplicate:replayed_signature` | `REFUSED` | *Coming with the inbound-mail hardening (signed headers only):* a mail whose signature covers no `Message-ID`, or a replay of a signature already seen. Its marker rows (`signature_seen`) are hidden from the log |
 
 A mail with **no row at all** was never fetched. It may sit in another folder (`folder` is polled, spam folders are
 not), have arrived before the integration existed, or be older than the retention. Check the mailbox and the poll's

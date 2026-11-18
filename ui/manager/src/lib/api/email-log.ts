@@ -40,13 +40,14 @@ export interface EmailLogFilters {
 }
 
 /** States a row of the mail log can be in, for the filter. */
-export const EMAIL_LOG_STATES = ["DONE", "REFUSED", "RECEIVED", "TURN_SUBMITTED", "SENT", "FAILED", "SUPPRESSED", "PENDING"] as const;
+export const EMAIL_LOG_STATES = ["DONE", "REFUSED", "RECEIVED", "CLAIMED", "TURN_SUBMITTED", "SENT", "FAILED", "SUPPRESSED", "PENDING"] as const;
 
 /** Reason categories the backend writes (`docs/email-integration.md` → Troubleshooting). */
 export const EMAIL_LOG_REASON_CATEGORIES = [
   "blocked",
   "unauthenticated",
   "loop",
+  "duplicate",
   "unroutable",
   "too_large",
   "parse_error",
