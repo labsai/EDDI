@@ -620,6 +620,8 @@ Tagged by `integration`, `transport` and `mode`:
 
 - **No LLM-chosen recipients** (a generic `sendEmail` tool), unless as the allowlisted, approval-gated Phase 7
   item.
+  *Amended 2026-11-18 by [`email-channel-v3-control-plan.md`](email-channel-v3-control-plan.md) §2.2 and §10:
+  that item is specified there as an approval-gated send-out agent restricted to `outboundRecipients`.*
 - **No reply to an unauthenticated sender**, ever.
 - **No trust in unsigned provider verdicts** or in `Authentication-Results` headers. EDDI verifies DKIM itself.
 - **No `VERIFIED` provenance for email identities**, and no advice to set `allowUnverifiedPrincipal` for them.

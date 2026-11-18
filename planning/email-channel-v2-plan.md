@@ -80,7 +80,8 @@ changelog fragment carries the `decision-log` rows.
 ### 2.3 Reaffirmed bans (do not implement)
 
 - No reply-to-approve / approve-by-mail (v1 §22). Approvals happen in the Manager or Slack, never by answering a mail.
-- No LLM-chosen recipients.
+- No LLM-chosen recipients. *(Narrowed 2026-11-18 by [`email-channel-v3-control-plan.md`](email-channel-v3-control-plan.md)
+  §2.2: an approval-gated send-out agent may mail a recipient from an admin-controlled set.)*
 - No reply to an unauthenticated sender; Phase 5 Cc recipients are never "authenticated" — they are bounded by an
   allowlist instead, and the To stays the authenticated sender.
 - No domain-wide delegation.
@@ -686,7 +687,8 @@ configured), and the single reply comes from finance; legal never sees the sende
 Prioritised, each its own small plan before building:
 
 1. **Reply review / drafts**: `replyReview: never | always | multiRecipient | firstContact` — hold a reply for
-   approval in the Manager (reuse HITL), or `IMAP APPEND` it to Drafts for a person to send.
+   approval in the Manager (reuse HITL), or `IMAP APPEND` it to Drafts for a person to send. *(Reply review moved
+   to [`email-channel-v3-control-plan.md`](email-channel-v3-control-plan.md) §8.2 on 2026-11-18; drafts remain here.)*
 2. **HTML replies** with a configurable signature and the quoted original below (today `text/plain` only).
 3. **Human takeover** of a thread (`planning/human-takeover-design.md` is under review).
 4. **Setup wizard**: provider presets (M365 shared mailbox, Workspace mailbox grant, generic IMAP), test login,

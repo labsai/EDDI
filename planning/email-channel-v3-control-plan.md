@@ -1,32 +1,37 @@
 # Email Channel v3 — Control: Sender Lists, Review, Approvals, Roles, Send-out, S/MIME
 
-> **Status:** plan, not started (2026-11-18). Written so a coding agent can implement it without the conversation
-> that produced it. Line numbers drift; search for the named symbol.
+> **Status:** plan, not started (2026-11-18, reviewed against the code the same day). Written so a coding agent can
+> implement it without the conversation that produced it. Line numbers drift; search for the named symbol.
 >
-> **Builds on** [`email-channel-plan.md`](email-channel-plan.md) (v1, shipped in 6.7.0) and
+> **Builds on** [`email-channel-plan.md`](email-channel-plan.md) (v1) and
 > [`email-channel-v2-plan.md`](email-channel-v2-plan.md) (v2: mail log, addressing, thread replies, Workspace
-> mailboxes, consulting). Phase 2 of v2 is PR #1458 (mail log, lookup, owner digest); v2 Phase 4 (mailbox grant) is
-> PR #1476. Read v1 §9 (Identity), §22 (What I would NOT do), v2 §2 (Decisions) and
-> [`docs/hitl.md`](../docs/hitl.md) (both surfaces, tool approvals, request pinning, who may decide) first. This plan
-> amends one decision explicitly (§2.2).
+> mailboxes, consulting). v2 Phase 2 is PR #1458 (mail log, lookup, owner digest), v2 Phase 4 is PR #1476 (mailbox
+> grant). Read v1 §9 (Identity), §22 (What I would NOT do), v2 §2 (Decisions) and §3.1 (#1394, the signed view),
+> [`docs/hitl.md`](../docs/hitl.md) and [`docs/hitl-review-and-audit.md`](../docs/hitl-review-and-audit.md) first.
+> This plan amends one v2 decision explicitly (§2.2) and moves one v2 backlog item into a phase (§7.2).
+>
+> **Open PRs this plan relies on** (check their state before starting a phase): **#1394** (DKIM bound to signed
+> headers, `signature_seen` replay protection — C5 and C6 depend on it), **#1438** (Slack approval cards for every
+> pause — the Slack half of C3/C4), **#1396** (configurable deciders, approver role — who may decide in C3/C4).
 
 ## Table of Contents
 
 1. [Goals and non-goals](#1-goals-and-non-goals)
 2. [Decisions](#2-decisions)
 3. [What exists today](#3-what-exists-today)
-4. [Phase C1 — Sender lists as first-class, editable over REST and MCP](#4-phase-c1--sender-lists-as-first-class-editable-over-rest-and-mcp)
-5. [Phase C2 — S/MIME signing and the sending-health check](#5-phase-c2--smime-signing-and-the-sending-health-check)
-6. [Phase C3 — Held mail: review instead of drop](#6-phase-c3--held-mail-review-instead-of-drop)
-7. [Phase C4 — Approval before acting, and reply review](#7-phase-c4--approval-before-acting-and-reply-review)
-8. [Phase C5 — Sender roles: it matters who said it](#8-phase-c5--sender-roles-it-matters-who-said-it)
-9. [Phase C6 — Approved send-out to third parties](#9-phase-c6--approved-send-out-to-third-parties)
-10. [Phase C7 — The admin view](#10-phase-c7--the-admin-view)
-11. [Order and dependencies](#11-order-and-dependencies)
-12. [Cross-cutting checklist](#12-cross-cutting-checklist)
-13. [Things to verify before relying on them](#13-things-to-verify-before-relying-on-them)
-14. [Open questions](#14-open-questions)
-15. [What I would NOT do](#15-what-i-would-not-do)
+4. [Storage of the new settings](#4-storage-of-the-new-settings)
+5. [Phase C1 — Sender lists as first-class, editable over REST and MCP](#5-phase-c1--sender-lists-as-first-class-editable-over-rest-and-mcp)
+6. [Phase C2 — S/MIME signing and the sending-health check](#6-phase-c2--smime-signing-and-the-sending-health-check)
+7. [Phase C3 — Held mail: review instead of drop](#7-phase-c3--held-mail-review-instead-of-drop)
+8. [Phase C4 — Approval before acting, and reply review](#8-phase-c4--approval-before-acting-and-reply-review)
+9. [Phase C5 — Sender roles: it matters who said it](#9-phase-c5--sender-roles-it-matters-who-said-it)
+10. [Phase C6 — Approved send-out to third parties](#10-phase-c6--approved-send-out-to-third-parties)
+11. [Phase C7 — The admin view and MCP parity](#11-phase-c7--the-admin-view-and-mcp-parity)
+12. [Order and dependencies](#12-order-and-dependencies)
+13. [Cross-cutting checklist](#13-cross-cutting-checklist)
+14. [Things to verify before relying on them](#14-things-to-verify-before-relying-on-them)
+15. [Open questions](#15-open-questions)
+16. [What I would NOT do](#16-what-i-would-not-do)
 
 ---
 
@@ -38,18 +43,17 @@ reachable from the Manager, REST and MCP.
 
 **Goals**
 
-1. **Every mail can reach a decision.** Mail EDDI would refuse (sender not allowed, unauthenticated) can be held for a
-   human instead of dropped: discard, run once, or run and allow the sender from now on (C3).
-2. **Run, but ask first.** A mail that is processed can still require an approval before the agent acts on it, before
-   its reply leaves, or both — through the existing HITL machinery (Manager approvals page, Slack, MCP), never by
-   replying to a mail (C4).
+1. **Every mail can reach a decision.** Mail EDDI would refuse because the sender is not allowed or not authenticated
+   can be held for a human instead of dropped: discard, run once, or run and allow the sender from now on (C3).
+2. **Run, but ask first.** A processed mail can still require an approval before the agent acts on it, before its
+   reply leaves, or both — on the existing HITL machinery, never by replying to a mail (C4).
 3. **It matters who said it.** An authenticated sender's role decides which agents they reach, which tools the turn
    may use, what needs approval and what it may cost (C5).
-4. **Cc EDDI and ask it to send something.** "Send customer xyz the offer" from an authorised internal sender makes a
-   dedicated send-out agent mail that customer — recipient from an admin-controlled set, every new recipient approved,
-   the customer's answer continuing the thread in a narrow scope (C6).
-5. **Mail from EDDI is verifiably EDDI's.** Outgoing mail is S/MIME-signed by default (product-owner decision), and
-   the admin is told plainly when the domain's DKIM signing is not active (C2).
+4. **Cc EDDI and ask it to send something.** "Send customer xyz the offer" from an authorised sender makes a dedicated
+   send-out agent mail that customer — recipient from an admin-controlled set, approved by a human, the customer's
+   answer handled in a separate, narrow conversation (C6).
+5. **Mail from EDDI is verifiably EDDI's.** Mail the integration sends is S/MIME-signed by default (product-owner
+   decision), and the admin is told plainly when the domain's DKIM signing is not active (C2).
 6. **Admin-friendly.** Sender lists, roles, held mail and policies are one screen per integration, and every one of
    them is an MCP tool so an agent (the Platform Operator, or the admin's own) can manage them (C1, C7).
 
@@ -57,9 +61,9 @@ reachable from the Manager, REST and MCP.
 
 - S/MIME **encryption** (needs every recipient's certificate; a separate plan if ever).
 - Approving anything by mail (v1 §22 — reaffirmed).
-- A reply to an unauthenticated sender, even after a human released the mail (§15).
-- A model typing a free-form recipient address (§2.2 keeps this banned; C6 names a recipient from a controlled set).
-- Using a person's own mailbox, domain-wide delegation (v2 §2.1 D5, reaffirmed).
+- Any outgoing mail caused by an unauthenticated mail, even after a human released it (§16).
+- A model typing a recipient address outside an admin-controlled set (§2.2).
+- Using a person's own mailbox; domain-wide delegation (v2 §2.1 D5, reaffirmed).
 
 ## 2. Decisions
 
@@ -72,423 +76,493 @@ reachable from the Manager, REST and MCP.
 | D8 | Mail EDDI processes that asks for something | **It can be made to ask first**, via HITL, before it acts (C4) |
 | D9 | Allow- and blocklists | **Configurable, and editable over MCP** so an agent can manage them (C1) |
 | D10 | Who sent it | **Matters**: sender roles drive targets, tools, approvals, limits (C5) |
-| D11 | "Cc EDDI, send our customer xyz …" | **Yes**, through a dedicated, narrowly scoped send-out agent, every new recipient approved (C6) |
+| D11 | "Cc EDDI, send our customer xyz …" | **Yes**, through a dedicated, narrowly scoped send-out agent, approved by a human (C6) |
 
 ### 2.2 Amendment (binding — record it)
 
 **v2 §2.3 "No LLM-chosen recipients"** is narrowed, not dropped. v1 §22 already allowed "a generic `sendEmail` tool"
 as "the allowlisted, approval-gated Phase 7 item"; C6 is that item, specified:
 
-- The model never types an address that is not already in an admin-controlled set (`outboundRecipients`, §9.2). It
-  names a contact or an address; anything outside the set is refused before an approval is even asked for.
-- Every recipient EDDI has not mailed before through send-out needs a human approval, bound to the exact
-  recipient, subject and body (request pinning, `docs/hitl.md`).
+- The model never sends to an address outside an admin-controlled set (`outboundRecipients`, §10.2). Anything outside
+  it is refused in code before an approval is asked for.
+- A send to an external recipient (outside `internalDomains`) is approved by a human **every time** by default, bound
+  to the exact resolved recipient, subject and body (§10.3).
 - Only a sender whose role allows send-out (C5) can cause one; the tool is not assembled otherwise.
 
-Everything else in v2 §2.3 stands: no reply-to-approve, no reply to an unauthenticated sender, no domain-wide
-delegation.
+Everything else in v2 §2.3 stands. v1 §22, v2 §2.3 and v2 §11 item 1 get "Amended by v3" notes (added together with
+this plan).
 
 ## 3. What exists today
 
-Verified on `feat/email-mail-log` (PR #1458) and `main` 2026-11-18. Paths under `src/main/java/ai/labs/eddi/`.
+Verified on `feat/email-mail-log` (PR #1458 = `main` + mail log) on 2026-11-18. Paths under `src/main/java/ai/labs/eddi/`.
 
 | Piece | Where | Relevance |
 |---|---|---|
-| `senderAllowlist` / `senderBlocklist` | `configs/channels/model/EmailChannelSettings.java` (comma-separated, ≤ 200, `SenderPatterns` syntax) | C1 makes them first-class |
-| Order of checks | `integrations/email/EmailInboundProcessor.java` step 5–6: authentication → blocklist/allowlist (`blocked:not_allowlisted`) → `unauthenticated:<verdict>` | C3 hooks the refusals |
-| Re-fetch by Message-ID | `EmailMailboxPoller.resubmit` + `EmailInboundProcessor.pendingResubmissions` / `resubmissionLost` | C3 releases held mail through it — **no mail body is ever stored** (v1 §22) |
-| Mail log, digest | PR #1458: `IEmailMessageLedger.findByIntegration`, `GET /channelstore/channels/{id}/email-log`, `EmailOwnerNotifier` daily digest | C3 rows, C7 view |
-| Tool approvals | `hitlConfig.toolApprovals` (`requireApproval`, `exempt`, per-tool rules, request pinning), `docs/hitl.md` | C4, C6 |
-| Turn-level pause | `PAUSE_CONVERSATION` action from behavior rules; in conversation mode the sender gets an in-thread pause notice (`EmailReplySender`) | C4 |
-| Approver notification | `hitlConfig.notify.email` (v1 Phase 1) — deep link to the Manager approvals page | C3, C4 |
-| Approvals over MCP | `list_pending_approvals`, `get_approval_status`, `resume_conversation` | C3, C4 are visible to agents for free when built on HITL |
-| Channel MCP tools | `McpAdminTools`: `list/read/create/update/delete_channel_integration` (whole-document update) | C1 adds targeted tools |
-| Save-time warnings | `EmailAgentToolsInspector` (`email.tools-without-approvals`, …) | C4, C6 warnings |
-| Identity | `email:<integrationId>:<address>` (`perSender`), `SELF_ASSERTED` provenance, `PER_USER` connections refused | C5 |
-| Crypto library | `org.bouncycastle:bcprov-lts8on` managed in `pom.xml` (transitive) | C2 adds the PKIX/mail modules of the same line |
-| SMTP out | `integrations/email/reply/*`, Angus Mail (`jakarta.mail`) | C2 signs here |
+| Settings storage | `ChannelIntegrationConfiguration.platformConfig` is `Map<String,String>`; `EmailChannelSettings` refuses unknown keys and splits keys into common / trigger / conversation sets (`CONVERSATION_KEYS`: `smtpHost`, `smtpPort`, `fromName`, …). Its Javadoc: no secrets in settings, credentials come only from the connection | §4: nested settings need a typed field |
+| Sender lists | `senderAllowlist` / `senderBlocklist`, comma-separated, ≤ 200 (`MAX_LIST_ENTRIES`), `SenderPatternSyntax` (`*@*` is already refused); `SenderPatterns`, `AddressNormalizer` in `engine/mail` | C1 |
+| Check order | `EmailInboundProcessor`: loop/bounce → `blocked:no_single_sender` → own address **or** blocklist (`blocked:blocklist`) → allowlist (`blocked:not_allowlisted`, an **empty allowlist allows everyone**) → `unauthenticated:<verdict>`. The authentication verdict is computed before these checks but **not stored** on the ledger row | C3 |
+| Ledger dispositions | `EmailInboundProcessor.dispositionOf`: only `RECEIVED`/`CLAIMED` are live, every other state is `SETTLED` (marked processed). `State.isTerminal()` treats unlisted states as terminal | C3 adds states explicitly |
+| Re-fetch by Message-ID | `EmailMailboxPoller.resubmit` + `EmailInboundProcessor.pendingResubmissions` → `findDueResubmissions` (Mongo/Postgres: `state = RECEIVED`, `kind = TRIGGER`, **conversation not null**) + `resubmissionLost`. Searches the polled and the move folder | C3 extends it |
+| Ledger kinds | `TRIGGER`, `REPLY`, `NOTIFY`, `NOTICE` | C6 adds `SENDOUT` |
+| Mail log, digest | PR #1458: `findByIntegration`, `GET /channelstore/channels/{id}/email-log` (EDIT), `EmailOwnerNotifier` digest and once-a-day notices — sent through `SystemMailer`, not the integration's SMTP | C3 counts, C7 view |
+| Owners | `ownerNotifyAddresses`: up to 5 **mail addresses**, not EDDI principals | C3 notifications |
+| Identities | `email:<integrationId>:<address>` (`perSender`), `email-anon:<random>` for an unauthenticated sender (`EmailUserIdentity`; already in `ReservedPrincipals.PREFIXES` and memory-free); `SELF_ASSERTED` provenance; `PER_USER` connections refused | C3, C5, C6 |
+| Tool approvals | `hitlConfig.toolApprovals` (`requireApproval`, `exempt` always beats it, rules, `timeoutPolicy`), per-task blocks resolved by `TaskToolApprovalsResolver` (`task-approvals.mode=replace` replaces the agent block). **Request pinning covers HTTP tools only**; other tools have `requestPreview: null`, and amended arguments are not fingerprint-checked. `ApiCallsTask` (rule-driven httpcalls) has **no** approval gate; `McpCallsTask` refuses a gated call instead of pausing | C4 must not rely on merging |
+| Rule pauses, edited answers | `PAUSE_CONVERSATION`; `hitlConfig.review.allowAnswerEdits` + `editedAnswer` (`docs/hitl-review-and-audit.md`). A new conversation's `CONVERSATION_START` turn runs before any rule pause | C4 |
+| Email pause notice | `EmailHitlResumeObserver` on `HitlPauseCommittedEvent` queues the in-thread notice | C4 |
+| Slack approvals | `hitlApprovalChannel` is a key of a **Slack** integration and is read for Slack-originated flows only; #1438 posts cards for every pause | C3/C4 Slack half |
+| Group targets | Tool approvals inside group turns are auto-rejected (`system:group`) | C4 refuses `approvalPolicy` on GROUP targets |
+| MCP | `list_pending_approvals`, `get_approval_status`, `resume_conversation`; `list/read/create/update/delete_channel_integration` (whole-document update) | C1, C7 |
+| Save-time checks | `EmailAgentToolsInspector` — best effort: skips unreadable documents and GROUP targets, runs only when the integration is saved | C1 guard must not rely on it |
+| GDPR | `EmailIdentityGdprParticipant` finds conversations by identity, not by the ledger's `conversationId` | C3, C6 |
+| Crypto | `org.bouncycastle:bcprov-lts8on` pinned as a literal version in `pom.xml` (a CVE override), no version property | C2 |
 
-## 4. Phase C1 — Sender lists as first-class, editable over REST and MCP
+## 4. Storage of the new settings
+
+All new v3 settings live in **one typed object**, `emailControl`, on `ChannelIntegrationConfiguration` (next to
+`platformConfig`), not in the flat string map: maps, arrays and nested objects cannot be encoded there, and unknown
+`platformConfig` keys are refused. Both stores persist it with the rest of the document (Mongo: a subdocument;
+Postgres: the configuration's JSON column — verify how the channel store serialises it, §14). Validation lives in
+`EmailChannelSettings.validate` (one place for every email rule) and runs on save, on ZIP import and before every
+targeted operation. `emailControl` on a non-email integration → 400.
+
+Two exceptions stay where they are: `senderAllowlist` / `senderBlocklist` (existing keys, old JSON keeps working) and
+`smtpHost` / `smtpPort` / `fromName`, which C2 moves from the conversation-only key set to the **common** set (trigger
+mode still never replies; it needs SMTP only for the self-test and send-out).
+
+Per-target fields (`approvalPolicy`, `readOnlyTools`, `sendOutTarget`, `rejectedReply`) are new optional fields on
+`ChannelTarget`, refused for non-email integrations. Each section below says which mode a setting applies to.
+
+## 5. Phase C1 — Sender lists as first-class, editable over REST and MCP
 
 **Size:** S. Branch `feat/email-sender-lists`. No dependencies.
 
-Today a list is one comma-separated config value; changing one address means reading and rewriting the whole
-integration, which an agent does badly and which races with an admin editing the same integration.
+Changing one address today means reading and rewriting the whole integration — which an agent does badly and which
+races with an admin editing the same integration.
 
-### 4.1 Model
+### 5.1 Operations
 
-Unchanged storage: `senderAllowlist` / `senderBlocklist` stay keys of `platformConfig` (old JSON keeps working). New
-targeted operations produce a **new version** of the integration, exactly as a save does (same validation, same
-warnings, same `@ConfigurationUpdate` path, polling re-registered), so history and rollback are free.
-
-### 4.2 REST
+Targeted operations produce a **new version** of the integration through the same `RestChannelIntegrationStore`
+update path as a save (same validation, warnings, polling re-registration), so history and rollback are free.
 
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | `GET` | `/channelstore/channels/{id}/email-senders` | — | `{version, allow: [...], block: [...]}` of the current version |
-| `POST` | `/channelstore/channels/{id}/email-senders` | `{expectedVersion, add: {allow: [], block: []}, remove: {allow: [], block: []}, reason}` | Idempotent per entry (adding a present entry, removing an absent one is a no-op, reported). `expectedVersion` mismatch → 409 with the current lists. Returns the new version and warnings |
+| `POST` | `/channelstore/channels/{id}/email-senders` | `{expectedVersion, add: {allow, block}, remove: {allow, block}, reason, confirmOpen}` | Idempotent per entry (no-ops reported). `expectedVersion` mismatch → 409 with the current lists. Returns the new version and warnings |
 
-- Authorisation: EDIT on the integration (same rule as the mail log, #1458).
-- Validation: `SenderPatterns` syntax, normalised (`AddressNormalizer`), ≤ 200 per list, an entry in both lists → 400.
-  Adding `*@*` or `*@<the integration's own domain>` to the allowlist → warning `email.allowlist-broad`.
-- Audit: one `audit_ledger` entry per change with actor, integration, diff and `reason`.
+- Authorisation: EDIT on the integration.
+- Validation: `SenderPatternSyntax`, normalised, ≤ 200 per list, an entry in both lists → 400.
+- **Emptying a non-empty allowlist opens the integration to every sender** (an empty allowlist allows all): refused
+  unless `confirmOpen: true`, and then warning `email.allowlist-emptied`.
+- Warning `email.allowlist-broad` for `*@*.<public suffix>` and for the integration's own domain.
+- Audit: one `audit_ledger` entry per change (actor, integration, diff, `reason`).
 
-### 4.3 MCP
+### 5.2 MCP
 
-New tools in `McpAdminTools` (or a small `McpEmailSenderTools`): `list_email_senders(integrationId)`,
-`update_email_senders(integrationId, expectedVersion, addAllow, addBlock, removeAllow, removeBlock, reason)`.
-Descriptions say: changes create a new version; prefer exact addresses over `*@domain`.
+`list_email_senders(integrationId)`, `update_email_senders(integrationId, expectedVersion, addAllow, addBlock,
+removeAllow, removeBlock, reason, confirmOpen)`. Descriptions: changes create a new version; prefer exact addresses.
 
-**Privilege-escalation guard.** An agent that a mail can trigger must never be able to widen who can trigger it.
-`EmailAgentToolsInspector` refuses (save-time **error**, not warning) a target agent whose tools include
-`update_email_senders`, `update_channel_integration` or `create_channel_integration` (MCP or HTTP to these paths),
-and `ToolExecutionService` refuses the call at runtime when the conversation's user id is an `email:`/`email-*:`
-identity. Test both.
+### 5.3 The escalation guard (authoritative at runtime)
 
-### 4.4 Manager, operator, docs
+A turn that a mail started must never be able to widen who can make EDDI act, or decide its own approvals.
+
+- **Taint.** Every conversation whose root turn came from email — and every conversation it starts (delegation,
+  consult, A2A, group member turns) — carries `origin=email` (set where the turn is submitted, propagated with the
+  caller context; verify the propagation points, §14).
+- **Runtime refusal** in `ToolExecutionService` and in the HTTP/MCP call paths for a tainted turn: any write to
+  `/channelstore/channels/**`, the MCP tools `create/update/delete_channel_integration`, `update_email_senders`,
+  `update_email_roles`, `update_email_send_out`, `decide_held_email`, `resume_conversation`, and approval endpoints.
+  This check is the boundary.
+- **Save-time error** in `EmailAgentToolsInspector` for a target agent holding those tools by name — best effort,
+  documented as such (it skips unreadable documents and GROUP targets, and does not run when the agent changes later).
+
+### 5.4 Manager, operator, docs
 
 - Email settings: two chip lists with add/remove, a "why" field, the last change and who made it.
-- Operator: allow-list both endpoints (gated write for the POST), prompt section, revision bump.
-- `docs/email-integration.md`: "Managing senders" (REST, MCP, the guard). Skills in `integrations/claude-plugin/`.
+- Operator: both endpoints on the allow-list (the POST gated), prompt section, revision bump.
+- `docs/email-integration.md` "Managing senders"; skills in `integrations/claude-plugin/`.
 
-**Acceptance:** an MCP client adds `alice@partner.com` with `expectedVersion`; the next poll lets Alice's mail through;
-a stale `expectedVersion` gets 409; a mail-triggered agent holding the tool cannot be saved.
+**Acceptance:** an MCP client adds `alice@partner.com` with `expectedVersion`; the next poll lets Alice through; a stale
+version gets 409; removing the last allowlist entry without `confirmOpen` is refused; a mail-triggered agent calling
+`update_email_senders` (directly, or through a delegated agent) is refused at runtime.
 
-## 5. Phase C2 — S/MIME signing and the sending-health check
+## 6. Phase C2 — S/MIME signing and the sending-health check
 
-**Size:** M. Branch `feat/email-smime`. No dependencies. Applies to every mail EDDI sends from an integration:
-replies, pause notices, owner notices and digests, send-outs (C6).
+**Size:** M. Branch `feat/email-smime`. No dependencies.
 
-### 5.1 Why both DKIM and S/MIME
+**Scope:** mail the integration sends through its own SMTP — replies, pause notices, send-outs (C6), the self-test.
+Owner notices, digests and HITL notifications go through `SystemMailer` and are out of scope here (§15 Q3).
+
+### 6.1 Why both DKIM and S/MIME
 
 DKIM is done by the mail provider for the domain — EDDI cannot do it, but must **tell** the admin when it is not
-happening (the live test on 2026-11-18 found exactly this: `labs.ai` publishes a Google key but Workspace signing was
-never started, so mail was signed by Google's stand-in domain and refused `pass-unaligned`). S/MIME is EDDI's own
-signature over the message: the recipient's client shows it as signed by the mailbox, it survives forwarding, and
-it is per mailbox, not per domain.
+happening. The live test on 2026-11-18 found exactly that: `labs.ai` publishes a Google key, but Workspace signing was
+never started, so mail was signed by Google's stand-in domain and refused `unauthenticated:pass-unaligned`. S/MIME is
+EDDI's own signature: the recipient's client shows the message as signed by the mailbox, it survives forwarding, and
+it is per mailbox.
 
-### 5.2 Keys (common to both modes, under `platformConfig`)
+### 6.2 Settings
 
-| Key | Default | Meaning |
+| Setting | Default | Meaning |
 |---|---|---|
-| `smimeSign` | `true` | `true`: sign when a certificate is configured; without one, mail is sent unsigned and the save warns `email.smime-no-certificate` (so upgrades and quick setups keep working). `required`: never send unsigned — a missing, expired or mismatched certificate holds outgoing mail (`REPLY` rows wait, reason `smime_unavailable`, owner notice). `false`: off |
-| `smimeCertificate` | — | `${vault:name}` of a PKCS#12 (base64) holding the key and chain. PEM (key + chain) also accepted |
-| `smimeCertificatePassword` | — | `${vault:name}`, for a protected PKCS#12 |
+| `emailControl.smime.sign` | `true` | `true`: sign when a signing connection is configured; without one, mail goes out unsigned and the save warns `email.smime-no-certificate` (upgrades and quick setups keep working). `required`: never send unsigned — a missing, expired or mismatched certificate holds outgoing mail (rows wait with reason `smime_unavailable`, owner notice). `false`: off |
+| `emailControl.smime.connection` | — | Name of a connection of the new auth type `SMIME_SIGNING` |
 
-"On by default" is the `true` default; "can be turned off in the JSON" is `false`. The vault grant of the
-certificate secret must name the integration (same allowed-hosts style as connection secrets — verify how a non-URL
-consumer is granted, §13).
+The certificate is a **credential**, so it lives on a connection, not in the settings (the "no secrets here" rule of
+`EmailChannelSettings`): `SMIME_SIGNING` holds `certificate` (`${vault:…}`, PKCS#12 base64 or PEM key + chain) and
+`password` (`${vault:…}`, optional), binding `SERVICE`, resolved only by the email transport. Vault grants work as for
+every connection secret (verify a non-URL connection type fits the resolver and grant model, §14). "On by default" is
+`sign: true`; "can be switched off in the JSON" is `sign: false`.
 
-### 5.3 Validation (save time and daily)
+### 6.3 Validation (save time and daily)
 
-- The certificate's `rfc822Name` SAN (or e-mail in the subject) equals `address` (normalised); key usage
-  `digitalSignature`; extended key usage `emailProtection`; not expired; chain builds to the bundled trust store or is
-  shipped complete. Mismatch → 400 for `required`, warning otherwise.
-- Daily: expiry within 30 days → owner notice (`EmailOwnerNotifier`, new reason `CERTIFICATE_EXPIRING`), metric
+- The certificate's `rfc822Name` SAN (or subject e-mail) equals `address` (normalised); key usage `digitalSignature`;
+  extended key usage `emailProtection`; not expired; the chain builds to the JDK trust store or is shipped complete.
+  A mismatch → 400 under `required`, warning otherwise.
+- Daily: expiry within 30 days → owner notice (new `EmailOwnerNotifier` reason `CERTIFICATE_EXPIRING`), metric
   `eddi_email_smime_certificate_days_left`.
 
-### 5.4 Signing
+### 6.4 Signing
 
-- `multipart/signed` (clear-signed, `application/pkcs7-signature`, detached), SHA-256, RSA-PSS or RSA PKCS#1 v1.5
-  (verify client support, §13) or ECDSA by key type. Clients without S/MIME still read the text.
-- Sign in the reply sender right before SMTP submission, after the body is final; the ledger stores only
-  `signed: true|false` on the row (no signature bytes).
-- Library: Bouncy Castle `bcpkix-lts8on` plus its Jakarta Mail module (`bcjmail-lts8on` — verify the artifact for the
-  LTS line, §13); same version property as `bcprov-lts8on`. No second MIME stack (v1 §22): build on the Angus
-  `MimeMessage` already produced.
+- `multipart/signed`, detached `application/pkcs7-signature`, SHA-256; RSA (PKCS#1 v1.5 unless client support for
+  PSS is confirmed, §14) or ECDSA by key type. Clients without S/MIME still read the text.
+- Signed right before SMTP submission, after the body is final. The ledger stores `signed: true|false` on OUT rows
+  (new column; Postgres `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, Mongo field), never signature bytes.
+- Library: Bouncy Castle's PKIX and Jakarta-Mail S/MIME modules of the same line as `bcprov-lts8on` (artifact names
+  to verify, §14). Introduce a `bouncycastle.version` property for all three. No second MIME stack (v1 §22): sign the
+  Angus `MimeMessage` already built.
 - Metric `eddi_email_outbound_total{…, signed="true|false"}`.
 
-### 5.5 Sending-health check
+### 6.5 Sending-health check
 
-`POST /channelstore/channels/{id}/email-self-test` (EDIT): sends a short mail from the integration to its own
-`address` with a unique token, the next poll recognises it (by token, before any routing; never a turn), and the
-result — DKIM verdict and signing domain, alignment, S/MIME verified or not — is returned by
-`GET …/email-self-test/{token}` and shown in the Manager. Plain-language results, e.g. "Your provider signs as
-`labs-ai.20230601.gappssmtp.com`, not `labs.ai`: start DKIM authentication for `labs.ai` in the Google Admin console".
-Also: DMARC record present or not (advice only). MCP tool `run_email_self_test`.
+`POST /channelstore/channels/{id}/email-self-test` (EDIT; at most 5 per integration per hour) sends a short mail from
+the integration to its own `address` carrying a single-use token valid for 15 minutes. The processor recognises it
+**before the own-address refusal** (token matches an open self-test of this integration, From is `address`), records
+the result and settles the row as `self_test` — it can never start a turn; a reused or expired token is refused like
+any own-address mail. `GET …/email-self-test/{token}` returns, in plain words: the DKIM verdict and signing domain,
+alignment, whether S/MIME verified, DMARC present (advice only). Example: "Your provider signs as
+`labs-ai.20230601.gappssmtp.com`, not `labs.ai`: start DKIM authentication for `labs.ai` in the Google Admin console."
+Microsoft 365 does not DKIM-sign mail inside one organisation, so there an unsigned result is reported as
+**inconclusive**, with the advice to test from outside. MCP tool `run_email_self_test`.
 
-**Acceptance:** with a certificate in the vault, a reply arrives signed and Gmail/Outlook show it as signed; with
-`smimeSign: false` it does not; with `required` and an expired certificate nothing is sent and the owner is told; the
-self-test names a provider that does not sign aligned.
+**Acceptance:** with a signing connection, a reply arrives signed and Gmail/Outlook show it as signed; with
+`sign: false` it is not signed; under `required` with an expired certificate nothing is sent and the owner is told;
+the self-test names a provider that does not sign aligned; a replayed self-test mail does nothing.
 
-## 6. Phase C3 — Held mail: review instead of drop
+## 7. Phase C3 — Held mail: review instead of drop
 
-**Size:** M–L. Branch `feat/email-held-mail`. Depends on C1 (for "run and allow").
+**Size:** M–L. Branch `feat/email-held-mail`. Depends on C1 (run and allow). Both modes.
 
-### 6.1 Keys
+### 7.1 Settings
 
-| Key | Default | Meaning |
+| Setting | Default | Meaning |
 |---|---|---|
-| `onRefused` | `{}` (all `drop`) | Per reason class → `drop` or `review`. Classes: `notAllowlisted` (`blocked:not_allowlisted`), `blocklisted`, `unauthenticated` (`unauthenticated:*`), `notAddressed` (v2 Phase 3, when it exists). Loops, lists, auto-replies, oversize and rate limits are **never** reviewable. The Manager preselects `notAllowlisted: review` for new integrations |
-| `reviewExpiry` | `P7D` | A held mail nobody decided is dropped (`review_expired`) |
-| `maxHeldPerDay` | `50` | Beyond it, mail of that day is dropped (`review_full`) and counted in the digest — a spam wave cannot fill the queue |
-| `reviewers` | the integration's owners | EDDI user ids or roles who are notified and may decide |
+| `emailControl.onRefused.notAllowlisted` | `drop` | `drop` or `review` for `blocked:not_allowlisted` |
+| `emailControl.onRefused.unauthenticated` | `drop` | `drop` or `review` for `unauthenticated:*` |
+| `emailControl.onRefused.notAddressed` | `drop` | Only once v2 Phase 3 exists |
+| `emailControl.review.expiry` | `P7D` | Undecided held mail is dropped (`review_expired`). At most the ledger retention minus one day |
+| `emailControl.review.maxHeldPerDay` | `50` | Per integration; beyond it `review_full` |
+| `emailControl.review.maxHeldPerSenderDomainPerDay` | `5` | So one sender cannot fill the queue for everyone |
+| `emailControl.review.reviewers` | — | EDDI user ids or roles who may decide (default below) |
 
-### 6.2 Holding
+**Never reviewable:** loops and bounces, `blocked:no_single_sender`, `blocked:blocklist` (which also covers mail from
+the integration's own address), oversize, rate and budget limits. The Manager preselects `notAllowlisted: review` for
+new integrations (§15 Q4).
 
-- The processor, where it would refuse with a reviewable reason, transitions the row to the new state `HELD` (both
-  ledger stores, Mongo and Postgres; mail-log reason kept, e.g. `held:not_allowlisted`) and leaves the mail in the
-  polled folder **unmarked**, or moves it to a sibling `EDDI/Held` folder when `processedAction` is `move:` — verify
-  the cursor and resubmission still find it there, §13.
-- No body is stored. The reviewer's preview is fetched live: `GET /channelstore/channels/{id}/email-held/{rowId}`
-  re-reads the mail by Message-ID from the mailbox and returns sender, verdict, subject, the first 4 000 characters of
-  the text (quoted history stripped, hidden content removed by the existing filter), attachment names. Not cached.
-- **Notification**: `reviewers` get one notice per batch, not per mail — through the system mailer with a deep link
-  (as `hitlConfig.notify.email`) and, when the integration names a Slack approval channel, there. The daily digest
-  gains a "held" count.
+### 7.2 Holding
 
-### 6.3 Deciding
+- The processor evaluates **all** reviewable checks; if any fails and all failing ones are set to `review`, the row
+  becomes `HELD` with every failing reason (mail-log reason e.g. `held:not_allowlisted+unauthenticated`), the
+  **authentication verdict** stored on the row (new column `authVerdict`), and the mail is marked processed and — when
+  `processedAction` is `move:` — moved to a sibling `EDDI/Held`. The cursor advances; a held mail never pins it.
+- `HELD` (and C4's states) are added explicitly to `State`, `isTerminal()`, `dispositionOf` and the mail-log state
+  filter, in both stores. Postgres: `ALTER TABLE … ADD COLUMN IF NOT EXISTS` for every new column.
+- No body is stored. The preview is fetched live: `GET /channelstore/channels/{id}/email-held/{rowId}` re-reads the
+  mail by Message-ID (polled, move and Held folders) and returns sender, verdict, subject, the first 4 000 characters
+  of the text (quoted history stripped, hidden content removed by the existing filter), attachment names. Not cached.
+- **Notification:** reviewers get one notice per batch through `SystemMailer` with a deep link to the Manager, sent to
+  `ownerNotifyAddresses` and to the verified addresses of the reviewer principals. The digest gains a "held" count.
+  Slack: once #1438 lands, held mail is posted like a pause (its card binding needs a held-mail subject; part of this
+  phase if #1438 is merged, otherwise a follow-up).
+
+### 7.3 Deciding
 
 `POST /channelstore/channels/{id}/email-held/{rowId}/decision` `{decision: discard | runOnce | runAndAllow, note}`;
 MCP `list_held_email`, `decide_held_email`; the Manager approvals page lists held mail as its own kind next to
-conversation pauses (one queue for the human).
+pauses (one queue for the human).
 
-- `discard` → row `REFUSED`, reason `review_discarded`, mail marked processed.
-- `runOnce` → row back to `RECEIVED` with a one-shot pass flag; the next poll re-fetches it (resubmission path) and
-  runs it, skipping only the check that held it. `runAndAllow` additionally adds the exact sender address to the
-  allowlist through C1 (audited, `reason` = the note).
-- **An unauthenticated mail released by a human** runs only as an anonymous, memory-free identity
-  (`email-anon:<integrationId>:<random>`, `hasNoPersistentMemory`, reserved in `ReservedPrincipals`), never gets a
-  reply or pause notice (v1 §22 — the From may be forged), and the reviewer's UI says so in plain words before the
-  decision. `runAndAllow` is not offered for it (an allowlist entry does not make a forged From true).
-- A released mail still meets the target's `approvalPolicy` (C4): releasing it means "process it", not "do whatever
-  it asks".
-- Who may decide: EDIT on the integration, or a role named in `reviewers`. Every decision is audited.
+- **Who decides:** `reviewers`, default = EDIT holders of the integration plus `eddi-approver` (#1396's approver
+  role). `runAndAllow` additionally requires **EDIT**, because it writes the allowlist.
+- `discard` → `REFUSED`, reason `review_discarded`.
+- `runOnce` → the row gets `released = true` and `nextAttemptAt = now`, state `RECEIVED`. `findDueResubmissions` is
+  extended to return released rows **without** a conversation, and `resubmit` searches the Held folder. On the run,
+  only the checks that held it are skipped; every non-reviewable check runs again.
+- `runAndAllow` = `runOnce` + the exact sender address added to the allowlist through C1 (audited, `reason` = note).
+  **Offered only when the stored verdict is an aligned pass** — a forged From fails the allowlist check before
+  authentication is looked at, so the reason alone cannot tell.
+- **A released mail without an aligned pass** runs as `email-anon:<random>` (memory-free), **never causes outgoing
+  mail** (no reply, no pause notice, no send-out — v1 §22), and its turn may use only the target's `readOnlyTools`
+  (enforced in C3 itself, before C5's `anonymous` role exists). The reviewer's UI says this before the decision.
+- A released mail still meets the target's `approvalPolicy` (C4): releasing means "process it", not "do what it asks".
+- Every decision is audited.
 
-**Acceptance:** a stranger's mail is held, the owner gets one notice, sees the text in the Manager, picks "run and
-allow"; the mail runs once, the sender is on the allowlist (new version), and a second mail from them runs directly;
-an unauthenticated held mail never produces outgoing mail.
+Existing integrations with `requireAuthentication: false` keep today's behaviour (anonymous identity, full tools); a
+save warning `email.anonymous-tools` names the tools such a target exposes.
 
-## 7. Phase C4 — Approval before acting, and reply review
+**Acceptance:** a stranger's signed mail is held, the owner gets one notice, sees the text, picks "run and allow"; the
+mail runs once, the sender is on the allowlist, a second mail from them runs directly; a forged mail is held with
+verdict `fail`, offers no "run and allow", and after "run once" runs with read-only tools and sends nothing; a held
+mail does not stop the cursor.
 
-**Size:** M. Branch `feat/email-approval-policy`. Depends on nothing for 7.1–7.2; 7.3 needs C5 for role-based
-policies.
+## 8. Phase C4 — Approval before acting, and reply review
 
-"The mail is processed, but if it asks for something, ask me first."
+**Size:** M. Branch `feat/email-approval-policy`. No hard dependency (§8.3 reads C5 when present). Both modes for
+8.1; conversation mode for 8.2.
 
-### 7.1 Per target: `approvalPolicy`
-
-New optional field on email targets (refused for other channel types, as v2 §7.1 does for its fields):
+### 8.1 Per target: `approvalPolicy`
 
 | Value | Behaviour |
 |---|---|
-| `actions` (**Manager default for new email targets**) | The agent runs; every tool call that is not read-only needs approval. Implemented by **merging** a deny-by-default rule into the turn's effective `toolApprovals` for email-originated turns: `requireApproval: ["*"]` minus the target's `readOnlyTools` (new field, explicit list; empty by default). The agent's own `toolApprovals` still apply on top (they can only add) |
+| `actions` | The agent runs; every tool call not listed in the target's `readOnlyTools` waits for approval |
 | `firstContact` | As `actions`, and a sender's first mail to this target (no earlier `DONE` row from that address) pauses before the agent runs |
 | `everyTurn` | Every mail pauses before the agent runs; the approver sees the mail and decides go / reject / go with a note |
-| `none` | Today's behaviour: only the agent's own `toolApprovals` |
+| `none` | Today: only the agent's own `toolApprovals` |
 
-A pause **before the agent runs** is a regular HITL pause of the mail's conversation: the processor submits the turn
-with the context flag `mail.preApproval = true`, and the pipeline pauses before any task that can act (verify the
-cleanest hook — a built-in first step that emits `PAUSE_CONVERSATION`, or a pre-turn gate in `ConversationService` —
-§13). In conversation mode the sender gets the existing in-thread pause notice; the approver gets the existing
-approver notification; Manager, Slack and MCP (`list_pending_approvals`, `resume_conversation`) all work unchanged.
-"Reject" ends the turn with the target's `rejectedReply` (new, optional; default: no reply in trigger mode, a short
-"Your request was not approved." in conversation mode).
+Strictness order: `none` < `actions` < `firstContact` < `everyTurn`. Default on upgrade: `none` (no behaviour change);
+the Manager preselects `actions` for new email targets; save warning `email.approval-policy-none` for a target with
+tools. Refused on GROUP targets (group turns auto-reject tool approvals).
 
-Migration: existing integrations keep `none` on upgrade (no behaviour change); the Manager preselects `actions` for
-new email targets. Save warning `email.approval-policy-none` when a target with tools is `none`.
+**The email gate is its own gate, not a merge.** Merging `requireApproval: ["*"]` into the agent's block would be
+undone by the agent's `exempt` (exemptions always win), by `task-approvals.mode=replace`, and by an agent
+`timeoutPolicy: AUTO_APPROVE`. Instead, for a turn tainted `origin=email` (§5.3), after `TaskToolApprovalsResolver`:
 
-### 7.2 Reply review (v2 §11 backlog item 1, moved here)
+- a tool call not in `readOnlyTools` pauses, whatever the agent's and task's `exempt` say; timeout policy
+  `AUTO_REJECT` after `emailControl.review.expiry`;
+- rule-driven `httpcalls` (`ApiCallsTask`, which has no gate) and `mcpcalls` (`McpCallsTask`, which refuses gated
+  calls) of a tainted turn are **refused** unless named in `readOnlyTools`; save warning `email.rule-calls-refused`
+  when the target's workflow contains them.
 
-| Key (conversation mode) | Default | Meaning |
+**Pausing before the agent runs** (`firstContact`, `everyTurn`): the gate sits **before conversation start** for a new
+conversation (otherwise `CONVERSATION_START` and its model calls run first) and before the pipeline for a continued
+one — a pause of the mail's conversation with no step run yet (verify the hook, §14). The sender gets the existing
+in-thread pause notice (`EmailHitlResumeObserver`, conversation mode, authenticated senders only), approvers get the
+existing notification, and the Manager approvals page and MCP (`list_pending_approvals`, `resume_conversation`) work
+unchanged; Slack once #1438 is merged. "Reject" ends the turn with the target's `rejectedReply` (optional; default
+none in trigger mode, "Your request was not approved." in conversation mode).
+
+### 8.2 Reply review (v2 §11 backlog item 1, moved here)
+
+| Setting (conversation mode) | Default | Meaning |
 |---|---|---|
-| `replyReview` | `never` | `always`, `firstContact`, `external` (recipient not matching `internalDomains`), `never` |
-| `internalDomains` | empty | Patterns that count as internal for `external` and for C6 |
+| `emailControl.replyReview` | `never` | `always`, `firstContact`, `external` (recipient outside `internalDomains`), `never` |
+| `emailControl.internalDomains` | empty | Patterns counted as internal here and in C6 |
 
-A reply under review is a pause **after** the turn and **before** sending: the reply row waits in a new state
-`REVIEW`, the approver sees the exact text and may approve, reject, or **edit** it (the edited text is what is signed
-and sent; both versions are kept in the audit ledger, not in the ledger row). Approve in Manager, Slack or MCP; never
-by mail. Expiry like `reviewExpiry`; an expired reply is not sent (`review_expired`).
+Implemented as a **rule pause at the end of the turn, before the reply row is queued**, reusing
+`hitlConfig.review.allowAnswerEdits` / `editedAnswer`: the approver sees the reply, approves, rejects or edits it, and
+the edited text is the one signed and sent. No new ledger state; Manager, MCP `resume_conversation` and the audit
+trail work as for any rule pause. An expired review sends nothing.
 
-### 7.3 "Approved sender, forbidden ask"
+### 8.3 "Approved sender, forbidden ask"
 
-Layers, documented together in "Keeping an email agent in bounds":
+Layers, documented together in "Keeping an email agent in bounds": the agent's tools are the blast radius (v1); the
+email gate and per-tool rules (8.1); sender roles (C5); reply review (8.2); guardrails
+([`guardrails-architecture.md`](guardrails-architecture.md)) once they ship.
 
-1. The agent's tools are the blast radius (v1) — give it the fewest.
-2. `approvalPolicy` (7.1) and per-tool rules (`docs/hitl.md`) — the consequential calls wait for a human.
-3. Sender roles (C5) — what this sender may reach at all.
-4. Reply review (7.2) — what leaves.
-5. Guardrails ([`guardrails-architecture.md`](guardrails-architecture.md)) once they ship — refusals by topic.
+**Acceptance:** a target on `actions` answers a question without approval, its `http.post` call pauses even though the
+agent exempts it; under `everyTurn` a new mail pauses before `CONVERSATION_START` (no model cost recorded); a
+rule-driven httpcall of a tainted turn is refused; under `replyReview: always` the edited reply is the one that
+arrives, signed.
 
-**Acceptance:** a target on `actions` answers a question without approval, but its `http.post` call pauses; on
-`everyTurn` the turn pauses before the model is called (no cost recorded); under `replyReview: always` an edited reply
-is the one that arrives, signed.
+## 9. Phase C5 — Sender roles: it matters who said it
 
-## 8. Phase C5 — Sender roles: it matters who said it
+**Size:** M. Branch `feat/email-sender-roles`. Depends on C1, C4 and **#1394** (replay protection: without
+`signature_seen`, a captured mail from a powerful address can be replayed with a valid signature).
 
-**Size:** M. Branch `feat/email-sender-roles`. Depends on C1.
-
-### 8.1 Keys
+### 9.1 Settings
 
 ```json
-"senderRoles": [
-  { "role": "exec",     "senders": ["cfo@company.com", "ceo@company.com"] },
-  { "role": "staff",    "senders": ["*@company.com"] },
-  { "role": "customer", "senders": ["*@customer-a.com", "*@customer-b.de"] }
-],
-"rolePolicies": {
-  "exec":     { "targets": ["*"], "approvalPolicy": "actions", "sendOut": true,  "maxTurnsPerDay": 200 },
-  "staff":    { "targets": ["*"], "approvalPolicy": "actions", "sendOut": true },
-  "customer": { "targets": ["support"], "approvalPolicy": "actions", "tools": ["kb_search"], "sendOut": false }
+"emailControl": {
+  "senderRoles": [
+    { "role": "exec",     "senders": ["cfo@company.com", "ceo@company.com"] },
+    { "role": "staff",    "senders": ["*@company.com"] },
+    { "role": "customer", "senders": ["*@customer-a.com", "*@customer-b.de"] }
+  ],
+  "rolePolicies": {
+    "exec":     { "targets": ["*"], "approvalPolicy": "actions", "sendOut": true },
+    "staff":    { "targets": ["*"], "approvalPolicy": "actions", "sendOut": true, "maxTurnsPerSenderPerDay": 30 },
+    "customer": { "targets": ["support"], "approvalPolicy": "actions", "tools": ["kb_search"] }
+  }
 }
 ```
 
-- First matching `senderRoles` entry wins (order is explicit); a sender matching none has role `default`, whose
-  policy defaults to today's behaviour.
-- A role applies only to an **authenticated** sender (aligned DKIM pass). Unauthenticated or released mail (C3) is
-  always role `anonymous`, which can never send out and never reach tools beyond `readOnlyTools`.
-- `rolePolicies.<role>` may **narrow** what the target allows (targets, tool allow-list intersected with the agent's,
-  a stricter `approvalPolicy`, lower caps) — never widen it. Validation rejects a role policy that would.
-- The turn context carries `mail.senderRole`, so an agent's prompt can address an executive differently from a
-  customer; behaviour that matters is enforced in code, not left to the prompt.
-- Roles and policies are editable over REST and MCP like the sender lists (C1): `list_email_roles`,
-  `update_email_roles` (expected version, audited, same privilege-escalation guard).
+- First matching entry wins. No match → role `default`: all targets, the target's own `approvalPolicy`, no tool
+  restriction, `sendOut: false`, the integration's caps — i.e. today's behaviour.
+- Roles apply only to an **authenticated** sender (aligned pass). Unauthenticated or released mail is role
+  `anonymous`: `readOnlyTools` only, `sendOut: false`, never outgoing mail.
+- A role policy can only **narrow**: `targets` ⊆ the integration's, `tools` intersected with the agent's,
+  `approvalPolicy` at least the target's (strictness order, §8.1), caps (`maxTurnsPerSenderPerDay`, same name as the
+  integration key) at most the integration's. Validation refuses a widening policy. Roles and v2 §7.6
+  `allowedSenders` both apply; a mail must pass both.
+- Under v2 `replyAudience: thread` the identity is v2's `email-thread:…`; roles still apply to the sender.
+- The turn context carries `mail.senderRole` so a prompt can adapt its tone; anything that matters is enforced in code.
+- REST/MCP like C1: `list_email_roles`, `update_email_roles` (expected version, audited, §5.3 guard).
 
-### 8.2 Trust
+### 9.2 Trust
 
-DKIM authenticates the **domain**, not the person. Within one's own Workspace/M365 domain a person normally cannot
-send as a colleague, but aliases, "send mail as" and shared mailboxes can open that up. Hence:
-
-- Roles bind to addresses, not to EDDI users, in this phase. The identity stays `email:<id>:<address>`,
-  `SELF_ASSERTED`; `PER_USER` connections stay refused (v1).
-- The Manager shows, next to a role with sensitive powers (`sendOut`, any non-read-only tool), "trust rests on your
-  mail provider preventing one person from sending as another" and links the self-test (C2).
-- Linking a sender to an EDDI user's own grants is **open question Q1** (§14), not in this phase.
+DKIM authenticates the **domain**, not the person. Within one Workspace/M365 domain a person normally cannot send as a
+colleague, but aliases, "send mail as" and shared mailboxes can open that up. Roles bind to addresses, not EDDI users;
+identities stay `SELF_ASSERTED`; `PER_USER` connections stay refused. The Manager shows, next to a role with sensitive
+powers, "trust rests on your mail provider preventing one person from sending as another" and links the self-test.
+Linking a sender to an EDDI user's grants is open question Q1.
 
 **Acceptance:** the CFO's mail reaches the finance target and may send out; a customer's mail reaches only `support`
-and its tool list is cut to `kb_search`; a role policy that tries to add a tool the agent lacks is refused at save.
+with only `kb_search`; a policy widening tools or caps is refused at save; a replayed CFO mail is refused (#1394).
 
-## 9. Phase C6 — Approved send-out to third parties
+## 10. Phase C6 — Approved send-out to third parties
 
-**Size:** L. Branch `feat/email-send-out`. Depends on C4 (approvals), C5 (`sendOut` role), and for the Cc case on v2
-Phase 3 (addressing, `actWhen: addressed`), which depends on #1394.
+**Size:** L. Branch `feat/email-send-out`. Depends on C2 (SMTP in common keys, signing), C4, C5, and **#1394**; the
+Cc/@mention case also on v2 Phase 3.
 
-### 9.1 The shape
+### 10.1 The shape
 
-"@eddi please send customer xyz the offer we discussed" in a mail an authorised sender sends (or Cc's EDDI on) is
-routed to a **send-out target**: an agent built for it — one tool, `sendMail`, plus read-only access to exactly the
-data it may attach or quote, no long-term memory. Ship it as a starter configuration ("Mail clerk") in
-`docs/agent-configs/` so admins do not build it from scratch.
+"@eddi please send customer xyz the offer we discussed" from an authorised sender is routed to a **send-out target**
+(`sendOutTarget: true`): an agent built for it — one tool, `sendMail`, plus read-only access to exactly the data it
+may quote or attach, no long-term memory. Ship a starter configuration ("Mail clerk") in `docs/agent-configs/`.
 
-### 9.2 Keys (per integration)
+### 10.2 Settings
 
-| Key | Default | Meaning |
+| Setting | Default | Meaning |
 |---|---|---|
-| `sendOut.enabled` | `false` | Assemble `sendMail` for targets marked `sendOutTarget: true`, for senders whose role has `sendOut: true` |
-| `sendOut.outboundRecipients` | — (required when enabled) | `SenderPatterns` syntax (`*@customer-a.com`, exact addresses), max 500, and/or `contactSource`: a global variable or an `httpcalls` lookup (CRM) returning `{name, address}` for a contact name. An address outside these is refused before approval |
-| `sendOut.approveNewRecipients` | `true` | A recipient never sent to through send-out needs approval. **Cannot be set `false` for external recipients** (not in `internalDomains`) |
-| `sendOut.approveEverySend` | `false` | Every send waits for approval |
-| `sendOut.maxPerDay` | `20` | Per integration, counted from the ledger |
-| `sendOut.maxRecipientsPerMail` | `1` | No Cc/Bcc from the model, ever; >1 only lists addresses explicitly named in one approval |
-| `sendOut.copyRequester` | `true` | The requester is Cc'd (they asked, they see what went out) |
-| `sendOut.allowReplies` | `true` | The recipient's answer to that mail continues the send-out conversation (9.4) |
-| `sendOut.replyWindow` | `P14D` | How long the recipient's answers are accepted in that thread |
+| `emailControl.sendOut.enabled` | `false` | Assemble `sendMail` for send-out targets, for senders whose role has `sendOut: true` |
+| `emailControl.sendOut.outboundRecipients` | — (required when enabled) | Patterns (`*@customer-a.com`, exact addresses), max 500 |
+| `emailControl.sendOut.contactSource` | — | Optional lookup of a contact name (a global variable or an `httpcalls` call, e.g. a CRM) returning `{name, address}`. An ambiguous name is refused; a resolved address must **still** match `outboundRecipients` — the source can narrow, never widen |
+| `emailControl.sendOut.approveExternal` | `every` | `every`: each send to an address outside `internalDomains` is approved. `new`: only the first send to that address. Never off |
+| `emailControl.sendOut.approveInternal` | `new` | `every`, `new`, `never` |
+| `emailControl.sendOut.maxPerDay` | `20` | Per integration, counted from the ledger |
+| `emailControl.sendOut.copyRequester` | `true` | The requester is Cc'd |
+| `emailControl.sendOut.allowReplies` | `true` | The recipient's answer is handled (§10.4) |
+| `emailControl.sendOut.replyWindow` | `P14D` | How long answers are accepted |
 
-`outboundRecipients` is editable over REST/MCP like the sender lists (C1).
+Editable over REST and MCP (`update_email_send_out`, expected version, audited, §5.3 guard). One recipient per send;
+the model never adds Cc or Bcc.
 
-### 9.3 The tool
+### 10.3 The tool and its approval
 
-`sendMail(recipient, subject, body)` where `recipient` is a contact name or an address. Resolution and checks run in
-code, in this order: resolve contact → address in `outboundRecipients` → suppression list (GDPR) → caps → approval
-(request pinning binds recipient, subject and body; the approver sees all three and may edit subject/body, as in
-7.2). From is the integration's `address`, signed (C2). Ledger kind `SENDOUT`, direction `OUT`, with the requesting
-sender and the conversation; digest counts; mail-log filter `kind=SENDOUT`.
+`sendMail(recipient, subject, body)`, `recipient` a contact name or an address. In code, in this order: resolve →
+match `outboundRecipients` → suppression list → caps → approval.
 
-### 9.4 A narrow conversation with the recipient
+Request pinning does not cover non-HTTP tools today, so `sendMail` pins its own: the approval is bound to a stored
+hash of (resolved address, subject, body). The approver may edit subject and body, **not** the recipient; after an
+edit the hash is recomputed and every check runs again before sending. From is the integration's `address`, signed
+(C2). Ledger kind `SENDOUT`, direction `OUT`, with the requesting sender and conversation (new columns; both stores);
+digest counts; mail-log filter `kind=SENDOUT`.
 
-With `allowReplies`, the recipient's answer (In-Reply-To the send-out's Message-ID, signed view, aligned DKIM) is
-accepted **for that thread only** even though the recipient is not on the allowlist: a thread-scoped participant
-entry, expiring after `sendOut.replyWindow`. It runs in the send-out conversation under a memory-free
-`email-sendout:<integrationId>:<threadRoot hash>` identity with `anonymous` powers plus answering in the thread; the
-agent's answer to the recipient falls under `replyReview` (default for send-out threads: `external` → reviewed). The
-requester is told of the answer (Cc or notice, per `copyRequester`). Anything else the recipient sends outside that
-thread is ordinary mail and meets the allowlist (or C3).
+### 10.4 The recipient's answer: a separate, narrow conversation
 
-**Acceptance:** staff writes "send the attached offer to Jane at customer-a"; the clerk resolves Jane, the approver
-sees recipient/subject/body, approves; Jane receives a signed mail with the requester in Cc; Jane's reply continues
-that conversation, its answer waits for review; an address outside `outboundRecipients` is refused without asking
-anyone; a customer-role sender asking for a send-out gets no `sendMail` tool.
+The requester's conversation holds internal context, memory and `sendMail`; the recipient must never run in it (a
+conversation's user id is fixed at start). With `allowReplies`:
 
-## 10. Phase C7 — The admin view
+- An answer is accepted only when its `In-Reply-To` is a `SENDOUT` row's Message-ID, its **From equals that row's
+  recipient exactly**, with an aligned pass, within `replyWindow` (signed view, #1394). This replaces only the
+  allowlist check; loop, auto-reply, blocklist and suppression checks still run.
+- It opens (or continues) a **separate conversation** keyed by the thread root, running as
+  `email-sendout:<integrationId>:<sha256(threadRoot)>` (added to `ReservedPrincipals.PREFIXES`,
+  `hasNoPersistentMemory`, `EmailUserIdentity.isEmailIdentity`), seeded only with the sent mail's text. `sendMail` is
+  never assembled there; tools are the target's `readOnlyTools`.
+- The agent's answer to the recipient is reviewed like `replyReview: external` regardless of the setting. The requester
+  is told of the answer (Cc or notice, per `copyRequester`).
+
+**Acceptance:** staff writes "send the offer to Jane at customer-a"; the clerk resolves Jane, the approver sees
+recipient, subject and body, approves; Jane receives a signed mail with the requester in Cc; Jane's reply opens a
+separate conversation without the requester's history or `sendMail`, and its answer waits for review; a reply from
+anyone but Jane with Jane's Message-ID is not accepted; an address outside `outboundRecipients` is refused without
+asking anyone; a customer-role sender gets no `sendMail`.
+
+## 11. Phase C7 — The admin view and MCP parity
 
 **Size:** M. Branch `feat/email-control-view`. Grows with each phase; start with C1.
 
 One "Mail control" tab per email integration in the Manager:
 
-- **Senders**: allow/block lists (C1), roles and their policies (C5), "last changed by".
-- **Held mail** (C3) and **waiting replies / send-outs** (C4, C6) — or a filtered link to the approvals page, which
-  stays the one queue.
-- **What goes out**: mail-log filter for `REPLY`, `SENDOUT`, `NOTIFY`, with signed/unsigned.
-- **Health**: certificate status and expiry, last self-test result (DKIM, alignment, DMARC), last poll.
-- **Policy summary in plain words**: "Staff can reach all agents; consequential actions need approval by the finance
-  owners; customers can only reach support; mail from unknown senders is held for review."
+- **Senders:** lists (C1), roles and their policies (C5), last change and who made it.
+- **Waiting for a human:** held mail (C3), paused turns and reply reviews (C4), send-outs (C6) — a filtered view of the
+  approvals page, which stays the one queue.
+- **What goes out:** mail-log filter for `REPLY`, `NOTICE`, `NOTIFY`, `SENDOUT`, with signed/unsigned.
+- **Health:** signing certificate and expiry, last self-test (DKIM, alignment, DMARC), last poll.
+- **Policy summary in plain words:** "Staff can reach all agents; their actions need approval; customers can only reach
+  support; mail from unknown senders is held for review."
 
-Every value on the tab is also reachable over MCP (`list_email_senders`, `update_email_senders`, `list_email_roles`,
-`update_email_roles`, `list_held_email`, `decide_held_email`, `run_email_self_test`, `read_email_policy`), so the
-Platform Operator can answer "who may make the finance agent do what?" and make the change behind an approval.
-Operator prompt, allow-list and revision bump in each phase that adds a tool.
+MCP parity: `list_email_senders`, `update_email_senders`, `list_email_roles`, `update_email_roles`,
+`update_email_send_out`, `list_held_email`, `decide_held_email`, `run_email_self_test`, and `read_email_policy`
+(returns the resolved `emailControl`, the per-target `approvalPolicy` and `readOnlyTools`, and the plain-words summary
+the tab shows). Pauses and reply reviews are decided with the existing `resume_conversation`. Operator prompt,
+allow-list (writes gated) and revision bump in each phase that adds a tool; operator PRs land serially.
 
-## 11. Order and dependencies
+## 12. Order and dependencies
 
-| Phase | Size | Depends on | Notes |
-|---|---|---|---|
-| C1 Sender lists | S | — | First: everything else builds on it |
-| C2 S/MIME + self-test | M | — | Parallel with C1 |
-| C3 Held mail | M–L | C1 | |
-| C4 Approval policy, reply review | M | — (7.3: C5) | Parallel with C3 |
-| C5 Sender roles | M | C1 | |
-| C6 Send-out | L | C4, C5; v2 Phase 3 (→ #1394) for the Cc/mention case | A To-addressed request works without v2 Phase 3 |
-| C7 Admin view | M | grows per phase | |
+| Phase | Size | Depends on |
+|---|---|---|
+| C1 Sender lists + guard | S | — |
+| C2 S/MIME + self-test | M | — |
+| C3 Held mail | M–L | C1; #1438 for Slack |
+| C4 Approval gate, reply review | M | — (§5.3 taint from C1); #1438 for Slack |
+| C5 Sender roles | M | C1, C4, **#1394** |
+| C6 Send-out | L | C2, C4, C5, **#1394**; v2 Phase 3 for Cc/@mention |
+| C7 Admin view | M | grows per phase |
 
-Merge order with v2: #1458 (v2 Phase 2) and #1476 (v2 Phase 4) first. Each phase that changes the operator bumps
-`operator-revision.json`; land those serially.
+Merge #1458 and #1476 first. C1 and C2 can run in parallel; C3 and C4 in parallel after C1.
 
-## 12. Cross-cutting checklist
+## 13. Cross-cutting checklist
 
-Every phase: both datastores (Mongo and Postgres twins, ledger state additions in both), REST + MCP + Manager +
-operator, all 11 locales, `docs/email-integration.md` and the skills in `integrations/claude-plugin/`, metrics,
-GDPR (`findByRecipient` / `deleteByRecipient` cover new rows and stores), audit entries for every human decision and
-every policy change, save-time validation with actionable errors, unit tests plus an IT through the real store, a
-mutation check of each security test (revert the guard, the test must fail), a live run against the test mailbox
-(`eddi@eddi.solutions`) before declaring done, changelog fragment.
+Every phase: both datastores (Mongo and Postgres; new columns with `ADD COLUMN IF NOT EXISTS`), REST + MCP + Manager
++ operator, all 11 locales, `docs/email-integration.md` and the skills in `integrations/claude-plugin/`, metrics, GDPR,
+audit entries for every human decision and policy change, save-time validation with actionable errors, unit tests and
+an IT through the real store, a mutation check of each security test, a live run against the test mailbox before
+declaring done, a changelog fragment.
 
-## 13. Things to verify before relying on them
+**GDPR:** erasing an address must also reach the conversations named by its ledger rows (`email-anon:` releases,
+`email-sendout:` threads), not only conversations found by identity — extend `EmailIdentityGdprParticipant` to cascade
+over the `conversationId` of the address's rows; the held-mail rows and `SENDOUT` rows (as recipient and as requester)
+are covered by `findByRecipient`/`deleteByRecipient` and the new requester column.
 
-1. The cleanest hook for a pause **before** the agent runs (C4 7.1): a built-in first workflow step emitting
-   `PAUSE_CONVERSATION`, or a gate in `ConversationService` — and that the resume path then runs the full pipeline.
-2. HITL tool approvals merged per turn (an email-only deny-by-default added to the agent's own `toolApprovals`)
-   without changing the stored agent document, and that request pinning still holds.
-3. How the vault grants a secret to a non-URL consumer (the S/MIME certificate) — connections use allowed hosts.
-4. Bouncy Castle artifacts for S/MIME on the LTS line (`bcpkix-lts8on`, `bcjmail-lts8on`?) and their versions next to
-   the managed `bcprov-lts8on`; license and OpenSSF checks.
-5. How Gmail (web, consumer and Workspace), Outlook (desktop, web), Apple Mail and Thunderbird display a clear-signed
-   message from a public CA S/MIME certificate; RSA-PSS vs PKCS#1 v1.5 support.
-6. Holding mail in the polled folder vs an `EDDI/Held` folder: cursor progress, resubmission finding it by
-   Message-ID, Gmail labels vs folders.
-7. That the self-test mail is recognised before routing and can never start a turn, and that a forged copy of it
-   (token reuse) does nothing.
-8. Slack approval channels: can a non-conversation item (held mail) be posted and decided there, or only pauses?
-9. On Windows, dnsjava without `eddi.email.dns.servers` takes every adapter's resolvers (including dead `fec0::` and
-   disconnected ones) and every DKIM lookup fails temporarily (seen 2026-11-18). Document it; consider logging the
-   lookup exception at DEBUG and naming the servers tried in the `auth_temporary` mail-log note.
+## 14. Things to verify before relying on them
 
-## 14. Open questions
+1. How the channel store serialises a typed `emailControl` field in Mongo and Postgres, and ZIP export/import.
+2. The propagation points for the `origin=email` taint: delegation (`converseWithAgent`), consult, A2A, group member
+   turns, scheduled follow-ups.
+3. The hook for a pause before conversation start (new conversation) and before the pipeline (continued one), and that
+   the resume path then runs the full turn.
+4. That an email gate after `TaskToolApprovalsResolver` pauses (not refuses) for every tool source the LLM task
+   assembles, and integrates with the execution journal (at-most-once).
+5. A connection auth type without a URL (`SMIME_SIGNING`): resolver, allowlist and grant model.
+6. Bouncy Castle artifact names and versions for S/MIME on the LTS line next to `bcprov-lts8on`; licence and
+   OpenSSF checks.
+7. How Gmail (consumer, Workspace), Outlook (desktop, web), Apple Mail and Thunderbird show a clear-signed message from
+   a public CA S/MIME certificate; RSA-PSS support.
+8. Moving held mail to `EDDI/Held` on Gmail (labels) and Exchange; `resubmit` finding it there.
+9. How #1438 binds a card to its subject, and what a held-mail subject needs.
+10. On Windows, dnsjava without `eddi.email.dns.servers` takes every adapter's resolvers (including dead `fec0::` and
+    disconnected ones) and every DKIM lookup fails temporarily (seen 2026-11-18). Document it in
+    `docs/email-integration.md`; consider naming the servers tried in the `auth_temporary` note.
+
+## 15. Open questions
 
 - **Q1 — Link senders to EDDI users?** An authenticated sender mapped to exactly one directory user with a verified
-  address could carry that user's roles and `PER_USER` grants. Needs a decision on provenance (`SELF_ASSERTED` today)
-  and an admin assertion per domain that the provider prevents impersonation. Out of C5 until decided.
-- **Q2 — One certificate per integration or a deployment default?** Per integration matches "per mailbox"; a default
-  would simplify small setups.
-- **Q3 — S/MIME for the system mailer** (HITL notifications, `eddi.mail.smtp.*`) too? Same code, separate
-  certificate.
-- **Q4 — Default of `onRefused.notAllowlisted`** for new integrations: `review` (preselected) or ask in the wizard.
+  address could carry that user's roles and `PER_USER` grants. Needs a provenance decision (`SELF_ASSERTED` today) and
+  a per-domain admin assertion that the provider prevents impersonation.
+- **Q2 — One signing connection per integration or a deployment default?**
+- **Q3 — S/MIME for `SystemMailer`** (owner notices, digests, HITL notifications)? Same code, a deployment-level
+  signing connection.
+- **Q4 — Default of `onRefused.notAllowlisted`** for new integrations: `review` (preselected) or ask in a wizard.
 
-## 15. What I would NOT do
+## 16. What I would NOT do
 
-- **No approval by replying to a mail**, ever (v1 §22, v2 §2.3) — not for held mail, not for send-outs.
-- **No reply, pause notice or send-out caused by an unauthenticated mail**, even after a human released it.
-- **No model-typed address outside `outboundRecipients`**; no Cc/Bcc the model adds.
-- **No storing mail bodies** to make review easier; previews are fetched live.
-- **No mail-triggered agent that can change its own integration** (sender lists, roles, policies).
-- **No widening by roles**: a role policy can only narrow what the target and agent allow.
-- **No silent unsigned mail under `smimeSign: required`.**
+- **No approval by replying to a mail**, ever (v1 §22, v2 §2.3).
+- **No outgoing mail caused by an unauthenticated mail**, even after a human released it.
+- **No address outside `outboundRecipients`**; no recipient edits by the approver; no Cc/Bcc added by the model.
+- **No storing mail bodies** for review; previews are fetched live.
+- **No email-originated turn that can change its integration, its senders, roles or policies, or decide an approval**
+  — enforced at runtime, not only at save.
+- **No merging the email gate into the agent's `toolApprovals`**; it is its own gate.
+- **No widening by roles.**
+- **No silent unsigned mail under `smime.sign: required`.**
