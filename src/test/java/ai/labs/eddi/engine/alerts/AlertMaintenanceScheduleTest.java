@@ -11,6 +11,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -90,6 +91,53 @@ class AlertMaintenanceScheduleTest {
         schedule.ensure();
 
         verify(store, never()).createSchedule(any());
+    }
+
+    @Test
+    @DisplayName("duplicates made by nodes that started at once are removed, the oldest one is kept")
+    void removesDuplicatesKeepingTheOldest() throws Exception {
+        ScheduleConfiguration newer = row("b", AlertSchedules.maintenanceMetadata());
+        newer.setCreatedAt(Instant.parse("2026-11-18T10:00:02Z"));
+        ScheduleConfiguration oldest = row("a", AlertSchedules.maintenanceMetadata());
+        oldest.setCreatedAt(Instant.parse("2026-11-18T10:00:01Z"));
+        ScheduleConfiguration newest = row("c", AlertSchedules.maintenanceMetadata());
+        newest.setCreatedAt(Instant.parse("2026-11-18T10:00:03Z"));
+        ScheduleConfiguration other = row("user-1", null);
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(newer, other, oldest, newest));
+
+        schedule.removeDuplicates();
+
+        verify(store).deleteSchedule("b");
+        verify(store).deleteSchedule("c");
+        verify(store, never()).deleteSchedule("a");
+        verify(store, never()).deleteSchedule("user-1");
+    }
+
+    @Test
+    @DisplayName("a single maintenance schedule is never deleted")
+    void aSingleScheduleIsKept() throws Exception {
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean()))
+                .thenReturn(List.of(row("only", AlertSchedules.maintenanceMetadata())));
+
+        schedule.removeDuplicates();
+
+        verify(store, never()).deleteSchedule(any());
+    }
+
+    @Test
+    @DisplayName("the node that creates the schedule last cleans up the copy another node made")
+    void creatingChecksForDuplicates() throws Exception {
+        when(store.readScheduleByName(AlertSchedules.SCHEDULE_NAME)).thenReturn(Optional.empty());
+        ScheduleConfiguration mine = row("mine", AlertSchedules.maintenanceMetadata());
+        mine.setCreatedAt(Instant.parse("2026-11-18T10:00:02Z"));
+        ScheduleConfiguration theirs = row("theirs", AlertSchedules.maintenanceMetadata());
+        theirs.setCreatedAt(Instant.parse("2026-11-18T10:00:01Z"));
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(theirs, mine));
+
+        schedule.ensure();
+
+        verify(store).deleteSchedule("mine");
+        verify(store, never()).deleteSchedule("theirs");
     }
 
     @Test
