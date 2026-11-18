@@ -415,6 +415,22 @@ public class EmbeddingStoreFactory {
     }
 
     /**
+     * The binding {@code store} was built with: the expanded parameters of the
+     * cache entry that holds it, so exactly what the store's credential came from,
+     * not a second expansion that a variable edit may have changed meanwhile.
+     * {@code null} for a store this factory does not cache (in-memory), which holds
+     * no secret.
+     */
+    public Map<String, String> bindingOf(EmbeddingStore<TextSegment> store) {
+        for (var entry : cache.asMap().entrySet()) {
+            if (entry.getValue() == store) {
+                return entry.getKey().storeParameters();
+            }
+        }
+        return null;
+    }
+
+    /**
      * The grant check against a binding recorded earlier (see
      * {@link #credentialBinding}), so a variable repointed since then cannot make
      * the check pass for a secret the held store does not use.

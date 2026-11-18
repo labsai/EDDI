@@ -1089,7 +1089,11 @@ public class McpToolProviderManager {
                 }
                 return;
             }
-            String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+            // The bound apiKey (see bindCredential) is the final credential; one that still
+            // holds a variable — deleted, cyclic, nested past the limit — is refused as it
+            // stands, never expanded again, since a second expansion could name another
+            // secret than the cached session uses.
+            String expanded = apiKey;
             if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
                 // A variable that does not resolve (deleted, nested past the limit, a
                 // cycle) names no secret: a grant check over it would pass vacuously while

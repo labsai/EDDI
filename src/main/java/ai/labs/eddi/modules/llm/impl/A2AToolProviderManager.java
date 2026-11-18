@@ -333,7 +333,9 @@ public class A2AToolProviderManager {
             }
             return;
         }
-        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+        // The bound apiKey is the final credential: one that still holds a variable is
+        // refused as it stands, never expanded again (see the MCP manager).
+        String expanded = apiKey;
         if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
             // A variable that does not resolve names no secret: refused rather than
             // checked vacuously while a card fetched with its old value is cached.

@@ -199,6 +199,20 @@ public class EmbeddingModelFactory {
     }
 
     /**
+     * The binding {@code model} was built with, read from the key of the cache
+     * entry that holds it; {@code null} when this factory does not hold it. See
+     * {@link EmbeddingStoreFactory#bindingOf}.
+     */
+    public Map<String, String> bindingOf(EmbeddingModel model) {
+        for (var entry : cache.asMap().entrySet()) {
+            if (entry.getValue() == model) {
+                return entry.getKey().parameters();
+            }
+        }
+        return null;
+    }
+
+    /**
      * The grant check against a binding recorded earlier; see
      * {@link #credentialBinding}.
      */

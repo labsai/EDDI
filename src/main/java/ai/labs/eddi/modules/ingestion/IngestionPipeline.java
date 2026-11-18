@@ -587,6 +587,10 @@ public class IngestionPipeline {
         } catch (UnsupportedFeatureException e) {
             collector.replaceUnsupported = true;
             return true;
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // Not swept, and the run fails with the refusal rather than reporting success.
+            collector.recordGrantRefusal(e);
+            return false;
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not remove chunks that source '%s' no longer has from before its state was "
                     + "cleared; they stay retrievable and the next complete run tries again",
@@ -725,6 +729,10 @@ public class IngestionPipeline {
                     LogSanitizer.sanitize(source.getName()));
             stateStore.purgeSource(sourceKey);
             return false;
+        } catch (SecretResolver.SecretNotGrantedException e) {
+            // From the store lookup's own check (the grant changed after the one above):
+            // thrown, so the caller keeps the files rather than reading "false" as done.
+            throw e;
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Could not remove the chunks of source '%s' from knowledge base '%s'; they stay "
                     + "retrievable and nothing lists them any more",
@@ -1130,16 +1138,18 @@ public class IngestionPipeline {
          * expansion.
          */
         void acquireStore() {
-            storeBinding = embeddingStoreFactory.credentialBinding(knowledgeBase);
             store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+            // What the store was built with, read from the factory's own cache key: a
+            // second expansion could differ from the one the store's credential came from.
+            storeBinding = embeddingStoreFactory.bindingOf(store);
         }
 
         private EmbeddingModel model() {
             if (model == null) {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
-                modelBinding = embeddingModelFactory.credentialBinding(knowledgeBase);
                 model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
+                modelBinding = embeddingModelFactory.bindingOf(model);
             } else {
                 embeddingModelFactory.requireGranted(knowledgeBase, modelBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
@@ -1751,6 +1761,8 @@ public class IngestionPipeline {
             embeddingStore.addAll(embeddings, textSegments);
 
             try {
+                // And again before the delete: a large addAll takes time too.
+                embeddingStore = store();
                 embeddingStore.removeAll(metadataKey(METADATA_DOCUMENT_ID).isEqualTo(documentId)
                         .and(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey))
                         .and(metadataKey(METADATA_RUN_ID).isNotEqualTo(runId)));

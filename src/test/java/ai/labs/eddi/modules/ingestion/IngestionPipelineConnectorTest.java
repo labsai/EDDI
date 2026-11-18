@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
@@ -206,6 +208,27 @@ class IngestionPipelineConnectorTest {
         }
         assertFalse(embeddingStore.segmentsOf("a").isEmpty(), "the chunks of the last good run stay");
         assertFalse(stateStore.lookup(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()), "a").orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("a held model is re-checked against the binding it was built with, not a fresh expansion (#1179)")
+    void heldModelRecheckedAgainstItsOwnBinding() {
+        Map<String, String> builtWith = Map.of("apiKey", "${vault:key-a}");
+        when(modelFactory.bindingOf(any())).thenReturn(builtWith);
+        doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:key-a} is not resolved for no agent"))
+                .when(modelFactory).requireGranted(any(RagConfiguration.class), eq(builtWith), any());
+        var connector = new Scripted();
+        connector.discovery = context -> {
+            context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
+            context.accept(WorkItem.prefetched(text("b", "Beta body"), context.partition()));
+        };
+
+        IngestionReport report = run(connector);
+
+        // The first document acquires the model; the second re-checks it, against
+        // key-a.
+        assertEquals(1, report.documentsIngested());
+        assertTrue(String.valueOf(report.message()).contains("key-a"), report.message());
     }
 
     @Test

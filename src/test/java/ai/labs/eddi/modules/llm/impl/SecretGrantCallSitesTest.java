@@ -322,6 +322,38 @@ class SecretGrantCallSitesTest {
         }
 
         @Test
+        @DisplayName("a variable chain longer than the expansion limit is refused as bound, never expanded a second time")
+        void chainPastTheLimitIsRefused() {
+            // var1 -> var2 -> ... -> var10 -> the secret: more levels than expandFully
+            // follows.
+            when(variables.resolveValue(anyString())).thenAnswer(inv -> {
+                String value = inv.getArgument(0);
+                if (value.startsWith("${vars:var")) {
+                    int level = Integer.parseInt(value.substring("${vars:var".length(), value.length() - 1));
+                    return level < 10 ? "${vars:var" + (level + 1) + "}" : REF;
+                }
+                return value;
+            });
+            var manager = new McpToolProviderManager(variables, secretResolver);
+            var config = new McpServerConfig();
+            config.setName("weather");
+            config.setUrl("https://mcp.example.com/mcp");
+            config.setApiKey("${vars:var1}");
+            var bound = manager.bindCredential(config);
+            assertTrue(bound.getApiKey().startsWith("${vars:"), "the bound key stops at the limit: " + bound.getApiKey());
+            // Agent A is granted the secret at the end of the chain, and is still refused:
+            // the check must not expand the leftover variable to some other credential.
+            assertThrows(IllegalArgumentException.class, () -> manager.validateSecretGrant(bound, SecretAccess.agent(AGENT_A)));
+
+            var a2a = new A2AToolProviderManager(variables, secretResolver, false);
+            var peer = new A2AAgentConfig();
+            peer.setUrl("https://peer.example.com");
+            peer.setApiKey("${vars:var1}");
+            var boundPeer = a2a.bindCredential(peer);
+            assertThrows(IllegalArgumentException.class, () -> a2a.requireSecretGranted(boundPeer, SecretAccess.agent(AGENT_A)));
+        }
+
+        @Test
         void a2aGrantChecked() {
             var manager = new A2AToolProviderManager(variables, secretResolver, false);
             var config = new A2AAgentConfig();
