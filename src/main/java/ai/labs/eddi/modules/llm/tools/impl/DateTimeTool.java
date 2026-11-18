@@ -79,10 +79,11 @@ public class DateTimeTool {
             if ((startParsed.zoned() == null) != (endParsed.zoned() == null)) {
                 return "Error: Give both date-times with an offset or zone, or both without; a mix cannot be compared.";
             }
-            // With offsets/zones the difference is between instants; without, between
-            // the local values, as before.
-            Temporal start = startParsed.zoned() != null ? startParsed.zoned() : startParsed.local();
-            Temporal end = endParsed.zoned() != null ? endParsed.zoned() : endParsed.local();
+            // With offsets/zones the difference is between instants — as Instants, since
+            // ZonedDateTime counts DAYS on the calendar (a 23-hour spring-forward day is
+            // one day) — and without, between the local values, as before.
+            Temporal start = startParsed.zoned() != null ? startParsed.zoned().toInstant() : startParsed.local();
+            Temporal end = endParsed.zoned() != null ? endParsed.zoned().toInstant() : endParsed.local();
 
             long difference;
             String unitName;

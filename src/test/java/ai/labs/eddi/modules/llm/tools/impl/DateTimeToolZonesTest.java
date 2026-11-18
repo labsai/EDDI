@@ -103,6 +103,16 @@ class DateTimeToolZonesTest {
     }
 
     @Test
+    void zonedDayDifferenceIsElapsedTimeAcrossSpringForward() {
+        // 23 hours pass between these two noons: not a whole day as an instant.
+        assertEquals("Difference: 0 days",
+                tool.calculateDateDifference("2025-03-29T12:00:00+01:00[Europe/Vienna]", "2025-03-30T12:00:00+02:00[Europe/Vienna]", "days"));
+        assertEquals("Difference: 0 days", tool.calculateDateDifference("2025-03-29T11:00:00Z", "2025-03-30T10:00:00Z", "days"));
+        assertEquals("Difference: 1 days", tool.calculateDateDifference("2025-03-29T12:00:00", "2025-03-30T12:00:00", "days"),
+                "local values still count calendar days");
+    }
+
+    @Test
     void currentTimeIsNeverCachedButPureConversionsAre() throws Exception {
         assertTrue(DateTimeTool.class.getMethod("getCurrentDateTime", String.class).isAnnotationPresent(NeverCached.class));
         assertFalse(DateTimeTool.class.getMethod("convertTimezone", String.class, String.class, String.class)

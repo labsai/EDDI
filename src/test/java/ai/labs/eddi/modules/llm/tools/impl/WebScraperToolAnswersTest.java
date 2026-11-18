@@ -132,6 +132,18 @@ class WebScraperToolAnswersTest {
     }
 
     @Test
+    void aCommentedOutMetaCharsetIsNoDeclaration() throws Exception {
+        String page = "<html><head><!-- <meta charset=\"windows-1252\"> --><title>t</title></head><body><p>Café</p></body></html>";
+        answer("https://example.test/", Map.of(), page.getBytes(StandardCharsets.UTF_8));
+
+        assertTrue(tool.extractWebPageText("https://example.com").contains("Café"));
+        byte[] afterComment = "<!-- old --><meta charset='windows-1252'>".getBytes(StandardCharsets.UTF_8);
+        assertEquals(Charset.forName("windows-1252"), WebScraperTool.charsetOf(null, afterComment), "a real declaration after a comment");
+        byte[] unterminated = "<!-- <meta charset='windows-1252'>".getBytes(StandardCharsets.UTF_8);
+        assertEquals(StandardCharsets.UTF_8, WebScraperTool.charsetOf(null, unterminated), "an unterminated comment runs to the end");
+    }
+
+    @Test
     void aCutThroughAMultiByteCharacterIsDroppedInAnyCharset() {
         byte[] utf16 = "ab".getBytes(StandardCharsets.UTF_16LE);
         byte[] cut = Arrays.copyOf(utf16, utf16.length + 1);

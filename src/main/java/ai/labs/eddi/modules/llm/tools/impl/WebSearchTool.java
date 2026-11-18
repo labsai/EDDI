@@ -526,31 +526,40 @@ public class WebSearchTool {
         results.append("Wikipedia results for '").append(query).append("':\n\n");
 
         boolean hasResults = false;
+        JsonNode root;
         try {
-            JsonNode root = objectMapper.readTree(jsonResponse);
-            JsonNode queryNode = root.get("query");
-            JsonNode searchResults = queryNode != null ? queryNode.get("search") : null;
+            root = objectMapper.readTree(jsonResponse);
+        } catch (Exception e) {
+            LOGGER.warnf("Error parsing Wikipedia results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("Wikipedia");
+        }
+        JsonNode queryNode = root != null ? root.get("query") : null;
+        // An answer without a query result — an {"error": ...} envelope, warnings
+        // alone — is a failed search, not an empty one. A query result without hits
+        // ({"query":{"search":[]}}) is "nothing found".
+        if (queryNode == null || !queryNode.isObject() || root.has("error")) {
+            LOGGER.warnf("Wikipedia answered without a query result for query '%s'", sanitize(query));
+            throw unreadableAnswer("Wikipedia");
+        }
+        JsonNode searchResults = queryNode.path("search");
+        try {
+            int count = 0;
+            for (JsonNode item : searchResults) {
+                if (count >= 3)
+                    break;
 
-            if (searchResults != null && searchResults.isArray()) {
-                int count = 0;
-                for (JsonNode item : searchResults) {
-                    if (count >= 3)
-                        break;
+                String title = getTextOrEmpty(item, "title");
+                String snippet = getTextOrEmpty(item, "snippet")
+                        .replaceAll("<[^>]*>", ""); // Strip HTML tags
 
-                    String title = getTextOrEmpty(item, "title");
-                    String snippet = getTextOrEmpty(item, "snippet")
-                            .replaceAll("<[^>]*>", ""); // Strip HTML tags
+                String wikiUrl = "https://en.wikipedia.org/wiki/"
+                        + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
 
-                    String wikiUrl = "https://en.wikipedia.org/wiki/"
-                            + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
-
-                    results.append(++count).append(". ").append(title).append("\n");
-                    results.append("   ").append(snippet).append("\n");
-                    results.append("   ").append(wikiUrl).append("\n\n");
-                    hasResults = true;
-                }
+                results.append(++count).append(". ").append(title).append("\n");
+                results.append("   ").append(snippet).append("\n");
+                results.append("   ").append(wikiUrl).append("\n\n");
+                hasResults = true;
             }
-
         } catch (Exception e) {
             LOGGER.warnf("Error parsing Wikipedia results: %s", sanitize(e.getMessage()));
             throw unreadableAnswer("Wikipedia");

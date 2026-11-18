@@ -366,7 +366,8 @@ public class CalculatorTool {
             }
             String numStr = expression.substring(start, pos);
             try {
-                return Double.parseDouble(numStr);
+                // An overflowing literal parses to infinity; refused like any other.
+                return finite(Double.parseDouble(numStr));
             } catch (NumberFormatException e) {
                 throw new IllegalArgumentException("Invalid number: " + numStr);
             }

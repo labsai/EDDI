@@ -404,4 +404,11 @@ class CalculatorToolTest {
         assertTrue(calculatorTool.calculate("5 % 0").startsWith("Error: Division by zero"));
         assertTrue(calculatorTool.calculate("0 / 0").startsWith("Error: Division by zero"));
     }
+
+    @Test
+    void anOverflowingLiteralIsAnErrorNotAnInfinityThatDividesToZero() {
+        // 10^308 / 10^309 is 0.1; with the denominator parsed as Infinity it was "0".
+        String expression = "1" + "0".repeat(308) + " / " + "1" + "0".repeat(309);
+        assertTrue(calculatorTool.calculate(expression).startsWith("Error:"), calculatorTool.calculate(expression));
+    }
 }

@@ -241,11 +241,10 @@ class WebSearchToolExtendedTest {
         }
 
         @Test
-        @DisplayName("should handle missing query node")
+        @DisplayName("an error envelope is a failed search, not an empty one")
         void handlesMissingQueryNode() {
             String json = "{\"error\": \"something\"}";
-            String result = tool.formatWikipediaResults(json, "test");
-            assertTrue(result.contains("No Wikipedia articles found"));
+            assertThrows(ToolFailureException.class, () -> tool.formatWikipediaResults(json, "test"));
         }
 
         @Test

@@ -407,16 +407,15 @@ class WebSearchToolTest {
         }
 
         @Test
-        void formatWikipediaResults_MissingQueryNode_ShouldReturnNoArticles() {
+        void formatWikipediaResults_MissingQueryNode_IsAFailedSearch() {
             String json = """
                     {
                       "warnings": {"search": {"*": "some warning"}}
                     }
                     """;
 
-            String result = webSearchTool.formatWikipediaResults(json, "test");
-
-            assertTrue(result.contains("No Wikipedia articles found"));
+            // Without query.search the answer says nothing about whether articles exist.
+            assertThrows(ToolFailureException.class, () -> webSearchTool.formatWikipediaResults(json, "test"));
         }
 
         @Test

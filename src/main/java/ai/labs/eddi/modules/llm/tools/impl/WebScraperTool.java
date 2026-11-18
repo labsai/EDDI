@@ -868,7 +868,9 @@ public class WebScraperTool {
     private static final Pattern META_CONTENT = Pattern.compile("\\scontent\\s*=\\s*(\"[^\"]*\"|'[^']*')", Pattern.CASE_INSENSITIVE);
 
     private static Charset metaCharset(String head) {
-        var tags = META_TAG.matcher(head);
+        // The prescan skips comments (WHATWG "prescan a byte stream"): a commented-out
+        // <meta charset> is no declaration.
+        var tags = META_TAG.matcher(withoutComments(head));
         while (tags.find()) {
             String tag = tags.group();
             // Found in a copy whose quoted attribute values are blanked (same length),
@@ -898,6 +900,29 @@ public class WebScraperTool {
             }
         }
         return null;
+    }
+
+    /**
+     * {@code head} with every {@code <!-- ... -->} comment blanked (an unterminated
+     * one runs to the end), in one forward pass.
+     */
+    static String withoutComments(String head) {
+        int open = head.indexOf("<!--");
+        if (open < 0) {
+            return head;
+        }
+        StringBuilder out = new StringBuilder(head.length());
+        int copied = 0;
+        while (open >= 0) {
+            out.append(head, copied, open);
+            int close = head.indexOf("-->", open + 4);
+            int end = close < 0 ? head.length() : close + 3;
+            out.append(" ".repeat(end - open));
+            copied = end;
+            open = close < 0 ? -1 : head.indexOf("<!--", end);
+        }
+        out.append(head, copied, head.length());
+        return out.toString();
     }
 
     /** {@code tag} with the characters inside each quoted value replaced. */
