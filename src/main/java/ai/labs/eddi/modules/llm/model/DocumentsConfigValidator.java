@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.documents.DocumentBounds;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import java.math.BigDecimal;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -178,12 +179,14 @@ public final class DocumentsConfigValidator {
         if (!value.isNumber()) {
             return;
         }
-        double number = value.asDouble();
-        if (!Double.isFinite(number) || number < 0) {
+        // Exact decimal comparison: a byte count above 2^53 must not round past its
+        // bound.
+        if ((value.isFloatingPointNumber() && !Double.isFinite(value.asDouble())) || value.decimalValue().signum() < 0) {
             throw new IllegalArgumentException(field + " must not be negative (was " + value.asText() + ")");
         }
+        BigDecimal number = value.decimalValue();
         bounds.boundFor(path).ifPresent(bound -> {
-            if (number > bound) {
+            if (number.compareTo(BigDecimal.valueOf(bound)) > 0) {
                 throw new IllegalArgumentException(field + " is " + value.asText() + ", above the operator bound of "
                         + formatBound(bound) + " (" + DocumentBounds.propertyFor(path) + ")");
             }

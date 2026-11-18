@@ -38,6 +38,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
+import org.mockito.MockedStatic;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
@@ -191,17 +192,20 @@ class LlmTaskConfigureTest {
                     {"tasks":[{"actions":["help"],"id":"answer","type":"openai","documents":{"sharing":{"delegation":true}}}]}
                     """, LlmConfiguration.class);
             when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
-            // Resolution reads every operator default once; a spy shows configure() ran it.
-            // (Log capture is not reliable in a shared test JVM; the WARN text itself is
-            // asserted on warnOnDocumentsConfig's return value in
-            // LlmTaskDocumentsConfigTest.)
-            var settings = spy(DocumentSettings.of(Map.of(), DocumentBounds.none()));
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.none());
             llmTask.documentSettings = settings;
 
-            Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
+            // configure() must hand the stored configuration (with its documents block) and
+            // the deployment's settings to the warning helper, whose output
+            // LlmTaskDocumentsConfigTest asserts (log capture is not reliable in a shared
+            // JVM).
+            try (MockedStatic<LlmTask> statics = mockStatic(LlmTask.class, CALLS_REAL_METHODS)) {
+                Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
 
-            assertSame(config, result);
-            verify(settings, atLeastOnce()).defaultFor("sharing.delegation");
+                assertSame(config, result);
+                statics.verify(() -> LlmTask.warnOnDocumentsConfig(argThat(c -> c == config && c.tasks().get(0).getDocuments() != null),
+                        same(settings)));
+            }
         }
 
         @Test

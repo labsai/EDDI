@@ -19,7 +19,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doReturn;
@@ -61,16 +62,10 @@ class RestLlmStoreDocumentsPatchTest {
         rest.jsonPatcher = new ConfigJsonPatcher(mapper, new StrictConfigurationParser(mapper));
         String patch = "[{\"op\":\"add\",\"path\":\"/tasks/0/documents\",\"value\":{\"sharing\":{\"delegation\":true}}}]";
 
-        try {
-            var response = rest.patchLlm(ID, 2, patch);
-            assertTrue(response.getStatus() >= 400, "status " + response.getStatus());
-        } catch (RuntimeException e) {
-            boolean named = false;
-            for (Throwable cause = e; cause != null; cause = cause.getCause()) {
-                named |= cause.getMessage() != null && cause.getMessage().contains("documents.sharing.delegation is not available");
-            }
-            assertTrue(named, "refused for another reason: " + e);
-        }
+        // The store's refusal propagates as is (IllegalArgumentExceptionMapper turns it
+        // into a 400 at the HTTP layer); any other refusal would fail this assertion.
+        var e = assertThrows(IllegalArgumentException.class, () -> rest.patchLlm(ID, 2, patch));
+        assertEquals("langchain.task[0].documents.sharing.delegation is not available in this version", e.getMessage());
         verifyNoInteractions(storage);
     }
 }

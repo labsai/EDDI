@@ -303,4 +303,82 @@ class EffectiveDocumentsConfigTest {
             assertEquals(2, e.clampWarnings().size(), e.clampWarnings().toString());
         }
     }
+
+    @Nested
+    @DisplayName("save and deploy agree")
+    class SaveAndDeployAgree {
+
+        @Test
+        @DisplayName("a byte count above 2^53 stays exact, and is clamped exactly to its bound")
+        void exactLongs() throws Exception {
+            Set<String> live = Set.of("derived.maxBytesPerSource");
+            var exact = EffectiveDocumentsConfig.resolve(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740995}}"), DocumentSettings.none(),
+                    live);
+            assertEquals(9_007_199_254_740_995L, exact.derived().maxBytesPerSource());
+            assertTrue(exact.clampWarnings().isEmpty(), exact.clampWarnings().toString());
+
+            var bounded = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("derived.maxBytesPerSource", 9_007_199_254_740_992L)));
+            var clamped = EffectiveDocumentsConfig.resolve(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), bounded, live);
+            assertEquals(9_007_199_254_740_992L, clamped.derived().maxBytesPerSource());
+            assertEquals(1, clamped.clampWarnings().size(), clamped.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("a stored blank reference to a key that is not available is reported; a live blank is unset, silently")
+        void blankReference() throws Exception {
+            var notLive = EffectiveDocumentsConfig.resolve(parse("{\"index\":{\"rag\":\" \"}}"), DocumentSettings.none(), Set.of());
+            assertNull(notLive.index().rag());
+            assertEquals(List.of("documents.index.rag is not available in this version and is ignored"), notLive.clampWarnings());
+
+            var live = EffectiveDocumentsConfig.resolve(parse("{\"index\":{\"rag\":\" \"}}"), DocumentSettings.none(), Set.of("index.rag"));
+            assertNull(live.index().rag());
+            assertTrue(live.clampWarnings().isEmpty(), live.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("a negative stored value falls back to the default, which is still bounded")
+        void negativeFallbackIsBounded() throws Exception {
+            var bounded = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("split.maxUnitTokens", 6000, "derived.maxBytesPerSource", 1000L)));
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"split\":{\"maxUnitTokens\":-5},\"derived\":{\"maxBytesPerSource\":-1}}"), bounded,
+                    Set.of("split.maxUnitTokens", "derived.maxBytesPerSource"));
+            assertEquals(6000, e.split().maxUnitTokens());
+            assertEquals(1000L, e.derived().maxBytesPerSource());
+            assertEquals(4, e.clampWarnings().size(), e.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("an operator default for the bridge block is reported, and never turns it on")
+        void bridgeDefault() {
+            var settings = DocumentSettings.of(Map.of("bridge", "{}"), DocumentBounds.none());
+            var e = EffectiveDocumentsConfig.resolve(null, settings, Set.of("bridge"));
+            assertNull(e.bridge());
+            assertEquals(1, e.clampWarnings().size(), e.clampWarnings().toString());
+            assertTrue(e.clampWarnings().get(0).startsWith("eddi.documents.defaults.bridge "), e.clampWarnings().get(0));
+        }
+
+        @Test
+        @DisplayName("a stored enum name must match exactly, as at save; an operator default is trimmed")
+        void exactEnumNames() throws Exception {
+            Set<String> live = Set.of("large.onReady");
+            var padded = EffectiveDocumentsConfig.resolve(parse("{\"large\":{\"onReady\":\" NONE \"}}"), DocumentSettings.none(), live);
+            assertEquals(OnReady.NOTE, padded.large().onReady());
+            assertEquals(List.of("documents.large.onReady has an unknown value and is ignored"), padded.clampWarnings());
+
+            assertEquals(OnReady.NONE, EffectiveDocumentsConfig.resolve(parse("{\"large\":{\"onReady\":\"NONE\"}}"), DocumentSettings.none(), live)
+                    .large().onReady());
+            var fromDefault = EffectiveDocumentsConfig.resolve(null, DocumentSettings.of(Map.of("large.onReady", " NONE "), DocumentBounds.none()),
+                    live);
+            assertEquals(OnReady.NONE, fromDefault.large().onReady());
+        }
+
+        @Test
+        @DisplayName("explicit bounds skip a negative or non-finite value, as configured ones do; zero is a bound")
+        void explicitBoundsValidated() {
+            var bounds = DocumentBounds.of(Map.of("a", -1, "b", Double.NaN, "c", Double.POSITIVE_INFINITY, "d", 0));
+            assertTrue(bounds.boundFor("a").isEmpty());
+            assertTrue(bounds.boundFor("b").isEmpty());
+            assertTrue(bounds.boundFor("c").isEmpty());
+            assertEquals(0.0, bounds.boundFor("d").orElseThrow());
+        }
+    }
 }

@@ -91,6 +91,13 @@ class DocumentsConfigRoundTripTest {
                 """, LlmConfiguration.class));
         String again = MAPPER.writeValueAsString(MAPPER.readValue(json, LlmConfiguration.class));
         assertEquals(json, again);
+        // Against the input itself, not only against the same mapper twice: a mapper
+        // that renamed or dropped a field would pass the equality above.
+        var tree = MAPPER.readTree(json).get("tasks").get(0);
+        assertEquals("gpt-x", tree.path("parameters").path("modelName").asText(), json);
+        assertEquals("t1", tree.path("id").asText(), json);
+        assertEquals("openai", tree.path("type").asText(), json);
+        assertEquals("help", tree.path("actions").path(0).asText(), json);
         assertFalse(json.contains("documents"), json);
         assertNull(MAPPER.readValue(json, LlmConfiguration.class).tasks().get(0).getDocuments());
     }

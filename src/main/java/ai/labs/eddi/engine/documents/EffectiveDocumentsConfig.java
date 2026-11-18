@@ -9,6 +9,7 @@ import ai.labs.eddi.modules.llm.model.DocumentsConfigValidator;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import com.fasterxml.jackson.databind.node.TextNode;
 
+import java.math.BigDecimal;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -324,9 +325,23 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             return (int) clamp(path, v, 0);
         }
 
+        /**
+         * Byte counts stay integral: compared exactly against the bound, never through
+         * a {@code double} (which would round values above 2^53).
+         */
         long longValue(String path, Long designer, long builtIn) {
             Long v = pick(path, designer, null, Resolver::parseLong);
-            return (long) clamp(path, v != null ? v : builtIn, builtIn);
+            long value = v != null ? v : builtIn;
+            if (value < 0) {
+                warnings.add("documents." + path + " must not be negative; the default applies");
+                value = builtIn; // and the default is bounded like any other value
+            }
+            var bound = bounds.boundFor(path);
+            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(BigDecimal.valueOf(bound.get())) > 0) {
+                warnClamped(path, bound.get());
+                return (long) Math.floor(bound.get());
+            }
+            return value;
         }
 
         double doubleValue(String path, Double designer, double builtIn) {
@@ -344,7 +359,8 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         }
 
         String nullableString(String path, String designer) {
-            String v = pick(path, designer == null || designer.isBlank() ? null : designer, null, s -> s);
+            // A stored blank still counts as set, so a key that is not live is reported.
+            String v = pick(path, designer, null, s -> s);
             return v == null || v.isBlank() ? null : v.strip();
         }
 
@@ -404,6 +420,9 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         }
 
         Bridge bridge(DocumentsConfig.Bridge designer) {
+            if (readDefault("bridge").isPresent()) {
+                ignoredDefault("bridge", "is a block, which an operator default cannot set,");
+            }
             if (designer == null) {
                 return null;
             }
@@ -417,15 +436,19 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         private double clamp(String path, double value, double fallback) {
             if (!Double.isFinite(value) || value < 0) {
                 warnings.add("documents." + path + " must not be negative; the default applies");
-                return fallback;
+                value = fallback; // and the default is bounded like any other value
             }
             var bound = bounds.boundFor(path);
             if (bound.isPresent() && value > bound.get()) {
-                warnings.add("documents." + path + " is above the operator bound of " + formatNumber(bound.get()) + " ("
-                        + DocumentBounds.propertyFor(path) + ") and is clamped to it");
+                warnClamped(path, bound.get());
                 return bound.get();
             }
             return value;
+        }
+
+        private void warnClamped(String path, double bound) {
+            warnings.add("documents." + path + " is above the operator bound of " + formatNumber(bound) + " (" + DocumentBounds.propertyFor(path)
+                    + ") and is clamped to it");
         }
 
         /**
@@ -466,9 +489,13 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             }
         }
 
+        /**
+         * Exact names only, as the save validator matches them; operator defaults
+         * arrive already stripped ({@link DocumentSettings#defaultFor}).
+         */
         private static <E extends Enum<E>> E parseEnum(Class<E> type, String name) {
             for (E constant : type.getEnumConstants()) {
-                if (constant.name().equals(name.strip())) {
+                if (constant.name().equals(name)) {
                     return constant;
                 }
             }

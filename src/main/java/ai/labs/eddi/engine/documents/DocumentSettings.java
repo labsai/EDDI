@@ -69,14 +69,14 @@ public class DocumentSettings {
     }
 
     /**
-     * The operator bounds; read lazily so a CDI instance sees the deployment's
-     * values.
+     * The operator bounds. A CDI instance reads them <b>on every call</b>, never
+     * caching: the save validator reads {@link DocumentBounds#current()} fresh on
+     * every save, so a deploy must see the same values a save would (a resolution
+     * reads them once, at its start). Explicit settings ({@link #of}) return the
+     * bounds they were given.
      */
     public DocumentBounds bounds() {
-        if (bounds == null) {
-            bounds = DocumentBounds.current();
-        }
-        return bounds;
+        return bounds != null ? bounds : DocumentBounds.current();
     }
 
     // --- WP-0.1: the mechanism only; later packages append below ---

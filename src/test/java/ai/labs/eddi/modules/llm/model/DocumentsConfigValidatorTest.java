@@ -54,6 +54,37 @@ class DocumentsConfigValidatorTest {
         return Stream.concat(Stream.concat(withValues, DocumentsDesignJson.NULL_IN_DESIGN.stream()), Stream.of(List.of("bridge", "{}")));
     }
 
+    /**
+     * Every property Jackson would accept on the class, as dotted leaf paths:
+     * nested {@code DocumentsConfig} types are walked, {@code bridge} is a leaf.
+     */
+    private static void declaredLeaves(Class<?> type, String prefix, Set<String> out) {
+        var bean = MAPPER.getDeserializationConfig().introspect(MAPPER.constructType(type));
+        for (var property : bean.findProperties()) {
+            String path = prefix + property.getName();
+            Class<?> raw = property.getRawPrimaryType();
+            if (raw.getName().startsWith(DocumentsConfig.class.getName() + "$") && raw != DocumentsConfig.Bridge.class) {
+                declaredLeaves(raw, path + ".", out);
+            } else {
+                out.add(path);
+            }
+        }
+    }
+
+    @Test
+    @DisplayName("the declared properties are exactly the design's keys, set or not")
+    void declaredPropertiesMatchTheDesign() {
+        Set<String> expected = new HashSet<>(DocumentsDesignJson.LEAF_KEYS);
+        DocumentsDesignJson.NULL_IN_DESIGN.forEach(k -> expected.add(k.get(0)));
+        expected.add("bridge");
+        Set<String> declared = new HashSet<>();
+        declaredLeaves(DocumentsConfig.class, "", declared);
+        assertEquals(expected, declared);
+        Set<String> bridge = new HashSet<>();
+        declaredLeaves(DocumentsConfig.Bridge.class, "", bridge);
+        assertEquals(Set.of(), bridge, "the design names no bridge fields yet");
+    }
+
     @Test
     @DisplayName("the class carries every key of the design JSON — and no more")
     void classCoversTheDesignShape() throws Exception {
@@ -181,6 +212,17 @@ class DocumentsConfigValidatorTest {
                     .validate(parse("{\"large\":{\"summary\":{\"maxCostPerDocument\":5.01}}}"), PATH, live, bounds));
             assertDoesNotThrow(() -> DocumentsConfigValidator.validate(parse("{\"large\":{\"summary\":{\"maxCostPerDocument\":5.0}}}"),
                     PATH, live, bounds));
+        }
+
+        @Test
+        @DisplayName("a byte count is compared exactly: one above a bound of 2^53 is refused")
+        void exactLongBound() throws Exception {
+            var bounds = DocumentBounds.of(Map.of("derived.maxBytesPerSource", 9_007_199_254_740_992L));
+            Set<String> live = Set.of("derived.maxBytesPerSource");
+            assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator
+                    .validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740993}}"), PATH, live, bounds));
+            assertDoesNotThrow(() -> DocumentsConfigValidator.validate(parse("{\"derived\":{\"maxBytesPerSource\":9007199254740992}}"), PATH,
+                    live, bounds));
         }
 
         @Test

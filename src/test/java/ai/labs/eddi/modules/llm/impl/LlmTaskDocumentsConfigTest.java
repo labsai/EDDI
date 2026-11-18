@@ -26,13 +26,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * {@code warnOnDocumentsConfig} returns, which are exactly the lines it logs:
  * capturing the log itself is not reliable in a shared test JVM.
  */
-@DisplayName("LlmTask.configure — documents block")
+@DisplayName("LlmTask.warnOnDocumentsConfig — the deploy-time documents warnings")
 class LlmTaskDocumentsConfigTest {
 
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
     @Test
-    @DisplayName("a stored key that is not available deploys and logs exactly one WARN")
+    @DisplayName("a stored key that is not available produces exactly one warning, naming task and key")
     void storedNonLiveKeyWarnsOnce() throws Exception {
         var config = MAPPER.readValue("""
                 {"tasks":[{"actions":["help"],"id":"answer","type":"openai",

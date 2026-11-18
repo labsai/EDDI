@@ -60,7 +60,7 @@ public final class DocumentBounds {
         BOUND_PROPERTIES.forEach((path, property) -> {
             try {
                 config.getOptionalValue(property, Double.class).ifPresent(value -> {
-                    if (Double.isFinite(value) && value >= 0) {
+                    if (isValidBound(value)) {
                         read.put(path, value);
                     } else {
                         LOGGER.warnf("%s must be a non-negative number; the bound is ignored", property);
@@ -73,11 +73,23 @@ public final class DocumentBounds {
         return read.isEmpty() ? NONE : new DocumentBounds(read);
     }
 
-    /** Explicit bounds (tests, and callers that already hold the values). */
+    /**
+     * Explicit bounds (tests, and callers that already hold the values). The same
+     * rule as {@link #current()}: a bound that is negative or not finite is skipped
+     * (zero is a valid bound).
+     */
     public static DocumentBounds of(Map<String, ? extends Number> bounds) {
         Map<String, Double> copy = new LinkedHashMap<>();
-        bounds.forEach((path, value) -> copy.put(path, value.doubleValue()));
+        bounds.forEach((path, value) -> {
+            if (value != null && isValidBound(value.doubleValue())) {
+                copy.put(path, value.doubleValue());
+            }
+        });
         return new DocumentBounds(copy);
+    }
+
+    private static boolean isValidBound(double value) {
+        return Double.isFinite(value) && value >= 0;
     }
 
     public static DocumentBounds none() {

@@ -17,8 +17,8 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.junit.jupiter.api.Assertions.assertTrue;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.mockito.Mockito.verify;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -78,16 +78,16 @@ class LlmStoreDocumentsValidationTest {
 
     @Test
     @DisplayName("an empty documents block saves")
+    @SuppressWarnings("unchecked")
     void emptyBlockSaves() throws Exception {
         var task = new LlmConfiguration.Task();
         task.setId("t1");
         task.setDocuments(new DocumentsConfig());
-        try {
-            store.create(new LlmConfiguration(List.of(task)));
-        } catch (IllegalArgumentException e) {
-            fail("an empty block must save: " + e.getMessage());
-        } catch (RuntimeException ignored) {
-            // the mocked storage cannot complete a write; validation passed
-        }
+        var config = new LlmConfiguration(List.of(task));
+        IResourceStorage.IResource<LlmConfiguration> resource = mock(IResourceStorage.IResource.class);
+        when(storage.newResource(config)).thenReturn(resource);
+
+        assertSame(resource, store.create(config));
+        verify(storage).store(resource);
     }
 }
