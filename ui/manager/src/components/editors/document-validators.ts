@@ -29,13 +29,21 @@ interface LlmDocument {
 export const validateLlmDocument: DocumentValidator = (document, t) => {
   const tasks = (document as LlmDocument | null)?.tasks;
   if (!Array.isArray(tasks)) return null;
+  const unreadable = () =>
+    t("editor.documentCheckFailed", "This document has a shape the editor cannot check — fix it in the JSON tab before saving.");
   for (const task of tasks) {
     const temperature = task?.parameters?.temperature;
     if (temperature !== undefined && temperature !== null && !isTemperatureValue(String(temperature))) {
       return t("llmEditor.temperatureBlocksSave", "The temperature must be a number, 0 or more — fix it before saving.");
     }
-    for (const g of [...(task?.inputGuardrails ?? []), ...(task?.outputGuardrails ?? [])]) {
-      const bad = blockingRegexProblem(g);
+    const lists: unknown[] = [task?.inputGuardrails, task?.outputGuardrails];
+    // A list that is not a list (`"inputGuardrails": {}`) cannot be checked line
+    // by line, and the server cannot read it either: refuse it rather than skip it.
+    if (lists.some((list) => list !== undefined && list !== null && !Array.isArray(list))) return unreadable();
+    const guardrails = lists.flatMap((list) => (Array.isArray(list) ? (list as unknown[]) : []));
+    for (const g of guardrails) {
+      if (g === null || typeof g !== "object" || Array.isArray(g)) return unreadable();
+      const bad = blockingRegexProblem(g as GuardrailConfig);
       if (bad) {
         return t("llmEditor.grPatternBlocksSave", "A regex-filter guardrail has an invalid pattern (line {{line}}) — fix it before saving.", {
           line: bad.line,

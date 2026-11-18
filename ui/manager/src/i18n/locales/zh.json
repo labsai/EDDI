@@ -515,6 +515,7 @@
     "removeWorkflow": "从智能体中移除工作流",
     "a2aAddSkill": "添加技能",
     "saveConflict": "自你打开后，此智能体已在别处被修改。你的编辑已保留：请检查后再次保存。",
+    "saveWaitForVersion": "最新版本仍在加载——请稍后再保存。",
     "saveBeforeDeploy": "部署前请保存或放弃你的更改",
     "reviewChanges": "查看更改",
     "unsavedSections": "有未保存更改的部分：{{count}}",
@@ -978,6 +979,7 @@
     "loadingEditor": "正在加载编辑器…",
     "saveErrorReason": "未保存：{{reason}}",
     "savedWithWarnings": "已保存，但有警告",
+    "documentCheckFailed": "此文档的结构无法由编辑器检查——请先在 JSON 选项卡中修正再保存。",
     "dismissWarnings": "关闭"
   },
   "rulesEditor": {
@@ -2663,6 +2665,7 @@
     "statusTooLarge": "失败：{{name}} 大于 {{max}} MB，此处未读取。“摄取源”下的文件源可接收更大的文件。",
     "statusUploadRejected": "失败：服务器拒绝了上传（{{detail}}）",
     "reembedWarning": "此知识库已有摄取的文档，而你修改了{{what}}。保存不会重新嵌入这些文档：已存储的向量保持不变，因此在重新摄取文档（或创建新的知识库）之前，搜索可能结果很差或没有结果。",
+    "reembedWarningUnknown": "你更改了{{what}}。如果此知识库已包含文档（本页面无法判断，例如之前手动导入的文本），保存不会重新嵌入它们，在重新导入之前，搜索可能返回较差的结果或没有结果。",
     "reembedProvider": "嵌入提供商",
     "reembedModel": "嵌入模型",
     "reembedDimension": "向量维度",

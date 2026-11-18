@@ -417,10 +417,49 @@ export interface RegexLineProblem {
 /**
  * Syntax Java's `Pattern` accepts (or reads differently) that a JavaScript
  * `RegExp` does not: possessive quantifiers, atomic groups, inline flags, quoting
- * (`\Q…\E`), the `\A \z \Z \G \h \R` anchors and escapes, and the `&&`
- * class intersection.
+ * (`\Q…\E`), the `\A \z \Z \G \h \H \v \V \R \X \e \N{…}` anchors and escapes,
+ * Unicode and POSIX classes (`\p{…}`, `\pL`, `\p{javaLowerCase}` — literal text
+ * to a JavaScript `RegExp` without the `u` flag), `\x{…}` and `\b{g}`. Character
+ * classes are scanned separately (`usesJavaOnlyClassSyntax`).
  */
-const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHR]|\[[^\]]*&&/;
+const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHvVRXe]|\\[pP]|\\N\{|\\x\{|\\b\{/;
+
+/**
+ * Whether a character class uses what only Java understands: a nested class
+ * (`[a-z[-+]]`, a union — JavaScript reads `[-+` as a backwards range and
+ * rejects it), an `&&` intersection, or a `]` right after the opening `[` (a
+ * literal in Java, an empty class in JavaScript).
+ */
+function usesJavaOnlyClassSyntax(source: string): boolean {
+  let inClass = false;
+  for (let i = 0; i < source.length; i++) {
+    const c = source[i];
+    if (c === "\\") {
+      // `\Q…\E` quotes everything up to `\E`, brackets included.
+      if (source[i + 1] === "Q") return true;
+      i++;
+      continue;
+    }
+    if (!inClass) {
+      if (c === "[") {
+        inClass = true;
+        let next = i + 1;
+        if (source[next] === "^") next++;
+        if (source[next] === "]") return true;
+      }
+      continue;
+    }
+    if (c === "[") return true;
+    if (c === "&" && source[i + 1] === "&") return true;
+    if (c === "]") inClass = false;
+  }
+  return false;
+}
+
+/** Whether a pattern uses syntax this page cannot judge the way Java will. */
+function usesJavaOnlySyntax(source: string): boolean {
+  return JAVA_ONLY_SYNTAX.test(source) || usesJavaOnlyClassSyntax(source);
+}
 
 /**
  * Checks a regex-filter style `patterns` parameter line by line, the way the
@@ -430,15 +469,17 @@ const JAVA_ONLY_SYNTAX = /\(\?>|[*+?}]\+|\(\?[a-zA-Z-]+[):]|\\[QEAzZGhHR]|\[[^\]
  * The browser compiles with `new RegExp`, which is close to Java for everyday
  * patterns but not identical: a pattern JavaScript rejects that uses Java-only
  * syntax is reported as `unchecked`, not `invalid`, and a pattern that compiles
- * here can still be refused by Java — the backend's deploy check is the last word.
+ * here can still be refused by Java — the server skips such a line at run time.
  */
-export function regexPatternProblems(patterns: string | undefined): RegexLineProblem[] {
-  if (!patterns || !patterns.trim()) return [];
+export function regexPatternProblems(patterns: unknown): RegexLineProblem[] {
+  // The server reads parameters as text; a number in the JSON is its digits.
+  const text = typeof patterns === "string" ? patterns : patterns === undefined || patterns === null ? "" : String(patterns);
+  if (!text.trim()) return [];
   const problems: RegexLineProblem[] = [];
-  patterns.split(/\r\n|\r|\n/).forEach((raw, i) => {
+  text.split(/\r\n|\r|\n/).forEach((raw, i) => {
     const source = raw.trim();
     if (!source) return;
-    const javaOnly = JAVA_ONLY_SYNTAX.test(source);
+    const javaOnly = usesJavaOnlySyntax(source);
     try {
       new RegExp(source, "i");
       if (javaOnly) problems.push({ line: i + 1, state: "unchecked" });

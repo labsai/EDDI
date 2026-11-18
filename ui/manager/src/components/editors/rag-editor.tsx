@@ -234,6 +234,7 @@ function Section({
   defaultOpen = true,
   badge,
   children,
+  testId,
 }: {
   label: string;
   icon: React.ElementType;
@@ -241,6 +242,8 @@ function Section({
   defaultOpen?: boolean;
   badge?: string;
   children: React.ReactNode;
+  /** data-testid of the header button that opens and closes the section. */
+  testId?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -249,6 +252,7 @@ function Section({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
+        data-testid={testId}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start transition-colors hover:bg-muted/30"
       >
         <Icon className={cn("h-4 w-4 shrink-0", accent)} />
@@ -963,6 +967,7 @@ function IngestionPanel({
           onChange={(e) => setTextContent(e.target.value)}
           placeholder={t("ragEditor.pastePlaceholder", "Paste document text here...")}
           rows={3}
+          data-testid="ingest-text-input"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
         />
         {textContent.trim() && (
@@ -1016,6 +1021,8 @@ function IngestionPanel({
                         ? "text-muted-foreground"
                         : "text-primary",
                 )}
+                data-testid="ingestion-status"
+                data-status={ing.status}
               >
                 {ingestionStatusLabel(ing.status, t)}
               </span>
@@ -1116,7 +1123,25 @@ export function RagEditor({
   if (baselineRef.current === null || baselineRef.current.key !== baselineKey) {
     baselineRef.current = { key: baselineKey, settings: data };
   }
-  const staleChanges: EmbeddingChange[] = hasDocuments ? embeddingChanges(baselineRef.current.settings, data) : [];
+  const changedEmbedding = embeddingChanges(baselineRef.current.settings, data);
+  const staleChanges: EmbeddingChange[] = hasDocuments ? changedEmbedding : [];
+  // No run history proves nothing: a document ingested by hand in an earlier
+  // session leaves none, and a source can be gone. Only a knowledge base that
+  // was never saved is known to be empty; for any other the warning is
+  // conditional rather than absent.
+  const possiblyStaleChanges: EmbeddingChange[] = !hasDocuments && Boolean(resourceId) ? changedEmbedding : [];
+  const describeChanges = (changes: EmbeddingChange[]) =>
+    changes
+      .map((c) =>
+        c === "provider"
+          ? t("ragEditor.reembedProvider", "the embedding provider")
+          : c === "model"
+            ? t("ragEditor.reembedModel", "the embedding model")
+            : c === "dimension"
+              ? t("ragEditor.reembedDimension", "the vector dimension")
+              : t("ragEditor.reembedChunking", "the chunk settings"),
+      )
+      .join(", ");
 
   const unknownChunkStrategy =
     !!data.chunkStrategy?.trim() &&
@@ -1169,19 +1194,23 @@ export function RagEditor({
             {t(
               "ragEditor.reembedWarning",
               "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
-              {
-                what: staleChanges
-                  .map((c) =>
-                    c === "provider"
-                      ? t("ragEditor.reembedProvider", "the embedding provider")
-                      : c === "model"
-                        ? t("ragEditor.reembedModel", "the embedding model")
-                        : c === "dimension"
-                          ? t("ragEditor.reembedDimension", "the vector dimension")
-                          : t("ragEditor.reembedChunking", "the chunk settings"),
-                  )
-                  .join(", "),
-              },
+              { what: describeChanges(staleChanges) },
+            )}
+          </p>
+        </div>
+      )}
+      {possiblyStaleChanges.length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warn-300 bg-warn-50 p-3 text-xs text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="status"
+          data-testid="rag-reembed-warning-unknown"
+        >
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            {t(
+              "ragEditor.reembedWarningUnknown",
+              "You changed {{what}}. If this knowledge base already holds documents — this page cannot tell, for example for text ingested by hand earlier — saving does not re-embed them, and searches may return poor or no matches until they are ingested again.",
+              { what: describeChanges(possiblyStaleChanges) },
             )}
           </p>
         </div>
@@ -1592,6 +1621,7 @@ export function RagEditor({
         icon={Upload}
         accent="text-rose-500"
         defaultOpen={false}
+        testId="rag-ingestion-section"
       >
         {/* Pasted documents only ever accumulate: nothing lists them afterwards, and
             nothing re-reads or removes them. A Files source does all three. */}

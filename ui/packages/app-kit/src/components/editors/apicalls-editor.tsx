@@ -889,6 +889,21 @@ function parseIntList(raw: string): number[] {
     .filter((n) => !isNaN(n));
 }
 
+/**
+ * Whether a stored retry policy will actually retry, read with the backend's
+ * defaults (`RetryApiCallInstruction`): an omitted `maxRetries` is 3 and omitted
+ * `retryOnHttpCodes` are 502 and 503 — so `"retry": {}` retries. An explicit
+ * `0`, `[]` or `null` is what it says.
+ */
+function retryInstructionCanFire(retry: RetryApiCallInstruction): boolean {
+  // Stored JSON can hold null where the type says number: read it as stored.
+  const maxRetries: number | null = retry.maxRetries === undefined ? 3 : retry.maxRetries;
+  if (typeof maxRetries !== "number" || maxRetries < 1) return false;
+  const codes: number[] | null = retry.retryOnHttpCodes === undefined ? [502, 503] : retry.retryOnHttpCodes;
+  const matchers: RetryApiCallInstruction["responseValuePathMatchers"] | null = retry.responseValuePathMatchers;
+  return (codes?.length ?? 0) > 0 || (matchers?.length ?? 0) > 0;
+}
+
 export function RetryApiCallEditor({
   retry,
   onChange,
@@ -945,9 +960,7 @@ export function RetryApiCallEditor({
   }
 
   const matchers = retry.responseValuePathMatchers ?? [];
-  const retriesEnabled =
-    (retry.maxRetries ?? 0) > 0 &&
-    ((retry.retryOnHttpCodes?.length ?? 0) > 0 || matchers.length > 0);
+  const retriesEnabled = retryInstructionCanFire(retry);
 
   return (
     <div

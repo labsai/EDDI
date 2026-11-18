@@ -516,6 +516,7 @@
     "removeWorkflow": "Quitar el flujo de trabajo del agente",
     "a2aAddSkill": "Añadir habilidad",
     "saveConflict": "Este agente se modificó en otro lugar desde que lo abriste. Tus cambios se conservan: revísalos y vuelve a guardar.",
+    "saveWaitForVersion": "La versión más reciente aún se está cargando: vuelve a guardar en un momento.",
     "saveBeforeDeploy": "Guarda o descarta tus cambios antes de desplegar",
     "reviewChanges": "Revisar cambios",
     "unsavedSections": "Secciones con cambios sin guardar: {{count}}",
@@ -992,6 +993,7 @@
     "loadingEditor": "Cargando el editor…",
     "saveErrorReason": "No guardado: {{reason}}",
     "savedWithWarnings": "Guardado, con advertencias",
+    "documentCheckFailed": "Este documento tiene una forma que el editor no puede comprobar: corrígelo en la pestaña JSON antes de guardar.",
     "dismissWarnings": "Descartar"
   },
   "rulesEditor": {
@@ -2691,6 +2693,7 @@
     "statusTooLarge": "Error: {{name}} supera los {{max}} MB y no se leyó aquí. Una fuente de archivos en Fuentes de ingesta admite archivos más grandes.",
     "statusUploadRejected": "Error: el servidor rechazó la subida ({{detail}})",
     "reembedWarning": "Esta base de conocimiento ya tiene documentos ingeridos y cambiaste {{what}}. Al guardar no se vuelven a incrustar: los vectores almacenados no cambian, así que las búsquedas pueden dar malos resultados o ninguno hasta que se vuelvan a ingerir los documentos (o se cree una nueva base).",
+    "reembedWarningUnknown": "Cambiaste {{what}}. Si esta base de conocimiento ya contiene documentos (esta página no puede saberlo, por ejemplo con texto ingerido a mano antes), guardar no los vuelve a vectorizar, y las búsquedas pueden devolver resultados pobres o ninguno hasta que se ingieran de nuevo.",
     "reembedProvider": "el proveedor de embeddings",
     "reembedModel": "el modelo de embeddings",
     "reembedDimension": "la dimensión del vector",

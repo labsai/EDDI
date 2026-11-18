@@ -36,4 +36,16 @@ describe("DeleteAgentDialog", () => {
     expect(props.onReload).toHaveBeenCalledTimes(1);
     expect(props.onConfirm).not.toHaveBeenCalled();
   });
+
+  it("keeps Delete enabled for the first confirmation", () => {
+    setup();
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeEnabled();
+  });
+
+  it("disables Delete after a 409, so the refused request cannot be sent again", async () => {
+    const props = setup({ conflict });
+    expect(screen.getByTestId("alert-dialog-confirm")).toBeDisabled();
+    await userEvent.setup().click(screen.getByTestId("alert-dialog-confirm"));
+    expect(props.onConfirm).not.toHaveBeenCalled();
+  });
 });

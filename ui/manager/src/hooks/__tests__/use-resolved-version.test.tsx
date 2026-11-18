@@ -36,4 +36,54 @@ describe("useResolvedVersion", () => {
     await waitFor(() => expect(result.current.lookupFailed).toBe(true));
     expect(result.current.version).toBeUndefined();
   });
+
+  it("keeps the resolved version when a later lookup answers with a newer one", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const fetchCurrent = vi.fn().mockResolvedValueOnce(3).mockResolvedValue(5);
+    const { result } = renderHook(() => useResolvedVersion(["x"], "a", null, fetchCurrent), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.version).toBe(3));
+
+    // A window-focus refetch, an invalidation: another client saved v5 meanwhile.
+    await client.refetchQueries({ queryKey: ["x"] });
+    await client.invalidateQueries({ queryKey: ["x"] });
+    expect(result.current.version).toBe(3);
+  });
+
+  it("follows the URL when it names a version, and a bare link then returns to that one", async () => {
+    const fetchCurrent = vi.fn().mockResolvedValue(3);
+    const { result, rerender } = renderHook(
+      ({ v }: { v: string | null }) => useResolvedVersion(["x"], "a", v, fetchCurrent),
+      { wrapper: wrapper(), initialProps: { v: null as string | null } },
+    );
+    await waitFor(() => expect(result.current.version).toBe(3));
+    rerender({ v: "4" }); // the page's own save moved the URL on
+    expect(result.current.version).toBe(4);
+    rerender({ v: null }); // Back to the bare link
+    expect(result.current.version).toBe(4);
+  });
+
+  it("does not take a cached answer from an earlier visit as current", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["x", "a", "currentVersion"], 2);
+    const Wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const fetchCurrent = vi.fn().mockResolvedValue(6);
+    const { result } = renderHook(() => useResolvedVersion(["x"], "a", null, fetchCurrent), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.version).toBe(6));
+  });
+
+  it("looks the version up again for another resource", async () => {
+    const fetchCurrent = vi.fn(async (id: string) => (id === "a" ? 3 : 9));
+    const { result, rerender } = renderHook(
+      ({ id }: { id: string }) => useResolvedVersion(["x"], id, null, fetchCurrent),
+      { wrapper: wrapper(), initialProps: { id: "a" } },
+    );
+    await waitFor(() => expect(result.current.version).toBe(3));
+    rerender({ id: "b" });
+    await waitFor(() => expect(result.current.version).toBe(9));
+  });
 });

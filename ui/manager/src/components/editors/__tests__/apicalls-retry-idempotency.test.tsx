@@ -48,6 +48,24 @@ describe("RetryApiCallEditor — default policy", () => {
     expect(screen.getByTestId("retry-idempotency-warning")).toHaveAttribute("role", "alert");
   });
 
+  it.each([
+    ["an empty policy", {}],
+    ["no maxRetries", { retryOnHttpCodes: [500] }],
+    ["no retryOnHttpCodes", { maxRetries: 2 }],
+    ["no codes, but a value-path matcher", { retryOnHttpCodes: [], responseValuePathMatchers: [{ valuePath: "a", equals: "b" }] }],
+  ])("reads %s with the backend's defaults (3 retries on 502/503): the POST warning is an alert", (_name, retry) => {
+    renderWithProviders(<RetryApiCallEditor retry={retry} onChange={vi.fn()} method="POST" />);
+    expect(screen.getByTestId("retry-idempotency-warning")).toHaveAttribute("role", "alert");
+  });
+
+  it.each([
+    ["maxRetries 0", { maxRetries: 0 }],
+    ["no codes and no matchers", { maxRetries: 3, retryOnHttpCodes: [] }],
+  ])("keeps the note muted when %s disables retrying", (_name, retry) => {
+    renderWithProviders(<RetryApiCallEditor retry={retry} onChange={vi.fn()} method="POST" />);
+    expect(screen.getByTestId("retry-idempotency-warning")).not.toHaveAttribute("role");
+  });
+
   it("shows no idempotency note for GET", () => {
     renderWithProviders(
       <RetryApiCallEditor

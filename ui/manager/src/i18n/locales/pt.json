@@ -516,6 +516,7 @@
     "removeWorkflow": "Remover o fluxo de trabalho do agente",
     "a2aAddSkill": "Adicionar competência",
     "saveConflict": "Este agente foi alterado em outro lugar desde que você o abriu. Suas edições foram mantidas: revise-as e salve novamente.",
+    "saveWaitForVersion": "A versão mais recente ainda está carregando — salve novamente em instantes.",
     "saveBeforeDeploy": "Salve ou descarte suas alterações antes de implantar",
     "reviewChanges": "Revisar alterações",
     "unsavedSections": "Seções com alterações não salvas: {{count}}",
@@ -992,6 +993,7 @@
     "loadingEditor": "Carregando o editor…",
     "saveErrorReason": "Não salvo: {{reason}}",
     "savedWithWarnings": "Salvo, com avisos",
+    "documentCheckFailed": "Este documento tem um formato que o editor não consegue verificar — corrija-o na aba JSON antes de salvar.",
     "dismissWarnings": "Dispensar"
   },
   "rulesEditor": {
@@ -2691,6 +2693,7 @@
     "statusTooLarge": "Falha: {{name}} é maior que {{max}} MB e não foi lido aqui. Uma fonte de Arquivos em Fontes de ingestão aceita arquivos maiores.",
     "statusUploadRejected": "Falha: o servidor recusou o envio ({{detail}})",
     "reembedWarning": "Esta base de conhecimento já tem documentos ingeridos e você alterou {{what}}. Salvar não os incorpora novamente: os vetores armazenados permanecem como estão, então as buscas podem retornar resultados ruins ou nenhum até que os documentos sejam ingeridos de novo (ou uma nova base seja criada).",
+    "reembedWarningUnknown": "Você alterou {{what}}. Se esta base de conhecimento já contém documentos — esta página não consegue saber, por exemplo, para texto ingerido manualmente antes —, salvar não os reincorpora, e as buscas podem retornar resultados ruins ou nenhum até que sejam ingeridos novamente.",
     "reembedProvider": "o provedor de embeddings",
     "reembedModel": "o modelo de embeddings",
     "reembedDimension": "a dimensão do vetor",

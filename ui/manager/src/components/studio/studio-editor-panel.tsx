@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { useQueryClient } from "@tanstack/react-query";
 import { showSavedNotLiveToast } from "@/lib/save-not-live-toast";
 import { describeSaveError } from "@/lib/save-error";
+import { reportPartialSaveWarnings } from "@/lib/partial-save-warnings";
 import { parseResourceUri } from "@eddi/app-kit/lib/api/agents";
 import { getResourceType, type ResourceTypeConfig } from "@eddi/app-kit/lib/api/resources";
 import {
@@ -19,7 +20,7 @@ import {
 } from "@/hooks/use-resources";
 import { useJsonSchema } from "@/hooks/use-json-schema";
 import { DOCUMENT_VALIDATORS } from "@/components/editors/document-validators";
-import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
+import { ConfigEditorLayout, type EditorDraft } from "@/components/editors/config-editor-layout";
 import { CompatibleVersionCheckbox } from "@eddi/app-kit/components/agents/compatible-version-checkbox";
 import { useAgent } from "@eddi/app-kit/hooks/use-agents";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
@@ -243,6 +244,7 @@ export function StudioEditorPanel({
         if (partial?.retryContext) {
           onCascadeContextChange?.(partial.retryContext);
         }
+        reportPartialSaveWarnings(err, t);
         throw new Error(describeSaveError(err, t), { cause: err });
       }
     },
@@ -283,11 +285,11 @@ export function StudioEditorPanel({
 
   // The layout reports its working copy; the page asks about it before it
   // replaces this editor with another stage's.
-  const draftRef = useRef<{ data: string; dirty: boolean }>({ data: "", dirty: false });
+  const draftRef = useRef<EditorDraft>({ data: "", dirty: false, blockedBy: null });
   const busyRef = useRef(false);
   busyRef.current = isSaveAndTesting || cascadeSave.isPending;
   const handleDraftChange = useCallback(
-    (draft: { data: string; dirty: boolean }) => {
+    (draft: EditorDraft) => {
       const wasDirty = draftRef.current.dirty;
       draftRef.current = draft;
       if (draft.dirty !== wasDirty) onDirtyChange?.(panelId, draft.dirty);
@@ -296,11 +298,17 @@ export function StudioEditorPanel({
   );
   useEffect(() => {
     registerSaver?.(panelId, async () => {
-      const { data: draft, dirty } = draftRef.current;
+      const { data: draft, dirty, blockedBy } = draftRef.current;
       if (!dirty) return true;
       // A save or Save & Test is already writing: starting a second would race
       // it on the same versions. Report "not saved" so the page stays put.
       if (busyRef.current) return false;
+      // The layout refuses Save for this reason; saving from the leave-stage
+      // prompt must not be the way around it. The stage stays open to fix it.
+      if (blockedBy) {
+        toast.error(blockedBy);
+        return false;
+      }
       return saveJson(draft);
     });
     return () => registerSaver?.(panelId, null);

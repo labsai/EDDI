@@ -72,6 +72,11 @@ export interface CascadeOptions {
 export interface CascadePartialResult {
   /** Set when the resource hop succeeded in this call. */
   newResourceVersion?: number;
+  /**
+   * The warnings that resource save answered with: the resource version exists
+   * and the author should read them, even though a later hop failed.
+   */
+  warnings?: string[];
   /** Set when the workflow hop succeeded too, so only the agent hop failed. */
   newWorkflowVersion?: number;
   /** The context a retry must use — set whenever the cascade had one. */
@@ -184,6 +189,7 @@ export async function cascadeSaveResource(
     newResourceVersion = requireVersionFromLocation(saveResult.location, "resource");
     partial.newResourceVersion = newResourceVersion;
     warnings = saveWarningsOf(saveResult);
+    if (warnings.length > 0) partial.warnings = warnings;
   }
 
   // 3. + 4. Point the workflow at it, then the agent at the new workflow

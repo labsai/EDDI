@@ -65,14 +65,23 @@ export interface ConfigEditorLayoutProps {
    * Reports the working copy whenever it changes. For a host that must act on
    * unsaved edits from outside the layout: the Studio asks before it replaces
    * this editor with another stage's, and saves from there if asked to.
+   * `blockedBy` is why Save is refused right now (a field or document problem),
+   * or null — a host that saves from outside must refuse for the same reason.
    */
-  onDraftChange?: (draft: { data: string; dirty: boolean }) => void;
+  onDraftChange?: (draft: EditorDraft) => void;
   /**
    * Blocking checks on the parsed document, run whichever tab is showing — the
    * form editor's own reports vanish with the form, so without this a value the
    * form refuses could be saved from the JSON tab.
    */
   validateDocument?: DocumentValidator;
+}
+
+/** The working copy the layout reports through `onDraftChange`. */
+export interface EditorDraft {
+  data: string;
+  dirty: boolean;
+  blockedBy: string | null;
 }
 
 type EditorTab = "form" | "json";
@@ -142,10 +151,18 @@ export function ConfigEditorLayout({
   // The document-level check sees the JSON as it will be saved, on either tab.
   const documentProblem = useMemo(() => {
     if (!validateDocument) return null;
+    let parsed: unknown;
     try {
-      return validateDocument(JSON.parse(editedData), t);
+      parsed = JSON.parse(editedData);
     } catch {
       return null; // unparseable JSON has its own refusal
+    }
+    try {
+      return validateDocument(parsed, t);
+    } catch {
+      // A validator that cannot judge a document refuses it: answering "no
+      // problem" here would let the very documents the check exists for through.
+      return t("editor.documentCheckFailed", "This document has a shape the editor cannot check — fix it in the JSON tab before saving.");
     }
   }, [validateDocument, editedData, t]);
   const blockingReason = Object.values(fieldProblems)[0] ?? documentProblem;
@@ -189,8 +206,8 @@ export function ConfigEditorLayout({
   const isDirty = editedData !== data;
 
   useEffect(() => {
-    onDraftChange?.({ data: editedData, dirty: editedData !== data });
-  }, [editedData, data, onDraftChange]);
+    onDraftChange?.({ data: editedData, dirty: editedData !== data, blockedBy: blockingReason });
+  }, [editedData, data, onDraftChange, blockingReason]);
 
   // Discard confirmation state
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);

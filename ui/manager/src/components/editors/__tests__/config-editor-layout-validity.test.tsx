@@ -135,4 +135,50 @@ describe("ConfigEditorLayout — field validity and failed saves", () => {
     fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: doc("3.5") } });
     expect(screen.getByTestId("save-btn")).toBeEnabled();
   });
+
+  it("blocks a malformed guardrail list instead of letting the check give up", () => {
+    const onSave = vi.fn();
+    renderWithProviders(
+      <ConfigEditorLayout
+        {...base}
+        data={JSON.stringify({ tasks: [] })}
+        onSave={onSave}
+        validateDocument={validateLlmDocument}
+      />,
+    );
+    // The guardrail list is an object: the check used to throw here, the layout
+    // swallowed it, and the invalid temperature of the second task went through.
+    const malformed = { tasks: [{ inputGuardrails: {} }, { parameters: { temperature: "hot" } }] };
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify(malformed) } });
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+    expect(screen.getByTestId("save-blocked-reason")).toBeInTheDocument();
+
+    const nullEntry = { tasks: [{ outputGuardrails: [null] }] };
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify(nullEntry) } });
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+  });
+
+  it("refuses Save when a document validator throws", () => {
+    const throwing = () => {
+      throw new TypeError("unexpected shape");
+    };
+    renderWithProviders(
+      <ConfigEditorLayout {...base} data={JSON.stringify({ a: 1 })} onSave={vi.fn()} validateDocument={throwing} />,
+    );
+    fireEvent.change(screen.getByTestId("mock-monaco"), { target: { value: JSON.stringify({ a: 2 }) } });
+    expect(screen.getByTestId("save-btn")).toBeDisabled();
+  });
+
+  it("tells a host that saves from outside why Save is blocked", () => {
+    const onDraftChange = vi.fn();
+    renderWithProviders(
+      <ConfigEditorLayout {...base} onSave={vi.fn()} renderFormEditor={form} onDraftChange={onDraftChange} />,
+    );
+    fireEvent.change(screen.getByTestId("temp"), { target: { value: "abc" } });
+    expect(onDraftChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ dirty: true, blockedBy: "Temperature must be a number." }),
+    );
+    fireEvent.change(screen.getByTestId("temp"), { target: { value: "0.4" } });
+    expect(onDraftChange).toHaveBeenLastCalledWith(expect.objectContaining({ dirty: true, blockedBy: null }));
+  });
 });

@@ -29,6 +29,7 @@ import {
 import { useNavigate } from "react-router-dom";
 import { getResourceTypeIcon } from "@eddi/app-kit/lib/resource-type-icons";
 import { DOCUMENT_VALIDATORS } from "@/components/editors/document-validators";
+import { reportPartialSaveWarnings } from "@/lib/partial-save-warnings";
 import { ConfigEditorLayout } from "@/components/editors/config-editor-layout";
 import { EDITOR_MAP } from "@/components/editors/editor-registry";
 import { UpdateUsageDialog } from "@/components/editors/update-usage-dialog";
@@ -264,7 +265,10 @@ export function ResourceDetailPage() {
     if (partial.retryContext) {
       adoptCascadeContext(partial.retryContext);
     }
-  }, [adoptCascadeContext]);
+    // The resource version that exists came with warnings: keep them.
+    const warnings = reportPartialSaveWarnings(err, t);
+    if (warnings) setSaveWarnings(warnings);
+  }, [adoptCascadeContext, setSaveWarnings, t]);
 
   // All hooks are above — safe to do early returns below
 
@@ -450,6 +454,7 @@ export function ResourceDetailPage() {
   const handleSaveAndDeploy = useCallback(
     async (jsonString: string) => {
       if (!cascadeContext || !agentCtx || currentVersion === undefined) return;
+      setSaveWarnings(undefined);
       try {
         const parsed = JSON.parse(jsonString);
         await saveAndDeploy({
@@ -469,6 +474,8 @@ export function ResourceDetailPage() {
               // Save & Deploy shows the error's message as it stands.
               throw err instanceof CascadeReferenceError ? new Error(describeSaveError(err, t)) : err;
             }
+            // Save & Test answers with the same warnings as Save: keep them on screen.
+            setSaveWarnings(result.warnings);
             setCurrentVersion(result.newResourceVersion);
             setCascadeCompatible(false);
             // Update cascade context so next Save & Test uses correct versions
@@ -480,7 +487,7 @@ export function ResourceDetailPage() {
         // Error handled inside saveAndDeploy
       }
     },
-    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, adoptCascadeContext, t]
+    [id, currentVersion, cascadeSave, cascadeContext, cascadeCompatible, agentCtx, saveAndDeploy, adoptPartialCascade, adoptCascadeContext, t, setSaveWarnings]
   );
 
   const handleCascadeConfirm = useCallback(

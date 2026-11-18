@@ -515,6 +515,7 @@
     "removeWorkflow": "Workflow vom Agent entfernen",
     "a2aAddSkill": "Skill hinzufügen",
     "saveConflict": "Dieser Agent wurde seit dem Öffnen an anderer Stelle geändert. Ihre Änderungen bleiben erhalten: prüfen Sie sie und speichern Sie erneut.",
+    "saveWaitForVersion": "Die neueste Version wird noch geladen – speichere gleich noch einmal.",
     "saveBeforeDeploy": "Speichern oder verwerfen Sie Ihre Änderungen vor dem Deployment",
     "reviewChanges": "Änderungen prüfen",
     "unsavedSections": "Abschnitte mit ungespeicherten Änderungen: {{count}}",
@@ -978,6 +979,7 @@
     "loadingEditor": "Editor wird geladen …",
     "saveErrorReason": "Nicht gespeichert: {{reason}}",
     "savedWithWarnings": "Gespeichert, mit Warnungen",
+    "documentCheckFailed": "Dieses Dokument hat eine Form, die der Editor nicht prüfen kann – korrigiere es im JSON-Tab, bevor du speicherst.",
     "dismissWarnings": "Schließen"
   },
   "rulesEditor": {
@@ -2663,6 +2665,7 @@
     "statusTooLarge": "Fehlgeschlagen: {{name}} ist größer als {{max}} MB und wurde hier nicht gelesen. Eine Dateiquelle unter Ingestion-Quellen nimmt größere Dateien an.",
     "statusUploadRejected": "Fehlgeschlagen: Der Server hat den Upload abgelehnt ({{detail}})",
     "reembedWarning": "Diese Wissensbasis enthält bereits eingelesene Dokumente, und Sie haben {{what}} geändert. Beim Speichern werden sie nicht neu eingebettet: Die gespeicherten Vektoren bleiben unverändert, daher liefern Suchen möglicherweise schlechte oder keine Treffer, bis die Dokumente erneut eingelesen werden (oder eine neue Wissensbasis angelegt wird).",
+    "reembedWarningUnknown": "Du hast {{what}} geändert. Falls diese Wissensdatenbank bereits Dokumente enthält – diese Seite kann das nicht erkennen, etwa bei früher von Hand eingespieltem Text –, werden sie beim Speichern nicht neu eingebettet, und Suchen liefern möglicherweise schlechte oder keine Treffer, bis sie erneut eingespielt werden.",
     "reembedProvider": "den Embedding-Anbieter",
     "reembedModel": "das Embedding-Modell",
     "reembedDimension": "die Vektordimension",

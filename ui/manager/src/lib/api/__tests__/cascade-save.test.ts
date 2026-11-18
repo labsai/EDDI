@@ -592,6 +592,23 @@ describe("cascadeSaveResource", () => {
       expect(cascadePartialResult(err)).toEqual({ newResourceVersion: 2, retryContext: CONTEXT });
     });
 
+    it("keeps the warnings the resource save answered with when a parent hop fails", async () => {
+      vi.mocked(updateResource).mockResolvedValue({
+        location: "eddi://ai.labs.rules/rulestore/rulesets/res1?version=2",
+        warnings: ["Vectors are stale"],
+      });
+      vi.mocked(updateWorkflow).mockRejectedValue(new Error("wf conflict"));
+      const afterWorkflow = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT).catch((e: unknown) => e);
+      expect(cascadePartialResult(afterWorkflow)?.warnings).toEqual(["Vectors are stale"]);
+
+      vi.mocked(updateWorkflow).mockResolvedValue({
+        location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=5",
+      });
+      vi.mocked(updateAgent).mockRejectedValue(new Error("agent conflict"));
+      const afterAgent = await cascadeSaveResource(RT, "res1", 1, {}, CONTEXT).catch((e: unknown) => e);
+      expect(cascadePartialResult(afterAgent)?.warnings).toEqual(["Vectors are stale"]);
+    });
+
     it("reports the resource and workflow versions when the agent hop fails", async () => {
       vi.mocked(updateWorkflow).mockResolvedValue({
         location: "eddi://ai.labs.workflow/workflowstore/workflows/wf1?version=5",

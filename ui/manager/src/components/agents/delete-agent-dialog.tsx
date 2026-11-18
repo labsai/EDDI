@@ -42,6 +42,8 @@ export function DeleteAgentDialog({
       cancelLabel={t("common.cancel")}
       onConfirm={onConfirm}
       isPending={isPending}
+      // After a refusal the same request would be refused again: Reload is the way on.
+      confirmDisabled={conflict !== null}
     >
       {conflict && (
         <div className="space-y-3" data-testid="delete-agent-conflict">

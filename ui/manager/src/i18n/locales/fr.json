@@ -516,6 +516,7 @@
     "removeWorkflow": "Retirer le workflow de l'agent",
     "a2aAddSkill": "Ajouter une compétence",
     "saveConflict": "Cet agent a été modifié ailleurs depuis son ouverture. Vos modifications sont conservées : vérifiez-les et enregistrez à nouveau.",
+    "saveWaitForVersion": "La dernière version est encore en cours de chargement — enregistrez à nouveau dans un instant.",
     "saveBeforeDeploy": "Enregistrez ou abandonnez vos modifications avant de déployer",
     "reviewChanges": "Vérifier les modifications",
     "unsavedSections": "Sections avec des modifications non enregistrées : {{count}}",
@@ -992,6 +993,7 @@
     "loadingEditor": "Chargement de l’éditeur…",
     "saveErrorReason": "Non enregistré : {{reason}}",
     "savedWithWarnings": "Enregistré, avec des avertissements",
+    "documentCheckFailed": "Ce document a une forme que l’éditeur ne peut pas vérifier — corrigez-le dans l’onglet JSON avant d’enregistrer.",
     "dismissWarnings": "Fermer"
   },
   "rulesEditor": {
@@ -2691,6 +2693,7 @@
     "statusTooLarge": "Échec : {{name}} dépasse {{max}} Mo et n’a pas été lu ici. Une source Fichiers sous Sources d’ingestion accepte des fichiers plus volumineux.",
     "statusUploadRejected": "Échec : le serveur a refusé l’envoi ({{detail}})",
     "reembedWarning": "Cette base de connaissances contient déjà des documents ingérés, et vous avez modifié {{what}}. L’enregistrement ne les ré-intègre pas : les vecteurs stockés restent inchangés, les recherches peuvent donc donner de mauvais résultats ou aucun tant que les documents ne sont pas ingérés à nouveau (ou qu’une nouvelle base n’est pas créée).",
+    "reembedWarningUnknown": "Vous avez modifié {{what}}. Si cette base de connaissances contient déjà des documents — cette page ne peut pas le savoir, par exemple pour du texte ingéré à la main auparavant —, l’enregistrement ne les ré-encode pas, et les recherches peuvent renvoyer des résultats médiocres ou aucun tant qu’ils ne sont pas ingérés à nouveau.",
     "reembedProvider": "le fournisseur d’embeddings",
     "reembedModel": "le modèle d’embeddings",
     "reembedDimension": "la dimension des vecteurs",

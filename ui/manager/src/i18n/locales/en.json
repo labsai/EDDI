@@ -544,6 +544,7 @@
     "removeWorkflow": "Remove workflow from agent",
     "a2aAddSkill": "Add skill",
     "saveConflict": "This agent was changed elsewhere since you opened it. Your edits are kept: review them and save again.",
+    "saveWaitForVersion": "The latest version is still loading — save again in a moment.",
     "saveBeforeDeploy": "Save or discard your changes before deploying",
     "reviewChanges": "Review changes",
     "unsavedSections": "Sections with unsaved changes: {{count}}",
@@ -1019,6 +1020,7 @@
     "loadingEditor": "Loading editor…",
     "saveErrorReason": "Not saved: {{reason}}",
     "savedWithWarnings": "Saved, with warnings",
+    "documentCheckFailed": "This document has a shape the editor cannot check — fix it in the JSON tab before saving.",
     "dismissWarnings": "Dismiss"
   },
   "rulesEditor": {
@@ -2745,6 +2747,7 @@
     "statusTooLarge": "Failed: {{name}} is larger than {{max}} MB and was not read here. A Files source under Ingestion Sources takes larger files.",
     "statusUploadRejected": "Failed: the server refused the upload ({{detail}})",
     "reembedWarning": "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
+    "reembedWarningUnknown": "You changed {{what}}. If this knowledge base already holds documents — this page cannot tell, for example for text ingested by hand earlier — saving does not re-embed them, and searches may return poor or no matches until they are ingested again.",
     "reembedProvider": "the embedding provider",
     "reembedModel": "the embedding model",
     "reembedDimension": "the vector dimension",

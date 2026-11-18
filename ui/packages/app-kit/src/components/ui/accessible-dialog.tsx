@@ -95,7 +95,16 @@ export function AccessibleDialog({
     };
   }, [open]);
 
-  // Escape key handler
+  // The latest close callback, read when Escape or the backdrop fires. Kept out
+  // of the stack effect below: a parent handing a new `onClose` to a LOWER
+  // dialog re-ran that effect, which took the dialog off the stack and pushed it
+  // back on top — Escape then closed it underneath the one the user was in.
+  const onCloseRef = useRef(onClose);
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  // Escape key handler. Stack membership changes only when the dialog opens or closes.
   useEffect(() => {
     if (!open) return;
     openDialogs.push(titleId);
@@ -106,7 +115,7 @@ export function AccessibleDialog({
       if (openDialogs[openDialogs.length - 1] !== titleId) return;
       if (e.key === "Escape" && !e.defaultPrevented) {
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
       }
     };
     window.addEventListener("keydown", handleKeyDown);
@@ -115,7 +124,13 @@ export function AccessibleDialog({
       const index = openDialogs.lastIndexOf(titleId);
       if (index >= 0) openDialogs.splice(index, 1);
     };
-  }, [open, onClose, titleId]);
+  }, [open, titleId]);
+
+  // A click on the area around the panel closes the dialog like the backdrop
+  // under it — but only a click that also STARTED there: a text selection
+  // dragged out of a field ends its click on this container, and must not
+  // close the dialog and lose what was typed.
+  const pressStartedOutsideRef = useRef(false);
 
   // Focus trap
   const handleKeyDown = useCallback(
@@ -124,9 +139,11 @@ export function AccessibleDialog({
       const dialog = dialogRef.current;
       if (!dialog) return;
 
-      const focusable = dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
-      );
+      // Only what Tab can actually reach: a disabled Save as the "last" stop let
+      // Tab out of the dialog and sent Shift+Tab to a control that cannot take focus.
+      const focusable = Array.from(
+        dialog.querySelectorAll<HTMLElement>('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'),
+      ).filter((el) => !el.matches(":disabled") && el.tabIndex >= 0 && !el.closest("[inert], [aria-hidden='true']"));
       if (focusable.length === 0) return;
 
       const first = focusable[0]!;
@@ -155,7 +172,18 @@ export function AccessibleDialog({
       />
 
       {/* Dialog */}
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      <div
+        className="fixed inset-0 z-50 flex items-center justify-center p-4"
+        onMouseDown={(e) => {
+          pressStartedOutsideRef.current = e.target === e.currentTarget;
+        }}
+        onClick={(e) => {
+          const outside = e.target === e.currentTarget && pressStartedOutsideRef.current;
+          pressStartedOutsideRef.current = false;
+          if (outside) onCloseRef.current();
+        }}
+        data-testid={testId ? `${testId}-overlay` : undefined}
+      >
         {/* Capped at the viewport and scrolled in the body, not the box: a
             dialog taller than the window was centred and then clipped at BOTH
             ends, so its title and close button sat off-screen with nothing to

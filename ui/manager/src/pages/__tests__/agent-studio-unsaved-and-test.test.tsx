@@ -134,6 +134,32 @@ describe("Agent Studio — unsaved edits when switching stages", () => {
     await waitFor(() => expect(toastError).toHaveBeenCalled());
     expect(screen.getAllByTestId("model-type-select")[0]).toHaveValue("azure-openai");
   });
+
+  it("does not save a draft the editor refuses, when 'Save' is chosen on leaving the stage", async () => {
+    let llmPuts = 0;
+    server.use(
+      http.put("*/llmstore/llms/:id", () => {
+        llmPuts++;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderStudio();
+    const user = userEvent.setup();
+    await selectStage(user, LLM_STAGE);
+    const temperature = (await screen.findAllByTestId("llm-temperature"))[0]!;
+    await user.clear(temperature);
+    await user.type(temperature, "hot");
+    await waitFor(() => expect(screen.getAllByTestId("save-btn")[0]).toBeDisabled());
+
+    await selectStage(user, RULES_STAGE);
+    await user.click(await screen.findByTestId("unsaved-save"));
+
+    // Refused with the layout's own reason; nothing written; the stage stays open.
+    await waitFor(() => expect(toastError).toHaveBeenCalled());
+    expect(String(toastError.mock.calls[0]![0])).toMatch(/temperature/i);
+    expect(llmPuts).toBe(0);
+    expect(screen.getAllByTestId("llm-temperature")[0]).toHaveValue("hot");
+  });
 });
 
 describe("Agent Studio — leaving the editor on mobile", () => {

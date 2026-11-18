@@ -348,6 +348,12 @@ export function AgentDetailPage() {
     if (!draft || !isDirty) return true;
     // Every save path comes through here — the buttons, the shortcut and the
     // leave-page guard — so this is the one place that can refuse them all.
+    if (configPending) {
+      // The version being loaded is the one the save would address, while the
+      // draft still sits on the previous one: wait until its edits are carried over.
+      toast.error(t("agentDetail.saveWaitForVersion", "The latest version is still loading — save again in a moment."));
+      return false;
+    }
     if (ceilingInvalid) {
       toast.error(t("agentDetail.maxCostInvalid", "Enter an amount of 0 or more, or leave empty for unlimited."));
       return false;
@@ -408,6 +414,7 @@ export function AgentDetailPage() {
   }, [
     draft,
     isDirty,
+    configPending,
     agent,
     updateAgentMutation,
     id,
@@ -1470,6 +1477,11 @@ export function AgentDetailPage() {
           // A refused delete is usually a stale version: read the current one
           // instead of sending the same request again.
           closeDeleteDialog(false);
+          // An open draft was built on the version on screen. Carry its edits
+          // onto the newer one (as after a save conflict) — kept as it is, the
+          // next Save would write the old version's other blocks over the newer
+          // version's changes.
+          if (agent && isDirty) setRebaseFrom(agent);
           setVersion(undefined);
           void refetchVersions();
         }}
