@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.CascadeStep;
@@ -68,6 +70,18 @@ class LlmStoreCascadeCredentialValidationTest {
         assertTrue(error.getMessage().contains("step 0") && error.getMessage().contains("anthropic"), error.getMessage());
         assertThrows(IllegalArgumentException.class, () -> store.update("aaaaaaaaaaaaaaaaaaaaaaaa", 1, bad));
         verifyNoInteractions(storage);
+    }
+
+    @Test
+    @DisplayName("an import, sync, upgrade or copy (LenientConfigWrite) accepts the same config with a warning")
+    void lenientWriteAccepts() throws Exception {
+        var bad = cascade("anthropic", null);
+        assertThrows(IllegalArgumentException.class, () -> store.create(bad));
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> store.create(bad)));
+        // an update gets past the validation too: the mock storage then has nothing to
+        // update
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> LenientConfigWrite.call(() -> store.update("aaaaaaaaaaaaaaaaaaaaaaaa", 1, bad)));
     }
 
     @Test

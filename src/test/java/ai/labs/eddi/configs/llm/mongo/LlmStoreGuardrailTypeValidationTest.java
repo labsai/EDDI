@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.datastore.IResourceStorage;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import ai.labs.eddi.modules.llm.guardrails.impl.PiiRedactionGuardrail;
@@ -98,6 +100,22 @@ class LlmStoreGuardrailTypeValidationTest {
         var task = new LlmConfiguration.Task();
         task.setInputGuardrails(List.of(guardrail("pii-redaction")));
         assertDoesNotThrow(() -> store.create(new LlmConfiguration(List.of(task))));
+    }
+
+    @Test
+    @DisplayName("an import, sync, upgrade or copy (LenientConfigWrite) is accepted with a warning; an interactive save is refused")
+    void lenientWriteAcceptsWhatAnInteractiveSaveRefuses() throws Exception {
+        var bad = withInput("pii-redacton");
+        assertThrows(IllegalArgumentException.class, () -> store.create(bad));
+        assertThrows(IllegalArgumentException.class, () -> store.update("aaaaaaaaaaaaaaaaaaaaaaaa", 1, bad));
+
+        assertDoesNotThrow(() -> LenientConfigWrite.call(() -> store.create(bad)));
+        // an update gets past the validation too: the mock storage then has nothing to
+        // update
+        assertThrows(IResourceStore.ResourceNotFoundException.class,
+                () -> LenientConfigWrite.call(() -> store.update("aaaaaaaaaaaaaaaaaaaaaaaa", 1, bad)));
+        // the marker ends with the call
+        assertThrows(IllegalArgumentException.class, () -> store.create(bad));
     }
 
     @Test

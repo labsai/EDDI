@@ -3909,8 +3909,13 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
             try {
                 LlmConfiguration llmConfiguration = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 // Fail fast on cascade misconfiguration at deploy time (#validation).
-                CascadeConfigValidator.validate(llmConfiguration);
-                validateGuardrails(llmConfiguration);
+                try {
+                    CascadeConfigValidator.validate(llmConfiguration);
+                    validateGuardrails(llmConfiguration);
+                } catch (WorkflowConfigurationException e) {
+                    // The URI names the config's id and version.
+                    throw new WorkflowConfigurationException("LLM config " + uri + ": " + e.getMessage(), e);
+                }
                 // Self-hosted endpoints: required fields and capability flags.
                 OpenAiCompatibleConfigValidator.validate(llmConfiguration);
                 validateAnswerMode(llmConfiguration);

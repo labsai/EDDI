@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.groups.HandoffConfigValidator;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.properties.SecretScopeValidation;
@@ -85,9 +87,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
             return;
         }
         List<String> credentialProblems = CascadeCredentialPolicy.problems(content);
-        if (!credentialProblems.isEmpty()) {
-            throw new IllegalArgumentException("Invalid modelCascade: " + String.join("; ", credentialProblems));
-        }
+        refuseOrWarn(credentialProblems, "Invalid modelCascade: ");
         for (int i = 0; i < content.tasks().size(); i++) {
             LlmConfiguration.Task task = content.tasks().get(i);
             if (task != null) {
@@ -131,8 +131,25 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
         for (String problem : guardrailService.unknownTypeProblems("outputGuardrails", task.getOutputGuardrails())) {
             problems.add(taskPath + "." + problem);
         }
-        if (!problems.isEmpty()) {
-            throw new IllegalArgumentException(String.join("; ", problems));
+        refuseOrWarn(problems, "");
+    }
+
+    /**
+     * An interactive save (REST, MCP, the Manager) refuses these problems. An
+     * import, sync, upgrade or duplicate ({@link LenientConfigWrite}) writes a
+     * config that exists already, so it only logs one WARN per problem — the hard
+     * failure for it is at deploy.
+     */
+    private static void refuseOrWarn(List<String> problems, String prefix) {
+        if (problems.isEmpty()) {
+            return;
+        }
+        if (!LenientConfigWrite.isActive()) {
+            throw new IllegalArgumentException(prefix + String.join("; ", problems));
+        }
+        for (String problem : problems) {
+            LOGGER.warnf("LLM config import, sync, upgrade or copy accepted with a problem that a new save would refuse: %s",
+                    LogSanitizer.sanitize(problem));
         }
     }
 
