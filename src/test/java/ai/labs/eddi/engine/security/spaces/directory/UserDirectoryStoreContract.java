@@ -116,12 +116,52 @@ interface UserDirectoryStoreContract {
         store().upsert(user("sam-fin", "sam-fin", "sam.fin@example.com", true, "Sam", List.of(finance), 3000));
         store().upsert(user("sam-none", "sam-none", null, false, "Sam", List.of(), 4000));
 
-        assertEquals(Set.of("sam-eng"), principals(store().searchWithinTeams("SAM", List.of(engineering), 10)));
+        assertEquals(Set.of("sam-eng"), principals(store().searchWithinTeams("SAM", List.of(engineering), null, 10)));
         assertEquals(List.of("sam-fin", "sam-eng"),
-                store().searchWithinTeams("sam", List.of(engineering, finance), 10).stream().map(DirectoryUser::principal).toList());
-        assertEquals(Set.of(), principals(store().searchWithinTeams("s.m", List.of(engineering), 10)), "a dot is a dot");
-        assertTrue(store().searchWithinTeams("sam", List.of(), 10).isEmpty(), "no teams match nobody");
-        assertEquals(1, store().searchWithinTeams("sam", List.of(engineering, finance), 1).size());
+                store().searchWithinTeams("sam", List.of(engineering, finance), null, 10).stream().map(DirectoryUser::principal).toList());
+        assertEquals(Set.of(), principals(store().searchWithinTeams("s.m", List.of(engineering), null, 10)), "a dot is a dot");
+        assertTrue(store().searchWithinTeams("sam", List.of(), null, 10).isEmpty(), "no teams match nobody");
+        assertEquals(1, store().searchWithinTeams("sam", List.of(engineering, finance), null, 1).size());
+    }
+
+    @Test
+    @DisplayName("a team-scoped search leaves out people last seen before the window, exactly at its edge")
+    default void searchWithinTeamsWindow() {
+        String engineering = Subjects.team("engineering");
+        Instant cutoff = Instant.ofEpochSecond(5000);
+        store().upsert(at("sam-edge", engineering, cutoff));
+        store().upsert(at("sam-old", engineering, cutoff.minusMillis(1)));
+        store().upsert(at("sam-new", engineering, cutoff.plusSeconds(60)));
+
+        assertEquals(List.of("sam-new", "sam-edge"),
+                store().searchWithinTeams("sam", List.of(engineering), cutoff, 10).stream().map(DirectoryUser::principal).toList(),
+                "seen exactly at the cutoff is still current; a millisecond earlier is not");
+        assertEquals(Set.of("sam-edge", "sam-old", "sam-new"), principals(store().searchWithinTeams("sam", List.of(engineering), null, 10)),
+                "no window hides nobody");
+        assertEquals(Set.of("sam-edge", "sam-new"), principals(store().searchWithinTeams("", List.of(engineering), cutoff, 10)),
+                "the window applies to a blank prefix too");
+    }
+
+    @Test
+    @DisplayName("a stale entry is hidden, not deleted: it still resolves, and a new sign-in brings it back")
+    default void staleEntryIsHiddenNotDeleted() {
+        String engineering = Subjects.team("engineering");
+        Instant cutoff = Instant.ofEpochSecond(5000);
+        store().upsert(at("sam", engineering, cutoff.minusSeconds(1)));
+
+        assertTrue(store().searchWithinTeams("sam", List.of(engineering), cutoff, 10).isEmpty());
+        assertTrue(store().find("sam").isPresent(), "a share typed by exact name must still reach them");
+        assertEquals(1, store().findByUsername("sam").size());
+        assertEquals(Set.of("sam"), principals(store().search("sam", 10)), "an administrator still finds them");
+
+        store().upsert(at("sam", engineering, cutoff.plusSeconds(1)));
+
+        assertEquals(Set.of("sam"), principals(store().searchWithinTeams("sam", List.of(engineering), cutoff, 10)));
+    }
+
+    private static DirectoryUser at(String principal, String team, Instant lastSeen) {
+        return new DirectoryUser(principal, "sub-" + principal, principal, principal + "@example.com", true, "Sam", List.of(team),
+                Instant.ofEpochSecond(1000), lastSeen);
     }
 
     @Test

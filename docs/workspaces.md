@@ -28,6 +28,7 @@ Two switches, and they mean different things.
 | `eddi.workspaces.default-space` | *(empty)* | Empty = new resources land in the creator's personal space. A group name gives a team-first deployment: that team's members create there by default, everyone else keeps their personal space. **Changeable at runtime.** |
 | `eddi.workspaces.directory.enabled` | *(unset → follows `eddi.workspaces.enabled`)* | Record signed-in users so shares can name people — see [Finding people](#finding-people-the-user-directory). |
 | `eddi.workspaces.directory.expose-email` | `true` | Whether share suggestions show email addresses. |
+| `eddi.workspaces.directory.stale-after` | *(unset → never)* | How long after a person's last recorded sign-in the directory stops counting them as a team member — see [stale entries](#stale-entries-stale-after). |
 
 **Recording and enforcing are deliberately separate.** Deploy the release,
 let attribution accumulate, confirm in the Manager that agents show the owners
@@ -202,8 +203,57 @@ its search is deliberately narrow:
   The directory is refreshed from the token about every ten minutes while
   someone is signed in; a person removed from a team keeps that membership in
   the directory — and stays suggested to their former teammates — until they
-  next sign in. Nothing expires a directory entry by age; GDPR erasure removes
-  one.
+  next sign in, or until `eddi.workspaces.directory.stale-after` passes (below).
+  GDPR erasure removes an entry outright.
+
+#### Stale entries (`stale-after`)
+
+EDDI has no signal from the identity provider when somebody leaves a team; it
+only sees their next token. `eddi.workspaces.directory.stale-after` bounds how
+long an old token's teams are believed. It takes a duration (`90d`, `P90D`,
+`2160h`). **Unset — the default — means never**, which is the behaviour before
+the property existed.
+
+A person whose last recorded sign-in is older than the window counts as a member
+of **no** team in the directory:
+
+- they are no longer suggested to anyone in the share box — the team-scoped
+  search applies the window in the database query
+  (`IUserDirectoryStore.searchWithinTeams`), so a page of results is never
+  filled with people who are then dropped;
+- their email address is no longer shown to former teammates, in suggestions or
+  in a resource's grant list — those see the username, like anybody outside the
+  team.
+
+The boundary is inclusive: somebody seen exactly `stale-after` ago still counts.
+
+**The entry is hidden, not deleted.** Their next sign-in re-records it from the
+token they then carry, and everything comes back. Meanwhile a share typed by
+their exact username or verified email still resolves to them, their grants
+still show their name, and a grant to them is not flagged as "matches no
+recorded user".
+
+**Grants are not affected.** Whether somebody can reach a resource is decided
+against their *live* token on every request, never against the directory: a
+person with a stale entry keeps every grant their token still qualifies for,
+and a removed team member loses team access on their next request whether or
+not a window is set.
+
+**Administrators still see everybody.** `eddi-admin`'s search is not windowed,
+and shows a stale person with their email as before — the directory is theirs
+to manage — and stale entries are not marked as such in the suggestions.
+
+The window is honoured from one hour up: `lastSeen` is refreshed only about
+every ten minutes while somebody is active, so a shorter value would hide
+people who are signed in right now. A shorter value is raised to an hour, and a
+zero or negative one is read as "never", each with a warning in the log.
+
+Not covered by the window: the team-member lists used to fan out
+[notifications](#notifications-and-access-requests) and to warn that a shared-with team has no
+recorded members, and the team names an administrator is offered — these still
+read every recorded entry. Re-validating membership against the identity
+provider itself (SCIM, or a back-channel query) would remove the need for a
+window altogether; it is future work.
 
 ### Where new resources land
 

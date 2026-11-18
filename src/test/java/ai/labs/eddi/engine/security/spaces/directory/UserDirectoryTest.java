@@ -19,7 +19,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
+import java.time.Clock;
+import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneOffset;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.List;
@@ -36,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -92,7 +96,7 @@ class UserDirectoryTest {
         @Test
         @DisplayName("a non-administrator is offered only people who share one of their teams, searched in the store")
         void nonAdminSearchesOwnTeamsOnly() {
-            when(store.searchWithinTeams(eq("bob"), any(), anyInt())).thenReturn(List.of(member("bob", "bob@example.com", "engineering")));
+            when(store.searchWithinTeams(eq("bob"), any(), any(), anyInt())).thenReturn(List.of(member("bob", "bob@example.com", "engineering")));
 
             var matches = directory.search("bob", 8, ALICE, false);
 
@@ -101,7 +105,7 @@ class UserDirectoryTest {
             assertEquals("bob@example.com", matches.get(0).detail(), "a teammate's email is fine to show");
             @SuppressWarnings("unchecked")
             ArgumentCaptor<Collection<String>> teams = ArgumentCaptor.forClass(Collection.class);
-            verify(store).searchWithinTeams(eq("bob"), teams.capture(), anyInt());
+            verify(store).searchWithinTeams(eq("bob"), teams.capture(), isNull(), anyInt());
             assertEquals(Set.of(Subjects.team("engineering")), Set.copyOf(teams.getValue()));
             verify(store, never()).search(anyString(), anyInt());
             verify(store, never()).searchTeams(anyString(), anyInt());
@@ -110,7 +114,7 @@ class UserDirectoryTest {
         @Test
         @DisplayName("somebody outside the caller's teams is dropped even if the store returns them")
         void outsiderDropped() {
-            when(store.searchWithinTeams(eq("mal"), any(), anyInt())).thenReturn(List.of(member("mallory", "m@example.com", "finance")));
+            when(store.searchWithinTeams(eq("mal"), any(), any(), anyInt())).thenReturn(List.of(member("mallory", "m@example.com", "finance")));
 
             assertTrue(directory.search("mal", 8, ALICE, false).isEmpty());
         }
@@ -121,7 +125,7 @@ class UserDirectoryTest {
             var loner = CallerSpaces.of("lone", Set.of());
 
             assertTrue(directory.search("bob", 8, loner, false).isEmpty());
-            verify(store, never()).searchWithinTeams(anyString(), any(), anyInt());
+            verify(store, never()).searchWithinTeams(anyString(), any(), any(), anyInt());
             verify(store, never()).search(anyString(), anyInt());
         }
 
@@ -131,7 +135,7 @@ class UserDirectoryTest {
             assertTrue(directory.search("bo", 8, CallerSpaces.of("lone", Set.of()), true).isEmpty());
             assertTrue(directory.search("b", 8, ALICE, false).stream().noneMatch(m -> "user".equals(m.kind())));
             verify(store, never()).search(anyString(), anyInt());
-            verify(store, never()).searchWithinTeams(anyString(), any(), anyInt());
+            verify(store, never()).searchWithinTeams(anyString(), any(), any(), anyInt());
         }
 
         @Test
@@ -176,12 +180,12 @@ class UserDirectoryTest {
         @DisplayName("unset, the directory follows workspace enforcement; set, the operator's word wins")
         void enabledFollowsEnforcement() {
             when(settings.isEnforcing()).thenReturn(false);
-            assertFalse(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true).isActive(),
+            assertFalse(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true, Optional.empty()).isActive(),
                     "no enforced workspaces, nothing to share, no directory");
             when(settings.isEnforcing()).thenReturn(true);
-            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true).isActive());
+            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.empty(), true, Optional.empty()).isActive());
             when(settings.isEnforcing()).thenReturn(false);
-            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.of(true), true).isActive());
+            assertTrue(new UserDirectory(store, identity, spaceContext, settings, executor, Optional.of(true), true, Optional.empty()).isActive());
         }
     }
 
@@ -486,6 +490,124 @@ class UserDirectoryTest {
             assertNull(directory.labelFor(null));
 
             verify(store, times(2)).findAll(any());
+        }
+    }
+
+    /**
+     * {@code eddi.workspaces.directory.stale-after} (#1087): somebody removed from
+     * a team who never signs in again must stop being suggested, with their email,
+     * to their former teammates — without disappearing from anything else.
+     */
+    @Nested
+    @DisplayName("the stale-after window")
+    class StaleAfter {
+
+        private static final Instant NOW = Instant.parse("2026-11-18T12:00:00Z");
+        private static final Duration WINDOW = Duration.ofDays(90);
+        private static final Instant CUTOFF = NOW.minus(WINDOW);
+
+        private UserDirectory windowed() {
+            return windowed(WINDOW);
+        }
+
+        private UserDirectory windowed(Duration window) {
+            return new UserDirectory(store, identity, spaceContext, settings, executor, true, true, window,
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+        }
+
+        private static DirectoryUser seenAt(String principal, Instant lastSeen) {
+            return new DirectoryUser(principal, "sub-" + principal, principal, principal + "@example.com", true, principal.toUpperCase(),
+                    List.of(Subjects.team("engineering")), Instant.EPOCH, lastSeen);
+        }
+
+        @Test
+        @DisplayName("a teammate seen exactly at the cutoff still shares the team; a millisecond earlier, not")
+        void sharesTeamAtTheBoundary() {
+            var directory = windowed();
+
+            assertTrue(directory.sharesTeam(seenAt("bob", CUTOFF), ALICE));
+            assertTrue(directory.sharesTeam(seenAt("bob", NOW), ALICE));
+            assertFalse(directory.sharesTeam(seenAt("bob", CUTOFF.minusMillis(1)), ALICE));
+            assertFalse(directory.sharesTeam(seenAt("bob", null), ALICE), "an entry that cannot show it is current is not");
+        }
+
+        @Test
+        @DisplayName("unset, nobody is ever stale — today's behaviour")
+        void unsetNeverStale() {
+            var directory = new UserDirectory(store, identity, spaceContext, settings, executor, true, true, null,
+                    Clock.fixed(NOW, ZoneOffset.UTC));
+
+            assertNull(directory.visibleSince());
+            assertTrue(directory.sharesTeam(seenAt("bob", Instant.EPOCH), ALICE));
+        }
+
+        @Test
+        @DisplayName("a stale teammate's email is withheld from teammates, and still shown to an administrator")
+        void detailHidesStaleEmail() {
+            var directory = windowed();
+            var fresh = seenAt("bob", CUTOFF);
+            var stale = seenAt("bob", CUTOFF.minusMillis(1));
+
+            assertEquals("bob@example.com", directory.detailFor(fresh, ALICE, false));
+            assertEquals("bob", directory.detailFor(stale, ALICE, false), "the username, never the address");
+            assertEquals("bob@example.com", directory.detailFor(stale, ALICE, true));
+        }
+
+        @Test
+        @DisplayName("a non-administrator's search hands the cutoff to the store, and re-checks what comes back")
+        void nonAdminSearchIsWindowed() {
+            var directory = windowed();
+            when(store.searchWithinTeams(eq("bob"), any(), any(), anyInt()))
+                    .thenReturn(List.of(seenAt("bobby", CUTOFF), seenAt("bob-gone", CUTOFF.minusMillis(1))));
+
+            var matches = directory.search("bob", 8, ALICE, false);
+
+            verify(store).searchWithinTeams(eq("bob"), any(), eq(CUTOFF), anyInt());
+            assertEquals(List.of(Subjects.user("bobby")), matches.stream().map(UserDirectory.Match::subject).toList(),
+                    "a stale entry is dropped even when the store returns it");
+        }
+
+        @Test
+        @DisplayName("an administrator's search still offers a stale person, with their email")
+        void adminSeesStale() {
+            var directory = windowed();
+            when(store.search("bob", 9)).thenReturn(List.of(seenAt("bob", CUTOFF.minusSeconds(3600))));
+
+            var matches = directory.search("bob", 8, ALICE, true);
+
+            assertEquals(1, matches.size());
+            assertEquals("bob@example.com", matches.get(0).detail());
+            verify(store, never()).searchWithinTeams(anyString(), any(), any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("hidden is not gone: a stale person still resolves by exact name and still labels their grants")
+        void staleStillResolvesAndLabels() {
+            var directory = windowed();
+            var stale = seenAt("bob", CUTOFF.minusSeconds(3600));
+            when(store.find("bob")).thenReturn(Optional.of(stale));
+            when(store.findAll(any())).thenReturn(Map.of("bob", stale));
+
+            assertEquals(Subjects.user("bob"), directory.resolveSubject("bob", ALICE, false));
+            assertEquals("BOB", directory.labelFor("bob"));
+        }
+
+        @Test
+        @DisplayName("a non-positive window means never; one under an hour is raised to an hour")
+        void windowIsValidated() {
+            assertNull(windowed(Duration.ZERO).visibleSince());
+            assertNull(windowed(Duration.ofDays(-1)).visibleSince());
+            assertEquals(NOW.minus(Duration.ofHours(1)), windowed(Duration.ofMinutes(5)).visibleSince());
+            assertEquals(NOW.minus(Duration.ofHours(1)), windowed(Duration.ofHours(1)).visibleSince());
+        }
+
+        @Test
+        @DisplayName("the cutoff is truncated to milliseconds, the precision MongoDB keeps")
+        void cutoffIsMillis() {
+            var directory = new UserDirectory(store, identity, spaceContext, settings, executor, true, true, WINDOW,
+                    Clock.fixed(NOW.plusNanos(1_500_000), ZoneOffset.UTC));
+
+            assertEquals(CUTOFF.plusMillis(1), directory.visibleSince());
         }
     }
 }

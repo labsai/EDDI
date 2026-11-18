@@ -19,8 +19,10 @@ import org.eclipse.microprofile.context.ManagedExecutor;
 import org.eclipse.microprofile.jwt.JsonWebToken;
 import org.jboss.logging.Logger;
 
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -87,6 +89,30 @@ public class UserDirectory {
      */
     public static final String ENABLED_PROPERTY = "eddi.workspaces.directory.enabled";
 
+    /**
+     * How long after a person's last recorded sign-in the directory stops counting
+     * them as a member of any team — a {@link Duration}; unset means never.
+     * <p>
+     * The directory learns a person's teams from their token and has no other
+     * signal: somebody removed from a team who never signs in again would otherwise
+     * stay suggested, with their email, to their former teammates indefinitely.
+     * Past the window they are left out of team-scoped suggestions and their email
+     * is no longer shown to teammates. The entry is hidden, not deleted — the next
+     * sign-in re-records it from the then-current token — and it still resolves a
+     * share typed by exact username or verified email, and still labels grants.
+     * <p>
+     * This is directory visibility only. Whether somebody's grants work is decided
+     * against their live token on every request and is untouched by it.
+     */
+    public static final String STALE_AFTER_PROPERTY = "eddi.workspaces.directory.stale-after";
+
+    /**
+     * Shortest {@value #STALE_AFTER_PROPERTY} honoured. {@code lastSeen} is
+     * refreshed only about every {@link #RECORD_INTERVAL} while somebody is active,
+     * so a window near that would hide people who are signed in right now.
+     */
+    static final Duration MIN_STALE_AFTER = Duration.ofHours(1);
+
     private final IUserDirectoryStore store;
     private final SecurityIdentity identity;
     private final SpaceContext spaceContext;
@@ -94,6 +120,9 @@ public class UserDirectory {
     private final ManagedExecutor executor;
     private final boolean enabled;
     private final boolean exposeEmail;
+    /** {@value #STALE_AFTER_PROPERTY}, or {@code null} for never. */
+    private final Duration staleAfter;
+    private final Clock clock;
 
     /** principal → fingerprint of what was last recorded. */
     private final Cache<String, Integer> recorded = Caffeine.newBuilder().expireAfterWrite(RECORD_INTERVAL).maximumSize(50_000).build();
@@ -106,17 +135,29 @@ public class UserDirectory {
      * @param enabled
      *            {@value #ENABLED_PROPERTY}; unset follows
      *            {@link WorkspaceSettings#isEnforcing()}
+     * @param staleAfter
+     *            {@value #STALE_AFTER_PROPERTY}; unset means never
      */
     @Inject
     public UserDirectory(IUserDirectoryStore store, SecurityIdentity identity, SpaceContext spaceContext, WorkspaceSettings settings,
             ManagedExecutor executor, @ConfigProperty(name = ENABLED_PROPERTY) Optional<Boolean> enabled,
-            @ConfigProperty(name = "eddi.workspaces.directory.expose-email", defaultValue = "true") boolean exposeEmail) {
-        this(store, identity, spaceContext, settings, executor, enabled.orElseGet(settings::isEnforcing), exposeEmail);
+            @ConfigProperty(name = "eddi.workspaces.directory.expose-email", defaultValue = "true") boolean exposeEmail,
+            @ConfigProperty(name = STALE_AFTER_PROPERTY) Optional<Duration> staleAfter) {
+        this(store, identity, spaceContext, settings, executor, enabled.orElseGet(settings::isEnforcing), exposeEmail,
+                staleAfter.orElse(null), Clock.systemUTC());
     }
 
-    /** With the switch decided by the caller. Test seam. */
+    /**
+     * With the switch decided by the caller and no stale-after window. Test seam.
+     */
     public UserDirectory(IUserDirectoryStore store, SecurityIdentity identity, SpaceContext spaceContext, WorkspaceSettings settings,
             ManagedExecutor executor, boolean enabled, boolean exposeEmail) {
+        this(store, identity, spaceContext, settings, executor, enabled, exposeEmail, null, Clock.systemUTC());
+    }
+
+    /** Everything decided by the caller, clock included. Test seam. */
+    public UserDirectory(IUserDirectoryStore store, SecurityIdentity identity, SpaceContext spaceContext, WorkspaceSettings settings,
+            ManagedExecutor executor, boolean enabled, boolean exposeEmail, Duration staleAfter, Clock clock) {
         this.store = store;
         this.identity = identity;
         this.spaceContext = spaceContext;
@@ -124,6 +165,51 @@ public class UserDirectory {
         this.executor = executor;
         this.enabled = enabled;
         this.exposeEmail = exposeEmail;
+        this.staleAfter = validStaleAfter(staleAfter);
+        this.clock = clock;
+    }
+
+    /**
+     * A zero or negative window is read as "never" and one shorter than
+     * {@link #MIN_STALE_AFTER} is raised to it, each with a warning — rather than
+     * failing, because this bean is created lazily and a refusal would surface as a
+     * failed request, not a failed boot.
+     */
+    private static Duration validStaleAfter(Duration configured) {
+        if (configured == null) {
+            return null;
+        }
+        if (configured.isZero() || configured.isNegative()) {
+            LOGGER.warnf("[WORKSPACES] %s=%s is not a positive duration; directory entries will never be treated as stale.",
+                    STALE_AFTER_PROPERTY, configured);
+            return null;
+        }
+        if (configured.compareTo(MIN_STALE_AFTER) < 0) {
+            LOGGER.warnf("[WORKSPACES] %s=%s is shorter than the minimum %s and would hide people who are signed in right now "
+                    + "(the directory refreshes a sign-in about every %s); using %s.", STALE_AFTER_PROPERTY, configured, MIN_STALE_AFTER,
+                    RECORD_INTERVAL, MIN_STALE_AFTER);
+            return MIN_STALE_AFTER;
+        }
+        return configured;
+    }
+
+    /**
+     * The earliest {@code lastSeen} that still counts as a current team member, or
+     * {@code null} when no {@value #STALE_AFTER_PROPERTY} window is set. Truncated
+     * to milliseconds, the precision MongoDB stores, so the store query and the
+     * in-memory check draw the line at the same instant.
+     */
+    Instant visibleSince() {
+        return staleAfter == null ? null : clock.instant().minus(staleAfter).truncatedTo(ChronoUnit.MILLIS);
+    }
+
+    /**
+     * Whether {@code user} was seen at or after {@code since}; always, when
+     * {@code since} is null. An entry with no {@code lastSeen} cannot show it is
+     * current, so under a window it is not.
+     */
+    private static boolean seenSince(DirectoryUser user, Instant since) {
+        return since == null || (user.lastSeen() != null && !user.lastSeen().isBefore(since));
     }
 
     /**
@@ -412,9 +498,17 @@ public class UserDirectory {
         return usernameDetail(user, false);
     }
 
-    /** Whether {@code user} belongs to any team {@code caller} belongs to. */
-    static boolean sharesTeam(DirectoryUser user, CallerSpaces caller) {
-        if (user == null || caller == null || user.teams().isEmpty()) {
+    /**
+     * Whether {@code user} belongs to any team {@code caller} belongs to, as far as
+     * the directory knows. Somebody not seen within {@value #STALE_AFTER_PROPERTY}
+     * belongs to no team here: their recorded teams are what an old token said.
+     */
+    boolean sharesTeam(DirectoryUser user, CallerSpaces caller) {
+        return sharesTeam(user, caller, visibleSince());
+    }
+
+    private static boolean sharesTeam(DirectoryUser user, CallerSpaces caller, Instant since) {
+        if (user == null || caller == null || user.teams().isEmpty() || !seenSince(user, since)) {
             return false;
         }
         Set<String> teams = teamsOf(caller);
@@ -527,18 +621,23 @@ public class UserDirectory {
         if (isActive() && !q.startsWith(Subjects.TEAM_PREFIX) && userQuery.length() >= MIN_USER_QUERY) {
             Set<String> self = caller == null ? Set.of() : caller.selfPrincipals();
             Set<String> callerTeams = teamsOf(caller);
+            // One cutoff for the query and the re-check, so both draw the same line.
+            Instant since = visibleSince();
             try {
                 List<DirectoryUser> found;
                 if (callerIsAdmin) {
+                    // An administrator is offered everybody recorded, stale or not —
+                    // the directory is theirs to manage, and the window governs only
+                    // what teammates are shown of each other.
                     found = store.search(userQuery, bounded + 1);
                 } else if (callerTeams.isEmpty()) {
                     found = List.of();
                 } else {
-                    found = store.searchWithinTeams(userQuery, callerTeams, bounded + 1);
+                    found = store.searchWithinTeams(userQuery, callerTeams, since, bounded + 1);
                 }
                 for (DirectoryUser user : found) {
                     if (self.contains(user.principal()) || !searchableBy(user, userQuery)
-                            || (!callerIsAdmin && !sharesTeam(user, caller))) {
+                            || (!callerIsAdmin && !sharesTeam(user, caller, since))) {
                         continue;
                     }
                     String subject = Subjects.user(user.principal());

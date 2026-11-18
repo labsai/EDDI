@@ -157,11 +157,15 @@ public class MongoUserDirectoryStore implements IUserDirectoryStore {
     }
 
     @Override
-    public List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, int limit) {
+    public List<DirectoryUser> searchWithinTeams(String prefix, Collection<String> teamSubjects, Instant seenSince, int limit) {
         if (teamSubjects == null || teamSubjects.isEmpty()) {
             return List.of();
         }
-        Bson inTeams = Filters.in(TEAMS, List.copyOf(teamSubjects));
+        // The teams index narrows to the caller's teams; the lastSeen bound is a
+        // range over the same documents, which the lastSeen index serves for the sort.
+        Bson inTeams = seenSince == null
+                ? Filters.in(TEAMS, List.copyOf(teamSubjects))
+                : Filters.and(Filters.in(TEAMS, List.copyOf(teamSubjects)), Filters.gte(LAST_SEEN, Date.from(seenSince)));
         String lower = DirectoryUser.lower(prefix);
         if (lower == null || lower.isEmpty()) {
             return collect(inTeams, limit);
