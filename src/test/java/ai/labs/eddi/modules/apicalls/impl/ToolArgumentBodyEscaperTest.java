@@ -156,12 +156,47 @@ class ToolArgumentBodyEscaperTest {
     }
 
     @Test
-    void aSingleTokenIsWhatCannotFormStructure() {
-        assertTrue(ToolArgumentBodyEscaper.isSingleToken("asc"));
-        assertTrue(ToolArgumentBodyEscaper.isSingleToken("-1.5e+3"));
-        assertFalse(ToolArgumentBodyEscaper.isSingleToken("1,2"));
-        assertFalse(ToolArgumentBodyEscaper.isSingleToken("a b"));
-        assertFalse(ToolArgumentBodyEscaper.isSingleToken("\"x"));
+    void aStructureFreeValueIsKeptAndEverythingThatCanFormStructureIsNot() {
+        assertTrue(ToolArgumentBodyEscaper.isStructureFree("asc"));
+        assertTrue(ToolArgumentBodyEscaper.isStructureFree("-1.5e+3"));
+        assertTrue(ToolArgumentBodyEscaper.isStructureFree("express delivery"), "a space joins no tokens");
+        assertTrue(ToolArgumentBodyEscaper.isStructureFree("Müller & Söhne"));
+        for (String structural : List.of("1,2", "\"x", "a\\b", "{x", "x}", "[1", "a:b", "${vars:x}", "a\nb", "a\tb")) {
+            assertFalse(ToolArgumentBodyEscaper.isStructureFree(structural), structural);
+        }
+    }
+
+    @Test
+    void aBranchOnABenignValueWithASpaceIsTakenInBothRenders() throws Exception {
+        var guard = guard("{#if mode == 'express delivery'}{\"fast\":true}{#else}{\"fast\":false,\"slow\":1}{/if}", Set.of("mode"));
+        assertEquals("{\"fast\":true}", guard.renderBody(Map.of("mode", "express delivery"), RENDER));
+        assertEquals("{\"fast\":false,\"slow\":1}", guard.renderBody(Map.of("mode", "standard"), RENDER));
+    }
+
+    @Test
+    void aReferenceIsAllowedOnlyWhereTheTemplateWritesIt() {
+        assertTrue(ToolArgumentBodyEscaper.referencesComeFromTheTemplate("{\"k\":\"${vars:a}\",\"q\":\"\"}",
+                "{\"k\":\"${vars:a}\",\"q\":\"x\"}"));
+        assertFalse(ToolArgumentBodyEscaper.referencesComeFromTheTemplate("{\"k\":\"${vars:a}\",\"q\":\"\"}",
+                "{\"k\":\"${vars:a}\",\"q\":\"${vars:a}\"}"), "counted: a second copy came from the argument");
+        assertFalse(ToolArgumentBodyEscaper.referencesComeFromTheTemplate("{\"q\":\"\"}", "{\"q\":\"${vault:key}\"}"));
+    }
+
+    @Test
+    void aTemplateThatRendersNothingForAnArgumentIsRefused() throws Exception {
+        var guard = guard("{#if on}{\"a\":1}{/if}", Set.of("on"));
+        assertEquals("{\"a\":1}", guard.renderBody(Map.of("on", true), RENDER));
+        assertThrows(ToolArgumentBodyEscaper.ArgumentRefusedException.class, () -> guard.renderBody(Map.of("on", false), RENDER));
+    }
+
+    @Test
+    void aTypedValueIsUsedOnlyWhileItsBindingIsUnchanged() throws Exception {
+        var guard = ToolArgumentBodyEscaper.guard(call("{\"amount\":{amount}}", "application/json"), Set.of("amount"),
+                Map.of("amount", JsonNodeFactory.instance.textNode("2")));
+        assertEquals("{\"amount\":\"2\"}", guard.renderBody(Map.of("amount", "2"), RENDER), "the validated string");
+        assertEquals("{\"amount\":7}", guard.renderBody(Map.of("amount", 7), RENDER), "a response saved over it is what is sent");
+        assertEquals("{\"amount\":\"<scrubbed>\"}", guard.renderBody(Map.of("amount", "<scrubbed>"), RENDER),
+                "a scrubbed binding is never replaced by the validated plaintext");
     }
 
     // ------------------------------------------------------------ bare values
@@ -203,6 +238,27 @@ class ToolArgumentBodyEscaperTest {
         var guard = guard("{\"a\":\"{item}\"}", Set.of("items"));
         assertEquals(Set.of("items", "item"), guard.forIteration("items", "item").argumentNames());
         assertEquals(Set.of("items"), guard.forIteration("properties.items", "item").argumentNames());
+        var hyphenated = guard("{\"a\":\"{item}\"}", Set.of("order-items"));
+        assertEquals(Set.of("order-items", "item"), hyphenated.forIteration("order-items", "item").argumentNames(),
+                "the selector's path grammar: a hyphen is part of the key");
+        assertEquals(Set.of("order-items", "item"), hyphenated.forIteration(" order-items[0].lines ", "item").argumentNames());
+        assertEquals("order", ToolArgumentBodyEscaper.rootKey("order.items"));
+    }
+
+    @Test
+    void forEachGuardsTheSharedArrayTheSameWayForEveryItem() throws Exception {
+        List<String> items = List.of("a\"", "b");
+        var guard = guard("{\"a\":\"{item}\",\"n\":\"{items}\"}", Set.of("items")).forIteration("items", "item");
+        for (String item : items) {
+            Map<String, Object> data = new HashMap<>();
+            data.put("items", items);
+            data.put("item", item);
+            JSON.readTree(guard.renderBody(data, RENDER));
+        }
+        // The array's twins are reused across items (one copy per call, not per item);
+        // what the template prints of it is still the escaped text.
+        Map<String, Object> data = new HashMap<>(Map.of("items", items, "item", "c"));
+        assertEquals("[\"a\\\"\",\"b\"]", JSON.readTree(guard.renderBody(data, RENDER)).get("n").asText());
     }
 
     private static ToolArgumentBodyEscaper.Guard guard(String body, Set<String> names) {

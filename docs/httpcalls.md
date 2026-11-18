@@ -284,23 +284,52 @@ any `+json` suffix, with or without parameters such as `; charset=utf-8`):
   as JSON of the same structure. A value that is a single JSON token (a number,
   `true`, a plain word) passes; `1,2,3` is refused with a tool error and the
   request is not sent. Deploying the agent logs a warning naming each such
-  construct, so the operator sees it before a user does.
+  construct, so the operator sees it before a user does. A value with no
+  character that can form JSON structure (no quote, backslash, brace, bracket,
+  comma, colon, `$` or control character — `express delivery` qualifies) is
+  kept as it is in the second render, so a condition such as
+  `{#if mode == 'express delivery'}` takes the same branch in both.
 - **Every body rendered this way must be valid JSON** once the arguments are in;
-  one that is not is refused rather than sent. The refusal never quotes the
-  value.
+  one that is not — or that renders **empty**, for example because an argument
+  switched off the section holding the whole document — is refused rather than
+  sent. The refusal never quotes the value.
+- **No `${...}` reference from an argument**: `${vars:…}`, `${vault:…}` and the
+  other references are resolved *after* the body is rendered, and a variable's
+  value is not escaped when it expands. A reference that is in the body only
+  because an argument wrote it (whole, or assembled from several arguments) is
+  refused; references the template or author data write are resolved as usual.
 - **Headers**: a rendered header value that contains a control character (such
-  as a line break) is refused, whichever way the template read the value.
+  as a line break) is refused, whichever way the template read the value. It is
+  judged after `${vars:…}` expansion, so a variable an argument names cannot
+  carry one past the check. This check applies to every tool call with a
+  templated header, whatever its `contentType`, and `escapeToolArguments: false`
+  turns it off together with the body escaping.
+- **`forEach` over an argument array**: the item is model text too (the path's
+  first key is read the way the selector reads it, so `order-items` is one
+  key). An item that is refused refuses the whole call before any item is sent.
+- **Retries**: each attempt is rendered from the live template data. A typed
+  argument's validated value is used only while its binding is unchanged — a
+  response saved under the argument's name, or a value a `scope: "secret"`
+  instruction vaulted and scrubbed, is what the retry renders. A retry refused
+  here is not sent; the tool result is the attempt that was, with a
+  `retryNotSent` entry saying so.
 
 The check costs one extra render of the body and two JSON parses per tool call,
-and only for a call whose JSON body actually names an argument. Refusals are
-counted in `eddi.httpcalls.tool.argument.refused` (tag `reason`).
+and only for a call whose JSON body actually names an argument; in a `forEach`,
+the guarded copies of the array and the other arguments are made once per call,
+not once per item. Refusals are counted in `eddi.httpcalls.tool.argument.refused`
+(tag `reason`: `bare_value`, `not_json`, `empty`, `structure`, `reference`,
+`header`). A refused call counts as not executed for the tool loop (an audit
+sample of executed calls never records it).
 
 Not changed: the body of a call whose template is a single variable
 (`{requestBody}`, the model writes the whole document and the body guard
 validates it), `{json:serialize(...)}` expressions (they read the raw value —
 they are the author's own escaping), a body that does not mention any
 argument, URL path and query values (percent-encoded per segment), a call
-triggered by a behavior rule, and everything the author controls
+triggered by a behavior rule (a call with `actions` runs there unescaped, so the
+deploy-time warning keeps naming its argument expressions), and everything the
+author controls
 (`{properties.x}`, `{context.y}`, `{memory...}`, API responses) — those keep
 the rules above, including the deploy-time warning. A `preRequest` property
 instruction that copies an argument into a property makes it author data from
@@ -473,7 +502,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.responseHeaderObjectName                                           | (`String`) name under which the RESPONSE headers are stored, reachable as `{memory.current.httpCalls.<responseHeaderObjectName>.<Header-Name>}` and, for an LLM tool, returned under the result's `headers` key. Unset by default — set it only when the answer you need is in a header (a `201`'s `Location`, say) rather than the body, since headers reach conversation memory unredacted. Header names are matched case-insensitively, and credential-bearing headers (`Set-Cookie`, `WWW-Authenticate`, …) are never stored. |
 | httpCall.description                                                        | (`String`) what the call does, in natural language — shown to an LLM when the call is offered as a tool.                                                                                                                       |
 | httpCall.parameters                                                         | (`Map<String, String>`) parameter name → description, for an LLM calling the call as a tool.                                                                                                                                    |
-| httpCall.argumentSchema                                                     | (`Object`, unset by default) JSON Schema of the tool arguments: one object whose `properties` are the tool parameters. When set, the tool's parameters are **typed** from it and a call that violates it is refused **before the approval gate** — see [Argument schema](#argument-schema-for-llm-tools). Unset keeps string parameters and today's rendering exactly. Generated by the OpenAPI tool builder. |
+| httpCall.argumentSchema                                                     | (`Object`, unset by default) JSON Schema of the tool arguments: one object whose `properties` are the tool parameters. When set, the tool's parameters are **typed** from it and a call that violates it is refused **before the approval gate** — see [Argument schema](#argument-schema-for-llm-tools). Unset keeps string parameters and no validation; tool arguments are still escaped in a JSON body unless `escapeToolArguments` is `false`. Generated by the OpenAPI tool builder. |
 | httpCall.escapeToolArguments                                                | (`Boolean`, default `true`) values the model supplies as tool arguments cannot change the structure of a JSON body, and a header carrying a control character is refused (see [Exception: arguments the model supplies as an LLM tool](#exception-arguments-the-model-supplies-as-an-llm-tool)); `false` restores raw substitution. |
 | httpCall.unknownFields                                                      | (`String`, default `reject` when a schema is set) what happens to an argument field the schema does not declare: `reject` refuses the call, `drop` removes the field before the request is built, `allow` passes it through. An explicit `additionalProperties: true` keeps the field under every mode; an explicit `false` is refused under `reject` and `allow`, and under `drop` the field is removed (so it is never sent). Any other value is refused at save time. |
 | httpCall.actions                                                            | (`List<String>`) the behavior-rule actions that trigger this call (`"*"` matches any action).                                                                                                                                   |
@@ -591,7 +620,11 @@ Supported keywords: `type`, `properties`, `required`, `items`, `enum`, boolean
 `additionalProperties`, `description`, `nullable`, `minimum`/`maximum` (and the exclusive forms),
 `minLength`/`maxLength`, `minItems`/`maxItems`. Anything else — `$ref`, `pattern`, `format`,
 compositions — is ignored and accepts any value, so the check never refuses what it cannot read.
-Without `argumentSchema` nothing here applies and the request is rendered byte for byte as before.
+Without `argumentSchema` nothing here applies: there is no validation and the parameters stay strings.
+That does not mean raw rendering — in a JSON body, string substitutions are still escaped, plain bare
+values are written as canonical JSON and unsafe bodies are refused
+([escapeToolArguments](#exception-arguments-the-model-supplies-as-an-llm-tool)); only
+`"escapeToolArguments": false` restores raw substitution.
 
 ### Turn deadline
 

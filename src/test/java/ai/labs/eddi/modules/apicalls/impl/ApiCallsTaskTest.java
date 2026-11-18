@@ -499,6 +499,10 @@ class ApiCallsTaskTest {
         call.getRequest().setContentType("application/json");
         call.setEscapeToolArguments(false);
         assertEquals(3, ApiCallsTask.unescapedSplices(call).size(), "escaping opted out");
+
+        call.setEscapeToolArguments(null);
+        call.setActions(List.of("lookup"));
+        assertEquals(3, ApiCallsTask.unescapedSplices(call).size(), "a rule action runs the call without the escaper");
     }
 
     @Test

@@ -60,13 +60,15 @@ public class ApiCall {
      * tool builder and settable by hand.
      * <p>
      * <b>Absence is a switch:</b> {@code null} (every config written before this
-     * field existed) means no argument validation, string-typed tool parameters and
-     * the request rendered exactly as before. When set, a tool call whose arguments
-     * violate it is refused before the approval gate and never executed, and
-     * non-string argument values are rendered as JSON text. Supported keywords:
-     * {@code type}, {@code properties}, {@code required}, {@code items},
-     * {@code enum}, {@code additionalProperties} (boolean), {@code description},
-     * {@code nullable}, {@code minimum}/{@code maximum},
+     * field existed) means no argument validation and string-typed tool parameters.
+     * It does not switch off {@link #escapeToolArguments}: an untyped tool call's
+     * arguments are still escaped in a JSON body, and only
+     * {@code escapeToolArguments: false} restores raw substitution. When set, a
+     * tool call whose arguments violate it is refused before the approval gate and
+     * never executed, and non-string argument values are rendered as JSON text.
+     * Supported keywords: {@code type}, {@code properties}, {@code required},
+     * {@code items}, {@code enum}, {@code additionalProperties} (boolean),
+     * {@code description}, {@code nullable}, {@code minimum}/{@code maximum},
      * {@code minLength}/{@code maxLength}, {@code minItems}/{@code maxItems};
      * anything else (including {@code $ref}, {@code pattern} and {@code format}) is
      * ignored.
@@ -92,15 +94,19 @@ public class ApiCall {
      * {@code true} (the default): inside a JSON string literal it is JSON-escaped,
      * so it can only be the content of the literal the author wrote it into; a bare
      * placeholder ({@code "count":{count}}) must be valid JSON of the declared type
-     * and is emitted canonically (a string as a quoted JSON string). Applies only
-     * to a call executed as an LLM tool with a JSON {@code contentType};
-     * author-controlled data ({@code {properties.x}}, {@code {context.y}}, API
-     * responses) is never changed.
+     * and is emitted canonically (a string as a quoted JSON string). The body
+     * escaping applies only to a call executed as an LLM tool with a JSON
+     * {@code contentType}; author-controlled data ({@code {properties.x}},
+     * {@code {context.y}}, API responses) is never changed. The same switch also
+     * covers the rendered-header check on the tool path, whatever the content type
+     * (a {@code text/plain} call included): a header whose value, after
+     * {@code ${vars:...}} expansion, holds a control character is refused.
      * <p>
      * {@code false} restores raw substitution for an author who builds JSON out of
-     * argument text on purpose; the author then owns escaping (use
-     * {@code {json:serialize(x)}}) and the deploy-time warning about unescaped
-     * values in string literals applies to the call again.
+     * argument text on purpose — and turns the header check off with it; the author
+     * then owns escaping (use {@code {json:serialize(x)}}) and the deploy-time
+     * warning about unescaped values in string literals applies to the call again.
+     * A call run by a rule action is never escaped, whatever this says.
      */
     private Boolean escapeToolArguments;
     private HttpPreRequest preRequest;

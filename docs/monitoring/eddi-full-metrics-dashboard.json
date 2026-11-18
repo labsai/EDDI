@@ -2469,7 +2469,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Tool calls whose arguments violated the tool's argumentSchema, refused before the approval gate and never executed (eddi.tool.arguments.refused, by source).",
+          "description": "Tool calls whose arguments violated the tool's argumentSchema, refused before the approval gate and never executed (eddi.tool.arguments.refused, by source). The `httpcall guard:` series are httpcall tool calls refused because an argument could not be placed in the request without changing its structure (eddi.httpcalls.tool.argument.refused, by reason: bare_value, not_json, empty, structure, reference, header); nothing was sent.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -2487,6 +2487,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "{{source}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (reason) (rate(eddi_httpcalls_tool_argument_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "httpcall guard: {{reason}}"
             }
           ],
           "fieldConfig": {

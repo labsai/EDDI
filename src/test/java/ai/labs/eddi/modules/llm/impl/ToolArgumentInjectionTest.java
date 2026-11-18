@@ -9,7 +9,9 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ApiCall;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.apicalls.model.ForEachInstruction;
+import ai.labs.eddi.configs.apicalls.model.HttpPostResponse;
 import ai.labs.eddi.configs.apicalls.model.Request;
+import ai.labs.eddi.configs.apicalls.model.RetryApiCallInstruction;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
@@ -36,8 +38,10 @@ import ai.labs.eddi.modules.properties.impl.SecretPropertyVault;
 import ai.labs.eddi.modules.templating.impl.ConfigReferenceNamespaceResolvers;
 import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 import dev.langchain4j.service.tool.ToolExecutor;
 import io.quarkus.qute.Engine;
@@ -92,6 +96,11 @@ class ToolArgumentInjectionTest {
     private static final String WORKFLOW_URI = "eddi://ai.labs.workflow/workflowstore/workflows/wf-1?version=1";
     private static final String HTTPCALLS_URI = "eddi://ai.labs.httpcalls/apicallstore/apicalls/api-1?version=1";
     private static final ObjectMapper JSON = new ObjectMapper();
+    /**
+     * Parses a sent body as one whole document, as the production guard does:
+     * {@code {"name":"x"} {"admin":true}} is not JSON, not its first value.
+     */
+    private static final ObjectMapper WHOLE_DOCUMENT = JsonMapper.builder().enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS).build();
     private static final String LONG = "x".repeat(20_000) + "\",\"admin\":true,\"z\":\"";
 
     enum Expect {
@@ -182,9 +191,20 @@ class ToolArgumentInjectionTest {
                 sent("unparsed block opening a string", "{\"a\":1,{|\"x\":\"|}{name}\"}", "{\"name\":" + smuggle + "}", "{\"name\":\"benign\"}"),
                 sent("vault reference in a bare position", "{\"a\":\"{name}\",\"k\":${vault:limit}}", "{\"name\":" + smuggle + "}",
                         "{\"name\":\"benign\"}"),
+                // --- references resolved after the check (CodeRabbit 4621747966)
+                refused("variable reference in a string literal", "{\"q\":\"{name}\"}", "{\"name\":\"${vars:greeting}\"}",
+                        "{\"name\":\"benign\"}"),
+                refused("variable reference assembled from two arguments", "{\"q\":\"{a}{b}\"}", "{\"a\":\"$\",\"b\":\"{vars:greeting}\"}",
+                        "{\"a\":\"benign\",\"b\":\"benign\"}"),
+                refused("argument-supplied vault reference in a bare position", "{\"q\":{name}}", "{\"name\":\"${vault:limit}\"}",
+                        "{\"name\":\"benign\"}"),
+                // --- an argument that removes the whole document (CodeRabbit 4621748044)
+                refused("section holding the document switched off", "{#if on}{\"a\":1}{/if}", "{\"on\":false}", "{\"on\":true}"),
                 // --- legitimate templates keep working
                 sent("conditional on a plain value", "{\"sort\":\"{#if order == 'asc'}ascending{#else}descending{/if}\"}", "{\"order\":\"asc\"}",
                         "{\"order\":\"asc\"}"),
+                sent("conditional on a value with a space", "{#if mode == 'express delivery'}{\"fast\":true}{#else}{\"fast\":false,\"x\":1}{/if}",
+                        "{\"mode\":\"express delivery\"}", "{\"mode\":\"express delivery\"}"),
                 sent("conditional section in a bare position", "{\"n\":{#if flag}1{#else}2{/if}}", "{\"flag\":\"yes\"}", "{\"flag\":\"yes\"}"),
                 sent("author data next to arguments", "{\"name\":\"{name}\",\"role\":\"{properties.role}\"}", "{\"name\":" + smuggle + "}",
                         "{\"name\":\"benign\"}"),
@@ -222,6 +242,8 @@ class ToolArgumentInjectionTest {
     private final List<String> sent = new CopyOnWriteArrayList<>();
     /** Every request built, sent or not. */
     private final List<FakeRequest> built = new CopyOnWriteArrayList<>();
+    /** What the API answers (always 200, application/json). */
+    private volatile String responseBody = "{\"ok\":true}";
 
     @BeforeEach
     void setUp() {
@@ -246,7 +268,12 @@ class ToolArgumentInjectionTest {
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(secretResolver.resolveValue("${vault:limit}")).thenReturn("5");
-        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        // Deployment variables as configured: values are not JSON-escaped when they
+        // expand, and one may hold a line break.
+        when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> {
+            String value = inv.getArgument(0);
+            return value == null ? null : value.replace("${vars:greeting}", "Welcome \"back\"").replace("${vars:crlf}", "a\r\nX-Admin: 1");
+        });
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));
         var engine = Engine.builder().addDefaults().strictRendering(false).addNamespaceResolver(new ConfigReferenceNamespaceResolvers.Vault())
@@ -294,10 +321,10 @@ class ToolArgumentInjectionTest {
         assertEquals(Expect.SENT, c.expect(), c.name() + ": sent, but expected to be refused: " + sent);
         assertEquals(benignBodies.size(), sent.size(), c.name() + ": a different number of requests");
         for (int i = 0; i < sent.size(); i++) {
-            JsonNode benign = JSON.readTree(benignBodies.get(i));
+            JsonNode benign = WHOLE_DOCUMENT.readTree(benignBodies.get(i));
             JsonNode hostile;
             try {
-                hostile = JSON.readTree(sent.get(i));
+                hostile = WHOLE_DOCUMENT.readTree(sent.get(i));
             } catch (Exception e) {
                 fail(c.name() + ": the body sent is not JSON: " + sent.get(i));
                 return;
@@ -330,6 +357,85 @@ class ToolArgumentInjectionTest {
         }
         // The items are sent concurrently: compare as a set.
         assertTrue(ids.contains("1,2") && ids.contains("a\",\"admin\":true,\"b\":\""), ids.toString());
+    }
+
+    @Test
+    void forEachOverAHyphenatedArgumentEscapesTheItem() throws Exception {
+        // PathNavigator reads "order-items" as one key; the item is model text.
+        ApiCall call = call("{\"tag\":\"{item}\"}");
+        var forEach = new ForEachInstruction();
+        forEach.setPathToTargetArray("order-items");
+        forEach.setIterationObjectName("item");
+        call.setForEach(forEach);
+
+        executorFor(call).execute(toolCall("{\"order-items\":[\"a\\\",\\\"admin\\\":true,\\\"b\\\":\\\"\"]}"), "m");
+
+        assertEquals(1, sent.size(), sent.toString());
+        JsonNode node = WHOLE_DOCUMENT.readTree(sent.getFirst());
+        assertEquals(1, node.size(), sent.getFirst());
+        assertEquals("a\",\"admin\":true,\"b\":\"", node.get("tag").asText());
+    }
+
+    @Test
+    void aForEachWithOneRefusedItemSendsNoItem() throws Exception {
+        ApiCall call = call("{\"a\":1}");
+        call.getRequest().getHeaders().put("X-Item", "{item}");
+        var forEach = new ForEachInstruction();
+        forEach.setPathToTargetArray("items");
+        forEach.setIterationObjectName("item");
+        call.setForEach(forEach);
+
+        String result = executorFor(call).execute(toolCall("{\"items\":[\"fine\",\"a\\r\\nX-Admin: 1\",\"also fine\"]}"), "m");
+
+        assertTrue(isRefusal(result) && result.contains("X-Item"), result);
+        assertTrue(sent.isEmpty(), "decided before any item was dispatched: " + sent);
+    }
+
+    @Test
+    void aLineBreakAVariableExpandsIntoAHeaderIsRefused() throws Exception {
+        ApiCall call = call("{\"a\":1}");
+        call.getRequest().getHeaders().put("X-Trace", "{trace}");
+
+        String result = executorFor(call).execute(toolCall("{\"trace\":\"${vars:crlf}\"}"), "m");
+
+        assertTrue(isRefusal(result) && result.contains("X-Trace"), result);
+        assertTrue(sent.isEmpty());
+    }
+
+    @Test
+    void aRetrySendsTheLiveBindingNotTheValidatedValue() throws Exception {
+        // The first response is saved under the argument's own name; the retry renders
+        // that, as it would on the rule path, never the value validated before.
+        ApiCall call = call("{\"amount\":{amount}}");
+        call.setArgumentSchema(Map.of("type", "object", "properties", Map.of("amount", Map.of("type", "integer"))));
+        retryOnceOn200(call, "amount");
+
+        executorFor(call).execute(toolCall("{\"amount\":2}"), "m");
+
+        assertEquals(List.of("{\"amount\":2}", "{\"amount\":{\"ok\":true}}"), sent);
+    }
+
+    @Test
+    void aRetryRefusedAfterASentAttemptKeepsThatAttemptsOutcome() throws Exception {
+        responseBody = "{\"note\":\"${vars:greeting}\"}";
+        ApiCall call = call("{\"q\":{q}}");
+        retryOnceOn200(call, "q");
+
+        String result = executorFor(call).execute(toolCall("{\"q\":\"first\"}"), "m");
+
+        assertEquals(List.of("{\"q\":\"first\"}"), sent, "the retry was not sent");
+        JsonNode answer = JSON.readTree(result);
+        assertEquals(200, answer.get("httpCode").asInt(), result);
+        assertTrue(answer.get("retryNotSent").asText().contains("was sent"), result);
+        assertFalse(result.contains("\"error\""), "not reported as a call that sent nothing: " + result);
+    }
+
+    private static void retryOnceOn200(ApiCall call, String responseObjectName) {
+        call.setSaveResponse(true);
+        call.setResponseObjectName(responseObjectName);
+        var postResponse = new HttpPostResponse();
+        postResponse.setRetryApiCallInstruction(new RetryApiCallInstruction(1, 0, List.of(200), null));
+        call.setPostResponse(postResponse);
     }
 
     @Test
@@ -559,7 +665,7 @@ class ToolArgumentInjectionTest {
             return new IResponse() {
                 @Override
                 public String getContentAsString() {
-                    return "{\"ok\":true}";
+                    return responseBody;
                 }
 
                 @Override

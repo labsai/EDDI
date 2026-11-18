@@ -288,11 +288,16 @@ class HttpCallToolsProvider implements ToolSourceProvider {
 
                         @Override
                         public String execute(ToolExecutionRequest toolRequest, Object memoryId) {
-                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null);
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null).result();
                         }
 
                         @Override
                         public String executeMocked(ToolExecutionRequest toolRequest, ToolMockRegistry.MockResult mock) {
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, mock).result();
+                        }
+
+                        @Override
+                        public Outcome executeJudged(ToolExecutionRequest toolRequest, ToolMockRegistry.MockResult mock) {
                             return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, mock);
                         }
                     });
@@ -337,8 +342,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      *            null to send the request — the executor answers the call with it
      *            and runs its response handling on it unchanged
      */
-    private String executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest, String targetServerUrl,
-                                       ToolMockRegistry.MockResult mock) {
+    private RefusalAwareToolExecutor.Outcome executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest,
+                                                                 String targetServerUrl, ToolMockRegistry.MockResult mock) {
         try {
             // Normally already refused before the gate (ToolLoopRunner). Checked again
             // here because an approved call resumed after the configuration changed, or
@@ -346,7 +351,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // now refuses.
             List<String> violations = argumentViolationsOf(apiCall, toolRequest);
             if (!violations.isEmpty()) {
-                return ToolArgumentSchemaValidator.refusal(violations);
+                return RefusalAwareToolExecutor.Outcome.refused(ToolArgumentSchemaValidator.refusal(violations));
             }
             ToolCallData call = templateDataFor(apiCall, memory, toolRequest);
             Map<String, Object> templateData = call.templateData();
@@ -362,7 +367,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // trip to be told something the string itself already says.
             String rejection = rejectUnparseableBody(apiCall, templateData);
             if (rejection != null) {
-                return rejection;
+                return RefusalAwareToolExecutor.Outcome.refused(rejection);
             }
 
             Map<String, Object> result = call.guard() == null
@@ -371,14 +376,14 @@ class HttpCallToolsProvider implements ToolSourceProvider {
 
             String serialized = jsonSerialization.serialize(result);
             LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
-            return serialized;
+            return RefusalAwareToolExecutor.Outcome.ran(serialized);
         } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
             // Names the argument and the expectation, never the value.
             LOGGER.warnf("Refusing httpcall tool '%s' before sending: %s", sanitize(apiCall.getName()), sanitize(refused.getMessage()));
-            return errorResult(refused.getMessage());
+            return RefusalAwareToolExecutor.Outcome.refused(errorResult(refused.getMessage()));
         } catch (Exception e) {
             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
+            return RefusalAwareToolExecutor.Outcome.ran(errorResult(describeToolFailure(e, targetServerUrl, apiCall)));
         }
     }
 
@@ -470,7 +475,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
     }
 
     /** An httpcall tool: mock-aware and able to judge its arguments up front. */
-    private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator {
+    private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator, RefusalAwareToolExecutor {
     }
 
     /**
@@ -499,11 +504,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     static Map<String, Object> renderArguments(ObjectNode arguments) {
         Map<String, Object> rendered = new LinkedHashMap<>();
-        arguments.fields().forEachRemaining(field -> {
-            JsonNode value = field.getValue();
-            rendered.put(field.getKey(),
-                    value == null || value.isNull() ? null : value.isTextual() ? value.asText() : ToolArgumentBodyEscaper.plainJson(value));
-        });
+        // The escaper's own definition: its guard compares the live binding against it.
+        arguments.fields().forEachRemaining(field -> rendered.put(field.getKey(), ToolArgumentBodyEscaper.templateValueOf(field.getValue())));
         return rendered;
     }
 

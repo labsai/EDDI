@@ -73,6 +73,7 @@ import java.util.OptionalDouble;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
 
@@ -1884,9 +1885,23 @@ class ToolLoopRunner {
                 if (testDecision != null) {
                     ToolMockRegistry.recordToolCall(memory, toolRequest.name(), toolRequest.arguments(), mockSource, testDecision.outcome());
                 }
-                Supplier<String> execution = mock != null
-                        ? () -> mockingExecutor.executeMocked(toolRequest, mock)
-                        : () -> executor.execute(toolRequest, null);
+                // A tool that refuses a call before doing anything (an httpcall whose
+                // arguments cannot be placed in its request) says so explicitly; the call
+                // then counts as not executed, whatever its answer's wording.
+                AtomicBoolean refusedBeforeRunning = new AtomicBoolean();
+                ToolExecutor target = mock != null ? mockingExecutor : executor;
+                Supplier<String> execution;
+                if (target instanceof RefusalAwareToolExecutor judged) {
+                    execution = () -> {
+                        RefusalAwareToolExecutor.Outcome outcome = judged.executeJudged(toolRequest, mock);
+                        refusedBeforeRunning.set(outcome.refused());
+                        return outcome.result();
+                    };
+                } else {
+                    execution = mock != null
+                            ? () -> mockingExecutor.executeMocked(toolRequest, mock)
+                            : () -> executor.execute(toolRequest, null);
+                }
                 boolean trackCost = chargeTracker && mock == null;
                 // Hard tenant ceiling (opt-in): a priced call holds its price against the
                 // monthly budget before it runs, and is refused when the budget cannot take it.
@@ -1901,8 +1916,8 @@ class ToolLoopRunner {
                                     execution, enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs)
                             : toolExecutionService.executeToolWrapped(invocation, toolRequest.arguments(), cacheScopeTag, conversationId,
                                     execution, enableRateLimiting, cacheThisCall, trackCost, rateLimit, toolTimeoutMs, quotaGate);
-                    // The quota refused it: the tool never ran.
-                    notExecuted = quotaGate != null && quotaGate.refused();
+                    // The quota refused it, or the tool refused its arguments: it never ran.
+                    notExecuted = refusedBeforeRunning.get() || quotaGate != null && quotaGate.refused();
                 }
             }
         } else {

@@ -373,6 +373,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 String failureBody = null;
 
                 do {
+                    // What a retry refused by the argument guard falls back to: the attempt
+                    // that WAS sent (see the catch around buildRequest below).
+                    Map<String, Object> sentResult = amountOfExecutions > 0 ? new LinkedHashMap<>(result) : null;
+                    boolean sentFailureInTemplateData = failureInTemplateData;
+                    Object sentError = templateDataObjects.get(errorObjectName);
+                    Object sentHttpCode = templateDataObjects.get(httpCodeObjectName);
+                    String sentFailureBody = failureBody;
                     // Final attempt wins, entirely: a retried failure populated
                     // "body"/"httpCode" on its pass through the loop, and a
                     // succeeding retry that does NOT save its response would
@@ -401,8 +408,33 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // Re-read per attempt rather than hoisted: a post-response property
                         // instruction can write a property between attempts, and the guard has to
                         // judge the request it is actually about to send.
-                        BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory),
-                                secretContextOf(memory), guard);
+                        BuiltRequest built;
+                        try {
+                            built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory),
+                                    secretContextOf(memory), guard);
+                        } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+                            if (sentResult == null) {
+                                // The first attempt: nothing was sent, and the refusal is the answer.
+                                throw refused;
+                            }
+                            // A retry, after an attempt that was sent and may have taken effect
+                            // (its response is in the template data the retry renders). That
+                            // attempt's outcome stands; the retry is reported as not sent.
+                            LOGGER.warnf("ApiCall (%s): retry %d not sent, its arguments were refused: %s", LogSanitizer.sanitize(call.getName()),
+                                    amountOfExecutions, LogSanitizer.sanitize(refused.getMessage()));
+                            result.putAll(sentResult);
+                            result.put("retryNotSent", "Attempt " + (amountOfExecutions + 1) + " (a retry) was NOT sent; this result is "
+                                    + "from attempt " + amountOfExecutions + ", which was sent. " + refused.getMessage());
+                            if (sentFailureInTemplateData) {
+                                if (sentError != null) {
+                                    templateDataObjects.put(errorObjectName, sentError);
+                                }
+                                templateDataObjects.put(httpCodeObjectName, sentHttpCode);
+                                failureInTemplateData = true;
+                                failureBody = sentFailureBody;
+                            }
+                            break;
+                        }
                         resolvedSecrets = built.resolvedSecrets();
                         substitutedSecrets.addAll(resolvedSecrets);
                         request = built.request();
@@ -787,6 +819,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
             BuiltRequest built;
             try {
                 built = buildRequest(targetServerUrl, call, itemData, conversationProperties, secretContext, itemGuard);
+            } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+                // The model's arguments are refused as a whole, here, while every item is
+                // still only built and none is sent: the answer names what to correct, and
+                // no partial fan-out runs that the model could not tell apart.
+                throw refused;
             } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
                 // This item's request cannot be built (a refused reference, a template
                 // that does not render): nothing of it is sent, and the others still are.
@@ -1857,12 +1894,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
         boolean headerCarriesCredential = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
-            if (guard != null) {
-                guard.checkHeader(headerName, headerValue);
-            }
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);
+            if (guard != null) {
+                // After ${vars:...} expansion: an argument may name a variable, and the
+                // value it expands to is what the header carries.
+                guard.checkHeader(headerName, headerValue);
+            }
             // Judged by the reference, not by the resolved set growing: a secret the
             // URL or body already resolved is in the set before this header is
             // reached, so a header reusing it added nothing and went unflagged.

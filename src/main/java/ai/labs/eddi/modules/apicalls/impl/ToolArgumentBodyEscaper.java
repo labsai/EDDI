@@ -20,15 +20,20 @@ import io.micrometer.core.instrument.Metrics;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.Deque;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -108,6 +113,11 @@ public final class ToolArgumentBodyEscaper {
      * replaced by a neutral token in both renders before they are parsed.
      */
     private static final Pattern CONFIG_REFERENCE = Pattern.compile("\\$\\{[A-Za-z][A-Za-z0-9_-]*:[^{}\\s\"\\\\]*}");
+    /**
+     * The opener of a reference resolved after rendering: dollar, brace, a name and
+     * a colon.
+     */
+    private static final Pattern REFERENCE_OPENER = Pattern.compile("\\$\\{[A-Za-z][A-Za-z0-9_-]*:");
     private static final Set<String> BLOCK_LABELS = Set.of("else", "is", "case");
 
     /** Parses the rendered body for the structural check: strict, lossless. */
@@ -185,7 +195,20 @@ public final class ToolArgumentBodyEscaper {
         if (!bodyGuarded && !headersTemplated) {
             return null;
         }
-        return new Guard(bodyGuarded ? body : null, Set.copyOf(argumentNames), Map.copyOf(typedValues));
+        return new Guard(bodyGuarded ? body : null, Set.copyOf(argumentNames), Map.copyOf(typedValues), null);
+    }
+
+    /**
+     * What a template substitutes for a typed argument: a string as itself, JSON
+     * null as {@code null}, anything else as its canonical JSON. The single
+     * definition shared with {@code HttpCallToolsProvider}, so a guard can tell
+     * whether the live binding is still the argument it validated.
+     */
+    public static Object templateValueOf(JsonNode value) {
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        return value.isTextual() ? value.asText() : plainJson(value);
     }
 
     /**
@@ -197,11 +220,52 @@ public final class ToolArgumentBodyEscaper {
         private final String body;
         private final Set<String> names;
         private final Map<String, JsonNode> typed;
+        /** The {@code forEach} item name: a new value per element, never reused. */
+        private final String perItem;
+        /** The body's analysis: the body and the names are fixed, so computed once. */
+        private volatile Analysis analysis;
+        /**
+         * The guarded twins of bindings that are the same object for every element of a
+         * {@code forEach} (the array itself, the other arguments), by identity: built
+         * once per call instead of once per element.
+         */
+        private final Map<Object, Object[]> twins = Collections.synchronizedMap(new IdentityHashMap<>());
+        /** Seeds of argument-derived inert keys, distinct across every render. */
+        private final AtomicInteger inertKeys = new AtomicInteger();
 
-        private Guard(String body, Set<String> names, Map<String, JsonNode> typed) {
+        private Guard(String body, Set<String> names, Map<String, JsonNode> typed, String perItem) {
             this.body = body;
             this.names = names;
             this.typed = typed;
+            this.perItem = perItem;
+        }
+
+        private Analysis analysis() {
+            Analysis computed = analysis;
+            if (computed == null) {
+                computed = analyse(body, names);
+                analysis = computed;
+            }
+            return computed;
+        }
+
+        /**
+         * The validated JSON of a typed argument while its live binding is still the
+         * value that was validated; {@code null} once a property instruction, a saved
+         * response or a scrub replaced it — the live value then decides, so a retry
+         * sends what it renders and a vaulted plaintext is not put back.
+         */
+        private JsonNode typedFor(String name, Object live) {
+            JsonNode node = typed.get(name);
+            return node != null && Objects.equals(live, templateValueOf(node)) ? node : null;
+        }
+
+        /** The escaped and the inert twin of {@code value}, cached when reusable. */
+        private Object[] twinsOf(String name, Object value, Inert stand) {
+            if (name.equals(perItem) || value == null || value instanceof String || value instanceof Number || value instanceof Boolean) {
+                return new Object[]{escapeLeaves(value), stand.of(value, true)};
+            }
+            return twins.computeIfAbsent(value, v -> new Object[]{escapeLeaves(v), stand.of(v, true)});
         }
 
         /** The model arguments this guard protects. */
@@ -226,17 +290,14 @@ public final class ToolArgumentBodyEscaper {
             if (pathToTargetArray == null || iterationName == null || iterationName.isBlank()) {
                 return this;
             }
-            String path = pathToTargetArray.trim();
-            int end = 0;
-            while (end < path.length() && isIdentifierPart(path.charAt(end))) {
-                end++;
-            }
-            if (!names.contains(path.substring(0, end))) {
+            if (!names.contains(rootKey(pathToTargetArray))) {
                 return this;
             }
             Set<String> withItem = new LinkedHashSet<>(names);
             withItem.add(iterationName.trim());
-            return new Guard(body, withItem, typed);
+            // The item differs per element; every other binding is the same object for
+            // every element, so its guarded twins are built once (see twins).
+            return new Guard(body, withItem, typed, iterationName.trim());
         }
 
         /**
@@ -249,8 +310,9 @@ public final class ToolArgumentBodyEscaper {
             if (body == null) {
                 return;
             }
-            for (String name : analyse(body, names).bare()) {
-                bareJson(name, data.get(name), typed.get(name));
+            for (String name : analysis().bare()) {
+                Object live = data.get(name);
+                bareJson(name, live, typedFor(name, live));
             }
         }
 
@@ -266,17 +328,17 @@ public final class ToolArgumentBodyEscaper {
             if (body == null) {
                 return null;
             }
-            Analysis analysis = analyse(body, names);
+            Analysis analysis = analysis();
             if (!analysis.mentions()) {
                 return renderer.render(body, data);
             }
             Map<String, Object> escaped = new LinkedHashMap<>(data);
             Map<String, Object> inert = new LinkedHashMap<>(data);
-            Inert stand = new Inert();
+            Inert stand = new Inert(inertKeys);
             for (String name : names) {
-                Object value = data.get(name);
-                escaped.put(name, escapeLeaves(value));
-                inert.put(name, stand.of(value, true));
+                Object[] twin = twinsOf(name, data.get(name), stand);
+                escaped.put(name, twin[0]);
+                inert.put(name, twin[1]);
             }
             for (String name : analysis.raw()) {
                 Object value = data.get(name);
@@ -284,12 +346,18 @@ public final class ToolArgumentBodyEscaper {
                 inert.put(RAW_PREFIX + name, stand.of(value, false));
             }
             for (String name : analysis.bare()) {
-                escaped.put(VALUE_PREFIX + name, bareJson(name, data.get(name), typed.get(name)));
+                Object live = data.get(name);
+                escaped.put(VALUE_PREFIX + name, bareJson(name, live, typedFor(name, live)));
                 inert.put(VALUE_PREFIX + name, WILDCARD_JSON);
             }
             String sent = renderer.render(analysis.rewritten(), escaped);
             if (sent == null || sent.isBlank()) {
-                return sent;
+                // A JSON body template that reads an argument and renders nothing — a
+                // model-chosen value switched off the section holding the document —
+                // would go out as a request without a body. A call meant to send none
+                // configures no body.
+                throw refused("empty", "The request was NOT sent: with the arguments substituted, the JSON request body is empty. "
+                        + "Send the values the tool needs to build its request.");
             }
             JsonNode actual = parseOrNull(sent);
             if (actual == null) {
@@ -308,6 +376,14 @@ public final class ToolArgumentBodyEscaper {
                         + "request body. A value used outside a JSON string may only be a plain number, boolean or single word; "
                         + "send simpler values.");
             }
+            if (!referencesComeFromTheTemplate(benign, sent)) {
+                // ${vars:…}, ${vault:…} and the other references are resolved AFTER this
+                // check. One an argument wrote would be expanded into the body here — a
+                // variable's value is not escaped, so it could break the JSON this check
+                // just accepted.
+                throw refused("reference", "The request was NOT sent: an argument value contains a ${...} reference, which is only "
+                        + "resolved where the tool's configuration writes it. Send the value without '${'.");
+            }
             return sent;
         }
 
@@ -323,6 +399,21 @@ public final class ToolArgumentBodyEscaper {
                         + "without control characters.");
             }
         }
+    }
+
+    /**
+     * The template-data key a {@code forEach} / batch path starts at, read with the
+     * grammar the selector uses ({@code PathNavigator}): the path is trimmed, its
+     * first {@code .}-separated segment is the key up to an {@code [index]}. So
+     * {@code order-items}, {@code items[0].tags} and {@code items} start at the key
+     * {@code order-items}, {@code items} and {@code items}.
+     */
+    static String rootKey(String pathToTargetArray) {
+        String path = pathToTargetArray.trim();
+        int end = path.indexOf('.');
+        String segment = end < 0 ? path : path.substring(0, end);
+        int index = segment.indexOf('[');
+        return index < 0 ? segment : segment.substring(0, index);
     }
 
     private static ArgumentRefusedException refused(String reason, String message) {
@@ -826,13 +917,19 @@ public final class ToolArgumentBodyEscaper {
     /**
      * Builds the stand-ins of the second render: the same shapes and lengths as the
      * escaped values, with every string that could form JSON structure replaced by
-     * private-use characters. A string made only of letters, digits and
-     * {@code . _ + -} is kept as it is: outside a string it is at most one JSON
-     * token, so it cannot change the structure, and keeping it keeps conditions
-     * such as {@code {#if mode == 'asc'}} taking the same branch.
+     * private-use characters. A string with no character that can form JSON
+     * structure ({@link #isStructureFree}) is kept as it is: outside a string it is
+     * at most a run of JSON tokens with nothing to join them, so it cannot change
+     * the structure — the rendered body either parses to the same tree or does not
+     * parse — and keeping it keeps conditions such as {@code {#if mode == 'express
+     * delivery'}} taking the same branch in both renders.
      */
     private static final class Inert {
-        private int keys;
+        private final AtomicInteger keys;
+
+        Inert(AtomicInteger keys) {
+            this.keys = keys;
+        }
 
         Object of(Object value, boolean escapedLengths) {
             if (value == null || value instanceof Number || value instanceof Boolean) {
@@ -860,17 +957,17 @@ public final class ToolArgumentBodyEscaper {
         }
 
         private static String string(String s, boolean escapedLengths) {
-            if (isSingleToken(s)) {
+            if (isStructureFree(s)) {
                 return s;
             }
             return inert(escapedLengths ? escapeContent(s).length() : s.length(), 0);
         }
 
         private String key(String key) {
-            if (isSingleToken(key) && !key.isEmpty()) {
+            if (isStructureFree(key) && !key.isEmpty()) {
                 return key;
             }
-            return inert(Math.max(1, escapeContent(key).length()), keys++);
+            return inert(Math.max(1, escapeContent(key).length()), keys.getAndIncrement() & Integer.MAX_VALUE);
         }
 
         private static String inert(int length, int seed) {
@@ -886,12 +983,19 @@ public final class ToolArgumentBodyEscaper {
         }
     }
 
-    static boolean isSingleToken(String s) {
+    /**
+     * Whether {@code s} holds no character that can form JSON structure or a
+     * post-render reference: no quote, backslash, brace, bracket, comma, colon,
+     * dollar sign, control character (CR, LF, TAB, ...) or inert marker. Letters of
+     * any script, digits, spaces and other punctuation pass: written anywhere in a
+     * body, such a value is string content or a run of bare tokens that JSON cannot
+     * join without a separator it does not contain.
+     */
+    static boolean isStructureFree(String s) {
         for (int i = 0; i < s.length(); i++) {
             char c = s.charAt(i);
-            boolean ok = c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '.' || c == '_' || c == '+'
-                    || c == '-';
-            if (!ok) {
+            if (c < 0x20 || c == 0x7f || c == '"' || c == '\\' || c == '{' || c == '}' || c == '[' || c == ']' || c == ',' || c == ':'
+                    || c == '$' || c >= INERT && c <= INERT_LAST) {
                 return false;
             }
         }
@@ -899,6 +1003,46 @@ public final class ToolArgumentBodyEscaper {
     }
 
     // -------------------------------------------------- structural check
+
+    /**
+     * Whether every {@code ${namespace:...}} reference of the sent body is also in
+     * the inert render, counted with multiplicity. The inert render replaces every
+     * argument text that could form a reference ({@code $ { : }} are not kept), so
+     * a reference only the sent body holds was written — whole or in part — by an
+     * argument. References the template or author data wrote are in both.
+     */
+    static boolean referencesComeFromTheTemplate(String inert, String sent) {
+        Map<String, Integer> allowed = new HashMap<>();
+        for (String reference : references(inert)) {
+            allowed.merge(reference, 1, Integer::sum);
+        }
+        for (String reference : references(sent)) {
+            Integer left = allowed.get(reference);
+            if (left == null || left == 0) {
+                return false;
+            }
+            allowed.put(reference, left - 1);
+        }
+        return true;
+    }
+
+    /**
+     * Each reference opener ({@link #REFERENCE_OPENER}) of {@code text} with what
+     * follows it up to the first closing brace (or the end): the span a resolver
+     * would read.
+     */
+    private static List<String> references(String text) {
+        List<String> found = new ArrayList<>();
+        Matcher opener = REFERENCE_OPENER.matcher(text);
+        int from = 0;
+        while (from < text.length() && opener.find(from)) {
+            int close = text.indexOf('}', opener.end());
+            int end = close < 0 ? text.length() : close + 1;
+            found.add(text.substring(opener.start(), end));
+            from = opener.end();
+        }
+        return found;
+    }
 
     private static JsonNode parseOrNull(String text) {
         try {

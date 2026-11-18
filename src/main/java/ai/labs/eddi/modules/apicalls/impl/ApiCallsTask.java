@@ -236,9 +236,12 @@ public class ApiCallsTask implements ILifecycleTask {
             }
             List<String> spliced = unescapedSplices(call);
             if (!spliced.isEmpty()) {
+                String rulePath = escapesArguments(call) && runsOnRuleActions(call)
+                        ? " The call also runs on rule actions, where tool-argument escaping does not apply."
+                        : "";
                 LOGGER.warnf("httpCall '%s' (uri:%s) splices %s into a JSON string literal of its body without escaping. A value "
                         + "containing a quote changes the JSON structure; write {json:serialize(...)} in place of the quoted "
-                        + "expression instead (see docs/httpcalls.md).", call.getName(), uriObj, String.join(", ", spliced));
+                        + "expression instead (see docs/httpcalls.md).%s", call.getName(), uriObj, String.join(", ", spliced), rulePath);
             }
             List<String> checkedPerCall = toolArgumentFindings(call);
             if (!checkedPerCall.isEmpty()) {
@@ -262,11 +265,14 @@ public class ApiCallsTask implements ILifecycleTask {
      * The expressions spliced unescaped into a JSON string literal of the call's
      * body. A declared tool argument is JSON-escaped when the model supplies it
      * (ToolArgumentBodyEscaper), so it does not count where the escaper runs; every
-     * other expression (memory, properties, context) still does.
+     * other expression (memory, properties, context) still does. A call that also
+     * runs on rule actions is executed there without the escaper, with whatever the
+     * template data holds under the argument's name — so there every expression
+     * counts.
      */
     static List<String> unescapedSplices(ApiCall call) {
         List<String> spliced = expressionsInsideJsonStrings(call.getRequest().getBody());
-        if (!escapesArguments(call)) {
+        if (!escapesArguments(call) || runsOnRuleActions(call)) {
             return spliced;
         }
         Set<String> declared = declaredArgumentNames(call);
@@ -315,6 +321,11 @@ public class ApiCallsTask implements ILifecycleTask {
             }
         }
         return found;
+    }
+
+    /** Whether a behavior rule's action can run the call ({@code actions} set). */
+    private static boolean runsOnRuleActions(ApiCall call) {
+        return call.getActions() != null && !call.getActions().isEmpty();
     }
 
     private static Set<String> declaredArgumentNames(ApiCall call) {
