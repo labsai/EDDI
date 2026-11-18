@@ -308,12 +308,26 @@ export function elementBefore(text: string, index: number): string {
   return m?.[1] ?? "";
 }
 
+/**
+ * Drop the regions a source file fences off with
+ * `// route-integrity:ignore-start` ... `// route-integrity:ignore-end`.
+ *
+ * The only user is the permission map's SCREENS table in lib/roles.ts: its
+ * paths are gate PREFIXES matched with startsWith (`/manage/studio` gates
+ * `/manage/studio/:agentId`), not places a link goes to, so they match no route
+ * by design. Fencing exactly that table keeps every real link in the same file
+ * (`homePathForRoles`) checked, which excluding the whole file would not.
+ */
+export function withoutIgnoredRegions(src: string): string {
+  return src.replace(/\/\/ route-integrity:ignore-start[^\n]*\n[\s\S]*?\/\/ route-integrity:ignore-end[^\n]*\n/g, "");
+}
+
 export function collectTargets(files: string[]): { checkable: Target[]; unresolvable: Target[] } {
   const checkable: Target[] = [];
   const unresolvable: Target[] = [];
   const seen = new Set<string>();
   for (const file of files) {
-    const text = stripComments(readFileSync(file, "utf8"));
+    const text = stripComments(withoutIgnoredRegions(readFileSync(file, "utf8")));
     const appNavigate = /\bnavigate\s*=\s*useAppNavigate\(\)/.test(text);
     for (const pattern of [TARGET, APP_PATH]) {
       pattern.lastIndex = 0;

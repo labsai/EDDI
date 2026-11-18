@@ -134,6 +134,7 @@ export function rolesForCapability(capability: Capability): readonly string[] {
  * so a more specific path sits above its parent. A path not listed is open to
  * every role that can reach the Manager at all.
  */
+// route-integrity:ignore-start (permission-gate prefixes, not navigation targets)
 const SCREENS: ReadonlyArray<{ path: string; capability: Capability; exact?: boolean }> = [
   { path: "/manage", capability: "dashboard.read", exact: true },
   { path: "/manage/agents/wizard", capability: "setup.guided" },
@@ -176,6 +177,7 @@ const SCREENS: ReadonlyArray<{ path: string; capability: Capability; exact?: boo
   { path: "/manage/branding", capability: "branding.manage" },
   { path: "/manage/userdata", capability: "userdata.own" },
 ];
+// route-integrity:ignore-end
 
 /** The capability the screen at `path` needs, or `null` when any role may open it. */
 export function capabilityForScreen(path: string): Capability | null {
