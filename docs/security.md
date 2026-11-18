@@ -514,19 +514,24 @@ The flag switches off only the vulnerable path: Base64 decoding falls back to pl
 
 **For a deployment running an older image,** add the flag yourself:
 
-- **EDDI:** set `JDK_JAVA_OPTIONS` to `--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics`. Setting the variable replaces the image's value, so keep the first two flags.
+- **EDDI:** if you do not set `JDK_JAVA_OPTIONS` yourself, set it to `--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics`. Setting the variable replaces the image's value, so keep the first two flags. If you already set it (for example for a custom truststore), append `-XX:-UseBASE64Intrinsics` to your existing value and keep your other options.
 - **Keycloak:** append `-XX:-UseBASE64Intrinsics` to `JAVA_OPTS_APPEND`.
+- **Demo image:** it carries the flag on its `java` ENTRYPOINT from this release on. An older demo image needs a rebuild or a new `--entrypoint`.
 
-Then check the running JVM, not the environment:
+A changed setting does not reach a running JVM. Recreate each affected container or pod so that it starts with the new flags: `docker compose up -d --force-recreate <service>` for Compose, `kubectl rollout restart` for a Deployment or StatefulSet (a `helm upgrade` that changes the pod template does this itself). Then check the running JVM, not the environment:
 
 ```bash
 docker exec <container> jcmd <java pid> VM.flags -all | grep UseBASE64Intrinsics   # expect: = false
 grep -o avx512vbmi /proc/cpuinfo | head -1                                           # on the host: empty = not affected
 ```
 
-`jcmd -l` inside the container lists the Java processes. In the Keycloak image, pid 1 is the start script, not the JVM.
+`jcmd -l` inside the container lists the Java processes. In the Keycloak image, pid 1 is the start script, not the JVM. The demo image is a JRE without `jcmd`, but its `java` is pid 1, so the flag is on its command line:
 
-When the pinned base images carry a fixed JDK, remove the flag from all five places and delete `Java4ShellMitigationTest`. The test fails the build if the flag disappears earlier.
+```bash
+docker exec <container> sh -c 'tr "\0" "\n" < /proc/1/cmdline | grep -x -e -XX:-UseBASE64Intrinsics'   # expect: the flag, printed back
+```
+
+Remove the flag from all five places, and delete `Java4ShellMitigationTest`, only when **all three** pinned bases carry a fixed JDK: the UBI `openjdk-25-runtime` digest (25.0.5.1 or later), the `eclipse-temurin:25-jre` digest of the demo image (25.0.5.1 or later) and the Keycloak image (JDK 21.0.13.1 or later). Moving one pin does not fix the others. The test fails the build whenever the flag is missing, so it goes in the same change.
 
 ## Caller Identity Forwarding — `CallerIdentityResolver`
 
