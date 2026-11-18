@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { renderPage, renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { server } from "@eddi/app-kit/test/mocks/server";
 import { MOCK_EMAIL_LOG } from "@eddi/app-kit/test/mocks/handlers";
 import { EmailMailLog } from "@/components/channels/email-mail-log";
@@ -121,11 +121,15 @@ describe("EmailMailLog", () => {
 
   it("does not revive a 403 that a later successful read already lifted", async () => {
     let mode: "ok" | "forbidden" | "down" = "ok";
+    let networkFailures = 0;
     server.use(
       http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
         const filtered = new URL(request.url).searchParams.has("state");
         if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
-        if (mode === "down") return HttpResponse.error();
+        if (mode === "down") {
+          networkFailures++;
+          return HttpResponse.error();
+        }
         return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
       }),
     );
@@ -146,8 +150,41 @@ describe("EmailMailLog", () => {
     // so its cached rows show.
     mode = "down";
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
-    expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument();
+    await waitFor(() => expect(networkFailures).toBeGreaterThan(0)); // the network error, not the old 403
+    await waitFor(() => expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument());
+  });
+
+  it("does not revive a lifted 403 when the section mounts again on the same cache", async () => {
+    let mode: "ok" | "forbidden" | "down" = "ok";
+    let networkFailures = 0;
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+        const filtered = new URL(request.url).searchParams.has("state");
+        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        if (mode === "down") {
+          networkFailures++;
+          return HttpResponse.error();
+        }
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+      }),
+    );
+    const first = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    const { queryClient } = first;
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+    mode = "forbidden";
+    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
+    mode = "ok";
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
+    first.unmount();
+
+    // Back later, same cache: the section starts on "All" (old 403 cached), whose
+    // refetch now fails on the network.
+    mode = "down";
+    renderPage("/", <EmailMailLog channelId="ch-email" />, "/", queryClient);
+    await waitFor(() => expect(networkFailures).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("email-log-row-all")).toBeInTheDocument());
   });
 
   it("counts a 403 that arrives after the filter has already changed", async () => {

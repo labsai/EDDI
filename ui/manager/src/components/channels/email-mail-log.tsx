@@ -167,9 +167,14 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
       if (!isApiError(error) || error.status !== 403 || at <= liftedAt.current) return;
       setDeniedAt((prev) => (prev === null || at > prev ? at : prev));
     };
-    for (const query of queryClient.getQueryCache().getAll()) {
-      if (JSON.stringify(query.queryKey).startsWith(prefix)) noteDenial(query.state.error, query.state.errorUpdatedAt);
+    const cached = queryClient.getQueryCache().getAll().filter((query) => JSON.stringify(query.queryKey).startsWith(prefix));
+    // Mounting again (the cache outlives the component): rebuild "lifted" from
+    // the cache itself — a successful read newer than a cached 403 already
+    // lifted it.
+    for (const query of cached) {
+      if (query.state.status === "success" && query.state.dataUpdatedAt > liftedAt.current) liftedAt.current = query.state.dataUpdatedAt;
     }
+    for (const query of cached) noteDenial(query.state.error, query.state.errorUpdatedAt);
     return queryClient.getQueryCache().subscribe((event) => {
       if (event.type !== "updated" || !JSON.stringify(event.query.queryKey).startsWith(prefix)) return;
       noteDenial(event.query.state.error, event.query.state.errorUpdatedAt);
