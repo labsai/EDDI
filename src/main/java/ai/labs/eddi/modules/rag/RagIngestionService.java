@@ -297,9 +297,8 @@ public class RagIngestionService {
                 // The new chunks are already stored, so a failed delete (pgvector wraps
                 // its SQLException in a RuntimeException), or a lease lost before it,
                 // leaves both versions retrievable. Still a failure — the operator should
-                // retry, and a retry
-                // removes every version but its own — but the status says what state it
-                // left, rather than a bare "failed".
+                // retry, and a retry removes every version but its own — but the status
+                // says what state it left, rather than a bare "failed".
                 ingestionState.put(warningKey(ragConfigId, ingestionId),
                         "The new version of '" + documentName + "' is stored, but removing the previous "
                                 + "version failed, so both may be retrievable until the replacement is retried.");
