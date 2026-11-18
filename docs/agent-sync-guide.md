@@ -238,9 +238,11 @@ flag the target cannot honour (see the identity bullet under
 [Key Design Decisions](#key-design-decisions)), the steps a first promotion dropped under
 `allowIncomplete=true`, and what the stores' save-time checks found in the written configs: an LLM
 config naming an unknown provider or a parameter out of range, a workflow step this server does not
-have, a `${vault:…}` reference the target has no secret for. Those checks refuse the same config when
-it is saved by hand (400); an import, sync, upgrade or duplicate only warns, so an archive that
-imported before keeps importing.
+have, and — to an administrator only, the role that may read secret metadata — a `${vault:…}`
+reference the target has no secret for. Those checks refuse the same config when it is saved by hand
+(400); an import, sync, upgrade, duplicate or API-agent re-sync only warns, so an archive that
+imported before keeps importing. The agent setup wizard (and MCP `setup_agent` / `create_api_agent`)
+is not lenient: what it generates passes the checks by construction.
 
 `compatible` and `compatibilityGeneration` say how the agent version the sync wrote was declared and which
 [compatibility generation](deployment-management-of-agents.md#the-compatibility-generation) it carries.
@@ -300,7 +302,7 @@ curl -X POST "http://localhost:7070/backup/import/sync/batch?sourceUrl=https://s
 | `sourceAgentVersion` | No | Version to sync (null = latest) |
 | `targetAgentId` | No | Local agent to upgrade. When omitted, the target is **the agent an earlier sync or import promoted from this source agent**, recognised by the `originId` its descriptor records — so repeating a sync never creates a second copy. Only when there is none (or `createNew=true`) is the agent created: the source's own export archive is fetched and imported with `strategy=create`, and the new agent records the source's id as its `originId`. The preview marks a target found this way with `matchStrategy: "originId"` on the agent row |
 | `createNew` | No | `true` to create a new agent even when one was promoted from this source before |
-| `allowIncomplete` | No | First promotion only: `true` creates the agent although its archive names configurations it does not contain; the unresolvable steps are dropped and listed in `warnings`. Default `false` = `422` |
+| `allowIncomplete` | No | First promotion only: `true` creates the agent although its archive names configurations it does not contain; the unresolvable steps are dropped and listed in `warnings`. Default `false` = `422`. A `SyncRequest` of a batch sync takes `"allowIncomplete": true` per agent |
 | `selectedResources` | No (execute only) | Comma-separated ids of the preview rows to apply (the row's `sourceId`; for a `REMOVE` row that is the target's id). Omit to apply everything; an empty value is a `400`. A `CONFLICT` row is applied only when named here |
 | `workflowOrder` | No (execute only) | Desired workflow order after sync: comma-separated workflow ids of the target (a list in a `SyncRequest`). Unlisted workflows follow in their current order; without it, new workflows are appended |
 | `compatible` | No (execute only; default `false`) | Declare the agent version this sync writes **compatible** with the one it replaces, so conversations running on the target switch to it on their next turn. By default the version is a breaking change and they stay where they are. A `SyncRequest` takes `"compatible": true` per agent. No effect when the sync creates a new agent or writes nothing. See [Promoting an agent by import or sync](deployment-management-of-agents.md#promoting-an-agent-by-import-or-sync) |
@@ -353,7 +355,7 @@ An archive can name a configuration it does not contain: EDDI's selective export
 workflow whole, references to the configs it left out included, because `strategy=merge` answers
 those from the target's own copy. A **create** has no such copy. Dropping the step used to answer
 `201` for an agent that deploys `READY` and then cannot answer (its LLM step is gone), so it is now
-refused with `422` and nothing is written:
+refused with `422` before anything is written (the archive's workflows are scanned first):
 
 ```json
 { "error": "The archive references 1 configuration(s) it does not contain, …",
@@ -366,15 +368,19 @@ first promotion) imports it anyway. The `201` then carries `X-Import-Warnings: <
 body `{ "resourceUri", "warnings": [...], "dropped": [...] }`. Nothing deploys an imported agent
 automatically; complete it before you deploy. A `201` with warnings but no dropped step (an unknown
 provider, a missing vault secret) means the same: the configuration was written, and the warning
-tells you what will fail at run time. `strategy=merge` and `strategy=upgrade` are not affected.
+tells you what will fail at run time. Without `allowIncomplete` a create with such findings is a plain
+`201` too, carrying the same header and body. `strategy=merge` and `strategy=upgrade` are not
+affected by `allowIncomplete`.
 
 ## What an export contains, and what it deliberately omits
 
 An export (`POST /backup/export/{agentId}`, then `GET /backup/export/{file}`) is **all or nothing**: when part of it cannot be built
 (a configuration that cannot be serialized or written, the prompt snippets, the schedules), no
 archive is produced and the call answers `500` with `{"error": "Export failed: the archive could not
-include …, so no archive was produced. See the server log for the cause."}`. It used to skip the
-part and answer as if the archive were complete.
+include …, so no archive was produced. See the server log for the cause."}` — `422`, naming the
+resource, when a stored configuration itself cannot be serialized. It used to skip the part and
+answer as if the archive were complete. A configuration whose descriptor row is missing is still
+exported (without its name), as before.
 
 An archive **contains**: the agent, its workflows, every configuration those reference (behavior
 rules, HTTP calls, LLM, property, output, MCP calls, RAG, parsers, dictionaries), the prompt
