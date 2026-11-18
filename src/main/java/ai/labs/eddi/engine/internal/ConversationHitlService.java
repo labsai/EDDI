@@ -626,8 +626,10 @@ class ConversationHitlService {
             // refusal puts the pause back untouched, so the call stays pending for
             // someone who may decide it. Rejections are never refused.
             try {
-                decision.setMandatoryApproval(MandatoryApproverCheck.enforce(snapshot.getHitlPendingToolCalls(), decision,
-                        callerIdentityContext.captureOrCurrent(), snapshot.getUserId(), snapshot.getResolutionProvenance()));
+                var byCall = MandatoryApproverCheck.enforceByCall(snapshot.getHitlPendingToolCalls(), decision,
+                        callerIdentityContext.captureOrCurrent(), snapshot.getUserId(), snapshot.getResolutionProvenance());
+                decision.setMandatoryApprovalsByCallId(byCall);
+                decision.setMandatoryApproval(MandatoryApproverCheck.strictest(snapshot.getHitlPendingToolCalls(), byCall));
             } catch (MandatoryApprovalRefusedException refused) {
                 LOGGER.infof("Refused a decision on conversation %s: it approves a call that needs a mandatory approval its "
                         + "approver cannot give (%s); the pause is untouched", sanitize(conversationId), refused.getMessage());

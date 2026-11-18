@@ -161,6 +161,14 @@ public class HitlDecision {
      */
     @JsonIgnore
     private MandatoryApprovalAttribution mandatoryApproval;
+    /**
+     * The same, per approved mandatory call (call id to attribution): a batch may
+     * hold calls with different approver rules, and each call is executed and
+     * recorded with its own. {@link #getMandatoryApproval()} is the strictest of
+     * them, for the decision's audit entry. Server-side only.
+     */
+    @JsonIgnore
+    private Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId;
 
     /**
      * The id of a pause that started at {@code pausedAt}: its epoch milliseconds.
@@ -285,6 +293,29 @@ public class HitlDecision {
     @JsonIgnore
     public void setMandatoryApproval(MandatoryApprovalAttribution mandatoryApproval) {
         this.mandatoryApproval = mandatoryApproval;
+    }
+
+    @JsonIgnore
+    public Map<String, MandatoryApprovalAttribution> getMandatoryApprovalsByCallId() {
+        return mandatoryApprovalsByCallId;
+    }
+
+    @JsonIgnore
+    public void setMandatoryApprovalsByCallId(Map<String, MandatoryApprovalAttribution> mandatoryApprovalsByCallId) {
+        this.mandatoryApprovalsByCallId = mandatoryApprovalsByCallId;
+    }
+
+    /**
+     * How the approval of mandatory call {@code callId} was accepted, or null. Per
+     * call when the resume path recorded it per call; otherwise the decision-wide
+     * attribution.
+     */
+    @JsonIgnore
+    public MandatoryApprovalAttribution getMandatoryApprovalOf(String callId) {
+        if (mandatoryApprovalsByCallId != null) {
+            return callId == null ? null : mandatoryApprovalsByCallId.get(callId);
+        }
+        return mandatoryApproval;
     }
 
     @JsonIgnore

@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /**
@@ -43,6 +44,12 @@ public final class MandatoryApproverCheck {
      * administrator.
      */
     public static final String REFUSED_NOT_USER = "Only the user of this conversation or an administrator can confirm this.";
+    /**
+     * Refusal: the approver is the conversation's user, but nobody verified that
+     * identity when the conversation was created.
+     */
+    public static final String REFUSED_UNVERIFIED_USER = "This conversation's user identity was not verified when it started, so only an "
+            + "administrator can confirm this.";
     /** Refusal: an administrator approved for the user without a reason. */
     public static final String REFUSED_ADMIN_WITHOUT_REASON = "An administrator confirming this for the user of the conversation must give a "
             + "reason in the decision's note.";
@@ -72,17 +79,51 @@ public final class MandatoryApproverCheck {
      */
     public static MandatoryApprovalAttribution enforce(PendingToolCallBatch batch, HitlDecision decision, CallerIdentity approver,
                                                        String conversationUserId, ResolutionPrincipal.Provenance provenance) {
+        return strictest(batch, enforceByCall(batch, decision, approver, conversationUserId, provenance));
+    }
+
+    /**
+     * As {@link #enforce}, answering how each approved mandatory call's approval
+     * was accepted (call id to attribution) - each call is executed and recorded
+     * with its own, since a batch may mix approver rules. Empty when the decision
+     * approves no mandatory call.
+     *
+     * @throws MandatoryApprovalRefusedException
+     *             when the approver rule of any approved mandatory call refuses
+     */
+    public static Map<String, MandatoryApprovalAttribution> enforceByCall(PendingToolCallBatch batch, HitlDecision decision,
+                                                                          CallerIdentity approver, String conversationUserId,
+                                                                          ResolutionPrincipal.Provenance provenance) {
+        Map<String, MandatoryApprovalAttribution> byCall = new LinkedHashMap<>();
         if (batch == null || batch.getCalls() == null || decision == null) {
+            return byCall;
+        }
+        for (PendingToolCall call : batch.getCalls()) {
+            if (call == null || !call.isMandatory() || !approves(decision, call)) {
+                continue;
+            }
+            byCall.put(call.getCallId(), check(ruleOf(call), decision, noteFor(decision, call), approver, conversationUserId, provenance));
+        }
+        return byCall;
+    }
+
+    /**
+     * The attribution of the call with the strictest approver rule in
+     * {@code byCall} (the first on a tie), or null when there is none - what the
+     * decision's audit entry records.
+     */
+    public static MandatoryApprovalAttribution strictest(PendingToolCallBatch batch, Map<String, MandatoryApprovalAttribution> byCall) {
+        if (batch == null || batch.getCalls() == null || byCall == null || byCall.isEmpty()) {
             return null;
         }
         MandatoryApprovalAttribution strictest = null;
         ApproverRule strictestRule = null;
         for (PendingToolCall call : batch.getCalls()) {
-            if (call == null || !call.isMandatory() || !approves(decision, call)) {
+            MandatoryApprovalAttribution accepted = call == null ? null : byCall.get(call.getCallId());
+            if (accepted == null) {
                 continue;
             }
             ApproverRule rule = ruleOf(call);
-            MandatoryApprovalAttribution accepted = check(rule, decision, noteFor(decision, call), approver, conversationUserId, provenance);
             if (strictestRule == null || rule.ordinal() > strictestRule.ordinal()) {
                 strictestRule = rule;
                 strictest = accepted;
@@ -152,7 +193,8 @@ public final class MandatoryApproverCheck {
         if (approver == null) {
             throw new MandatoryApprovalRefusedException(REFUSED_NOT_USER);
         }
-        if (CallerIdentityContext.isSameUser(approver, conversationUserId) && provenance == ResolutionPrincipal.Provenance.VERIFIED) {
+        boolean sameUser = CallerIdentityContext.isSameUser(approver, conversationUserId);
+        if (sameUser && provenance == ResolutionPrincipal.Provenance.VERIFIED) {
             return new MandatoryApprovalAttribution(conversationUserId, null, ActingAs.USER);
         }
         if (approver.admin()) {
@@ -162,6 +204,6 @@ public final class MandatoryApproverCheck {
             String adminId = approver.userId() != null ? approver.userId() : decidedBy;
             return new MandatoryApprovalAttribution(adminId, conversationUserId, ActingAs.ADMIN_ON_BEHALF);
         }
-        throw new MandatoryApprovalRefusedException(REFUSED_NOT_USER);
+        throw new MandatoryApprovalRefusedException(sameUser ? REFUSED_UNVERIFIED_USER : REFUSED_NOT_USER);
     }
 }

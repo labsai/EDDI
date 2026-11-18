@@ -233,6 +233,9 @@ class ConversationServiceMandatoryApprovalTest {
 
         verify(conversationCoordinator).submitInOrder(eq(CONVERSATION_ID), any());
         assertEquals(new MandatoryApprovalAttribution(USER_ID, null, ActingAs.USER), decision.getMandatoryApproval());
+        // ...and per call, which is what the resumed tool loop executes each call with.
+        assertEquals(Map.of("call-1", new MandatoryApprovalAttribution(USER_ID, null, ActingAs.USER)),
+                decision.getMandatoryApprovalsByCallId());
     }
 
     @Test

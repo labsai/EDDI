@@ -310,26 +310,27 @@ class ToolLoopResumer {
             }
 
             // APPROVED (top-level default or per-call) below.
-            trace.add(approvedEntry(c, committedPlanHash, decision.getMandatoryApproval()));
+            // How this call's mandatory approval was accepted - per call, since a batch
+            // may mix approver rules; null for a call no mandatory rule gated.
+            MandatoryApprovalAttribution attribution = c.isMandatory() ? decision.getMandatoryApprovalOf(c.getCallId()) : null;
+            trace.add(approvedEntry(c, committedPlanHash, attribution));
 
             // A mandatory call (MandatoryApprovalRule) runs only on an approval the resume
             // path checked against its ApproverRule. Every decision is checked there; this
             // is the execution-side line, so a decision that reached this loop by any
-            // other route still cannot run one.
-            if (c.isMandatory() && decision.getMandatoryApproval() == null) {
-                currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"this call needs an approval its approver could not give\"}"));
-                trace.add(Map.of("type", "hitl_mandatory_unapproved", "tool", c.getToolName(), "callId", c.getCallId()));
-                emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
-                continue;
-            }
-            // Amended arguments are re-asked of the turn's mandatory rules: an approver
-            // must not amend a pattern-gated call into one that carries, say, a file — the
-            // approval given was not the one such a call needs.
-            if (amended != null && !c.isMandatory()
+            // other route still cannot run one. Amended arguments are re-asked of the
+            // turn's rules too: an approver must not amend a pattern-gated call into one
+            // that carries, say, a file - the approval given was not the one it needs.
+            String mandatoryRefusal = null;
+            if (c.isMandatory() && attribution == null) {
+                mandatoryRefusal = "this call needs an approval its approver could not give";
+            } else if (amended != null && !c.isMandatory()
                     && MandatoryApprovals.evaluate(setup.mandatoryApprovalRules(), rebuiltRequest(c, amended)) != null) {
+                mandatoryRefusal = "the amended call needs a mandatory approval it was not given";
+            }
+            if (mandatoryRefusal != null) {
                 currentMessages.add(ToolExecutionResultMessage.from(rebuiltRequest(c),
-                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"the amended call needs a mandatory approval it was not given\"}"));
+                        "{\"status\":\"NOT_EXECUTED\",\"reason\":\"" + mandatoryRefusal + "\"}"));
                 trace.add(Map.of("type", "hitl_mandatory_unapproved", "tool", c.getToolName(), "callId", c.getCallId()));
                 emitToolResult(memory, task, toolCanonicalNames, c, ToolLoopRunner.TOOL_STATUS_NOT_EXECUTED);
                 continue;
@@ -434,7 +435,6 @@ class ToolLoopResumer {
                 // checked above, which preRequest property instructions can change.
                 // A mandatory call's attribution is bound around it, so a record the call
                 // creates can store who approved it and on whose behalf.
-                MandatoryApprovalAttribution attribution = c.isMandatory() ? decision.getMandatoryApproval() : null;
                 String result = ApprovedCallScope.run(protection, conversationId, attribution,
                         () -> CALLER_CONTEXT.callAsApprover(() -> toolLoopRunner.executeSingleToolCallResult(req, memory, trace,
                                 toolExecutors, toolRateLimits, toolCanonicalNames, toolSources, defaultRateLimit, maxBudget, conversationId,

@@ -101,7 +101,9 @@ class MandatoryApprovalResumeTest {
         void selfAssertedUser() {
             var refused = assertThrows(MandatoryApprovalRefusedException.class, () -> MandatoryApproverCheck.enforce(consent,
                     decision(HitlVerdict.APPROVED, USER_ID, null), user(USER_ID), USER_ID, Provenance.SELF_ASSERTED));
-            assertEquals(MandatoryApproverCheck.REFUSED_NOT_USER, refused.getMessage());
+            // The user is told why: their identity was never verified, not that they are
+            // someone else.
+            assertEquals(MandatoryApproverCheck.REFUSED_UNVERIFIED_USER, refused.getMessage());
         }
 
         @Test
@@ -204,6 +206,22 @@ class MandatoryApprovalResumeTest {
                     decision(HitlVerdict.APPROVED, OTHER_ID, null), user(OTHER_ID), USER_ID, Provenance.SELF_ASSERTED);
 
             assertEquals(new MandatoryApprovalAttribution(OTHER_ID, null, ActingAs.APPROVER), accepted);
+        }
+
+        @Test
+        @DisplayName("a batch mixing approver rules: each call keeps its own attribution; the strictest is the decision's")
+        void mixedBatchAttributedPerCall() {
+            var mixed = batch(call("oversight", ApproverRule.ANY_PERMITTED_APPROVER), call("consent", ApproverRule.CONVERSATION_USER));
+            var decision = decision(HitlVerdict.APPROVED, ADMIN_ID, "user asked by phone");
+
+            var byCall = MandatoryApproverCheck.enforceByCall(mixed, decision, admin(ADMIN_ID), USER_ID, Provenance.VERIFIED);
+
+            assertEquals(new MandatoryApprovalAttribution(ADMIN_ID, null, ActingAs.APPROVER), byCall.get("oversight"));
+            assertEquals(new MandatoryApprovalAttribution(ADMIN_ID, USER_ID, ActingAs.ADMIN_ON_BEHALF), byCall.get("consent"));
+            assertEquals(byCall.get("consent"), MandatoryApproverCheck.strictest(mixed, byCall));
+            decision.setMandatoryApprovalsByCallId(byCall);
+            assertEquals(byCall.get("oversight"), decision.getMandatoryApprovalOf("oversight"));
+            assertNull(decision.getMandatoryApprovalOf("unknown"), "per-call lookup never falls back to another call's attribution");
         }
 
         @Test

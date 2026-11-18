@@ -419,6 +419,21 @@ class ToolLoopMandatoryApprovalTest {
         }
 
         @Test
+        @DisplayName("checked approvals recorded per call, none for this call: NOT_EXECUTED despite a decision-wide attribution")
+        void perCallApprovalMissingNotExecuted() throws Exception {
+            ChatModel chatModel = mock(ChatModel.class);
+            when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("done"));
+            var decision = approval(new MandatoryApprovalAttribution(USER_ID, null, ActingAs.USER));
+            decision.setMandatoryApprovalsByCallId(Map.of("other-call", new MandatoryApprovalAttribution(USER_ID, null, ActingAs.USER)));
+
+            var result = orchestrator.resumeToolLoop(chatModel, calculatorTask(), memory, batch(pendingCall("{\"expression\":\"file\"}", true)),
+                    decision, true);
+
+            verify(calculatorTool, never()).calculate(anyString());
+            assertTrue(result.trace().stream().anyMatch(t -> "hitl_mandatory_unapproved".equals(t.get("type"))));
+        }
+
+        @Test
         @DisplayName("an administrator's checked approval: runs once, the call sees who approved and for whom, the trace records it")
         void adminApprovalRunsWithAttribution() throws Exception {
             var attribution = new MandatoryApprovalAttribution(ADMIN_ID, USER_ID, ActingAs.ADMIN_ON_BEHALF);
@@ -432,8 +447,13 @@ class ToolLoopMandatoryApprovalTest {
             ChatModel chatModel = mock(ChatModel.class);
             when(chatModel.chat(any(ChatRequest.class))).thenReturn(text("done"));
 
+            // As the resume path records it: per call, with a decision-wide value that is
+            // another call's — the call must run with its own.
+            var decision = approval(new MandatoryApprovalAttribution(ADMIN_ID, null, ActingAs.APPROVER));
+            decision.setMandatoryApprovalsByCallId(Map.of("c1", attribution));
+
             var result = orchestrator.resumeToolLoop(chatModel, calculatorTask(), memory, batch(pendingCall("{\"expression\":\"file\"}", true)),
-                    approval(attribution), true);
+                    decision, true);
 
             verify(calculatorTool, times(1)).calculate("file");
             assertEquals(attribution, seen.get());

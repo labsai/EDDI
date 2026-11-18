@@ -34,7 +34,8 @@ unchanged.
   holding one never gets an `AUTO_APPROVE` timeout. Amending a mandatory call is a `400` before the
   pause is consumed. `ANY_PERMITTED_APPROVER`: whoever may decide the pause today.
 - **Execution side.** `ToolLoopResumer` runs a mandatory call only when the resume path attached a
-  checked `MandatoryApprovalAttribution` to the decision, re-asks the rules about amended arguments,
+  checked `MandatoryApprovalAttribution` for that call to the decision (per call: a batch may mix
+  approver rules, and each call runs and is recorded with its own), re-asks the rules about amended arguments,
   records `actingAs`/`approvedBy`/`onBehalfOf` on the `hitl_approved` trace entry, and binds the
   attribution around the call (`ApprovedCallScope.attribution()`) so a record the call creates can
   store it.
