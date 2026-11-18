@@ -29,7 +29,10 @@ public final class CascadeCredentialPolicy {
 
     private static final Set<String> CREDENTIAL_BOUND = Set.of("apikey", "accesstoken", "authtoken", "nonazureapikey", "signingsecret", "apppassword",
             "bottoken", "compartmentid", "configprofile", "projectid", "region", "location", "organizationid", "serviceversion", "customheaders",
-            "customqueryparams", "customparameters");
+            "customqueryparams", "customparameters",
+            // account-bound resources of one vendor: a Bedrock guardrail, a Gemini cached
+            // content
+            "guardrailid", "guardrailversion", "guardrailstreammode", "cachedcontentname");
 
     /** The keys that are a credential in their own right (not an endpoint). */
     private static final Set<String> SECRET_KEYS = Set.of("apikey", "accesstoken", "authtoken", "nonazureapikey");

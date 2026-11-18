@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
@@ -44,14 +45,31 @@ class ConfidenceEvaluatorExtendedTest {
         }
 
         @Test
-        @DisplayName("a judge confidence of 85 is 85 percent; an unusable one falls back to the heuristic")
+        @DisplayName("a judge confidence of 85 or 85% is 85 percent; a fraction above 1, a negative or above 100 escalates")
         void judgeConfidenceAboveOne() {
             assertEquals(0.85, judgeSays("{\"confidence\": 85}").confidence(), 0.001);
-            assertEquals(0.015, judgeSays("{\"confidence\": 1.5}").confidence(), 0.0001);
-            // 400 and -3 are no confidence: "Some response" is short, so the heuristic
-            // gives 0.3
-            assertEquals(0.3, judgeSays("{\"confidence\": 400}").confidence(), 0.001);
-            assertEquals(0.3, judgeSays("{\"confidence\": -3}").confidence(), 0.001);
+            assertEquals(0.85, judgeSays("{\"confidence\": \"85%\"}").confidence(), 0.001);
+            assertEquals(0.85, judgeSays("{\"confidence\": 8.5e-1}").confidence(), 0.001);
+            assertEquals(1.0, judgeSays("{\"confidence\": 1}").confidence(), 0.001);
+            // 1.5 (a 1-5 scale), 400, -3 and a word are no confidence: escalate
+            for (String unusable : List.of("{\"confidence\": 1.5}", "{\"confidence\": 400}", "{\"confidence\": -3}",
+                    "{\"confidence\": \"high\"}")) {
+                assertEquals(0.0, judgeSays(unusable).confidence(), 0.001, unusable);
+            }
+        }
+
+        @Test
+        @DisplayName("fallbackWhenJudgeUnavailable=true restores the heuristic for a failed judge")
+        void optInHeuristic() {
+            var heuristic = new LlmConfiguration.HeuristicConfig();
+            heuristic.setFallbackWhenJudgeUnavailable(true);
+            ChatModel judgeModel = mock(ChatModel.class);
+            when(judgeModel.chat(any(List.class))).thenThrow(new RuntimeException("API error"));
+
+            var result = ConfidenceEvaluator.evaluateWithJudge("A reasonably long response that should get decent heuristic confidence",
+                    judgeModel, heuristic);
+
+            assertEquals(0.8, result.confidence(), 0.01);
         }
 
         private ConfidenceEvaluator.EvaluationResult judgeSays(String reply) {
@@ -72,8 +90,9 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            // Falls back to heuristic — long response with no hedging → 0.8
-            assertEquals(0.8, result.confidence(), 0.01);
+            // No usable verdict: fails towards escalation, not the heuristic's accepting
+            // 0.8
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test
@@ -85,8 +104,8 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            // Falls back to heuristic
-            assertEquals(0.8, result.confidence(), 0.01);
+            // A judge that threw: escalate
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test
@@ -101,7 +120,7 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            assertEquals(0.8, result.confidence(), 0.01);
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test

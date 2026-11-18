@@ -48,13 +48,17 @@ class TaskBidEngineTest {
                 "{\"bids\": [{\"subject\": \"Write the migration\", \"confidence\": 1.7, \"estimatedComplexity\": \"M\", \"rationale\": \"I own the schema\"}]}",
                 ALICE, SUBJECTS);
         assertEquals(1, strict.size());
-        assertEquals(1.0, strict.get(0).confidence(), "confidence clamps at 1.0");
+        assertEquals(0.0, strict.get(0).confidence(), "1.7 is no usable confidence, never a winning 1.0");
 
         var fenced = TaskBidEngine.parseBids(
                 "My bids:\n```json\n{\"bids\": [{\"subject\": \"Update the docs\", \"confidence\": -0.5}]}\n```",
                 ALICE, SUBJECTS);
         assertEquals(1, fenced.size());
-        assertEquals(0.0, fenced.get(0).confidence(), "confidence clamps at 0.0");
+        assertEquals(0.0, fenced.get(0).confidence(), "a negative confidence is no confidence");
+
+        var percent = TaskBidEngine.parseBids(
+                "{\"bids\": [{\"subject\": \"Update the docs\", \"confidence\": 85}]}", ALICE, SUBJECTS);
+        assertEquals(0.85, percent.get(0).confidence(), 1e-9, "a whole number is a percentage");
 
         assertTrue(TaskBidEngine.parseBids("I'd love to take the migration work!", ALICE, SUBJECTS).isEmpty(),
                 "prose is never guessed into a bid");

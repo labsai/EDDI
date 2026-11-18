@@ -42,22 +42,22 @@ class ConfidenceEvaluatorTest {
         }
 
         @Test
-        @DisplayName("a confidence above 1.0 is read as a percentage, never accepted as certain")
-        void testAboveOneIsAPercentage() {
+        @DisplayName("a fraction above 1.0 (a 1-5 scale, a slip) is no confidence, never accepted as certain")
+        void testAboveOneIsUnusable() {
             String response = "{\"response\": \"Sure!\", \"confidence\": 1.5}";
             var result = ConfidenceEvaluator.evaluateStructuredOutput(response);
 
-            assertEquals(0.015, result.confidence(), 0.0001);
+            assertEquals(0.0, result.confidence(), 0.0001);
+            assertEquals("Sure!", result.response());
         }
 
         @Test
-        @DisplayName("a negative confidence is no confidence: the answer is scored by the heuristic")
+        @DisplayName("a negative confidence is no confidence: the step escalates and the answer is kept")
         void testNegativeIsUnusable() {
             String response = "{\"response\": \"Hmm\", \"confidence\": -0.5}";
             var result = ConfidenceEvaluator.evaluateStructuredOutput(response);
 
-            // "Hmm" is short -> the heuristic's short score
-            assertEquals(0.3, result.confidence(), 0.001);
+            assertEquals(0.0, result.confidence(), 0.001);
             assertEquals("Hmm", result.response());
         }
 

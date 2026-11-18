@@ -73,19 +73,23 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("confidence above 1 is a percentage, anything else out of range is no confidence (heuristic)")
+    @DisplayName("a whole number above 1 is a percentage; a fraction above 1, a negative, above 100 or a word escalates (answer kept)")
     void confidence_outOfRange() {
-        // 5.0 reads as 5%: the step escalates, it is not accepted as certain.
+        // 5.0 is a whole number: 5% — the step escalates, it is not accepted as
+        // certain.
         var five = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 5.0}", null);
         assertEquals(0.05, five.confidence(), 0.001);
         assertEquals("x", five.response());
-        // Negative: unusable, so the unwrapped answer is scored by the heuristic (short
-        // -> 0.3).
-        var negative = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": -2.0}", null);
-        assertEquals(0.3, negative.confidence(), 0.001);
-        assertEquals("x", negative.response());
-        // Above 100 is unusable too.
-        assertEquals(0.3, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 250}", null).confidence(), 0.001);
+        for (String unusable : List.of("-2.0", "250", "1.5", "1.2", "\"high\"")) {
+            var r = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": " + unusable + "}", null);
+            assertEquals(0.0, r.confidence(), 0.001, unusable);
+            assertEquals("x", r.response(), unusable);
+        }
+        // the opt-in scores the unwrapped answer with the heuristic ("x" is short ->
+        // 0.3)
+        var heuristic = new HeuristicConfig();
+        heuristic.setFallbackWhenJudgeUnavailable(true);
+        assertEquals(0.3, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\",\"confidence\": 250}", heuristic).confidence(), 0.001);
     }
 
     @Test
@@ -102,8 +106,9 @@ class ConfidenceEvaluatorEnterpriseTest {
         var percent = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 85}", null);
         assertEquals(0.85, percent.confidence(), 0.001);
         var unusable = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": 400}", null);
-        assertEquals(0.3, unusable.confidence(), 0.001);
+        assertEquals(0.0, unusable.confidence(), 0.001);
         assertEquals("x", unusable.response());
+        assertEquals(0.85, ConfidenceEvaluator.evaluateStructuredOutput("{\"response\":\"x\" \"confidence\": \"85%\"}", null).confidence(), 0.001);
     }
 
     @Test
@@ -292,21 +297,22 @@ class ConfidenceEvaluatorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("judge output without any JSON confidence — falls back to heuristic")
-    void judge_noConfidence_fallsBack() {
+    @DisplayName("judge output without any JSON confidence — escalates, the answer is kept")
+    void judge_noConfidence_escalates() {
         ChatModel judge = mock(ChatModel.class);
         when(judge.chat(anyList())).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("I think it's pretty good honestly.")).build());
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
-        assertEquals(0.8, r.confidence(), 0.001);
+        assertEquals(0.0, r.confidence(), 0.001);
+        assertEquals("A confident, complete answer to the user's question here.", r.response());
     }
 
     @Test
-    @DisplayName("judge that throws — falls back to heuristic")
-    void judge_throws_fallsBack() {
+    @DisplayName("judge that throws — escalates")
+    void judge_throws_escalates() {
         ChatModel judge = mock(ChatModel.class);
         when(judge.chat(anyList())).thenThrow(new RuntimeException("judge down"));
         EvaluationResult r = ConfidenceEvaluator.evaluateWithJudge("A confident, complete answer to the user's question here.", judge, null);
-        assertEquals(0.8, r.confidence(), 0.001);
+        assertEquals(0.0, r.confidence(), 0.001);
     }
 
     @Test

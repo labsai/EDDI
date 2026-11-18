@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.TaskDefinition;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.AwardedBid;
 import ai.labs.eddi.configs.groups.model.SharedTaskList.TaskItem;
+import ai.labs.eddi.modules.llm.impl.ReportedConfidence;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -144,9 +145,10 @@ public final class TaskBidEngine {
             if (!seen.add(canonical)) {
                 continue; // first bid per task wins within one reply
             }
-            double confidence = b.path("confidence").isNumber()
-                    ? Math.max(0.0, Math.min(1.0, b.path("confidence").asDouble()))
-                    : 0.0;
+            // The same reading as the cascade's confidences: 0..1, or a whole percentage;
+            // anything else bids at 0.0 instead of clamping to a winning 1.0.
+            Double reported = ReportedConfidence.of(b.get("confidence"));
+            double confidence = reported != null ? reported : 0.0;
             String complexity = b.path("estimatedComplexity").isTextual() ? b.path("estimatedComplexity").asText() : null;
             String rationale = b.path("rationale").isTextual() ? b.path("rationale").asText() : null;
             bids.add(new Bid(member.agentId(), member.speakingOrder(), canonical, confidence, complexity, rationale));

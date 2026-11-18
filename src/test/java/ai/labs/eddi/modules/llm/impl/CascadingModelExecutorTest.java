@@ -540,6 +540,10 @@ class CascadingModelExecutorTest {
             assertNull(result.get("baseUrl"));
             assertNull(result.get("customHeaders"));
             assertNull(result.get("region"));
+            for (String bound : List.of("guardrailId", "guardrailVersion", "cachedContentName", "customParameters", "serviceVersion", "location")) {
+                assertNull(CascadingModelExecutor.mergeParams(Map.of(bound, "x", "temperature", "0.2"), Map.of(), "bedrock", "gemini").get(bound),
+                        bound);
+            }
             assertEquals("0.2", result.get("temperature"));
             assertEquals("30000", result.get("timeout"));
             assertEquals("claude", result.get("modelName"));
