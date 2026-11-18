@@ -268,7 +268,10 @@
     "deployFailedIn": "{{environment}} へのデプロイに失敗しました",
     "undeployCompatibleHint": "互換性のあるデプロイ済みバージョンで続行できる会話は終了されず、次のターンでそのバージョンに移ります。",
     "sortLoadingAll": "並べ替えを完全にするため、すべてのエージェントを読み込んでいます…",
-    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。"
+    "createNamingFailed": "エージェントは作成されましたが、名前を保存できませんでした。エージェントのページで名前を変更してください。",
+    "deleted": "{{name}} を削除しました",
+    "confirmDeleteNamed": "{{name}} を削除しますか？",
+    "deleteEndAndDelete": "会話を終了して削除"
   },
   "agentDetail": {
     "a2aDescHint": "エージェントカードに表示され、他のエージェントがこのエージェントの機能を理解するのに役立ちます",
@@ -850,7 +853,10 @@
     "endReasonRetired": "終了：エージェントのバージョンが廃止されました",
     "waitingForPause": "一時停止の保存を待っています…",
     "searchTranscriptLabel": "トランスクリプトを検索",
-    "matchCount": "一致したステップ: {{matches}}"
+    "matchCount": "一致したステップ: {{matches}}",
+    "errorTitle": "この会話はエラー状態です",
+    "errorNoDetail": "エンジンは理由を記録していません。失敗したターンのサーバーログに詳細があります。",
+    "errorStep": "ステップ {{step}}"
   },
   "resources": {
     "backToWorkflow": "ワークフローに戻る",
@@ -1969,7 +1975,9 @@
     "noMatchesHint": "検索の対象はここに読み込み済みのエントリのみです。さらに過去を調べるには、古いエントリを読み込むか、フィルターを調整してください。",
     "searchLogsLabel": "読み込み済みのログエントリを検索",
     "errorCount_one": "エラー {{count}} 件",
-    "warnCount_one": "警告 {{count}} 件"
+    "warnCount_one": "警告 {{count}} 件",
+    "filteredCountLoaded": "読み込み済み {{total}} 件中 {{shown}} 件",
+    "filterLoadedOnly": "レベルフィルターと件数は、これまでに読み込んだ項目だけが対象です。より古い項目も一致する可能性があります。さらに遡って検索するには古い項目を読み込んでください。"
   },
   "secrets": {
     "loadError": "シークレットを読み込めませんでした",
@@ -3016,7 +3024,8 @@
     "discardEditsDescription": "設定のセクションがまだ編集中です。パネルを閉じると、そこでの変更は破棄されます。",
     "discardEditsConfirm": "破棄",
     "keepEditing": "編集を続ける",
-    "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。"
+    "streamInterrupted": "ライブ接続が切断されました。保存済みのディスカッションを表示しています。実行中は引き続き更新されます。",
+    "inputDisabledNoMembers": "ディスカッションを始めるには、このグループにメンバーを 1 人以上追加してください"
   },
   "memories": {
     "title": "ユーザーメモリ",
@@ -3494,7 +3503,8 @@
     "targetsCol": "ターゲット",
     "type": "タイプ",
     "unnamed": "名前なしチャネル",
-    "version": "バージョン"
+    "version": "バージョン",
+    "duplicated": "チャネルを複製しました"
   },
   "channelDetail": {
     "saveSuccess": "チャンネルを保存しました",
@@ -3545,7 +3555,11 @@
     "selectGroup": "グループを選択…",
     "unknownGroup": "{{id}}（見つかりません）",
     "plaintextSecret": "{{fields}} はシークレットボールトに保存し、${vault:…} で参照してください。平文の認証情報は保存されません。",
-    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。"
+    "plaintextStored": "このチャネルは {{fields}} を平文で保存しています。シークレットボールトに移し、保存して参照に置き換えてください。",
+    "triggerReserved": "「help」は予約語です。ボットは対象の一覧で応答するため、トリガーにはできません。",
+    "triggerDuplicate": "このトリガーはすでにこの対象にあります。",
+    "channelIdEmpty": "チャンネル ID がないと、ルーターはこの連携を無視します。Slack のメッセージは届きません。",
+    "routerRefreshNote": "メッセージルーターは約 1 分以内に変更を反映します。"
   },
   "hitl": {
     "loadingApprovalDetails": "承認の詳細を読み込んでいます…",

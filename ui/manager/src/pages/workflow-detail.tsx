@@ -1,6 +1,7 @@
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { RequestAccessPanel } from "@/components/workspaces/request-access-panel";
 import { isForbidden } from "@/lib/access";
-import { useState, useCallback, useMemo, useEffect, useRef } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
@@ -14,7 +15,6 @@ import {
   Save,
   Undo2,
   Rocket,
-  X,
 } from "lucide-react";
 import { cn, formatRelativeTime } from "@eddi/app-kit/lib/utils";
 import { accessForDetail } from "@/lib/access";
@@ -1068,13 +1068,6 @@ function ParserDialog({
   onCancel: () => void;
 }) {
   const { t } = useTranslation();
-  const dialogRef = useRef<HTMLDivElement>(null);
-
-  // Auto-focus the dialog panel on mount for keyboard a11y
-  useEffect(() => {
-    dialogRef.current?.focus();
-  }, []);
-
   // Lock body scroll while dialog is open
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -1084,54 +1077,17 @@ function ParserDialog({
     };
   }, []);
 
-  // Close on Escape key
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        e.stopPropagation();
-        onCancel();
-      }
-    },
-    [onCancel],
-  );
-
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      data-testid="parser-edit-dialog"
-      onKeyDown={handleKeyDown}
+    // The shared dialog supplies Escape, the focus trap and focus return that the
+    // hand-rolled overlay lacked.
+    <AccessibleDialog
+      open
+      onClose={onCancel}
+      title={t("parserEditor.title", "Parser Configuration")}
+      testId="parser-edit-dialog"
+      maxWidth="max-w-lg"
     >
-      {/* Backdrop */}
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-in fade-in duration-150"
-        onClick={onCancel}
-        aria-hidden="true"
-      />
-
-      {/* Dialog panel */}
-      <div
-        ref={dialogRef}
-        tabIndex={-1}
-        className="relative z-10 w-full max-w-lg max-h-[85vh] overflow-y-auto rounded-xl border border-border bg-card shadow-2xl mx-4 p-5 outline-none animate-in fade-in zoom-in-95 duration-200"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="parser-dialog-title"
-      >
-        {/* Header */}
-        <div className="flex items-center justify-between mb-4">
-          <h3 id="parser-dialog-title" className="text-lg font-semibold text-foreground">
-            {t("parserEditor.title", "Parser Configuration")}
-          </h3>
-          <button
-            onClick={onCancel}
-            className="rounded-md p-1.5 text-muted-foreground hover:bg-secondary hover:text-foreground transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            aria-label={t("common.close", "Close")}
-          >
-            <X className="h-4 w-4" />
-          </button>
-        </div>
-
+      <div className="p-5">
         {/* Editor content */}
         <ParserEditor data={data} onChange={onChange} />
 
@@ -1153,6 +1109,6 @@ function ParserDialog({
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }

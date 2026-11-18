@@ -22,6 +22,8 @@ interface AccessibleDialogProps {
   maxWidth?: string;
   /** Whether to show the close button (default: true) */
   showClose?: boolean;
+  /** Optional data-testid of the close button. */
+  closeTestId?: string;
 }
 
 /**
@@ -41,6 +43,7 @@ export function AccessibleDialog({
   testId,
   maxWidth = "max-w-md",
   showClose = true,
+  closeTestId,
 }: AccessibleDialogProps) {
   const { t } = useTranslation();
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -168,6 +171,7 @@ export function AccessibleDialog({
                 onClick={onClose}
                 aria-label={t("common.close", "Close")}
                 className="rounded-md p-1 text-muted-foreground hover:bg-secondary hover:text-foreground"
+                data-testid={closeTestId}
               >
                 <X className="h-5 w-5" />
               </button>

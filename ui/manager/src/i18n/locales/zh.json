@@ -268,7 +268,10 @@
     "deployFailedIn": "在 {{environment}} 中部署失败",
     "undeployCompatibleHint": "可由兼容的已部署版本继续的会话不会被结束：它们会在下一轮切换到该版本。",
     "sortLoadingAll": "正在加载所有智能体，以便完整排序…",
-    "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。"
+    "createNamingFailed": "智能体已创建，但无法保存其名称。请在其页面中重命名。",
+    "deleted": "已删除 {{name}}",
+    "confirmDeleteNamed": "删除 {{name}}？",
+    "deleteEndAndDelete": "结束对话并删除"
   },
   "agentDetail": {
     "a2aDescHint": "显示在智能体名片中——帮助其他智能体了解此智能体的功能",
@@ -850,7 +853,10 @@
     "endReasonRetired": "已结束：该智能体版本已被停用",
     "waitingForPause": "正在等待暂停状态保存…",
     "searchTranscriptLabel": "搜索对话记录",
-    "matchCount": "匹配的步骤：{{matches}}"
+    "matchCount": "匹配的步骤：{{matches}}",
+    "errorTitle": "此对话处于错误状态",
+    "errorNoDetail": "引擎没有记录原因。失败回合的服务器日志中有详细信息。",
+    "errorStep": "步骤 {{step}}"
   },
   "resources": {
     "backToWorkflow": "返回工作流",
@@ -1969,7 +1975,9 @@
     "noMatchesHint": "搜索仅覆盖此处已加载的条目。请加载更早的条目或调整筛选条件以查看更早的内容。",
     "searchLogsLabel": "搜索已加载的日志条目",
     "errorCount_one": "{{count}} 个错误",
-    "warnCount_one": "{{count}} 个警告"
+    "warnCount_one": "{{count}} 个警告",
+    "filteredCountLoaded": "已加载的 {{total}} 条中的 {{shown}} 条",
+    "filterLoadedOnly": "级别过滤和计数仅涵盖目前已加载的条目；更早的条目仍可能匹配。请加载更早的条目以向前搜索。"
   },
   "secrets": {
     "loadError": "无法加载密钥",
@@ -3016,7 +3024,8 @@
     "discardEditsDescription": "配置中的某一部分仍在编辑。关闭面板会放弃你在其中所做的更改。",
     "discardEditsConfirm": "放弃",
     "keepEditing": "继续编辑",
-    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。"
+    "streamInterrupted": "实时连接已断开。正在显示已保存的讨论，讨论运行期间会持续更新。",
+    "inputDisabledNoMembers": "请至少为该群组添加一名成员以开始讨论"
   },
   "memories": {
     "title": "用户记忆",
@@ -3494,7 +3503,8 @@
     "targetsCol": "目标",
     "type": "类型",
     "unnamed": "未命名频道",
-    "version": "版本"
+    "version": "版本",
+    "duplicated": "已复制频道"
   },
   "channelDetail": {
     "saveSuccess": "频道已保存",
@@ -3545,7 +3555,11 @@
     "selectGroup": "选择群组…",
     "unknownGroup": "{{id}}（未找到）",
     "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
-    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
+    "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。",
+    "triggerReserved": "“help”是保留词：机器人会用目标列表回应它，因此不能用作触发词。",
+    "triggerDuplicate": "此触发词已在该目标上。",
+    "channelIdEmpty": "没有频道 ID，路由器会忽略此集成：没有任何 Slack 消息会到达它。",
+    "routerRefreshNote": "消息路由器会在大约一分钟内应用更改。"
   },
   "hitl": {
     "loadingApprovalDetails": "正在加载审批详情…",

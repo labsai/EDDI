@@ -297,7 +297,10 @@
     "deployFailedIn": "Deployment failed in {{environment}}",
     "undeployCompatibleHint": "Conversations that a compatible deployed version can continue are not ended: they move to it on their next turn.",
     "sortLoadingAll": "Loading every agent so the sort is complete…",
-    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page."
+    "createNamingFailed": "Agent created, but its name could not be saved. Rename it from its page.",
+    "deleted": "{{name}} deleted",
+    "confirmDeleteNamed": "Delete {{name}}?",
+    "deleteEndAndDelete": "End conversations and delete"
   },
   "agentDetail": {
     "a2aDescHint": "Shown in the Agent Card — helps other agents understand what this agent does",
@@ -879,7 +882,10 @@
     "endReasonRetired": "Ended: the agent version was retired",
     "waitingForPause": "Waiting for the pause to be saved…",
     "searchTranscriptLabel": "Search the transcript",
-    "matchCount": "Matching steps: {{matches}}"
+    "matchCount": "Matching steps: {{matches}}",
+    "errorTitle": "This conversation is in an error state",
+    "errorNoDetail": "The engine recorded no reason for it. The server log of the failing turn has the details.",
+    "errorStep": "Step {{step}}"
   },
   "commandPalette": {
     "placeholder": "Search pages, agents, actions…",
@@ -2010,7 +2016,9 @@
     "copied": "Log entry copied",
     "noMatches": "No loaded entries match your search.",
     "noMatchesHint": "Search only covers the entries already loaded here. Load older entries or adjust the filters to look further back.",
-    "searchLogsLabel": "Search the loaded log entries"
+    "searchLogsLabel": "Search the loaded log entries",
+    "filteredCountLoaded": "{{shown}} of {{total}} loaded entries",
+    "filterLoadedOnly": "The level filter and the counts cover only the entries loaded so far; older entries may still match. Load older entries to search further back."
   },
   "secrets": {
     "loadError": "Couldn't load secrets",
@@ -3069,7 +3077,8 @@
     "discardEditsDescription": "A section of the configuration is still being edited. Closing the panel discards what you changed there.",
     "discardEditsConfirm": "Discard",
     "keepEditing": "Keep editing",
-    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs."
+    "streamInterrupted": "The live connection was lost. Showing the saved discussion, which keeps updating while it runs.",
+    "inputDisabledNoMembers": "Add at least one member to this group to start a discussion"
   },
   "groupWizard": {
     "groupMemberHint": "This group will participate as a nested sub-group in the discussion.",
@@ -3535,7 +3544,8 @@
     "targetsCol": "Targets",
     "type": "Type",
     "unnamed": "Unnamed Channel",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Channel duplicated"
   },
   "channelDetail": {
     "saveSuccess": "Channel saved",
@@ -3586,7 +3596,11 @@
     "selectGroup": "Select a group…",
     "unknownGroup": "{{id}} (not found)",
     "plaintextSecret": "Store {{fields}} in the secrets vault and reference it as ${vault:…} — plaintext credentials are not saved.",
-    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference."
+    "plaintextStored": "This channel stores {{fields}} in plaintext. Move it to the secrets vault and save to replace it with a reference.",
+    "triggerReserved": "\"help\" is reserved: the bot answers it with the list of targets, so it cannot be a trigger.",
+    "triggerDuplicate": "This trigger is already on this target.",
+    "channelIdEmpty": "Without a channel ID the router ignores this integration: no Slack message reaches it.",
+    "routerRefreshNote": "The message router picks up changes within about a minute."
   },
   "hitl": {
     "loadingApprovalDetails": "Loading approval details…",

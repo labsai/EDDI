@@ -268,7 +268,10 @@
     "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
     "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다.",
     "sortLoadingAll": "정렬이 완전하도록 모든 에이전트를 불러오는 중…",
-    "createNamingFailed": "에이전트는 생성되었지만 이름을 저장하지 못했습니다. 에이전트 페이지에서 이름을 바꾸세요."
+    "createNamingFailed": "에이전트는 생성되었지만 이름을 저장하지 못했습니다. 에이전트 페이지에서 이름을 바꾸세요.",
+    "deleted": "{{name}}을(를) 삭제했습니다",
+    "confirmDeleteNamed": "{{name}}을(를) 삭제할까요?",
+    "deleteEndAndDelete": "대화를 종료하고 삭제"
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -850,7 +853,10 @@
     "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
     "waitingForPause": "일시 중지가 저장되기를 기다리는 중…",
     "searchTranscriptLabel": "대화 기록 검색",
-    "matchCount": "일치하는 단계: {{matches}}"
+    "matchCount": "일치하는 단계: {{matches}}",
+    "errorTitle": "이 대화는 오류 상태입니다",
+    "errorNoDetail": "엔진이 이유를 기록하지 않았습니다. 실패한 턴의 서버 로그에 자세한 내용이 있습니다.",
+    "errorStep": "{{step}}단계"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -1969,7 +1975,9 @@
     "noMatchesHint": "검색은 여기에 이미 불러온 항목만 대상으로 합니다. 더 이전 기록을 보려면 이전 항목을 불러오거나 필터를 조정하세요.",
     "searchLogsLabel": "불러온 로그 항목 검색",
     "errorCount_one": "오류 {{count}}개",
-    "warnCount_one": "경고 {{count}}개"
+    "warnCount_one": "경고 {{count}}개",
+    "filteredCountLoaded": "불러온 {{total}}개 중 {{shown}}개",
+    "filterLoadedOnly": "수준 필터와 개수는 지금까지 불러온 항목에만 적용됩니다. 더 오래된 항목도 일치할 수 있으니 더 오래된 항목을 불러와 더 이전까지 검색하세요."
   },
   "secrets": {
     "loadError": "시크릿을 불러올 수 없습니다",
@@ -3016,7 +3024,8 @@
     "discardEditsDescription": "구성의 한 섹션이 아직 편집 중입니다. 패널을 닫으면 그곳에서 변경한 내용이 취소됩니다.",
     "discardEditsConfirm": "버리기",
     "keepEditing": "계속 편집",
-    "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다."
+    "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다.",
+    "inputDisabledNoMembers": "토론을 시작하려면 이 그룹에 멤버를 한 명 이상 추가하세요"
   },
   "memories": {
     "title": "사용자 메모리",
@@ -3494,7 +3503,8 @@
     "targetsCol": "대상",
     "type": "유형",
     "unnamed": "이름 없는 채널",
-    "version": "버전"
+    "version": "버전",
+    "duplicated": "채널을 복제했습니다"
   },
   "channelDetail": {
     "saveSuccess": "채널이 저장되었습니다",
@@ -3545,7 +3555,11 @@
     "selectGroup": "그룹 선택…",
     "unknownGroup": "{{id}} (찾을 수 없음)",
     "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다.",
-    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요."
+    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요.",
+    "triggerReserved": "\"help\"는 예약어입니다. 봇이 대상 목록으로 응답하므로 트리거로 사용할 수 없습니다.",
+    "triggerDuplicate": "이 트리거는 이미 이 대상에 있습니다.",
+    "channelIdEmpty": "채널 ID가 없으면 라우터가 이 연동을 무시합니다. Slack 메시지가 전달되지 않습니다.",
+    "routerRefreshNote": "메시지 라우터는 약 1분 안에 변경 사항을 반영합니다."
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",

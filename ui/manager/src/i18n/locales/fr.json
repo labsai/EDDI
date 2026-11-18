@@ -269,7 +269,10 @@
     "deployFailedIn": "Le déploiement a échoué en {{environment}}",
     "undeployCompatibleHint": "Les conversations qu’une version compatible déployée peut poursuivre ne sont pas terminées : elles y passent lors de leur prochain tour.",
     "sortLoadingAll": "Chargement de tous les agents pour un tri complet…",
-    "createNamingFailed": "Agent créé, mais son nom n'a pas pu être enregistré. Renommez-le depuis sa page."
+    "createNamingFailed": "Agent créé, mais son nom n'a pas pu être enregistré. Renommez-le depuis sa page.",
+    "deleted": "{{name}} supprimé",
+    "confirmDeleteNamed": "Supprimer {{name}} ?",
+    "deleteEndAndDelete": "Terminer les conversations et supprimer"
   },
   "agentDetail": {
     "a2aDescHint": "Affiché dans l'Agent Card — aide les autres agents à comprendre ce que fait cet agent",
@@ -860,7 +863,10 @@
     "endReasonRetired": "Terminée : la version de l’agent a été retirée",
     "waitingForPause": "En attente de l'enregistrement de la pause…",
     "searchTranscriptLabel": "Rechercher dans la transcription",
-    "matchCount": "Étapes correspondantes : {{matches}}"
+    "matchCount": "Étapes correspondantes : {{matches}}",
+    "errorTitle": "Cette conversation est en état d’erreur",
+    "errorNoDetail": "Le moteur n’a enregistré aucune raison. Le journal du serveur pour le tour en échec contient les détails.",
+    "errorStep": "Étape {{step}}"
   },
   "resources": {
     "backToWorkflow": "Retour au workflow",
@@ -1989,7 +1995,9 @@
     "copied": "Entrée de journal copiée",
     "noMatches": "Aucune entrée chargée ne correspond à votre recherche.",
     "noMatchesHint": "La recherche ne porte que sur les entrées déjà chargées ici. Chargez des entrées plus anciennes ou ajustez les filtres pour remonter plus loin.",
-    "searchLogsLabel": "Rechercher dans les entrées de journal chargées"
+    "searchLogsLabel": "Rechercher dans les entrées de journal chargées",
+    "filteredCountLoaded": "{{shown}} sur {{total}} entrées chargées",
+    "filterLoadedOnly": "Le filtre de niveau et les compteurs ne portent que sur les entrées déjà chargées ; des entrées plus anciennes peuvent aussi correspondre. Chargez des entrées plus anciennes pour chercher plus loin."
   },
   "secrets": {
     "loadError": "Impossible de charger les secrets",
@@ -3046,7 +3054,8 @@
     "discardEditsDescription": "Une section de la configuration est encore en cours de modification. Fermer le panneau abandonne vos changements dans cette section.",
     "discardEditsConfirm": "Abandonner",
     "keepEditing": "Continuer la modification",
-    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours."
+    "streamInterrupted": "La connexion en direct a été perdue. Affichage de la discussion enregistrée, qui continue de se mettre à jour tant qu'elle est en cours.",
+    "inputDisabledNoMembers": "Ajoutez au moins un membre à ce groupe pour démarrer une discussion"
   },
   "memories": {
     "title": "Mémoire utilisateur",
@@ -3526,7 +3535,8 @@
     "targetsCol": "Cibles",
     "type": "Type",
     "unnamed": "Canal sans nom",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Canal dupliqué"
   },
   "channelDetail": {
     "saveSuccess": "Canal enregistré",
@@ -3578,7 +3588,11 @@
     "selectGroup": "Choisir un groupe…",
     "unknownGroup": "{{id}} (introuvable)",
     "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
-    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
+    "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence.",
+    "triggerReserved": "« help » est réservé : le bot y répond par la liste des cibles, il ne peut donc pas servir de déclencheur.",
+    "triggerDuplicate": "Ce déclencheur est déjà sur cette cible.",
+    "channelIdEmpty": "Sans identifiant de canal, le routeur ignore cette intégration : aucun message Slack ne l’atteint.",
+    "routerRefreshNote": "Le routeur de messages prend en compte les changements en une minute environ."
   },
   "hitl": {
     "loadingApprovalDetails": "Chargement des détails d’approbation…",

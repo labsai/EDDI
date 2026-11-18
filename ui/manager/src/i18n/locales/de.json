@@ -268,7 +268,10 @@
     "deployFailedIn": "Bereitstellung in {{environment}} fehlgeschlagen",
     "undeployCompatibleHint": "Unterhaltungen, die eine kompatible bereitgestellte Version fortsetzen kann, werden nicht beendet: Sie wechseln bei ihrem nächsten Zug zu ihr.",
     "sortLoadingAll": "Alle Agents werden geladen, damit die Sortierung vollständig ist…",
-    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um."
+    "createNamingFailed": "Agent erstellt, aber sein Name konnte nicht gespeichert werden. Benennen Sie ihn auf seiner Seite um.",
+    "deleted": "{{name}} gelöscht",
+    "confirmDeleteNamed": "{{name}} löschen?",
+    "deleteEndAndDelete": "Konversationen beenden und löschen"
   },
   "agentDetail": {
     "a2aDescHint": "Wird in der Agent Card angezeigt — hilft anderen Agenten zu verstehen, was dieser Agent tut",
@@ -850,7 +853,10 @@
     "endReasonRetired": "Beendet: Die Agent-Version wurde außer Betrieb genommen",
     "waitingForPause": "Warten, bis die Pause gespeichert ist…",
     "searchTranscriptLabel": "Im Verlauf suchen",
-    "matchCount": "Passende Schritte: {{matches}}"
+    "matchCount": "Passende Schritte: {{matches}}",
+    "errorTitle": "Diese Konversation befindet sich in einem Fehlerzustand",
+    "errorNoDetail": "Die Engine hat dafür keinen Grund aufgezeichnet. Das Server-Log des fehlgeschlagenen Schritts enthält die Details.",
+    "errorStep": "Schritt {{step}}"
   },
   "resources": {
     "backToWorkflow": "Zurück zum Workflow",
@@ -1969,7 +1975,9 @@
     "copied": "Log-Eintrag kopiert",
     "noMatches": "Keine geladenen Einträge entsprechen Ihrer Suche.",
     "noMatchesHint": "Die Suche umfasst nur die hier bereits geladenen Einträge. Laden Sie ältere Einträge oder passen Sie die Filter an, um weiter zurückzusuchen.",
-    "searchLogsLabel": "Geladene Log-Einträge durchsuchen"
+    "searchLogsLabel": "Geladene Log-Einträge durchsuchen",
+    "filteredCountLoaded": "{{shown}} von {{total}} geladenen Einträgen",
+    "filterLoadedOnly": "Der Level-Filter und die Zähler beziehen sich nur auf die bisher geladenen Einträge; ältere Einträge können trotzdem passen. Laden Sie ältere Einträge, um weiter zurückzusuchen."
   },
   "secrets": {
     "loadError": "Secrets konnten nicht geladen werden",
@@ -3016,7 +3024,8 @@
     "discardEditsDescription": "Ein Abschnitt der Konfiguration wird noch bearbeitet. Wenn Sie das Panel schließen, gehen Ihre Änderungen dort verloren.",
     "discardEditsConfirm": "Verwerfen",
     "keepEditing": "Weiter bearbeiten",
-    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft."
+    "streamInterrupted": "Die Live-Verbindung wurde unterbrochen. Angezeigt wird die gespeicherte Diskussion, die sich weiter aktualisiert, solange sie läuft.",
+    "inputDisabledNoMembers": "Fügen Sie dieser Gruppe mindestens ein Mitglied hinzu, um eine Diskussion zu starten"
   },
   "groupWizard": {
     "groupMemberHint": "Diese Gruppe nimmt als verschachtelte Untergruppe an der Diskussion teil.",
@@ -3494,7 +3503,8 @@
     "targetsCol": "Ziele",
     "type": "Typ",
     "unnamed": "Unbenannter Kanal",
-    "version": "Version"
+    "version": "Version",
+    "duplicated": "Kanal dupliziert"
   },
   "channelDetail": {
     "saveSuccess": "Kanal gespeichert",
@@ -3545,7 +3555,11 @@
     "selectGroup": "Gruppe auswählen …",
     "unknownGroup": "{{id}} (nicht gefunden)",
     "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
-    "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
+    "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen.",
+    "triggerReserved": "„help“ ist reserviert: Der Bot beantwortet es mit der Liste der Ziele und kann daher kein Trigger sein.",
+    "triggerDuplicate": "Dieser Trigger ist bei diesem Ziel bereits vorhanden.",
+    "channelIdEmpty": "Ohne Kanal-ID ignoriert der Router diese Integration: Keine Slack-Nachricht erreicht sie.",
+    "routerRefreshNote": "Der Nachrichten-Router übernimmt Änderungen innerhalb von etwa einer Minute."
   },
   "hitl": {
     "loadingApprovalDetails": "Freigabedetails werden geladen …",

@@ -269,7 +269,10 @@
     "deployFailedIn": "El despliegue falló en {{environment}}",
     "undeployCompatibleHint": "Las conversaciones que una versión compatible desplegada puede continuar no se terminan: pasan a ella en su siguiente turno.",
     "sortLoadingAll": "Cargando todos los agentes para que la ordenación sea completa…",
-    "createNamingFailed": "Agente creado, pero no se pudo guardar su nombre. Cámbialo desde su página."
+    "createNamingFailed": "Agente creado, pero no se pudo guardar su nombre. Cámbialo desde su página.",
+    "deleted": "{{name}} eliminado",
+    "confirmDeleteNamed": "¿Eliminar {{name}}?",
+    "deleteEndAndDelete": "Finalizar conversaciones y eliminar"
   },
   "agentDetail": {
     "a2aDescHint": "Se muestra en la Agent Card — ayuda a otros agentes a entender qué hace este agente",
@@ -860,7 +863,10 @@
     "endReasonRetired": "Finalizada: la versión del agente fue retirada",
     "waitingForPause": "Esperando a que se guarde la pausa…",
     "searchTranscriptLabel": "Buscar en la transcripción",
-    "matchCount": "Pasos coincidentes: {{matches}}"
+    "matchCount": "Pasos coincidentes: {{matches}}",
+    "errorTitle": "Esta conversación está en estado de error",
+    "errorNoDetail": "El motor no registró ningún motivo. El registro del servidor del turno fallido tiene los detalles.",
+    "errorStep": "Paso {{step}}"
   },
   "resources": {
     "backToWorkflow": "Volver al workflow",
@@ -1989,7 +1995,9 @@
     "copied": "Entrada de registro copiada",
     "noMatches": "Ninguna entrada cargada coincide con su búsqueda.",
     "noMatchesHint": "La búsqueda solo abarca las entradas ya cargadas aquí. Cargue entradas más antiguas o ajuste los filtros para buscar más atrás.",
-    "searchLogsLabel": "Buscar en las entradas de registro cargadas"
+    "searchLogsLabel": "Buscar en las entradas de registro cargadas",
+    "filteredCountLoaded": "{{shown}} de {{total}} entradas cargadas",
+    "filterLoadedOnly": "El filtro de nivel y los recuentos solo abarcan las entradas cargadas hasta ahora; las más antiguas aún pueden coincidir. Carga entradas anteriores para buscar más atrás."
   },
   "secrets": {
     "loadError": "No se pudieron cargar los secretos",
@@ -3046,7 +3054,8 @@
     "discardEditsDescription": "Aún se está editando una sección de la configuración. Si cierras el panel, se descartan los cambios que hiciste en ella.",
     "discardEditsConfirm": "Descartar",
     "keepEditing": "Seguir editando",
-    "streamInterrupted": "Se perdió la conexión en directo. Se muestra la discusión guardada, que se sigue actualizando mientras está en curso."
+    "streamInterrupted": "Se perdió la conexión en directo. Se muestra la discusión guardada, que se sigue actualizando mientras está en curso.",
+    "inputDisabledNoMembers": "Añade al menos un miembro a este grupo para iniciar una discusión"
   },
   "memories": {
     "title": "Memoria del usuario",
@@ -3526,7 +3535,8 @@
     "targetsCol": "Destinos",
     "type": "Tipo",
     "unnamed": "Canal sin nombre",
-    "version": "Versión"
+    "version": "Versión",
+    "duplicated": "Canal duplicado"
   },
   "channelDetail": {
     "saveSuccess": "Canal guardado",
@@ -3578,7 +3588,11 @@
     "selectGroup": "Selecciona un grupo…",
     "unknownGroup": "{{id}} (no encontrado)",
     "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
-    "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
+    "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia.",
+    "triggerReserved": "«help» está reservado: el bot responde con la lista de destinos, así que no puede ser un disparador.",
+    "triggerDuplicate": "Este disparador ya está en este destino.",
+    "channelIdEmpty": "Sin ID de canal, el enrutador ignora esta integración: ningún mensaje de Slack llega a ella.",
+    "routerRefreshNote": "El enrutador de mensajes recoge los cambios en aproximadamente un minuto."
   },
   "hitl": {
     "loadingApprovalDetails": "Cargando detalles de aprobación…",

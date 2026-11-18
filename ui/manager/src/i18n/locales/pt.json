@@ -269,7 +269,10 @@
     "deployFailedIn": "A implantação falhou em {{environment}}",
     "undeployCompatibleHint": "Conversas que uma versão compatível implantada pode continuar não são encerradas: elas passam para ela no próximo turno.",
     "sortLoadingAll": "A carregar todos os agentes para que a ordenação fique completa…",
-    "createNamingFailed": "Agente criado, mas não foi possível guardar o respetivo nome. Mude-o na página do agente."
+    "createNamingFailed": "Agente criado, mas não foi possível guardar o respetivo nome. Mude-o na página do agente.",
+    "deleted": "{{name}} excluído",
+    "confirmDeleteNamed": "Excluir {{name}}?",
+    "deleteEndAndDelete": "Encerrar conversas e excluir"
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -860,7 +863,10 @@
     "endReasonRetired": "Encerrada: a versão do agente foi desativada",
     "waitingForPause": "Aguardando a pausa ser salva…",
     "searchTranscriptLabel": "Pesquisar na transcrição",
-    "matchCount": "Etapas correspondentes: {{matches}}"
+    "matchCount": "Etapas correspondentes: {{matches}}",
+    "errorTitle": "Esta conversa está em estado de erro",
+    "errorNoDetail": "O mecanismo não registrou nenhum motivo. O log do servidor do turno com falha tem os detalhes.",
+    "errorStep": "Etapa {{step}}"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -1989,7 +1995,9 @@
     "copied": "Entrada de log copiada",
     "noMatches": "Nenhuma entrada carregada corresponde à sua pesquisa.",
     "noMatchesHint": "A pesquisa abrange apenas as entradas já carregadas aqui. Carregue entradas mais antigas ou ajuste os filtros para olhar mais atrás.",
-    "searchLogsLabel": "Pesquisar nas entradas de log carregadas"
+    "searchLogsLabel": "Pesquisar nas entradas de log carregadas",
+    "filteredCountLoaded": "{{shown}} de {{total}} entradas carregadas",
+    "filterLoadedOnly": "O filtro de nível e as contagens cobrem apenas as entradas carregadas até agora; entradas mais antigas ainda podem corresponder. Carregue entradas mais antigas para buscar mais atrás."
   },
   "secrets": {
     "loadError": "Não foi possível carregar os secrets",
@@ -3046,7 +3054,8 @@
     "discardEditsDescription": "Uma secção da configuração ainda está a ser editada. Fechar o painel descarta as alterações feitas nela.",
     "discardEditsConfirm": "Descartar",
     "keepEditing": "Continuar a editar",
-    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre."
+    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre.",
+    "inputDisabledNoMembers": "Adicione pelo menos um membro a este grupo para iniciar uma discussão"
   },
   "memories": {
     "title": "Memória do utilizador",
@@ -3526,7 +3535,8 @@
     "targetsCol": "Destinos",
     "type": "Tipo",
     "unnamed": "Canal sem nome",
-    "version": "Versão"
+    "version": "Versão",
+    "duplicated": "Canal duplicado"
   },
   "channelDetail": {
     "saveSuccess": "Canal salvo",
@@ -3578,7 +3588,11 @@
     "selectGroup": "Escolher um grupo…",
     "unknownGroup": "{{id}} (não encontrado)",
     "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas.",
-    "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência."
+    "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência.",
+    "triggerReserved": "\"help\" é reservado: o bot responde com a lista de destinos, então não pode ser um gatilho.",
+    "triggerDuplicate": "Este gatilho já está neste destino.",
+    "channelIdEmpty": "Sem um ID de canal, o roteador ignora esta integração: nenhuma mensagem do Slack chega a ela.",
+    "routerRefreshNote": "O roteador de mensagens aplica as alterações em cerca de um minuto."
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",

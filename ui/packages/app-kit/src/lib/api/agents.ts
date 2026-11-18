@@ -487,10 +487,13 @@ export function revokeAgentSigningKey(
 export function deleteAgent(
   id: string,
   version: number,
-  options?: { cascade?: boolean; permanent?: boolean }
+  options?: { cascade?: boolean; permanent?: boolean; endAllActiveConversations?: boolean }
 ): Promise<void> {
   const params = new URLSearchParams({ version: String(version) });
   if (options?.cascade) params.set("cascade", "true");
+  // Same switch the undeploy call takes: a delete the server refuses (409) because
+  // conversations are still running goes through once the user chose to end them.
+  if (options?.endAllActiveConversations) params.set("endAllActiveConversations", "true");
   if (options?.permanent) params.set("permanent", "true");
   return api.delete(`/agentstore/agents/${seg(id)}?${params}`);
 }

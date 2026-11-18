@@ -60,14 +60,24 @@ function TargetCard({
   const { t } = useTranslation();
   const uid = useId();
   const [triggerInput, setTriggerInput] = useState("");
+  /** Why the last Add did nothing — it used to refuse "help" without a word. */
+  const [triggerNote, setTriggerNote] = useState<"reserved" | "duplicate" | null>(null);
   const [expanded, setExpanded] = useState(true);
 
   const addTrigger = () => {
     const tr = triggerInput.trim().toLowerCase();
-    if (tr && !target.triggers.includes(tr) && tr !== "help") {
-      onUpdate({ ...target, triggers: [...target.triggers, tr] });
-      setTriggerInput("");
+    if (!tr) return;
+    if (tr === "help") {
+      setTriggerNote("reserved");
+      return;
     }
+    if (target.triggers.includes(tr)) {
+      setTriggerNote("duplicate");
+      return;
+    }
+    setTriggerNote(null);
+    onUpdate({ ...target, triggers: [...target.triggers, tr] });
+    setTriggerInput("");
   };
 
   return (
@@ -159,9 +169,16 @@ function TargetCard({
               ))}
             </div>
             <div className="flex gap-1">
-              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => setTriggerInput(e.target.value)} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addTrigger(); } }} />
+              <Input id={`${uid}-trigger`} data-testid={`target-trigger-input-${index}`} className="h-7 text-xs" value={triggerInput} onChange={(e) => { setTriggerInput(e.target.value); setTriggerNote(null); }} placeholder={t("channelDetail.addTrigger", "Add trigger...")} onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addTrigger(); } }} />
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTrigger}>{t("common.add", "Add")}</Button>
             </div>
+            {triggerNote && (
+              <p className="text-xs text-warn-700 dark:text-warn-300" role="status" data-testid={`target-trigger-note-${index}`}>
+                {triggerNote === "reserved"
+                  ? t("channelDetail.triggerReserved", "\"help\" is reserved: the bot answers it with the list of targets, so it cannot be a trigger.")
+                  : t("channelDetail.triggerDuplicate", "This trigger is already on this target.")}
+              </p>
+            )}
           </div>
 
           {/* Observe Mode — hidden until backend implements support */}
@@ -334,7 +351,10 @@ export function ChannelDetailPage() {
       }
       if (toSave !== draft) setDraft(toSave);
       setBaseline(JSON.stringify(toSave));
-      toast.success(t("channelDetail.saveSuccess", "Channel saved"));
+      toast.success(t("channelDetail.saveSuccess", "Channel saved"), {
+        // The router reads the integrations on a timer, not on every save.
+        description: t("channelDetail.routerRefreshNote", "The message router picks up changes within about a minute."),
+      });
       toastChannelWarnings(result?.warnings ?? [], t);
     } catch (err) {
       // Backend rejects duplicate/reserved triggers, missing targetId, a
@@ -543,7 +563,12 @@ export function ChannelDetailPage() {
         <div className="space-y-3">
           <div className="space-y-1">
             <label htmlFor={`${uid}-channelid`} className="text-xs font-medium">{t("channelDetail.channelId", "Slack Channel ID")}</label>
-            <Input id={`${uid}-channelid`} data-testid="channel-id-input" value={draft.platformConfig.channelId ?? ""} onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, channelId: e.target.value } })} placeholder="C0123ABCDEF" />
+            <Input id={`${uid}-channelid`} data-testid="channel-id-input" value={draft.platformConfig.channelId ?? ""} onChange={(e) => setDraft({ ...draft, platformConfig: { ...draft.platformConfig, channelId: e.target.value } })} placeholder="C0123ABCDEF" aria-invalid={!draft.platformConfig.channelId?.trim() || undefined} />
+            {!draft.platformConfig.channelId?.trim() && (
+              <p className="text-xs text-warn-700 dark:text-warn-300" role="status" data-testid="channel-id-empty-warning">
+                {t("channelDetail.channelIdEmpty", "Without a channel ID the router ignores this integration: no Slack message reaches it.")}
+              </p>
+            )}
           </div>
           <div className="space-y-1">
             <label htmlFor={`${uid}-bot`} className="text-xs font-medium">{t("channelDetail.botToken", "Bot Token")}</label>

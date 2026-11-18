@@ -354,16 +354,21 @@ export function GroupDetailPage() {
   }, [conversations, selectedConvId, streamState.isStreaming, streamState.conversationId, setSelectedConvId]);
 
   // ─── Context-aware input mode ─────────────────────────────────
+  // A group with nobody in it cannot hold a discussion: the composer used to be
+  // live, and the question went to a discussion no one would answer.
+  const groupHasNoMembers = !!groupConfig && (groupConfig.members ?? []).length === 0;
   const inputMode = useMemo((): "new" | "continue" | "disabled" => {
+    if (groupHasNoMembers) return "disabled";
     if (streamState.isStreaming) return "disabled";
     if (!selectedConvId) return "new";
     if (!selectedConversation) return "disabled"; // still loading
     const actions = selectedConversation.availableActions ?? [];
     if (actions.includes("continue")) return composerIntent;
     return "disabled";
-  }, [streamState.isStreaming, selectedConvId, selectedConversation, composerIntent]);
+  }, [groupHasNoMembers, streamState.isStreaming, selectedConvId, selectedConversation, composerIntent]);
 
   const disabledMessage = useMemo(() => {
+    if (groupHasNoMembers) return t("groups.inputDisabledNoMembers", "Add at least one member to this group to start a discussion");
     if (streamState.isStreaming) return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (!selectedConvId) return undefined;
     if (!selectedConversation) return t("common.loading", "Loading…");
@@ -376,7 +381,7 @@ export function GroupDetailPage() {
     if (state === "IN_PROGRESS" || state === "SYNTHESIZING") return t("groups.inputDisabledInProgress", "Discussion in progress…");
     if (state === "COMPLETED") return t("groups.inputDisabledCompleted", "Discussion completed");
     return undefined;
-  }, [streamState.isStreaming, selectedConvId, selectedConversation, t]);
+  }, [groupHasNoMembers, streamState.isStreaming, selectedConvId, selectedConversation, t]);
 
   const handleInputSubmit = useCallback((question: string, attachments?: GroupAttachmentRef[]) => {
     if (!groupId) return;
