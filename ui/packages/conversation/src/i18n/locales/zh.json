@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "停止未能作用于这一轮：它仍在另一台服务器上运行，其执行的操作依然有效。重新打开对话后即可看到它的回复。",
   "conversation.stop.unreachable": "停止请求未能到达服务器。这一轮可能仍在运行；请重新打开对话查看结果。",
   "conversation.diagram.label": "图表",
-  "conversation.diagram.source": "图表源代码"
+  "conversation.diagram.source": "图表源代码",
+  "conversation.send.unknownOutcome": "⚠️ 尚未收到回复。智能体可能仍在处理你的消息，所以消息保留在上方。请稍后再查看，或重新发送——不会被重复处理。",
+  "conversation.send.turnFailed": "⚠️ 智能体未能完成这一轮。你的消息在上方——重试即可再次发送。",
+  "conversation.send.empty": "智能体结束了，但没有回复这条消息。你可以换个说法，或再试一次。",
+  "conversation.reply.revised": "回复在流式显示后做了修订；你现在看到的是最终版本。"
 }

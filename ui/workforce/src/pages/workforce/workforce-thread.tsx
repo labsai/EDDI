@@ -50,8 +50,10 @@ import {
   RECONNECT_DELAYS_MS,
   STOP_VERIFY_DELAYS_MS,
   StreamEndedError,
+  turnFailureMessage,
   useAgentConversation,
   type ConversationMessage,
+  type Translate,
 } from "@eddi/conversation";
 import { extractOutputTexts, lastStepIndex, stepIndexes, type ContextMap, type ConversationSnapshot } from "@eddi/core";
 import { toolResultListener } from "@eddi/core/tool-events";
@@ -782,20 +784,55 @@ function createThreadConversation(
     presentFailure: (failure, ctx) => {
       const hooks = hooksRef.current;
       if (!hooks) return true;
-      if (failure.status === 409) {
-        // Refused WITHOUT being consumed because the conversation is paused:
-        // the backend never received the message, so it leaves the transcript.
-        // A paused error links to the approvals queue rather than a Retry.
-        ctx.withdraw();
-        hooks.failed(
-          hooks.t(
-            "Workforce.thread.pausedRejected",
-            "This conversation is paused waiting for a human decision, so the message was not sent.",
-          ),
-          true,
-          null,
-        );
-        return true;
+      // Rendered from the controller's classification, shared with the Manager and
+      // the widget — never from the status (a 409 is not always a pause, a 408 is
+      // not a refusal).
+      const sentence = (detail: { code?: string | null; message?: string } = {}) =>
+        turnFailureMessage(failure.class, failure.status, hooks.t as unknown as Translate, detail).replace(/^⚠️\s*/u, "");
+      switch (failure.class) {
+        case "ended":
+          // The controller's own handling: the conversation is marked ended and
+          // says so in the transcript.
+          return false;
+        case "paused":
+          // Refused WITHOUT being consumed because the conversation is paused:
+          // the backend never received the message, so it leaves the transcript.
+          // A paused error links to the approvals queue rather than a Retry.
+          ctx.withdraw();
+          hooks.failed(
+            hooks.t(
+              "Workforce.thread.pausedRejected",
+              "This conversation is paused waiting for a human decision, so the message was not sent.",
+            ),
+            true,
+            null,
+          );
+          return true;
+        case "notAccepted":
+          // Never accepted (too large, not found, not allowed, signed out, busy,
+          // unavailable): the message leaves the transcript, the draft comes
+          // back, and Retry sends it once more.
+          ctx.withdraw();
+          hooks.failed(sentence({ code: failure.code, message: failure.message }), false, null);
+          return true;
+        case "unknownOutcome":
+          // The server may have the message and may still be working. It stays on
+          // screen; Retry sends it again with the same Idempotency-Key, so the
+          // turn runs once (or answers from the stored one).
+          controller.dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+          hooks.failed(
+            failure.error instanceof StreamEndedError && failure.partial
+              ? hooks.t(
+                  "Workforce.thread.streamEnded",
+                  "The connection ended before the reply finished. What arrived is above — send again to retry.",
+                )
+              : sentence(),
+            false,
+            failure.partial ? null : ctx.userMessageId,
+          );
+          return true;
+        default:
+          break;
       }
       // The question stays on screen next to the error, so the reader sees
       // what they sent; Retry withdraws it just before re-sending. Not once

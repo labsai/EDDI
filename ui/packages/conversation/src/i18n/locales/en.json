@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "Stop did not reach this turn: it is still running on another server, and what it does still counts. Its reply appears when you reopen the conversation.",
   "conversation.stop.unreachable": "Stop could not reach the server. The turn may still be running there; reopen the conversation to see how it ended.",
   "conversation.diagram.label": "Diagram",
-  "conversation.diagram.source": "Diagram source"
+  "conversation.diagram.source": "Diagram source",
+  "conversation.send.unknownOutcome": "⚠️ No answer has arrived yet. The agent may still be working on your message, so it stays above. Check again in a moment, or send it again — it will not be processed twice.",
+  "conversation.send.turnFailed": "⚠️ The agent could not complete this turn. Your message is above — retry to send it again.",
+  "conversation.send.empty": "The agent finished without giving an answer to this message. You can rephrase it or try again.",
+  "conversation.reply.revised": "The reply was revised after it streamed in; what you see now is the final version."
 }

@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "La detención no alcanzó este turno: sigue ejecutándose en otro servidor y lo que haga cuenta. Su respuesta aparecerá cuando vuelvas a abrir la conversación.",
   "conversation.stop.unreachable": "La detención no pudo llegar al servidor. Puede que el turno siga ejecutándose allí; vuelve a abrir la conversación para ver cómo terminó.",
   "conversation.diagram.label": "Diagrama",
-  "conversation.diagram.source": "Código del diagrama"
+  "conversation.diagram.source": "Código del diagrama",
+  "conversation.send.unknownOutcome": "⚠️ Todavía no ha llegado ninguna respuesta. Puede que el agente siga trabajando en tu mensaje, por eso se queda arriba. Vuelve a comprobarlo en un momento o envíalo de nuevo: no se procesará dos veces.",
+  "conversation.send.turnFailed": "⚠️ El agente no pudo completar este turno. Tu mensaje está arriba: reinténtalo para enviarlo de nuevo.",
+  "conversation.send.empty": "El agente terminó sin dar una respuesta a este mensaje. Puedes reformularlo o intentarlo de nuevo.",
+  "conversation.reply.revised": "La respuesta se revisó después de llegar en directo; lo que ves ahora es la versión final."
 }

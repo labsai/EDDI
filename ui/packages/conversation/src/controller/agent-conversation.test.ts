@@ -425,10 +425,13 @@ describe("send — refusals and failures", () => {
     expect(texts(c).slice(-1)[0]).toContain(phrase);
   });
 
-  it("a dropped connection before any token withdraws; after one it keeps the partial reply", async () => {
+  it("a dropped connection before any token keeps the message (the server may have it); after one it keeps the partial reply", async () => {
     const c = await opened(failing(new TypeError("network")));
     await c.send("one");
-    expect(c.getSnapshot().restoreDraft).toBe("one");
+    // Accepted-but-outcome-unknown: the message stays and is not handed back.
+    expect(c.getSnapshot().restoreDraft).toBeNull();
+    expect(texts(c)).toContain("one");
+    expect(texts(c).slice(-1)[0]).toContain("No answer has arrived yet");
 
     const partial = fakeTransport({
       stream: vi.fn(async function* () {

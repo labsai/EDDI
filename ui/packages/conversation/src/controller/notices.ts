@@ -7,6 +7,7 @@
 
 import { ApiError, gatedToolNames, pauseReasonOf, type ApprovalStatus, type ConversationState } from "@eddi/core";
 import type { Translate } from "../i18n/text";
+import type { TurnFailureClass } from "./turn-failure";
 
 /** User-facing copy explaining why a turn was dropped. */
 export function skippedTurnMessage(state: ConversationState | undefined | null, t: Translate): string {
@@ -19,6 +20,53 @@ export function skippedTurnMessage(state: ConversationState | undefined | null, 
       return t("conversation.skipped.ended");
     default:
       return t("conversation.skipped.default");
+  }
+}
+
+/**
+ * The sentence for a turn that did not end with a reply, by its class (see
+ * `turn-failure`). `status` and `message` only choose the remedy inside
+ * `notAccepted` — sign in again, shorten, wait, ask the operator.
+ */
+export function turnFailureMessage(
+  cls: TurnFailureClass,
+  status: number | null,
+  t: Translate,
+  detail: { code?: string | null; message?: string } = {},
+): string {
+  switch (cls) {
+    case "ended":
+      return t("conversation.send.ended");
+    case "paused":
+      return t("conversation.send.conflict");
+    case "unknownOutcome":
+      return t("conversation.send.unknownOutcome");
+    case "failed":
+      return t("conversation.send.turnFailed");
+    case "empty":
+      return t("conversation.send.empty");
+    case "notAccepted":
+      break;
+  }
+  if (detail.code === "awaiting_approval") return t("conversation.send.awaiting");
+  if (detail.code) return t("conversation.send.notSent", { message: detail.message ?? "" });
+  switch (status) {
+    case 401:
+      return t("conversation.send.sessionExpired");
+    case 403:
+      return t("conversation.send.forbidden");
+    case 404:
+      return t("conversation.send.notFound");
+    case 409:
+      return t("conversation.send.conflict");
+    case 413:
+      return t("conversation.send.tooLarge");
+    case 429:
+      return t("conversation.send.rateLimited");
+    case 503:
+      return t("conversation.send.unavailable");
+    default:
+      return t("conversation.send.failed");
   }
 }
 

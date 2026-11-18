@@ -62,9 +62,13 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     expect(state.isProcessing).toBe(false);
     expect(state.messages.some((m) => m.isStreaming)).toBe(false);
     expect(state.messages.map((m) => m.role)).toEqual(["user", "agent"]);
+    // A connection that dropped after the send is a turn of unknown outcome: the
+    // message stays, and the notice says the agent may still be working on it
+    // (a "Retry Last Step" would re-run the step BEFORE this turn).
     const last = state.messages[state.messages.length - 1]!;
-    expect(last.isError).toBe(true);
-    expect(last.content).toContain("socket closed");
+    expect(last.kind).toBe("notice");
+    expect(last.isError).toBeUndefined();
+    expect(last.content).toContain("No answer has arrived yet");
   });
 
   it("keeps a partly streamed reply but closes it", async () => {
@@ -76,10 +80,10 @@ describe("useSendMessage — a failed send clears its typing state", () => {
     await waitFor(() => expect(result.current.isError).toBe(true));
 
     const agents = useChatStore.getState().messages.filter((m) => m.role === "agent");
-    expect(agents).toHaveLength(2);
-    expect(agents[0]!.content).toBe("Half an ans");
+    expect(agents).toHaveLength(1);
+    expect(agents[0]!.content).toContain("Half an ans");
+    expect(agents[0]!.content).toContain("Connection lost");
     expect(agents[0]!.isStreaming).toBe(false);
-    expect(agents[1]!.isError).toBe(true);
   });
 
   it("follows a turn whose stream dropped mid-reply and shows the reply it settled with", async () => {

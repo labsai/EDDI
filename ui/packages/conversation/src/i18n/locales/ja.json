@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "停止はこのターンに届きませんでした。別のサーバーで実行が続いており、その処理は有効です。会話を開き直すと返信が表示されます。",
   "conversation.stop.unreachable": "停止がサーバーに届きませんでした。ターンはまだ実行中かもしれません。会話を開き直して結果を確認してください。",
   "conversation.diagram.label": "図",
-  "conversation.diagram.source": "図のソース"
+  "conversation.diagram.source": "図のソース",
+  "conversation.send.unknownOutcome": "⚠️ まだ回答が届いていません。エージェントがメッセージの処理を続けている可能性があるため、メッセージは上に残しています。少し待ってからもう一度確認するか、再送してください。二重に処理されることはありません。",
+  "conversation.send.turnFailed": "⚠️ エージェントはこのターンを完了できませんでした。メッセージは上に残っています。再試行すると再送されます。",
+  "conversation.send.empty": "エージェントはこのメッセージに回答しないまま終了しました。言い換えるか、もう一度お試しください。",
+  "conversation.reply.revised": "返信はストリーミング表示のあとで修正されました。現在表示されているのが最終版です。"
 }

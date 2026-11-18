@@ -67,6 +67,7 @@ import {
   type Translate,
   type TurnFailure,
   type TurnFailureContext,
+  turnFailureMessage,
 } from "@eddi/conversation";
 import { ToolActivityLog, TurnNotesLog, turnNoteListener } from "@eddi/conversation/tool-activity";
 import { toolResultListener } from "@eddi/core/tool-events";
@@ -805,25 +806,21 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
     return true;
   }
 
-  const refusal = failure.kind === "refused" && (failure.status === 409 || failure.code !== null);
+  // The controller classified the failure (`failure.class`); the Manager renders
+  // from that, not from the status. An ended conversation and a turn whose
+  // outcome is unknown (a 408, a drop after the send) are the controller's own
+  // handling: the ENDED footer, and the message kept with a notice.
+  if (failure.class === "ended" || failure.class === "unknownOutcome") return false;
+
+  const refusal = failure.class === "notAccepted" || failure.class === "paused";
   if (refusal) {
-    // Paused is decided by the conversation's actual state, not by the status:
-    // a 409 also answers "processing another turn", "agent version mismatch"
-    // and "the conversation changed while your message was queued", and each
-    // used to show the approval banner over a conversation nobody could
-    // approve. Only a confirmed AWAITING_HUMAN is a pause; a failed read is a
-    // refusal, with the input left enabled.
-    let paused = failure.code === "awaiting_approval";
-    let pausedAt: string | null = null;
-    if (failure.status === 409 && ctx.conversationId) {
-      try {
-        const snapshot = await readConversation("production", "", ctx.conversationId, true);
-        paused = snapshot.conversationState === "AWAITING_HUMAN";
-        pausedAt = paused ? (snapshot.hitlPausedAt ?? null) : null;
-      } catch {
-        // Unconfirmed: a refusal, not a pause.
-      }
-    }
+    // Paused is decided by the conversation's actual state, which the controller
+    // read for a 409: a 409 also answers "processing another turn", "agent
+    // version mismatch" and "the conversation changed while your message was
+    // queued", and each used to show the approval banner over a conversation
+    // nobody could approve.
+    const paused = failure.class === "paused" || failure.code === "awaiting_approval";
+    const pausedAt = paused ? ((failure.conversation as { hitlPausedAt?: string } | null | undefined)?.hitlPausedAt ?? null) : null;
     if (!ctx.isCurrent()) return true;
     const secretModeBefore = store.getState().isSecretMode;
     const rejected = store.getState().messages.find((m) => m.id === ctx.userMessageId);
@@ -849,9 +846,18 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
     if (paused) {
       store.getState().setPaused(true, null, pausedAt);
     } else {
+      // The shared sentence for the class and status (sign in again, too large,
+      // …), without its warning sign: a toast is not a transcript line.
+      // A 409's own sentence names why (busy, version mismatch, queued and
+      // changed): the Manager is the operator's app, and that is what they need.
       const reason = failure.code
         ? (translateStreamError(failure.code, managerT ?? fallbackT) ?? failure.message)
-        : failure.message;
+        : failure.status === 409
+          ? failure.message
+          : turnFailureMessage(failure.class, failure.status, (managerT ?? fallbackT) as unknown as Translate).replace(
+            /^⚠️\s*/u,
+            "",
+          );
       toast.error(tr("chat.sendRejected", "Your message was not sent: {{reason}}", { reason }));
     }
     return true;

@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "L’arrêt n’a pas atteint ce tour : il continue sur un autre serveur et ce qu’il fait compte toujours. Sa réponse apparaîtra quand vous rouvrirez la conversation.",
   "conversation.stop.unreachable": "L’arrêt n’a pas pu joindre le serveur. Le tour s’y exécute peut-être encore ; rouvrez la conversation pour voir comment il s’est terminé.",
   "conversation.diagram.label": "Diagramme",
-  "conversation.diagram.source": "Source du diagramme"
+  "conversation.diagram.source": "Source du diagramme",
+  "conversation.send.unknownOutcome": "⚠️ Aucune réponse n’est encore arrivée. L’agent travaille peut-être toujours sur votre message, qui reste donc affiché. Vérifiez à nouveau dans un instant ou renvoyez-le : il ne sera pas traité deux fois.",
+  "conversation.send.turnFailed": "⚠️ L’agent n’a pas pu terminer ce tour. Votre message est au-dessus — réessayez pour le renvoyer.",
+  "conversation.send.empty": "L’agent a terminé sans répondre à ce message. Vous pouvez le reformuler ou réessayer.",
+  "conversation.reply.revised": "La réponse a été révisée après son affichage progressif ; ce que vous voyez maintenant est la version finale."
 }

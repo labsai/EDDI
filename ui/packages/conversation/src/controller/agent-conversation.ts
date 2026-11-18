@@ -29,7 +29,6 @@ import {
   parseErrorEvent,
   parseToolCallActivity,
   stepsToMessages,
-  UNCONSUMED_STREAM_ERROR_CODES,
   END_REASON_AGENT_VERSION_RETIRED,
   type AttachmentResult,
   type ConversationSnapshot,
@@ -41,7 +40,8 @@ import {
   type InputField,
 } from "@eddi/core";
 import { englishText, type Translate } from "../i18n/text";
-import { skippedTurnMessage, startFailureMessage } from "./notices";
+import { skippedTurnMessage, startFailureMessage, turnFailureMessage } from "./notices";
+import { classifyTurnFailure, isRefusal, type TurnFailureClass } from "./turn-failure";
 import {
   conversationReducer,
   initialConversationState,
@@ -157,8 +157,14 @@ export interface ConversationStore {
 /** A turn that did not end with a reply. */
 export interface TurnFailure {
   /**
-   * `refused`: the server turned the turn down before it ran (a 4xx, or a
-   * stream error code for an unconsumed turn). `failed`: the request failed (a
+   * How the controller classified the failure (see `./turn-failure`). Render
+   * from this, not from `status`: a 408 and a 413 are both 4xx and mean the
+   * opposite about whether the server has the message.
+   */
+  class: TurnFailureClass;
+  /**
+   * `refused`: the server turned the turn down before it ran (`class` is
+   * `notAccepted`, `ended` or `paused`). `failed`: the request failed (a
    * dropped connection, a 5xx). `streamError`: the stream reported an error
    * while the turn ran.
    */
@@ -173,6 +179,16 @@ export interface TurnFailure {
   error?: unknown;
   /** Part of the reply had already arrived. */
   partial: boolean;
+  /**
+   * The stream `error` frame's payload, whole, when it was a JSON object — so a
+   * field the backend adds later (an error class, `retryable`) reaches the host
+   * without a change here.
+   */
+  payload?: Record<string, unknown> | null;
+  /** Why an ended conversation ended, when the read after a 410 said. */
+  endReason?: string | null;
+  /** The conversation as the read that decided a 409 or a 410 saw it. */
+  conversation?: Partial<ConversationSnapshot> | null;
 }
 
 export interface TurnFailureContext {
@@ -244,6 +260,20 @@ interface TurnContext {
   doneUnreadable: boolean;
   /** An error the stream reported, kept for the host to present once the stream ends. */
   failure: TurnFailure | null;
+  /** A `task_failed` event was seen: the turn may still have recovered, so only `done` decides. */
+  taskFailed: boolean;
+  /**
+   * The turn called a tool or escalated to another model: text streamed before
+   * that is replaced by the final answer by design, so a shorter `done` text is
+   * no surprise.
+   */
+  reworked: boolean;
+  /**
+   * This send repeats a submission whose outcome was not settled (it carries
+   * the same Idempotency-Key), so a "busy" answer means the first attempt is
+   * still running, not that this message was dropped.
+   */
+  reusedKey: boolean;
   /**
    * The mark of the latest STORED step before this turn (see `latestStepMark`),
    * or null while it is not known. The backend keeps a running say turn in
@@ -269,6 +299,9 @@ function newTurn(stateBeforeSend: ConversationState | null, userMessageId: strin
     announcedPause: false,
     doneUnreadable: false,
     failure: null,
+    taskFailed: false,
+    reworked: false,
+    reusedKey: false,
     baseline: null,
     baselineRead: null,
   };
@@ -348,6 +381,16 @@ function statusOf(err: unknown): number | null {
   if (err instanceof ApiError) return err.status;
   const status = (err as { status?: unknown } | null)?.status;
   return typeof status === "number" ? status : null;
+}
+
+/** The JSON object a frame carries, or null. */
+function parseObject(data: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(data);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
 }
 
 function isAbortError(e: unknown): boolean {
@@ -695,7 +738,14 @@ export class AgentConversation {
     const inputField = skipped ? null : findInputField(lastOutput?.output);
     if (inputField) dispatch({ type: "SET_INPUT_FIELD", field: inputField });
 
-    if (skipped) {
+    if (skipped && turn.reusedKey && snapshot?.conversationState === "IN_PROGRESS") {
+      // A retry of a submission that may still be running (same Idempotency-Key):
+      // "busy" here means the first attempt is still working, not that this
+      // message was dropped. Keep it; the user is told to look again.
+      this.keepSubmission = true;
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", null, this.t)) });
+    } else if (skipped) {
       // The server dropped this turn without consuming it. The payload carries
       // the PREVIOUS step's outputs, so its quick replies must not be applied.
       // The user's own bubble goes too: leaving it asserts the message was
@@ -721,6 +771,20 @@ export class AgentConversation {
           type: "ADD_MESSAGE",
           message: { ...makeAgentMessage(content, outputImages), ...(guardrails ? { guardrails } : {}) },
         });
+      } else if (
+        snapshot &&
+        !inputField &&
+        !isTurnPaused(snapshot, turn.stateBeforeSend) &&
+        snapshot.conversationState !== "ENDED"
+      ) {
+        // The turn finished and nothing came of it. A bubble that just goes
+        // away leaves a question with no reply and no notice.
+        const failedTurn =
+          turn.taskFailed || snapshot.conversationState === "ERROR" || snapshot.conversationState === "EXECUTION_INTERRUPTED";
+        dispatch({
+          type: "ADD_MESSAGE",
+          message: makeNotice(turnFailureMessage(failedTurn ? "failed" : "empty", null, this.t)),
+        });
       }
       if (!isTurnPaused(snapshot, turn.stateBeforeSend)) {
         dispatch({ type: "SET_QUICK_REPLIES", replies: lastOutput?.quickReplies ?? [] });
@@ -729,7 +793,21 @@ export class AgentConversation {
       // Tokens already rendered the answer, but responseValidation can
       // SUPERSEDE them (fallback text) after the fact. The snapshot is
       // authoritative.
+      const streamed = this.state.messages.find((m) => m.role === "agent" && m.isStreaming && m.kind !== "notice");
+      const revised =
+        !turn.reworked &&
+        !!outputText &&
+        !!streamed &&
+        !streamed.guardrails?.length &&
+        outputText.trim() !== streamed.content.trim() &&
+        outputText.trim().length < streamed.content.trim().length &&
+        // Interim commentary before the final round ("Let me look that up… <answer>")
+        // is the designed case of a tool-enabled turn, not a surprise.
+        !streamed.content.trim().endsWith(outputText.trim());
       if (outputText) dispatch({ type: "RECONCILE_LAST_AGENT", content: outputText });
+      // The final text is SHORTER than what streamed: it replaced the text on
+      // screen, which the reader would otherwise take for a glitch.
+      if (revised) dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.reply.revised")) });
       // After the reconcile, which would take an appended reason with it.
       if (failureLine) dispatch({ type: "APPEND_TO_LAST_AGENT", token: `\n\n${failureLine}` });
       // Images never stream as tokens; the snapshot is their only source.
@@ -776,7 +854,9 @@ export class AgentConversation {
 
       case "task_failed":
         // The turn may still recover (cascade escalation, retry), so done/error
-        // decides the outcome — but stop implying the agent is composing.
+        // decides the outcome — but stop implying the agent is composing, and
+        // remember it: a turn that then ends with nothing says why.
+        turn.taskFailed = true;
         dispatch({ type: "SET_THINKING", value: false });
         dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
         return false;
@@ -787,6 +867,7 @@ export class AgentConversation {
       // explaining. The next token clears it.
       case "tool_call": {
         const tool = parseToolCallActivity(event.data);
+        turn.reworked = true;
         if (tool) dispatch({ type: "SET_ACTIVE_TOOL", tool });
         return false;
       }
@@ -810,6 +891,7 @@ export class AgentConversation {
       // silent — a buffered cascade emits its whole answer as one token — so
       // say something rather than leave a bare spinner.
       case "cascade_escalation":
+        turn.reworked = true;
         dispatch({ type: "SET_ESCALATING", value: true });
         return false;
 
@@ -850,19 +932,26 @@ export class AgentConversation {
       case "error": {
         // Payload is {"message":"…","code":"…"}, not a bare string.
         const { message, code } = parseErrorEvent(event.data);
-        const unconsumed = turn.tokenCount === 0 && code !== null && UNCONSUMED_STREAM_ERROR_CODES.has(code);
+        // A frame without a code is a failure while the turn ran; a code is
+        // classified by `turn-failure` (the one place new codes are mapped).
+        const classified: TurnFailureClass =
+          code === null ? "failed" : classifyTurnFailure({ status: null, code, partial: turn.tokenCount > 0 });
+        const cls: TurnFailureClass = classified === "unknownOutcome" ? "failed" : classified;
+        const unconsumed = turn.tokenCount === 0 && isRefusal(cls);
         if (this.options.presentFailure) {
           // The host shows it, once the stream has ended (it may want a read).
           turn.failure = {
+            class: cls,
             kind: unconsumed ? "refused" : "streamError",
             status: null,
             code,
             message,
             partial: turn.tokenCount > 0,
+            payload: parseObject(event.data),
           };
           return true;
         }
-        this.presentDefaultStreamError(turn, unconsumed, code, message);
+        this.presentDefaultStreamError(turn, unconsumed, cls, code, message);
         return true;
       }
 
@@ -1071,6 +1160,7 @@ export class AgentConversation {
     /** True once Stop or New conversation has taken this turn over. */
     const stopped = () => this.abort !== abort;
     const turn = newTurn(this.state.conversationState, turnId);
+    turn.reusedKey = reusedKey;
     this.activeTurn = turn;
     if (conversationId && transport.mode !== "local") this.readBaseline(conversationId, turn);
     const failureContext: TurnFailureContext = {
@@ -1242,7 +1332,15 @@ export class AgentConversation {
     // still be running, so it is a dropped stream like any other — followed,
     // and reported if it never settles — rather than the part on screen
     // passing for the whole answer.
-    if (!streamDone && !stopped() && turn.tokenCount > 0 && !turn.failure && this.options.reconnectDelaysMs?.length) {
+    // With NOTHING of the reply it is the same case, and the worse one: the
+    // stream ended empty, so the turn may have run, may still run, or never
+    // started. That was a silent end; it is now a turn of unknown outcome.
+    if (
+      !streamDone &&
+      !stopped() &&
+      !turn.failure &&
+      (turn.tokenCount > 0 ? !!this.options.reconnectDelaysMs?.length : true)
+    ) {
       throw new StreamEndedError();
     }
     if (!streamDone) dispatch({ type: "FINISH_STREAMING" });
@@ -1253,9 +1351,10 @@ export class AgentConversation {
       const handled = await this.presentHostFailure(failure, failureContext);
       if (!handled && this.isCurrent(sendGen)) {
         // The host declined: the controller's own notices, and the turn ends.
-        this.presentDefaultStreamError(turn, failure.kind === "refused", failure.code ?? null, failure.message);
+        this.presentDefaultStreamError(turn, failure.kind === "refused", failure.class, failure.code ?? null, failure.message);
       }
       if (failure.kind === "refused") result = { outcome: "refused", failure };
+      if (failure.class === "ended") this.submission = null;
       if (!this.isCurrent(sendGen)) return result;
     }
     if (this.options.refreshAfterStream === false && !turn.doneUnreadable) return result;
@@ -1307,9 +1406,21 @@ export class AgentConversation {
   }
 
   /** The controller's own notices for a stream `error` frame, and the end of the turn. */
-  private presentDefaultStreamError(turn: TurnContext, unconsumed: boolean, code: string | null, message: string): void {
+  private presentDefaultStreamError(
+    turn: TurnContext,
+    unconsumed: boolean,
+    cls: TurnFailureClass,
+    code: string | null,
+    message: string,
+  ): void {
     const dispatch = this.dispatch;
-    if (unconsumed) {
+    if (unconsumed && cls === "ended") {
+      // The conversation is over. The post-stream read (when a host asks for
+      // one) supplies the reason; the footer is the same as for a 410.
+      this.withdraw(turn.userMessageId);
+      dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason: null });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(this.t("conversation.send.ended")) });
+    } else if (unconsumed) {
       // Refused before it ran — the streaming twin of a 409. Withdraw the
       // optimistic bubble and hand the draft (a secret included, masked)
       // back. The refresh after the stream picks up the paused state.
@@ -1363,31 +1474,55 @@ export class AgentConversation {
     const dispatch = this.dispatch;
     const t = this.t;
     const transport = this.transport;
-    const status = err instanceof ApiError ? err.status : typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : null;
-    const refused = status !== null && status >= 400 && status < 500;
-    const failure: TurnFailure = {
-      kind: refused ? "refused" : "failed",
+    const status = statusOf(err);
+    const partial = turn.tokenCount > 0;
+    let cls = classifyTurnFailure({ status, code: null, partial });
+    const build = (): TurnFailure => ({
+      class: cls,
+      kind: isRefusal(cls) ? "refused" : "failed",
       status,
       code: null,
       message: errorMessage(err),
       error: err,
-      partial: turn.tokenCount > 0,
-    };
-    const result: TurnResult = { outcome: refused ? "refused" : "failed", failure };
+      partial,
+    });
+    const resultOf = (failure: TurnFailure): TurnResult => ({ outcome: isRefusal(failure.class) ? "refused" : "failed", failure });
     // A failure after New Conversation belongs to the turn the user abandoned.
-    if (!this.isCurrent(sendGen)) return result;
+    if (!this.isCurrent(sendGen)) return resultOf(build());
     // Stop (or New conversation) ended this turn on purpose; whoever stopped it
     // reset the UI, and the abort must not be reported as a failure.
     if (transport.mode !== "local" && stopped()) return { outcome: "sent" };
 
-    // The connection dropped after the turn was accepted and part of the reply
-    // arrived: the turn may well still be running on the server. Follow it
-    // before calling it lost.
-    if (status === null && turn.tokenCount > 0 && conversationId && this.options.reconnectDelaysMs?.length) {
+    // The server may have the turn (a dropped connection, a 408, a gateway
+    // timeout, a stream that ended empty) and may still be running it. Follow it
+    // before calling it lost: a read that holds the turn's own step settles it.
+    if (cls === "unknownOutcome" && conversationId && this.options.reconnectDelaysMs?.length) {
       const followed = await this.followDroppedTurn(conversationId, sendGen, turn, stopped);
       if (followed === "applied") return { outcome: "sent", recovered: true };
       if (followed === "taken" || !this.isCurrent(sendGen) || stopped()) return { outcome: "sent" };
     }
+
+    // A 409 is a pause only when the conversation reads AWAITING_HUMAN — it
+    // also answers "processing another turn", "agent version mismatch" and "the
+    // conversation changed while your message was queued". The read also
+    // refreshes what the composer shows.
+    let readState: ConversationSnapshot | null = null;
+    if ((status === 409 || cls === "ended") && conversationId) {
+      try {
+        readState = await transport.read(conversationId, true);
+      } catch {
+        // best effort: a 409 stays a refusal, an ended conversation has no reason
+      }
+      if (!this.isCurrent(sendGen)) return resultOf(build());
+      if (status === 409) cls = readState?.conversationState === "AWAITING_HUMAN" ? "paused" : "notAccepted";
+    }
+    const failure = build();
+    if (readState) failure.conversation = readState;
+    if (cls === "ended") failure.endReason = readState?.endReason ?? null;
+    const result = resultOf(failure);
+    // An ended conversation takes no more turns; every other submission that did
+    // not end as sent keeps its key for the retry.
+    if (cls === "ended") this.submission = null;
 
     // Keep the send locked while the host presents the failure (it may await a
     // read); clear the processing state only once it has finished.
@@ -1400,81 +1535,54 @@ export class AgentConversation {
     dispatch({ type: "SET_ACTIVE_TOOL", tool: null });
     if (handled) return result;
 
-    if (status === 409) {
-      // Refused and NEVER consumed — most often because the conversation is
-      // awaiting a human decision. Withdraw the bubble, hand the text back, and
-      // say why. The server's own text is an operator instruction, not
-      // something to show an end user.
-      this.withdraw(turnId);
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("conversation.send.conflict")) });
-      // Re-read so the paused state (and its card) appears immediately. Gated
-      // on the conversation id ALONE: the managed route has no agent id, and
-      // requiring one left its composer live against a paused conversation.
-      if (conversationId) {
-        try {
-          const snap = await transport.read(conversationId, true);
-          if (!this.isCurrent(sendGen)) return result;
-          if (snap.conversationState) {
-            dispatch({ type: "SET_CONVERSATION_STATE", state: snap.conversationState, endReason: snap.endReason ?? null });
-          }
-        } catch {
-          // best effort
-        }
-      }
-      return result;
-    }
-
-    if (status === 410 && conversationId) {
+    if (cls === "ended") {
       // The conversation has ended (410 GONE) and the turn was never consumed.
-      // Ask why: an agent update that retired the conversation's version gets
-      // its own footer.
-      let endReason: string | null = null;
-      try {
-        endReason = (await transport.read(conversationId, true)).endReason ?? null;
-      } catch {
-        // best effort — the generic ended footer still applies
-      }
-      if (!this.isCurrent(sendGen)) return result;
+      // An agent update that retired the conversation's version gets its own
+      // footer instead of the generic notice.
       this.withdraw(turnId);
-      dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason });
-      if (endReason !== END_REASON_AGENT_VERSION_RETIRED) {
+      dispatch({ type: "SET_CONVERSATION_STATE", state: "ENDED", endReason: failure.endReason ?? null });
+      if (failure.endReason !== END_REASON_AGENT_VERSION_RETIRED) {
         dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("conversation.send.ended")) });
       }
       return result;
     }
 
-    // Every other 4xx refused the turn before it ran: withdraw and hand back.
-    // Each has its own copy because the remedies differ (sign in again,
-    // shorten, wait, ask the operator).
-    if (refused) {
+    if (cls === "paused" || cls === "notAccepted") {
+      // Refused and NEVER consumed. Withdraw the bubble, hand the text back, and
+      // say why (each status has its own copy: the remedies differ — sign in
+      // again, shorten, wait, ask the operator). The server's own text is an
+      // operator instruction, not something to show an end user.
       this.withdraw(turnId);
-      const copy =
-        status === 401
-          ? t("conversation.send.sessionExpired")
-          : status === 403
-            ? t("conversation.send.forbidden")
-            : status === 404
-              ? t("conversation.send.notFound")
-              : status === 413
-                ? t("conversation.send.tooLarge")
-                : status === 429
-                  ? t("conversation.send.rateLimited")
-                  : t("conversation.send.failed");
-      dispatch({ type: "ADD_MESSAGE", message: makeNotice(copy) });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage(cls, status, t)) });
+      if (readState?.conversationState) {
+        dispatch({
+          type: "SET_CONVERSATION_STATE",
+          state: readState.conversationState,
+          endReason: readState.endReason ?? null,
+        });
+      }
       return result;
     }
 
     console.error("Failed to send message:", err);
-    // From here the failure is a dropped connection or a server error.
-    if (turn.tokenCount === 0) {
+    if (!partial && cls === "unknownOutcome") {
+      // Nothing of the answer arrived and the server may still be working on
+      // it: the message STAYS (it is not lost, and sending it again repeats the
+      // same Idempotency-Key, so the turn runs once). Only the empty
+      // placeholder goes.
+      dispatch({ type: "REMOVE_EMPTY_STREAMING_MESSAGE" });
+      dispatch({ type: "FINISH_STREAMING" });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(turnFailureMessage("unknownOutcome", status, t)) });
+      return result;
+    }
+    // From here the failure is a server error, or a dropped connection with part
+    // of the reply on screen.
+    if (!partial) {
       // Nothing of the answer arrived: take the bubble back and put the text in
       // the composer again (withdraw also drops the empty placeholder).
       this.withdraw(turnId);
       dispatch({ type: "FINISH_STREAMING" });
-      dispatch({
-        type: "ADD_MESSAGE",
-        message: makeNotice(status === 503 ? t("conversation.send.unavailable") : t("conversation.send.failed")),
-      });
+      dispatch({ type: "ADD_MESSAGE", message: makeNotice(t("conversation.send.failed")) });
       return result;
     }
     // Part of the answer is already on screen. Keep it, say it may be cut

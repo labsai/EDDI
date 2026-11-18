@@ -120,5 +120,9 @@
   "conversation.stop.stillRunning": "A parada não alcançou este turno: ele continua em execução em outro servidor e o que ele faz ainda vale. A resposta aparece quando você reabrir a conversa.",
   "conversation.stop.unreachable": "A parada não conseguiu chegar ao servidor. O turno pode ainda estar em execução lá; reabra a conversa para ver como terminou.",
   "conversation.diagram.label": "Diagrama",
-  "conversation.diagram.source": "Código do diagrama"
+  "conversation.diagram.source": "Código do diagrama",
+  "conversation.send.unknownOutcome": "⚠️ Ainda não chegou nenhuma resposta. O agente pode ainda estar a trabalhar na sua mensagem, por isso ela permanece acima. Verifique novamente daqui a pouco ou envie-a de novo — não será processada duas vezes.",
+  "conversation.send.turnFailed": "⚠️ O agente não conseguiu concluir este turno. A sua mensagem está acima — tente novamente para a enviar outra vez.",
+  "conversation.send.empty": "O agente terminou sem dar uma resposta a esta mensagem. Pode reformulá-la ou tentar novamente.",
+  "conversation.reply.revised": "A resposta foi revista depois de ser transmitida; o que vê agora é a versão final."
 }
