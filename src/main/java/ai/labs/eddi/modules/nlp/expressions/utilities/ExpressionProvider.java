@@ -8,6 +8,7 @@ import ai.labs.eddi.modules.nlp.expressions.Expression;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.IExpressionFactory;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
+import ai.labs.eddi.modules.nlp.expressions.value.AnyValue;
 import ai.labs.eddi.modules.nlp.expressions.value.Value;
 import org.jboss.logging.Logger;
 
@@ -165,7 +166,7 @@ public class ExpressionProvider implements IExpressionProvider {
         int indexOfOpening = indexOf(source, '(', start, end);
         int indexOfClosing = lastIndexOf(source, ')', start, end);
         if (indexOfOpening > -1 && indexOfClosing > -1) {
-            exp = new Expression(source.substring(start, indexOfOpening).trim());
+            exp = new Expression(source.substring(start, trimEnd(source, start, indexOfOpening)));
             // The bound is enforced where the descent happens, not only in the entry
             // scan, so a caller cannot reach this level around the scan.
             limits.requireDepth(depth + 1);
@@ -190,15 +191,59 @@ public class ExpressionProvider implements IExpressionProvider {
         return expressionFactory.getExpression(exp);
     }
 
+    /**
+     * Whether the parser gives {@code c} a meaning of its own: {@code (} and
+     * {@code )} delimit sub-expressions, {@code ,} separates expressions. Every
+     * other character is part of an expression's name. Code that must keep data
+     * from becoming notation asks here instead of keeping its own list.
+     */
+    public static boolean isNotationCharacter(char c) {
+        return c == '(' || c == ')' || c == ',';
+    }
+
+    /**
+     * Whether the parser skips {@code c} around an expression and its name, at
+     * every level: {@link Character#isWhitespace(char)} — which includes U+3000,
+     * U+2000 to U+2006 and the line separators — and every control character up to
+     * U+0020 (what {@link String#trim()} removes). The no-break spaces U+00A0,
+     * U+2007, U+202F and the zero-width characters (U+200B, U+2060, U+FEFF) are not
+     * skipped: they stay part of the name.
+     * <p>
+     * One notion for the whole parser: the name in front of a {@code (} used to be
+     * cut with {@code String.trim()} while everything else used
+     * {@code isWhitespace}, so {@code "\u0001*(a)"} read as the wildcard and
+     * {@code "　*"} did as well — through different rules, which no single check
+     * outside the parser could mirror.
+     */
+    public static boolean isSkippedWhitespace(char c) {
+        return c <= ' ' || Character.isWhitespace(c);
+    }
+
+    /**
+     * Whether {@code text}, standing alone between two pieces of notation, is read
+     * as the wildcard expression {@code *} (which equals every expression) — i.e.
+     * whether it is {@code *} once the parser has skipped the whitespace around it.
+     * Asks the same trimming the parser applies, so the answer cannot drift from
+     * the parser's own reading.
+     */
+    public static boolean readsAsWildcard(String text) {
+        if (text == null) {
+            return false;
+        }
+        int start = trimStart(text, 0, text.length());
+        int end = trimEnd(text, start, text.length());
+        return end - start == AnyValue.NAME.length() && text.startsWith(AnyValue.NAME, start);
+    }
+
     private static int trimStart(String source, int start, int end) {
-        while (start < end && Character.isWhitespace(source.charAt(start))) {
+        while (start < end && isSkippedWhitespace(source.charAt(start))) {
             start++;
         }
         return start;
     }
 
     private static int trimEnd(String source, int start, int end) {
-        while (end > start && Character.isWhitespace(source.charAt(end - 1))) {
+        while (end > start && isSkippedWhitespace(source.charAt(end - 1))) {
             end--;
         }
         return end;
