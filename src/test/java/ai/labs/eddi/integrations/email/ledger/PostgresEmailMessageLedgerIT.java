@@ -16,8 +16,11 @@ import java.sql.Statement;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /** {@link EmailMessageLedgerContract} against PostgreSQL (Testcontainers). */
 class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMessageLedgerContract, EmailLedgerLogContract {
@@ -31,6 +34,28 @@ class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMess
         store = new PostgresEmailMessageLedger(createDataSourceInstance());
         store.indexBuildLauncher = Runnable::run; // the late index build, synchronously
         store.countPending(); // creates the schema
+    }
+
+    @Test
+    @DisplayName("a second replica on an existing schema writes while another replica's concurrent index build runs")
+    void secondReplicaDoesNotQueueBehindTheBuild() throws Exception {
+        // Replica A's CREATE INDEX CONCURRENTLY holds SHARE UPDATE EXCLUSIVE on the
+        // table for the whole build; a plain CREATE INDEX (even IF NOT EXISTS, on an
+        // index that exists) asks for SHARE, which conflicts and would queue — and
+        // the ledger write after it with it. Hold that lock as the build would.
+        try (Connection buildingReplica = dataSource.getConnection(); Statement lock = buildingReplica.createStatement()) {
+            buildingReplica.setAutoCommit(false);
+            lock.execute("LOCK TABLE " + PostgresEmailMessageLedger.TABLE + " IN SHARE UPDATE EXCLUSIVE MODE");
+
+            var replicaB = new PostgresEmailMessageLedger(createDataSourceInstance());
+            replicaB.indexBuildLauncher = task -> {
+            };
+            var row = EmailLedgerLogContract.inbound("int-replica", IEmailMessageLedger.State.DONE, null, EmailLedgerLogContract.T0);
+            boolean inserted = CompletableFuture.supplyAsync(() -> replicaB.insertIfAbsent(row)).get(15, TimeUnit.SECONDS);
+
+            assertTrue(inserted, "replica B initialised its schema and wrote without waiting for the build");
+            buildingReplica.rollback();
+        }
     }
 
     @Test

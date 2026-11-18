@@ -388,7 +388,9 @@ the rows (none shows a subject or a body, since the ledger stores neither):
   (`refused:loop`: auto-replies, bounces, mail from EDDI itself — still visible in the mail log); otherwise such
   mail, the digest included, would trigger the next day's digest. It counts the rows still in the ledger when it is
   sent: with an `eddi.email.ledger-retention` near one day, the earliest rows of the day may have expired by then,
-  so keep the retention well above 24 hours for complete counts. It needs the [system mailer](hitl.md#email-notifications),
+  so for complete counts keep the retention above 24 hours plus the longest delay you expect between UTC midnight
+  and the digest (it is due from 00:05 UTC and goes out with the next inbound sweep, `eddi.email.inbound.sweep-interval`,
+  or later if no node runs one) — two days is a comfortable floor. It needs the [system mailer](hitl.md#email-notifications),
   and the inbound sweep sends it, so no extra schedule is involved. It is sent at most once: one node claims the day
   before counting, so a count or relay failure loses that day's digest rather than risking two. With no owner address
   inside the allowed domains nothing is claimed, so the digest still goes out once one is added that day.

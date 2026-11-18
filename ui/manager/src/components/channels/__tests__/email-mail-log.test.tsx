@@ -82,11 +82,40 @@ describe("EmailMailLog", () => {
 
     forbidden = true;
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
-    await waitFor(() => expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument());
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument(); // the 403 has arrived
 
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
-    await waitFor(() => expect(screen.queryByTestId("email-log-filter-state")).toHaveValue(""));
+    await waitFor(() => expect(screen.getByTestId("email-log-filter-state")).toHaveValue(""));
     expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument();
+  });
+
+  it("shows a list cached before a 403 again once a later read confirms access", async () => {
+    let mode: "ok" | "forbidden" | "down" = "ok";
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+        if (mode === "forbidden") return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        if (mode === "down") return HttpResponse.error();
+        const filtered = new URL(request.url).searchParams.has("state");
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: filtered ? "refused" : "all" }], nextCursor: null });
+      }),
+    );
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+
+    mode = "forbidden";
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+
+    // Access restored: a successful read of this filter lifts the denial...
+    mode = "ok";
+    await userEvent.click(screen.getByTestId("error-state-retry"));
+    expect(await screen.findByTestId("email-log-row-refused")).toBeInTheDocument();
+
+    // ...so the list cached before the 403 shows again, even if its refetch fails.
+    mode = "down";
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+    expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
   });
 
   it("loads the next page with the cursor the server returned", async () => {

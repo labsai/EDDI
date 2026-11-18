@@ -247,12 +247,27 @@ export function ChannelDetailPage() {
   // version 1: resolve it, then put it in the URL (keeping the #mail-log hash).
   const hasVersion = searchParams.has("version");
   const currentVersion = useChannelCurrentVersion(id!, !hasVersion);
+  // Each versionless navigation asks again, and only an answer to THIS ask
+  // counts: an earlier answer still in the query (a page that stayed mounted,
+  // a refetch that failed) is never written into the URL.
+  const [lookup, setLookup] = useState<{ key: string; from: number } | null>(null);
+  const refetchCurrentVersion = currentVersion.refetch;
   useEffect(() => {
-    if (hasVersion || !currentVersion.isFetchedAfterMount || currentVersion.isFetching || currentVersion.data === undefined) return;
+    if (hasVersion) return;
+    setLookup({ key: location.key, from: Date.now() });
+    void refetchCurrentVersion();
+  }, [hasVersion, location.key, refetchCurrentVersion]);
+  // Until the effect above has recorded THIS navigation, nothing counts as answered.
+  const askedNow = lookup !== null && lookup.key === location.key;
+  const versionAnswered =
+    askedNow && !currentVersion.isFetching && !currentVersion.isError && currentVersion.dataUpdatedAt >= (lookup?.from ?? 0);
+  const versionLookupFailed = !hasVersion && askedNow && !currentVersion.isFetching && currentVersion.isError;
+  useEffect(() => {
+    if (hasVersion || !versionAnswered || currentVersion.data === undefined) return;
     const params = new URLSearchParams(location.search);
     params.set("version", String(currentVersion.data));
     navigate({ search: params.toString(), hash: location.hash }, { replace: true });
-  }, [hasVersion, currentVersion.isFetchedAfterMount, currentVersion.isFetching, currentVersion.data, location.search, location.hash, navigate]);
+  }, [hasVersion, versionAnswered, currentVersion.data, location.search, location.hash, navigate]);
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
@@ -263,6 +278,10 @@ export function ChannelDetailPage() {
   const deleteMutation = useDeleteChannel();
 
   const [draft, setDraft] = useState<ChannelIntegrationConfiguration | null>(null);
+  // Which `${id}@${version}` the draft was seeded from. Moving to another channel
+  // (or version) keeps the old draft in state until the new one loads; the
+  // editor, Save and Delete must never act on it under the new identity.
+  const [draftKey, setDraftKey] = useState<string | null>(null);
   // React keys for the target cards, parallel to `draft.targets`. Not on the
   // targets themselves, which are saved verbatim. The cards keep local state
   // (a half-typed trigger, collapsed or not); keyed by index, removing one
@@ -291,6 +310,7 @@ export function ChannelDetailPage() {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
       seededFor.current = key;
+      setDraftKey(key);
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
@@ -437,7 +457,9 @@ export function ChannelDetailPage() {
   // through editing — trading a stuck skeleton for silent data loss. Once a draft
   // exists the form stays mounted and a refetch failure is surfaced by the banner
   // below instead.
-  if (!hasVersion && currentVersion.isError) {
+  const draftIsCurrent = hasVersion && draftKey === `${id}@${version}`;
+
+  if (versionLookupFailed) {
     return (
       <div data-testid="channel-detail-error">
         <ErrorState
@@ -450,7 +472,8 @@ export function ChannelDetailPage() {
     );
   }
 
-  if (isError && !draft) {
+  // A background error for the channel already on screen keeps its draft.
+  if (isError && !draftIsCurrent) {
     return (
       <div data-testid="channel-detail-error">
         <ErrorState
@@ -463,7 +486,7 @@ export function ChannelDetailPage() {
     );
   }
 
-  if (isLoading || !draft) {
+  if (isLoading || !draft || !draftIsCurrent) {
     return (
       <div className="space-y-6" data-testid="channel-detail-loading">
         <div className="h-8 w-48 bg-muted rounded animate-pulse" />

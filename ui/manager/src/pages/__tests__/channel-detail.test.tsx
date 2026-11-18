@@ -4,6 +4,7 @@ import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
 import { server } from "@eddi/app-kit/test/mocks/server";
 import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
+import { Link } from "react-router-dom";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
@@ -497,5 +498,98 @@ describe("ChannelDetailPage — switching the channel type", () => {
     await user.selectOptions(screen.getByTestId("channel-type-select"), "webhook");
     expect(raw().platformConfig).toEqual({});
     expect(screen.getByTestId("webhook-signing-secret")).toBeInTheDocument();
+  });
+});
+
+describe("ChannelDetailPage — a link without ?version (the owner digest's)", () => {
+  function renderWithLinks(path: string) {
+    return renderPage(
+      path,
+      <>
+        <Link to="/manage/channels/ch-email#mail-log" data-testid="go-email">email</Link>
+        <Link to="/manage/channels/ch1" data-testid="go-ch1">ch1</Link>
+        <ChannelDetailPage />
+      </>,
+      "/manage/channels/:id",
+    );
+  }
+
+  it("opens the current version, not version 1", async () => {
+    const requested: string[] = [];
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () => HttpResponse.json(3)),
+      http.get("*/channelstore/channels/ch1", ({ request }) => {
+        requested.push(new URL(request.url).searchParams.get("version") ?? "");
+        return HttpResponse.json({ name: "Engineering Slack v3", channelType: "slack", platformConfig: {}, targets: [] });
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+
+    expect(await screen.findByText("Engineering Slack v3")).toBeInTheDocument();
+    expect(requested).toEqual(["3"]);
+  });
+
+  it("shows a retryable error when the version cannot be resolved, and never loads version 1", async () => {
+    let fail = true;
+    const requested: string[] = [];
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () =>
+        fail ? HttpResponse.json({ error: "unavailable" }, { status: 503 }) : HttpResponse.json(2),
+      ),
+      http.get("*/channelstore/channels/ch1", ({ request }) => {
+        requested.push(new URL(request.url).searchParams.get("version") ?? "");
+        return HttpResponse.json({ name: "Engineering Slack v2", channelType: "slack", platformConfig: {}, targets: [] });
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+
+    expect(await screen.findByTestId("channel-detail-error")).toBeInTheDocument();
+    expect(requested).toEqual([]);
+
+    fail = false;
+    await userEvent.click(within(screen.getByTestId("channel-detail-error")).getByTestId("error-state-retry"));
+    expect(await screen.findByText("Engineering Slack v2")).toBeInTheDocument();
+    expect(requested).toEqual(["2"]);
+  });
+
+  it("does not reuse an earlier answer when the same page asks again and the lookup fails", async () => {
+    let fail = false;
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", () =>
+        fail ? HttpResponse.json({ error: "unavailable" }, { status: 503 }) : HttpResponse.json(1),
+      ),
+    );
+    renderWithLinks("/manage/channels/ch1");
+    expect(await screen.findByText("Engineering Slack")).toBeInTheDocument();
+
+    fail = true;
+    await userEvent.click(screen.getByTestId("go-ch1"));
+
+    expect(await screen.findByTestId("channel-detail-error")).toBeInTheDocument();
+  });
+
+  it("never shows the previous channel's draft under the next channel while its version resolves", async () => {
+    let release: () => void = () => {};
+    const pending = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    server.use(
+      http.get("*/channelstore/channels/ch-email/currentversion", async () => {
+        await pending;
+        return HttpResponse.json(1);
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1?version=1");
+    expect(await screen.findByText("Engineering Slack")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTestId("go-email"));
+
+    expect(await screen.findByTestId("channel-detail-loading")).toBeInTheDocument();
+    expect(screen.queryByText("Engineering Slack")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("save-channel-btn")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("delete-channel-btn")).not.toBeInTheDocument();
+
+    release();
+    expect(await screen.findByText("Invoice intake")).toBeInTheDocument();
   });
 });

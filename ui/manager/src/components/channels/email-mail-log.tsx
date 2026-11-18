@@ -155,7 +155,13 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   useEffect(() => {
     if (isApiError(log.error) && log.error.status === 403) setDeniedAt(log.errorUpdatedAt);
   }, [log.error, log.errorUpdatedAt]);
-  const forbidden = deniedAt !== null && !(log.isSuccess && !log.isError && log.dataUpdatedAt > deniedAt);
+  const accessConfirmed = deniedAt !== null && log.isSuccess && !log.isError && log.dataUpdatedAt > deniedAt;
+  // A read newer than the denial confirms access: lift it for every filter, so a
+  // list cached before it shows again (and a later network error keeps it).
+  useEffect(() => {
+    if (accessConfirmed) setDeniedAt(null);
+  }, [accessConfirmed]);
+  const forbidden = deniedAt !== null && !accessConfirmed;
 
   return (
     <div className="space-y-4" data-testid="email-mail-log">
