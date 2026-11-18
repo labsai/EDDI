@@ -363,7 +363,8 @@ class ConversationServiceMandatoryApprovalTest {
 
             conversationService.conversationHitlService.applyEffectiveToolTimeoutPolicy(memory, hitlConfig);
 
-            assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, memory.getHitlTimeoutPolicy(), "governing rule: " + governing);
+            assertEquals(HitlTimeoutPolicy.WAIT_INDEFINITELY, memory.getHitlTimeoutPolicy(),
+                    "governing rule: " + (governing == null ? "none (scalar policy)" : governing.getMatch() + " " + governing.getTimeoutPolicy()));
         }
         // The same config auto-approves a batch without a mandatory call — the clamp is
         // what the assertion above sees, not a default.
