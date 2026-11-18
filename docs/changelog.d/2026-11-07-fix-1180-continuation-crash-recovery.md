@@ -43,7 +43,11 @@ sweep** on the existing schedule machinery:
   `pendingContinuation.decidedAt` that holds only unhandled records.
   `ConversationContinuations.recover` arms a missing schedule, leaves an
   existing one alone, never revives a conversation that is not READY, and
-  withdraws its own row if the record was removed or replaced meanwhile.
+  withdraws its own row if the record was removed or replaced meanwhile. A
+  candidate whose recovery fails is held back for ten minutes (in memory, no
+  write) and the read reaches past it, so a record that fails on its own — a
+  user id longer than PostgreSQL's 255-character schedule column, say — cannot
+  starve the ones behind it.
 - **Handled, not removed.** A sweep only *marks* a record handled (drops
   `decidedAt`, which takes it out of the index); only a cancel, an end or a newer
   turn removes or replaces it. That is what lets a sweep tell "the job was
@@ -74,7 +78,8 @@ sweep** on the existing schedule machinery:
   end the job. With the sweep on it no longer does, so the event is raised only
   when the sweep is switched off (or the decision could not be recorded) — and
   then only after the decision is retired, so a sweep switched on later cannot
-  arm a job its owner was told had ended; otherwise the turn is left to the
+  arm a job its owner was told had ended (a decision that cannot even be retired
+  is not announced at all); otherwise the turn is left to the
   sweep and the job carries on.
   [`user-events.md`](../user-events.md) says so.
 - **Configuration:** `eddi.continuation.recovery.enabled` (`true`),

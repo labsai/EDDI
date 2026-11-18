@@ -507,9 +507,15 @@ public class ConversationContinuations {
                 // Nothing will fire the next turn: the job stops here as surely as at its
                 // limit, so its owner hears that it ended, and why. The decision is
                 // retired first, so a sweep switched on later cannot arm a job its
-                // owner was told had finished.
-                clearPending(conversationId, number.intValue(), decisionId);
-                announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
+                // owner was told had finished. A decision that could not be retired is
+                // still armable, so its end is not announced: telling the owner the job
+                // finished and then running it would be the worse of the two.
+                if (tryClearPending(conversationId, number.intValue(), decisionId) != null) {
+                    announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
+                } else {
+                    LOGGER.warnf("Continuation %d of conversation %s could neither be armed nor retired; its end is not announced, "
+                            + "since a recovery sweep could still arm it", number.intValue(), sanitize(conversationId));
+                }
             }
             return false;
         }
@@ -791,7 +797,8 @@ public class ConversationContinuations {
      * another node already wrote it, nothing is written.</li>
      * <li>The record is then marked handled
      * ({@link IConversationMemoryStore#markPendingContinuationHandled}), which
-     * takes it out of the sweep's index. Sweeps only ever mark it; only a cancel,
+     * takes it out of the sweep's index. For a READY conversation, sweeps only ever
+     * mark it (step 1 removes the record of one that is not READY); only a cancel,
      * an end or a newer turn removes or replaces it. Both the mark and the removal
      * match the decision id, not only the number, so a later decision of the same
      * number is never marked or removed in this one's name. So when the record no

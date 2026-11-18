@@ -19,20 +19,24 @@ import org.junit.jupiter.api.Test;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 
 class ContinuationRecoverySweepTest {
@@ -87,6 +91,43 @@ class ContinuationRecoverySweepTest {
         doReturn(Recovery.RECOVERED).when(continuations).recover(b);
 
         assertEquals(Map.of(Recovery.RECOVERED, 1), sweep.sweep());
+    }
+
+    @Test
+    @DisplayName("a candidate that keeps failing is held back, so it cannot starve the records behind it")
+    void failingCandidateDoesNotStarveTheRest() throws Exception {
+        var now = new AtomicReference<>(NOW);
+        Clock clock = new Clock() {
+            @Override
+            public ZoneOffset getZone() {
+                return ZoneOffset.UTC;
+            }
+
+            @Override
+            public Clock withZone(ZoneId zone) {
+                return this;
+            }
+
+            @Override
+            public Instant instant() {
+                return now.get();
+            }
+        };
+        var oneAtATime = new ContinuationRecoverySweep(memoryStore, continuations, leases, true, Duration.ofSeconds(90), 1, clock);
+        var poisoned = candidate("poisoned");
+        var next = candidate("next");
+        doReturn(List.of(poisoned)).when(memoryStore).findPendingContinuations(anyLong(), eq(1));
+        doReturn(List.of(poisoned, next)).when(memoryStore).findPendingContinuations(anyLong(), eq(2));
+        doThrow(new IResourceStore.ResourceStoreException("refused for this row")).when(continuations).recover(poisoned);
+        doReturn(Recovery.RECOVERED).when(continuations).recover(next);
+
+        assertTrue(oneAtATime.sweep().isEmpty(), "the first pass tries the oldest and it fails");
+        assertEquals(Map.of(Recovery.RECOVERED, 1), oneAtATime.sweep(), "the next pass reads past it and recovers the one behind");
+        verify(continuations, times(1)).recover(poisoned);
+
+        now.set(NOW.plus(ContinuationRecoverySweep.FAILURE_BACKOFF).plusSeconds(1));
+        oneAtATime.sweep();
+        verify(continuations, times(2)).recover(poisoned);
     }
 
     @Test

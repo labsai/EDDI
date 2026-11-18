@@ -21,6 +21,7 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -61,6 +62,24 @@ public class ContinuationRecoverySweep {
     private final Duration gracePeriod;
     private final int batchSize;
     private final Clock clock;
+
+    /** How long a candidate whose recovery failed is left out of the passes. */
+    static final Duration FAILURE_BACKOFF = Duration.ofMinutes(10);
+    /**
+     * At most this many candidates are held back at once; past it, they retry every
+     * pass.
+     */
+    static final int MAX_BACKED_OFF = 1000;
+
+    /**
+     * Candidates whose recovery failed, by conversation and decision, with the time
+     * they are tried again. The read is oldest first, so a record that fails on its
+     * own (a schedule insert one store refuses for that row alone) would otherwise
+     * take a slot in every pass, and a batch of them would starve every record
+     * behind them. Kept in memory on purpose: it costs no write per failure, and a
+     * node that takes the lease over simply tries them once more.
+     */
+    private final Map<String, Long> backedOff = new ConcurrentHashMap<>();
 
     @Inject
     public ContinuationRecoverySweep(IConversationMemoryStore memoryStore, ConversationContinuations continuations,
@@ -110,14 +129,30 @@ public class ContinuationRecoverySweep {
             return outcomes;
         }
         try {
-            List<PendingContinuationCandidate> candidates = memoryStore
-                    .findPendingContinuations(clock.millis() - gracePeriod.toMillis(), batchSize);
+            long now = clock.millis();
+            backedOff.values().removeIf(retryAt -> retryAt <= now);
+            // Read past the held-back candidates, so a full batch still reaches the
+            // records behind them.
+            List<PendingContinuationCandidate> candidates = memoryStore.findPendingContinuations(now - gracePeriod.toMillis(),
+                    batchSize + backedOff.size());
+            int tried = 0;
             for (PendingContinuationCandidate candidate : candidates) {
+                String key = backoffKey(candidate);
+                if (tried >= batchSize) {
+                    break;
+                }
+                if (backedOff.containsKey(key)) {
+                    continue;
+                }
+                tried++;
                 try {
                     outcomes.merge(continuations.recover(candidate), 1, Integer::sum);
                 } catch (Exception e) {
-                    LOGGER.warnf("Could not recover the pending continuation of conversation %s: %s",
-                            sanitize(candidate.conversationId()), e.toString());
+                    if (backedOff.size() < MAX_BACKED_OFF) {
+                        backedOff.put(key, now + FAILURE_BACKOFF.toMillis());
+                    }
+                    LOGGER.warnf("Could not recover the pending continuation of conversation %s (tried again in %d min): %s",
+                            sanitize(candidate.conversationId()), FAILURE_BACKOFF.toMinutes(), e.toString());
                 }
             }
             if (outcomes.containsKey(Recovery.RECOVERED)) {
@@ -133,5 +168,9 @@ public class ContinuationRecoverySweep {
             }
         }
         return outcomes;
+    }
+
+    private static String backoffKey(PendingContinuationCandidate candidate) {
+        return candidate.conversationId() + ":" + candidate.pending().getNumber() + ":" + candidate.pending().getDecisionId();
     }
 }

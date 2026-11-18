@@ -423,9 +423,10 @@ eddi_continuation_recovered_total           # Decided continuations the recovery
 user does not own the conversation — a schedule the engine did not mint; alert on
 any). Every reason except
 `undeployed` and `schedule_failed` ends the chain; an `undeployed` fire is retried with the schedule
-backoff and dead-lettered like any failed fire. `schedule_failed` ends it only while the recovery
-sweep is off: with the sweep on, the same decision is armed later and then counted in `recovered`,
-so a `schedule_failed` alone is no proof the job stopped. A steady `disabled` rate means a
+backoff and dead-lettered like any failed fire. `schedule_failed` does not by itself
+mean the job stopped: while the recovery sweep is on and the decision was stored, the sweep may arm
+it later, and it is then counted in `recovered` — though nothing guarantees that it will. With the
+sweep off, or no stored decision for it, the chain ends there. A steady `disabled` rate means a
 rule emits the action on an agent that never opted in. `duplicate` counts
 re-delivered fires that found their turn already ran — the at-least-once
 delivery working as designed, not an error.

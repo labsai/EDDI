@@ -404,6 +404,27 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("with the sweep off, a decision that can neither be armed nor retired is not announced as ended")
+        void storeFailureWithRecoveryOffAndAFailedRetire() throws Exception {
+            var publisher = mock(UserEventPublisher.class);
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
+            withStore.userEventPublisher = publisher;
+            withStore.recoveryEnabled = false;
+            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            withStore.decide(memory, Environment.production);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(memoryStore).clearPendingContinuation(anyString(), any(), any());
+
+            assertFalse(withStore.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+
+            // Every retire attempt failed, so the decision is still armable by a sweep
+            // switched on later: the owner must not hear that the job finished.
+            verify(memoryStore, times(ConversationContinuations.ARM_ATTEMPTS)).clearPendingContinuation(anyString(), any(), any());
+            verify(publisher, never()).publish(any(), any());
+        }
+
+        @Test
         @DisplayName("a write that fails for a moment is retried, and the continuation is armed")
         void transientStoreFailure() throws Exception {
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);

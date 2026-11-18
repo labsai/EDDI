@@ -118,8 +118,10 @@ and armed only **after** the commit, as a one-shot schedule due immediately. A t
 failed, was cancelled, lost its cluster lease or could not be stored arms nothing. A schedule write
 that fails is retried a few times on the spot; one that keeps failing is counted
 (`schedule_failed`) and logged. With the recovery sweep on and the decision stored, it is left to
-the sweep and the job carries on. Otherwise — the sweep switched off — the decision is retired and
-the job ends there, with `job.finished` (`schedule_failed`) for its owner.
+the sweep and the job carries on. Otherwise — the sweep switched off, or no stored decision it could
+arm — the decision is retired and the job ends there, with `job.finished` (`schedule_failed`) for
+its owner. A decision that cannot even be retired is not announced as ended, since a sweep could
+still arm it; the failure is logged instead.
 
 ### Crash recovery
 
@@ -138,7 +140,9 @@ A **recovery sweep** runs on every node every `eddi.continuation.recovery.interv
 reads the records older than `eddi.continuation.recovery.grace-period` (1 minute — by then the
 turn's own arm, which runs milliseconds after the commit, has long happened or never will), oldest
 first and at most `eddi.continuation.recovery.batch-size` (100) per pass, from an index that holds
-only those records — never the rest of the conversations. For each one:
+only those records — never the rest of the conversations. A record whose recovery fails is left out
+of the passes for ten minutes and the read reaches past it, so a record that fails on its own
+cannot hold up the ones behind it. For each one:
 
 | The conversation… | What the sweep does |
 |---|---|
