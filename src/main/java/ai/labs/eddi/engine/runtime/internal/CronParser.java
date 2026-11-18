@@ -44,13 +44,17 @@ public final class CronParser {
             Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12"));
 
     /**
-     * How far {@link #computeNextFire} looks ahead before it gives up. The longest
-     * gap a satisfiable expression can have is the one between two 29 Februaries
-     * across a skipped leap year: 8 years (2096-02-29 to 2104-02-29, because 2100
-     * is not a leap year). 9 covers it with a margin. The old two-year window made
-     * {@code 0 9 29 2 *} fire once and then fail to compute its successor.
+     * How far {@link #computeNextFire} looks ahead before it gives up: one full
+     * 400-year Gregorian cycle, after which every date and weekday alignment
+     * repeats, so a satisfiable expression always has a successor inside it. A
+     * smaller window is not enough once the day fields combine: a 29 February that
+     * must also be a Sunday has gaps of 28 years, and one that spans 2100 (not a
+     * leap year) is longer still. Only an expression that can never match walks the
+     * whole window, which takes a few hundred thousand cheap day steps. The old
+     * two-year window made {@code 0 9 29 2 *} fire once and then fail to compute
+     * its successor.
      */
-    static final int MAX_SCAN_YEARS = 9;
+    static final int MAX_SCAN_YEARS = 400;
 
     private CronParser() {
     }

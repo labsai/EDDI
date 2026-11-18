@@ -133,8 +133,9 @@ EDDI uses **standard 5-field cron expressions**:
 | `0 9 29 2 *` | 09:00 on 29 February — every fourth year, and every eighth across 2100 |
 
 An expression that can never match (`0 0 30 2 *`, `* * 31 4 *`) is refused when you save
-it. EDDI looks 9 years ahead for the next fire, which covers the longest gap a valid
-expression can have (29 February across a non-leap century year). If a fire completes and
+it. EDDI looks 400 years ahead for the next fire, one full Gregorian cycle, which covers the
+longest gap a valid expression can have (for example `0 9 29 2 */7`, a 29 February that is
+also a Sunday, fires every 28 years or more). If a fire completes and
 no next fire exists any more (a stored expression that stopped matching), the schedule is
 **disabled** with `disabledReason: "no-next-fire"` and the fire stays recorded as completed;
 it is not left claimed to be fired again. (The completion write is retried three times; if

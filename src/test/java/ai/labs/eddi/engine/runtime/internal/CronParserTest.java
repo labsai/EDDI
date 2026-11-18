@@ -118,6 +118,21 @@ class CronParserTest {
                 CronParser.computeNextFire("* * 29 2 *", ZonedDateTime.of(2096, 2, 29, 23, 59, 0, 0, UTC).toInstant(), UTC));
     }
 
+    /**
+     * A starred day-of-week combines with the day of month by AND, so "29 February
+     * that is a Sunday" has gaps of 28 years; the scan window must be a full
+     * Gregorian cycle for such an expression to have a successor.
+     */
+    @Test
+    void computeNextFire_leapDaySunday_hasASuccessorTwentyEightYearsLater() {
+        Instant first = CronParser.computeNextFire("0 9 29 2 */7", Instant.parse("2026-11-18T00:00:00Z"), UTC);
+        assertEquals(ZonedDateTime.of(2032, 2, 29, 9, 0, 0, 0, UTC).toInstant(), first);
+        assertEquals(ZonedDateTime.of(2060, 2, 29, 9, 0, 0, 0, UTC).toInstant(), CronParser.computeNextFire("0 9 29 2 */7", first, UTC));
+        // The wildcard walker takes the same window.
+        assertEquals(ZonedDateTime.of(2060, 2, 29, 9, 0, 0, 0, UTC).toInstant(),
+                CronParser.computeNextFire("*/15 9 29 2 */7", ZonedDateTime.of(2032, 2, 29, 9, 45, 0, 0, UTC).toInstant(), UTC));
+    }
+
     @Test
     void computeNextFire_neverMatchingCronStillThrows() {
         assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire("0 0 30 2 *", Instant.parse("2027-03-01T00:00:00Z"), UTC));
