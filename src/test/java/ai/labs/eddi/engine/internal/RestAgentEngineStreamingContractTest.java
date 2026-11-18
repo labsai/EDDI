@@ -10,7 +10,7 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
-import ai.labs.eddi.engine.memory.model.ConversationMemoryTail;
+import ai.labs.eddi.engine.memory.ConversationMemoryTail;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -163,7 +163,7 @@ class RestAgentEngineStreamingContractTest {
 
     @Test
     @DisplayName("a node at its stream cap refuses with 503 before touching the sink or starting the turn")
-    void streamCapRefuses() {
+    void streamCapRefuses() throws Exception {
         streaming.sseStreams = new SseStreams(1, SseStreams.DEFAULT_MAX_PENDING_EVENTS, SseStreams.DEFAULT_MAX_PENDING_BYTES, null);
         streaming.sseStreams.open(SseStreams.Kind.GROUP, "busy", new FakeSse.Sink(false), sse, 0, 0, null, null);
         var input = new InputData();

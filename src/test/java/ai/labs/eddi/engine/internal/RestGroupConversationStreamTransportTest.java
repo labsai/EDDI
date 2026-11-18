@@ -86,7 +86,7 @@ class RestGroupConversationStreamTransportTest {
         rest.shutdown();
     }
 
-    private GroupDiscussionEventListener start(FakeSse.Sink sink) {
+    private GroupDiscussionEventListener start(FakeSse.Sink sink) throws Exception {
         rest.discussStreaming("group-1", new DiscussRequest("Hello", "user-1"), sink, sse);
         var listener = ArgumentCaptor.forClass(GroupDiscussionEventListener.class);
         verify(groupService).startAndDiscussAsync(anyString(), anyString(), anyString(), listener.capture());
@@ -95,7 +95,7 @@ class RestGroupConversationStreamTransportTest {
 
     @Test
     @DisplayName("a silent discussion stream gets keep-alive comments")
-    void keepAlive() {
+    void keepAlive() throws Exception {
         var sink = new FakeSse.Sink(false);
         start(sink);
 
@@ -120,7 +120,7 @@ class RestGroupConversationStreamTransportTest {
 
     @Test
     @DisplayName("a completed discussion releases its stream")
-    void completionReleases() {
+    void completionReleases() throws Exception {
         var sink = new FakeSse.Sink(false);
         var listener = start(sink);
         listener.onGroupComplete(new GroupConversationEventSink.GroupCompleteEvent(GroupConversation.GroupConversationState.COMPLETED, "answer"));
@@ -131,7 +131,7 @@ class RestGroupConversationStreamTransportTest {
 
     @Test
     @DisplayName("a stream silent past the agent timeout after its first event is ended with group_error")
-    void backstop() {
+    void backstop() throws Exception {
         var sink = new FakeSse.Sink(false);
         var listener = start(sink);
         listener.onGroupStart(new GroupConversationEventSink.GroupStartEvent("gc-1", "group-1", "q", "round-robin", 1, List.of("a")));

@@ -187,8 +187,11 @@ class RestAgentEngineStreamingKeepAliveTest {
         verify(conversationService, never()).cancelConversation(anyString(), any(), anyString());
         verify(future, atLeastOnce()).cancel(false);
 
-        // When this turn starts, its first event finds the sink closed and cancels it.
+        // When this turn starts, its first event finds the sink closed and cancels it —
+        // off the sending thread (B11), so the handed-off task is run here.
         handler.onTaskStart(new TaskId("ai.labs.llm"), "llm", 0);
+        assertEquals(1, clientGone.size());
+        clientGone.forEach(Runnable::run);
         verify(conversationService).cancelConversation("conv-1", ControlSignal.CANCEL_GRACEFUL,
                 RestAgentEngineStreaming.CANCELLED_BY_CLIENT_DISCONNECT);
     }
