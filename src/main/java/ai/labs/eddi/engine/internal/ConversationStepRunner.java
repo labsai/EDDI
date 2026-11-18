@@ -1582,9 +1582,14 @@ class ConversationStepRunner {
         } catch (RuntimeException readFailure) {
             currentState = null;
         }
-        transitionUnlessEnded(conversationId, currentState, ConversationState.ERROR);
+        boolean recorded = transitionUnlessEnded(conversationId, currentState, ConversationState.ERROR);
+        // The state the conversation really has now (A13): ERROR only when the CAS
+        // above recorded it; otherwise whatever it was (ENDED, a concurrent writer's
+        // state, or unknown when it could not be read).
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
-        msg = String.format(msg, conversationId, ConversationState.ERROR);
+        msg = String.format(msg, conversationId, recorded
+                ? ConversationState.ERROR
+                : (currentState != null ? currentState + " (ERROR not recorded)" : "unknown (ERROR not recorded)"));
         conversationService.contextLogger.setLoggingContext(loggingContext);
         LOGGER.error(msg, t);
     }
@@ -1611,19 +1616,22 @@ class ConversationStepRunner {
      * compare-and-set, unless it is {@code ENDED} (or unknown). When the CAS loses
      * — the state changed after it was read — the store's value stands and the
      * cache is refreshed from it.
+     *
+     * @return whether {@code target} was recorded
      */
-    void transitionUnlessEnded(String conversationId, ConversationState observedState, ConversationState target) {
+    boolean transitionUnlessEnded(String conversationId, ConversationState observedState, ConversationState target) {
         if (observedState != null && observedState != ConversationState.ENDED) {
             try {
                 if (conversationMemoryStore.compareAndSetState(conversationId, observedState, target)) {
                     cacheConversationState(conversationId, target);
-                    return;
+                    return true;
                 }
             } catch (ResourceStoreException | RuntimeException e) {
                 LOGGER.warnf("Could not record %s for conversation %s: %s", target, sanitize(conversationId), sanitize(e.getMessage()));
             }
         }
         refreshCachedState(conversationId);
+        return false;
     }
 
     void setConversationState(String conversationId, ConversationState conversationState) {

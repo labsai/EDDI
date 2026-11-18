@@ -154,6 +154,26 @@ class RestAgentEngineTest {
             // unauthenticated mock identity here) via the 2-arg overload.
             verify(conversationService).endConversation("conv-1", null);
         }
+
+        @Test
+        @DisplayName("A11: an unknown conversation id answers 404 and ends nothing")
+        void unknownConversationIsNotFound() {
+            when(conversationService.getConversationState("missing"))
+                    .thenThrow(new IConversationService.ConversationNotFoundException("No conversation found! (conversationId=missing)"));
+
+            assertThrows(IConversationService.ConversationNotFoundException.class, () -> restAgentEngine.endConversation("missing"));
+            verify(conversationService, never()).endConversation(eq("missing"), any());
+        }
+
+        @Test
+        @DisplayName("A11: the sync timeout's 408 carries a JSON error body")
+        void requestTimeoutHasABody() {
+            Response timeout = RestAgentEngine.requestTimeout();
+
+            assertEquals(408, timeout.getStatus());
+            assertNotNull(timeout.getEntity());
+            assertTrue(timeout.getEntity().toString().contains(RestAgentEngine.REQUEST_TIMEOUT_CODE));
+        }
     }
 
     @Nested
@@ -232,6 +252,17 @@ class RestAgentEngineTest {
             Response response = restAgentEngine.undo("conv-1");
 
             assertEquals(409, response.getStatus());
+        }
+
+        @Test
+        @DisplayName("A9: undo and redo on an ENDED conversation answer 410, like say and rerun")
+        void undoRedoOnEndedConversationIsGone() throws Exception {
+            when(conversationService.undo("conv-1")).thenReturn(false);
+            when(conversationService.redo("conv-1")).thenReturn(false);
+            when(conversationService.getConversationState("conv-1")).thenReturn(ConversationState.ENDED);
+
+            assertEquals(410, restAgentEngine.undo("conv-1").getStatus());
+            assertEquals(410, restAgentEngine.redo("conv-1").getStatus());
         }
 
         @Test

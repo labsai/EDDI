@@ -65,6 +65,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
@@ -1611,6 +1612,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new AgentNotReadyException(msg);
             }
+            if (agent.getDeploymentStatus() == Deployment.Status.ERROR) {
+                // A failed deployment leaves a placeholder (the agent was deleted, or a
+                // config it names is gone) whose continueConversation throws "deployment
+                // still in progress" — a 500 for what is "this agent cannot run" (A12).
+                throw new AgentNotReadyException(String.format("Agent deployment failed (environment=%s, agentId=%s, version=%s)",
+                        environment, conversationMemory.getAgentId(), agent.getAgentVersion()));
+            }
 
             // In-flight admission BEFORE the quota slot: a turn refused for capacity
             // must not have spent the tenant's api-call quota. Every exit below
@@ -1918,8 +1926,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         // invariant crash recovery relies on. Checked against the loaded
         // (DB-backed) state; false maps to 409 CONFLICT at the REST layer.
         ConversationState loadedStateForUndo = conversationMemory.getConversationState();
+        // A9: an ENDED conversation is not edited either — say and rerun refuse it, and
+        // undo/redo rewrote its history (the REST layer answers 410 for it).
         if (loadedStateForUndo == ConversationState.AWAITING_HUMAN
-                || loadedStateForUndo == ConversationState.IN_PROGRESS) {
+                || loadedStateForUndo == ConversationState.IN_PROGRESS
+                || loadedStateForUndo == ConversationState.ENDED) {
             LOGGER.warnf("Undo rejected: conversation %s is in state %s", conversationId, loadedStateForUndo);
             return false;
         }
@@ -1981,8 +1992,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         // redo during IN_PROGRESS races an executing resume (see undo).
         // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
         ConversationState loadedStateForRedo = conversationMemory.getConversationState();
+        // A9: nor an ENDED one (see undoLoaded).
         if (loadedStateForRedo == ConversationState.AWAITING_HUMAN
-                || loadedStateForRedo == ConversationState.IN_PROGRESS) {
+                || loadedStateForRedo == ConversationState.IN_PROGRESS
+                || loadedStateForRedo == ConversationState.ENDED) {
             LOGGER.warnf("Redo rejected: conversation %s is in state %s", conversationId, loadedStateForRedo);
             return false;
         }

@@ -290,6 +290,12 @@ public class RestAgentEngine implements IRestAgentEngine {
     @Override
     public Response endConversation(String conversationId) {
         validateConversationOwnership(conversationId);
+        // A11: the store's end is an update that matches nothing for an unknown id, and
+        // the owner guard admits an admin (and everyone with auth off) for a
+        // conversation with no descriptor — so an unknown id was answered 200. Every
+        // sibling endpoint answers 404; so does this one now (ConversationNotFound is
+        // mapped to 404).
+        conversationService.getConversationState(conversationId);
         // G4: attribute a pause-terminating end to the calling principal so it lands
         // in the hitl.approval audit trail (null-safe for anonymous callers).
         String endedBy = identity.getPrincipal() != null ? identity.getPrincipal().getName() : null;
@@ -441,9 +447,21 @@ public class RestAgentEngine implements IRestAgentEngine {
                 .type(MediaType.APPLICATION_JSON).header("Retry-After", "5").build();
     }
 
-    private static Response requestTimeout() {
-        return Response.status(Response.Status.REQUEST_TIMEOUT).build();
+    /**
+     * The caller's wait ran out (A11: it used to be an empty body). The turn may
+     * still finish and be stored, so the body says to read the conversation before
+     * sending the message again.
+     */
+    static Response requestTimeout() {
+        return Response.status(Response.Status.REQUEST_TIMEOUT).type(MediaType.APPLICATION_JSON)
+                .entity(errorBody(new TurnError(REQUEST_TIMEOUT_CODE, false, null,
+                        "The turn did not finish within the time this request waits (systemRuntime.agentTimeoutInSeconds). It may still "
+                                + "complete: read the conversation before sending the message again.")))
+                .build();
     }
+
+    /** The {@code error.code} of a request whose wait for its turn ran out. */
+    static final String REQUEST_TIMEOUT_CODE = "REQUEST_TIMEOUT";
 
     /**
      * The answer for a turn that was dropped without consuming its input (say) or a
@@ -714,7 +732,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.undo(conversationId);
-            return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
+            return performed ? Response.ok().build() : historyEditRefused(conversationId);
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
@@ -741,13 +759,25 @@ public class RestAgentEngine implements IRestAgentEngine {
         validateConversationOwnership(conversationId);
         try {
             boolean performed = conversationService.redo(conversationId);
-            return performed ? Response.ok().build() : Response.status(Response.Status.CONFLICT).build();
+            return performed ? Response.ok().build() : historyEditRefused(conversationId);
         } catch (ResourceNotFoundException e) {
             throw sneakyThrow(e);
         } catch (ResourceStoreException e) {
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to redo");
         }
+    }
+
+    /**
+     * An undo or redo that changed nothing: {@code 410} when the conversation has
+     * ended (A9 — the same answer say and rerun give), otherwise {@code 409} as
+     * before (nothing to undo/redo, paused, running, or a concurrent writer won).
+     */
+    private Response historyEditRefused(String conversationId) {
+        if (conversationService.getConversationState(conversationId) == ConversationState.ENDED) {
+            return Response.status(Response.Status.GONE).entity("Conversation has ended").build();
+        }
+        return Response.status(Response.Status.CONFLICT).build();
     }
 
     @Override
@@ -809,7 +839,7 @@ public class RestAgentEngine implements IRestAgentEngine {
         // Same budget and timeout answer as say. The resumed turn keeps running past a
         // timeout, exactly as a say turn does; only this request stops waiting.
         response.setTimeout(agentTimeout, TimeUnit.SECONDS);
-        response.setTimeoutHandler(asyncResp -> asyncResp.resume(Response.status(Response.Status.REQUEST_TIMEOUT).build()));
+        response.setTimeoutHandler(asyncResp -> asyncResp.resume(requestTimeout()));
 
         // Opt-in: without any of the say flags the answer is the empty 200 it has
         // always been, and the service is called without a handler.
