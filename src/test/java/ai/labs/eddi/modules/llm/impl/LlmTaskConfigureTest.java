@@ -37,8 +37,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.mockito.Mock;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.util.*;
+import java.util.logging.Handler;
+import java.util.logging.Level;
+import java.util.logging.LogRecord;
+import java.util.logging.Logger;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
@@ -179,6 +184,47 @@ class LlmTaskConfigureTest {
                     Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null);
 
             assertSame(config, result);
+        }
+
+        @Test
+        @DisplayName("a stored documents key that is not available deploys, with one WARN naming it")
+        void documentsKeyNotAvailableDeploysWithWarning() throws Exception {
+            var config = new ObjectMapper().readValue("""
+                    {"tasks":[{"actions":["help"],"id":"answer","type":"openai","documents":{"sharing":{"delegation":true}}}]}
+                    """, LlmConfiguration.class);
+            when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+
+            List<String> warnings = new ArrayList<>();
+            var handler = new Handler() {
+                @Override
+                public void publish(LogRecord record) {
+                    if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
+                        Object[] p = record.getParameters();
+                        warnings.add(p == null ? record.getMessage() : String.format(record.getMessage(), p));
+                    }
+                }
+
+                @Override
+                public void flush() {
+                }
+
+                @Override
+                public void close() {
+                }
+            };
+            var jul = Logger.getLogger(LlmTask.class.getName());
+            var previous = jul.getLevel();
+            jul.setLevel(Level.ALL);
+            jul.addHandler(handler);
+            try {
+                Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
+                assertSame(config, result);
+            } finally {
+                jul.removeHandler(handler);
+                jul.setLevel(previous);
+            }
+            assertEquals(1, warnings.stream().filter(w -> w.contains("documents.sharing.delegation is not available")).count(),
+                    warnings.toString());
         }
 
         @Test

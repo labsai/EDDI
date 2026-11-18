@@ -1796,7 +1796,7 @@ The LLM task supports advanced pre-request and post-response processing for fine
 
 ## Documents (`documents`)
 
-An LLM task can carry a `documents` block that says how the agent treats PDF documents: their structure, splitting them into chapters ("units"), handing files to other agents, a personal or team library, and documents too large to forward whole. The design is in `planning/pdf-image-extraction-and-agent-file-sharing.md`; it ships one capability at a time.
+An LLM task can carry a `documents` block that says how the agent treats PDF documents: their structure, splitting them into chapters ("units"), handing files to other agents, a personal or team library, and documents too large to forward whole. It ships one capability at a time.
 
 **Nothing in the block is available yet.** The block exists in the configuration model so that the shape is stable, but every key is refused when the configuration is saved:
 
@@ -1809,8 +1809,8 @@ An absent block, `{}` and empty nested blocks (`"split": {}`) are accepted and c
 How values resolve, once keys become available:
 
 - **Every key is optional.** Unset means the deployment default, `eddi.documents.defaults.<path>` (for example `eddi.documents.defaults.split.maxUnitTokens=8000`), and without one the built-in default.
-- **Operator bounds.** Some numbers (counts, bytes, depth, dollars) have an operator bound. A value above it is refused when the configuration is saved, with the bound named. A stored value above it (an import, or a bound tightened later) is clamped with a warning when the agent is deployed: a bound never un-deploys an agent.
-- **Stored keys that are not available** (an import from a newer EDDI, or a configuration written directly to the database) do not stop a deploy: they are ignored, and the deploy log names each one at WARN.
+- **Operator bounds.** Some numbers (counts, bytes, depth, dollars) have an operator bound. A value above it is refused when the configuration is saved, with the bound named. A stored value above it (a bound tightened after the save) is clamped with a warning when the agent is deployed: a bound never un-deploys an agent.
+- **Stored keys that are not available** (a configuration written directly to the database, or saved by a newer EDDI and then run on this one) do not stop a deploy. Every save path — the REST API, JSON patch, ZIP import, agent setup and upgrade — refuses them: they are ignored, and the deploy log names each one at WARN.
 
 The full shape, with every key at its default:
 

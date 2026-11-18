@@ -26,10 +26,11 @@ import java.util.function.Function;
  * A key that is not available in this version
  * ({@link DocumentsConfigValidator#LIVE_KEYS}) resolves to its built-in ("off")
  * value whatever was stored or configured. A stored value the save-time
- * validator would refuse today — an import, a bound tightened later, an unknown
- * name — never throws here: it is ignored or clamped, and the reason is
- * reported in {@link #clampWarnings()} for the caller to log once. Runtime code
- * reads only this record, never {@link DocumentsConfig}.
+ * validator would refuse today — written directly to the database, saved by a
+ * newer version, or above a bound tightened later — never throws here: it is
+ * ignored or clamped, and the reason is reported in {@link #clampWarnings()}
+ * for the caller to log once. Runtime code reads only this record, never
+ * {@link DocumentsConfig}.
  * </p>
  *
  * @param clampWarnings

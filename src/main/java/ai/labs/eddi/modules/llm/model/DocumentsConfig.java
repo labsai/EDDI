@@ -32,10 +32,10 @@ import java.util.List;
  * </p>
  *
  * <p>
- * The shape is the whole agent-level {@code documents} JSON of the design
- * ({@code planning/pdf-image-extraction-and-agent-file-sharing.md} §14), so a
- * client that sends a key before it is available gets the "not available"
- * refusal rather than the strict REST boundary's unknown-key 400.
+ * The shape is the whole agent-level {@code documents} JSON of the design (the
+ * PDF documents design, §14), so a client that sends a key before it is
+ * available gets the "not available" refusal rather than the strict REST
+ * boundary's unknown-key 400.
  * </p>
  *
  * @since 6.8.0

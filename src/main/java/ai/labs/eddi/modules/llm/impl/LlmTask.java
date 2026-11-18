@@ -3940,8 +3940,9 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * Resolves each task's {@code documents} block once at deploy time and logs, at
      * WARN, every value that was ignored (a key not available in this version, an
      * unknown name) or clamped to an operator bound. Never throws: a stored
-     * configuration, an import or a bound tightened later must not un-deploy an
-     * agent — only the next <em>save</em> of such a value is refused.
+     * configuration (written directly to the database, or by a newer version) or a
+     * bound tightened later must not un-deploy an agent — only the next
+     * <em>save</em> of such a value is refused.
      */
     static void warnOnDocumentsConfig(LlmConfiguration llmConfiguration, DocumentSettings settings) {
         if (llmConfiguration == null || llmConfiguration.tasks() == null) {

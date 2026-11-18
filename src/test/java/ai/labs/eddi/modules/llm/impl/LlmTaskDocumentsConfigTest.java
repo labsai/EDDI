@@ -25,8 +25,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 /**
  * Deploy time never refuses a {@code documents} value: a stored configuration
  * that carries a key not available in this version (written before a key was
- * withdrawn, imported, or written straight to the database) loads, resolves to
- * off, and logs one WARN naming the task and the key.
+ * withdrawn, saved by a newer version, or written straight to the database)
+ * loads, resolves to off, and logs one WARN naming the task and the key.
  */
 @DisplayName("LlmTask.configure — documents block")
 class LlmTaskDocumentsConfigTest {
