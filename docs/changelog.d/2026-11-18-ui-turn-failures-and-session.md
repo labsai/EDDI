@@ -103,6 +103,10 @@ Code review wave 2, section Q (shared client code of the Manager, Workforce and 
 - **Workforce.** A failure that arrives while the thread is parked is kept and shown on return; the registry is keyed
   by person and emptied on sign-out (`onSignOut`) or a change of person; a live region announces the thread's
   notices. `BearerEventSource` refills its retry budget only after a real (non-comment) event or 30 s of uptime.
+- **Workforce first load.** The top bar's user menu is `React.lazy`, so the dropdown primitives (about 30 KB gz) leave
+  the first load. Its 2rem placeholder is mounted only when a menu will render (`useAuth().method !== "none"`): with
+  authentication off neither is mounted, so the bar no longer shows a box that appears and vanishes on every load.
+  `workforce-topbar.test.tsx` covers both cases.
 
 ### Not done
 
