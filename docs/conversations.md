@@ -70,8 +70,11 @@ or a streaming `say`, and the retry is answered instead of refused:
 - A turn that **failed** is not remembered: retrying a failed request with the same key runs it again.
 - The Manager, Workforce and the Chat UI send a key with every `say` and streaming `say`: one per submission, the
   same on every retry of it (the Retry button, a draft sent again after a `408` or a dropped connection), a new
-  one for the next submission. They run on the EDDI origin, so no CORS rule is involved; a browser client of
-  your own on another origin must have `idempotency-key` in `quarkus.http.cors.headers` before it can send one.
+  one for the next submission, and expire the key client-side after nine minutes (below the 600 s default of
+  `eddi.turns.idempotency.ttl-seconds`). They send it only to their own origin; a Chat UI embedded with an
+  `apiBaseUrl` on another origin sends none unless it opts in (`idempotencyKeys`), because the backend must allow
+  the header first: `idempotency-key` and `x-eddi-request-id` are in the default `quarkus.http.cors.headers`, and a
+  deployment that overrides that list has to keep them.
 - Waiting for a running turn works on the node that runs it; behind a multi-node (NATS) coordinator a
   duplicate that lands on another node still meets `409` until the turn completes, after which the stored
   answer is served everywhere. `0` for the TTL switches the feature off.
