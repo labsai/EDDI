@@ -6571,7 +6571,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_hitl_timeout_count_total` — nobody answered in time and the timeout policy fired. `eddi_hitl_timeout_arm_failures_total` — a pause whose timeout could not be scheduled; it waits without one until crash recovery re-creates it (a single node at its next start, a cluster on a sweep that reaches the pause, once the store accepts the write). `eddi_hitl_timeout_undecidable_total` — a timeout decision that can never apply (the stored plan changed), so the pause was cancelled. `eddi_hitl_timeout_rearmed_spent_total` — a timeout that fired and completed while its pause still waits, re-armed an hour later.",
+          "description": "`eddi_hitl_timeout_count_total` — nobody answered in time and the timeout policy fired. `eddi_hitl_timeout_arm_failures_total` — a pause whose timeout could not be scheduled; it waits without one until crash recovery re-creates it (a single node at its next start, a cluster on a sweep that reaches the pause, once the store accepts the write). `eddi_hitl_timeout_undecidable_total` — a timeout decision that can never apply (the stored plan changed): reason plan_changed, the pause was cancelled; reason unbound_plan_changed, a timeout row from an older build names no pause, so the pause was not cancelled and waits until recovery arms a bound timeout (about an hour later on a cluster, at the next start on a single node). `eddi_hitl_timeout_rearmed_spent_total` — a timeout that fired and completed while its pause still waits, re-armed an hour later.",
           "gridPos": {
             "h": 7,
             "w": 12,
