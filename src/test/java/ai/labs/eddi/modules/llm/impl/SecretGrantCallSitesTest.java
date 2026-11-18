@@ -38,6 +38,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -64,6 +66,7 @@ class SecretGrantCallSitesTest {
     static final String AGENT_B = "bbbbbbbbbbbbbbbbbbbbbbbb";
     static final SecretReference KEY = new SecretReference("default", "openai-key");
     static final String REF = "${vault:openai-key}";
+    private static final Pattern VAR_LEVEL = Pattern.compile("\\$\\{vars:var(\\d{1,3})\\}");
 
     private ISecretProvider provider;
     private SecretResolver secretResolver;
@@ -328,9 +331,10 @@ class SecretGrantCallSitesTest {
             // follows.
             when(variables.resolveValue(anyString())).thenAnswer(inv -> {
                 String value = inv.getArgument(0);
-                if (value.startsWith("${vars:var")) {
-                    int level = Integer.parseInt(value.substring("${vars:var".length(), value.length() - 1));
-                    return level < 10 ? "${vars:var" + (level + 1) + "}" : REF;
+                Matcher level = VAR_LEVEL.matcher(value);
+                if (level.matches()) {
+                    int n = Integer.parseInt(level.group(1)); // digits only, by the pattern
+                    return n < 10 ? "${vars:var" + (n + 1) + "}" : REF;
                 }
                 return value;
             });

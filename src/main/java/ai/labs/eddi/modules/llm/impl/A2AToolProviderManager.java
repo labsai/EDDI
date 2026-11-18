@@ -335,15 +335,13 @@ public class A2AToolProviderManager {
         }
         // The bound apiKey is the final credential: one that still holds a variable is
         // refused as it stands, never expanded again (see the MCP manager).
-        String expanded = apiKey;
-        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
+        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(apiKey)) {
             // A variable that does not resolve names no secret: refused rather than
             // checked vacuously while a card fetched with its old value is cached.
             throw new IllegalArgumentException("The apiKey of the A2A agent at " + config.getUrl() + " names a global variable that does "
                     + "not resolve to a value, so its vault grant cannot be checked.");
         }
-        secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
-                "A2A agent at " + config.getUrl());
+        secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "A2A agent at " + config.getUrl());
     }
 
     /**

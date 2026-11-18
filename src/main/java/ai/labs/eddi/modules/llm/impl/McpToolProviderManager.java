@@ -1093,16 +1093,14 @@ public class McpToolProviderManager {
             // holds a variable — deleted, cyclic, nested past the limit — is refused as it
             // stands, never expanded again, since a second expansion could name another
             // secret than the cached session uses.
-            String expanded = apiKey;
-            if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(expanded)) {
+            if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(apiKey)) {
                 // A variable that does not resolve (deleted, nested past the limit, a
                 // cycle) names no secret: a grant check over it would pass vacuously while
                 // a session cached for the credential it used to name is still served.
                 throw new IllegalArgumentException("The apiKey of MCP server '" + serverName + "' names a global variable that does not "
                         + "resolve to a value, so its vault grant cannot be checked. Restore the variable or use a ${vault:…} reference.");
             }
-            secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(expanded != null ? expanded : apiKey)), access,
-                    "MCP server '" + serverName + "'");
+            secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "MCP server '" + serverName + "'");
         } catch (SecretResolver.SecretNotGrantedException | ConnectionException e) {
             throw new IllegalArgumentException(e.getMessage(), e);
         }
