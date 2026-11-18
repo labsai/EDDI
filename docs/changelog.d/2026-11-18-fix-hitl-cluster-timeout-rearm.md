@@ -18,7 +18,7 @@
     this pause's while it can fire;
   - a row of this pause a person disabled is left alone;
   - when the pause's timeout fired and completed while the pause still waits (also a legacy row that fired after
-    the pause began), it is re-armed one hour after that fire — a safety net, not a retry loop;
+    the pause began), a recovery pass creates the replacement row at once but its next fire is delayed until one hour after that fire — a safety net, not a retry loop;
   - otherwise — no row, rows of earlier pauses only, rows that can never fire again (`DEAD_LETTERED`, `FAILED` out of
     `eddi.schedule.max-retries`, switched off by an agent undeploy: older builds did all three to HITL timeouts), or
     rows that cannot be read — every row under the name is deleted and one is created at the original due time. An
@@ -47,7 +47,7 @@
   `ConversationHitlService.scheduleHitlTimeout` and the group approval and human-turn schedulers in
   `GroupHitlCoordinator` logged a failure at `WARN` and swallowed it. They now log at `ERROR` and count
   `eddi_hitl_timeout_arm_failures_total{surface}` (`regular`, `group`, `group-human`). The cluster sweep re-creates
-  the missing schedule within one interval; a single node does so at its next start.
+  the missing schedule on a sweep that reaches the pause (best effort: at most 10,000 paused conversations per pass); a single node does so at its next start.
 - **Docs.** `docs/hitl.md` → Crash Recovery describes what the sweep keeps, re-creates and re-arms, the undecidable
   outcome, the single-node limit, the startup grace (only for re-created rows: a surviving overdue row fires at the
   first poll, so `AUTO_APPROVE` decides right after an outage longer than the timeout) and the earlier cluster
