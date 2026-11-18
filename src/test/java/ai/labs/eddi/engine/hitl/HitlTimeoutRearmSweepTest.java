@@ -28,8 +28,10 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -87,11 +89,30 @@ class HitlTimeoutRearmSweepTest {
             rows.removeIf(row -> name.equals(row.getName()));
             return before - rows.size();
         });
-        // Like both stores: the rows of the name, at most `limit` of them.
+        // Like both stores: the rows of the name, at most `limit` decodable ones; an
+        // undecodable row is skipped and read past, up to an allowance of 100, beyond
+        // which the read fails rather than return a short result that looks complete.
         when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenAnswer(invocation -> {
             String name = invocation.getArgument(0);
             int limit = invocation.getArgument(1);
-            return rows.stream().filter(row -> name.equals(row.getName())).limit(limit).toList();
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            int scanned = 0;
+            for (ScheduleConfiguration row : rows) {
+                if (result.size() >= limit || scanned >= limit + 100) {
+                    break;
+                }
+                if (!name.equals(row.getName())) {
+                    continue;
+                }
+                scanned++;
+                if (!undecodable.contains(row.getId())) {
+                    result.add(row);
+                }
+            }
+            if (result.size() < limit && scanned >= limit + 100) {
+                throw new ResourceStoreException("too many undecodable rows");
+            }
+            return result;
         });
         doAnswer(invocation -> {
             String id = invocation.getArgument(0);
@@ -101,7 +122,11 @@ class HitlTimeoutRearmSweepTest {
 
         observer = new HitlCrashRecoveryObserver(memStore, gcStore, scheduleStore, mock(IConversationService.class),
                 mock(IGroupConversationService.class), true, true, Optional.empty());
+        observer.readRetryDelays = List.of(Duration.ZERO, Duration.ZERO); // the retries, without the wait
     }
+
+    /** Ids of rows the store cannot decode. */
+    private final Set<String> undecodable = new HashSet<>();
 
     // --- helpers -------------------------------------------------------------
 
@@ -578,6 +603,85 @@ class HitlTimeoutRearmSweepTest {
 
             assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME));
             assertFalse(disabled.isEnabled());
+        }
+
+        /**
+         * A conversation left IN_PROGRESS by a lost resume, with an intact bookmark.
+         */
+        private void lostResume(Instant pausedAt) throws Exception {
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setAgentId("agent-1");
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(pausedAt);
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            snapshot.setHitlApprovalTimeout("PT1M");
+            when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS)).thenReturn(List.of(CONV_ID));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
+            when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN))
+                    .thenReturn(true);
+        }
+
+        @Test
+        @DisplayName("restore path: a read that keeps failing creates nothing — the hand-disabled row is untouched, the failure counted")
+        void restoredPauseFailedReadCreatesNothing() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(1));
+            ScheduleConfiguration disabled = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", pausedAt,
+                    pausedAt.plusSeconds(60));
+            disabled.setEnabled(false);
+            lostResume(pausedAt);
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenThrow(new ResourceStoreException("down"));
+            var meters = new SimpleMeterRegistry();
+            observer.meterRegistry = meters;
+
+            observer.runRecovery(Instant.now());
+
+            assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME));
+            assertFalse(disabled.isEnabled(), "no automatic decision may come back for this pause");
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, times(3)).readSchedulesByName(REGULAR_NAME, 100); // first read + two retries
+            assertEquals(1.0, meters.counter(HitlCrashRecoveryObserver.METRIC_ARM_FAILURES, "surface", "regular").count());
+        }
+
+        @Test
+        @DisplayName("restore path: a read that fails once and succeeds on the retry is judged normally")
+        void restoredPauseReadSucceedsOnRetry() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(1));
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", pausedAt, pausedAt.plusSeconds(60));
+            pollAt(Instant.now()); // the timeout fired; its resume was lost with the node
+            lostResume(pausedAt);
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenThrow(new ResourceStoreException("blip"))
+                    .thenAnswer(invocation -> rowsNamed(invocation.getArgument(0)));
+
+            observer.runRecovery(Instant.now());
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size(), "the spent row is replaced");
+            assertTrue(named.get(0).isEnabled());
+            verify(scheduleStore, times(1)).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("an undecodable row in the first 100 does not hide a protected row beyond them: nothing is created")
+        void undecodableRowDoesNotHideAProtectedRow() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            ScheduleConfiguration broken = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE",
+                    Instant.now().minus(Duration.ofHours(1)), Instant.now().plus(Duration.ofHours(10)));
+            undecodable.add(broken.getId());
+            for (int i = 0; i < 99; i++) {
+                armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(2 + i)),
+                        Instant.now().plus(Duration.ofHours(10)));
+            }
+            ScheduleConfiguration disabled = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plus(Duration.ofMinutes(5)));
+            disabled.setEnabled(false);
+
+            sweeps(SWEEPS);
+
+            assertTrue(rowsNamed(REGULAR_NAME).contains(disabled));
+            assertFalse(disabled.isEnabled());
+            verify(scheduleStore, never()).createSchedule(any());
+            verify(scheduleStore, never()).deleteSchedule(anyString());
         }
 
         @Test

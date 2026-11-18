@@ -561,11 +561,14 @@ public class PostgresScheduleStore implements IScheduleStore {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {
+            int rawLimit = (int) Math.min((long) limit + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
             ps.setString(1, name);
-            ps.setInt(2, limit);
+            ps.setInt(2, rawLimit);
             List<ScheduleConfiguration> result = new ArrayList<>();
+            int scanned = 0;
             try (ResultSet rs = ps.executeQuery()) {
-                while (rs.next()) {
+                while (result.size() < limit && rs.next()) {
+                    scanned++;
                     try {
                         result.add(fromResultSet(rs));
                     } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
@@ -577,11 +580,23 @@ public class PostgresScheduleStore implements IScheduleStore {
                     }
                 }
             }
+            if (result.size() < limit && scanned >= rawLimit) {
+                // Fewer than `limit` decodable rows, but the scan stopped at its cap: rows
+                // may remain unseen, so a short result would falsely look complete.
+                throw new IResourceStore.ResourceStoreException("Too many undecodable schedules under one name to read them completely");
+            }
             return result;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules by name: " + name, e);
         }
     }
+
+    /**
+     * How many undecodable rows {@link #readSchedulesByName} reads past before it
+     * gives up: it keeps reading until it has {@code limit} decodable rows, so a
+     * result shorter than {@code limit} is complete, and fails beyond this.
+     */
+    private static final int UNDECODABLE_ALLOWANCE = 100;
 
     @Override
     public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {

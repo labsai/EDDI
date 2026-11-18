@@ -179,7 +179,11 @@ public interface IScheduleStore {
      * by id. Read from the primary where the store has replicas. A row that cannot
      * be decoded is skipped (logged at WARN with its id) instead of failing the
      * read: the poller cannot fire it either, and one broken row must not stop the
-     * sweep from judging — and repairing — the rest. A {@code limit} of zero or
+     * sweep from judging — and repairing — the rest. The store reads past skipped
+     * rows until it has {@code limit} decodable ones, so a result shorter than
+     * {@code limit} holds every decodable row of the name; when too many rows
+     * cannot be decoded to tell (a store-defined allowance), the read fails rather
+     * than return a short result that looks complete. A {@code limit} of zero or
      * less returns nothing.
      */
     List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException;

@@ -35,6 +35,7 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
@@ -580,7 +581,8 @@ class MongoScheduleStoreTest {
         verify(scheduleCollection).find(filter.capture());
         assertEquals(new BsonDocument("name", new BsonString("hitl-timeout-conv-1")), encodedFilter(filter.getValue()),
                 "an equality on the name and nothing else");
-        verify(found).limit(100);
+        // the limit plus the allowance for undecodable rows the read may skip
+        verify(found).limit(200);
     }
 
     @Test
@@ -627,6 +629,50 @@ class MongoScheduleStoreTest {
         List<ScheduleConfiguration> result = store.readSchedulesByName("hitl-timeout-conv-1", 100);
 
         assertEquals(List.of(decoded), result);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — reads past an undecodable row, so a protected row beyond the limit is still returned")
+    void readSchedulesByName_readsPastSkippedRowsToTheLimit() throws Exception {
+        // One undecodable row in the first page of 100, then 99 stale rows, then the
+        // row that matters (a hand-disabled timeout of the current pause) at raw #101.
+        List<Document> docs = new ArrayList<>();
+        docs.add(new Document("_id", "broken-row"));
+        for (int i = 0; i < 99; i++) {
+            docs.add(new Document("_id", "stale-" + i));
+        }
+        docs.add(new Document("_id", "protected-row"));
+        FindIterable<Document> found = findingDocs(docs.toArray(new Document[0]));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(found);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenAnswer(invocation -> {
+            Document doc = invocation.getArgument(0);
+            if ("broken-row".equals(doc.get("_id"))) {
+                throw new IOException("unexpected field type");
+            }
+            var config = new ScheduleConfiguration();
+            config.setName(String.valueOf(doc.get("_id")));
+            return config;
+        });
+
+        List<ScheduleConfiguration> result = store.readSchedulesByName("hitl-timeout-conv-1", 100);
+
+        assertEquals(100, result.size(), "100 decodable rows: the result is capped, and the caller sees it is");
+        assertEquals("protected-row", result.get(99).getName());
+        verify(found).limit(200);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — too many undecodable rows to read completely: the read fails instead of looking complete")
+    void readSchedulesByName_failsWhenTheSkipAllowanceIsUsedUp() throws Exception {
+        List<Document> docs = new ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            docs.add(new Document("_id", "broken-" + i));
+        }
+        FindIterable<Document> found = findingDocs(docs.toArray(new Document[0]));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(found);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenThrow(new IOException("unreadable"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.readSchedulesByName("hitl-timeout-conv-1", 1));
     }
 
     /** A find whose cursor yields {@code docs}, accepting any limit. */

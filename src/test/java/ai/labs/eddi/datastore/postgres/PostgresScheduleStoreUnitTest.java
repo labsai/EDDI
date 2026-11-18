@@ -23,9 +23,12 @@ import java.sql.*;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static ai.labs.eddi.utils.LogCaptureSupport.assertNoForgedRecordBoundary;
 import static ai.labs.eddi.utils.LogCaptureSupport.captureLogsOf;
@@ -586,7 +589,50 @@ class PostgresScheduleStoreUnitTest {
         assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")),
                 sql.getAllValues().toString());
         verify(preparedStatement).setString(1, "hitl-timeout-conv-1");
-        verify(preparedStatement).setInt(2, 100);
+        // the limit plus the allowance for undecodable rows the read may skip
+        verify(preparedStatement).setInt(2, 200);
+    }
+
+    /**
+     * A result set of {@code ids} where the rows named in {@code broken} carry
+     * metadata that is not JSON.
+     */
+    private void stubRows(List<String> ids, Set<String> broken) throws Exception {
+        AtomicInteger row = new AtomicInteger(-1);
+        when(resultSet.next()).thenAnswer(invocation -> row.incrementAndGet() < ids.size());
+        when(resultSet.getString("id")).thenAnswer(invocation -> ids.get(row.get()));
+        when(resultSet.getString("metadata")).thenAnswer(invocation -> broken.contains(ids.get(row.get())) ? "{not json" : null);
+        when(jsonSerialization.deserialize(eq("{not json"), eq(Map.class))).thenThrow(new RuntimeException("bad json"));
+    }
+
+    @Test
+    void readSchedulesByName_readsPastSkippedRowsToTheLimit() throws Exception {
+        // One undecodable row in the first page of 100, then 99 stale rows, then the
+        // row
+        // that matters (a hand-disabled timeout of the current pause) at raw #101.
+        List<String> ids = new ArrayList<>();
+        ids.add("broken-row");
+        for (int i = 0; i < 99; i++) {
+            ids.add("stale-" + i);
+        }
+        ids.add("protected-row");
+        stubRows(ids, Set.of("broken-row"));
+
+        List<ScheduleConfiguration> rows = sut.readSchedulesByName("hitl-timeout-conv-1", 100);
+
+        assertEquals(100, rows.size(), "100 decodable rows: the result is capped, and the caller sees it is");
+        assertEquals("protected-row", rows.get(99).getId());
+    }
+
+    @Test
+    void readSchedulesByName_failsWhenTheSkipAllowanceIsUsedUp() throws Exception {
+        List<String> ids = new ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            ids.add("broken-" + i);
+        }
+        stubRows(ids, Set.copyOf(ids));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> sut.readSchedulesByName("hitl-timeout-conv-1", 1));
     }
 
     @Test

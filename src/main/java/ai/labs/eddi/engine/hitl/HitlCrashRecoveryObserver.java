@@ -749,9 +749,9 @@ public class HitlCrashRecoveryObserver {
      * @param replace
      *            for a pause that was just restored after a lost resume: a spent
      *            row is replaced at once (no backoff — the fire that started the
-     *            lost resume is not a timeout still to come), and a failed read
-     *            still creates the row; an armed or hand-disabled row of the pause
-     *            is kept
+     *            lost resume is not a timeout still to come); an armed or
+     *            hand-disabled row of the pause is kept, and a read that keeps
+     *            failing writes nothing, as on every other path
      * @param stillPaused
      *            whether the scanned pause is still the current one — checked
      *            before anything is deleted or created, and again after the create
@@ -791,24 +791,16 @@ public class HitlCrashRecoveryObserver {
             try {
                 // The store skips a row it cannot decode (and logs it): such a row cannot
                 // be fired by the poller either, so it is no timeout of this pause.
-                rows = scheduleStore.readSchedulesByName(scheduleName, ROWS_PER_NAME);
+                rows = readTimeoutRows(scheduleName);
                 arming = timeoutArming(rows, pauseId, pausedAt);
             } catch (Exception e) {
-                if (replace) {
-                    // The pause was just restored; nothing could be learned about its rows, and
-                    // the replacement below is the repair this pass exists for. No row is
-                    // deleted (none was read); a row of this pause that is still armed then
-                    // fires once more and is refused by pause id or state.
-                    rows = List.of();
-                    arming = TimeoutArming.MISSING;
-                } else {
-                    // A failed read says nothing about the rows: an armed one must not be
-                    // deleted and re-created on a transient error, and a disabled one must
-                    // not come back enabled. Nothing is written; the next sweep tries again.
-                    LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — leaving them as they are", scheduleName,
-                            e.getMessage());
-                    return false;
-                }
+                // A failed read says nothing about the rows — on the restore path too: an
+                // armed one must not be joined or replaced on a transient error, and one a
+                // person disabled (no automatic decision on this pause) must not get an
+                // enabled twin. For an approval gate the safe failure is the pause waiting
+                // for a human, so nothing is written.
+                readFailed(scheduleName, surface, conversationId, e);
+                return false;
             }
             if (arming == TimeoutArming.ARMED || arming == TimeoutArming.DISABLED) {
                 LOGGER.debugf("HITL timeout for %s (%s) left as it is: %s", conversationId, surface, arming);
@@ -883,6 +875,70 @@ public class HitlCrashRecoveryObserver {
             return false;
         }
     }
+
+    /**
+     * Pauses between the attempts to read a pause's timeout rows: a failed read
+     * writes nothing, and a single node has no later sweep to try again (its
+     * recovery runs only at startup), so a short blip is ridden out here. Bounded —
+     * the pass runs on a background thread, but one pause must not hold it for
+     * long. Package-private so tests can run without waiting.
+     */
+    List<Duration> readRetryDelays = List.of(Duration.ofSeconds(1), Duration.ofSeconds(4));
+
+    /**
+     * Reads the rows under {@code scheduleName}, retried per
+     * {@link #readRetryDelays}.
+     */
+    private List<ScheduleConfiguration> readTimeoutRows(String scheduleName) throws ResourceStoreException {
+        ResourceStoreException last = null;
+        for (int attempt = 0; attempt <= readRetryDelays.size(); attempt++) {
+            if (attempt > 0) {
+                try {
+                    Thread.sleep(readRetryDelays.get(attempt - 1).toMillis());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            try {
+                return scheduleStore.readSchedulesByName(scheduleName, ROWS_PER_NAME);
+            } catch (ResourceStoreException e) {
+                last = e;
+            } catch (RuntimeException e) {
+                last = new ResourceStoreException("Failed to read schedules by name", e);
+            }
+        }
+        throw last != null ? last : new ResourceStoreException("Interrupted while reading schedules by name");
+    }
+
+    /**
+     * Every read of a pause's timeout rows failed: nothing was written and the
+     * pause waits for a human. In a cluster the next sweep reads again (WARN);
+     * without one — a single node, whose recovery runs only at startup — the pause
+     * keeps waiting until the next start or a person's decision (ERROR). Counted as
+     * an arm failure either way.
+     */
+    private void readFailed(String scheduleName, String surface, String conversationId, Exception e) {
+        boolean sweepFollows = clusterConfig != null && clusterConfig.isNats();
+        if (sweepFollows) {
+            LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — nothing written; the next recovery sweep "
+                    + "reads again", scheduleName, e.getMessage());
+        } else {
+            LOGGER.errorf("HITL timeout schedule(s) %s could not be read after %d attempt(s) (%s) — nothing written: the pause "
+                    + "of %s waits for a person's decision without a re-armed timeout until the next start", scheduleName,
+                    readRetryDelays.size() + 1, e.getMessage(), conversationId);
+        }
+        if (meterRegistry != null) {
+            meterRegistry.counter(METRIC_ARM_FAILURES, "surface", surface).increment();
+        }
+    }
+
+    /**
+     * The arm-failure counter {@code ConversationHitlService} and
+     * {@code GroupHitlCoordinator} count at pause time — here: recovery could not
+     * read a pause's timeout rows, so it could not re-arm it.
+     */
+    static final String METRIC_ARM_FAILURES = "eddi_hitl_timeout_arm_failures";
 
     /**
      * Deletes, by id, the HITL timeout rows among {@code rows} — the rows a sweep

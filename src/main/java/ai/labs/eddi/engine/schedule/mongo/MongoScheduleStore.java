@@ -491,10 +491,13 @@ public class MongoScheduleStore implements IScheduleStore {
         // The primary: the HITL recovery sweep deletes and re-creates rows on what this
         // returns, and a lagging secondary that misses the armed row (or shows a stale
         // enabled flag) would have it treated as missing.
-        try (var cursor = schedulePrimaryReadCollection.find(eq(NAME, name)).limit(limit).iterator()) {
-            List<ScheduleConfiguration> result = new ArrayList<>();
-            while (cursor.hasNext()) {
+        int rawLimit = rawRowsToScan(limit);
+        List<ScheduleConfiguration> result = new ArrayList<>();
+        int scanned = 0;
+        try (var cursor = schedulePrimaryReadCollection.find(eq(NAME, name)).limit(rawLimit).iterator()) {
+            while (result.size() < limit && cursor.hasNext()) {
                 Document doc = cursor.next();
+                scanned++;
                 try {
                     result.add(fromDocument(doc));
                 } catch (Exception e) {
@@ -504,10 +507,26 @@ public class MongoScheduleStore implements IScheduleStore {
                             sanitize(name), sanitize(e.getMessage()));
                 }
             }
-            return result;
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to read schedules by name", e);
         }
+        if (result.size() < limit && scanned >= rawLimit) {
+            // Fewer than `limit` decodable rows, but the scan stopped at its cap: rows
+            // may remain unseen, so a short result would falsely look complete.
+            throw new IResourceStore.ResourceStoreException("Too many undecodable schedules under one name to read them completely");
+        }
+        return result;
+    }
+
+    /**
+     * How many undecodable rows {@link #readSchedulesByName} reads past before it
+     * gives up: it keeps reading until it has {@code limit} decodable rows, so a
+     * result shorter than {@code limit} is complete, and fails beyond this.
+     */
+    private static final int UNDECODABLE_ALLOWANCE = 100;
+
+    private static int rawRowsToScan(int limit) {
+        return (int) Math.min((long) limit + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
     }
 
     @Override
