@@ -6,20 +6,31 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.configs.agents.AgentCascadeService;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.internal.groups.ReviewRefusalException;
+import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.engine.spendcontrol.SpendControlException;
+import ai.labs.eddi.engine.tenancy.QuotaRefusal;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
 import ai.labs.eddi.engine.runtime.client.factory.RestInterfaceFactory;
 import com.fasterxml.jackson.core.JsonLocation;
 import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import org.jboss.logging.Logger;
 
 import java.io.IOException;
 import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import jakarta.ws.rs.ClientErrorException;
@@ -193,31 +204,91 @@ final class McpToolUtils {
         return Math.min(requested, maxSize);
     }
 
+    private static final ObjectMapper BOUNDS_MAPPER = new ObjectMapper();
+
     /**
-     * A JSON result within {@code maxChars}, or — when it is longer — an envelope
-     * saying so: {@code {"truncated":true,"totalChars":N,"returnedChars":M,
-     * "hint":"…","partial":"<the first M characters>"}}. The caller learns that the
-     * answer is incomplete instead of reading a silently cut document, and the hint
-     * names how to ask for less.
+     * A JSON object result within {@code maxChars}. A longer one is returned as
+     * valid JSON of its normal shape with the bulky lists shortened to their
+     * <em>newest</em> entries (the tail; the lists are oldest-first), never cutting
+     * inside a value: each list in {@code listFields} keeps the longest tail that
+     * lets the document fit, and the result gains {@code truncated: true},
+     * {@code totalChars}, {@code returnedChars}, {@code total<Field>} /
+     * {@code returned<Field>} per shortened list and {@code hint}. When no tail
+     * fits, the lists are emptied; a document that is still too large (one huge
+     * value) becomes just the {@code truncated} envelope with the counts and the
+     * hint.
+     *
+     * @param listFields
+     *            top-level array members that may be shortened, e.g.
+     *            {@code "conversationSteps"}
      */
-    static String bounded(String json, int maxChars, String hint) {
+    static String bounded(String json, int maxChars, String hint, String... listFields) {
         if (json == null || json.length() <= maxChars) {
             return json;
         }
-        return "{\"truncated\":true,\"totalChars\":" + json.length() + ",\"returnedChars\":" + maxChars + ",\"hint\":\"" + escapeJsonString(hint)
-                + "\",\"partial\":\"" + escapeJsonString(json.substring(0, maxChars)) + "\"}";
+        try {
+            JsonNode parsed = BOUNDS_MAPPER.readTree(json);
+            if (parsed instanceof ObjectNode root) {
+                Map<String, Integer> sizes = new LinkedHashMap<>();
+                for (String field : listFields) {
+                    if (root.get(field) instanceof ArrayNode list) {
+                        sizes.put(field, list.size());
+                    }
+                }
+                int largest = sizes.values().stream().mapToInt(Integer::intValue).max().orElse(0);
+                for (int keep = largest / 2;; keep = keep / 2) {
+                    ObjectNode shortened = root.deepCopy();
+                    for (var entry : sizes.entrySet()) {
+                        ArrayNode list = (ArrayNode) shortened.get(entry.getKey());
+                        int size = list.size();
+                        int from = Math.max(0, size - keep);
+                        ArrayNode tail = shortened.arrayNode();
+                        for (int i = from; i < size; i++) {
+                            tail.add(list.get(i));
+                        }
+                        shortened.set(entry.getKey(), tail);
+                        shortened.put("total" + capitalised(entry.getKey()), size);
+                        shortened.put("returned" + capitalised(entry.getKey()), tail.size());
+                    }
+                    shortened.put("truncated", true);
+                    shortened.put("totalChars", json.length());
+                    shortened.put("hint", hint);
+                    String candidate = BOUNDS_MAPPER.writeValueAsString(shortened);
+                    if (candidate.length() <= maxChars) {
+                        return candidate;
+                    }
+                    if (keep == 0) {
+                        break;
+                    }
+                }
+            }
+        } catch (JsonProcessingException e) {
+            // not an object we can shorten: the envelope below
+        }
+        return "{\"truncated\":true,\"totalChars\":" + json.length() + ",\"hint\":\"" + escapeJsonString(hint) + "\"}";
+    }
+
+    private static String capitalised(String field) {
+        return Character.toUpperCase(field.charAt(0)) + field.substring(1);
     }
 
     /**
-     * A text result within {@code maxChars}, or its first {@code maxChars}
-     * characters followed by an explicit {@code [truncated: true …]} line with the
-     * hint.
+     * A text result within {@code maxChars}, or its beginning cut at a line end
+     * (never inside a surrogate pair) followed by an explicit
+     * {@code [truncated: true …]} line with the hint.
      */
     static String boundedText(String text, int maxChars, String hint) {
         if (text == null || text.length() <= maxChars) {
             return text;
         }
-        return text.substring(0, maxChars) + "\n[truncated: true — returned " + maxChars + " of " + text.length() + " characters. " + hint + "]";
+        int cut = maxChars;
+        int lineEnd = text.lastIndexOf('\n', maxChars);
+        if (lineEnd > maxChars / 2) {
+            cut = lineEnd;
+        } else if (Character.isHighSurrogate(text.charAt(cut - 1))) {
+            cut--;
+        }
+        return text.substring(0, cut) + "\n[truncated: true — returned " + cut + " of " + text.length() + " characters. " + hint + "]";
     }
 
     /**
@@ -388,6 +459,16 @@ final class McpToolUtils {
     }
 
     /**
+     * What may be said about {@code e} to the caller: its message when it is a
+     * failure {@link #isCallerFacing} lets through, else {@code fallback}. The one
+     * way a tool puts an exception's text into a result; {@code
+     * McpToolErrorLeakScanTest} flags the raw {@code getMessage()} forms.
+     */
+    static String safeMessage(Throwable e, String fallback) {
+        return isCallerFacing(e) ? describe(e) : fallback;
+    }
+
+    /**
      * A failure whose message a tool authored for its caller — a missing trigger,
      * an empty reply — and that {@link #isCallerFacing} therefore lets through.
      */
@@ -406,6 +487,14 @@ final class McpToolUtils {
                 || e instanceof IConversationService.AgentNotReadyException || e instanceof IConversationService.AgentMismatchException
                 || e instanceof IConversationService.ConversationEndedException || e instanceof IConversationService.InputTooLargeException
                 || e instanceof IConversationService.ConversationNotFoundException
+                // Refusals EDDI raises itself, with text written for the caller: the setup
+                // wizard's validation, a cascade request that cannot be applied, a spend
+                // control refusal, a review validation, a malformed review argument, a quota
+                // refusal. Listed by type on purpose: a new exception is not caller-facing
+                // until someone decides it is.
+                || e instanceof AgentSetupService.AgentSetupException || e instanceof AgentCascadeService.CascadeException
+                || e instanceof SpendControlException || e instanceof ReviewRefusalException || e instanceof McpReviewArguments.BadArgument
+                || e instanceof QuotaRefusal
                 || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
                 // A discussion refusal the engine authored ("no phases are defined", the
                 // depth limit) — but not one that wraps an underlying failure, whose

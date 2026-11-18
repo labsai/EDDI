@@ -29,6 +29,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.MAX_PAGE_SIZE;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.clampLimit;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.safeMessage;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
@@ -48,6 +49,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpMemoryTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpMemoryTools.class);
@@ -76,7 +78,7 @@ public class McpMemoryTools {
         return listUserMemories(userId, limit, null);
     }
 
-    @Tool(name = "list_user_memories", description = "List persistent memory entries for a user, one page at a time. "
+    @Tool(name = "list_user_memories", description = "List persistent memory entries for a user, one page at a time, newest update first. "
             + "Returns structured facts, preferences, and context that agents have remembered about the user. "
             + "The result carries total, offset, limit and truncated=true when more entries follow: ask for the next page with "
             + "offset = offset + count.")
@@ -89,12 +91,12 @@ public class McpMemoryTools {
             return errorJson("userId is required");
         ownershipValidator.validateUserAccess(identity, userId);
         try {
-            var entries = userMemoryStore.getAllEntries(userId);
-            int total = entries.size();
+            // Only the page is loaded (the store pages, newest update first), plus a count.
+            long total = userMemoryStore.countEntries(userId);
             int maxEntries = clampLimit(limit, 50, MAX_PAGE_SIZE);
-            int from = Math.min(Math.max(offset != null ? offset : 0, 0), total);
-            int to = Math.min(from + maxEntries, total);
-            var page = entries.subList(from, to);
+            int from = Math.max(offset != null ? offset : 0, 0);
+            var page = userMemoryStore.getEntriesPage(userId, from, maxEntries);
+            long to = (long) from + page.size();
 
             var result = new LinkedHashMap<String, Object>();
             result.put("userId", userId);
@@ -243,7 +245,7 @@ public class McpMemoryTools {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         if (IUserMemoryStore.isReservedKey(key))
-            return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage());
+            return errorJson(safeMessage(new IUserMemoryStore.ReservedMemoryKeyException(key), "The key is reserved"));
         try {
             var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
             List<String> groups = groupIds == null || groupIds.isBlank()
@@ -270,7 +272,7 @@ public class McpMemoryTools {
     }
 
     @Tool(name = "delete_user_memory", description = "Delete a specific memory entry by its database ID.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String deleteUserMemory(@ToolArg(description = "Memory entry ID (required)") String entryId) {
         requireAnyRole(identity, authEnabled, McpRoles.ADMIN_ONLY);
         if (entryId == null || entryId.isBlank())
@@ -286,7 +288,7 @@ public class McpMemoryTools {
             if (IUserMemoryStore.isReservedKey(existing.get().key())) {
                 // The Art. 18 flag is lifted through the GDPR admin unrestrict endpoint, which
                 // audits it.
-                return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()).getMessage());
+                return errorJson(safeMessage(new IUserMemoryStore.ReservedMemoryKeyException(existing.get().key()), "The key is reserved"));
             }
             userMemoryStore.deleteEntry(entryId);
             return jsonSerialization.serialize(Map.of("entryId", entryId, "status", "deleted"));

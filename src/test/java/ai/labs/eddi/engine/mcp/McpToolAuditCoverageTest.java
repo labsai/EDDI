@@ -62,22 +62,26 @@ class McpToolAuditCoverageTest {
      * Mutators that reach the REST API over the loopback, where
      * {@code AdminActionAuditFilter} records them with the MCP caller's identity.
      */
-    private static final Set<String> REST_BACKED = Set.of("create_agent", "delete_agent", "update_agent", "update_resource", "create_resource",
-            "delete_resource", "apply_agent_changes", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
-            "create_channel_integration", "update_channel_integration", "delete_channel_integration");
+    private static final Set<String> REST_BACKED = Set.of("create_agent", "delete_agent", "update_resource", "create_resource",
+            "delete_resource", "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger", "create_channel_integration",
+            "update_channel_integration", "delete_channel_integration");
+    // Checked by reading the bodies: these only call getRestStore(...) proxies.
+    // update_agent (an in-process
+    // redeploy) and apply_agent_changes (in-process AgentCascadeService) are NOT
+    // here — they are @McpAudited.
 
     /** The conversational data plane, audited per turn like a chat message. */
     private static final Set<String> DATA_PLANE = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
             "discuss_with_group", "start_group_discussion", "followup_with_member", "continue_group_discussion");
 
     /**
-     * Writes its own ledger entry: the GDPR tools record the call themselves, the
-     * spend-control tools' changes carry a reason in the ledger, and a HITL
-     * decision is a ledger event of its own with the reviewer on it.
+     * Writes its own ledger entry: the GDPR tools record the call themselves
+     * (checked below), and the spend-control tools' changes go through
+     * {@code SpendControlChangeService}, which writes {@code SpendControlAudit}
+     * entries with the actor and the reason.
      */
     private static final Set<String> SELF_RECORDING = Set.of("delete_user_data", "export_user_data", "update_model_prices", "update_tenant_quota",
-            "withdraw_spend_control_change", "resume_conversation", "cancel_conversation", "approve_group_phase", "submit_group_human_input",
-            "cancel_group_discussion");
+            "withdraw_spend_control_change");
 
     private static final List<String> READ_VERBS = List.of("list_", "read_", "get_", "count_", "search_", "summarize_", "describe_", "discover_");
 
@@ -121,6 +125,23 @@ class McpToolAuditCoverageTest {
             list.stream().filter(name -> !seen.contains(name)).forEach(stale::add);
         }
         assertTrue(stale.isEmpty(), "Classified here but no such tool exists any more: " + stale);
+    }
+
+    @Test
+    @DisplayName("a class with an @McpAudited method carries the class-level binding that makes the interceptor run, like @McpErrorResults")
+    void auditedClassesAreBound() throws Exception {
+        Set<String> unbound = new TreeSet<>();
+        for (Method method : tools()) {
+            if (method.isAnnotationPresent(McpAudited.class) && !method.getDeclaringClass().isAnnotationPresent(McpAuditBinding.class)) {
+                unbound.add(method.getDeclaringClass().getSimpleName());
+            }
+            if (method.isAnnotationPresent(McpAudited.class)) {
+                assertTrue(method.getDeclaringClass().isAnnotationPresent(McpErrorResults.class),
+                        method.getName() + ": the audit interceptor reads the outcome the error interceptor produces");
+            }
+        }
+        assertTrue(unbound.isEmpty(), "Add @McpAuditBinding to: " + unbound);
+        assertTrue(McpAuditInterceptor.class.isAnnotationPresent(McpAuditBinding.class));
     }
 
     @Test

@@ -49,6 +49,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.escapeJsonString;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.parseIntOrDefault;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.safeMessage;
 
 /**
  * MCP tools for resolving Human-in-the-Loop (HITL) approval gates over the MCP
@@ -70,6 +71,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpHitlTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpHitlTools.class);
@@ -288,6 +290,7 @@ public class McpHitlTools {
                   + "or an edit; toolDecisionsJson decides TOOL_CALL pauses per call "
                   + "({\"<callId>\":{\"verdict\":\"APPROVED\",\"amendedArguments\":{...},\"reasonCode\":\"TONE\"}}). "
                   + "Tool arguments are logged by MCP clients — use the REST resume endpoint for long or sensitive edits.")
+    @McpAudited(target = 0)
     public String resumeConversation(
                                      @ToolArg(description = "Conversation ID awaiting approval") String conversationId,
                                      @ToolArg(description = "APPROVED or REJECTED (case-insensitive)") String verdict,
@@ -349,11 +352,13 @@ public class McpHitlTools {
             return errorJson("This approval requires planHash (from get_approval_status); the pause was not consumed",
                     "PLAN_HASH_REQUIRED", null);
         } catch (McpReviewArguments.BadArgument e) {
-            return errorJson(e.getMessage(), "BAD_REQUEST", null);
+            return errorJson(safeMessage(e, "Invalid arguments"), "BAD_REQUEST", null);
         } catch (IllegalArgumentException e) {
             // The service's pre-CAS validation (tool decisions, edit, reason code):
-            // nothing was consumed. Its messages name fields and codes, never values.
-            return errorJson("Invalid decision: " + e.getMessage(), "BAD_REQUEST", null);
+            // nothing was consumed. Its own messages name fields and codes, never values;
+            // one a library raised is not repeated.
+            return errorJson("Invalid decision: " + safeMessage(e, "check verdict, toolDecisionsJson, editedAnswer and reasonCode"),
+                    "BAD_REQUEST", null);
         } catch (IllegalStateException e) {
             String state;
             try {
@@ -371,6 +376,7 @@ public class McpHitlTools {
 
     @Tool(name = "cancel_conversation",
           description = "Cancel a paused or running regular conversation. Attributed to the authenticated caller.")
+    @McpAudited(target = 0)
     public String cancelConversation(
                                      @ToolArg(description = "Conversation ID") String conversationId) {
         requireAnyRole(identity, authEnabled, McpRoles.HITL);
@@ -586,6 +592,7 @@ public class McpHitlTools {
                   + "instead of taskApprovals); editedAnswer replaces a SYNTHESIS phase's output; reasonCode explains a "
                   + "rejection or an edit.")
     @SuppressWarnings("unchecked")
+    @McpAudited(target = {0, 1})
     public String approveGroupPhase(
                                     @ToolArg(description = "Group ID") String groupId,
                                     @ToolArg(description = "Group conversation ID") String conversationId,
@@ -688,10 +695,10 @@ public class McpHitlTools {
             return errorJson("Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                     + "or already approved", "WRONG_STATE", null);
         } catch (McpReviewArguments.BadArgument e) {
-            return errorJson(e.getMessage(), "BAD_REQUEST", null);
+            return errorJson(safeMessage(e, "Invalid arguments"), "BAD_REQUEST", null);
         } catch (ReviewRefusalException e) {
             // the review validation's own message, written for the caller
-            return errorJson("Invalid approval request: " + e.getMessage(), "BAD_REQUEST", null);
+            return errorJson("Invalid approval request: " + safeMessage(e, "check the review arguments"), "BAD_REQUEST", null);
         } catch (IllegalArgumentException e) {
             // other validation in the coordinator names internal state (member ids, task
             // statuses): fixed text
@@ -711,6 +718,7 @@ public class McpHitlTools {
                   + "— this is the member SPEAKING, not an approval. When the pending kind is TIE_BREAK "
                   + "(get_group_approval_status pendingKind/pendingOptions), pass choice = exactly one of the options; "
                   + "content is then an optional rationale.")
+    @McpAudited(target = {0, 1})
     public String submitGroupHumanInput(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId,
@@ -751,7 +759,7 @@ public class McpHitlTools {
                     + "timed out, or cancelled", "WRONG_STATE", null);
         } catch (IllegalArgumentException e) {
             if (e.getMessage() != null && e.getMessage().startsWith(HumanTieBreakEngine.INVALID_CHOICE_PREFIX)) {
-                return errorJson(e.getMessage(), "BAD_REQUEST", null);
+                return errorJson(safeMessage(e, "Invalid choice"), "BAD_REQUEST", null);
             }
             return errorJson("Invalid submission: the memberId does not match the pending turn, or the content is "
                     + "blank or too long", "BAD_REQUEST", null);
@@ -765,6 +773,7 @@ public class McpHitlTools {
           description = "Cancel an in-progress or paused group discussion. Attributed to the authenticated caller. "
                   + "A caller who is only an approver (neither the owner nor an admin) may cancel only a discussion "
                   + "that is awaiting a decision.")
+    @McpAudited(target = {0, 1})
     public String cancelGroupDiscussion(
                                         @ToolArg(description = "Group ID") String groupId,
                                         @ToolArg(description = "Group conversation ID") String conversationId) {

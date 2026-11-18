@@ -9,13 +9,17 @@ import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.UnauthorizedException;
+import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.annotation.Priority;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import jakarta.interceptor.AroundInvoke;
 import jakarta.interceptor.Interceptor;
 import jakarta.interceptor.InvocationContext;
 
 import java.lang.reflect.Method;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Records an MCP tool call that changes state in the admin-action ledger, the
@@ -30,7 +34,7 @@ import java.lang.reflect.Method;
  * carry prompts, secrets and configuration. Recording never throws
  * ({@link AdminActionRecorder}): the tool's outcome does not depend on it.
  */
-@McpAudited
+@McpAuditBinding
 @Interceptor
 @Priority(Interceptor.Priority.APPLICATION)
 public class McpAuditInterceptor {
@@ -38,9 +42,15 @@ public class McpAuditInterceptor {
     @Inject
     AdminActionRecorder recorder;
 
+    @Inject
+    Instance<SecurityIdentity> identity;
+
     @AroundInvoke
     Object audit(InvocationContext context) throws Exception {
         Method method = context.getMethod();
+        if (!method.isAnnotationPresent(McpAudited.class)) {
+            return context.proceed();
+        }
         Object[] parameters = context.getParameters();
         try {
             Object result = context.proceed();
@@ -59,8 +69,37 @@ public class McpAuditInterceptor {
     }
 
     private void record(Method method, Object[] parameters, int status) {
-        recorder.recordToolCall(toolName(method), subjectOf(method, parameters), method.getDeclaringClass().getSimpleName().replaceAll("_.*", "")
-                + "#" + method.getName(), status);
+        // As the REST filter: a request an HTTP path policy refuses (an unauthenticated
+        // caller) is never on record, so a probe cannot fill the ledger. A refusal of
+        // an
+        // authenticated caller is.
+        if (status == 403 && isAnonymous()) {
+            return;
+        }
+        recorder.recordToolCall(toolName(method), subjectOf(method, parameters), targetsOf(method, parameters),
+                method.getDeclaringClass().getSimpleName().replaceAll("_.*", "") + "#" + method.getName(), status);
+    }
+
+    private boolean isAnonymous() {
+        try {
+            return identity != null && identity.isResolvable() && identity.get().isAnonymous();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private static List<String> targetsOf(Method method, Object[] parameters) {
+        McpAudited audited = method.getAnnotation(McpAudited.class);
+        List<String> targets = new ArrayList<>();
+        if (audited == null || parameters == null) {
+            return targets;
+        }
+        for (int index : audited.target()) {
+            if (index >= 0 && index < parameters.length && parameters[index] instanceof String id) {
+                targets.add(id);
+            }
+        }
+        return targets;
     }
 
     /**
@@ -93,7 +132,8 @@ public class McpAuditInterceptor {
             case "BAD_REQUEST" -> 400;
             case "UNAVAILABLE" -> 503;
             case "TIMEOUT" -> 504;
-            default -> 500;
+            case "INTERNAL" -> 500;
+            default -> 400; // WRONG_STATE, DISABLED, PLAN_CHANGED, ... : the caller's request was refused
         };
     }
 

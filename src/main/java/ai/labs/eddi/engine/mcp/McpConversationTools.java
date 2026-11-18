@@ -419,8 +419,10 @@ public class McpConversationTools {
             }
 
             return bounded(jsonSerialization.serialize(snapshot), MAX_RESULT_CHARS,
-                    "The conversation is too large for one result. Ask for less: currentStepOnly=true, returningFields (e.g. 'input,output,actions'), "
-                            + "or read_conversation_log with a logSize.");
+                    "The conversation is too large for one result, so only the newest steps and outputs are returned (totalConversationSteps says "
+                            + "how many there are). Ask for less: currentStepOnly=true, returningFields (e.g. 'input,output,actions'), "
+                            + "or read_conversation_log with a logSize.",
+                    "conversationSteps", "conversationOutputs");
         } catch (ForbiddenException e) {
             return accessDenied("read_conversation", conversationId);
         } catch (NotFoundException e) {

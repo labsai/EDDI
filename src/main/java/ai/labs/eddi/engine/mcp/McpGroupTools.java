@@ -62,12 +62,14 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpGroupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpGroupTools.class);
 
     /** What a cut group conversation tells the caller about getting the rest. */
-    private static final String GROUP_RESULT_HINT = "The group conversation is too large for one result. The full transcript stays stored: "
+    private static final String GROUP_RESULT_HINT = "The group conversation is too large for one result, so only the newest transcript entries are returned (totalTranscript says how many "
+            + "there are). The full transcript stays stored: "
             + "read it through the REST API (GET /groups/{groupId}/conversations/{groupConversationId}) or inspect single members' conversations with read_conversation_log.";
     private static final ObjectMapper MAPPER = new ObjectMapper();
 
@@ -191,7 +193,7 @@ public class McpGroupTools {
         // quotes only the caller's own input.
         if (e instanceof JsonProcessingException || isCallerFacing(e)) {
             LOGGER.debugf("%s rejected: %s", tool, LogSanitizer.sanitize(describe(e)));
-            return errorJson(message + ": " + describe(e));
+            return errorJson(message + ": " + safeMessage(e, "the request was refused"));
         }
         return internalFailure(LOGGER, tool, message, e);
     }
@@ -417,7 +419,7 @@ public class McpGroupTools {
     }
 
     @Tool(description = "Update an existing agent group. Pass the full " + "configuration as JSON.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String update_group(@ToolArg(description = "Group ID") String groupId,
                                @ToolArg(description = "Version number to update (default: latest; 0 also means latest)",
                                         required = false) String version,
@@ -437,7 +439,7 @@ public class McpGroupTools {
     }
 
     @Tool(description = "Delete an agent group configuration")
-    @McpAudited
+    @McpAudited(target = 0)
     public String delete_group(@ToolArg(description = "Group ID") String groupId,
                                @ToolArg(description = "Version number to delete (default: latest; 0 also means latest)",
                                         required = false) String version) {
@@ -481,7 +483,7 @@ public class McpGroupTools {
         try {
             String user = resolveOwner(userId);
             GroupConversation gc = groupConversationService.discuss(groupId, question, user, 0);
-            return bounded(jsonSerialization.serialize(gc), MAX_RESULT_CHARS, GROUP_RESULT_HINT);
+            return bounded(jsonSerialization.serialize(gc), MAX_RESULT_CHARS, GROUP_RESULT_HINT, "transcript");
         } catch (ForbiddenException e) {
             return errorJson("Access denied: you cannot start a conversation as another user");
         } catch (Exception e) {
@@ -507,7 +509,7 @@ public class McpGroupTools {
             // The same serve-time pass the REST group views run: the stored context was
             // rendered by whatever build wrote it, and the redaction rules are per build.
             gc.setHitlApprovalContext(ApprovalContextViews.reRedacted(gc.getHitlApprovalContext()));
-            return bounded(jsonSerialization.serialize(gc), MAX_RESULT_CHARS, GROUP_RESULT_HINT);
+            return bounded(jsonSerialization.serialize(gc), MAX_RESULT_CHARS, GROUP_RESULT_HINT, "transcript");
         } catch (ForbiddenException e) {
             return accessDenied("read_group_conversation", groupConversationId);
         } catch (Exception e) {
@@ -589,7 +591,7 @@ public class McpGroupTools {
     @Tool(description = "Delete a group conversation. Its shared artifacts and any ephemeral agents "
             + "created for it are deleted; the members' own conversations are ENDED, not deleted, and "
             + "remain readable afterwards.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String delete_group_conversation(
                                             @ToolArg(description = "Group conversation ID to delete") String groupConversationId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
@@ -687,7 +689,7 @@ public class McpGroupTools {
             + "conversations and cleans up dynamically-created agents. No further "
             + "follow-ups or continuations are possible after closing. "
             + "Returns the closed GroupConversation.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String close_group_conversation(
                                            @ToolArg(description = "Group conversation ID") String groupConversationId) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
@@ -710,7 +712,7 @@ public class McpGroupTools {
     @Tool(description = "Add a task to a standing team's backlog (I13). The backlog persists across "
             + "discussions; scheduled cadences pull executable tasks from it into task-force runs. "
             + "Higher priority runs earlier. Returns the created task.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String add_team_task(@ToolArg(description = "Group configuration ID") String groupId,
                                 @ToolArg(description = "Task subject (short, unique within the backlog)") String subject,
                                 @ToolArg(description = "Task description (optional)", required = false) String description,
@@ -731,7 +733,7 @@ public class McpGroupTools {
             try {
                 bet = SharedTaskList.Bet.of(hypothesis, metric, target, reviewDate);
             } catch (IllegalArgumentException e) {
-                return errorJson(e.getMessage());
+                return errorJson(safeMessage(e, "Invalid bet"));
             }
             if (subject.trim().length() > SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH) {
                 return errorJson("subject exceeds " + SharedTaskList.MAX_AGENT_TASK_SUBJECT_LENGTH + " characters");
@@ -818,7 +820,7 @@ public class McpGroupTools {
     @Tool(description = "Create a group from a packaged template (I10) by assigning agents to its named roles. "
             + "roleAssignments is a JSON object mapping role -> agent id (for HUMAN roles: the principal id). "
             + "Saves through the normal store path, so every save-time validation applies.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String create_group_from_template(@ToolArg(description = "Template id, e.g. 'research-pod'") String templateId,
                                              @ToolArg(description = "Name for the new group (optional; defaults to the template's name)",
                                                       required = false) String name,

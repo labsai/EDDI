@@ -72,7 +72,8 @@ class McpMemoryToolsBranchCoverageTest {
         @DisplayName("success with default limit")
         void successDefaultLimit() throws Exception {
             var entries = List.of(mock(UserMemoryEntry.class));
-            when(userMemoryStore.getAllEntries("user1")).thenReturn(entries);
+            when(userMemoryStore.countEntries("user1")).thenReturn(1L);
+            when(userMemoryStore.getEntriesPage(eq("user1"), anyInt(), anyInt())).thenReturn(new ArrayList<>(entries));
             when(jsonSerialization.serialize(any())).thenReturn("{\"count\":1}");
 
             String result = tools.listUserMemories("user1", null);
@@ -86,7 +87,8 @@ class McpMemoryToolsBranchCoverageTest {
                     mock(UserMemoryEntry.class),
                     mock(UserMemoryEntry.class),
                     mock(UserMemoryEntry.class));
-            when(userMemoryStore.getAllEntries("user1")).thenReturn(new ArrayList<>(entries));
+            when(userMemoryStore.countEntries("user1")).thenReturn(3L);
+            when(userMemoryStore.getEntriesPage(eq("user1"), anyInt(), anyInt())).thenReturn(new ArrayList<>(entries.subList(0, 2)));
             when(jsonSerialization.serialize(any())).thenReturn("{\"count\":2}");
 
             String result = tools.listUserMemories("user1", 2);
@@ -96,7 +98,7 @@ class McpMemoryToolsBranchCoverageTest {
         @Test
         @DisplayName("exception returns error json")
         void exceptionReturnsError() throws Exception {
-            when(userMemoryStore.getAllEntries("user1")).thenThrow(new RuntimeException("db error"));
+            when(userMemoryStore.countEntries("user1")).thenThrow(new RuntimeException("db error"));
 
             String result = tools.listUserMemories("user1", null);
             assertTrue(result.contains("error"));

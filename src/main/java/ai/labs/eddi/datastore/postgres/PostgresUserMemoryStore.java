@@ -851,6 +851,29 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
         }
     }
 
+    @Override
+    public List<UserMemoryEntry> getEntriesPage(String userId, int offset, int limit) throws IResourceStore.ResourceStoreException {
+        if (limit < 1) {
+            return new ArrayList<>();
+        }
+        ensureSchema();
+        String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, userId);
+            ps.setInt(2, limit);
+            ps.setInt(3, Math.max(offset, 0));
+            List<UserMemoryEntry> entries = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    entries.add(resultSetToEntry(rs));
+                }
+            }
+            return entries;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to get a page of entries", e);
+        }
+    }
+
     // === GDPR ===
 
     @Override

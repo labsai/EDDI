@@ -27,6 +27,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpSetupTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpSetupTools.class);
@@ -103,7 +104,7 @@ public class McpSetupTools {
             var result = agentSetupService.setupAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {
-            return errorJson(e.getMessage());
+            return errorJson(safeMessage(e, "Setup refused"));
         } catch (Exception e) {
             LOGGER.error("MCP setup_agent failed", e);
             return toolFailure(LOGGER, "setup_agent", "Failed to set up agent", e);
@@ -159,7 +160,7 @@ public class McpSetupTools {
             var result = agentSetupService.createApiAgent(request);
             return jsonSerialization.serialize(result);
         } catch (AgentSetupException e) {
-            return errorJson(e.getMessage());
+            return errorJson(safeMessage(e, "Setup refused"));
         } catch (Exception e) {
             LOGGER.error("MCP create_api_agent failed", e);
             return toolFailure(LOGGER, "create_api_agent", "Failed to create API agent", e);

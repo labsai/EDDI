@@ -44,6 +44,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpTeamBudgetTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpTeamBudgetTools.class);
@@ -117,7 +118,7 @@ public class McpTeamBudgetTools {
             + "base is adjusted, and next month starts at the base again. The cap may not be below what the team already spent; the "
             + "reason is required (at most 1000 characters) and kept in the audit ledger and the month's history. Raising a cap "
             + "raises what the team may spend: do it only when the person you act for asked for this amount.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String adjustTeamBudget(@ToolArg(description = "The group's id (required)") String groupId,
                                    @ToolArg(description = "This month's cap in USD (required)") Double capUsd,
                                    @ToolArg(description = "Why (required)") String reason) {
@@ -135,7 +136,7 @@ public class McpTeamBudgetTools {
     @Tool(name = "transfer_team_budget", description = "Administrators only. Move part of this month's cap from one team to another. The "
             + "source must keep a cap at or above what it already spent; both teams need a teamBudget; the reason is required. Give an "
             + "idempotencyKey to make a retry of the same transfer a no-op.")
-    @McpAudited
+    @McpAudited(target = {0, 1})
     public String transferTeamBudget(@ToolArg(description = "Group id to take cap from (required)") String fromGroupId,
                                      @ToolArg(description = "Group id to give cap to (required)") String toGroupId,
                                      @ToolArg(description = "Amount in USD, more than 0 (required)") Double amountUsd,

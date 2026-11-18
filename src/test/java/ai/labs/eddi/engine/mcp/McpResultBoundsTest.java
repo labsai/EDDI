@@ -4,48 +4,90 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @DisplayName("MCP tool results are bounded")
 class McpResultBoundsTest {
 
+    private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private static String conversation(int steps) {
+        StringBuilder json = new StringBuilder("{\"conversationState\":\"READY\",\"conversationSteps\":[");
+        for (int i = 0; i < steps; i++) {
+            json.append(i == 0 ? "" : ",").append("{\"n\":").append(i).append(",\"text\":\"").append("x".repeat(40)).append("\"}");
+        }
+        return json.append("],\"conversationOutputs\":[{\"o\":1},{\"o\":2},{\"o\":3}]}").toString();
+    }
+
     @Test
     @DisplayName("a result within the cap is returned as it is")
     void withinCapIsUntouched() {
         String json = "{\"a\":1}";
-        assertSame(json, McpToolUtils.bounded(json, 100, "hint"));
+        assertSame(json, McpToolUtils.bounded(json, 100, "hint", "a"));
         assertSame("text", McpToolUtils.boundedText("text", 100, "hint"));
     }
 
     @Test
-    @DisplayName("a JSON result over the cap becomes a valid envelope that says truncated:true and how to ask for less")
-    void overCapBecomesAnEnvelope() throws Exception {
-        String json = "{\"k\":\"" + "x\"y".repeat(100) + "\"}";
+    @DisplayName("a JSON result over the cap is valid JSON of its own shape: the newest list entries, whole, with truncated/total/returned/hint")
+    void overCapKeepsTheNewestEntries() throws Exception {
+        String json = conversation(200);
 
-        String bounded = McpToolUtils.bounded(json, 50, "Ask for less.");
+        String bounded = McpToolUtils.bounded(json, 1_000, "Ask for less.", "conversationSteps", "conversationOutputs");
 
-        var node = new ObjectMapper().readTree(bounded);
+        assertTrue(bounded.length() <= 1_000, "fits the cap: " + bounded.length());
+        JsonNode node = MAPPER.readTree(bounded); // valid JSON, never cut inside a value
+        assertEquals("READY", node.get("conversationState").asText(), "the document keeps its normal shape");
         assertTrue(node.get("truncated").asBoolean());
         assertEquals(json.length(), node.get("totalChars").asInt());
-        assertEquals(50, node.get("returnedChars").asInt());
         assertEquals("Ask for less.", node.get("hint").asText());
-        assertEquals(json.substring(0, 50), node.get("partial").asText());
+        assertEquals(200, node.get("totalConversationSteps").asInt());
+        int returned = node.get("returnedConversationSteps").asInt();
+        assertTrue(returned > 0 && returned < 200, "some newest steps: " + returned);
+        assertEquals(returned, node.get("conversationSteps").size());
+        assertEquals(199, node.get("conversationSteps").get(returned - 1).get("n").asInt(), "the newest step is kept");
+        assertEquals(199 - returned + 1, node.get("conversationSteps").get(0).get("n").asInt(), "a contiguous tail");
     }
 
     @Test
-    @DisplayName("a text result over the cap ends in an explicit truncated marker with the hint")
-    void overCapTextHasAMarker() {
-        String text = McpToolUtils.boundedText("a".repeat(120), 100, "Use a smaller logSize.");
+    @DisplayName("a document that cannot be shortened by its lists becomes the small truncated envelope, still valid JSON")
+    void unshortenableBecomesAnEnvelope() throws Exception {
+        String json = "{\"blob\":\"" + "y".repeat(5_000) + "\"}";
 
-        assertTrue(text.startsWith("a".repeat(100) + "\n[truncated: true"), text);
-        assertTrue(text.contains("returned 100 of 120"), text);
+        JsonNode node = MAPPER.readTree(McpToolUtils.bounded(json, 500, "Too big.", "items"));
+
+        assertTrue(node.get("truncated").asBoolean());
+        assertEquals("Too big.", node.get("hint").asText());
+        assertFalse(node.has("blob"));
+    }
+
+    @Test
+    @DisplayName("a text result over the cap is cut at a line end and ends in an explicit truncated marker with the hint")
+    void overCapTextHasAMarker() {
+        String text = McpToolUtils.boundedText(("line of text\n").repeat(20), 100, "Use a smaller logSize.");
+
+        assertTrue(text.contains("\n[truncated: true"), text);
+        String kept = text.substring(0, text.indexOf("\n[truncated"));
+        assertTrue(kept.length() <= 100 && kept.endsWith("line of text"), "cut at a line end: " + kept);
         assertTrue(text.endsWith("Use a smaller logSize.]"), text);
+    }
+
+    @Test
+    @DisplayName("a text cut never splits a surrogate pair")
+    void textCutKeepsSurrogatePairs() {
+        String text = "a".repeat(99) + "😀" + "b".repeat(50); // an emoji straddling the cap
+
+        String cut = McpToolUtils.boundedText(text, 100, "hint");
+
+        String kept = cut.substring(0, cut.indexOf("\n[truncated"));
+        assertFalse(Character.isHighSurrogate(kept.charAt(kept.length() - 1)), "no dangling half of a pair");
     }
 
     @Test

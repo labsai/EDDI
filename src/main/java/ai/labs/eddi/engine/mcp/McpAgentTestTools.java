@@ -27,6 +27,7 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
  */
 @ApplicationScoped
 @McpErrorResults
+@McpAuditBinding
 public class McpAgentTestTools {
 
     private static final Logger LOGGER = Logger.getLogger(McpAgentTestTools.class);
@@ -49,7 +50,7 @@ public class McpAgentTestTools {
             + "version to the 'test' environment if needed (never production) and runs in the background: returns the run id at once — "
             + "poll get_agent_test_run until status is PASSED, FAILED, ERROR, ABORTED or CANCELLED. Tool calls are mocked by the suite; an unmocked call is "
             + "not executed and fails its case.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String runAgentTests(@ToolArg(description = "Test suite id (required)") String suiteId,
                                 @ToolArg(description = "Agent id (required)") String agentId,
                                 @ToolArg(description = "Suite version; omit for the current one", required = false) Integer suiteVersion,
@@ -79,7 +80,7 @@ public class McpAgentTestTools {
     @Tool(name = "cancel_agent_test_run", description = "Cancel a RUNNING agent test run: no further turn starts, a turn in progress is "
             + "abandoned, and its test conversations are ended and deleted. Returns the record as it is now; poll get_agent_test_run "
             + "until status is CANCELLED. Only works on the node executing the run.")
-    @McpAudited
+    @McpAudited(target = 0)
     public String cancelAgentTestRun(@ToolArg(description = "Run id (required)") String runId) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {

@@ -33,6 +33,7 @@ import java.util.Map;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.readCallerJson;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.requireAnyRole;
+import static ai.labs.eddi.engine.mcp.McpToolUtils.safeMessage;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.toolFailure;
 
 /**
@@ -148,7 +149,7 @@ public class McpSpendControlTools {
         } catch (SpendControlException e) {
             return refusal(e);
         } catch (IllegalArgumentException e) {
-            return errorJson(e.getMessage(), SpendControlException.BAD_REQUEST, null);
+            return errorJson(safeMessage(e, "The request was refused"), SpendControlException.BAD_REQUEST, null);
         } catch (Exception e) {
             return toolFailure(LOGGER, "update_model_prices", e);
         }
@@ -298,13 +299,13 @@ public class McpSpendControlTools {
 
     private String refusal(SpendControlException e) {
         Map<String, Object> body = new LinkedHashMap<>();
-        body.put("error", e.getMessage());
+        body.put("error", safeMessage(e, "The change was refused"));
         body.put("errorCode", e.code());
         body.putAll(e.details());
         try {
             return jsonSerialization.serialize(body);
         } catch (Exception serialization) {
-            return errorJson(e.getMessage(), e.code(), null);
+            return errorJson(safeMessage(e, "The change was refused"), e.code(), null);
         }
     }
 }

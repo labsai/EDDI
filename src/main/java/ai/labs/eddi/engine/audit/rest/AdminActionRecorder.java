@@ -109,8 +109,30 @@ public class AdminActionRecorder {
      *            the outcome as the HTTP status the REST surface answers for it
      */
     public void recordToolCall(String tool, String subjectUserId, String resource, int status) {
-        submit(MCP_METHOD, resource, status, auditLedger -> "/mcp/" + tool
+        recordToolCall(tool, subjectUserId, List.of(), resource, status);
+    }
+
+    /**
+     * Like {@link #recordToolCall(String, String, String, int)}, naming the
+     * resources the call acted on: {@code /mcp/<tool>/<target>.../<pseudonym>}. A
+     * target is a resource id, recorded as it is (with {@code /} and control
+     * characters made harmless and the length bounded); a null or blank one is left
+     * out.
+     */
+    public void recordToolCall(String tool, String subjectUserId, List<String> targets, String resource, int status) {
+        StringBuilder targetPath = new StringBuilder();
+        for (String target : targets == null ? List.<String>of() : targets) {
+            if (target != null && !target.isBlank()) {
+                targetPath.append('/').append(pathSegment(target));
+            }
+        }
+        submit(MCP_METHOD, resource, status, auditLedger -> "/mcp/" + tool + targetPath
                 + (subjectUserId == null || subjectUserId.isBlank() ? "" : "/" + auditLedger.pseudonymOf(subjectUserId)));
+    }
+
+    private static String pathSegment(String id) {
+        String cleaned = id.strip().replace("/", "%2F").replaceAll("\\p{Cntrl}", "?");
+        return cleaned.length() > 128 ? cleaned.substring(0, 128) : cleaned;
     }
 
     private void submit(String method, String resource, int status, Function<AuditLedgerService, String> recordedPath) {

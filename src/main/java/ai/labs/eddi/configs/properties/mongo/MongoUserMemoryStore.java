@@ -619,6 +619,20 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         return entries;
     }
 
+    @Override
+    public List<UserMemoryEntry> getEntriesPage(String userId, int offset, int limit) throws IResourceStore.ResourceStoreException {
+        RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
+        List<UserMemoryEntry> entries = new ArrayList<>();
+        if (limit < 1) {
+            return entries;
+        }
+        for (Document doc : memoriesCollection.find(eq(FIELD_USER_ID, userId)).sort(descending(FIELD_UPDATED_AT)).skip(Math.max(offset, 0))
+                .limit(limit)) {
+            entries.add(documentToEntry(doc));
+        }
+        return entries;
+    }
+
     // === GDPR ===
 
     @Override
