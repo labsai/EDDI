@@ -154,7 +154,7 @@ public class EmailOwnerNotifier {
         if (from == null) {
             return true;
         }
-        for (String recipient : allowedOwners(settings)) {
+        for (String recipient : allowedOwners(settings, true)) {
             send(integrationId, integrationName, reason, day, from, recipient, now);
         }
         return true;
@@ -182,7 +182,16 @@ public class EmailOwnerNotifier {
         if (utc.toLocalTime().isBefore(DIGEST_NOT_BEFORE)) {
             return false;
         }
+        // Before the claim: an owner list the domain policy empties sends nothing,
+        // and must not use up the day or count as sent. Not counted here: this runs
+        // on every sweep, the refusal metric once per sent digest below.
+        if (allowedOwners(settings, false).isEmpty()) {
+            return false;
+        }
         String day = utc.toLocalDate().toString();
+        // Claimed before counting, so the count runs once per day and node-wide
+        // only on the winner: at most once — a count that fails after the claim
+        // loses that day's digest rather than risking two.
         try {
             if (!stateStore.claimNotice(integrationId, day + ":" + Reason.DIGEST.id(), now)) {
                 return false;
@@ -207,7 +216,7 @@ public class EmailOwnerNotifier {
         }
         String subject = "[EDDI] Daily mail digest: " + flatten(integrationName == null ? integrationId : integrationName);
         String text = digestText(integrationId, integrationName, yesterdayStart, counts, total);
-        for (String recipient : allowedOwners(settings)) {
+        for (String recipient : allowedOwners(settings, true)) {
             send(integrationId, Reason.DIGEST, day, from, recipient, subject, text, now);
         }
         return true;
@@ -232,7 +241,7 @@ public class EmailOwnerNotifier {
         return text.toString();
     }
 
-    private List<String> allowedOwners(EmailChannelSettings settings) {
+    private List<String> allowedOwners(EmailChannelSettings settings, boolean countRefusals) {
         List<String> allowed = new ArrayList<>();
         for (String address : settings.ownerNotifyAddresses()) {
             Optional<String> recipient = AddressNormalizer.tryNormalize(address);
@@ -240,7 +249,9 @@ public class EmailOwnerNotifier {
                 continue;
             }
             if (!recipientPolicy.allows(recipient.get())) {
-                count("not_allowed");
+                if (countRefusals) {
+                    count("not_allowed");
+                }
                 continue;
             }
             allowed.add(recipient.get());

@@ -127,6 +127,10 @@ interface EmailLedgerLogContract {
         assertEquals(Set.of(refusedLoop.id()), ids(ledger().findByIntegration("int-1", query(null, null, null, "loop:own_address", null, null))));
         assertEquals(Set.of(), ids(ledger().findByIntegration("int-1", query(null, null, null, "loop_", null, null))),
                 "the prefix is literal, '_' is no wildcard");
+        assertEquals(Set.of(), ids(ledger().findByIntegration("int-1", query(null, null, null, "loop.", null, null))),
+                "the prefix is literal, '.' is no regex wildcard");
+        assertEquals(Set.of(), ids(ledger().findByIntegration("int-1", query(null, null, null, "l%", null, null))),
+                "the prefix is literal, '%' is no wildcard");
         assertEquals(Set.of(refusedLoop.id(), unauthenticated.id()),
                 ids(ledger().findByIntegration("int-1", query(null, null, null, null, T0.minusSeconds(20), T0))), "since inclusive, until exclusive");
     }

@@ -4,8 +4,8 @@ import { getEmailLog, lookupEmailLog, type EmailLogFilters } from "@/lib/api/ema
 
 /**
  * An email integration's mail log, a page at a time (newest first, keyset
- * cursor). A filter change starts a new list. Not retried on 401/403/404:
- * those answer "no edit access" and "not an email integration".
+ * cursor). A filter change starts a new list. Not retried on 400/401/403/404:
+ * a bad filter, "no edit access" and "not an email integration" stay so.
  */
 export function useEmailLog(id: string, filters: EmailLogFilters, enabled = true) {
   return useInfiniteQuery({
@@ -14,7 +14,7 @@ export function useEmailLog(id: string, filters: EmailLogFilters, enabled = true
     initialPageParam: null as string | null,
     getNextPageParam: (lastPage) => lastPage.nextCursor ?? undefined,
     enabled: enabled && !!id,
-    retry: (failureCount, error) => !(isApiError(error) && [401, 403, 404].includes(error.status)) && failureCount < 2,
+    retry: (failureCount, error) => !(isApiError(error) && [400, 401, 403, 404].includes(error.status)) && failureCount < 2,
   });
 }
 

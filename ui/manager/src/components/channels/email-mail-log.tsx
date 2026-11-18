@@ -26,16 +26,16 @@ function stateVariant(state: string): "success" | "destructive" | "warning" | "s
   return "secondary";
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, locale: string): string {
   const at = new Date(iso);
-  return Number.isNaN(at.getTime()) ? iso : at.toLocaleString();
+  return Number.isNaN(at.getTime()) ? iso : at.toLocaleString(locale);
 }
 
 function LogRow({ row }: { row: EmailLogRow }) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   return (
     <tr className="border-t border-border align-top" data-testid={`email-log-row-${row.id}`}>
-      <td className="py-2 pe-3 whitespace-nowrap text-muted-foreground">{formatTime(row.createdAt)}</td>
+      <td className="py-2 pe-3 whitespace-nowrap text-muted-foreground">{formatTime(row.createdAt, i18n.language)}</td>
       <td className="py-2 pe-3 whitespace-nowrap">
         {row.direction === "IN" ? t("emailLog.directionIn", "In") : t("emailLog.directionOut", "Out")}
         <span className="ms-1 text-[10px] text-muted-foreground">{row.kind}</span>
@@ -132,7 +132,14 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   const [filters, setFilters] = useState<EmailLogFilters>({});
   const log = useEmailLog(channelId, filters);
   const rows = log.data?.pages.flatMap((page) => page.rows) ?? [];
-  const setFilter = (key: keyof EmailLogFilters, value: string) => setFilters((prev) => ({ ...prev, [key]: value }));
+  // "All" removes the key, so the query key matches the unfiltered list again.
+  const setFilter = (key: keyof EmailLogFilters, value: string) =>
+    setFilters((prev) => {
+      const next = { ...prev };
+      if (value) next[key] = value as never;
+      else delete next[key];
+      return next;
+    });
   const { hash } = useLocation();
   // The owner digest links to `…#mail-log`; the section only exists once the
   // channel has loaded, after the router's own (hash-less) scroll handling.

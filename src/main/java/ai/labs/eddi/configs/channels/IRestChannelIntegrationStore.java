@@ -109,7 +109,7 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @Operation(description = "The mail log of an email integration, newest first: every mail it received or sent in the ledger's retention "
             + "(30 days by default), its state and, for a mail it did not act on, the reason (e.g. blocked:not_allowlisted). No subjects or "
             + "bodies. Filters: direction (IN|OUT), kind (TRIGGER|REPLY|NOTIFY|NOTICE), state, reason (a prefix such as 'blocked'), "
-            + "since/until (ISO-8601), limit (1-200, default 50); pass nextCursor as 'after' for the next page. Needs edit access.")
+            + "since/until (ISO-8601), limit (default 50, clamped to 1-200); pass nextCursor as 'after' for the next page. Needs edit access.")
     EmailLogView.Page readEmailLog(@PathParam("id") String id,
                                    @QueryParam("direction") String direction,
                                    @QueryParam("kind") String kind,
@@ -117,7 +117,7 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
                                    @QueryParam("reason") String reason,
                                    @QueryParam("since") String since,
                                    @QueryParam("until") String until,
-                                   @QueryParam("limit") Integer limit,
+                                   @QueryParam("limit") String limit,
                                    @QueryParam("after") String after);
 
     @POST

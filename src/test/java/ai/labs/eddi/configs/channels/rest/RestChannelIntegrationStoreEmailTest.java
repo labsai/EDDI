@@ -204,7 +204,7 @@ class RestChannelIntegrationStoreEmailTest {
         ArgumentCaptor<IEmailMessageLedger.LedgerQuery> query = ArgumentCaptor.forClass(IEmailMessageLedger.LedgerQuery.class);
         when(support.mailLog(eq(ID), query.capture())).thenReturn(new IEmailMessageLedger.LedgerPage(List.of(row), "next"));
 
-        EmailLogView.Page page = sut.readEmailLog(ID, "in", "trigger", "refused", "blocked", "2026-11-17T00:00:00Z", null, 500, cursor.encode());
+        EmailLogView.Page page = sut.readEmailLog(ID, "in", "trigger", "refused", "blocked", "2026-11-17T00:00:00Z", null, "500", cursor.encode());
 
         assertEquals("next", page.nextCursor());
         EmailLogView view = page.rows().get(0);
@@ -243,6 +243,7 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, "LOST", null, null, null, null, null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, "yesterday", null, null, null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "%%%"));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, "abc", null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "bm8tYmFy"));
     }
 

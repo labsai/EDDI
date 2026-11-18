@@ -18,7 +18,7 @@ Phase 2 of the email channel v2 plan: before EDDI starts ignoring mail it was no
   are dedup records, not mails: the log hides them by default and the counts never include them.
 - REST, beside the suppression endpoints and with the same check (edit access, 404 for a non-email channel):
   `GET /channelstore/channels/{id}/email-log` (filters `direction`, `kind`, `state`, `reason` prefix, `since`,
-  `until`, `limit` 1–200, `after` cursor; a bad value or cursor is a 400) and `POST …/email-log/lookup`
+  `until`, `limit` (default 50, clamped to 1–200), `after` cursor; a bad value or cursor is a 400) and `POST …/email-log/lookup`
   (`{"messageId": …}` → the row(s) of that Message-ID, inbound first, or 404; POST keeps the id out of access logs).
 - New common key `ownerDigest` (`off` default | `daily`): from 00:05 UTC the inbound sweep has
   `EmailOwnerNotifier.sendDigestIfDue` send the previous UTC day's inbound counts by outcome to `ownerNotifyAddresses`

@@ -287,8 +287,12 @@ export const READ_ENDPOINTS: readonly string[] = [
   // An email integration's mail log (EDDI 6.8+): one row per mail it received or
   // sent — state, refusal reason, conversation id and the counterpart address,
   // never a subject or body — so "why didn't EDDI answer my mail?" has an
-  // answer. The backend requires edit access to the integration, as for its
-  // suppression list.
+  // answer. The backend requires edit access to the integration. A row's
+  // `reason` can carry a relay's error text (at most 300 characters), and the
+  // counterpart is a sender's or recipient's address — the same personal data
+  // the conversation reads above already hand the operator, and less of it.
+  // The suppression list stays ungranted: it holds hashes only, which answer
+  // nothing the log does not.
   //
   // Deliberately NOT granted: `POST …/email-log/lookup` (the by-Message-ID
   // lookup). It reads only, but it is a POST, and the gate decides by method —

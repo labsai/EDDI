@@ -373,7 +373,7 @@ the rows (none shows a subject or a body, since the ledger stores neither):
 
   Filters: `direction` (`IN`, `OUT`), `kind` (`TRIGGER` = an inbound mail in either mode, `REPLY`, `NOTIFY`,
   `NOTICE`), `state`, `reason` (a prefix such as `blocked` or `loop:own_address`), and `since`/`until` (ISO-8601
-  instants; `until` is exclusive). `limit` is 1–200. An unknown value, or a cursor this log did not issue, is a 400.
+  instants; `until` is exclusive). `limit` defaults to 50 and is clamped to 1–200. An unknown or malformed value, or a cursor this log did not issue, is a 400.
   A row has `id, kind, direction, messageId, state, reason, reasonCategory, conversationId, counterpart` (the sender
   of an inbound mail, the recipient of an outbound one), `attempts, createdAt, updatedAt`. The lookup is a POST so
   the Message-ID, which usually names a domain, stays out of access logs. It returns the row with that id, or 404: an
@@ -383,18 +383,23 @@ the rows (none shows a subject or a body, since the ledger stores neither):
   pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
   (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
   subjects or bodies. A day without mail sends nothing. It needs the [system mailer](hitl.md#email-notifications),
-  and the inbound sweep sends it, so no extra schedule is involved.
+  and the inbound sweep sends it, so no extra schedule is involved. It is sent at most once: one node claims the day
+  before counting, so a count or relay failure loses that day's digest rather than risking two. With no owner address
+  inside the allowed domains nothing is claimed, so the digest still goes out once one is added that day.
 
 What the reason means. The category is the part before the first `:`:
 
 | `reason` | State | Meaning |
 |---|---|---|
 | *(none)* | `DONE` | The turn ran. Look at the conversation (`conversationId`) for what the agent did |
+| `group_discussion` | `DONE` | The mail started a group discussion; `conversationId` is the group conversation's id |
+| `reply_rebuild_failed:<n>` | `TURN_SUBMITTED` | Conversation mode: the turn ran, but its reply could not be rebuilt yet; the sweep has tried `n` times and tries again |
 | `loop:<auto_submitted…>`, `loop:own_address`, `loop:other_integration`, `loop:eddi_message_id`, `loop:refers_to_eddi_mail` | `REFUSED` | An auto-reply, a list or bulk mail, a delivery report, mail from this or another integration's address, or a reply to mail EDDI sent. See [How a mail is processed](#how-a-mail-is-processed) step 3 |
 | `blocked:no_single_sender` | `REFUSED` | The mail has no `From`, or more than one |
 | `blocked:blocklist` | `REFUSED` | The sender matches `senderBlocklist` (or is the integration's own address) |
 | `blocked:not_allowlisted` | `REFUSED` | `senderAllowlist` is set and the sender matches none of its entries |
 | `unauthenticated:<verdict>` | `REFUSED` | No aligned DKIM pass (`fail`, `none`, `pass-unaligned`, …) and `requireAuthentication` is on (always in conversation mode) |
+| `processing_restricted` | `REFUSED` | The sender has restricted the processing of their data ([GDPR](gdpr-compliance.md)); the mail is not run |
 | `unroutable` | `REFUSED` | No target matched and there is no usable default target |
 | `too_large`, `too_large:input` | `REFUSED` | Over `maxMessageBytes`, or the rendered input was too long |
 | `parse_error:<reason>` | `REFUSED` | The MIME could not be parsed |

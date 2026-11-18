@@ -427,11 +427,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     @Override
     public EmailLogView.Page readEmailLog(String id, String direction, String kind, String state, String reason, String since, String until,
-                                          Integer limit, String after) {
+                                          String limit, String after) {
         requireEmailIntegrationForEdit(id);
         var query = new IEmailMessageLedger.LedgerQuery(enumParam("direction", direction, IEmailMessageLedger.Direction.class),
                 enumParam("kind", kind, IEmailMessageLedger.Kind.class), enumParam("state", state, IEmailMessageLedger.State.class),
-                reason == null ? null : reason.trim(), instantParam("since", since), instantParam("until", until), limit == null ? 50 : limit,
+                reason == null ? null : reason.trim(), instantParam("since", since), instantParam("until", until), limitParam(limit),
                 cursorParam(after), false);
         var page = emailSupport().mailLog(id, query);
         return new EmailLogView.Page(page.rows().stream().map(RestChannelIntegrationStore::logView).toList(), page.nextCursor());
@@ -463,6 +463,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             return Enum.valueOf(type, value.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
             throw new BadRequestException("Unknown " + name + " '" + sanitize(value) + "'.");
+        }
+    }
+
+    /**
+     * A String, not an Integer: JAX-RS turns a failed {@code @QueryParam}
+     * conversion into a 404, which reads as "no such integration".
+     */
+    private static int limitParam(String value) {
+        if (value == null || value.isBlank()) {
+            return 50;
+        }
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            throw new BadRequestException("'limit' must be a whole number (1-200).");
         }
     }
 

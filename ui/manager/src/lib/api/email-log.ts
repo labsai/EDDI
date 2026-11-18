@@ -47,6 +47,7 @@ export const EMAIL_LOG_REASON_CATEGORIES = [
   "blocked",
   "unauthenticated",
   "loop",
+  "processing_restricted",
   "duplicate",
   "unroutable",
   "too_large",

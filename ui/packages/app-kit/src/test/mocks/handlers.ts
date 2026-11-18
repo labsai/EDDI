@@ -860,7 +860,7 @@ export const MOCK_EMAIL_LOG = [
   },
 ] as const;
 
-export const MOCK_REPLACE_WARNING ="The new version is stored, but the previous version is still retrievable (mock).";
+export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
 
 function readSeed<T>(key: string): T | null {
   try {

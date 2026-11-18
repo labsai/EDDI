@@ -120,6 +120,24 @@ class EmailOwnerDigestTest {
 
         assertFalse(notifier.sendDigestIfDue("int1", "Invoices", settings("daily"), TODAY_0010));
         verify(mailer, never()).send(any(), anyList());
+
+        // The day was not used up: once the mailer is configured, the digest goes out.
+        when(mailer.isEnabled()).thenReturn(true);
+        assertTrue(notifier.sendDigestIfDue("int1", "Invoices", settings("daily"), TODAY_0010.plus(Duration.ofHours(1))));
+        verify(mailer, times(1)).send(any(), anyList());
+    }
+
+    @Test
+    @DisplayName("owners all outside the domain policy: nothing is claimed, sent or reported as sent")
+    void noAllowedOwner() throws Exception {
+        inbound("int1", State.DONE, null, YESTERDAY_NOON);
+        Map<String, String> pc = new HashMap<>(Map.of("mode", "trigger", "transport", "imap", "connection", "c", "host", "imap.x.com", "address",
+                "invoices@contoso.com", "ownerNotifyAddresses", "outsider@elsewhere.com", "ownerDigest", "daily"));
+
+        assertFalse(notifier.sendDigestIfDue("int1", "Invoices", EmailChannelSettings.from(pc), TODAY_0010));
+        verify(mailer, never()).send(any(), anyList());
+        assertTrue(notifier.sendDigestIfDue("int1", "Invoices", settings("daily"), TODAY_0010.plus(Duration.ofHours(1))),
+                "the day was not used up");
     }
 
     @Test
