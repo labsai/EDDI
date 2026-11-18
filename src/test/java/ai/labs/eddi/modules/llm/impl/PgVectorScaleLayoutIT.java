@@ -117,7 +117,7 @@ class PgVectorScaleLayoutIT {
     @DisplayName("a new knowledge base gets a jsonb table with HNSW and metadata indexes, and its queries use them")
     void newTableIsIndexedAndUsed() throws Exception {
         EmbeddingStore<TextSegment> store = factory.getOrCreate(KB_ID, kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
-        var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, store);
+        var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, EmbeddingStoreFactory.unwrap(store));
 
         assertEquals("jsonb", metadataType(TABLE));
         Map<String, String> indexes = indexes(TABLE);
