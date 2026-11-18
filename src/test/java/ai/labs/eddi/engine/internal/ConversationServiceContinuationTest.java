@@ -30,6 +30,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot.WorkflowRunSn
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgent;
@@ -177,19 +178,31 @@ class ConversationServiceContinuationTest {
         @Test
         @DisplayName("the next turn is armed only after the turn that asked for it was committed")
         void armedAfterTheCommit() throws Exception {
+            when(scheduleStore.createScheduleIfAbsent(any())).thenReturn(true);
             say(new InputData("start the job", new HashMap<>()));
             runQueuedTurns(1);
 
             InOrder order = inOrder(conversationMemoryStore, scheduleStore);
             order.verify(conversationMemoryStore).storeConversationMemorySnapshot(any());
             order.verify(scheduleStore).createScheduleIfAbsent(any());
-            assertEquals(1, ((Number) stepValue(persistedSnapshot(), ConversationContinuations.STEP_NEXT)).intValue(),
+            ConversationMemorySnapshot committed = persistedSnapshot();
+            assertEquals(1, ((Number) stepValue(committed, ConversationContinuations.STEP_NEXT)).intValue(),
                     "the committed step says which continuation it scheduled");
 
             ScheduleConfiguration armed = armedSchedule();
             assertEquals("go on", armed.getMessage());
             assertEquals(1, armed.getMetadata().get(ConversationContinuations.METADATA_NUMBER_KEY));
             assertEquals(USER_ID, armed.getUserId());
+
+            // The outbox record went into the same write as the step: what a crash
+            // right after the commit leaves for the recovery sweep.
+            PendingContinuation pending = committed.getPendingContinuation();
+            assertNotNull(pending, "the committed turn carries its outbox record");
+            assertEquals(1, pending.getNumber());
+            assertEquals("go on", pending.getInput());
+            assertEquals(ENV.toString(), pending.getEnvironment(), "recorded with the turn's environment");
+            assertEquals(pending.getDecisionId(), armed.getMetadata().get(ConversationContinuations.METADATA_DECISION_KEY));
+            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 1, pending.getDecisionId()), armed.getId());
         }
 
         @Test

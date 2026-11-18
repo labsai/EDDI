@@ -32,16 +32,23 @@ public class PendingContinuation {
     private String environment;
     /** Epoch milliseconds — a number in both stores, so it can be range-queried. */
     private Long decidedAt;
+    private String decisionId;
 
     public PendingContinuation() {
     }
 
     public PendingContinuation(Integer number, Integer maxContinuations, String input, String environment, Long decidedAt) {
+        this(number, maxContinuations, input, environment, decidedAt, null);
+    }
+
+    public PendingContinuation(Integer number, Integer maxContinuations, String input, String environment, Long decidedAt,
+            String decisionId) {
         this.number = number;
         this.maxContinuations = maxContinuations;
         this.input = input;
         this.environment = environment;
         this.decidedAt = decidedAt;
+        this.decisionId = decisionId;
     }
 
     /** The number of the continuation to run. */
@@ -92,6 +99,20 @@ public class PendingContinuation {
         this.decidedAt = decidedAt;
     }
 
+    /**
+     * The id of the decision, minted by the turn that decided and also stored in
+     * its step. Unlike {@link #getDecidedAt()} it stays when a sweep marks the
+     * record handled, so marks, removals and schedule ids all match this one
+     * decision and never a later decision of the same number.
+     */
+    public String getDecisionId() {
+        return decisionId;
+    }
+
+    public void setDecisionId(String decisionId) {
+        this.decisionId = decisionId;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -102,16 +123,17 @@ public class PendingContinuation {
         }
         return Objects.equals(number, that.number) && Objects.equals(maxContinuations, that.maxContinuations)
                 && Objects.equals(input, that.input) && Objects.equals(environment, that.environment)
-                && Objects.equals(decidedAt, that.decidedAt);
+                && Objects.equals(decidedAt, that.decidedAt) && Objects.equals(decisionId, that.decisionId);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(number, maxContinuations, input, environment, decidedAt);
+        return Objects.hash(number, maxContinuations, input, environment, decidedAt, decisionId);
     }
 
     @Override
     public String toString() {
-        return "PendingContinuation{number=" + number + ", max=" + maxContinuations + ", decidedAt=" + decidedAt + "}";
+        return "PendingContinuation{number=" + number + ", max=" + maxContinuations + ", decidedAt=" + decidedAt + ", decisionId=" + decisionId
+                + "}";
     }
 }

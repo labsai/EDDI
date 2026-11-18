@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -124,6 +126,19 @@ class ConversationHitlServiceCancelTest {
         assertEquals(IConversationService.CancelOutcome.CANCELLED,
                 service.cancelConversation(ID, ControlSignal.CANCEL_GRACEFUL, "owner"));
         verify(conversationService).disarmContinuations(ID);
+    }
+
+    @Test
+    @DisplayName("a cancel between two turns whose stored decision could not be withdrawn fails instead of reporting CANCELLED")
+    void cancelBetweenTurnsWhoseDecisionStays() throws Exception {
+        when(store.getConversationState(ID)).thenReturn(ConversationState.READY);
+        when(store.compareAndSetState(eq(ID), any(), any())).thenReturn(false);
+        when(conversationService.disarmContinuations(ID)).thenReturn(ConversationContinuations.WITHDRAWAL_FAILED);
+
+        // The conversation stays READY, so the recovery sweep could arm the job again:
+        // the caller must hear that the cancel did not take, and retry.
+        assertThrows(IResourceStore.ResourceStoreException.class,
+                () -> service.cancelConversation(ID, ControlSignal.CANCEL_GRACEFUL, "owner"));
     }
 
     @Test

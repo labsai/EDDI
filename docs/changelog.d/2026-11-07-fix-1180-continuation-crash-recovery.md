@@ -13,20 +13,29 @@ recovered automatically. It now is, with an **outbox record plus a recovery
 sweep** on the existing schedule machinery:
 
 - **The outbox record.** `decide` leaves a `PendingContinuation` (number, the
-  agent's `maxContinuations` and `continuationInput`, environment, `decidedAt`)
-  on the memory, and the snapshot conversion writes it as the top-level
+  agent's `maxContinuations` and `continuationInput`, environment, `decidedAt`
+  and a decision id that the step also stores as `continuation:decision`) on the
+  memory, and the snapshot conversion writes it as the top-level
   `pendingContinuation` of the stored conversation — in the same document write
   as the step, on the append path and the full-replace path of both stores. It
   is derived from the current step on every write, so the next committed turn
   replaces or removes it. Only `decide` creates one: a record a cancel or an end
   removed stays removed when the same step is stored again, since rebuilding it
-  from the step would hand the sweep a job that was stopped.
+  from the step would hand the sweep a job that was stopped. The record is carried
+  only while its decision id matches the step's, so an undo back to an earlier
+  step that decided the same number never carries the undone turn's decision.
 - **Deterministic schedule ids.** A continuation's schedule id is a name-based
-  UUID of conversation and number, written through the new
+  UUID of conversation, number and decision id, written through the new
   `IScheduleStore.createScheduleIfAbsent` (MongoDB unique `_id`, PostgreSQL
   `ON CONFLICT (id) DO NOTHING`). The turn's own arm, its retries and any number
   of sweeping nodes write one row between them. This also stops the arm's retry
-  from writing a duplicate row when an attempt reported a failure but landed.
+  from writing a duplicate row when an attempt reported a failure but landed. A
+  later decision of the same number (a turn that decides again before the
+  continuation ran, e.g. after its fire found the conversation paused) gets a row
+  of its own; the fire's once-only check still runs the number once. Keying the id
+  on the number alone (the first version of this PR) let such a decision take the
+  earlier one's row — still claimed by a fire about to complete — for its own, and
+  needed a replace path comparing two nodes' clocks; both are gone.
 - **The sweep** (`ContinuationRecoverySweep`, `@Scheduled`, every node, under a
   `leader.continuation-recovery` lease that only saves reads) reads records
   older than a grace period, oldest first and bounded, from a sparse
@@ -44,11 +53,15 @@ sweep** on the existing schedule machinery:
   schedules, so every interleaving with a sweep ends without a live row. A
   cancel of a job whose arm was lost answers `200 CANCELLED`, as for any job
   between two turns. `decide` now also refuses a turn already cancelled
-  (`interrupted`) so its decision never reaches the store. Removing the record
+  (`interrupted`) so its decision never reaches the store. The sweep's mark and
+  removal match the decision id, so a later decision of the same number is never
+  marked or removed in an earlier one's name. Removing the record
   is retried like the arm's write (three attempts), because a cancel between
   two turns leaves the conversation READY: a record left behind would be armed
   by the sweep. It is one round trip per store (`findOneAndUpdate` returning the
-  record as it was; a locking CTE on PostgreSQL), since every end runs it.
+  record as it was; a locking CTE on PostgreSQL), since every end runs it. If it
+  still fails, `disarm` reports `WITHDRAWAL_FAILED` and a cancel between two
+  turns answers `500` (safe to repeat) instead of `200 CANCELLED`.
 - **Indexes are built without blocking writes**: PostgreSQL `CREATE INDEX
   CONCURRENTLY` on a background thread under an advisory lock (INVALID builds
   dropped and rebuilt, like the audit ledger's late indexes), MongoDB on a
@@ -59,8 +72,10 @@ sweep** on the existing schedule machinery:
 - **`job.finished` on a failed write.** Main meanwhile raised `job.finished`
   with state `schedule_failed` when the arm's write failed, since that used to
   end the job. With the sweep on it no longer does, so the event is raised only
-  when the sweep is switched off (or the decision could not be recorded);
-  otherwise the turn is left to the sweep and the job carries on.
+  when the sweep is switched off (or the decision could not be recorded) — and
+  then only after the decision is retired, so a sweep switched on later cannot
+  arm a job its owner was told had ended; otherwise the turn is left to the
+  sweep and the job carries on.
   [`user-events.md`](../user-events.md) says so.
 - **Configuration:** `eddi.continuation.recovery.enabled` (`true`),
   `.interval` (`60s`), `.grace-period` (`60s`), `.batch-size` (`100`) — in

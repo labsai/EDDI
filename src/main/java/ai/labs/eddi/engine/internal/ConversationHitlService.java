@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.IAuditEntryCollector;
+import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlPlanBinding;
 import ai.labs.eddi.engine.hitl.HitlPlanHash;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
@@ -300,8 +301,17 @@ class ConversationHitlService {
         // paused, but the job is still live: its next turn is queued. Withdrawing it
         // is what cancelling that job means. Never on the approver's paused-only
         // cancel, which may stop a pending approval and nothing else.
-        if (!pausedOnly && conversationService.disarmContinuations(conversationId) > 0) {
-            return IConversationService.CancelOutcome.CANCELLED;
+        if (!pausedOnly) {
+            int withdrawn = conversationService.disarmContinuations(conversationId);
+            if (withdrawn == ConversationContinuations.WITHDRAWAL_FAILED) {
+                // The schedules are gone, but the stored decision is not, and the
+                // conversation stays READY: the recovery sweep could arm the job again.
+                // Not a cancel to confirm — the caller retries.
+                throw new ResourceStoreException("The pending continuation of the conversation could not be withdrawn");
+            }
+            if (withdrawn > 0) {
+                return IConversationService.CancelOutcome.CANCELLED;
+            }
         }
         // READY / ENDED / ERROR / EXECUTION_INTERRUPTED: nothing paused, nothing
         // running. Use endConversation to close a READY conversation.

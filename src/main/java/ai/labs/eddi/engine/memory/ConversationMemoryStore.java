@@ -1417,7 +1417,7 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
     }
 
     @Override
-    public boolean markPendingContinuationHandled(String conversationId, int number) {
+    public boolean markPendingContinuationHandled(String conversationId, int number, String decisionId) {
         if (!isStorableId(conversationId)) {
             return false;
         }
@@ -1425,27 +1425,36 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         // refused for it. MATCHED, not modified: a record another sweep already marked
         // still names the continuation.
         return conversationCollectionDocument
-                .updateOne(pendingContinuationFilter(conversationId, number), Updates.unset(KEY_PENDING_CONTINUATION_DECIDED_AT))
+                .updateOne(pendingContinuationFilter(conversationId, number, decisionId), Updates.unset(KEY_PENDING_CONTINUATION_DECIDED_AT))
                 .getMatchedCount() > 0;
     }
 
     @Override
-    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber) {
+    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber, String expectedDecisionId) {
         if (!isStorableId(conversationId)) {
             return false;
         }
         // One narrow update that hands back the record as it was, so whether it was
         // still unhandled is read from the same write that removed it. Neither _rev
         // nor _fence moves.
-        Document before = conversationCollectionDocument.findOneAndUpdate(pendingContinuationFilter(conversationId, expectedNumber),
+        Document before = conversationCollectionDocument.findOneAndUpdate(
+                pendingContinuationFilter(conversationId, expectedNumber, expectedDecisionId),
                 Updates.unset(KEY_PENDING_CONTINUATION), new FindOneAndUpdateOptions()
                         .projection(Projections.include(KEY_PENDING_CONTINUATION_DECIDED_AT)).returnDocument(ReturnDocument.BEFORE));
         return before != null && before.get(KEY_PENDING_CONTINUATION) instanceof Document record && record.get("decidedAt") != null;
     }
 
-    private static Bson pendingContinuationFilter(String conversationId, Integer number) {
+    /**
+     * The conversation's record; with a number, only while it names that number and
+     * decision. {@code eq(field, null)} also matches a record without a decision
+     * id, which is what a null decision id means.
+     */
+    private static Bson pendingContinuationFilter(String conversationId, Integer number, String decisionId) {
         Bson filter = Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)), Filters.exists(KEY_PENDING_CONTINUATION));
-        return number != null ? Filters.and(filter, Filters.eq(KEY_PENDING_CONTINUATION + ".number", number)) : filter;
+        return number != null
+                ? Filters.and(filter, Filters.eq(KEY_PENDING_CONTINUATION + ".number", number),
+                        Filters.eq(KEY_PENDING_CONTINUATION + ".decisionId", decisionId))
+                : filter;
     }
 
     private static PendingContinuation pendingContinuationOf(Object value) {
@@ -1456,7 +1465,8 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
                 record.get("maxContinuations") instanceof Number max ? max.intValue() : null,
                 record.get("input") instanceof String input ? input : null,
                 record.get("environment") instanceof String environment ? environment : null,
-                record.get("decidedAt") instanceof Number decidedAt ? decidedAt.longValue() : null);
+                record.get("decidedAt") instanceof Number decidedAt ? decidedAt.longValue() : null,
+                record.get("decisionId") instanceof String decisionId ? decisionId : null);
     }
 
     private static ConversationState conversationStateOf(Object value) {

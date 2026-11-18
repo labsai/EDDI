@@ -567,13 +567,17 @@ public interface IConversationMemoryStore {
      * neither the revision nor the fence moves, so a turn in flight is never
      * refused for it.
      *
-     * @return whether the conversation still carries a record naming continuation
-     *         {@code number} (handled before or not) — {@code false} when a cancel,
-     *         an end or a newer turn removed or replaced it
+     * @param decisionId
+     *            the decision the record must name, besides {@code number}
+     *            ({@code null} matches a record without one)
+     * @return whether the conversation still carries a record naming this decision
+     *         (handled before or not) — {@code false} when a cancel, an end or a
+     *         newer turn removed or replaced it
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    boolean markPendingContinuationHandled(String conversationId, int number) throws IResourceStore.ResourceStoreException;
+    boolean markPendingContinuationHandled(String conversationId, int number, String decisionId)
+            throws IResourceStore.ResourceStoreException;
 
     /**
      * Removes the conversation's {@link PendingContinuation} with a narrow field
@@ -582,12 +586,17 @@ public interface IConversationMemoryStore {
      * @param expectedNumber
      *            remove it only while it names this continuation; {@code null}
      *            removes whatever is there (end, cancel)
+     * @param expectedDecisionId
+     *            with {@code expectedNumber}: remove it only while it names this
+     *            decision ({@code null} matches a record without one); ignored when
+     *            {@code expectedNumber} is {@code null}
      * @return whether the record removed was still unhandled — a continuation that
      *         was decided and whose schedule nobody had confirmed yet
      * @throws IResourceStore.ResourceStoreException
      *             on persistence failures
      */
-    boolean clearPendingContinuation(String conversationId, Integer expectedNumber) throws IResourceStore.ResourceStoreException;
+    boolean clearPendingContinuation(String conversationId, Integer expectedNumber, String expectedDecisionId)
+            throws IResourceStore.ResourceStoreException;
 
     // === GDPR ===
 

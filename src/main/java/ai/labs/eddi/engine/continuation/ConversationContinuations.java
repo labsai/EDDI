@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.engine.continuation;
 
-import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -24,7 +23,6 @@ import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
-import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.userevents.UserEvent;
 import ai.labs.eddi.engine.userevents.UserEventAudience;
@@ -41,6 +39,7 @@ import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalDouble;
 import java.util.UUID;
 
@@ -76,13 +75,17 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * it at the top level of the stored conversation in the same document write as
  * the step. A node that dies between the commit and step 3 therefore leaves the
  * decision behind, and {@link ContinuationRecoverySweep} arms it from there
- * ({@link #recover}). The schedule's id is derived from the conversation and
- * the continuation number ({@link #scheduleId}) and written with
+ * ({@link #recover}). Every decision gets an id of its own, stored in the step
+ * ({@value #STEP_DECISION}) and in the record; the schedule's id is derived
+ * from the conversation, the continuation number and that decision id
+ * ({@link #scheduleId}) and written with
  * {@link IScheduleStore#createScheduleIfAbsent}, so the original arm, a retry
- * of it and any number of sweeping nodes write one row between them. The record
- * is marked handled once its schedule is known to exist, removed when the
- * conversation is ended or cancelled ({@link #disarm}), and replaced by the
- * next committed turn, which derives it from its own step.
+ * of it and any number of sweeping nodes write one row between them, while a
+ * later decision of the same number (a turn that decides again before the
+ * continuation ran) gets a row of its own. The record is marked handled once
+ * its schedule is known to exist, removed when the conversation is ended or
+ * cancelled ({@link #disarm}), and replaced by the next committed turn, which
+ * derives it from its own step.
  * <p>
  * <b>Why a schedule and not the conversation coordinator's queue.</b> The
  * coordinator's queue is in memory: a continuation queued there dies with the
@@ -119,6 +122,12 @@ public class ConversationContinuations {
     public static final String STEP_NEXT = "continuation:next";
     /** Step key: why this turn's {@code CONTINUE_CONVERSATION} was ignored. */
     public static final String STEP_REFUSED = "continuation:refused";
+    /**
+     * Step key: the id of this step's decision to continue — what binds the outbox
+     * record and the schedule to the step that decided, so a second decision of the
+     * same number (or an undo back to an earlier one) is never mistaken for it.
+     */
+    public static final String STEP_DECISION = "continuation:decision";
 
     /** Context key of a continuation turn, reserved for the engine. */
     public static final String CONTEXT_KEY = ClientContextGuard.KEY_SELF_CONTINUATION;
@@ -133,6 +142,15 @@ public class ConversationContinuations {
     public static final String METADATA_NUMBER_KEY = "continuationNumber";
     /** Metadata key: the agent's {@code maxContinuations} when it was armed. */
     public static final String METADATA_MAX_KEY = "maxContinuations";
+    /** Metadata key: the id of the decision the schedule arms. */
+    public static final String METADATA_DECISION_KEY = "continuationDecision";
+
+    /**
+     * What {@link #disarm} returns when the stored outbox record could not be
+     * removed: the schedules are deleted, but the recovery sweep could still arm
+     * the decision while the conversation stays READY.
+     */
+    public static final int WITHDRAWAL_FAILED = -1;
 
     private static final String NAME_PREFIX = "continuation-";
 
@@ -292,11 +310,15 @@ public class ConversationContinuations {
             return null;
         }
         int next = used + 1;
+        String decisionId = UUID.randomUUID().toString();
         var scheduled = new Data<Object>(STEP_NEXT, next);
         scheduled.setPublic(false);
         step.storeData(scheduled);
+        var decision = new Data<Object>(STEP_DECISION, decisionId);
+        decision.setPublic(false);
+        step.storeData(decision);
         memory.setPendingContinuation(new PendingContinuation(next, policy.maxContinuations(), policy.input(),
-                environment != null ? environment.toString() : null, clock.millis()));
+                environment != null ? environment.toString() : null, clock.millis(), decisionId));
         return next;
     }
 
@@ -308,9 +330,12 @@ public class ConversationContinuations {
     /**
      * The outbox record to store with the memory's current step: the one
      * {@link #decide} recorded while the step still carries the matching
-     * {@value #STEP_NEXT}, {@code null} when the step did not decide to continue.
-     * Called by the snapshot conversion on every write, which is what removes a
-     * record once a later step is committed.
+     * {@value #STEP_NEXT} and {@value #STEP_DECISION}, {@code null} when the step
+     * did not decide to continue. The decision id, not the number, is what binds
+     * the two: after an undo, a record of the undone turn's decision never rides
+     * along with an earlier step that decided the same number. Called by the
+     * snapshot conversion on every write, which is what removes a record once a
+     * later step is committed.
      * <p>
      * Only {@link #decide} creates a record. A memory whose record was removed (a
      * cancel, an end, a sweep that found the conversation not READY) keeps it
@@ -324,7 +349,14 @@ public class ConversationContinuations {
             return null;
         }
         PendingContinuation recorded = memory.getPendingContinuation();
-        return recorded != null && recorded.getNumber() != null && recorded.getNumber() == number.intValue() ? recorded : null;
+        return recorded != null && recorded.getNumber() != null && recorded.getNumber() == number.intValue()
+                && Objects.equals(recorded.getDecisionId(), decisionOf(step)) ? recorded : null;
+    }
+
+    /** The decision id the step stored with its {@value #STEP_NEXT}, if any. */
+    private static String decisionOf(IConversationStep step) {
+        IData<Object> decision = step.getData(STEP_DECISION);
+        return decision != null && decision.getResult() instanceof String id ? id : null;
     }
 
     private static String refusalReason(IConversationMemory memory, IConversationStep step, ContinuationPolicy policy, int used) {
@@ -438,20 +470,21 @@ public class ConversationContinuations {
             return false;
         }
         ContinuationPolicy policy = memory.getContinuationPolicy();
+        String decisionId = decisionOf(step);
         if (memory.isCancelled()) {
             // A cancel that signalled this turn found no schedule to withdraw yet; the
             // job it cancelled must not queue its next turn now — nor leave the stored
             // outbox record behind for the recovery sweep to arm.
-            clearPending(conversationId, number.intValue());
+            clearPending(conversationId, number.intValue(), decisionId);
             refuse(REASON_INTERRUPTED, conversationId, "the turn was cancelled before its continuation was armed");
             return false;
         }
         pruneUsedUp(conversationId);
         try {
             var schedule = schedule(conversationId, memory.getAgentId(), memory.getUserId(),
-                    environment != null ? environment.toString() : null, number.intValue(), policy.maxContinuations(), policy.input());
-            PendingContinuation recorded = memory.getPendingContinuation();
-            createWithRetry(schedule, recorded != null && recorded.getDecidedAt() != null ? recorded.getDecidedAt() : clock.millis());
+                    environment != null ? environment.toString() : null, number.intValue(), policy.maxContinuations(), policy.input(),
+                    decisionId);
+            createWithRetry(schedule);
             if (memory.isCancelled()) {
                 // The cancel landed while the schedule was being written: its disarm
                 // ran before the row existed, so withdraw the row here.
@@ -472,7 +505,10 @@ public class ConversationContinuations {
                 LOGGER.infof("Continuation %d of conversation %s is left to the recovery sweep", number.intValue(), sanitize(conversationId));
             } else {
                 // Nothing will fire the next turn: the job stops here as surely as at its
-                // limit, so its owner hears that it ended, and why.
+                // limit, so its owner hears that it ended, and why. The decision is
+                // retired first, so a sweep switched on later cannot arm a job its
+                // owner was told had finished.
+                clearPending(conversationId, number.intValue(), decisionId);
                 announceFinished(conversationId, memory, REASON_SCHEDULE_FAILED);
             }
             return false;
@@ -496,8 +532,9 @@ public class ConversationContinuations {
      * {@code job.finished} for the conversation's owner, with the refusal reason as
      * its state when there is one ({@code limit}, {@code cost_ceiling}, …) and
      * {@code done} otherwise. A next turn that was decided but whose schedule could
-     * not be written ends the job too, with state {@code schedule_failed} — unless
-     * the recovery sweep will arm it ({@link #recoveryWillArm}). Never throws.
+     * not be written ends the job too, with state {@code schedule_failed}, and its
+     * record is removed — unless the recovery sweep will arm it
+     * ({@link #recoveryWillArm}). Never throws.
      */
     private void announceFinished(String conversationId, IConversationMemory memory, IWritableConversationStep step) {
         String reason;
@@ -537,14 +574,14 @@ public class ConversationContinuations {
     }
 
     /**
-     * The one-shot schedule of continuation {@code number}, due now, under its
-     * derived id ({@link #scheduleId}).
+     * The one-shot schedule of continuation {@code number}, due now, under the id
+     * derived from its decision ({@link #scheduleId}).
      */
     private ScheduleConfiguration schedule(String conversationId, String agentId, String userId, String environment, int number,
-                                           Integer max, String input) {
+                                           Integer max, String input, String decisionId) {
         Instant now = clock.instant();
         var schedule = new ScheduleConfiguration();
-        schedule.setId(scheduleId(conversationId, number));
+        schedule.setId(scheduleId(conversationId, number, decisionId));
         schedule.setName(scheduleName(conversationId));
         schedule.setAgentId(agentId);
         schedule.setEnvironment(environment);
@@ -556,18 +593,23 @@ public class ConversationContinuations {
         schedule.setNextFire(now);
         schedule.setEnabled(true);
         schedule.setCreatedAt(now);
-        schedule.setMetadata(metadata(conversationId, number, max != null ? max : 0));
+        schedule.setMetadata(metadata(conversationId, number, max != null ? max : 0, decisionId));
         return schedule;
     }
 
     /**
-     * The id of continuation {@code number}'s schedule: a name-based UUID of the
-     * conversation and the number. Every writer of that continuation derives the
-     * same id, and {@link IScheduleStore#createScheduleIfAbsent} lets only the
-     * first one write the row.
+     * The id of the schedule of one decision to run continuation {@code number}: a
+     * name-based UUID of the conversation, the number and the decision id. Every
+     * writer of that decision derives the same id, and
+     * {@link IScheduleStore#createScheduleIfAbsent} lets only the first one write
+     * the row. A later decision of the same number has another id, so it never
+     * mistakes the row of an earlier one — still firing, spent or dead-lettered —
+     * for its own; the fire's once-only check ({@link #ranIn}) still runs the
+     * number once.
      */
-    public static String scheduleId(String conversationId, int number) {
-        return UUID.nameUUIDFromBytes((NAME_PREFIX + conversationId + ":" + number).getBytes(StandardCharsets.UTF_8)).toString();
+    public static String scheduleId(String conversationId, int number, String decisionId) {
+        String name = NAME_PREFIX + conversationId + ":" + number + (decisionId != null ? ":" + decisionId : "");
+        return UUID.nameUUIDFromBytes(name.getBytes(StandardCharsets.UTF_8)).toString();
     }
 
     /**
@@ -576,12 +618,12 @@ public class ConversationContinuations {
      * moment would otherwise stop the job; a write that keeps failing is reported
      * by the caller as {@code schedule_failed}. A row that is already there — the
      * sweep was faster, or an attempt that reported a failure did land — counts as
-     * written: it is the same continuation.
+     * written: its id names this very decision.
      */
-    private void createWithRetry(ScheduleConfiguration schedule, long decidedAt) throws Exception {
+    private void createWithRetry(ScheduleConfiguration schedule) throws Exception {
         for (int attempt = 1;; attempt++) {
             try {
-                writeIfAbsent(schedule, decidedAt);
+                scheduleStore.createScheduleIfAbsent(schedule);
                 return;
             } catch (Exception e) {
                 if (attempt >= ARM_ATTEMPTS) {
@@ -598,50 +640,21 @@ public class ConversationContinuations {
         }
     }
 
-    /**
-     * Writes the continuation's schedule under its derived id unless a live one is
-     * there. A row with the same id that is <em>not</em> live — dead-lettered, or
-     * spent by a fire that did not run the turn (the conversation was paused) — and
-     * that predates this decision belongs to an earlier attempt at the same number:
-     * the new decision replaces it, exactly as it would have written a fresh row
-     * before ids were derived. A row created after the decision (the original arm
-     * of the very decision the sweep is recovering) is never replaced.
-     *
-     * @return whether this call wrote the row
-     */
-    private boolean writeIfAbsent(ScheduleConfiguration schedule, long decidedAt) throws Exception {
-        if (scheduleStore.createScheduleIfAbsent(schedule)) {
-            return true;
-        }
-        ScheduleConfiguration existing;
-        try {
-            existing = scheduleStore.readSchedule(schedule.getId());
-        } catch (IResourceStore.ResourceNotFoundException gone) {
-            return scheduleStore.createScheduleIfAbsent(schedule);
-        }
-        if (existing == null || isLive(existing) || existing.getCreatedAt() == null
-                || !existing.getCreatedAt().isBefore(Instant.ofEpochMilli(decidedAt))) {
-            return false;
-        }
-        LOGGER.infof("Replacing the spent schedule of continuation %s (status %s) with the new decision", sanitize(schedule.getId()),
-                existing.getFireStatus());
-        scheduleStore.deleteSchedule(existing.getId());
-        return scheduleStore.createScheduleIfAbsent(schedule);
-    }
-
-    /**
-     * Enabled and not dead-lettered: the schedule will still fire (or is firing).
-     */
-    private static boolean isLive(ScheduleConfiguration schedule) {
-        return schedule.isEnabled() && schedule.getFireStatus() != FireStatus.DEAD_LETTERED;
-    }
-
     public static Map<String, Object> metadata(String conversationId, int number, int max) {
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put(METADATA_TYPE_KEY, METADATA_TYPE_VALUE);
         metadata.put(METADATA_CONVERSATION_ID_KEY, conversationId);
         metadata.put(METADATA_NUMBER_KEY, number);
         metadata.put(METADATA_MAX_KEY, max);
+        return metadata;
+    }
+
+    /** {@link #metadata(String, int, int)} of one decision. */
+    public static Map<String, Object> metadata(String conversationId, int number, int max, String decisionId) {
+        Map<String, Object> metadata = metadata(conversationId, number, max);
+        if (decisionId != null) {
+            metadata.put(METADATA_DECISION_KEY, decisionId);
+        }
         return metadata;
     }
 
@@ -655,7 +668,11 @@ public class ConversationContinuations {
      * returned is the pending ones only: a cancel of a job that has finished must
      * find nothing to cancel, not report the job's spent schedules as cancelled.
      *
-     * @return how many pending continuations were withdrawn
+     * @return how many pending continuations were withdrawn, or
+     *         {@link #WITHDRAWAL_FAILED} when the stored outbox record could not be
+     *         removed — the rows are deleted all the same, but while the
+     *         conversation stays READY the recovery sweep could arm the decision
+     *         again, so a cancel must not report success
      */
     public int disarm(String conversationId) {
         if (conversationId == null || scheduleStore == null) {
@@ -664,7 +681,7 @@ public class ConversationContinuations {
         // The outbox record goes FIRST: a sweep that armed from it a moment ago either
         // wrote its row before this point (the delete below takes it) or finds the
         // record gone when it confirms, and withdraws its own row (see recover).
-        boolean recordCleared = clearPending(conversationId, null);
+        Boolean recordCleared = tryClearPending(conversationId, null, null);
         String name = scheduleName(conversationId);
         // The count is only for the report; if it fails the delete must still run, or a
         // cancelled job stays armed. An unknown count reports 0 withdrawn, never the
@@ -678,6 +695,9 @@ public class ConversationContinuations {
         try {
             int deleted = scheduleStore.deleteSchedulesByName(name);
             int withdrawn = Math.min(pending, deleted);
+            if (recordCleared == null) {
+                return WITHDRAWAL_FAILED;
+            }
             if (withdrawn == 0 && recordCleared) {
                 // A decided continuation whose arm was lost to a crash is still pending:
                 // the recovery sweep would have armed it. Withdrawing it is withdrawing one.
@@ -699,20 +719,34 @@ public class ConversationContinuations {
      * later if the conversation is still READY — which a cancel between two turns
      * leaves it — so that is logged at ERROR.
      *
+     * @param expectedNumber
+     *            remove it only while it names this continuation; {@code null}
+     *            removes whatever is there
+     * @param expectedDecisionId
+     *            with {@code expectedNumber}: remove it only while it names this
+     *            decision
      * @return whether an unhandled record was removed
      */
-    private boolean clearPending(String conversationId, Integer expectedNumber) {
+    private boolean clearPending(String conversationId, Integer expectedNumber, String expectedDecisionId) {
+        return Boolean.TRUE.equals(tryClearPending(conversationId, expectedNumber, expectedDecisionId));
+    }
+
+    /**
+     * {@link #clearPending}, telling a removal that failed ({@code null}) from a
+     * record that was not there ({@code false}).
+     */
+    private Boolean tryClearPending(String conversationId, Integer expectedNumber, String expectedDecisionId) {
         if (memoryStore == null) {
             return false;
         }
         for (int attempt = 1;; attempt++) {
             try {
-                return memoryStore.clearPendingContinuation(conversationId, expectedNumber);
+                return memoryStore.clearPendingContinuation(conversationId, expectedNumber, expectedDecisionId);
             } catch (Exception e) {
                 if (attempt >= ARM_ATTEMPTS) {
                     LOGGER.errorf("Could not clear the pending continuation record of conversation %s after %d attempts (%s); while the "
                             + "conversation stays READY the recovery sweep may still arm it", sanitize(conversationId), ARM_ATTEMPTS, e.toString());
-                    return false;
+                    return null;
                 }
                 LOGGER.warnf("Clearing the pending continuation record of conversation %s failed (attempt %d of %d), retrying: %s",
                         sanitize(conversationId), attempt, ARM_ATTEMPTS, e.toString());
@@ -720,7 +754,7 @@ public class ConversationContinuations {
                     Thread.sleep(ARM_RETRY_BACKOFF_MS * attempt);
                 } catch (InterruptedException interrupted) {
                     Thread.currentThread().interrupt();
-                    return false;
+                    return null;
                 }
             }
         }
@@ -752,17 +786,20 @@ public class ConversationContinuations {
      * <ol>
      * <li>A conversation that is not READY any more (ended, paused for a human) is
      * not revived: its record is removed.</li>
-     * <li>The schedule is written under its derived id with
-     * {@link IScheduleStore#createScheduleIfAbsent}: when the original arm or
+     * <li>The schedule is written under the id derived from the record's decision
+     * with {@link IScheduleStore#createScheduleIfAbsent}: when the original arm or
      * another node already wrote it, nothing is written.</li>
      * <li>The record is then marked handled
      * ({@link IConversationMemoryStore#markPendingContinuationHandled}), which
      * takes it out of the sweep's index. Sweeps only ever mark it; only a cancel,
-     * an end or a newer turn removes or replaces it. So when the record no longer
-     * names this continuation, the continuation was withdrawn or superseded while
-     * this ran, and a row this call wrote is withdrawn again. A cancel removes the
-     * record before it deletes the rows, so between them every interleaving ends
-     * without a live row; two sweeps write one row and both keep it.</li>
+     * an end or a newer turn removes or replaces it. Both the mark and the removal
+     * match the decision id, not only the number, so a later decision of the same
+     * number is never marked or removed in this one's name. So when the record no
+     * longer names this decision, the continuation was withdrawn or superseded
+     * while this ran, and a row this call wrote is withdrawn again. A cancel
+     * removes the record before it deletes the rows, so between them every
+     * interleaving ends without a live row; two sweeps write one row and both keep
+     * it.</li>
      * </ol>
      * The decision itself — {@code maxContinuations}, the cost ceiling, a group
      * member's turn — was taken by the turn and is not taken again; everything the
@@ -777,18 +814,19 @@ public class ConversationContinuations {
         String conversationId = candidate.conversationId();
         PendingContinuation pending = candidate.pending();
         int number = pending.getNumber();
+        String decisionId = pending.getDecisionId();
         if (candidate.state() != ConversationState.READY) {
-            memoryStore.clearPendingContinuation(conversationId, number);
+            memoryStore.clearPendingContinuation(conversationId, number, decisionId);
             LOGGER.infof("Pending continuation %d of conversation %s dropped: the conversation is %s", number, sanitize(conversationId),
                     candidate.state());
             return Recovery.NOT_READY;
         }
         var schedule = schedule(conversationId, candidate.agentId(), candidate.userId(), pending.getEnvironment(), number,
-                pending.getMaxContinuations(), pending.getInput());
-        boolean written = writeIfAbsent(schedule, pending.getDecidedAt() != null ? pending.getDecidedAt() : 0L);
+                pending.getMaxContinuations(), pending.getInput(), decisionId);
+        boolean written = scheduleStore.createScheduleIfAbsent(schedule);
         // Marks, never removes: another sweep that finds the row this one wrote marks
         // the record too, and must not look like a cancel to this one.
-        boolean stillPending = memoryStore.markPendingContinuationHandled(conversationId, number);
+        boolean stillPending = memoryStore.markPendingContinuationHandled(conversationId, number, decisionId);
         if (written && !stillPending) {
             scheduleStore.deleteSchedule(schedule.getId());
             LOGGER.infof("Recovered continuation %d of conversation %s withdrawn: the conversation moved on meanwhile", number,

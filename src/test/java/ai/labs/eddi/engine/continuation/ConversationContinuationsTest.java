@@ -380,21 +380,26 @@ class ConversationContinuationsTest {
         }
 
         @Test
-        @DisplayName("with the recovery sweep switched off, a failed write still ends the job and says so")
+        @DisplayName("with the recovery sweep switched off, a failed write retires the decision first, then ends the job and says so")
         void storeFailureWithRecoveryOff() throws Exception {
             var publisher = mock(UserEventPublisher.class);
-            var withStore = new ConversationContinuations(scheduleStore, mock(IConversationMemoryStore.class), meters,
-                    Clock.fixed(NOW, ZoneOffset.UTC));
+            var memoryStore = mock(IConversationMemoryStore.class);
+            var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
             withStore.userEventPublisher = publisher;
             withStore.recoveryEnabled = false;
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
             withStore.decide(memory, Environment.production);
+            String decision = (String) stepValue(memory, ConversationContinuations.STEP_DECISION);
             doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
 
             withStore.armIfDecided(CONVERSATION_ID, memory, Environment.production);
 
             var event = ArgumentCaptor.forClass(UserEvent.class);
-            verify(publisher).publish(event.capture(), any());
+            var order = inOrder(memoryStore, publisher);
+            // Retired before the owner is told the job ended: a sweep switched on later
+            // must not arm a job its owner heard had finished.
+            order.verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, 1, decision);
+            order.verify(publisher).publish(event.capture(), any());
             assertEquals(ConversationContinuations.REASON_SCHEDULE_FAILED, event.getValue().state());
         }
 
@@ -545,7 +550,9 @@ class ConversationContinuationsTest {
 
             assertEquals(1, continuations.decide(memory, Environment.production));
 
-            assertEquals(new PendingContinuation(1, 4, "next phase", "production", NOW.toEpochMilli()), memory.getPendingContinuation());
+            String decision = (String) stepValue(memory, ConversationContinuations.STEP_DECISION);
+            assertNotNull(decision, "the step carries the id of its decision");
+            assertEquals(new PendingContinuation(1, 4, "next phase", "production", NOW.toEpochMilli(), decision), memory.getPendingContinuation());
         }
 
         @Test
@@ -577,7 +584,8 @@ class ConversationContinuationsTest {
             continuations.decide(memory, Environment.test);
 
             ConversationMemorySnapshot stored = ConversationMemoryUtilities.convertConversationMemory(memory);
-            assertEquals(new PendingContinuation(1, 4, "go", "test", NOW.toEpochMilli()), stored.getPendingContinuation());
+            assertEquals(new PendingContinuation(1, 4, "go", "test", NOW.toEpochMilli(),
+                    (String) stepValue(memory, ConversationContinuations.STEP_DECISION)), stored.getPendingContinuation());
 
             IConversationMemory loaded = ConversationMemoryUtilities.convertConversationMemorySnapshot(stored);
             assertEquals(stored.getPendingContinuation(), loaded.getPendingContinuation(), "a load keeps the record");
@@ -611,6 +619,19 @@ class ConversationContinuationsTest {
         }
 
         @Test
+        @DisplayName("a record of another decision of the same number (an undo back to an earlier step) is not carried")
+        void recordOfAnotherDecisionIsNotCarried() {
+            var memory = memoryWith(new ContinuationPolicy(4, "go"), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(memory, Environment.production);
+            PendingContinuation own = memory.getPendingContinuation();
+            memory.setPendingContinuation(new PendingContinuation(1, 4, "go", "production", NOW.toEpochMilli(), "the-undone-turns-decision"));
+
+            assertNull(ConversationContinuations.pendingOf(memory), "the undone turn's decision must not ride along with this step");
+            memory.setPendingContinuation(own);
+            assertEquals(own, ConversationContinuations.pendingOf(memory), "the step's own decision is carried");
+        }
+
+        @Test
         @DisplayName("the original arm writes under the derived id, and a row the sweep already wrote counts as armed")
         void armUsesTheDerivedId() throws Exception {
             var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
@@ -621,70 +642,44 @@ class ConversationContinuationsTest {
 
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createScheduleIfAbsent(captor.capture());
-            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 1), captor.getValue().getId());
+            String decision = (String) stepValue(memory, ConversationContinuations.STEP_DECISION);
+            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 1, decision), captor.getValue().getId());
+            assertEquals(decision, captor.getValue().getMetadata().get(ConversationContinuations.METADATA_DECISION_KEY));
             verify(scheduleStore, never()).createSchedule(any());
-        }
-
-        private ScheduleConfiguration existingRow(boolean enabled, ScheduleConfiguration.FireStatus status, Instant createdAt) {
-            var row = new ScheduleConfiguration();
-            row.setId(ConversationContinuations.scheduleId(CONVERSATION_ID, 1));
-            row.setEnabled(enabled);
-            row.setFireStatus(status);
-            row.setCreatedAt(createdAt);
-            return row;
+            verify(scheduleStore, never()).readSchedule(anyString());
         }
 
         @Test
-        @DisplayName("a re-decided number replaces a dead-lettered row of an earlier attempt instead of reporting it armed")
-        void reDecisionReplacesASpentRow() throws Exception {
-            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
-            continuations.decide(memory, Environment.production);
-            String id = ConversationContinuations.scheduleId(CONVERSATION_ID, 1);
-            doReturn(false).doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(existingRow(true, ScheduleConfiguration.FireStatus.DEAD_LETTERED, NOW.minusSeconds(7200))).when(scheduleStore)
-                    .readSchedule(id);
+        @DisplayName("a second decision of the same number writes a row of its own, never taking an earlier one's row for it")
+        void reDecisionGetsItsOwnRow() throws Exception {
+            var first = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(first, Environment.production);
+            var second = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
+            continuations.decide(second, Environment.production);
+            doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
 
-            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, first, Environment.production));
+            assertTrue(continuations.armIfDecided(CONVERSATION_ID, second, Environment.production));
 
-            var order = inOrder(scheduleStore);
-            order.verify(scheduleStore).deleteSchedule(id);
-            order.verify(scheduleStore).createScheduleIfAbsent(any());
-        }
-
-        @Test
-        @DisplayName("a disabled row spent by a fire that did not run the turn is replaced too")
-        void reDecisionReplacesADisabledRow() throws Exception {
-            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
-            continuations.decide(memory, Environment.production);
-            String id = ConversationContinuations.scheduleId(CONVERSATION_ID, 1);
-            doReturn(false).doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(existingRow(false, ScheduleConfiguration.FireStatus.PENDING, NOW.minusSeconds(60))).when(scheduleStore).readSchedule(id);
-
-            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
-            verify(scheduleStore).deleteSchedule(id);
-        }
-
-        @Test
-        @DisplayName("a live row is never replaced, whoever wrote it")
-        void liveRowIsKept() throws Exception {
-            var memory = memoryWith(new ContinuationPolicy(4, ""), IConversation.CONTINUE_CONVERSATION);
-            continuations.decide(memory, Environment.production);
-            String id = ConversationContinuations.scheduleId(CONVERSATION_ID, 1);
-            doReturn(false).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(existingRow(true, ScheduleConfiguration.FireStatus.FAILED, NOW.minusSeconds(7200))).when(scheduleStore).readSchedule(id);
-
-            assertTrue(continuations.armIfDecided(CONVERSATION_ID, memory, Environment.production));
+            var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+            verify(scheduleStore, times(2)).createScheduleIfAbsent(captor.capture());
+            assertNotEquals(captor.getAllValues().get(0).getId(), captor.getAllValues().get(1).getId(),
+                    "a paused fire of the first decision must not count as the second one's schedule");
             verify(scheduleStore, never()).deleteSchedule(anyString());
-            verify(scheduleStore, times(1)).createScheduleIfAbsent(any());
         }
 
         @Test
         @DisplayName("the derived id is stable per continuation and differs between continuations and conversations")
         void derivedIds() {
-            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2), ConversationContinuations.scheduleId(CONVERSATION_ID, 2));
-            assertNotEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2), ConversationContinuations.scheduleId(CONVERSATION_ID, 3));
-            assertNotEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2), ConversationContinuations.scheduleId("other", 2));
-            assertDoesNotThrow(() -> UUID.fromString(ConversationContinuations.scheduleId(CONVERSATION_ID, 2)));
+            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d"),
+                    ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d"));
+            assertNotEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d"),
+                    ConversationContinuations.scheduleId(CONVERSATION_ID, 3, "d"));
+            assertNotEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d"), ConversationContinuations.scheduleId("other", 2, "d"));
+            assertNotEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d"),
+                    ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "e"),
+                    "two decisions of one number are two schedules");
+            assertDoesNotThrow(() -> UUID.fromString(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, "d")));
         }
 
         @Test
@@ -697,7 +692,7 @@ class ConversationContinuationsTest {
             memory.setCancelled(true);
 
             assertFalse(withStore.armIfDecided(CONVERSATION_ID, memory, Environment.production));
-            verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, 1);
+            verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, 1, (String) stepValue(memory, ConversationContinuations.STEP_DECISION));
         }
 
         @Test
@@ -706,14 +701,14 @@ class ConversationContinuationsTest {
             var memoryStore = mock(IConversationMemoryStore.class);
             var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
             String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
-            doReturn(true).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null);
+            doReturn(true).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null, null);
             doReturn(0).when(scheduleStore).countPendingSchedulesByName(name);
             doReturn(0).when(scheduleStore).deleteSchedulesByName(name);
 
             assertEquals(1, withStore.disarm(CONVERSATION_ID), "the crashed job's continuation was pending all the same");
 
             var order = inOrder(memoryStore, scheduleStore);
-            order.verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, null);
+            order.verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, null, null);
             order.verify(scheduleStore).deleteSchedulesByName(name);
         }
 
@@ -722,22 +717,24 @@ class ConversationContinuationsTest {
         void disarmWithNothingPending() throws Exception {
             var memoryStore = mock(IConversationMemoryStore.class);
             var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
-            doReturn(false).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null);
+            doReturn(false).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null, null);
 
             assertEquals(0, withStore.disarm(CONVERSATION_ID));
         }
 
         @Test
-        @DisplayName("a record that cannot be removed does not stop disarm from deleting the rows")
+        @DisplayName("a record that cannot be removed does not stop disarm from deleting the rows, but it reports the withdrawal failed")
         void disarmSurvivesARecordFailure() throws Exception {
             var memoryStore = mock(IConversationMemoryStore.class);
             var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
             String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
-            doThrow(new IResourceStore.ResourceStoreException("down")).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null);
+            doThrow(new IResourceStore.ResourceStoreException("down")).when(memoryStore).clearPendingContinuation(CONVERSATION_ID, null, null);
             doReturn(1).when(scheduleStore).countPendingSchedulesByName(name);
             doReturn(1).when(scheduleStore).deleteSchedulesByName(name);
 
-            assertEquals(1, withStore.disarm(CONVERSATION_ID));
+            assertEquals(ConversationContinuations.WITHDRAWAL_FAILED, withStore.disarm(CONVERSATION_ID),
+                    "the stored decision is still there: a cancel must not be confirmed");
+            verify(scheduleStore).deleteSchedulesByName(name);
         }
 
         @Test
@@ -747,12 +744,12 @@ class ConversationContinuationsTest {
             var withStore = new ConversationContinuations(scheduleStore, memoryStore, meters, Clock.fixed(NOW, ZoneOffset.UTC));
             String name = ConversationContinuations.scheduleName(CONVERSATION_ID);
             doThrow(new IResourceStore.ResourceStoreException("blip")).doReturn(true).when(memoryStore).clearPendingContinuation(CONVERSATION_ID,
-                    null);
+                    null, null);
             doReturn(0).when(scheduleStore).countPendingSchedulesByName(name);
             doReturn(0).when(scheduleStore).deleteSchedulesByName(name);
 
             assertEquals(1, withStore.disarm(CONVERSATION_ID), "the retry removed the unhandled record");
-            verify(memoryStore, times(2)).clearPendingContinuation(CONVERSATION_ID, null);
+            verify(memoryStore, times(2)).clearPendingContinuation(CONVERSATION_ID, null, null);
         }
     }
 
@@ -760,6 +757,7 @@ class ConversationContinuationsTest {
     @DisplayName("recover — arming a decided continuation the crash left unarmed (#1180)")
     class Recover {
 
+        private static final String DECISION = "decision-2";
         private IConversationMemoryStore memoryStore;
         private ConversationContinuations recovering;
 
@@ -771,7 +769,7 @@ class ConversationContinuationsTest {
 
         private PendingContinuationCandidate candidate(ConversationState state) {
             return new PendingContinuationCandidate(CONVERSATION_ID, "agent-1", "user-1", state,
-                    new PendingContinuation(2, 5, "go on", "production", NOW.minusSeconds(600).toEpochMilli()));
+                    new PendingContinuation(2, 5, "go on", "production", NOW.minusSeconds(600).toEpochMilli(), DECISION));
         }
 
         private double recovered() {
@@ -783,14 +781,14 @@ class ConversationContinuationsTest {
         @DisplayName("a missing schedule is written once under the derived id, for the owner, with the stored input and cap")
         void armsTheMissingSchedule() throws Exception {
             doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
 
             assertEquals(ConversationContinuations.Recovery.RECOVERED, recovering.recover(candidate(ConversationState.READY)));
 
             var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
             verify(scheduleStore).createScheduleIfAbsent(captor.capture());
             ScheduleConfiguration schedule = captor.getValue();
-            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2), schedule.getId());
+            assertEquals(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, DECISION), schedule.getId());
             assertEquals(ConversationContinuations.scheduleName(CONVERSATION_ID), schedule.getName());
             assertEquals("user-1", schedule.getUserId(), "the fire runs only for the conversation's owner");
             assertEquals("agent-1", schedule.getAgentId());
@@ -799,6 +797,7 @@ class ConversationContinuationsTest {
             assertEquals(NOW, schedule.getNextFire());
             assertEquals(2, schedule.getMetadata().get(ConversationContinuations.METADATA_NUMBER_KEY));
             assertEquals(5, schedule.getMetadata().get(ConversationContinuations.METADATA_MAX_KEY));
+            assertEquals(DECISION, schedule.getMetadata().get(ConversationContinuations.METADATA_DECISION_KEY));
             assertTrue(ConversationContinuations.isContinuationSchedule(schedule.getMetadata()));
             verify(scheduleStore, never()).deleteSchedule(anyString());
             assertEquals(1.0, recovered());
@@ -808,11 +807,11 @@ class ConversationContinuationsTest {
         @DisplayName("an armed continuation is left alone: nothing written, nothing deleted, the record marked handled")
         void alreadyArmed() throws Exception {
             doReturn(false).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
 
             assertEquals(ConversationContinuations.Recovery.ALREADY_ARMED, recovering.recover(candidate(ConversationState.READY)));
 
-            verify(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            verify(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
             verify(scheduleStore, never()).deleteSchedule(anyString());
             verify(scheduleStore, never()).deleteSchedulesByName(anyString());
             assertEquals(0.0, recovered());
@@ -826,18 +825,18 @@ class ConversationContinuationsTest {
                 assertEquals(ConversationContinuations.Recovery.NOT_READY, recovering.recover(candidate(state)), state.name());
             }
             verify(scheduleStore, never()).createScheduleIfAbsent(any());
-            verify(memoryStore, times(3)).clearPendingContinuation(CONVERSATION_ID, 2);
+            verify(memoryStore, times(3)).clearPendingContinuation(CONVERSATION_ID, 2, DECISION);
         }
 
         @Test
         @DisplayName("a record withdrawn or replaced while the sweep armed (cancel, end, newer turn) takes the sweep's row back")
         void superseded() throws Exception {
             doReturn(true).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(false).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(false).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
 
             assertEquals(ConversationContinuations.Recovery.SUPERSEDED, recovering.recover(candidate(ConversationState.READY)));
 
-            verify(scheduleStore).deleteSchedule(ConversationContinuations.scheduleId(CONVERSATION_ID, 2));
+            verify(scheduleStore).deleteSchedule(ConversationContinuations.scheduleId(CONVERSATION_ID, 2, DECISION));
             assertEquals(0.0, recovered());
         }
 
@@ -845,7 +844,7 @@ class ConversationContinuationsTest {
         @DisplayName("a row the original arm wrote is never withdrawn, even when the record is gone")
         void neverWithdrawsARowItDidNotWrite() throws Exception {
             doReturn(false).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(false).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(false).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
 
             assertEquals(ConversationContinuations.Recovery.ALREADY_ARMED, recovering.recover(candidate(ConversationState.READY)));
             verify(scheduleStore, never()).deleteSchedule(anyString());
@@ -869,7 +868,7 @@ class ConversationContinuationsTest {
                 rows.remove((String) inv.getArgument(0));
                 return null;
             }).when(scheduleStore).deleteSchedule(anyString());
-            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
 
             var pool = Executors.newFixedThreadPool(2);
             try {
@@ -889,20 +888,17 @@ class ConversationContinuationsTest {
         }
 
         @Test
-        @DisplayName("a dead-lettered row written after the decision is the decision's own: the sweep does not restart it")
-        void deadRowOfTheSameDecisionIsKept() throws Exception {
-            String id = ConversationContinuations.scheduleId(CONVERSATION_ID, 2);
-            var dead = new ScheduleConfiguration();
-            dead.setId(id);
-            dead.setEnabled(true);
-            dead.setFireStatus(ScheduleConfiguration.FireStatus.DEAD_LETTERED);
-            dead.setCreatedAt(NOW.minusSeconds(500)); // the record says decided 600 s ago
+        @DisplayName("the mark and the removal name the decision, so a later decision of the same number is not touched")
+        void matchesTheDecision() throws Exception {
             doReturn(false).when(scheduleStore).createScheduleIfAbsent(any());
-            doReturn(dead).when(scheduleStore).readSchedule(id);
-            doReturn(true).when(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2);
+            doReturn(true).when(memoryStore).markPendingContinuationHandled(anyString(), anyInt(), any());
 
-            assertEquals(ConversationContinuations.Recovery.ALREADY_ARMED, recovering.recover(candidate(ConversationState.READY)));
-            verify(scheduleStore, never()).deleteSchedule(anyString());
+            recovering.recover(candidate(ConversationState.READY));
+            recovering.recover(candidate(ConversationState.ENDED));
+
+            verify(memoryStore).markPendingContinuationHandled(CONVERSATION_ID, 2, DECISION);
+            verify(memoryStore).clearPendingContinuation(CONVERSATION_ID, 2, DECISION);
+            verify(scheduleStore, never()).readSchedule(anyString());
         }
 
         @Test
@@ -911,8 +907,8 @@ class ConversationContinuationsTest {
             doThrow(new IResourceStore.ResourceStoreException("down")).when(scheduleStore).createScheduleIfAbsent(any());
 
             assertThrows(IResourceStore.ResourceStoreException.class, () -> recovering.recover(candidate(ConversationState.READY)));
-            verify(memoryStore, never()).markPendingContinuationHandled(anyString(), anyInt());
-            verify(memoryStore, never()).clearPendingContinuation(anyString(), any());
+            verify(memoryStore, never()).markPendingContinuationHandled(anyString(), anyInt(), any());
+            verify(memoryStore, never()).clearPendingContinuation(anyString(), any(), any());
         }
     }
 }

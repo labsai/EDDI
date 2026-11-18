@@ -51,6 +51,7 @@ import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConv
 import static ai.labs.eddi.engine.memory.ConversationMemoryUtilities.convertConversationMemorySnapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -164,11 +165,15 @@ class PendingContinuationStoreParityTest extends MongoTestBase {
         assertEquals("carry on", first.getInput());
         assertEquals("production", first.getEnvironment());
         assertNotNull(first.getDecidedAt());
+        assertNotNull(first.getDecisionId(), backend + ": the decision id round-trips");
 
         storeNextTurn(store, id, true);
         PendingContinuation second = stored(store, id);
         assertNotNull(second, backend + ": an appended turn that decides again replaces the record");
         assertEquals(1, second.getNumber(), "continuation 1 has not run yet, so the next decision is 1 again");
+        assertNotNull(second.getDecisionId());
+        assertNotEquals(first.getDecisionId(), second.getDecisionId(),
+                backend + ": the stored record is the second decision, not the first one kept");
 
         storeNextTurn(store, id, false);
         assertNull(stored(store, id), backend + ": an appended turn that does not continue removes it");
@@ -193,23 +198,36 @@ class PendingContinuationStoreParityTest extends MongoTestBase {
         assertTrue(store.findPendingContinuations(found.pending().getDecidedAt(), 10_000).stream()
                 .noneMatch(c -> id.equals(c.conversationId())), backend + ": the cutoff is exclusive and honoured");
 
-        assertFalse(store.markPendingContinuationHandled(id, 2), backend + ": another number does not match");
-        assertTrue(store.markPendingContinuationHandled(id, 1), backend + ": the record names continuation 1");
-        assertTrue(store.markPendingContinuationHandled(id, 1), backend + ": a handled record still names it — what two sweeps see");
+        String decision = found.pending().getDecisionId();
+        assertNotNull(decision, backend + ": the query reads the decision id");
+        assertFalse(store.markPendingContinuationHandled(id, 2, decision), backend + ": another number does not match");
+        assertFalse(store.markPendingContinuationHandled(id, 1, "another-decision"),
+                backend + ": another decision of the same number does not match");
+        assertNotNull(candidate(store, id), backend + ": a mismatched mark leaves the record in the query");
+        assertTrue(store.markPendingContinuationHandled(id, 1, decision), backend + ": the record names this decision");
+        assertTrue(store.markPendingContinuationHandled(id, 1, decision), backend + ": a handled record still names it — what two sweeps see");
         assertNull(candidate(store, id), backend + ": a handled record is out of the query");
         PendingContinuation handled = stored(store, id);
         assertNotNull(handled, backend + ": marking keeps the record");
         assertNull(handled.getDecidedAt());
+        assertEquals(decision, handled.getDecisionId(), backend + ": marking keeps the decision id");
 
-        assertFalse(store.clearPendingContinuation(id, null), backend + ": removing a handled record reports nothing pending");
+        assertFalse(store.clearPendingContinuation(id, null, null), backend + ": removing a handled record reports nothing pending");
         assertNull(stored(store, id), backend + ": but removes it");
-        assertFalse(store.markPendingContinuationHandled(id, 1), backend + ": a removed record names nothing — what a cancel looks like");
+        assertFalse(store.markPendingContinuationHandled(id, 1, decision), backend + ": a removed record names nothing — what a cancel looks like");
 
         String other = storeDecidingTurn(store);
-        assertFalse(store.clearPendingContinuation(other, 3), backend + ": a guarded clear of another number removes nothing");
+        String otherDecision = stored(store, other).getDecisionId();
+        assertFalse(store.clearPendingContinuation(other, 3, otherDecision), backend + ": a guarded clear of another number removes nothing");
+        assertFalse(store.clearPendingContinuation(other, 1, "another-decision"),
+                backend + ": a guarded clear of another decision of the same number removes nothing");
         assertNotNull(stored(store, other));
-        assertTrue(store.clearPendingContinuation(other, null), backend + ": removing an unhandled record reports it");
+        assertTrue(store.clearPendingContinuation(other, 1, otherDecision), backend + ": removing this unhandled decision reports it");
         assertNull(stored(store, other));
+
+        String third = storeDecidingTurn(store);
+        assertTrue(store.clearPendingContinuation(third, null, null), backend + ": an unguarded clear (end, cancel) removes and reports it");
+        assertNull(stored(store, third));
     }
 
     @ParameterizedTest(name = "{0}")
@@ -220,7 +238,7 @@ class PendingContinuationStoreParityTest extends MongoTestBase {
         String id = storeDecidingTurn(store);
         Long revision = store.getRevision(id);
 
-        store.markPendingContinuationHandled(id, 1);
+        assertTrue(store.markPendingContinuationHandled(id, 1, stored(store, id).getDecisionId()));
         assertEquals(revision, store.getRevision(id), backend + ": marking does not move the revision");
 
         storeNextTurn(store, id, false);
@@ -233,7 +251,7 @@ class PendingContinuationStoreParityTest extends MongoTestBase {
     void createScheduleIfAbsent(String backend, Supplier<IScheduleStore> factory) throws Exception {
         IScheduleStore store = factory.get();
         String conversationId = UUID.randomUUID().toString();
-        String id = ConversationContinuations.scheduleId(conversationId, 1);
+        String id = ConversationContinuations.scheduleId(conversationId, 1, "decision-pc");
 
         assertTrue(store.createScheduleIfAbsent(schedule(id, conversationId)), backend + ": the first writer writes");
         assertFalse(store.createScheduleIfAbsent(schedule(id, conversationId)), backend + ": the second finds it");

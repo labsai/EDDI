@@ -108,7 +108,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
      */
     private static final String PENDING_CONTINUATION_PRESENT = "(data->'pendingContinuation') IS NOT NULL";
     private static final String PENDING_CONTINUATION_UNHANDLED = "(data->'pendingContinuation'->'decidedAt') IS NOT NULL";
-    private static final String PENDING_CONTINUATION_NUMBER = " AND (data->'pendingContinuation'->>'number')::int = ?";
+    private static final String PENDING_CONTINUATION_NUMBER = " AND (data->'pendingContinuation'->>'number')::int = ?"
+            + " AND (data->'pendingContinuation'->>'decisionId') IS NOT DISTINCT FROM ?::text";
     private static final String PENDING_CONTINUATION_DECIDED_AT = "((data->'pendingContinuation'->>'decidedAt')::bigint)";
     static final String PENDING_CONTINUATION_INDEX = "idx_conv_pending_continuation";
     private static final String CREATE_INDEX_PENDING_CONTINUATION = "CREATE INDEX CONCURRENTLY IF NOT EXISTS " + PENDING_CONTINUATION_INDEX
@@ -1498,7 +1499,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
                         continue;
                     }
                     out.add(new PendingContinuationCandidate(rs.getString("id"), rs.getString("AGENT_ID"), rs.getString("user_id"),
-                            conversationStateOf(rs.getString("conversation_state")), pending));
+                            stateOrNull(rs.getString("conversation_state")), pending));
                 }
             }
             return out;
@@ -1506,7 +1507,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public boolean markPendingContinuationHandled(String conversationId, int number) throws IResourceStore.ResourceStoreException {
+    public boolean markPendingContinuationHandled(String conversationId, int number, String decisionId)
+            throws IResourceStore.ResourceStoreException {
         if (!PostgresIds.isStorableId(conversationId)) {
             return false;
         }
@@ -1519,6 +1521,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, conversationId);
             ps.setInt(2, number);
+            ps.setString(3, decisionId);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to mark the pending continuation handled", e);
@@ -1526,7 +1529,8 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
     }
 
     @Override
-    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber) throws IResourceStore.ResourceStoreException {
+    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber, String expectedDecisionId)
+            throws IResourceStore.ResourceStoreException {
         if (!PostgresIds.isStorableId(conversationId)) {
             return false;
         }
@@ -1541,6 +1545,7 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             ps.setString(1, conversationId);
             if (expectedNumber != null) {
                 ps.setInt(2, expectedNumber);
+                ps.setString(3, expectedDecisionId);
             }
             try (ResultSet rs = ps.executeQuery()) {
                 return rs.next() && rs.getBoolean(1);
@@ -1558,17 +1563,6 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
             return jsonSerialization.deserialize(json, PendingContinuation.class);
         } catch (IOException | RuntimeException e) {
             LOGGER.warnf("Unparseable pendingContinuation for conversation %s: %s", conversationId, e.getMessage());
-            return null;
-        }
-    }
-
-    private static ConversationState conversationStateOf(String value) {
-        if (value == null) {
-            return null;
-        }
-        try {
-            return ConversationState.valueOf(value);
-        } catch (IllegalArgumentException e) {
             return null;
         }
     }

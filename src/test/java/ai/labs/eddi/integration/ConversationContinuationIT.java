@@ -349,7 +349,7 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
 
         List<Map<String, Object>> armed = pendingContinuations(continuingAgent, conversationId);
         assertEquals(1, armed.size(), "the sweep armed the lost continuation: " + armed);
-        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), armed.getFirst().get("id"));
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1, storedDecision(conversationId)), armed.getFirst().get("id"));
         assertEquals(USER_ID, armed.getFirst().get("userId"), "armed for the conversation's owner");
         assertNull(conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation().getDecidedAt(),
                 "the record is marked handled");
@@ -381,7 +381,8 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
         awaitUntil(Duration.ofSeconds(10), () -> pendingContinuations(continuingAgent, conversationId).size() == 1,
                 "the first turn did not arm its continuation");
         Map<String, Object> original = pendingContinuations(continuingAgent, conversationId).getFirst();
-        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), original.get("id"), "the turn armed under the derived id");
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1, storedDecision(conversationId)), original.get("id"),
+                "the turn armed under the derived id");
         awaitCandidate(conversationId);
 
         recoverySweep.sweep();
@@ -494,7 +495,7 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
         assertEquals(sweepers - 1, outcomes.stream().filter(o -> o == Recovery.ALREADY_ARMED).count(), "the rest found it: " + outcomes);
         List<Map<String, Object>> armed = pendingContinuations(continuingAgent, conversationId);
         assertEquals(1, armed.size(), "one schedule for the continuation: " + armed);
-        assertEquals(ConversationContinuations.scheduleId(conversationId, 1), armed.getFirst().get("id"));
+        assertEquals(ConversationContinuations.scheduleId(conversationId, 1, storedDecision(conversationId)), armed.getFirst().get("id"));
 
         // Leave nothing running for the next test.
         given().post("agents/" + conversationId + "/cancel").then().statusCode(200);
@@ -657,5 +658,15 @@ public class ConversationContinuationIT extends BaseIntegrationIT {
             assertTrue(condition.getAsBoolean(), message);
             Thread.sleep(250);
         } while (System.nanoTime() < end);
+    }
+
+    /**
+     * The decision id of the conversation's stored outbox record (kept after a
+     * mark).
+     */
+    private String storedDecision(String conversationId) throws Exception {
+        PendingContinuation pending = conversationMemoryStore.loadConversationMemorySnapshot(conversationId).getPendingContinuation();
+        assertNotNull(pending, "the conversation carries its outbox record");
+        return pending.getDecisionId();
     }
 }

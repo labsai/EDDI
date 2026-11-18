@@ -2164,8 +2164,14 @@ your tool schemas do not cover it, not as a routine first step:
   metric, never in the step) — is not a stopped job: a recovery sweep arms it
   from the decision stored with the step, normally within about two minutes
   (eddi.continuation.recovery.*; eddi_continuation_recovered_total counts it).
-  Still missing well after that: the sweep is switched off or failing — ask an
-  administrator to check the logs) or
+  Still missing well after that: first rule out a job stopped on purpose —
+  read the conversation's state and latest step: cancelled or ended, or a
+  later turn that decided again or not at all, means the decision was
+  withdrawn or replaced and nothing is wrong. Only while the conversation is
+  still READY and that same step is still its latest may the sweep be
+  switched off or failing — ask an administrator to check the logs. If you
+  cannot confirm that, say the missing schedule alone does not tell the
+  cause) or
   "continuation:refused" (why not: disabled, limit, cost_ceiling, not_settled,
   group_member, ...) — read the conversation with returnDetailed=true. It never runs for an ENDED or
   AWAITING_HUMAN conversation, and the sweep never revives one; ending or
