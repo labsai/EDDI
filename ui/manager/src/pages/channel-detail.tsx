@@ -236,6 +236,13 @@ function GroupTargetPicker({
 
 /* ─── Main Page ───────────────────────────────────────────────── */
 
+/** A fresh number for each visit of a versionless link (module-wide, so a remount never repeats one). */
+let visitCounter = 0;
+function nextVisit() {
+  visitCounter += 1;
+  return visitCounter;
+}
+
 export function ChannelDetailPage() {
   const { t } = useTranslation();
   const uid = useId();
@@ -246,9 +253,15 @@ export function ChannelDetailPage() {
   // A link without ?version (the owner digest's) opens the current version, not
   // version 1: resolve it, then put it in the URL (keeping the #mail-log hash).
   const hasVersion = searchParams.has("version");
-  const currentVersion = useChannelCurrentVersion(id!, location.key, !hasVersion);
-  // The query is this navigation's own (keyed by it), so a settled success is
-  // this navigation's answer and a settled failure is its error.
+  // One version lookup per VISIT, not per history entry: Back restores an earlier
+  // `location.key`, and a request still pending under it must not be reused.
+  const [visit, setVisit] = useState(() => ({ key: location.key, n: nextVisit() }));
+  useEffect(() => {
+    if (visit.key !== location.key) setVisit({ key: location.key, n: nextVisit() });
+  }, [visit.key, location.key]);
+  const currentVersion = useChannelCurrentVersion(id!, `visit-${visit.n}`, !hasVersion && visit.key === location.key);
+  // The query is this visit's own, so a settled success is this visit's answer
+  // and a settled failure is its error.
   const versionAnswered = currentVersion.isSuccess && !currentVersion.isFetching;
   const versionLookupFailed = !hasVersion && currentVersion.isError && !currentVersion.isFetching;
   useEffect(() => {
@@ -311,7 +324,21 @@ export function ChannelDetailPage() {
   // The mail log belongs to the saved version: an unsaved switch to email has
   // no log yet (and a switch away still has one).
   // Case-insensitive, as the server's own check is.
-  const savedIsEmail = config?.channelType?.toLowerCase() === "email";
+  // The log belongs to the integration as it is NOW: the server checks the
+  // current version's type, so an older email version of a channel that is no
+  // longer email has no log. Case-insensitive, as the server's check is.
+  const latest = useChannelCurrentVersion(id!, "latest");
+  const latestConfig = useChannel(id!, latest.data, latest.data !== undefined && latest.data !== version);
+  // If the latest version cannot be resolved, fall back to the loaded version's
+  // type rather than hiding the section the owner digest links to.
+  const currentType = latest.isError
+    ? config?.channelType
+    : latest.data === undefined
+      ? undefined
+      : latest.data === version
+        ? config?.channelType
+        : latestConfig.data?.channelType;
+  const savedIsEmail = currentType?.toLowerCase() === "email";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;

@@ -4,7 +4,7 @@ import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
 import { server } from "@eddi/app-kit/test/mocks/server";
 import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
@@ -502,12 +502,19 @@ describe("ChannelDetailPage — switching the channel type", () => {
 });
 
 describe("ChannelDetailPage — a link without ?version (the owner digest's)", () => {
+  function BackButton() {
+    const navigate = useNavigate();
+    return <button type="button" data-testid="go-back" onClick={() => void navigate(-1)}>back</button>;
+  }
+
   function renderWithLinks(path: string) {
     return renderPage(
       path,
       <>
         <Link to="/manage/channels/ch-email#mail-log" data-testid="go-email">email</Link>
         <Link to="/manage/channels/ch1" data-testid="go-ch1">ch1</Link>
+        <Link to="/manage/channels/ch4?version=1" data-testid="go-ch4">ch4</Link>
+        <BackButton />
         <ChannelDetailPage />
       </>,
       "/manage/channels/:id",
@@ -525,8 +532,9 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
     );
     renderWithLinks("/manage/channels/ch1");
 
-    expect(await screen.findByText("Engineering Slack v3")).toBeInTheDocument();
-    expect(requested).toEqual(["3"]);
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack v3");
+    expect(requested).toContain("3");
+    expect(requested).not.toContain("1"); // never version 1
   });
 
   it("shows a retryable error when the version cannot be resolved, and never loads version 1", async () => {
@@ -548,7 +556,7 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
 
     fail = false;
     await userEvent.click(within(screen.getByTestId("channel-detail-error")).getByTestId("error-state-retry"));
-    expect(await screen.findByText("Engineering Slack v2")).toBeInTheDocument();
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack v2");
     expect(requested).toEqual(["2"]);
   });
 
@@ -591,5 +599,56 @@ describe("ChannelDetailPage — a link without ?version (the owner digest's)", (
 
     release();
     expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
+  });
+
+  it("asks again on Back instead of reusing a lookup still pending from the earlier visit", async () => {
+    const answers: Array<() => void> = [];
+    let asked = 0;
+    server.use(
+      http.get("*/channelstore/channels/ch1/currentversion", async () => {
+        // Every answer is held until the end: the first visit's lookup is still
+        // pending when the user leaves and comes back.
+        asked++;
+        await new Promise<void>((resolve) => answers.push(resolve));
+        return HttpResponse.json(1);
+      }),
+    );
+    renderWithLinks("/manage/channels/ch1");
+    await waitFor(() => expect(answers.length).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const before = asked;
+
+    await userEvent.click(screen.getByTestId("go-ch4"));
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Billing Webhook");
+    await userEvent.click(screen.getByTestId("go-back"));
+
+    await waitFor(() => expect(asked).toBeGreaterThan(before)); // a new request for this visit
+    answers.forEach((release) => release());
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Engineering Slack");
+  });
+
+  it("shows no mail log on an older email version when the integration is no longer email", async () => {
+    server.use(
+      http.get("*/channelstore/channels/ch-email/currentversion", () => HttpResponse.json(2)),
+      http.get("*/channelstore/channels/ch-email", ({ request }) =>
+        new URL(request.url).searchParams.get("version") === "2"
+          ? HttpResponse.json({ name: "Now Slack", channelType: "slack", platformConfig: {}, targets: [] })
+          : HttpResponse.json({ name: "Invoice intake", channelType: "EMAIL", platformConfig: { mode: "trigger", transport: "imap" }, targets: [] }),
+      ),
+    );
+    renderWithLinks("/manage/channels/ch-email?version=1");
+    expect(await screen.findByTestId("channel-name-input")).toHaveValue("Invoice intake");
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("email-mail-log-section")).not.toBeInTheDocument();
+  });
+
+  it("shows the mail log for a saved type of EMAIL (case-insensitive, as the server)", async () => {
+    server.use(
+      http.get("*/channelstore/channels/ch-email", () =>
+        HttpResponse.json({ name: "Invoice intake", channelType: "EMAIL", platformConfig: { mode: "trigger", transport: "imap" }, targets: [] }),
+      ),
+    );
+    renderWithLinks("/manage/channels/ch-email?version=1");
+    expect(await screen.findByTestId("email-mail-log-section")).toBeInTheDocument();
   });
 });

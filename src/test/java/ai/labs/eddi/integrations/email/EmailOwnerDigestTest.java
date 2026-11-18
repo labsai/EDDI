@@ -237,6 +237,9 @@ class EmailOwnerDigestTest {
         assertEquals(1, sweeper.sendDigests(() -> TODAY_0010));
         verify(owner, never()).sendDigestIfDue(eq("int-none"), any(), any(), any());
         verify(owner, never()).sendDigestIfDue(eq("int-turned-off"), any(), any(), any());
+        // Only the fresh owner list reaches the notifier, never the scan's.
+        verify(owner, never()).sendDigestIfDue(eq("int-daily"), any(),
+                argThat(s -> s == null || !s.ownerNotifyAddresses().equals(List.of("fresh@contoso.com"))), any());
         verify(directory, never()).all(); // never the last-good fallback, which may name a removed owner
     }
 

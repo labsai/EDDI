@@ -142,7 +142,7 @@ public class EmailInboundSweeper {
     @Scheduled(every = "${eddi.email.inbound.sweep-interval:5m}", delayed = "60s", identity = "email-inbound-sweeper",
                concurrentExecution = Scheduled.ConcurrentExecution.SKIP)
     void sweep() {
-        Instant now = Instant.now();
+        Instant now = clock.get();
         try {
             resolveStranded(now);
         } catch (RuntimeException e) {

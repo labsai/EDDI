@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useId, useState, type FormEvent } from "react";
+import { useEffect, useId, useState, type FormEvent } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
-import { useQueryClient } from "@tanstack/react-query";
 import { Inbox, Search } from "lucide-react";
 import { Badge, Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
@@ -9,7 +8,7 @@ import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
 import { isApiError } from "@eddi/app-kit/lib/api-client";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorState } from "@/components/shared/error-state";
-import { useEmailLog, useEmailLogLookup } from "@/hooks/use-email-log";
+import { useEmailLog, useEmailLogDenial, useEmailLogLookup } from "@/hooks/use-email-log";
 import {
   EMAIL_LOG_REASON_CATEGORIES,
   EMAIL_LOG_STATES,
@@ -77,7 +76,7 @@ function LogTable({ rows, testId }: { rows: EmailLogRow[]; testId: string }) {
 }
 
 /** "Look up Message-ID": why EDDI did or did not answer one mail. */
-function MessageIdLookup({ channelId, onDenied }: { channelId: string; onDenied: (error: unknown) => void }) {
+function MessageIdLookup({ channelId }: { channelId: string }) {
   const { t } = useTranslation();
   const uid = useId();
   const [messageId, setMessageId] = useState("");
@@ -87,8 +86,8 @@ function MessageIdLookup({ channelId, onDenied }: { channelId: string; onDenied:
   const submit = (event: FormEvent) => {
     event.preventDefault();
     const value = messageId.trim();
-    // The lookup sits behind the same EDIT check: its 403 denies the whole log.
-    if (value) lookup.mutate(value, { onError: (error) => { if (isApiError(error) && error.status === 403) onDenied(error); } });
+    // A 403 denies the whole log; the hook handles it (even after an unmount).
+    if (value) lookup.mutate(value);
   };
 
   return (
@@ -132,10 +131,18 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   const { t } = useTranslation();
   const uid = useId();
   const [filters, setFilters] = useState<EmailLogFilters>({});
-  // Declared before the query: while access is denied the log does not fetch.
-  const [denial, setDenial] = useState<unknown>(null);
+  // Edit access withdrawn: a 403 from any of this integration's mail-log
+  // requests or the lookup (handled in the hooks, so also while unmounted) drops
+  // every cached page and records a denial. While denied, rows and the lookup are
+  // hidden and nothing is fetched until Retry; only a successful read sent after
+  // the denial lifts it. A Retry that fails keeps everything hidden.
+  const denial = useEmailLogDenial(channelId);
   const forbidden = denial !== null;
-  const log = useEmailLog(channelId, filters, !forbidden);
+  const [retrying, setRetrying] = useState(false);
+  const log = useEmailLog(channelId, filters, !forbidden || retrying);
+  useEffect(() => {
+    if (!forbidden) setRetrying(false);
+  }, [forbidden]);
   const rows = log.data?.pages.flatMap((page) => page.rows) ?? [];
   // "All" removes the key, so the query key matches the unfiltered list again.
   const setFilter = (key: keyof EmailLogFilters, value: string) =>
@@ -152,29 +159,6 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   useEffect(() => {
     if (hash === "#mail-log") document.getElementById("mail-log")?.scrollIntoView?.({ block: "start" });
   }, [hash, locationKey]);
-  // Edit access withdrawn while the page is open (a 403 from ANY of this
-  // integration's mail-log requests or from the lookup): every cached page of
-  // the log is cancelled and dropped, nothing is fetched while denied, and only
-  // Retry — a fresh request — can lift it. With no cached rows left anywhere,
-  // no filter, remount or late response can bring them back.
-  const queryClient = useQueryClient();
-  const deny = useCallback(
-    (error: unknown) => {
-      setDenial(error);
-      const queryKey = ["channels", channelId, "email-log"];
-      void queryClient.cancelQueries({ queryKey }).then(() => queryClient.removeQueries({ queryKey }));
-    },
-    [queryClient, channelId],
-  );
-  useEffect(() => {
-    const prefix = JSON.stringify(["channels", channelId, "email-log"]).slice(0, -1);
-    // Only a NEW error: a query keeps its last error while it refetches.
-    return queryClient.getQueryCache().subscribe((event) => {
-      if (event.type !== "updated" || event.action.type !== "error") return;
-      if (!JSON.stringify(event.query.queryKey).startsWith(prefix)) return;
-      if (isApiError(event.action.error) && event.action.error.status === 403) deny(event.action.error);
-    });
-  }, [queryClient, channelId, deny]);
 
   return (
     <div className="space-y-4" data-testid="email-mail-log">
@@ -184,7 +168,7 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
           "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. The mail log does not store subjects or bodies.",
         )}
       </p>
-      {!forbidden && <MessageIdLookup key={channelId} channelId={channelId} onDenied={deny} />}
+      {!forbidden && <MessageIdLookup key={channelId} channelId={channelId} />}
       <div className="flex flex-wrap gap-2">
         <label className="sr-only" htmlFor={`${uid}-direction`}>{t("emailLog.colDirection", "Direction")}</label>
         <select id={`${uid}-direction`} className={selectClass} data-testid="email-log-filter-direction" value={filters.direction ?? ""} onChange={(e) => setFilter("direction", e.target.value)}>
@@ -207,7 +191,9 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
           ))}
         </select>
       </div>
-      {forbidden && <ErrorState error={denial} onRetry={() => setDenial(null)} />}
+      {forbidden && (
+        <ErrorState error={denial.error} onRetry={() => (retrying ? void log.refetch() : setRetrying(true))} />
+      )}
       {!forbidden && log.isLoading && <Skeleton className="h-24 w-full" />}
       {!forbidden && log.isError && <ErrorState error={log.error} onRetry={() => void log.refetch()} />}
       {!forbidden && log.isSuccess && rows.length === 0 && (

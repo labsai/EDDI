@@ -200,12 +200,14 @@ describe("EmailMailLog", () => {
     await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
     first.unmount();
 
-    // Back later, same cache, and the network is down: there is nothing to show.
+    // Back later, same cache: the denial is still recorded, nothing is cached,
+    // nothing is fetched until Retry.
     state.mode = "down";
     renderPage("/", <EmailMailLog channelId="ch-email" />, "/", queryClient);
-    await waitFor(() => expect(state.downHits).toBeGreaterThan(0));
-    await waitFor(() => expect(queryClient.isFetching({ queryKey: LOG_KEY })).toBe(0));
+    expect(await screen.findByTestId("error-state-retry")).toBeInTheDocument();
     expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+    expect(state.downHits).toBe(0);
   });
 
   it("a 403 from the Message-ID lookup denies the whole log", async () => {
@@ -222,6 +224,87 @@ describe("EmailMailLog", () => {
 
     await waitFor(() => expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument());
     expect(screen.getByTestId("error-state")).toBeInTheDocument();
+  });
+
+  it("a Retry that fails on the network keeps rows and lookup hidden, with Retry still offered", async () => {
+    const state = { mode: "forbidden" as Mode, downHits: 0 };
+    serveLog(state);
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+
+    state.mode = "down";
+    await userEvent.click(screen.getByTestId("error-state-retry"));
+    await waitFor(() => expect(state.downHits).toBeGreaterThan(0));
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+    expect(screen.getByTestId("error-state-retry")).toBeInTheDocument();
+
+    state.mode = "ok";
+    await userEvent.click(screen.getByTestId("error-state-retry"));
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+    expect(screen.getByTestId("email-log-lookup-input")).toBeInTheDocument();
+  });
+
+  it("a list 403 that arrives after the section unmounted still drops the cached rows", async () => {
+    let release: (() => void) | null = null;
+    let hold = false;
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", async () => {
+        if (hold) {
+          await new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+        }
+        if (state.mode === "down") {
+          state.downHits++;
+          return HttpResponse.error();
+        }
+        return HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "all" }], nextCursor: null });
+      }),
+    );
+    const first = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    const { queryClient } = first;
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+
+    hold = true;
+    void queryClient.refetchQueries({ queryKey: LOG_KEY });
+    await waitFor(() => expect(release).not.toBeNull());
+    first.unmount();
+    release!(); // 403 while nobody is looking
+    await waitFor(() => expect(queryClient.getQueryCache().findAll({ queryKey: LOG_KEY })).toHaveLength(0));
+
+    hold = false;
+    state.mode = "down";
+    renderPage("/", <EmailMailLog channelId="ch-email" />, "/", queryClient);
+    expect(await screen.findByTestId("error-state")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-row-all")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+  });
+
+  it("a lookup 403 that arrives after the section unmounted still drops the cached rows", async () => {
+    let release: (() => void) | null = null;
+    const state = { mode: "ok" as Mode, downHits: 0 };
+    serveLog(state);
+    server.use(
+      http.post("*/channelstore/channels/:id/email-log/lookup", async () => {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return HttpResponse.json({ error: "forbidden" }, { status: 403 });
+      }),
+    );
+    const first = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    const { queryClient } = first;
+    expect(await screen.findByTestId("email-log-row-all")).toBeInTheDocument();
+
+    await userEvent.type(screen.getByTestId("email-log-lookup-input"), "<m@x.example>");
+    await userEvent.click(screen.getByTestId("email-log-lookup-btn"));
+    await waitFor(() => expect(release).not.toBeNull());
+    first.unmount();
+    release!();
+    await waitFor(() => expect(queryClient.getQueryCache().findAll({ queryKey: LOG_KEY })).toHaveLength(0));
   });
 
   it("loads the next page with the cursor the server returned", async () => {

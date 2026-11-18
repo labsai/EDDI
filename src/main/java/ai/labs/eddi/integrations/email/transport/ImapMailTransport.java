@@ -194,7 +194,7 @@ public class ImapMailTransport implements MailTransport {
         } catch (AuthenticationFailedException e) {
             closeQuietly(store);
             throw new MailboxException(MailboxException.Category.AUTHENTICATION,
-                    "The IMAP server " + endpoint.host() + " refused the login of connection '" + settings.connection() + "'.", e);
+                    "The IMAP server " + endpoint.host() + " refused the login of connection '" + settings.connection() + "': " + rootMessage(e), e);
         } catch (MessagingException e) {
             closeQuietly(store);
             throw new MailboxException(MailboxException.Category.CONNECTION,

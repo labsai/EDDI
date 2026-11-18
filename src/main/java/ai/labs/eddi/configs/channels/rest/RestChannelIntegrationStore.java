@@ -513,7 +513,8 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
         // Same range as since/until: a forged cursor far outside it would fail in
         // the store (a 500), not page.
-        if (cursor.createdAt().isBefore(Instant.EPOCH) || cursor.createdAt().isAfter(LATEST_BOUND)) {
+        if (cursor.createdAt().isBefore(Instant.EPOCH) || cursor.createdAt().isAfter(LATEST_BOUND)
+                || cursor.id().chars().anyMatch(c -> c < 0x20 || c == 0x7f)) {
             throw new BadRequestException("'after' is not a cursor this mail log issued.");
         }
         return cursor;

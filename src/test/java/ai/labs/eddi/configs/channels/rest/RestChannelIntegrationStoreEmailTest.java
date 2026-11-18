@@ -247,6 +247,8 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, "1969-12-31T23:59:59Z", null, null, null));
         String farCursor = new IEmailMessageLedger.Cursor(Instant.parse("+400000000-01-01T00:00:00Z"), "row-0").encode();
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, farCursor));
+        String nulCursor = new IEmailMessageLedger.Cursor(Instant.parse("2026-11-17T00:00:00Z"), "row" + (char) 0 + "x").encode();
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, nulCursor));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "%%%"));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, "abc", null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "bm8tYmFy"));
