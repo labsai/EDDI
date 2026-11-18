@@ -22,6 +22,23 @@ how to see spend that has no price, and how to refuse it.
 - **Strict mode is opt-in**: `unpricedPolicy` `REFUSE_WHEN_BUDGETED` or `REFUSE`
   refuses an unpriced call before it is made.
 
+## Explicit zero prices
+
+An explicit `0` is a real price — a self-hosted model is free — and by default it
+beats the catalog. On a **hosted** provider it also keeps `audit:cost` at 0, so
+cost ceilings, tenant budgets and `unpricedPolicy` never see that model's spend.
+That stays allowed, but it is made visible and can be forbidden:
+
+- **Visible.** A task, cascade step or judge priced at an explicit zero on a
+  provider other than `ollama`, `jlama` or `openai-compatible` produces a warning
+  at save (server log) and at deploy (the deployment's warnings), and every priced
+  call at such a zero increments `eddi.llm.pricing.explicit_zero_calls{provider}`.
+- **Forbidden, if you want.** `eddi.llm.pricing.catalog-floor=true` makes the
+  catalog a floor: a configured price for a model the catalog knows is raised to the
+  catalog's (a higher configured price stays; a model the catalog does not know
+  keeps what the config says). Only the base and cache prices are floored, not a
+  config's own long-context tier. Default `false`, today's behaviour.
+
 ## Price resolution
 
 For one call, each price — input, output, cache read, cache write, and the

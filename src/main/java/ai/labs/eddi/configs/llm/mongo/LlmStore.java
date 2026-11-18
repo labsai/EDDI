@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.llm.impl.CascadeCredentialPolicy;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.ExplicitPrices;
 import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.ToolDisplayConfigValidator;
@@ -91,6 +92,11 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
             LlmConfiguration.Task task = content.tasks().get(i);
             if (task != null) {
                 validateGuardrailTypes(task, "langchain.task[" + i + "]");
+                // Not a rejection (a free model is legitimate), but the author learns at save
+                // time.
+                for (String warning : ExplicitPrices.zeroPriceWarnings(task)) {
+                    LOGGER.warnf("langchain.task[%d]: %s", i, warning);
+                }
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
                 ToolCallGuardrailConfigValidator.validate(task.getToolCallGuardrails(), "langchain.task[" + i + "].toolCallGuardrails");

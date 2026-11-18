@@ -80,6 +80,12 @@ public final class ModelPriceResolver {
             BucketPrices own = new BucketPrices(override.inputPer1M(), override.outputPer1M(),
                     pricing != null ? pricing.cacheReadPricePer1M() : null, pricing != null ? pricing.cacheWritePricePer1M() : null);
             BucketPrices fromCatalog = BucketPrices.of(entry);
+            ExplicitPrices.countIfZeroPriced(override, usage.get(MeteredTokenUsage.PRICING_MODEL));
+            if (ExplicitPrices.catalogFloor()) {
+                // eddi.llm.pricing.catalog-floor: a configuration may not price a catalogued
+                // model below the catalog (an explicit 0 included).
+                own = own.atLeast(fromCatalog);
+            }
             BucketPrices base = own.orElse(fromCatalog);
             BucketPrices tier = tierPrices(pricing != null ? pricing.longContext() : null, entry, base);
             double usd = base.cost(in - lcIn, cr - lcCr, cw - lcCw, out - lcOut) + tier.cost(lcIn, lcCr, lcCw, lcOut);
