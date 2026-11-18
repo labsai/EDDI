@@ -174,6 +174,38 @@ class OAuthTokenServiceMailboxRecheckTest {
     }
 
     @Test
+    @DisplayName("a mismatch never deletes a grant an administrator re-linked while the profile was being read")
+    void mismatchSparesAReLinkedGrant() throws Exception {
+        when(accountCheck.check(any(), any(), any())).thenAnswer(invocation -> {
+            // The admin re-links the mailbox correctly while this refresh is checking.
+            var relinked = grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow();
+            relinked.setEncryptedAccessToken("sealed:relinked-access");
+            relinked.setAccessTokenIv("iv-relinked");
+            grantStore.seed(relinked);
+            return MailboxAccountCheck.Outcome.MISMATCH;
+        });
+
+        assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        ConnectionGrant kept = grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow();
+        assertEquals("iv-relinked", kept.getAccessTokenIv(), "only the refreshed row may be deleted, never its replacement");
+    }
+
+    @Test
+    @DisplayName("a check that cannot run at all (misconfigured connection) keeps the grant and reports the configuration")
+    void unverifiableConfigurationKeepsTheGrant() throws Exception {
+        when(accountCheck.check(any(), any(), any()))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "allowlist lacks the Gmail API"));
+
+        ConnectionException refused = assertThrows(ConnectionException.class, () -> service().accessToken(connection(), PRINCIPAL));
+
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, refused.getReason());
+        ConnectionGrant kept = grantStore.find(TENANT, CONNECTION, PRINCIPAL).orElseThrow();
+        assertEquals("sealed:1//rotated", kept.getEncryptedRefreshToken());
+        assertFalse(kept.isAccessTokenUsable(Instant.now(), Duration.ZERO));
+    }
+
+    @Test
     @DisplayName("a PER_USER refresh is never sent to the mailbox check")
     void perUserIsNotChecked() throws Exception {
         var perUser = connection();

@@ -813,6 +813,11 @@ public class RestConnectionAuthorization implements IRestConnectionAuthorization
      * normalised — or {@code null} when the token carries none. Without one the
      * own-mailbox refusal cannot apply; the account check still binds the grant to
      * the requested address.
+     * <p>
+     * {@code email_verified} is deliberately not consulted: this value only ever
+     * causes a refusal, so reading an unverified claim refuses more, never less.
+     * The check guards against an administrator linking their own mailbox by
+     * mistake; the account check is the security boundary.
      */
     private String linkerEmail() {
         if (securityIdentity == null || !(securityIdentity.getPrincipal() instanceof JsonWebToken jwt)) {

@@ -29,6 +29,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -212,6 +213,44 @@ class RestConnectionStoreGrantLifecycleTest {
 
         verify(grantStore, never()).countByConnection(anyString(), anyString());
         verify(connectionStore).update(eq(ID), eq(2), any());
+    }
+
+    private static ConnectionConfiguration mailbox(String name) {
+        var mailbox = connection(name, "default");
+        mailbox.setAuthType(AuthType.OAUTH2_AUTHORIZATION_CODE);
+        mailbox.setBinding(Binding.MAILBOX);
+        mailbox.setStaticAuth(null);
+        mailbox.setBaseUrlAllowlist(List.of("imaps://imap.gmail.com", "https://gmail.googleapis.com"));
+        var oauth = oauth();
+        oauth.setAccountCheck(OAuthConfig.ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE);
+        mailbox.setOauth(oauth);
+        return mailbox;
+    }
+
+    @Test
+    @DisplayName("a MAILBOX connection's 409 names the mailbox unlink, not a per-user route no one can use")
+    void mailboxRefusalNamesTheMailboxUnlink() throws Exception {
+        storedAs(mailbox("gws"), 2);
+        when(connectionStore.idOfName("default", "gws")).thenReturn(ID);
+        when(grantStore.countByConnection("default", "gws")).thenReturn(1L);
+
+        var error = assertThrows(ClientErrorException.class, () -> rest().updateConnection(ID, 2, connection("gws", "default")));
+
+        assertEquals(409, error.getResponse().getStatus());
+        assertTrue(error.getMessage().contains("POST /connections/gws/mailbox-grants/unlink"), error.getMessage());
+        assertFalse(error.getMessage().contains("/grant,"), error.getMessage());
+    }
+
+    @Test
+    @DisplayName("a MAILBOX connection cannot be created where no administrator can be authenticated to link it")
+    void refusesMailboxWithoutAuthorization() {
+        var rest = new RestConnectionStore(connectionStore, mock(IDocumentDescriptorStore.class), mock(IJsonSchemaCreator.class),
+                connectionRegistry, grantStore, secretProvider, false, adminGuard(), new InMemoryConnectionNameClaimStore(),
+                mock(CredentialReferenceResolver.class));
+
+        var error = assertThrows(BadRequestException.class, () -> rest.createConnection(mailbox("gws")));
+
+        assertTrue(error.getMessage().contains("MAILBOX connection requires authorization.enabled=true"), error.getMessage());
     }
 
     @Test

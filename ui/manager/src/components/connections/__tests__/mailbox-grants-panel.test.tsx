@@ -85,7 +85,7 @@ describe("MailboxGrantsPanel", () => {
     renderWithProviders(<MailboxGrantsPanel connectionName="gws" />);
 
     await userEvent.click(await screen.findByTestId("mailbox-grant-unlink"));
-    await userEvent.click(await screen.findByRole("button", { name: /unlink/i, hidden: false }));
+    await userEvent.click(await screen.findByTestId("alert-dialog-confirm"));
 
     await waitFor(() => expect(unlinked).toEqual({ address: "support@company.example" }));
   });

@@ -661,8 +661,12 @@ public class RestConnectionStore implements IRestConnectionStore {
         throw new ClientErrorException("Connection '" + current.getName() + "' has " + linked + " linked account(s) whose grants were "
                 + "produced under authType " + current.getAuthType() + " / binding " + current.getBinding() + ". Changing it to "
                 + target.getAuthType() + " / " + target.getBinding() + " would leave their refresh tokens at rest under a name the "
-                + "resolver never reads them for. Have each user unlink with DELETE /connections/" + current.getName()
-                + "/grant, or delete the connection — which deletes its grants with it — and create the new one.",
+                + "resolver never reads them for. "
+                + (current.getBinding() == Binding.MAILBOX
+                        ? "Unlink each mailbox with POST /connections/" + current.getName() + "/mailbox-grants/unlink (Manager: the "
+                                + "connection's Mailbox grants panel)"
+                        : "Have each user unlink with DELETE /connections/" + current.getName() + "/grant")
+                + ", or delete the connection — which deletes its grants with it — and create the new one.",
                 Response.Status.CONFLICT);
     }
 

@@ -181,6 +181,7 @@ export function MailboxGrantsPanel({
             "{{address}} will no longer be readable through this connection, and its email integration fails as not connected until the mailbox is linked again.",
         })}
         onConfirm={() => void confirmUnlink()}
+        isPending={unlink.isPending}
         confirmLabel={t("connections.mailbox.unlink", "Unlink")}
         cancelLabel={t("common.cancel", "Cancel")}
       />

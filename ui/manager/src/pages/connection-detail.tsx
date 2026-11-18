@@ -316,19 +316,31 @@ export function ConnectionDetailPage() {
             ? (stored?.allowUnverifiedPrincipal ?? false)
             : prev.allowUnverifiedPrincipal;
       const oauth = prev.oauth ?? blank.oauth;
+      // The account check follows the binding: restored with a returning
+      // MAILBOX binding (a detour through another type must not lose it, as the
+      // binding is not lost), defaulted for a new one, and dropped elsewhere —
+      // the backend refuses it on any other binding.
+      const accountCheck =
+        binding !== "MAILBOX"
+          ? null
+          : ((returningToStored ? stored?.oauth?.accountCheck : oauth?.accountCheck) ??
+            oauth?.accountCheck ??
+            "google-gmail-profile");
       return {
         ...prev,
         authType,
         binding,
         allowUnverifiedPrincipal,
         staticAuth: prev.staticAuth ?? blank.staticAuth,
-        // The backend refuses an account check on any binding but MAILBOX.
-        oauth: oauth && binding !== "MAILBOX" ? { ...oauth, accountCheck: null } : oauth,
+        oauth: oauth ? { ...oauth, accountCheck } : oauth,
       };
     });
   }, []);
 
-  /** The STATIC-only choice between a shared key and a caller-supplied one. */
+  /**
+   * The binding choice, for the two types that have one: STATIC (shared key or
+   * caller-supplied) and the user-login flow (per user or dedicated mailbox).
+   */
   const changeBinding = useCallback((binding: Binding) => {
     setDraft((prev) => {
       if (!prev) return prev;

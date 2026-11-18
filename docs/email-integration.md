@@ -97,7 +97,8 @@ connection. `headerName` is required by the connection model but not used by a m
 Gmail's IMAP and SMTP take OAuth through SASL `XOAUTH2`, and a Workspace user mailbox's token comes from an
 authorization-code grant — somebody has to sign in to Google **as the mailbox** once. A connection bound
 [`MAILBOX`](connections.md#dedicated-mailboxes-mailbox) holds one such grant per dedicated mailbox, linked by an
-`eddi-admin`; the mail transport is the only thing that can use it. Only **dedicated** mailboxes
+`eddi-admin`; only an email integration's mail login can use it (any integration author can attach an
+integration to a linked mailbox, as with any connection). Only **dedicated** mailboxes
 (`eddi@eddi.solutions`), never a person's own: domain-wide delegation stays out.
 
 **Prerequisites** are those of the [Google Workspace recipe](google-workspace.md#prerequisites) for connections:

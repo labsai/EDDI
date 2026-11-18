@@ -2193,7 +2193,8 @@ your tool schemas do not cover it, not as a routine first step:
   "trigger" or "conversation" (required) and transport "imap" (fixed);
   connection (required: a platform connection NAME, no
   \${...}, OAUTH2_CLIENT_CREDENTIALS for XOAUTH2 or BASIC for an app password,
-  bound SERVICE or MAILBOX (PER_USER is refused), whose baseUrlAllowlist holds
+  bound SERVICE, or OAUTH2_AUTHORIZATION_CODE bound MAILBOX for a Google
+  Workspace mailbox (PER_USER is refused), whose baseUrlAllowlist holds
   imaps://<host> or imap://<host>:143, and in conversation mode also
   smtp://<smtpHost>:587 or smtps://<smtpHost>); host
   (required, a DNS name, no IP literal); port 993 (TLS) or 143 (STARTTLS);

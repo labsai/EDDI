@@ -80,6 +80,17 @@ class ImapMailTransportLoginTest {
     }
 
     @Test
+    @DisplayName("NOT_CONNECTED on a non-MAILBOX connection stays CREDENTIAL — owners are not told to link a mailbox")
+    void notConnectedOnServiceIsCredential() {
+        when(resolver.authTypeOf(REFERENCE)).thenReturn(Optional.of(AuthType.OAUTH2_CLIENT_CREDENTIALS));
+        when(resolver.bindingOf(REFERENCE)).thenReturn(Optional.of(Binding.SERVICE));
+        when(resolver.resolveAccessToken(REFERENCE, IMAP, null))
+                .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_CONNECTED, "grant disappeared mid-refresh"));
+
+        assertEquals(MailboxException.Category.CREDENTIAL, assertThrows(MailboxException.class, () -> transport.login(settings)).getCategory());
+    }
+
+    @Test
     @DisplayName("an unlinked mailbox fails NOT_CONNECTED; any other credential failure stays CREDENTIAL")
     void notConnectedCategory() {
         when(resolver.bindingOf(REFERENCE)).thenReturn(Optional.of(Binding.MAILBOX));

@@ -353,6 +353,57 @@ describe("ConnectionDetailPage", () => {
     expect(sent[0]!.allowUnverifiedPrincipal).toBe(true);
   });
 
+  it("keeps a MAILBOX connection's account check across a type detour and back", async () => {
+    // The check is dropped on any other binding (the backend refuses it there);
+    // coming back to the stored MAILBOX binding must bring it back, or the draft
+    // would be refused for the field it lost on the way.
+    const user = userEvent.setup();
+    const sent = captureSave();
+    server.use(
+      http.get("*/connectionstore/connections/:id", ({ request }) => {
+        if (new URL(request.url).pathname.endsWith("/descriptors")) return;
+        return HttpResponse.json({
+          name: "gws-support-mailbox",
+          authType: "OAUTH2_AUTHORIZATION_CODE",
+          binding: "MAILBOX",
+          allowUnverifiedPrincipal: false,
+          staticAuth: null,
+          oauth: {
+            authorizationUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+            tokenUrl: "https://oauth2.googleapis.com/token",
+            clientId: "id",
+            clientSecret: "${vault:gws-mailbox-client-secret}",
+            scopes: ["https://mail.google.com/"],
+            extraAuthParams: {},
+            usePkce: true,
+            clientAuthMethod: "client_secret_basic",
+            discoveryUrl: null,
+            accountCheck: "google-gmail-profile",
+          },
+          baseUrlAllowlist: ["imaps://imap.gmail.com", "https://gmail.googleapis.com"],
+          timeoutMs: null,
+        });
+      }),
+      http.get("*/connections/gws-support-mailbox/mailbox-grants", () => HttpResponse.json([])),
+    );
+    renderDetail("mailbox");
+    await screen.findByTestId("connection-name-input");
+    expect(screen.getByTestId("connection-account-check")).toHaveValue("google-gmail-profile");
+
+    await user.selectOptions(screen.getByTestId("connection-auth-type-select"), "OAUTH2_CLIENT_CREDENTIALS");
+    await confirmAuthChange(user);
+    await user.selectOptions(
+      screen.getByTestId("connection-auth-type-select"),
+      "OAUTH2_AUTHORIZATION_CODE",
+    );
+
+    expect(screen.getByTestId("connection-account-check")).toHaveValue("google-gmail-profile");
+    await user.click(screen.getByTestId("save-connection-btn"));
+    await waitFor(() => expect(sent).toHaveLength(1));
+    expect(sent[0]!.binding).toBe("MAILBOX");
+    expect((sent[0]!.oauth as { accountCheck?: string }).accountCheck).toBe("google-gmail-profile");
+  });
+
   it("asks before the auth type of an existing connection is changed", async () => {
     // A grant belongs to the flow that produced it, so a type change strands
     // every account linked through the connection — and the backend refuses

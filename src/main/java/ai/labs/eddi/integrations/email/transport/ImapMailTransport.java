@@ -234,9 +234,11 @@ public class ImapMailTransport implements MailTransport {
             String token = xoauth2Token(resolver, reference, target, settings);
             return new String[]{settings.address(), token, "XOAUTH2"};
         } catch (ConnectionException e) {
-            // NOT_CONNECTED is the one an administrator fixes by linking the mailbox;
-            // its own category lets the poller tell the owners exactly that.
-            MailboxException.Category category = e.getReason() == ConnectionException.Reason.NOT_CONNECTED
+            // NOT_CONNECTED on a MAILBOX connection is the one an administrator fixes by
+            // linking the mailbox; its own category lets the poller tell the owners
+            // exactly that. On any other binding it stays a credential failure, or the
+            // owners would be told to link a mailbox that has no grant to link.
+            MailboxException.Category category = e.getReason() == ConnectionException.Reason.NOT_CONNECTED && isMailboxBound(resolver, reference)
                     ? MailboxException.Category.NOT_CONNECTED
                     : MailboxException.Category.CREDENTIAL;
             throw new MailboxException(category,
@@ -253,6 +255,15 @@ public class ImapMailTransport implements MailTransport {
      * binding is read first: {@link ConnectionResolver#resolveAccessToken} refuses
      * it, so that no other caller can ever spend it.
      */
+    /** Whether the connection is MAILBOX-bound; false when that cannot be told. */
+    private static boolean isMailboxBound(ConnectionResolver resolver, String reference) {
+        try {
+            return resolver.bindingOf(reference).orElse(null) == Binding.MAILBOX;
+        } catch (ConnectionException e) {
+            return false;
+        }
+    }
+
     private static String xoauth2Token(ConnectionResolver resolver, String reference, URI target, EmailChannelSettings settings) {
         if (resolver.bindingOf(reference).orElse(null) == Binding.MAILBOX) {
             return resolver.resolveMailboxAccessToken(reference, target, settings.address());

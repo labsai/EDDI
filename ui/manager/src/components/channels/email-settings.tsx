@@ -25,6 +25,7 @@ import {
 } from "@/lib/email-channel";
 import { emailProblemMessage } from "@/lib/email-channel-messages";
 import { useMailboxGrants } from "@/hooks/use-mailbox-grants";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 
 const selectClass =
   "flex h-9 w-full rounded-lg border border-border bg-background px-3 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary";
@@ -87,7 +88,10 @@ export function EmailPlatformFields({
   const mailboxConnection = (connections ?? []).find(
     (c) => c.connectionName === pc.connection && c.binding === "MAILBOX",
   );
-  const mailboxGrants = useMailboxGrants(pc.connection, !!mailboxConnection);
+  // eddi-admin only: an editor would get a 403 (an audited admin-endpoint denial)
+  // on every render; it learns the state from the save warning instead.
+  const isAdmin = useHasRole("eddi-admin");
+  const mailboxGrants = useMailboxGrants(pc.connection, !!mailboxConnection && isAdmin);
   const mailboxAddress = (pc.address ?? "").trim().toLowerCase();
   const mailboxGrant = mailboxGrants.data?.find((g) => g.address === mailboxAddress);
 

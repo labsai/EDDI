@@ -514,7 +514,10 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
         if (outcome == MailboxAccountCheck.Outcome.MISMATCH) {
             try {
-                grantStore.delete(tenantId, connection.getName(), principal);
+                // Only the row that was refreshed. An administrator may have re-linked
+                // the mailbox correctly while the profile was being read; a delete by
+                // key alone would remove that new, correct grant.
+                grantStore.deleteIfSealedWith(tenantId, connection.getName(), principal, grant.getAccessTokenIv());
             } catch (RuntimeException e) {
                 LOGGER.errorf("[SECURITY] Could not delete the mismatched mailbox grant of connection '%s' (%s); it is refused on every "
                         + "refresh until it is", sanitize(connection.getName()), e.getClass().getSimpleName());
@@ -524,6 +527,13 @@ public class OAuthTokenService implements AccessTokenSupplier {
                     + "it was linked for. The grant was deleted; an administrator must link the mailbox again.", sanitize(connection.getName()));
             throw new MailboxAccountMismatch("The mailbox grant of connection '" + connection.getName() + "' no longer belongs to the "
                     + "mailbox and was deleted. Link the mailbox again.");
+        }
+        if (unverifiable != null && unverifiable.getReason() == ConnectionException.Reason.INVALID_CONFIGURATION) {
+            // Not a blip: a document that predates save-time validation (no known
+            // account check, or the Gmail API missing from its allowlist). Every poll
+            // would refresh and fail the same way, so say it loudly.
+            LOGGER.errorf("The mailbox grant of connection '%s' cannot be verified because the connection is misconfigured: %s",
+                    sanitize(connection.getName()), unverifiable.getMessage());
         }
         TokenResponse token = refreshed.token();
         persist(connection, tenantId, principal, new TokenResponse(token.accessToken(), token.refreshToken(), Duration.ZERO, token.scopes()),

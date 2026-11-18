@@ -893,6 +893,13 @@ headers, MCP, A2A, ingestion), `resolveForDiscovery`, `resolveAccessToken` (the 
 and `resolveBasicLogin` — refuses a `MAILBOX` connection with `UNSUPPORTED_PLACEMENT` before
 any token is fetched. A grant that reads and sends a whole mailbox is not a tool credential.
 
+**Linking is admin-only; using a linked mailbox is not.** Whoever may save an email
+integration (`eddi-admin` or `eddi-editor`) can point one at a `MAILBOX` connection and a
+linked address, and its agent then reads and answers that mailbox — exactly as an editor can
+already attach an integration to a `SERVICE` connection's shared mailbox. The grant fences off
+*how* the credential is spent (only the mail login of an integration naming that address), not
+*who* may configure such an integration. Restrict integration authoring where that matters.
+
 **Refresh re-checks the account.** Every refresh that mints a new access token runs the
 account check before the token is used. A mismatch deletes the grant, logs `[SECURITY]`,
 counts `eddi.connection.token.refresh.count{outcome="account_mismatch"}`, and the poll fails
