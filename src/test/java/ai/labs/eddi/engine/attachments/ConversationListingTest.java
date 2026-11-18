@@ -44,6 +44,38 @@ class ConversationListingTest {
     }
 
     @Test
+    void order_isByNameThenReference_whateverTheStoreOrder() {
+        var store = mock(IAttachmentStore.class);
+        when(store.listAccessible(SOURCE)).thenReturn(List.of(
+                new IAttachmentStore.Attachment(REF_C, "z.pdf", "application/pdf", 1, SOURCE),
+                new IAttachmentStore.Attachment(REF_B, "b.pdf", "application/pdf", 1, SOURCE),
+                new IAttachmentStore.Attachment(REF_A, "B.pdf", "application/pdf", 1, SOURCE)));
+        var reversed = mock(IAttachmentStore.class);
+        when(reversed.listAccessible(SOURCE)).thenReturn(List.of(
+                new IAttachmentStore.Attachment(REF_A, "B.pdf", "application/pdf", 1, SOURCE),
+                new IAttachmentStore.Attachment(REF_B, "b.pdf", "application/pdf", 1, SOURCE),
+                new IAttachmentStore.Attachment(REF_C, "z.pdf", "application/pdf", 1, SOURCE)));
+
+        var listing = ConversationListing.of(SOURCE, store, Set.of(), List.of());
+
+        assertEquals(List.of("B.pdf", "b.pdf", "z.pdf"), listing.displayNames());
+        assertEquals(listing, ConversationListing.of(SOURCE, reversed, Set.of(), List.of()));
+    }
+
+    @Test
+    void recordsItsConversationAndWithheldSet() {
+        var store = new InMemoryAttachmentStore().put(REF_A, "a.pdf", "application/pdf", 10, SOURCE).put(REF_B, "refused.pdf",
+                "application/pdf", 20, SOURCE);
+
+        var listing = ConversationListing.of(SOURCE, store, Set.of(REF_B), List.of());
+
+        assertEquals(SOURCE, listing.conversationId());
+        assertTrue(listing.isWithheld(REF_B));
+        assertFalse(listing.isWithheld(REF_A));
+        assertFalse(listing.isWithheld(null));
+    }
+
+    @Test
     void foreignRoots_areNotListed() {
         var store = new InMemoryAttachmentStore().put(REF_A, "a.pdf", "application/pdf", 10, SOURCE).put(REF_B, "secret.pdf",
                 "application/pdf", 20, OTHER);
@@ -144,7 +176,7 @@ class ConversationListingTest {
 
     @Test
     void entriesAreImmutable() {
-        var listing = new ConversationListing(null);
+        var listing = new ConversationListing(null, null, null);
         assertTrue(listing.entries().isEmpty());
         assertTrue(ConversationListing.empty().isEmpty());
     }

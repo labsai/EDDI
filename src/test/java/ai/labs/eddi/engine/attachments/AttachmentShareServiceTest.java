@@ -102,8 +102,9 @@ class AttachmentShareServiceTest {
 
         @Test
         void oneBasedIndex() {
+            // Sorted by name: 1 = chart.png, 2 = notes.txt, 3 = report.pdf.
             var r = service.resolveNames(listing, List.of("1", "3"));
-            assertEquals(List.of(AttachmentSelector.wholeFile(REF_PDF), AttachmentSelector.wholeFile(REF_TXT)), r.selectors());
+            assertEquals(List.of(AttachmentSelector.wholeFile(REF_PNG), AttachmentSelector.wholeFile(REF_PDF)), r.selectors());
         }
 
         @Test
@@ -149,7 +150,7 @@ class AttachmentShareServiceTest {
             assertTrue(r.resolved().isEmpty());
             String reason = r.refused().get(0).reason();
             assertTrue(reason.startsWith("ambiguous"), reason);
-            assertTrue(reason.contains("1, 3"), reason);
+            assertTrue(reason.contains("1, 2"), reason);
             assertFalse(reason.contains(REF_PDF) || reason.contains(REF_TXT), reason);
             assertEquals(1, refused(Refusal.AMBIGUOUS));
         }
@@ -163,8 +164,19 @@ class AttachmentShareServiceTest {
         }
 
         @Test
+        void longRequestedName_isEchoedCut() {
+            var r = service.resolveNames(listing, List.of("x".repeat(5000)));
+
+            String echoed = r.refused().get(0).requestedName();
+            assertEquals(AttachmentShareService.MAX_ECHO_CHARS + 1, echoed.length());
+            assertTrue(echoed.endsWith("…"));
+            var part = service.resolveNames(listing, List.of("y".repeat(5000) + "#u3"));
+            assertTrue(part.refused().get(0).requestedName().length() <= AttachmentShareService.MAX_ECHO_CHARS + 1);
+        }
+
+        @Test
         void sameFileTwice_resolvesOnce() {
-            var r = service.resolveNames(listing, List.of("report.pdf", "1"));
+            var r = service.resolveNames(listing, List.of("report.pdf", "3"));
             assertEquals(1, r.resolved().size());
         }
 
@@ -201,6 +213,8 @@ class AttachmentShareServiceTest {
             assertEquals("application/pdf", entry.output().get("mimeType"));
             assertEquals(1200L, entry.output().get("sizeBytes"));
             assertFalse(entry.output().containsValue("report.pdf"), "no file name in the audit entry");
+            assertFalse(entry.output().containsKey("storageRef"), "no capability in the audit entry");
+            assertFalse(entry.output().containsValue(REF_PDF), "no capability in the audit entry");
         }
 
         @Test
@@ -278,7 +292,8 @@ class AttachmentShareServiceTest {
 
         @Test
         void readableFileMissingFromTheGivenListing_isRefused() throws Exception {
-            var result = service.share(SOURCE, ConversationListing.empty(), List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET,
+            var result = service.share(SOURCE, new ConversationListing(SOURCE, List.of(), Set.of()),
+                    List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET,
                     ShareReason.DELEGATION, open(), ShareParties.UNKNOWN);
 
             assertTrue(result.shared().isEmpty());
@@ -286,7 +301,43 @@ class AttachmentShareServiceTest {
         }
 
         @Test
-        void listingOfAnotherConversation_isRefusedByTheReadCheck() throws Exception {
+        void emptyListing_refusesEverything() throws Exception {
+            var result = service.share(SOURCE, ConversationListing.empty(), List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET,
+                    ShareReason.DELEGATION, open(), ShareParties.UNKNOWN);
+
+            assertEquals(new ShareResult.Refused(AttachmentShareService.UNKNOWN_FILE, Refusal.NOT_FOUND.text()), result.refused().get(0));
+            verify(store, never()).grantAccess(any(), any());
+        }
+
+        @Test
+        void staleListingOfThisSource_isRefusedByTheReadCheck() throws Exception {
+            // Built for SOURCE, but holding an entry SOURCE cannot read (stale, or built by
+            // hand).
+            var strangers = ConversationListing.of(STRANGER, store, Set.of(), List.of());
+            var stale = new ConversationListing(SOURCE, strangers.entries(), Set.of());
+
+            var result = service.share(SOURCE, stale, List.of(AttachmentSelector.wholeFile(REF_FOREIGN)), TARGET, ShareReason.DELEGATION,
+                    open(), ShareParties.UNKNOWN);
+
+            assertEquals(new ShareResult.Refused(AttachmentShareService.UNKNOWN_FILE, Refusal.NOT_FOUND.text()), result.refused().get(0));
+            verify(store, never()).grantAccess(any(), any());
+        }
+
+        @Test
+        void handBuiltListingWithAWithheldRoot_isRefused() throws Exception {
+            var full = ConversationListing.of(SOURCE, store, Set.of(), List.of());
+            var withheld = new ConversationListing(SOURCE, full.entries(), Set.of(REF_PDF));
+
+            var result = service.share(SOURCE, withheld, List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET, ShareReason.DELEGATION,
+                    open(), ShareParties.UNKNOWN);
+
+            assertTrue(result.shared().isEmpty());
+            assertEquals(new ShareResult.Refused(AttachmentShareService.UNKNOWN_FILE, Refusal.NOT_FOUND.text()), result.refused().get(0));
+            verify(store, never()).grantAccess(any(), any());
+        }
+
+        @Test
+        void listingOfAnotherConversation_isRefused() throws Exception {
             var strangers = ConversationListing.of(STRANGER, store, Set.of(), List.of());
 
             var result = service.share(SOURCE, strangers, List.of(AttachmentSelector.wholeFile(REF_FOREIGN)), TARGET,

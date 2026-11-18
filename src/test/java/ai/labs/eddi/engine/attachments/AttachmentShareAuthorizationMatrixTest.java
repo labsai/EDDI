@@ -61,7 +61,12 @@ class AttachmentShareAuthorizationMatrixTest {
         /** Withheld by the sharing conversation: absent from its listing. */
         WITHHELD,
         /** Selector taken from the owner's listing, not the sharer's. */
-        FOREIGN_LISTING
+        FOREIGN_LISTING,
+        /**
+         * A listing built by hand for the sharer that lists the file but records it as
+         * withheld.
+         */
+        WITHHELD_HAND_BUILT
     }
 
     enum Depth {
@@ -85,7 +90,10 @@ class AttachmentShareAuthorizationMatrixTest {
                 Arguments.of(Actor.GRANTEE, FileState.LISTED, Depth.BELOW, null),
                 Arguments.of(Actor.GRANTEE, FileState.LISTED, Depth.AT_LIMIT, Refusal.DEPTH),
                 Arguments.of(Actor.GRANTEE, FileState.WITHHELD, Depth.BELOW, Refusal.NOT_FOUND),
-                Arguments.of(Actor.GRANTEE, FileState.FOREIGN_LISTING, Depth.BELOW, null),
+                Arguments.of(Actor.GRANTEE, FileState.FOREIGN_LISTING, Depth.BELOW, Refusal.NOT_FOUND),
+                Arguments.of(Actor.OWNER, FileState.FOREIGN_LISTING, Depth.BELOW, null),
+                Arguments.of(Actor.OWNER, FileState.WITHHELD_HAND_BUILT, Depth.BELOW, Refusal.NOT_FOUND),
+                Arguments.of(Actor.GRANTEE, FileState.WITHHELD_HAND_BUILT, Depth.BELOW, Refusal.NOT_FOUND),
                 Arguments.of(Actor.STRANGER, FileState.LISTED, Depth.BELOW, Refusal.NOT_FOUND),
                 Arguments.of(Actor.STRANGER, FileState.LISTED, Depth.AT_LIMIT, Refusal.NOT_FOUND),
                 Arguments.of(Actor.STRANGER, FileState.FOREIGN_LISTING, Depth.BELOW, Refusal.NOT_FOUND),
@@ -105,6 +113,8 @@ class AttachmentShareAuthorizationMatrixTest {
             case LISTED -> ConversationListing.of(source, store, Set.of(), List.of());
             case WITHHELD -> ConversationListing.of(source, store, Set.of(FILE), List.of());
             case FOREIGN_LISTING -> ConversationListing.of(OWNER_CONV, store, Set.of(), List.of());
+            case WITHHELD_HAND_BUILT -> new ConversationListing(source, ConversationListing.of(source, store, Set.of(), List.of()).entries(),
+                    Set.of(FILE));
         };
         var policy = new SharePolicy(5, 10, MAX_DEPTH, depth.value, Set.of(), null);
 

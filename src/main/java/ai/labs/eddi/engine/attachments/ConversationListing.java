@@ -8,8 +8,11 @@ import ai.labs.eddi.engine.memory.model.Attachment;
 import org.jboss.logging.Logger;
 
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -33,23 +36,44 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * An entry's {@link Entry#displayName()} is what the model sees and writes
  * back: the file name, or {@value #UNNAMED} — never the {@code storageRef},
  * which is a capability a model must not hold. Entries are numbered from 1 in
- * listing order, so a model can also name an entry by its number.
+ * listing order, so a model can also name an entry by its number. The order is
+ * deterministic (display name, case-insensitive, then reference), so the same
+ * files list the same way on every turn; but a file granted or uploaded later
+ * can shift the numbers, so a number means something only against the listing
+ * shown in the same turn.
+ * <p>
+ * A listing records the conversation it was built for and the roots that
+ * conversation withholds, so {@link AttachmentShareService#share} can refuse a
+ * listing built for another conversation and a withheld root even in a listing
+ * built by hand.
  *
+ * @param conversationId
+ *            the conversation the listing was built for; {@code null} for the
+ *            empty listing, which nothing can be shared from
  * @param entries
  *            the entries, in listing order
+ * @param withheldRootRefs
+ *            the roots the conversation withholds; never listed, never shared
  * @since 6.7.0
  */
-public record ConversationListing(List<Entry> entries) {
+public record ConversationListing(String conversationId, List<Entry> entries, Set<String> withheldRootRefs) {
 
     private static final Logger LOGGER = Logger.getLogger(ConversationListing.class);
 
     /** The display name of a file stored without a name. */
     public static final String UNNAMED = "(unnamed)";
 
-    private static final ConversationListing EMPTY = new ConversationListing(List.of());
+    private static final ConversationListing EMPTY = new ConversationListing(null, List.of(), Set.of());
+
+    /** Listing order: display name (case-insensitive), then the root reference. */
+    private static final Comparator<Entry> ORDER = Comparator
+            .comparing((Entry e) -> e.displayName().toLowerCase(Locale.ROOT))
+            .thenComparing(Entry::displayName)
+            .thenComparing(Entry::rootRef);
 
     public ConversationListing {
         entries = entries == null ? List.of() : List.copyOf(entries);
+        withheldRootRefs = withheldRootRefs == null ? Set.of() : Set.copyOf(withheldRootRefs);
     }
 
     /**
@@ -116,10 +140,16 @@ public record ConversationListing(List<Entry> entries) {
                     sanitize(e.getMessage()));
             return EMPTY;
         }
-        if (accessible == null || accessible.isEmpty()) {
-            return EMPTY;
+        if (accessible == null) {
+            accessible = List.of();
         }
         Set<String> withheld = withheldRootRefs != null ? withheldRootRefs : Set.of();
+        Set<String> withheldCopy = new HashSet<>();
+        for (String ref : withheld) {
+            if (ref != null) {
+                withheldCopy.add(ref);
+            }
+        }
         // Keyed by storageRef: a blob both owned and granted is listed once.
         Map<String, Entry> unique = new LinkedHashMap<>();
         for (IAttachmentStore.Attachment a : accessible) {
@@ -132,7 +162,16 @@ public record ConversationListing(List<Entry> entries) {
             unique.putIfAbsent(a.storageRef(),
                     new Entry(name, AttachmentSelector.wholeFile(a.storageRef()), a.mimeType(), a.sizeBytes(), false));
         }
-        return new ConversationListing(new ArrayList<>(unique.values()));
+        List<Entry> ordered = new ArrayList<>(unique.values());
+        ordered.sort(ORDER);
+        return new ConversationListing(conversationId, ordered, withheldCopy);
+    }
+
+    /**
+     * Whether a root is withheld by the conversation this listing was built for.
+     */
+    public boolean isWithheld(String rootRef) {
+        return rootRef != null && withheldRootRefs.contains(rootRef);
     }
 
     /** The display names, in listing order (duplicates kept). */

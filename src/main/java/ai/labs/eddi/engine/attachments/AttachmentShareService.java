@@ -60,6 +60,9 @@ public class AttachmentShareService {
      */
     public static final String REFUSED_METER = "eddi.attachment.share.refused";
 
+    /** The longest requested name a refusal echoes back. */
+    public static final int MAX_ECHO_CHARS = 200;
+
     /** The requested name of a refusal for a file the source cannot name. */
     public static final String UNKNOWN_FILE = "(unknown file)";
 
@@ -143,16 +146,34 @@ public class AttachmentShareService {
      *         a denied read or a store failure
      */
     public boolean mayRead(String storageRef, String conversationId) {
+        return whyNotReadable(storageRef, conversationId) == null;
+    }
+
+    /**
+     * {@link #mayRead} with the reason for a {@code false}, for a caller's log
+     * line: {@code null} when the conversation may read the blob, else a short
+     * reason — {@code "no store"}, {@code "no reference"}, {@code "no source
+     * conversation"}, or the simple class name of the store's refusal (e.g.
+     * {@code AttachmentAccessDeniedException}). Never the store's message, which
+     * may echo the reference.
+     */
+    public String whyNotReadable(String storageRef, String conversationId) {
         IAttachmentStore store = store();
-        if (store == null || storageRef == null || storageRef.isBlank() || conversationId == null || conversationId.isBlank()) {
-            return false;
+        if (store == null) {
+            return "no store";
+        }
+        if (storageRef == null || storageRef.isBlank()) {
+            return "no reference";
+        }
+        if (conversationId == null || conversationId.isBlank()) {
+            return "no source conversation";
         }
         try {
-            return store.getMetadata(storageRef, conversationId) != null;
+            return store.getMetadata(storageRef, conversationId) != null ? null : "no metadata";
         } catch (Exception e) {
             LOGGER.debugf("Conversation '%s' may not read an attachment: %s", LogSanitizer.sanitize(conversationId),
                     LogSanitizer.sanitize(e.getMessage()));
-            return false;
+            return e.getClass().getSimpleName();
         }
     }
 
@@ -174,7 +195,7 @@ public class AttachmentShareService {
         List<String> displayNames = list.displayNames();
         for (String raw : names) {
             SelectorText.Parsed parsed = SelectorText.parse(raw, displayNames);
-            String requested = raw == null ? "" : raw.strip();
+            String requested = echo(raw);
             if (parsed.hasPart()) {
                 refuse(refused, requested, Refusal.PART);
                 continue;
@@ -205,6 +226,16 @@ public class AttachmentShareService {
         return new Resolution(resolved, refused);
     }
 
+    /**
+     * What the model wrote, as echoed back in a refusal: stripped and cut to
+     * {@value #MAX_ECHO_CHARS} characters, so a long or injected name cannot
+     * inflate the tool result.
+     */
+    static String echo(String raw) {
+        String s = raw == null ? "" : raw.strip();
+        return s.length() <= MAX_ECHO_CHARS ? s : s.substring(0, MAX_ECHO_CHARS) + "…";
+    }
+
     /** The 0-based index a 1-based entry number names, or {@code null}. */
     private static Integer listingNumber(String name, int size) {
         if (name.isEmpty() || name.length() > 9 || !name.chars().allMatch(Character::isDigit)) {
@@ -218,9 +249,10 @@ public class AttachmentShareService {
      * Shares files of the source conversation with the target conversation.
      * <p>
      * Source and target are derived by the <strong>caller</strong> (server code),
-     * never by a model. Per selector, in order: it must be an entry of
-     * {@code listing}, whose root the source can read ({@link #mayRead} — so a
-     * stale or another conversation's listing widens nothing); a whole file (parts
+     * never by a model. The listing must have been built for the source
+     * conversation. Per selector, in order: it must be an entry of {@code listing},
+     * not withheld by the source, and its root readable by the source
+     * ({@link #mayRead} — so a stale listing widens nothing); a whole file (parts
      * cannot be shared yet); of an allowed MIME type; the source must be below
      * {@code maxDepth}; the call below {@code maxFilesPerShare}; the turn below
      * {@code maxSharesPerTurn}. Then the root is granted to the target, the share
@@ -263,6 +295,10 @@ public class AttachmentShareService {
         } else if (isBlank(sourceConversationId) || isBlank(targetConversationId)
                 || sourceConversationId.equals(targetConversationId)) {
             callRefusal = Refusal.TARGET;
+        } else if (!sourceConversationId.equals(list.conversationId())) {
+            // A listing built for another conversation (or the empty one) holds
+            // nothing this source may name, and not its withheld set either.
+            callRefusal = Refusal.NOT_FOUND;
         }
         int sharedByThisCall = 0;
         Set<AttachmentSelector> seen = new HashSet<>();
@@ -284,8 +320,14 @@ public class AttachmentShareService {
                 refuse(refused, name, Refusal.NOT_FOUND);
                 continue;
             }
-            // The listing must be this source's: a stale or hand-built one cannot widen
-            // access, and a file the source cannot read keeps its name to itself.
+            // Withheld roots are never shared (I3b), even from a listing built by hand
+            // that lists one.
+            if (list.isWithheld(listed.get().rootRef())) {
+                refuse(refused, UNKNOWN_FILE, Refusal.NOT_FOUND);
+                continue;
+            }
+            // A stale listing cannot widen access, and a file the source cannot read
+            // keeps its name to itself.
             if (!mayRead(listed.get().rootRef(), sourceConversationId)) {
                 refuse(refused, UNKNOWN_FILE, Refusal.NOT_FOUND);
                 continue;
@@ -312,6 +354,8 @@ public class AttachmentShareService {
                 refuse(refused, name, Refusal.FILES_PER_SHARE);
                 continue;
             }
+            // Check now, count after the grant: safe because the tool calls of a turn
+            // run one at a time (TurnCounter), so nothing races the slot in between.
             if (policy.sharesThisTurn().get() >= policy.maxSharesPerTurn()) {
                 refuse(refused, name, Refusal.SHARES_PER_TURN);
                 continue;
@@ -360,8 +404,10 @@ public class AttachmentShareService {
         }
         try {
             Map<String, Object> output = new LinkedHashMap<>();
+            // No storageRef: it is a capability, and audit entries are returned to
+            // their owner (read_audit_trail). The target conversation identifies the
+            // share; its grants identify the file.
             output.put("reason", reason.name());
-            output.put("storageRef", entry.rootRef());
             output.put("targetConversationId", targetConversationId);
             if (parties.targetAgentId() != null) {
                 output.put("targetAgentId", parties.targetAgentId());

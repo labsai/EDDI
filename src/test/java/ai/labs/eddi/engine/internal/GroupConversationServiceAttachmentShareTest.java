@@ -75,13 +75,13 @@ class GroupConversationServiceAttachmentShareTest {
     @Test
     void injectedShareService_decidesThePassThrough() throws Exception {
         var shareService = mock(AttachmentShareService.class);
-        when(shareService.mayRead(REF, PARENT)).thenReturn(false);
+        when(shareService.whyNotReadable(REF, PARENT)).thenReturn("AttachmentAccessDeniedException");
         service.attachmentShareService = shareService;
         var gc = child();
 
         service.materializeAttachments(gc, List.of(reference()), PARENT);
 
-        verify(shareService).mayRead(REF, PARENT);
+        verify(shareService).whyNotReadable(REF, PARENT);
         verify(store, never()).grantAccess(any(), any());
         assertNull(gc.getAttachments());
     }
@@ -89,7 +89,7 @@ class GroupConversationServiceAttachmentShareTest {
     @Test
     void injectedShareService_allowing_grantsTheChild() throws Exception {
         var shareService = mock(AttachmentShareService.class);
-        when(shareService.mayRead(REF, PARENT)).thenReturn(true);
+        when(shareService.whyNotReadable(REF, PARENT)).thenReturn(null);
         service.attachmentShareService = shareService;
         var gc = child();
 

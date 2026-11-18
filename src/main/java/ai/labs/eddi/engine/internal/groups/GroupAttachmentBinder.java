@@ -153,17 +153,21 @@ public class GroupAttachmentBinder {
      * Whether a pre-stored reference may be shared with {@code gc}'s members: only
      * when server code took it from {@code trustedSourceConversationId} and that
      * conversation can read the blob (as owner or grantee) — the rule
-     * {@link AttachmentShareService#mayRead} holds for every agent-to-agent path.
-     * On success {@code gc} is granted read access as well.
+     * {@link AttachmentShareService#mayRead} holds for every agent-to-agent path
+     * (asked through {@link AttachmentShareService#whyNotReadable} for the log). On
+     * success {@code gc} is granted read access as well.
      */
     private boolean mayPassThrough(String storageRef, GroupConversation gc, String trustedSourceConversationId) {
         // No store to grant through means nothing can be passed on, whatever the
         // share service's own store says.
-        if (attachmentStore == null || !shareService.mayRead(storageRef, trustedSourceConversationId)) {
-            // The source id is caller-supplied: sanitized (LogSanitizer's rule).
+        String refusal = attachmentStore == null ? "no store" : shareService.whyNotReadable(storageRef, trustedSourceConversationId);
+        if (refusal != null) {
+            // The source id is caller-supplied: sanitized (LogSanitizer's rule). The
+            // reason is a fixed phrase or an exception class name, never the store's
+            // message.
             LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': only references the caller's own "
-                    + "conversation can read are shared (source conversation: '%s')", gc.getId(),
-                    sanitize(trustedSourceConversationId));
+                    + "conversation can read are shared (source conversation: '%s', reason: %s)", gc.getId(),
+                    sanitize(trustedSourceConversationId), refusal);
             return false;
         }
         try {
