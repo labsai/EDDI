@@ -109,6 +109,30 @@ class StoreParameterChecksTest {
     }
 
     @Test
+    @DisplayName("a pgvector table named like one of EDDI's own is refused at save, schema-qualified or not")
+    void eddiTablesAreRefused() {
+        assertTrue(refusal(pgvector(Map.of("table", "resources"))).contains("one of EDDI's own tables"));
+        assertTrue(refusal(pgvector(Map.of("table", "public.Conversation_Memories"))).contains("one of EDDI's own tables"));
+        assertDoesNotThrow(() -> pgvector(Map.of("table", "team_docs")).validate());
+    }
+
+    @Test
+    @DisplayName("what an interactive save refuses is listed for the lenient paths, and clamping brings retrieval settings into range")
+    void legacyHelpers() {
+        RagConfiguration old = pgvector(Map.of("host", "db:5432"));
+        old.setMinScore(1.5);
+        old.setMaxResults(0);
+        old.setName(" ");
+
+        assertEquals(4, old.findStrictProblems().size(), old.findStrictProblems().toString());
+        assertDoesNotThrow(old::validateLenient);
+        assertTrue(old.clampRetrievalSettings());
+        assertEquals(1.0, old.getMinScore());
+        assertEquals(5, old.getMaxResults());
+        assertFalse(old.clampRetrievalSettings());
+    }
+
+    @Test
     @DisplayName("a blank name and out-of-range retrieval settings are refused")
     void retrievalSettings() {
         RagConfiguration blank = new RagConfiguration();

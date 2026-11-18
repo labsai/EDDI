@@ -20,6 +20,7 @@ import ai.labs.eddi.modules.ingestion.PreviewBusyException;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
+import ai.labs.eddi.modules.rag.OperatorFailureException;
 import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
@@ -186,7 +187,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         } catch (IllegalArgumentException e) {
             // The configuration cannot be addressed (a 6.5.0-layout knowledge base
             // with no name, say).
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", RagFailures.clientMessage(e))).build();
         }
 
         LOGGER.infof("Ingestion started: id=%s, kb=%s, doc=%s, chars=%d", ingestionId, sanitize(ragConfigId), sanitize(documentName),
@@ -238,7 +239,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         try {
             outcome = ragIngestionService.delete(ragConfigId, documentName, knowledgeBase);
         } catch (IllegalArgumentException e) {
-            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.BAD_REQUEST).entity(Map.of("error", RagFailures.clientMessage(e))).build();
         } catch (RuntimeException e) {
             // pgvector wraps its SQLException in a RuntimeException; a store that is
             // down is the client's cue to retry, not a client error.
@@ -506,7 +507,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             body.put("truncated", page.truncated());
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
-            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -547,7 +548,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             body.put("results", hits.stream().map(RestRagIngestion::describeChunk).toList());
             return Response.ok(body).build();
         } catch (UnsupportedOperationException e) {
-            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
         } catch (RuntimeException e) {
             return inspectionFailed(ragConfigId, e);
         }
@@ -620,7 +621,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             try {
                 hits = inspector.search(ragConfigId, knowledgeBase, resolved.source(), golden.query(), k, minScore);
             } catch (UnsupportedOperationException e) {
-                return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+                return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
             } catch (RuntimeException e) {
                 LOGGER.warnf(e, "Evaluating knowledge base %s failed at query %d", sanitize(ragConfigId), i);
                 if (e instanceof VectorSpaceMismatchException mismatch) {
@@ -814,6 +815,9 @@ public class RestRagIngestion implements IRestRagIngestion {
         if (e instanceof VectorSpaceMismatchException mismatch) {
             return mismatchResponse(mismatch);
         }
+        if (e instanceof OperatorFailureException unresolved) {
+            return unresolvedResponse(unresolved);
+        }
         return Response.status(Response.Status.BAD_GATEWAY)
                 .entity(Map.of("error", RagFailures.clientMessage(e)))
                 .build();
@@ -838,7 +842,14 @@ public class RestRagIngestion implements IRestRagIngestion {
             return null;
         } catch (VectorSpaceMismatchException e) {
             return mismatchResponse(e);
+        } catch (OperatorFailureException e) {
+            return unresolvedResponse(e);
         }
+    }
+
+    private static Response unresolvedResponse(OperatorFailureException e) {
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", RagFailures.clientMessage(e), "code", "EMBEDDING_SETTINGS_UNRESOLVED")).build();
     }
 
     // --- The vector space, and making it again ---
@@ -861,7 +872,7 @@ public class RestRagIngestion implements IRestRagIngestion {
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not read the vector space of knowledge base %s", sanitize(ragConfigId));
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-                    .entity(Map.of("error", "The vector space record could not be read. The details are in the server log."))
+                    .entity(Map.of("error", RagFailures.clientMessage(e)))
                     .build();
         }
         Map<String, Object> body = new LinkedHashMap<>();
@@ -877,6 +888,27 @@ public class RestRagIngestion implements IRestRagIngestion {
             }
         }
         return Response.ok(body).build();
+    }
+
+    /**
+     * Agents are bound to the latest version, so a vector space recorded for an
+     * older one would be wrong for them: refused, with the reason.
+     */
+    private Response requireLatestVersion(String ragConfigId, Integer version) {
+        IResourceStore.IResourceId current;
+        try {
+            current = restRagStore.getCurrentResourceId(ragConfigId);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return null;
+        }
+        if (current == null || current.getVersion() == null || current.getVersion().equals(version)) {
+            return null;
+        }
+        return Response.status(Response.Status.CONFLICT)
+                .entity(Map.of("error", "Version " + version + " is not the latest version of this knowledge base (" + current.getVersion()
+                        + "). Re-embedding records the embedding model of the version it is given, and agents use the latest: re-embed "
+                        + "version " + current.getVersion() + ".", "code", "NOT_LATEST_VERSION", "latestVersion", current.getVersion()))
+                .build();
     }
 
     private static Map<String, Object> describeSpace(VectorSpace space) {
@@ -908,11 +940,28 @@ public class RestRagIngestion implements IRestRagIngestion {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", "Re-embedding is not available here"))
                     .build();
         }
+        Response notLatest = requireLatestVersion(ragConfigId, version);
+        if (notLatest != null) {
+            return notLatest;
+        }
         KnowledgeBaseReembedService.Result result;
         try {
             result = reembedService.reembed(ragConfigId, resolved.knowledgeBase());
+        } catch (KnowledgeBaseReembedService.ReembedRefusedException e) {
+            Map<String, Object> refusal = new LinkedHashMap<>();
+            refusal.put("error", e.getMessage());
+            refusal.put("code", e.code());
+            refusal.put("knowledgeBases", e.knowledgeBases());
+            return Response.status(Response.Status.CONFLICT).entity(refusal).build();
+        } catch (VectorSpaceMismatchException | OperatorFailureException e) {
+            // An unresolvable variable, say: nothing was changed, and it is worth retrying.
+            return Response.status(Response.Status.CONFLICT)
+                    .entity(Map.of("error", RagFailures.clientMessage(e), "code", e instanceof VectorSpaceMismatchException
+                            ? VectorSpaceMismatchException.CODE
+                            : "EMBEDDING_SETTINGS_UNRESOLVED"))
+                    .build();
         } catch (UnsupportedOperationException e) {
-            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", e.getMessage())).build();
+            return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Re-embedding knowledge base %s failed before any source was run", sanitize(ragConfigId));
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
@@ -1148,7 +1197,7 @@ public class RestRagIngestion implements IRestRagIngestion {
             // Answering "not found" sends the caller looking for a knowledge base
             // that is sitting there.
             return new ResolvedSource(null, null, Response.status(Response.Status.BAD_REQUEST)
-                    .entity(Map.of("error", "Invalid request: " + e.getMessage())).build());
+                    .entity(Map.of("error", "Invalid request: " + RagFailures.clientMessage(e))).build());
         } catch (RuntimeException e) {
             // A store that is down is not a missing knowledge base. Reporting 404 for
             // an outage hides it behind a client error that nobody investigates.

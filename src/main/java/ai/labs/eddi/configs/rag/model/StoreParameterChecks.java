@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.rag.model;
 
 import java.net.URI;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
@@ -52,7 +53,7 @@ public final class StoreParameterChecks {
             return null;
         }
         return switch (storeType) {
-            case "pgvector" -> firstProblem(port(params, "port"), host(params, "host"), pgvectorDimension(params));
+            case "pgvector" -> firstProblem(port(params, "port"), host(params, "host"), pgvectorDimension(params), foreignTable(params));
             case "qdrant" -> firstProblem(port(params, "port"), host(params, "host"));
             case "elasticsearch" -> httpUrl(params, "serverUrl");
             case "chroma" -> httpUrl(params, "baseUrl");
@@ -85,6 +86,31 @@ public final class StoreParameterChecks {
             }
         }
         return null;
+    }
+
+    /**
+     * Tables EDDI's own database keeps. A knowledge base pointed at one (when the
+     * vector store is EDDI's own PostgreSQL) must never delete from or drop it.
+     * This list can drift; the real guard is the check, when a table is used, that
+     * it has the columns EDDI's pgvector layout creates.
+     */
+    static final Set<String> EDDI_TABLES = Set.of("agent_triggers", "alert_events", "alert_rules", "alert_windows", "approval_decisions",
+            "attachments", "audit_ledger", "audit_samples", "autonomy_state", "branding", "branding_assets", "conversation_checkpoints",
+            "conversation_memories", "conversation_ratings", "database_logs", "deployments", "eddi_schedule_fire_logs", "eddi_schedules",
+            "global_variables", "group_lesson_history", "group_outcomes", "hitl_tool_execution_journal", "migration_log",
+            "model_price_catalog", "rag_ingested_files", "rag_ingestion_documents", "rag_ingestion_runs", "rag_ingestion_sources",
+            "resources", "resources_history", "spend_control_changes", "user_conversations", "usermemories");
+
+    private static String foreignTable(Map<String, String> params) {
+        String table = literal(params.get("table"));
+        if (table == null) {
+            return null;
+        }
+        String bare = table.substring(table.lastIndexOf('.') + 1).toLowerCase(Locale.ROOT);
+        return EDDI_TABLES.contains(bare)
+                ? "storeParameters.table '" + bare + "' is one of EDDI's own tables, not a vector table. Name a table of the knowledge "
+                        + "base's own, or omit it"
+                : null;
     }
 
     private static String port(Map<String, String> params, String key) {

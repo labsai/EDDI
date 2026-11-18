@@ -1158,7 +1158,14 @@ eddi_ingestion_errors_total                 # Pages that failed to fetch, conver
 eddi_ingestion_files_stored_total           # Files accepted onto an upload source
 eddi_ingestion_files_rejected_total         # Files an upload source refused, with a reason
 eddi_ingestion_files_deleted_total          # Files removed from an upload source
+eddi_rag_vector_space_refused_total         # Retrievals, ingests and runs refused because the vector store holds another embedding space
 ```
+
+`eddi_rag_vector_space_refused_total` carries `reason` alone — `space` (another model's vectors),
+`dimension` (vectors of another size) or `maintenance` (the knowledge base is being re-embedded) —
+never a knowledge base, whose number is unbounded. A refusal repeats on every turn of every agent that
+uses the knowledge base, so the log line for it is written once a minute per knowledge base and the
+rate is the signal: one that does not fall means a knowledge base needs `POST /ragstore/rags/{id}/reembed`.
 
 The first two carry `knowledgeBase` (the RAG configuration's name) and `source` (the
 ingestion source's name). Unchanged pages are not counted, so a scheduled re-crawl of a

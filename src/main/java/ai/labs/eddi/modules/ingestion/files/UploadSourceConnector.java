@@ -18,6 +18,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.StopReason;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.IngestedFileStoreException;
+import org.jboss.logging.Logger;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -41,6 +42,8 @@ import java.util.Map;
  */
 @ApplicationScoped
 public class UploadSourceConnector implements SourceConnector {
+
+    private static final Logger LOGGER = Logger.getLogger(UploadSourceConnector.class);
 
     static final String HINT_FILE_NAME = "fileName";
     static final String HINT_MIME_TYPE = "mimeType";
@@ -66,11 +69,12 @@ public class UploadSourceConnector implements SourceConnector {
         try {
             files = fileStore.list(sourceKey);
         } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not list the uploaded files of source %s", sourceKey);
             // The store is unavailable, so this run learned nothing about which files
             // exist. Reported as an uncovered run: concluding "no files" here would
             // delete the whole knowledge base over a database blip.
             context.reportFailure(null, null, new SourceError.Transient(
-                    "The uploaded files of this source could not be listed: " + describe(e)));
+                    "The uploaded files of this source could not be listed; the storage reported an error (see the server log)"));
             return DiscoveryResult.of(StopReason.CANCELLED, Coverage.PARTIAL);
         }
 
@@ -104,9 +108,13 @@ public class UploadSourceConnector implements SourceConnector {
         try {
             content = fileStore.load(context.sourceKey(), item.documentId()).orElse(null);
         } catch (IngestedFileStoreException e) {
+            LOGGER.warnf(e, "Could not load an uploaded file of source %s", context.sourceKey());
             // The bytes could not be fetched this time. Not evidence that the file is
             // gone: the listing just said it is there.
-            throw new SourceException(new SourceError.Transient(describe(e)), e);
+            // The cause is EDDI's own database driver's text: it stays on the exception
+            // (and so in the log), and the message that reaches a run record is fixed.
+            throw new SourceException(new SourceError.Transient("An uploaded file could not be read from storage this time; "
+                    + "the next run tries again"), e);
         }
         if (content == null) {
             // Deleted between the listing and the read. The next run sees it gone
@@ -145,10 +153,5 @@ public class UploadSourceConnector implements SourceConnector {
             hints.put(HINT_MIME_TYPE, file.mimeType());
         }
         return hints;
-    }
-
-    private static String describe(Throwable t) {
-        String message = t.getMessage();
-        return message == null || message.isBlank() ? t.getClass().getSimpleName() : message;
     }
 }

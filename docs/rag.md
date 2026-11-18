@@ -326,16 +326,25 @@ ranks by meaningless scores and still answers. So a knowledge base on an externa
 (`pgvector`, `mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma`) **knows which embedding space its
 store holds** and refuses to work in any other.
 
-**What is recorded.** The embedding provider, the model (or Azure `deploymentName`), Gemini's
-`taskType`, and the vector size — configured through `dimensions`/`outputDimensionality`, or measured
-from the first embedding an ingestion makes. Credentials and endpoints are not part of it: moving a
-model to another host does not change a vector. The record lives in EDDI's own database (next to the
-ingestion state), keyed by a digest of the store's *location* — store type, server, database and
-table or collection — not by the knowledge base. Two knowledge bases that name the same table share
-one record, which is right, since they share vectors. It is the same mechanism for every store type;
-a pgvector-only metadata table was rejected because no other store has an equivalent place, and a
-record kept two ways has to be kept in step. The cost: a vector store wiped or restored behind EDDI's
-back keeps its record until the knowledge base is re-embedded, which resets it.
+**What is recorded — two things, because two different things are true.**
+
+- *Which model made a knowledge base's vectors*: the embedding provider, the model (or Azure
+  `deploymentName`) and Gemini's `taskType`. That is a fact about the **knowledge base**: retrieval and
+  deletion are filtered by the chunk tag, so two knowledge bases that share one table can hold different
+  models without touching each other. The record is keyed by the store *location* (store type, server,
+  database, table or collection) **and the chunk tag** — the knowledge base's id, or in the 6.5.0 name
+  layout its name, so two same-named knowledge bases there share one record, by definition.
+- *The vector size*: configured through `dimensions`/`outputDimensionality`, or measured from the first
+  embedding an ingestion makes. That is a fact about the **table**: its column has one size. It is
+  recorded per location, and for pgvector checked against the table's real column (`atttypmod`), which
+  nothing can contradict — a legacy `vector(1536)` table with `dimension: 3072` configured is refused with
+  the real size named.
+
+Credentials and endpoints are not part of either: moving a model to another host does not change a
+vector. Both live in EDDI's own database (next to the ingestion state), under a digest. It is the same
+mechanism for every store type; a pgvector-only metadata table was rejected because no other store has an
+equivalent place, and a record kept two ways has to be kept in step. The cost: a vector store wiped or
+restored behind EDDI's back keeps its record until the knowledge base is re-embedded, which resets it.
 
 **What is refused.** When the configured space differs from the recorded one, search, `/ingest`, and
 every source run answer with a message that names both spaces and the way out. The REST answer is
@@ -348,9 +357,17 @@ to change instead of a driver error from the first `INSERT`. A run also **stops*
 rejected credential, unknown model or space mismatch instead of trying every remaining document.
 
 **A knowledge base from before this check** has no record. It adopts the configured space on its first
-use (logged once). That cannot be verified — nothing says what the existing vectors were made with —
-so a knowledge base whose model was changed before the upgrade is as wrong as it was; it keeps working,
-and the next change is caught.
+use, under its own key (logged once) — so one knowledge base's adoption never tells another to
+re-embed. That cannot be verified — nothing says what the existing vectors were made with — so a
+knowledge base whose model was changed before the upgrade is as wrong as it was; it keeps working, and
+the next change is caught. Nothing is adopted, judged or reset while a `${vars:…}` reference in the
+embedding settings cannot be resolved: the call is refused (retryable) instead, so a record never holds
+the reference's text.
+
+**Visibility.** A refusal repeats on every turn of every agent that uses the knowledge base. It is
+counted in `eddi_rag_vector_space_refused_total{reason}` (see [metrics](metrics.md)), written to the log
+once a minute per knowledge base without a stack trace, and put into `rag:trace:*` as the same
+client-safe sentence the REST answers carry — never the raw exception text.
 
 **Saving a changed model.** `PUT /ragstore/rags/{id}` still saves, because the save is how a wrong
 model is fixed and a knowledge base that holds nothing yet loses nothing by it. When the new version
@@ -359,19 +376,48 @@ changes the embedding space while keeping the store location, the `200` carries 
 the old and the new model. The refusal above is what then makes the change safe. Moving the vectors
 elsewhere (another table, collection or server) starts empty and warns about nothing.
 
+A node that still holds a store for a table another node dropped reads it as empty rather than failing
+with "relation does not exist", and rebuilds it on the next write; a record cached on another node is
+refreshed within 30 seconds, so a node may refuse for that long after a re-embed.
+
 **Re-embedding.** `GET /ragstore/rags/{id}/vector-space?version=N` shows the recorded and the
 configured space and whether they match. `POST /ragstore/rags/{id}/reembed?version=N` (EDIT) then:
 
+0. refuses, with `409` and nothing changed, what cannot be done safely: another knowledge base keeps
+   its chunks under the same tag in the same store (`SHARED_CHUNKS`, the 6.5.0 name layout: same name,
+   same table — deleting by the tag would take its chunks too; give them separate tables and re-embed
+   each); a pgvector table that other knowledge bases keep rows in would have to change its column size
+   (`SHARED_TABLE_SIZE`); the version asked for is not the latest (`NOT_LATEST_VERSION`, because agents use
+   the latest and the record would describe the wrong model); an embedding setting names a variable that
+   cannot be resolved now (`EMBEDDING_SETTINGS_UNRESOLVED`, retryable);
 1. claims every source, so nothing runs while the vectors go — a run in flight anywhere answers `409`
    and changes nothing;
-2. removes every vector of this knowledge base from its store (for pgvector, a table that is then empty
-   is dropped and recreated by the next write, which is how a new vector size gets a new column; a
-   table that still holds other knowledge bases' rows is left alone, and a store that cannot delete by
-   metadata answers `501` — empty it by hand first);
-3. records the configured space as the store's;
-4. forgets each source's ingestion state and starts an ordinary run of every enabled source.
+2. **forgets every source's content hashes first**, so that after a crash at any later point the next run —
+   scheduled or manual — embeds everything again instead of reporting "unchanged" over an empty store;
+3. removes every vector of this knowledge base from its store, by its chunk tag (for pgvector, a table
+   that is then empty is dropped, under an exclusive lock and in one transaction, and recreated by the
+   next write, which is how a new vector size gets a new column; a table that still holds other
+   knowledge bases' rows, or is busy, is left alone, a table that is not an EDDI pgvector table is never
+   touched, and a store that cannot delete by metadata answers `501` — empty it by hand first). A
+   direct `/ingest` on the same instance waits (`409`-class refusal) while this runs;
+4. records the configured space as this knowledge base's, and forgets the location's vector size when
+   nothing else keeps vectors there;
+5. forgets each source's ingestion state and starts an ordinary run of every enabled source.
 
-The answer is `202` with, per source, the `runId` to follow in
+| Status and `code` | When |
+| --- | --- |
+| `202` | Vectors removed, runs started. Body: `{"status": "started", "kbId", "sources": [{"sourceId", "runId" or null, "note" or null}], "notReEmbedded": [text]}` |
+| `409` `SHARED_CHUNKS` | Another knowledge base keeps its chunks under the same tag in the same store (6.5.0 name layout). `knowledgeBases` lists them |
+| `409` `SHARED_TABLE_SIZE` | A pgvector table other knowledge bases keep rows in would have to change its vector size |
+| `409` `NOT_LATEST_VERSION` | `version` is not the latest. `latestVersion` says which is |
+| `409` `EMBEDDING_SETTINGS_UNRESOLVED` | An embedding setting names a variable that cannot be resolved now; retry |
+| `409` (no code) | A run is in flight for a source (`sourceId`) |
+| `501` | The store cannot delete by metadata |
+| `503` | The vector store failed; the sources' hashes were already forgotten, so the next run of each embeds everything again |
+
+The `409` bodies are `{"error": text, "code": …}`; a refused search, ingest or run uses `code: VECTOR_SPACE_MISMATCH`.
+
+The `202` answer has, per source, the `runId` to follow in
 `GET /ragstore/rags/{id}/sources/{sourceId}/runs`, and a list `notReEmbedded`. **Documents sent
 through `POST /ingest` cannot be rebuilt**: EDDI embeds them and keeps no copy, so they are removed
 with the old vectors and have to be sent again. Uploaded files are kept and web pages are fetched
@@ -797,14 +843,14 @@ every prompt that retrieves it. So an **uploaded** file is read the way a person
 
 | Format | Left out |
 | --- | --- |
-| Word | runs marked hidden (`w:vanish`, unless switched off) and runs set at one point or smaller (`w:sz` 2 or less). A paragraph whose *mark* is hidden keeps its text |
-| Excel | sheets marked `hidden` or `veryHidden`, hidden rows, and hidden columns (kept as empty cells, so the others stay aligned). A workbook whose every sheet is hidden yields no text |
-| PowerPoint | slides marked "hide slide" (`show="0"`) and shapes marked hidden |
+| Word | runs marked hidden (`w:vanish`, `w:specVanish` or `w:webHidden`, unless switched off) and runs set at one point or smaller (`w:sz` 2 or less). A paragraph whose *mark* is hidden keeps its text |
+| Excel | sheets marked `hidden` or `veryHidden`, rows and columns hidden by hand (columns are kept as empty cells, so the others stay aligned). **Kept:** rows hidden by an autofilter (any sheet that has an `autoFilter` keeps all its rows) and rows or columns collapsed by grouping (`outlineLevel`), because a filter or a collapsed group is not the author hiding text. A workbook whose every sheet is hidden is refused at upload with a message saying so ("only hidden sheets"), not "unreadable" |
+| PowerPoint | slides marked "hide slide" (`show="0"`) and any shape marked hidden — text boxes, pictures, groups (with everything in them), connectors and any other shape kind; a hidden shape ends where it ends and never takes the next one's text with it |
 | HTML | elements the markup hides outright — the `hidden` attribute, `display:none`, zero `opacity`, off-screen or zero-size elements — on top of what the page converter always drops (comments, one-pixel text, transparent text, text the same colour as an explicitly set background) |
 
 **Not covered, and why.** White-on-white and tiny-but-not-one-point text in Word cannot be told from
 legitimate styling without rendering the page (white text on a dark table cell is everywhere), and
-character styles that carry `vanish` are not resolved. **A PDF is not filtered**: its invisible text
+character styles that carry `vanish` are not resolved (only the run's own properties are read), and a row hidden by a filter is dropped like a hand-hidden one if the sheet's `autoFilter` element lies beyond the rows that are read (the row limit). **A PDF is not filtered**: its invisible text
 (render mode 3) is also the only text layer of an OCR'd scan, so dropping it would empty every
 searchable scan; a PDF is therefore only as trustworthy as whoever made it. HTML stylesheet rules
 (`<style>` blocks) are not read for an upload, as they are for an e-mail body.

@@ -255,6 +255,20 @@ public class RagConfiguration {
      *             strategy that is not implemented
      */
     public void validate() {
+        validate(true);
+    }
+
+    /**
+     * {@link #validate()} without the checks added for settings that could only
+     * fail later — for a knowledge base that arrives in an archive, a sync or an
+     * upgrade, which its owner cannot edit first. What those checks would refuse is
+     * listed by {@link #findStrictProblems()}, for the caller to log.
+     */
+    public void validateLenient() {
+        validate(false);
+    }
+
+    private void validate(boolean interactive) {
         String unsupported = findUnsupportedSettings();
         if (unsupported != null) {
             throw new IllegalArgumentException(unsupported);
@@ -272,27 +286,29 @@ public class RagConfiguration {
         if (embeddingProblem != null) {
             throw new IllegalArgumentException(embeddingProblem);
         }
-        // What can only fail later — a store type nothing implements, a port that is
-        // not
-        // one, a vector size that is not a size, an endpoint that is not http(s) — is
-        // refused here, where the author is looking. Writes only: a stored
-        // configuration is never judged by this.
-        String endpointProblem = StoreParameterChecks.findEndpointProblem(embeddingParameters);
-        if (endpointProblem != null) {
-            throw new IllegalArgumentException(endpointProblem);
-        }
-        String storeProblem = StoreParameterChecks.findProblem(storeType, storeParameters);
-        if (storeProblem != null) {
-            throw new IllegalArgumentException(storeProblem);
-        }
-        if (name != null && name.isBlank()) {
-            throw new IllegalArgumentException("name must not be empty");
-        }
-        if (maxResults != null && maxResults < 1) {
-            throw new IllegalArgumentException("maxResults must be at least 1, was " + maxResults);
-        }
-        if (minScore != null && (minScore.isNaN() || minScore < 0.0 || minScore > 1.0)) {
-            throw new IllegalArgumentException("minScore must be between 0.0 and 1.0");
+        if (interactive) {
+            // What can only fail later — a store type nothing implements, a port that is
+            // not
+            // one, a vector size that is not a size, an endpoint that is not http(s) — is
+            // refused here, where the author is looking. Writes only: a stored
+            // configuration is never judged by this.
+            String endpointProblem = StoreParameterChecks.findEndpointProblem(embeddingParameters);
+            if (endpointProblem != null) {
+                throw new IllegalArgumentException(endpointProblem);
+            }
+            String storeProblem = StoreParameterChecks.findProblem(storeType, storeParameters);
+            if (storeProblem != null) {
+                throw new IllegalArgumentException(storeProblem);
+            }
+            if (name != null && name.isBlank()) {
+                throw new IllegalArgumentException("name must not be empty");
+            }
+            if (maxResults != null && maxResults < 1) {
+                throw new IllegalArgumentException("maxResults must be at least 1, was " + maxResults);
+            }
+            if (minScore != null && (minScore.isNaN() || minScore < 0.0 || minScore > 1.0)) {
+                throw new IllegalArgumentException("minScore must be between 0.0 and 1.0");
+            }
         }
         if (chunkSize != null && (chunkSize < 1 || chunkSize > MAX_CHUNK_SIZE)) {
             throw new IllegalArgumentException("chunkSize must be between 1 and " + MAX_CHUNK_SIZE + ", was " + chunkSize);
@@ -318,6 +334,52 @@ public class RagConfiguration {
                 }
             }
         }
+    }
+
+    /**
+     * What an interactive save refuses beyond {@link #validateLenient()}: settings
+     * that could only fail later. Never throws.
+     */
+    public List<String> findStrictProblems() {
+        List<String> problems = new ArrayList<>();
+        addIfNotNull(problems, StoreParameterChecks.findEndpointProblem(embeddingParameters));
+        addIfNotNull(problems, StoreParameterChecks.findProblem(storeType, storeParameters));
+        if (name != null && name.isBlank()) {
+            problems.add("name must not be empty");
+        }
+        if (maxResults != null && maxResults < 1) {
+            problems.add("maxResults must be at least 1, was " + maxResults);
+        }
+        if (minScore != null && (minScore.isNaN() || minScore < 0.0 || minScore > 1.0)) {
+            problems.add("minScore must be between 0.0 and 1.0");
+        }
+        return problems;
+    }
+
+    private static void addIfNotNull(List<String> problems, String problem) {
+        if (problem != null) {
+            problems.add(problem);
+        }
+    }
+
+    /**
+     * Brings retrieval settings written before they were checked into range: a
+     * {@code minScore} outside 0-1 to the nearest bound, a {@code maxResults} below
+     * one to the default. For an archive that cannot be edited first.
+     *
+     * @return whether either changed
+     */
+    public boolean clampRetrievalSettings() {
+        boolean changed = false;
+        if (minScore != null && (minScore.isNaN() || minScore < 0.0 || minScore > 1.0)) {
+            minScore = minScore.isNaN() ? 0.6 : Math.max(0.0, Math.min(1.0, minScore));
+            changed = true;
+        }
+        if (maxResults != null && maxResults < 1) {
+            maxResults = 5;
+            changed = true;
+        }
+        return changed;
     }
 
     // --- Ingestion sources ---

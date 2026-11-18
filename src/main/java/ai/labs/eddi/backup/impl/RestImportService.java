@@ -71,6 +71,7 @@ import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
+import ai.labs.eddi.configs.rag.rest.RestRagStore;
 import ai.labs.eddi.configs.snippets.IPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.IRestPromptSnippetStore;
 import ai.labs.eddi.configs.snippets.model.PromptSnippet;
@@ -2092,18 +2093,22 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             return;
         }
         clampImportedChunking(config);
-        if (config.getSources() == null) {
-            return;
-        }
-        for (var source : config.getSources()) {
-            if (source != null && (source.getId() == null || source.getId().isBlank())) {
-                source.setId(UUID.randomUUID().toString());
+        // Retrieval settings out of range are brought into it, and what an interactive
+        // save would now refuse (an unknown store type, a host with a port, a blank
+        // name …) is kept and said at WARN: the archive cannot be edited first. Done
+        // whether or not there are sources — the check used to be skipped without them.
+        RestRagStore.tolerateLegacySettings(config);
+        if (config.getSources() != null) {
+            for (var source : config.getSources()) {
+                if (source != null && (source.getId() == null || source.getId().isBlank())) {
+                    source.setId(UUID.randomUUID().toString());
+                }
             }
         }
         // Throws on a source the engine cannot honour. Importing it instead would
         // produce a knowledge base whose runs fail for ever, and the failure would
         // only be visible in a run history nobody is watching yet.
-        config.validate();
+        config.validateLenient();
         // The same check RestRagStore.prepareForWrite runs, and for the same
         // reason: validate() does not look at the cron, so an archive could store
         // an expression POST /ragstore/rags refuses — and the schedule built from
@@ -2154,7 +2159,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // Before the REST update, whose validate() would refuse them.
             clampImportedChunking(config);
         }
-        return updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, store::updateRag, transaction);
+        // The lenient update where the store offers it: the interactive one refuses
+        // what
+        // older versions accepted, and the archive cannot be edited first.
+        RestUpdate<RagConfiguration> update = store instanceof RestRagStore lenient ? lenient::updateRagLenient : store::updateRag;
+        return updateTracked(IRagStore.class, IRestRagStore.resourceURI, localId, localVersion, config, update, transaction);
     }
 
     /**

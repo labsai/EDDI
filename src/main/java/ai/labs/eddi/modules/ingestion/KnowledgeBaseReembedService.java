@@ -5,7 +5,9 @@
 package ai.labs.eddi.modules.ingestion;
 
 import ai.labs.eddi.configs.rag.model.IngestionSource;
+import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
@@ -25,19 +27,22 @@ import java.util.Optional;
  * <p>
  * What a changed embedding model needs is not an edit but a rebuild: every
  * vector in the store was made by the old model and means nothing next to the
- * new one. The operation is:
+ * new one. The order is chosen so that a crash at any point leaves the
+ * knowledge base refillable, never empty with an ingestion state that says
+ * "unchanged":
  * <ol>
- * <li>claim every source's run slot, so no run starts or is mid-way while the
- * vectors go (a run in flight anywhere refuses the whole operation, and nothing
- * has been changed);</li>
- * <li>remove all of the knowledge base's vectors from its store
- * ({@link EmbeddingStoreFactory#removeKnowledgeBaseVectors});</li>
- * <li>record the configured space as the store's
- * ({@link VectorSpaceGuard#reset} );</li>
- * <li>forget each source's ingestion state, which also releases its claim, and
- * start an ordinary run of every enabled source. Those runs are the "background
- * run with status": they appear in each source's run history like any
- * other.</li>
+ * <li>refuse what cannot be done safely (another knowledge base keeps the same
+ * chunks, or a shared pgvector table would have to change its column
+ * size);</li>
+ * <li>claim every source's run slot, so nothing runs while the vectors go (a
+ * run in flight anywhere refuses the whole operation, and nothing has been
+ * changed);</li>
+ * <li><b>forget every source's content hashes first</b>
+ * ({@link IIngestionStateStore#invalidateContent}): from here a run, scheduled
+ * or manual, embeds everything again whatever happens next;</li>
+ * <li>remove the knowledge base's vectors, record the configured space, and —
+ * per source — forget the state and start an ordinary run. Those runs are the
+ * background run with status: they appear in each source's run history.</li>
  * </ol>
  *
  * <p>
@@ -56,20 +61,26 @@ public class KnowledgeBaseReembedService {
     static final String DIRECT_INGEST_NOTE = "Documents sent through POST /ragstore/rags/{id}/ingest: EDDI does not keep their "
             + "text, so they were removed with the old vectors and have to be sent again.";
 
+    /** Re-embedding was refused before anything was changed. */
+    public static final String CODE_SHARED_CHUNKS = "SHARED_CHUNKS";
+    public static final String CODE_SHARED_TABLE_SIZE = "SHARED_TABLE_SIZE";
+
     private final IngestionPipeline pipeline;
     private final RagSourceIngestionService sources;
     private final IIngestionStateStore stateStore;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final VectorSpaceGuard vectorSpaceGuard;
+    private final KnowledgeBaseStorageGuard storageGuard;
 
     @Inject
     public KnowledgeBaseReembedService(IngestionPipeline pipeline, RagSourceIngestionService sources, IIngestionStateStore stateStore,
-            EmbeddingStoreFactory embeddingStoreFactory, VectorSpaceGuard vectorSpaceGuard) {
+            EmbeddingStoreFactory embeddingStoreFactory, VectorSpaceGuard vectorSpaceGuard, KnowledgeBaseStorageGuard storageGuard) {
         this.pipeline = pipeline;
         this.sources = sources;
         this.stateStore = stateStore;
         this.embeddingStoreFactory = embeddingStoreFactory;
         this.vectorSpaceGuard = vectorSpaceGuard;
+        this.storageGuard = storageGuard;
     }
 
     /**
@@ -98,14 +109,50 @@ public class KnowledgeBaseReembedService {
     }
 
     /**
-     * @throws UnsupportedOperationException
-     *             when the vector store cannot delete by metadata; nothing was
+     * Re-embedding cannot be done safely; nothing was changed.
+     */
+    public static class ReembedRefusedException extends RuntimeException {
+
+        private final String code;
+        private final List<String> knowledgeBases;
+
+        public ReembedRefusedException(String code, String message, List<String> knowledgeBases) {
+            super(message);
+            this.code = code;
+            this.knowledgeBases = List.copyOf(knowledgeBases);
+        }
+
+        public String code() {
+            return code;
+        }
+
+        /** The other knowledge bases involved. */
+        public List<String> knowledgeBases() {
+            return knowledgeBases;
+        }
+    }
+
+    /**
+     * @throws ReembedRefusedException
+     *             when another knowledge base keeps the same chunks, or a shared
+     *             pgvector table would have to change its column size; nothing was
      *             changed
+     * @throws UnsupportedOperationException
+     *             when the vector store cannot delete by metadata; the ingestion
+     *             state is marked for a rebuild, the vectors are untouched
      * @throws RuntimeException
-     *             when the store failed; the claims are released and the ingestion
-     *             state is as it was
+     *             when the store failed; the claims are released, and the sources'
+     *             content hashes were already forgotten, so the next run of each
+     *             embeds everything again
      */
     public Result reembed(String ragConfigId, RagConfiguration knowledgeBase) {
+        List<KnowledgeBaseStorageGuard.Sharer> sharers = storageGuard == null ? List.of() : storageGuard.sharersOf(ragConfigId, knowledgeBase);
+        requireNoSharedChunks(ragConfigId, knowledgeBase, sharers);
+        requireNoSharedSizeChange(ragConfigId, knowledgeBase);
+        // Before anything is claimed or removed: an unresolved variable refuses the
+        // whole operation.
+        vectorSpaceGuard.configured(knowledgeBase);
+
         List<IngestionSource> all = new ArrayList<>();
         if (knowledgeBase.getSources() != null) {
             knowledgeBase.getSources().stream().filter(source -> source != null).forEach(all::add);
@@ -123,12 +170,23 @@ public class KnowledgeBaseReembedService {
             claims.add(claim.get());
         }
 
+        // A direct /ingest on this instance waits until the vectors are made again.
+        vectorSpaceGuard.beginMaintenance(ragConfigId);
         try {
-            embeddingStoreFactory.removeKnowledgeBaseVectors(ragConfigId, knowledgeBase);
-            vectorSpaceGuard.reset(ragConfigId, knowledgeBase);
+            // First, and durable: from here every run — scheduled, manual, or the next
+            // one after a crash — embeds everything again, whatever happens below.
+            // Without it, vectors gone + record reset + state "unchanged" left the
+            // knowledge base empty with nothing to say so.
+            for (IngestionSource source : all) {
+                stateStore.invalidateContent(IngestionPipeline.stateKey(ragConfigId, source));
+            }
+            boolean emptied = embeddingStoreFactory.removeKnowledgeBaseVectors(ragConfigId, knowledgeBase);
+            vectorSpaceGuard.reset(ragConfigId, knowledgeBase, emptied || sharers.isEmpty());
         } catch (RuntimeException e) {
             release(ragConfigId, claimed, claims);
             throw e;
+        } finally {
+            vectorSpaceGuard.endMaintenance(ragConfigId);
         }
         LOGGER.infof("Re-embedding knowledge base %s: its vectors were removed and %d source(s) are being run again",
                 LogSanitizer.sanitize(ragConfigId), all.size());
@@ -157,6 +215,69 @@ public class KnowledgeBaseReembedService {
                     : new SourceOutcome(sourceId, null, "A run started for it in the meantime and will embed everything again."));
         }
         return new Result(null, outcomes, List.of(DIRECT_INGEST_NOTE));
+    }
+
+    /**
+     * In the 6.5.0 name layout two knowledge bases with one name share a location
+     * <em>and</em> a chunk tag: deleting by the tag would take the other one's
+     * chunks, and its ingestion state would go on saying "unchanged".
+     */
+    private static void requireNoSharedChunks(String ragConfigId, RagConfiguration knowledgeBase,
+                                              List<KnowledgeBaseStorageGuard.Sharer> sharers) {
+        String chunkKbId;
+        try {
+            chunkKbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, knowledgeBase);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        List<String> same = sharers.stream().filter(sharer -> chunkKbId.equals(sharer.chunkKbId())).map(KnowledgeBaseStorageGuard.Sharer::id)
+                .toList();
+        if (!same.isEmpty()) {
+            throw new ReembedRefusedException(CODE_SHARED_CHUNKS, "Knowledge base(s) " + String.join(", ", same) + " keep their chunks "
+                    + "under the same tag in the same store (6.5.0 layout: same name, same table), so removing this one's vectors would "
+                    + "remove theirs, and their ingestion state would still say \"unchanged\". Nothing was changed. Give the knowledge "
+                    + "bases separate tables (storeParameters.table / collectionName) and re-embed each.", same);
+        }
+    }
+
+    /**
+     * A pgvector column has one size. Changing it means dropping the table, which
+     * is not allowed while other knowledge bases keep rows in it.
+     */
+    private void requireNoSharedSizeChange(String ragConfigId, RagConfiguration knowledgeBase) {
+        if (!"pgvector".equals(knowledgeBase.getStoreType())) {
+            return;
+        }
+        String chunkKbId;
+        try {
+            chunkKbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, knowledgeBase);
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        var info = embeddingStoreFactory.inspectPgVectorTable(ragConfigId, knowledgeBase, chunkKbId);
+        if (!info.exists() || !info.layoutMatches() || info.columnDimension() == null || !info.otherRows()) {
+            return;
+        }
+        int declared = declaredDimension(knowledgeBase);
+        if (declared > 0 && declared != info.columnDimension()) {
+            throw new ReembedRefusedException(CODE_SHARED_TABLE_SIZE, "The table holds other knowledge bases' rows and its vectors have "
+                    + info.columnDimension() + " dimensions, but this knowledge base is configured for " + declared + ". A table cannot "
+                    + "change its vector size while it is shared. Nothing was changed. Give this knowledge base a table of its own "
+                    + "(storeParameters.table), or set storeParameters.dimension back to " + info.columnDimension() + ".", List.of());
+        }
+    }
+
+    private static int declaredDimension(RagConfiguration knowledgeBase) {
+        var params = knowledgeBase.getStoreParameters();
+        String raw = params == null ? null : params.get("dimension");
+        if (raw == null || raw.isBlank()) {
+            return VectorSpaceGuard.PGVECTOR_DEFAULT_DIMENSION;
+        }
+        try {
+            return Integer.parseInt(raw.trim());
+        } catch (NumberFormatException e) {
+            return -1;
+        }
     }
 
     private void release(String ragConfigId, List<IngestionSource> claimed, List<String> claims) {

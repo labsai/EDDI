@@ -193,6 +193,13 @@ public class RagIngestionService {
             // 2. Chunk
             DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.chunkSizeOrDefault(), ragConfig.chunkOverlapOrDefault());
 
+            // Before the store is even built — building may create its table at the
+            // configured size — and before a single document is embedded: a knowledge
+            // base whose embedding model changed would otherwise add new vectors next to
+            // the old ones.
+            if (vectorSpaceGuard != null) {
+                vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
+            }
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
@@ -201,11 +208,6 @@ public class RagIngestionService {
             // configuration is replaced rather than mixed with these vectors.
             EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
 
-            // Before a single document is embedded: a knowledge base whose embedding
-            // model changed would otherwise add new vectors next to the old ones.
-            if (vectorSpaceGuard != null) {
-                vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
-            }
             Embedder ingestor = new Embedder(splitter, model, ragConfigId, ragConfig);
 
             if (replace) {
@@ -255,6 +257,11 @@ public class RagIngestionService {
                 return;
             }
             List<Embedding> embeddings = model.embedAll(segments).content();
+            if (vectorSpaceGuard != null) {
+                // Again, now that the provider has answered: a re-embed may have started
+                // while this document was being embedded.
+                vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
+            }
             if (vectorSpaceGuard != null && !embeddings.isEmpty()) {
                 vectorSpaceGuard.verifyDimension(ragConfigId, ragConfig, embeddings.get(0).dimension(), true);
             }

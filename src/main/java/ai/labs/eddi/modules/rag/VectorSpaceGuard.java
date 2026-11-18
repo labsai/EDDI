@@ -9,9 +9,11 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rag.model.VectorSpace;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
+import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -26,63 +28,89 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Knows which {@linkplain VectorSpace vector space} each external vector store
- * holds, and refuses to search or write in another one.
+ * Knows which {@linkplain VectorSpace vector space} each knowledge base's
+ * vectors are in, and refuses to search or write in another one.
  *
- * <h2>Where the record is kept</h2>
- * <p>
- * In EDDI's own database, next to the ingestion state, keyed by a digest of the
- * store's <em>location</em> — store type, server parameters and table or
- * collection (see {@link KnowledgeBaseStorage#vectorSpaceLocation}) — not by
- * the knowledge base. That is the same for pgvector, MongoDB Atlas,
- * Elasticsearch, Qdrant and Chroma, so there is one mechanism to reason about.
- * Keyed by location, two knowledge bases that name the same table share one
- * record, which is right: they share vectors. The alternative for pgvector, a
- * metadata table in the vector database, was rejected: only that one store type
- * could have it (the others have no place a client may put it), it needs DDL
- * rights EDDI's vector user may not have, and a record kept in two ways is two
- * things to keep in step. The cost of this choice: a vector store wiped or
- * restored behind EDDI's back keeps its old record until the knowledge base is
- * re-embedded, which resets it.
+ * <h2>Two records, because two different things are true</h2>
+ * <ul>
+ * <li><b>Which model made the vectors</b> is a fact about a <em>knowledge
+ * base</em>: retrieval and deletion are filtered by the chunk tag, so two
+ * knowledge bases that share one table can hold different models without
+ * touching each other. It is recorded per store <em>location</em> and <em>chunk
+ * tag</em> ({@link KnowledgeBaseStorage#chunkKbId}) — the id in the per-id
+ * layout, the name in the 6.5.0 layout, where two same-named knowledge bases
+ * share the tag and so, by definition, one record.</li>
+ * <li><b>The vector size</b> is a fact about the <em>table</em>: its column has
+ * one. It is recorded per location, and for pgvector checked against the real
+ * column ({@code atttypmod}), which nothing can contradict.</li>
+ * </ul>
+ * Both live in EDDI's own database, next to the ingestion state, keyed by a
+ * digest. The alternative for pgvector, a metadata table in the vector
+ * database, was rejected: no other store has an equivalent place and it needs
+ * DDL rights.
  *
  * <h2>Knowledge bases from before this check</h2>
  * <p>
- * With no record, the configured space is adopted on first use and logged once.
- * It cannot be verified — nothing says what the existing vectors were made with
- * — so a knowledge base whose embedding settings were changed before the
- * upgrade stays as wrong as it was; it is not made worse, and it keeps working.
- *
- * <h2>The vector size</h2>
- * <p>
- * Not known from configuration, so it is measured: the first embedding of an
- * ingestion records it, and every later embedding — a query included — is
- * compared with it ({@link #verifyDimension}).
+ * With no record, a knowledge base adopts the space it is configured for on its
+ * first use, under its own key — so one knowledge base's adoption never tells
+ * another to re-embed. That cannot be verified against the vectors already
+ * there. It is not done when the configured space cannot be resolved
+ * ({@code ${vars:…}} that did not resolve): the call is refused, retryable.
  */
 @ApplicationScoped
 public class VectorSpaceGuard {
 
     private static final Logger LOGGER = Logger.getLogger(VectorSpaceGuard.class);
 
-    static final String KEY_PREFIX = "vector-space:";
+    static final String MODEL_PREFIX = "vector-space:model:";
+    static final String SIZE_PREFIX = "vector-space:size:";
 
-    /** Reads of the record are cached this long; this node's own writes are not. */
+    /** Counter of refusals, tagged by reason only (never by knowledge base). */
+    public static final String REFUSED_METRIC = "eddi.rag.vector_space.refused";
+
+    /** Reads of a record are cached this long; this node's own writes are not. */
     static final Duration CACHE_TTL = Duration.ofSeconds(30);
 
+    /** A refusal is logged at most this often per knowledge base. */
+    static final Duration LOG_INTERVAL = Duration.ofMinutes(1);
+
     /** pgvector's {@code dimension} parameter default (OpenAI small). */
-    static final int PGVECTOR_DEFAULT_DIMENSION = 1536;
+    public static final int PGVECTOR_DEFAULT_DIMENSION = 1536;
 
     private final IIngestionStateStore stateStore;
     private final GlobalVariableResolver variables;
 
-    private final Cache<String, String> recorded = Caffeine.newBuilder().maximumSize(2_000).expireAfterWrite(CACHE_TTL).build();
+    /**
+     * The real column size of a pgvector table. Null in tests that build the guard
+     * by hand.
+     */
+    @Inject
+    EmbeddingStoreFactory storeFactory;
+
+    @Inject
+    MeterRegistry meterRegistry;
+
+    private final Cache<String, String> recorded = Caffeine.newBuilder().maximumSize(4_000).expireAfterWrite(CACHE_TTL).build();
+    private final Cache<String, Boolean> recentlyLogged = Caffeine.newBuilder().maximumSize(2_000).expireAfterWrite(LOG_INTERVAL).build();
 
     /** Locations whose adoption was logged already — once per process is enough. */
     private final Set<String> adoptionLogged = ConcurrentHashMap.newKeySet();
+
+    /** Knowledge bases being re-embedded by this instance. */
+    private final Set<String> underMaintenance = ConcurrentHashMap.newKeySet();
 
     @Inject
     public VectorSpaceGuard(IIngestionStateStore stateStore, GlobalVariableResolver variables) {
         this.stateStore = stateStore;
         this.variables = variables;
+    }
+
+    /**
+     * Gives the guard the factory that reads a pgvector table's real column size;
+     * for tests built by hand.
+     */
+    public void useStoreFactory(EmbeddingStoreFactory factory) {
+        this.storeFactory = factory;
     }
 
     /** What a check found. */
@@ -91,42 +119,104 @@ public class VectorSpaceGuard {
 
     /**
      * Whether a vector space is tracked for this configuration: an external store
-     * with a location. An in-memory store is replaced when its embedding
-     * configuration changes (see {@code EmbeddingStoreFactory}).
+     * with a location and a chunk tag. An in-memory store is replaced when its
+     * embedding configuration changes (see {@code EmbeddingStoreFactory}).
      */
     public static boolean applies(String ragConfigId, RagConfiguration config) {
-        return KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config) != null;
+        return identityOf(ragConfigId, config) != null;
     }
 
-    /** The space {@code config} writes and searches in. */
+    private record Identity(String location, String chunkKbId) {
+        String modelKey() {
+            return MODEL_PREFIX + digest(location + "\n" + chunkKbId);
+        }
+
+        String sizeKey() {
+            return SIZE_PREFIX + digest(location);
+        }
+    }
+
+    private static Identity identityOf(String ragConfigId, RagConfiguration config) {
+        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
+        if (location == null) {
+            return null;
+        }
+        try {
+            return new Identity(location, KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
+    }
+
+    /**
+     * The space {@code config} writes and searches in.
+     *
+     * @throws OperatorFailureException
+     *             when a global variable it names cannot be resolved right now:
+     *             nothing is judged, adopted or reset on text that is not the
+     *             configuration's real value
+     */
     public VectorSpace configured(RagConfiguration config) {
         Map<String, String> params = config.getEmbeddingParameters();
-        if (params != null && !params.isEmpty() && variables != null) {
+        if (params != null && !params.isEmpty()) {
+            Map<String, String> resolved;
             try {
-                Map<String, String> resolved = variables.resolveAll(params);
-                if (resolved != null) {
-                    params = resolved;
-                }
+                resolved = variables == null ? params : variables.resolveAll(params);
             } catch (RuntimeException e) {
-                LOGGER.debugf("Comparing the configured embedding parameters as written: %s",
-                        LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+                LOGGER.warnf("Could not resolve the embedding parameters of knowledge base '%s': %s",
+                        LogSanitizer.sanitize(config.getName()), LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+                throw unresolved();
+            }
+            if (resolved != null) {
+                params = resolved;
+            }
+            for (String key : new String[]{"model", "modelName", "deploymentName", "taskType", "dimensions", "outputDimensionality"}) {
+                String value = params.get(key);
+                if (value != null && value.contains("${")) {
+                    throw unresolved();
+                }
             }
         }
         return VectorSpace.of(config, params);
     }
 
+    private static OperatorFailureException unresolved() {
+        return new OperatorFailureException("This knowledge base's embedding settings name a global variable that could not be "
+                + "resolved right now, so its embedding space cannot be checked. Nothing was changed; try again.");
+    }
+
     /**
      * Compares the recorded space with the configured one without changing
-     * anything. Used by the status endpoint and by the checks below.
+     * anything. Used by the status endpoint.
      */
     public Status status(String ragConfigId, RagConfiguration config) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
-        if (location == null) {
+        Identity identity = identityOf(ragConfigId, config);
+        if (identity == null) {
             return new Status(false, null, null, true);
         }
         VectorSpace configured = configured(config);
-        VectorSpace stored = read(location);
+        VectorSpace stored = stored(identity);
         return new Status(true, stored, configured, stored == null || !configured.conflictsWith(stored));
+    }
+
+    private VectorSpace stored(Identity identity) {
+        VectorSpace model = VectorSpace.decode(read(identity.modelKey()));
+        if (model == null) {
+            return null;
+        }
+        return model.withDimension(readSize(identity));
+    }
+
+    private Integer readSize(Identity identity) {
+        String raw = read(identity.sizeKey());
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.valueOf(raw.trim());
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     /**
@@ -136,35 +226,42 @@ public class VectorSpaceGuard {
      * retrieval down, and nothing was found to be wrong.
      *
      * @throws VectorSpaceMismatchException
-     *             on a mismatch
+     *             on a mismatch, or while this knowledge base is being re-embedded
+     * @throws OperatorFailureException
+     *             when the configured space cannot be resolved
      */
     public void requireCompatible(String ragConfigId, RagConfiguration config) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
-        if (location == null) {
+        Identity identity = identityOf(ragConfigId, config);
+        if (identity == null) {
             return;
+        }
+        if (underMaintenance.contains(ragConfigId)) {
+            refused("maintenance");
+            throw new VectorSpaceMismatchException("This knowledge base is being re-embedded right now. Its vectors are removed and "
+                    + "rebuilt, so searching and ingesting wait until the runs it started have filled it again.");
         }
         VectorSpace configured = configured(config);
         VectorSpace stored;
         try {
-            stored = read(location);
+            stored = stored(identity);
         } catch (RuntimeException e) {
-            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s; not checking it",
-                    LogSanitizer.sanitize(ragConfigId));
+            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
             return;
         }
         if (stored == null) {
-            adopt(ragConfigId, config, location, configured);
+            adopt(ragConfigId, config, identity, configured);
             return;
         }
         if (configured.conflictsWith(stored)) {
+            refused(configured.sameModelAs(stored) ? "dimension" : "space");
             throw new VectorSpaceMismatchException(mismatchMessage(ragConfigId, stored, configured));
         }
     }
 
     /**
-     * Checks a measured vector size against the recorded one — and against the
-     * table's, for pgvector — and, when {@code record} is set and the size was not
-     * known, records it.
+     * Checks a measured vector size against what holds the vectors — the table's
+     * real column for pgvector, the size recorded for the location otherwise — and,
+     * when {@code record} is set and no size was known, records it.
      *
      * @param actual
      *            the size of an embedding the provider just returned
@@ -175,88 +272,134 @@ public class VectorSpaceGuard {
      *             when the size is not the one this knowledge base's vectors have
      */
     public void verifyDimension(String ragConfigId, RagConfiguration config, int actual, boolean record) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
-        if (location == null || actual <= 0) {
+        Identity identity = identityOf(ragConfigId, config);
+        if (identity == null || actual <= 0) {
             return;
         }
         if ("pgvector".equals(config.getStoreType())) {
             int declared = declaredPgVectorDimension(config);
-            if (declared > 0 && declared != actual) {
-                throw new VectorSpaceMismatchException("The embedding model returns vectors of " + actual
-                        + " dimensions, but this knowledge base's pgvector table is made for " + declared
-                        + " (storeParameters.dimension"
-                        + (config.getStoreParameters() != null && config.getStoreParameters().containsKey("dimension")
+            Integer real = realColumnDimension(ragConfigId, config);
+            int expected = real != null ? real : declared;
+            if (expected > 0 && expected != actual) {
+                refused("dimension");
+                throw new VectorSpaceMismatchException("The embedding model returns vectors of " + actual + " dimensions, but this "
+                        + "knowledge base's pgvector table " + (real != null ? "was made for " + real : "is configured for " + declared)
+                        + " (storeParameters.dimension" + (config.getStoreParameters() != null && config.getStoreParameters().containsKey("dimension")
                                 ? ""
                                 : ", default " + PGVECTOR_DEFAULT_DIMENSION)
-                        + "). Set storeParameters.dimension to " + actual + " and re-embed the knowledge base "
-                        + "(POST /ragstore/rags/" + ragConfigId + "/reembed): its table is recreated for the new size.");
+                        + "). Set storeParameters.dimension to " + actual + " and re-embed the knowledge base (POST /ragstore/rags/"
+                        + ragConfigId + "/reembed): the table is recreated for the new size when no other knowledge base keeps rows in it; "
+                        + "otherwise give this knowledge base a table of its own.");
             }
         }
-        VectorSpace stored;
+        Integer size;
         try {
-            stored = read(location);
+            size = readSize(identity);
         } catch (RuntimeException e) {
-            LOGGER.warnf(e, "Could not read the vector space of knowledge base %s; not checking its dimension",
-                    LogSanitizer.sanitize(ragConfigId));
+            LOGGER.warnf(e, "Could not read the vector size of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
             return;
         }
-        VectorSpace configured = configured(config);
-        if (stored == null) {
-            stored = configured;
+        if (size != null && size != actual) {
+            refused("dimension");
+            throw new VectorSpaceMismatchException("The embedding model returns vectors of " + actual + " dimensions, but this "
+                    + "knowledge base's vector store holds vectors of " + size + ". Re-embed the knowledge base (POST /ragstore/rags/"
+                    + ragConfigId + "/reembed) to rebuild its vectors in the new size; a store shared with other knowledge bases keeps "
+                    + "one size, so give this one a location of its own if the others stay.");
         }
-        if (stored.dimension() != null && stored.dimension() != actual) {
-            throw new VectorSpaceMismatchException("The embedding model returns vectors of " + actual
-                    + " dimensions, but this knowledge base's vector store holds vectors of " + stored.dimension() + " ("
-                    + stored.describe() + "). Re-embed the knowledge base (POST /ragstore/rags/" + ragConfigId
-                    + "/reembed) to rebuild its vectors in the new size.");
+        if (record && size == null) {
+            write(identity.sizeKey(), Integer.toString(actual));
         }
-        if (record && stored.dimension() == null) {
-            write(location, stored.withDimension(actual));
+    }
+
+    private Integer realColumnDimension(String ragConfigId, RagConfiguration config) {
+        if (storeFactory == null) {
+            return null;
+        }
+        try {
+            var info = storeFactory.inspectPgVectorTable(ragConfigId, config, KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+            return info.exists() && info.layoutMatches() ? info.columnDimension() : null;
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not read the real vector size of the pgvector table of knowledge base %s: %s",
+                    LogSanitizer.sanitize(ragConfigId), LogSanitizer.sanitize(String.valueOf(e.getMessage())));
+            return null;
         }
     }
 
     /**
-     * Records the configured space as the one the store holds, with the size
-     * unknown — after the vectors were removed to be made again.
+     * Records the configured space as the one this knowledge base's vectors are in,
+     * with the size unknown — after they were removed to be made again.
+     *
+     * @param clearSize
+     *            also forget the location's vector size: true when nothing else
+     *            keeps vectors there
      */
-    public void reset(String ragConfigId, RagConfiguration config) {
-        String location = KnowledgeBaseStorage.vectorSpaceLocation(ragConfigId, config);
-        if (location == null) {
+    public void reset(String ragConfigId, RagConfiguration config, boolean clearSize) {
+        Identity identity = identityOf(ragConfigId, config);
+        if (identity == null) {
             return;
         }
-        write(location, configured(config));
+        VectorSpace configured = configured(config);
+        write(identity.modelKey(), configured.withDimension(null).encode());
+        if (clearSize) {
+            write(identity.sizeKey(), "");
+        }
     }
 
-    private void adopt(String ragConfigId, RagConfiguration config, String location, VectorSpace configured) {
+    /** Marks a knowledge base as being re-embedded by this instance. */
+    public void beginMaintenance(String ragConfigId) {
+        underMaintenance.add(ragConfigId);
+    }
+
+    public void endMaintenance(String ragConfigId) {
+        underMaintenance.remove(ragConfigId);
+    }
+
+    /**
+     * Logs a refusal at WARN, once a minute per knowledge base, without a stack
+     * trace: a refused knowledge base is refused on every turn, and the turn is not
+     * the news.
+     */
+    public void logRefusal(String ragConfigId, String knowledgeBaseName, Exception refusal) {
+        if (recentlyLogged.asMap().putIfAbsent(ragConfigId, Boolean.TRUE) == null) {
+            LOGGER.warnf("Knowledge base '%s' (%s) was refused: %s", LogSanitizer.sanitize(knowledgeBaseName),
+                    LogSanitizer.sanitize(ragConfigId), LogSanitizer.sanitize(RagFailures.clientMessage(refusal)));
+        }
+    }
+
+    private void adopt(String ragConfigId, RagConfiguration config, Identity identity, VectorSpace configured) {
         try {
-            write(location, configured);
+            write(identity.modelKey(), configured.withDimension(null).encode());
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not record the vector space of knowledge base %s", LogSanitizer.sanitize(ragConfigId));
             return;
         }
-        if (adoptionLogged.add(location)) {
+        if (adoptionLogged.add(identity.modelKey())) {
             LOGGER.infof("Knowledge base %s has no recorded vector space (it was created before EDDI tracked it). "
                     + "Adopting the configured one, %s; that cannot be verified against the vectors already in %s.",
                     LogSanitizer.sanitize(ragConfigId), configured.describe(), LogSanitizer.sanitize(config.getStoreType()));
         }
     }
 
-    private VectorSpace read(String location) {
-        String key = locationKey(location);
+    private String read(String key) {
         String cached = recorded.getIfPresent(key);
         if (cached == null) {
-            cached = stateStore.storeFingerprint(KEY_PREFIX + key).orElse(null);
+            cached = stateStore.storeFingerprint(key).orElse(null);
             if (cached != null) {
                 recorded.put(key, cached);
             }
         }
-        return VectorSpace.decode(cached);
+        return cached;
     }
 
-    private void write(String location, VectorSpace space) {
-        String key = locationKey(location);
-        stateStore.recordStoreFingerprint(KEY_PREFIX + key, space.encode());
-        recorded.put(key, space.encode());
+    private void write(String key, String value) {
+        stateStore.recordStoreFingerprint(key, value);
+        recorded.put(key, value);
+    }
+
+    private void refused(String reason) {
+        if (meterRegistry != null) {
+            meterRegistry.counter(REFUSED_METRIC, "reason", reason).increment();
+        }
     }
 
     static String mismatchMessage(String ragConfigId, VectorSpace stored, VectorSpace configured) {
@@ -282,11 +425,11 @@ public class VectorSpaceGuard {
         }
     }
 
-    /** A digest, because the location can contain a connection string. */
-    static String locationKey(String location) {
+    /** A digest, because a location can contain a connection string. */
+    static String digest(String text) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            return HexFormat.of().formatHex(digest.digest(location.getBytes(StandardCharsets.UTF_8))).substring(0, 40);
+            return HexFormat.of().formatHex(digest.digest(text.getBytes(StandardCharsets.UTF_8))).substring(0, 40);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 unavailable", e);
         }

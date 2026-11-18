@@ -109,11 +109,47 @@ public class RestRagStore implements IRestRagStore {
 
     @Override
     public Response updateRag(String id, Integer version, RagConfiguration ragConfiguration) {
+        return update(id, version, ragConfiguration, true);
+    }
+
+    /**
+     * {@link #updateRag} for a knowledge base that comes from an archive, a sync or
+     * an upgrade, which its owner cannot edit first: settings that older versions
+     * accepted and that the interactive save now refuses are brought into range or
+     * kept, with a WARN naming the knowledge base and the field. Access, storage
+     * rules and everything else are the same.
+     */
+    public Response updateRagLenient(String id, Integer version, RagConfiguration ragConfiguration) {
+        return update(id, version, ragConfiguration, false);
+    }
+
+    /**
+     * Keeps an older configuration usable on the lenient paths: retrieval settings
+     * out of range are clamped, and what the interactive save would refuse (an
+     * unknown store type, a host with a port, a blank name …) is kept, and said at
+     * WARN.
+     */
+    public static void tolerateLegacySettings(RagConfiguration config) {
+        if (config == null) {
+            return;
+        }
+        List<String> problems = config.findStrictProblems();
+        if (config.clampRetrievalSettings()) {
+            LOGGER.warnf("Knowledge base '%s': minScore or maxResults were outside the accepted range and were brought into it",
+                    LogSanitizer.sanitize(config.getName()));
+        }
+        for (String problem : problems) {
+            LOGGER.warnf("Knowledge base '%s': %s. Kept as it is: an interactive save would refuse it.", LogSanitizer.sanitize(config.getName()),
+                    LogSanitizer.sanitize(problem));
+        }
+    }
+
+    private Response update(String id, Integer version, RagConfiguration ragConfiguration, boolean interactive) {
         // Before the body is judged: a caller without EDIT should be told that,
         // rather than being handed validation errors about a resource they may not
         // change — and the 400s would also confirm the resource exists.
         restVersionInfo.requireEditAccess(id);
-        prepareForWrite(ragConfiguration);
+        prepareForWrite(ragConfiguration, interactive);
         // Read before writing: a source removed from sources[] must lose its
         // schedule, and afterwards there is nothing left to say which ones existed.
         RagConfiguration previous = readQuietly(id, version);
@@ -360,6 +396,10 @@ public class RestRagStore implements IRestRagStore {
      * {@link RagConfiguration#findUnsupportedSettings()}.
      */
     private void prepareForWrite(RagConfiguration ragConfiguration) {
+        prepareForWrite(ragConfiguration, true);
+    }
+
+    private void prepareForWrite(RagConfiguration ragConfiguration, boolean interactive) {
         if (ragConfiguration == null) {
             // RestVersionInfo rejects null with its own error message.
             return;
@@ -376,7 +416,12 @@ public class RestRagStore implements IRestRagStore {
             // a bad request with a 500.
             requireNoNullSources(ragConfiguration);
             assignSourceIds(ragConfiguration);
-            ragConfiguration.validate();
+            if (interactive) {
+                ragConfiguration.validate();
+            } else {
+                tolerateLegacySettings(ragConfiguration);
+                ragConfiguration.validateLenient();
+            }
             requireValidCronExpressions(ragConfiguration);
         } catch (IllegalArgumentException e) {
             throw new BadRequestException(e.getMessage(), e);

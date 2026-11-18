@@ -417,12 +417,13 @@ public class IngestionPipeline {
             // store the run writes to. A later lookup could return a newer, empty store
             // if the knowledge base were dropped or remodelled meanwhile, and every
             // document would then pass as "unchanged" against the old store's state.
-            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
             if (vectorSpaceGuard != null) {
-                // Before anything is embedded: the run fails with the reason, instead of
+                // Before the store is built (which may create its table) and before
+                // anything is embedded: the run fails with the reason, instead of
                 // writing vectors of another model next to the old ones.
                 vectorSpaceGuard.requireCompatible(ragConfigId, knowledgeBase);
             }
+            collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
             current = EmbeddingStoreFactory.fingerprintOf(collector.store);
         } else {
             current = embeddingStoreFactory.previewIngestionFingerprint(ragConfigId, knowledgeBase);

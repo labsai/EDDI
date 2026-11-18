@@ -79,9 +79,16 @@ public record VectorSpace(String provider, String model, String deployment, Stri
         if (other == null) {
             return false;
         }
-        return !provider.equalsIgnoreCase(other.provider) || !model.equalsIgnoreCase(other.model)
-                || !deployment.equalsIgnoreCase(other.deployment) || !taskType.equalsIgnoreCase(other.taskType)
-                || (dimension != null && other.dimension != null && !dimension.equals(other.dimension));
+        return !sameModelAs(other) || (dimension != null && other.dimension != null && !dimension.equals(other.dimension));
+    }
+
+    /**
+     * Whether the same embedding model made, or would make, the vectors — size
+     * aside.
+     */
+    public boolean sameModelAs(VectorSpace other) {
+        return other != null && provider.equalsIgnoreCase(other.provider) && model.equalsIgnoreCase(other.model)
+                && deployment.equalsIgnoreCase(other.deployment) && taskType.equalsIgnoreCase(other.taskType);
     }
 
     /** A readable, secret-free description for messages shown to operators. */

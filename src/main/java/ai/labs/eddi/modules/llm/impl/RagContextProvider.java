@@ -12,7 +12,10 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IDataFactory;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.rag.OperatorFailureException;
+import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
+import ai.labs.eddi.modules.rag.VectorSpaceMismatchException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.KnowledgeBaseReference;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.RagDefaults;
 import dev.langchain4j.data.segment.TextSegment;
@@ -213,11 +216,20 @@ public class RagContextProvider {
                 allResults.addAll(relevant.stream().map(c -> new RetrievalResult(kbName, c)).toList());
 
             } catch (Exception e) {
-                LOGGER.warnf(e, "Failed to retrieve from KB '%s': %s", kbName, e.getMessage());
+                if (e instanceof VectorSpaceMismatchException || e instanceof OperatorFailureException) {
+                    // Refused on every turn, so said once a minute and without a stack trace.
+                    if (vectorSpaceGuard != null) {
+                        vectorSpaceGuard.logRefusal(ragConfigIdOrName(step.stepConfig(), kbName), kbName, e);
+                    }
+                } else {
+                    LOGGER.warnf(e, "Failed to retrieve from KB '%s': %s", kbName, e.getMessage());
+                }
 
                 Map<String, Object> errorTrace = new HashMap<>();
                 errorTrace.put("kb", kbName);
-                errorTrace.put("error", e.getMessage());
+                // What the trace stores is read by whoever may read the conversation: never
+                // the raw exception text, which can hold driver output.
+                errorTrace.put("error", RagFailures.clientMessage(e));
                 traceEntries.add(errorTrace);
             }
         }
@@ -244,6 +256,14 @@ public class RagContextProvider {
         currentStep.storeData(ragContextData);
 
         return formattedContext;
+    }
+
+    private static String ragConfigIdOrName(Map<String, Object> stepConfig, String fallback) {
+        try {
+            return ragConfigIdOf(stepConfig);
+        } catch (IllegalArgumentException e) {
+            return fallback;
+        }
     }
 
     /**

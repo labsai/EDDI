@@ -90,3 +90,28 @@ in-memory default store losing `/ingest` documents on restart (documented).
 [`EmbeddingStoreFactory.java`](../../src/main/java/ai/labs/eddi/modules/llm/impl/EmbeddingStoreFactory.java),
 [`RestRagIngestion.java`](../../src/main/java/ai/labs/eddi/configs/rag/rest/RestRagIngestion.java),
 [`rag.md`](../rag.md)
+
+### Review round (same branch)
+
+An independent review found the single-knowledge-base case sound and these gaps; all fixed:
+
+- **Keying (M1, M2, S2).** The model identity is recorded per store location **and chunk tag** (per knowledge base),
+  the vector size per location — for pgvector verified against the table's real column (`atttypmod`). Two knowledge bases
+  on one table can hold different models of the same size without refusing each other, adoption is per knowledge base, and
+  one knowledge base's re-embed no longer resets another's record. `reembed` refuses (409) when another knowledge base
+  keeps the same chunks in the same store (`SHARED_CHUNKS`, 6.5.0 name layout) or when a shared pgvector table would have to
+  change its column size (`SHARED_TABLE_SIZE`); a store failure ends a run early (`SQLException`).
+- **Crash safety (M3).** `reembed` forgets every source's content hashes before it deletes anything, so a crash at any later
+  point leaves each source refilling on its next run instead of empty with state "unchanged".
+- **Older configs (M4).** Imports, syncs and upgrades are lenient: retrieval settings out of range are clamped, the rest
+  (unknown `storeType`, host with a port, blank name …) is kept and logged at WARN; only an interactive save refuses. The check
+  now also runs for an archive's knowledge base that has no sources.
+- **S1/S3/S4/S5/S6/S7/S8/N3.** Real pgvector column size; `eddi_rag_vector_space_refused_total{reason}` plus a once-a-minute
+  WARN without stack trace; the empty-table drop runs in one transaction under `LOCK TABLE … ACCESS EXCLUSIVE NOWAIT`, a table
+  that is not an EDDI pgvector table is never touched, a search on a node whose cache points at a dropped table reads it as
+  empty, a direct `/ingest` waits while its knowledge base is re-embedded; no input-echo, URL-credential or driver text to
+  clients; `reembed` refuses a version that is not the latest; nothing is adopted or reset while a variable is unresolved;
+  hidden-content extraction keeps autofilter/grouped Excel rows, handles `specVanish`/`webHidden`, no longer lets a hidden
+  connector swallow the next PowerPoint shape, and says "only hidden sheets" for a workbook that has nothing else; a refused
+  ingest no longer builds the store first.
+- **Tests.** `PgVectorVectorSpaceIT` (Testcontainers pgvector; needs Docker, run by CI) and unit tests for each item.

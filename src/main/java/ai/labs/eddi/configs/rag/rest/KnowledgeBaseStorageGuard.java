@@ -222,6 +222,78 @@ public class KnowledgeBaseStorageGuard {
         return matches;
     }
 
+    /**
+     * Another knowledge base that keeps vectors in the same store location.
+     *
+     * @param chunkKbId
+     *            the tag its chunks carry: equal to the asker's means the two share
+     *            their chunks outright (the 6.5.0 name layout, same name)
+     */
+    public record Sharer(String id, String chunkKbId) {
+    }
+
+    /**
+     * Every other knowledge base whose vectors are in the same store location as
+     * {@code self}'s — the current version of each is read.
+     *
+     * @throws IllegalStateException
+     *             when the list of knowledge bases cannot be read in full: a sharer
+     *             that is not seen is the one whose data is lost
+     */
+    public List<Sharer> sharersOf(String selfId, RagConfiguration self) {
+        String location = KnowledgeBaseStorage.vectorSpaceLocation(selfId, self);
+        if (location == null) {
+            return List.of();
+        }
+        List<Sharer> sharers = new ArrayList<>();
+        for (int page = 0; page < MAX_PAGES; page++) {
+            List<DocumentDescriptor> descriptors;
+            try {
+                descriptors = documentDescriptorStore.readDescriptors(RAG_DESCRIPTOR_TYPE, null, page, PAGE_SIZE, false);
+            } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+                throw new IllegalStateException("Could not list knowledge bases to find those sharing a store location", e);
+            }
+            if (descriptors == null || descriptors.isEmpty()) {
+                return sharers;
+            }
+            for (DocumentDescriptor descriptor : descriptors) {
+                IResourceStore.IResourceId resourceId;
+                try {
+                    resourceId = descriptor == null || descriptor.getResource() == null
+                            ? null
+                            : RestUtilities.extractResourceId(descriptor.getResource());
+                } catch (IllegalArgumentException e) {
+                    continue;
+                }
+                if (resourceId == null || resourceId.getId() == null || resourceId.getId().equals(selfId)) {
+                    continue;
+                }
+                try {
+                    RagConfiguration other = ragStore.read(resourceId.getId(), resourceId.getVersion());
+                    if (location.equals(KnowledgeBaseStorage.vectorSpaceLocation(resourceId.getId(), other))) {
+                        String tag;
+                        try {
+                            tag = KnowledgeBaseStorage.chunkKbId(resourceId.getId(), other);
+                        } catch (IllegalArgumentException e) {
+                            tag = null;
+                        }
+                        sharers.add(new Sharer(resourceId.getId(), tag));
+                    }
+                } catch (IResourceStore.ResourceNotFoundException e) {
+                    // Deleted since it was listed: it keeps nothing there.
+                } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                    throw new IllegalStateException("Could not read knowledge base " + resourceId.getId() + " to find out whether it shares "
+                            + "a store location", e);
+                }
+            }
+            if (descriptors.size() < PAGE_SIZE) {
+                return sharers;
+            }
+        }
+        throw new IllegalStateException("More than " + MAX_PAGES * PAGE_SIZE + " knowledge bases exist; the ones sharing a store location "
+                + "cannot be listed");
+    }
+
     private String explicitKeyOf(DocumentDescriptor descriptor, String selfId) {
         if (descriptor == null || descriptor.getResource() == null) {
             return null;

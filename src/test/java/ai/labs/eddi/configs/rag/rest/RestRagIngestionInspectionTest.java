@@ -12,10 +12,12 @@ import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceReferenceGuard;
 import ai.labs.eddi.configs.rag.model.VectorSpace;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseInspector;
 import ai.labs.eddi.modules.ingestion.KnowledgeBaseReembedService;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.modules.ingestion.files.IngestedFileService;
+import ai.labs.eddi.modules.rag.OperatorFailureException;
 import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.RagIngestionService;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
@@ -237,6 +239,72 @@ class RestRagIngestionInspectionTest {
                 .thenReturn(new KnowledgeBaseReembedService.Result(SOURCE_ID, List.of(), List.of()));
 
         assertEquals(409, rest.reembed(KB_ID, 1).getStatus());
+    }
+
+    @Test
+    @DisplayName("an older version is refused: agents use the latest, and the record would describe the wrong model")
+    void reembedOfAnOlderVersionIsRefused() throws Exception {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(restRagStore.getCurrentResourceId(KB_ID)).thenReturn(new IResourceStore.IResourceId() {
+            @Override
+            public String getId() {
+                return KB_ID;
+            }
+
+            @Override
+            public Integer getVersion() {
+                return 4;
+            }
+        });
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(409, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals("NOT_LATEST_VERSION", body.get("code"));
+        assertEquals(4, body.get("latestVersion"));
+        verify(service, never()).reembed(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a refusal to re-embed (shared chunks, shared table size) is a 409 with its code and the knowledge bases involved")
+    void reembedRefusalsAreConflicts() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenThrow(new KnowledgeBaseReembedService.ReembedRefusedException(
+                KnowledgeBaseReembedService.CODE_SHARED_CHUNKS, "kb2 keeps the same chunks", List.of("kb2")));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(409, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals("SHARED_CHUNKS", body.get("code"));
+        assertEquals(List.of("kb2"), body.get("knowledgeBases"));
+    }
+
+    @Test
+    @DisplayName("an unresolved variable is a retryable 409 with its own code, not a 5xx")
+    void reembedUnresolvedVariable() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenThrow(new OperatorFailureException("variable not resolved"));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(409, response.getStatus());
+        assertEquals("EMBEDDING_SETTINGS_UNRESOLVED", ((Map<?, ?>) response.getEntity()).get("code"));
+    }
+
+    @Test
+    @DisplayName("an IllegalArgumentException that quotes its input is not echoed to the caller")
+    void badRequestsDoNotEchoInput() {
+        when(restRagStore.readRag(eq(KB_ID), anyInt())).thenThrow(new IllegalArgumentException("http://user:pw@host/?token=1"));
+
+        Response response = rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null));
+
+        assertEquals(400, response.getStatus());
+        assertFalse(String.valueOf(((Map<?, ?>) response.getEntity()).get("error")).contains("user:pw"));
     }
 
     @Test
