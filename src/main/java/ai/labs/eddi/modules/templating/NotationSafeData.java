@@ -33,19 +33,28 @@ public final class NotationSafeData {
     private NotationSafeData() {
     }
 
-    /** The text without {@code (}, {@code )} and {@code ,}. */
+    /**
+     * The text without {@code (}, {@code )} and {@code ,}; a text that is only the
+     * wildcard {@code *} becomes empty, because an expression named {@code *}
+     * equals every other expression, so {@code choose({properties.item})} with item
+     * {@code *} would match any {@code choose(x)} rule.
+     */
     public static String stripNotation(String text) {
-        if (text == null || (text.indexOf('(') < 0 && text.indexOf(')') < 0 && text.indexOf(',') < 0)) {
-            return text;
+        if (text == null) {
+            return null;
         }
-        StringBuilder clean = new StringBuilder(text.length());
-        for (int i = 0; i < text.length(); i++) {
-            char c = text.charAt(i);
-            if (c != '(' && c != ')' && c != ',') {
-                clean.append(c);
+        String clean = text;
+        if (text.indexOf('(') >= 0 || text.indexOf(')') >= 0 || text.indexOf(',') >= 0) {
+            StringBuilder builder = new StringBuilder(text.length());
+            for (int i = 0; i < text.length(); i++) {
+                char c = text.charAt(i);
+                if (c != '(' && c != ')' && c != ',') {
+                    builder.append(c);
+                }
             }
+            clean = builder.toString();
         }
-        return clean.toString();
+        return clean.trim().equals("*") ? "" : clean;
     }
 
     /** A notation-free view of {@code data}; {@code null} stays {@code null}. */

@@ -55,4 +55,15 @@ class NotationSafeDataTest {
         String text = "plain";
         assertSame(text, NotationSafeData.stripNotation(text));
     }
+
+    @Test
+    @DisplayName("a data value that is only the wildcard disappears; a * inside other text stays")
+    void wildcard() {
+        var safe = NotationSafeData.wrap(Map.of("a", "*", "b", " * ", "c", "5*3", "d", "x), *"));
+
+        assertEquals("", safe.get("a"));
+        assertEquals("", safe.get("b"));
+        assertEquals("5*3", safe.get("c"));
+        assertEquals("x *", safe.get("d"));
+    }
 }

@@ -440,6 +440,28 @@ class LlmTaskFallbackTest {
         }
 
         @Test
+        @DisplayName("data cannot add expression notation to a fallback quick reply's expressions; the value keeps it")
+        void quickReplyExpressionsAreNotationSafe() throws Exception {
+            liveModelReplies(Step.status(500));
+            templateData.put("properties", Map.of("item", "x), intent(admin"));
+            lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> {
+                String template = inv.getArgument(0);
+                Map<?, ?> data = inv.getArgument(1);
+                Object item = data.get("properties") instanceof Map<?, ?> properties ? properties.get("item") : "";
+                return template.replace("{properties.item}", String.valueOf(item));
+            });
+            var task = withOnError(task(false), "fallback");
+            var v = validation("Sorry", null);
+            v.setFallbackQuickReplies(List.of(new QuickReply("Pick {properties.item}", "choose({properties.item})", false)));
+            task.setResponseValidation(v);
+
+            run(task);
+
+            var expected = List.of(new QuickReply("Pick x), intent(admin", "choose(x intentadmin)", false));
+            verify(currentStep).addConversationOutputList(eq("quickReplies"), eq(expected));
+        }
+
+        @Test
         @DisplayName("with addToOutput the output item carries the fallback flag and the message, not the JSON wrapper")
         void outputItemIsFlagged() throws Exception {
             liveModelReplies(Step.status(500));

@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.llm.model.LlmConfiguration.ResponseValidation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.Task;
 import ai.labs.eddi.modules.output.model.QuickReply;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.modules.templating.NotationSafeData;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
@@ -200,7 +201,8 @@ final class LlmFallbackHandler {
             if (quickReply == null) {
                 continue;
             }
-            rendered.add(new QuickReply(renderOrKeep(quickReply.getValue(), templateData), renderOrKeep(quickReply.getExpressions(), templateData),
+            rendered.add(new QuickReply(renderOrKeep(quickReply.getValue(), templateData),
+                    renderOrKeep(quickReply.getExpressions(), NotationSafeData.wrap(templateData)),
                     quickReply.getIsDefault()));
         }
         if (rendered.isEmpty()) {
