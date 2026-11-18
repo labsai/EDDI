@@ -964,9 +964,21 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         // The failure names secrets (never values) and the agent's grant situation, so
         // it goes only to someone who may edit, and so deploy, the agent. The endpoint
         // itself needs only USE on the agent (checked above).
-        if ("detailed".equalsIgnoreCase(format) && deployed != null && deployed.getDeploymentStatus() == ERROR
-                && deployed.getDeploymentFailure() != null && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
-            body.put("failure", deployed.getDeploymentFailure());
+        if (deployed != null && deployed.getDeploymentStatus() == ERROR && deployed.getDeploymentFailure() != null) {
+            DeploymentFailure failure = deployed.getDeploymentFailure();
+            if ("detailed".equalsIgnoreCase(format) && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
+                body.put("failure", failure);
+            } else {
+                // Everyone who may use the agent learns why it is not ready: the reason
+                // code and its fixed message. Secret names and the grant fix stay behind
+                // format=detailed for those who may edit it.
+                // A grant failure's own message names the secrets, so it is replaced.
+                String message = failure.isGrantMissing()
+                        ? "This agent names a vault secret it has not been granted. Someone who may edit the agent can see which "
+                                + "(deployment status with format=detailed)."
+                        : failure.message();
+                body.put("failure", new DeploymentFailure(failure.code(), message, null, null));
+            }
         }
         return Response.ok(body, MediaType.APPLICATION_JSON).build();
     }

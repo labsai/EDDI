@@ -465,7 +465,7 @@ Deployment status of an Agent REST API Endpoint
 | {environment} | (`Path parameter`):`String` deployment environment: `production` (default) or `test`             |
 | {agentId}     | (`Path parameter`):`String` id of the agent that you wish to **check** its **deployment status**. |
 | `version`     | (`Query parameter`, **required**):`Integer` the agent version to check.                          |
-| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated), or `?format=detailed` to add a `failure` object (code, message, and for a missing vault grant the fix) for a deployment in `ERROR`, to a caller who may edit the agent. |
+| Response      | JSON `{"status": ...}`, where `status` is one of `NOT_FOUND`, `IN_PROGRESS`, `ERROR` and `READY`. Add `?format=text` for the bare status word as plain text (deprecated), or `?format=detailed` to add the full `failure` object (code, message, and for a missing vault grant the secrets and the fix) for a deployment in `ERROR`, to a caller who may edit the agent. A deployment in `ERROR` carries `failure: {code, message}` **by default** for everyone who may use the agent: `code` is `VAULT_GRANT_MISSING`, `STEP_TYPE_UNKNOWN` (a workflow step this server does not have), `CONFIG_INVALID` (a configuration refused to configure), `REFERENCE_MISSING` (a referenced workflow or configuration was deleted) or `DEPLOYMENT_FAILED`, and `message` is fixed text per code — never the exception's text, which can hold values from the configuration. The reason is kept in memory with the deployment, so it is gone after a restart (the startup redeploy recomputes it). Every failed deployment is counted in `eddi.deployment.failed{reason=<code>}`. |
 
 ### Example*:*
 
@@ -545,6 +545,13 @@ DELETE /agentstore/agents/5aaf98e19f7dd421ac3c7de9?version=1
 DELETE /agentstore/agents/5aaf98e19f7dd421ac3c7de9?version=1&permanent=true
 → 200 OK (permanently removed)
 ```
+
+### Delete guards (409)
+
+Two guards stop a delete from breaking something that is still running; both answer `409 Conflict` with a JSON body and delete nothing.
+
+- **An agent that is deployed and has open conversations** is not deleted (`code: AGENT_HAS_OPEN_CONVERSATIONS`, with the open count per version) — the guard `undeploy` already has. Repeat the request with `endAllActiveConversations=true` to end them first and delete the agent. MCP `delete_agent` takes the same argument.
+- **A workflow an agent still lists, or a configuration (LLM, behavior, httpcalls, mcpcalls, output, property, dictionary, rag, parser) a workflow still uses** is not deleted (`code: RESOURCE_IN_USE`). The body is `{"error", "code", "resource": {type, id, version}, "usedBy": [{type, id, name, version}], "usedByCount", "override": "force=true"}`; `usedBy` names up to 10 users the caller may see, `usedByCount` counts all. A soft delete looks at the version addressed, `permanent=true` at every version. Repeat with `?force=true` to delete anyway (MCP `delete_resource` takes `force`). A cascade delete of an agent or workflow removes what it references together and is not refused.
 
 ### Cascade Delete
 
