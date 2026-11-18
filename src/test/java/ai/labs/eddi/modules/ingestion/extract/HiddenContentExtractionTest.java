@@ -249,6 +249,39 @@ class HiddenContentExtractionTest {
         }
 
         @Test
+        @DisplayName("a hand-hidden row outside the autofilter's range is dropped, one inside it is kept")
+        void onlyRowsInsideTheFilterRangeAreKept() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                        <row r="2" hidden="1"><c r="A2" t="s"><v>1</v></c></row>
+                        <row r="9" hidden="1"><c r="A9" t="s"><v>3</v></c></row>
+                      </sheetData>
+                      <autoFilter ref="A1:A3"/>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("FILTERED-OUT-ROW"), text);
+            assertFalse(text.contains("HAND-HIDDEN-ROW"), text);
+        }
+
+        @Test
+        @DisplayName("a row that is grouped and explicitly hidden counts as grouped, and is kept")
+        void groupedAndHiddenIsKept() {
+            String text = extractor.extract(sheetOnly("""
+                    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+                      <sheetData>
+                        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+                        <row r="2" hidden="1" outlineLevel="2"><c r="A2" t="s"><v>2</v></c></row>
+                      </sheetData>
+                    </worksheet>
+                    """), VISIBLE_ONLY);
+
+            assertTrue(text.contains("GROUPED-ROW"), text);
+        }
+
+        @Test
         @DisplayName("rows collapsed by grouping are kept; a row hidden by hand, with no filter and no group, is dropped")
         void groupedRowsAreKept() {
             String text = extractor.extract(sheetOnly("""

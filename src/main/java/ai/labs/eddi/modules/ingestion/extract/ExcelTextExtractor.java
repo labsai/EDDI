@@ -16,6 +16,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -189,8 +190,13 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         // recognised by the sheet's autoFilter element, which follows the data, and a
         // group's by outlineLevel). So hidden rows are kept until the sheet is read.
         boolean rowHidden = false;
-        boolean filtered = false;
-        List<Boolean> droppableRows = new ArrayList<>();
+        int rowNumber = -1;
+        // The rows an autoFilter covers (1-based, inclusive), once its element is read.
+        int filterFrom = -1;
+        int filterTo = -1;
+        // Per kept row: its row number when it is hidden by hand (a candidate to drop),
+        // else -1.
+        List<Integer> handHiddenRows = new ArrayList<>();
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(sheetXml)) {
             XMLStreamReader xml = reader.reader();
@@ -204,8 +210,15 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                                         limits.maxColumnsPerSheet());
                             }
                         }
-                        case "row" -> rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml);
-                        case "autoFilter" -> filtered = true;
+                        case "row" -> {
+                            rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml);
+                            rowNumber = intOr(OpenXmlPackage.attribute(xml, "r"), -1);
+                        }
+                        case "autoFilter" -> {
+                            int[] range = rowRange(OpenXmlPackage.attribute(xml, "ref"));
+                            filterFrom = range[0];
+                            filterTo = range[1];
+                        }
                         case "c" -> {
                             cellType = OpenXmlPackage.attribute(xml, "t");
                             column = columnOf(OpenXmlPackage.attribute(xml, "r"));
@@ -224,7 +237,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                     } else if ("row".equals(xml.getLocalName())) {
                         if (row.stream().anyMatch(value -> !value.isEmpty())) {
                             rows.add(List.copyOf(row));
-                            droppableRows.add(rowHidden);
+                            handHiddenRows.add(rowHidden ? rowNumber : -1);
                         }
                         row = new ArrayList<>();
                     }
@@ -233,14 +246,43 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         } catch (XMLStreamException e) {
             throw new UnreadableDocumentException("A sheet in this workbook could not be read.", e);
         }
-        if (!filtered) {
-            for (int i = rows.size() - 1; i >= 0; i--) {
-                if (droppableRows.get(i)) {
-                    rows.remove(i);
-                }
+        // A hidden row is kept when a filter can be the reason: it lies inside the
+        // autoFilter's range. A row hidden by hand outside any filter is dropped. (A
+        // row
+        // that is both grouped and explicitly hidden counts as grouped, and is kept.)
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            int hiddenRow = handHiddenRows.get(i);
+            boolean insideFilter = filterFrom > 0 && hiddenRow >= filterFrom && hiddenRow <= filterTo;
+            if (hiddenRow >= 0 && !insideFilter) {
+                rows.remove(i);
             }
         }
         return rows;
+    }
+
+    private static int intOr(String value, int fallback) {
+        try {
+            return value == null ? fallback : Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * {@code A1:C10} as {@code [1, 10]}; {@code [-1, -1]} when it cannot be read —
+     * then no row counts as filtered.
+     */
+    private static int[] rowRange(String ref) {
+        if (ref == null) {
+            return new int[]{-1, -1};
+        }
+        Matcher matcher = Pattern.compile("[A-Za-z]{1,3}(\\d{1,9})(?::[A-Za-z]{1,3}(\\d{1,9}))?").matcher(ref.trim());
+        if (!matcher.matches()) {
+            return new int[]{-1, -1};
+        }
+        int from = Integer.parseInt(matcher.group(1));
+        int to = matcher.group(2) == null ? from : Integer.parseInt(matcher.group(2));
+        return new int[]{Math.min(from, to), Math.max(from, to)};
     }
 
     /** A row or column in an outline group: collapsed, not hidden by its author. */
