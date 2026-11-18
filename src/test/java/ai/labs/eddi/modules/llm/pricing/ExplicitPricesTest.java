@@ -57,7 +57,11 @@ class ExplicitPricesTest {
     }
 
     private static Map<String, Object> usage(String type, String model) {
-        return ToolContextBudget.tokenUsageMap(UsageNormalizer.normalize(new TokenUsage(1_000_000, 1_000_000), type, null, model, CATALOG, true));
+        return usage(type, model, CATALOG);
+    }
+
+    private static Map<String, Object> usage(String type, String model, PriceCatalogSnapshot catalog) {
+        return ToolContextBudget.tokenUsageMap(UsageNormalizer.normalize(new TokenUsage(1_000_000, 1_000_000), type, null, model, catalog, true));
     }
 
     @Test
@@ -68,8 +72,11 @@ class ExplicitPricesTest {
         assertTrue(ExplicitPrices.zeroPriceWarnings(task("ollama", 0.0, 0.0)).isEmpty());
         assertTrue(ExplicitPrices.zeroPriceWarnings(task("jlama", 0.0, 0.0)).isEmpty());
         assertTrue(ExplicitPrices.zeroPriceWarnings(task("openai-compatible", 0.0, 0.0)).isEmpty());
-        // a real price, or none at all, is not a zero
-        assertTrue(ExplicitPrices.zeroPriceWarnings(task("openai", 1.0, 0.0)).isEmpty());
+        // a partial zero hides half of the spend: warned about too
+        assertEquals(1, ExplicitPrices.zeroPriceWarnings(task("openai", 0.0, 10.0)).size());
+        assertEquals(1, ExplicitPrices.zeroPriceWarnings(task("openai", 1.0, 0.0)).size());
+        // real prices, or none at all, are not a zero
+        assertTrue(ExplicitPrices.zeroPriceWarnings(task("openai", 1.0, 2.0)).isEmpty());
         assertTrue(ExplicitPrices.zeroPriceWarnings(task("openai", null, null)).isEmpty());
     }
 
@@ -129,6 +136,27 @@ class ExplicitPricesTest {
         ExplicitPrices.setCatalogFloor(true);
         PricedSpend on = ModelPriceResolver.price(zero, usage("openai", "gpt-4o"), CATALOG);
         assertEquals(2.5 + 10.0, on.usd(), 1e-9);
+    }
+
+    @Test
+    @DisplayName("the provider tag comes from the known provider types, anything else is 'other'")
+    void providerTagIsAllowListed() {
+        ModelPriceResolver.price(PriceOverride.of(0.0, 0.0), Map.of("inputTokens", 5L, "outputTokens", 5L, "pricingModel", "made-up-{x}/m"), CATALOG);
+        ModelPriceResolver.price(PriceOverride.of(0.0, 0.0), Map.of("inputTokens", 5L, "outputTokens", 5L, "pricingModel", "xai/grok"), CATALOG);
+
+        assertEquals(1.0, registry.counter(ExplicitPrices.ZERO_PRICED_CALLS, "provider", "other").count());
+        assertEquals(1.0, registry.counter(ExplicitPrices.ZERO_PRICED_CALLS, "provider", "xai").count());
+    }
+
+    @Test
+    @DisplayName("the catalog floor does not apply to a local provider")
+    void floorSkipsLocalProviders() {
+        var local = PriceCatalogSnapshot.of(
+                new ModelPriceCatalog(1, UnpricedPolicy.ALLOW, null, null, List.of(ModelPriceEntry.of("ollama", "*", 1.0, 1.0))),
+                UnpricedPolicy.ALLOW);
+        ExplicitPrices.setCatalogFloor(true);
+        var spend = ModelPriceResolver.price(PriceOverride.of(0.0, 0.0), usage("ollama", "llama3", local), local);
+        assertEquals(0.0, spend.usd(), 1e-12);
     }
 
     @Test

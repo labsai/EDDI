@@ -604,7 +604,7 @@ eddi_llm_request_duration_seconds           # Provider call latency (timer); tag
 eddi_llm_tokens_total                       # Tokens consumed; tags: provider, model, type (input|output|cache_read|cache_write|reasoning) — cache_* are subsets of input, reasoning of output
 eddi_llm_cost_usd_total                     # Priced LLM spend in USD per model phase; tags: provider, model, source (task|catalog|mixed|unpriced)
 eddi_llm_calls_unpriced_total               # Model calls with no price ($0); tags: provider, model, site (llm_task|group_system|…)
-eddi_llm_pricing_explicit_zero_calls_total  # Calls priced at an explicit 0 on a hosted (non-local) provider; tag: provider. Their spend is invisible to budgets
+eddi_llm_pricing_explicit_zero_calls_total  # Calls priced at an explicit 0 on a hosted (non-local) provider; tag: provider (a known provider type, else `other`). A partial zero counts too. Their spend is invisible to budgets
 eddi_llm_pricing_refused_total              # Calls refused by the strict unpriced policy; tags: site, reason (the policy)
 eddi_llm_price_catalog_entries              # Entries in the deployment price catalog (gauge)
 eddi_llm_price_catalog_oldest_asof_days     # Age of the oldest asOf in the catalog (gauge)

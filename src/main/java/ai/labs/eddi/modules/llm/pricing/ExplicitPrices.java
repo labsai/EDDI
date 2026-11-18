@@ -4,14 +4,15 @@
  */
 package ai.labs.eddi.modules.llm.pricing;
 
+import ai.labs.eddi.modules.llm.impl.builder.OpenAiCompatibleProviders;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import io.micrometer.core.instrument.Metrics;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Set;
-import java.util.regex.Pattern;
 
 /**
  * What an explicit {@code 0} price on a configuration means, and what to do
@@ -39,7 +40,19 @@ public final class ExplicitPrices {
      */
     private static final Set<String> LOCAL_PROVIDERS = Set.of("ollama", "jlama", "openai-compatible");
 
-    private static final Pattern SAFE_TAG = Pattern.compile("[a-z0-9._-]{1,40}");
+    /**
+     * The provider types a {@code provider} tag may carry — the built-in types and
+     * the named OpenAI-compatible presets; anything else is tagged {@code other},
+     * so a typo or a template in a config cannot grow the metric's cardinality.
+     */
+    private static final Set<String> KNOWN_PROVIDERS = knownProviders();
+
+    private static Set<String> knownProviders() {
+        Set<String> known = new HashSet<>(List.of("openai", "huggingface", "anthropic", "gemini-vertex", "gemini", "ollama", "jlama", "mistral",
+                "azure-openai", "bedrock", "oracle-genai", "openai-compatible"));
+        OpenAiCompatibleProviders.all().forEach(provider -> known.add(provider.id()));
+        return Set.copyOf(known);
+    }
 
     /** {@code eddi.llm.pricing.catalog-floor}; published by its config bean. */
     private static volatile boolean catalogFloor = false;
@@ -65,14 +78,17 @@ public final class ExplicitPrices {
     }
 
     /**
-     * Whether the prices set are an explicit zero: at least one is set, and every
-     * price that is set is 0.
+     * Whether a price that is set is an explicit zero — the input, the output or
+     * both. A partial zero ({@code input: 0, output: 10}) hides half of the spend
+     * the same way.
      */
     public static boolean isExplicitZero(Double input, Double output) {
-        if (input == null && output == null) {
-            return false;
-        }
-        return (input == null || input == 0.0) && (output == null || output == 0.0);
+        return (input != null && input == 0.0) || (output != null && output == 0.0);
+    }
+
+    /** The provider type of a usage's {@code "<type>/<model>"} key, or null. */
+    static String providerOf(Object pricingModel) {
+        return pricingModel instanceof String key && key.indexOf('/') > 0 ? key.substring(0, key.indexOf('/')) : null;
     }
 
     /**
@@ -84,14 +100,12 @@ public final class ExplicitPrices {
         if (override == null || !isExplicitZero(override.inputPer1M(), override.outputPer1M())) {
             return;
         }
-        String type = null;
-        if (pricingModel instanceof String key && key.indexOf('/') > 0) {
-            type = key.substring(0, key.indexOf('/'));
-        }
+        String type = providerOf(pricingModel);
         if (isLocal(type)) {
             return;
         }
-        String tag = type != null && SAFE_TAG.matcher(type.toLowerCase(Locale.ROOT)).matches() ? type.toLowerCase(Locale.ROOT) : "unknown";
+        String lower = type != null ? type.toLowerCase(Locale.ROOT) : null;
+        String tag = lower != null && KNOWN_PROVIDERS.contains(lower) ? lower : "other";
         Metrics.counter(ZERO_PRICED_CALLS, "provider", tag).increment();
     }
 
@@ -129,7 +143,7 @@ public final class ExplicitPrices {
 
     private static void note(String what, String type, Double input, Double output, List<String> warnings) {
         if (isExplicitZero(input, output) && type != null && !type.contains("{") && !isLocal(type)) {
-            warnings.add("the " + what + " (provider '" + type + "') is priced at an explicit 0: cost ceilings, tenant budgets and "
+            warnings.add("the " + what + " (provider '" + type + "') has an explicit 0 price (input or output): cost ceilings, tenant budgets and "
                     + "unpricedPolicy do not see its spend. Fine for a model that is free; otherwise remove the price (the catalog then prices "
                     + "it) or set eddi.llm.pricing.catalog-floor=true to keep configurations from pricing below the catalog");
         }

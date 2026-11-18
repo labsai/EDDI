@@ -36,8 +36,11 @@ That stays allowed, but it is made visible and can be forbidden:
 - **Forbidden, if you want.** `eddi.llm.pricing.catalog-floor=true` makes the
   catalog a floor: a configured price for a model the catalog knows is raised to the
   catalog's (a higher configured price stays; a model the catalog does not know
-  keeps what the config says). Only the base and cache prices are floored, not a
-  config's own long-context tier. Default `false`, today's behaviour.
+  keeps what the config says). The base, cache and long-context prices are all
+  floored; a local or self-hosted provider (`ollama`, `jlama`, `openai-compatible`)
+  is never floored, so a free model stays free. Default `false`, today's behaviour.
+- A **partial** zero (`inputPricePer1M: 0, outputPricePer1M: 10`) hides half of the
+  spend and is warned about and counted like a full one.
 
 ## Price resolution
 
