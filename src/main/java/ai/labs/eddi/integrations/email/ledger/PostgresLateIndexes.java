@@ -88,6 +88,18 @@ final class PostgresLateIndexes {
         }
     }
 
+    /**
+     * Whether a relation (table or index) of that name exists in the search path.
+     */
+    static boolean exists(Connection conn, String relation) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT to_regclass(?) IS NOT NULL")) {
+            ps.setString(1, relation);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() && rs.getBoolean(1);
+            }
+        }
+    }
+
     /** {@code pg_index.indisvalid} of an index, or null when it does not exist. */
     static Boolean isValid(Connection conn, String indexName) throws SQLException {
         try (PreparedStatement ps = conn.prepareStatement("SELECT i.indisvalid FROM pg_index i WHERE i.indexrelid = to_regclass(?)")) {

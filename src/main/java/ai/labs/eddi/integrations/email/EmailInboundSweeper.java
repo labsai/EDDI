@@ -169,17 +169,23 @@ public class EmailInboundSweeper {
         // A fresh read, never the directory's last-good fallback: a stale list could
         // still name an owner an editor removed. A failed read sends nothing this
         // tick (the next one retries; nothing was claimed).
-        for (EmailIntegration integration : directory.scan()) {
-            EmailChannelSettings settings = integration.settings();
-            if (settings == null || !settings.dailyOwnerDigest()) {
+        for (EmailIntegration listed : directory.scan()) {
+            if (listed.settings() == null || !listed.settings().dailyOwnerDigest()) {
                 continue;
             }
             try {
+                // Read again right before this integration's send: earlier sends in the
+                // loop take time, and an owner removed meanwhile must not be mailed.
+                EmailIntegration integration = directory.find(listed.id()).orElse(null);
+                EmailChannelSettings settings = integration == null ? null : integration.settings();
+                if (settings == null || !settings.dailyOwnerDigest()) {
+                    continue;
+                }
                 if (ownerNotifier.sendDigestIfDue(integration.id(), integration.configuration().getName(), settings, now)) {
                     sent++;
                 }
             } catch (RuntimeException e) {
-                LOGGER.warnf("Email integration %s: its daily digest failed: %s", sanitize(integration.id()), e.getMessage());
+                LOGGER.warnf("Email integration %s: its daily digest failed: %s", sanitize(listed.id()), e.getMessage());
             }
         }
         return sent;

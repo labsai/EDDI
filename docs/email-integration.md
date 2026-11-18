@@ -384,7 +384,11 @@ the rows (none shows a subject or a body, since the ledger stores neither):
 - **The daily digest** (`ownerDigest: daily`): from 00:05 UTC, one mail per day to the `ownerNotifyAddresses` that
   pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
   (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
-  subjects or bodies. A day without mail sends nothing. It needs the [system mailer](hitl.md#email-notifications),
+  subjects or bodies. A day without mail sends nothing, and so does a day whose only mail was refused as a loop
+  (`refused:loop`: auto-replies, bounces, mail from EDDI itself — still visible in the mail log); otherwise such
+  mail, the digest included, would trigger the next day's digest. It counts the rows still in the ledger when it is
+  sent: with an `eddi.email.ledger-retention` near one day, the earliest rows of the day may have expired by then,
+  so keep the retention well above 24 hours for complete counts. It needs the [system mailer](hitl.md#email-notifications),
   and the inbound sweep sends it, so no extra schedule is involved. It is sent at most once: one node claims the day
   before counting, so a count or relay failure loses that day's digest rather than risking two. With no owner address
   inside the allowed domains nothing is claimed, so the digest still goes out once one is added that day.
@@ -418,6 +422,13 @@ folders are not) or have arrived before the integration existed. Check the mailb
 [Operations](#operations) logs.
 
 ## Operations
+
+**Upgrading on PostgreSQL.** The mail log's index (`idx_email_ledger_integration_created`) is built in the background
+with `CREATE INDEX CONCURRENTLY` the first time the ledger is used, so an upgrade never blocks mail processing on a
+large ledger. Until it exists, listing an integration's mail log scans the table. A failed build is retried after
+30 seconds, 2 minutes and 10 minutes, then logged as a WARN and tried again on the next restart; an index an
+interrupted build left invalid is dropped and rebuilt. To build it ahead of an upgrade instead:
+`CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_email_ledger_integration_created ON email_message_ledger (integration_id, created_at DESC, id COLLATE "C" DESC);`
 
 | Property | Default | |
 |---|---|---|

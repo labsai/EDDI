@@ -9,9 +9,14 @@ Phase 2 of the email channel v2 plan: before EDDI starts ignoring mail it was no
 
 - `IEmailMessageLedger` gains `findByIntegration(integrationId, LedgerQuery)` — one integration's rows, newest first,
   keyset-paginated on `(createdAt desc, id desc)` with an opaque cursor — and `countInboundByOutcome(integrationId,
-  since, until)`. Both twins: MongoDB (index `idx_email_ledger_integration_created`) and PostgreSQL (`CREATE INDEX IF
-  NOT EXISTS idx_email_ledger_integration_created`, ids compared `COLLATE "C"` so ties order byte-wise as in MongoDB);
-  the in-memory fake follows them. New `EmailLedgerLogContract`, run by both ledger ITs and by
+  since, until)`. Both twins: MongoDB (index `idx_email_ledger_integration_created`) and PostgreSQL (ids compared
+  `COLLATE "C"` so ties order byte-wise as in MongoDB); the in-memory fake follows them. On PostgreSQL the new index
+  is built **`CREATE INDEX CONCURRENTLY` in the background** (new `PostgresLateIndexes`, the procedure of
+  `PostgresAuditStore`'s late indexes): a session advisory lock so replicas do not build it twice, an INVALID index
+  from an interrupted build dropped and rebuilt, retries after 30 s, 2 min and 10 min, then a WARN and a retry on the
+  next restart. Ledger writes never wait on it; until it exists the mail-log query scans. Schema initialisation runs
+  only the DDL whose table or index is missing, so a second replica never queues a plain `CREATE INDEX IF NOT EXISTS`
+  (which asks for a SHARE lock first) behind the concurrent build. New `EmailLedgerLogContract`, run by both ledger ITs and by
   `InMemoryEmailLedgerLogTest` (so the fake cannot drift), covers ordering, paging over equal timestamps, every
   filter, the literal reason prefix and the outcome counts.
 - Signature marker rows (`lastError = signature_seen`, written by the replay guard of the open inbound hardening PR)

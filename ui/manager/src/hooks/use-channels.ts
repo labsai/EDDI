@@ -39,6 +39,10 @@ export function useChannelCurrentVersion(id: string, enabled = true) {
     queryKey: [...CHANNELS_KEY, id, "currentversion"],
     queryFn: () => getChannelCurrentVersion(id),
     enabled: enabled && !!id,
+    // Always this navigation's answer, never a cached one: another editor may
+    // have saved a newer version since.
+    staleTime: 0,
+    gcTime: 0,
     retry: false,
   });
 }

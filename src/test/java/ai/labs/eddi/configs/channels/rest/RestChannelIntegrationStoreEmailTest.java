@@ -242,6 +242,9 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, "sideways", null, null, null, null, null, null, null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, "LOST", null, null, null, null, null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, "yesterday", null, null, null));
+        assertThrows(BadRequestException.class,
+                () -> sut.readEmailLog(ID, null, null, null, null, null, "+400000000-01-01T00:00:00Z", null, null));
+        assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, "1969-12-31T23:59:59Z", null, null, null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "%%%"));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, "abc", null));
         assertThrows(BadRequestException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, "bm8tYmFy"));

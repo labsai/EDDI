@@ -133,7 +133,9 @@ interface EmailLedgerLogContract {
                 "the prefix is literal, '%' is no wildcard");
         assertEquals(Set.of(refusedLoop.id(), unauthenticated.id()),
                 ids(ledger().findByIntegration("int-1", query(null, null, null, null, T0.minusSeconds(20), T0))), "since inclusive, until exclusive");
-        Instant justAfterDone = T0.plusNanos(500);
+        // 1 ns: a value the driver would round DOWN onto the row (500 ns it rounds up
+        // anyway).
+        Instant justAfterDone = T0.plusNanos(1);
         assertEquals(Set.of(), ids(ledger().findByIntegration("int-1", query(Direction.IN, null, null, null, justAfterDone, null))),
                 "a since finer than the store's precision does not round down onto a row");
         assertEquals(Set.of(done.id()), ids(ledger().findByIntegration("int-1", query(Direction.IN, null, State.DONE, null, null, justAfterDone))),

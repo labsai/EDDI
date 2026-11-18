@@ -25,7 +25,8 @@ describe("EmailMailLog", () => {
       http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
         const query = new URL(request.url).search;
         seen.push(query);
-        return HttpResponse.json({ rows: [row(query.includes("state=") ? "filtered" : "unfiltered")], nextCursor: null });
+        const id = query.includes("state=") ? "filtered" : query.includes("reason=") ? "reason-only" : "unfiltered";
+        return HttpResponse.json({ rows: [row(id)], nextCursor: null });
       }),
     );
     renderWithProviders(<EmailMailLog channelId="ch-email" />);
@@ -39,10 +40,13 @@ describe("EmailMailLog", () => {
     await waitFor(() => expect(seen.some((q) => q.includes("state=REFUSED") && q.includes("reason=blocked"))).toBe(true));
     expect(seen[0]).not.toContain("state=");
 
-    // "All" removes the key again: the unfiltered list, from the same query key.
+    // "All" removes each key again: state first leaves a reason-only list...
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    expect(await screen.findByTestId("email-log-row-reason-only")).toBeInTheDocument();
+    // ...and clearing the reason too is the unfiltered list.
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-reason"), "");
     expect(await screen.findByTestId("email-log-row-unfiltered")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-row-reason-only")).not.toBeInTheDocument();
   });
 
   it("hides rows already loaded once the log answers 403 (edit access withdrawn)", async () => {
@@ -61,6 +65,28 @@ describe("EmailMailLog", () => {
     await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
 
     await waitFor(() => expect(screen.queryByTestId("email-log-row-kept")).not.toBeInTheDocument());
+    expect(screen.queryByTestId("email-log-lookup-input")).not.toBeInTheDocument();
+  });
+
+  it("keeps a 403 in force when the filter goes back to a list cached before it", async () => {
+    let forbidden = false;
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", () =>
+        forbidden
+          ? HttpResponse.json({ error: "forbidden" }, { status: 403 })
+          : HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "cached" }], nextCursor: null }),
+      ),
+    );
+    renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-cached")).toBeInTheDocument();
+
+    forbidden = true;
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument());
+
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    await waitFor(() => expect(screen.queryByTestId("email-log-filter-state")).toHaveValue(""));
+    expect(screen.queryByTestId("email-log-row-cached")).not.toBeInTheDocument();
   });
 
   it("loads the next page with the cursor the server returned", async () => {

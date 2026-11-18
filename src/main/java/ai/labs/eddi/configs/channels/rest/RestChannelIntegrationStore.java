@@ -485,12 +485,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (value == null || value.isBlank()) {
             return null;
         }
+        Instant instant;
         try {
-            return Instant.parse(value.trim());
+            instant = Instant.parse(value.trim());
         } catch (DateTimeParseException e) {
             throw new BadRequestException("'" + name + "' must be an ISO-8601 instant such as 2026-11-18T00:00:00Z.");
         }
+        // ISO-8601 reaches far past what a BSON date or a SQL timestamp holds; such a
+        // bound would fail in the store (a 500), not filter.
+        if (instant.isBefore(Instant.EPOCH) || instant.isAfter(LATEST_BOUND)) {
+            throw new BadRequestException("'" + name + "' must lie between 1970-01-01T00:00:00Z and 9999-12-31T23:59:59Z.");
+        }
+        return instant;
     }
+
+    private static final Instant LATEST_BOUND = Instant.parse("9999-12-31T23:59:59Z");
 
     private static IEmailMessageLedger.Cursor cursorParam(String value) {
         if (value == null || value.isBlank()) {

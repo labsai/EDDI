@@ -147,20 +147,25 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
   useEffect(() => {
     if (hash === "#mail-log") document.getElementById("mail-log")?.scrollIntoView?.({ block: "start" });
   }, [hash, locationKey]);
-  // Edit access withdrawn while the page is open: the refetch is a 403, and the
-  // rows loaded before it must not stay on screen. Other failures (network, a
-  // failed next page) keep what is already shown.
-  const forbidden = isApiError(log.error) && log.error.status === 403;
+  // Edit access withdrawn while the page is open: a 403 on ANY of the log's
+  // queries hides every row and the lookup until a later successful read confirms
+  // access again (a cached list under another filter is not that). Other
+  // failures (network, a failed next page) keep what is already shown.
+  const [deniedAt, setDeniedAt] = useState<number | null>(null);
+  useEffect(() => {
+    if (isApiError(log.error) && log.error.status === 403) setDeniedAt(log.errorUpdatedAt);
+  }, [log.error, log.errorUpdatedAt]);
+  const forbidden = deniedAt !== null && !(log.isSuccess && !log.isError && log.dataUpdatedAt > deniedAt);
 
   return (
     <div className="space-y-4" data-testid="email-mail-log">
       <p className="text-xs text-muted-foreground">
         {t(
           "emailLog.description",
-          "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. Subjects and bodies are never stored.",
+          "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. The mail log does not store subjects or bodies.",
         )}
       </p>
-      <MessageIdLookup key={channelId} channelId={channelId} />
+      {!forbidden && <MessageIdLookup key={channelId} channelId={channelId} />}
       <div className="flex flex-wrap gap-2">
         <label className="sr-only" htmlFor={`${uid}-direction`}>{t("emailLog.colDirection", "Direction")}</label>
         <select id={`${uid}-direction`} className={selectClass} data-testid="email-log-filter-direction" value={filters.direction ?? ""} onChange={(e) => setFilter("direction", e.target.value)}>

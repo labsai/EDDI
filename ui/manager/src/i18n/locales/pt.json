@@ -5670,7 +5670,7 @@
     "ownerDigest": "Resumo diário de e-mail",
     "ownerDigestOff": "Desligado",
     "ownerDigestDaily": "Diário",
-    "ownerDigestHint": "Diário: os endereços de responsáveis permitidos recebem um e-mail por dia com as contagens de e-mails recebidos no dia UTC anterior por resultado (sem endereços nem conteúdo). Só é enviado se o remetente do sistema estiver configurado, um endereço de responsável cumprir a política de domínios de destinatários e o dia anterior tiver e-mails recebidos."
+    "ownerDigestHint": "Diário: os endereços de responsáveis permitidos recebem um e-mail por dia com as contagens de e-mails recebidos no dia UTC anterior por resultado (sem endereços nem conteúdo). Só é enviado se o remetente do sistema estiver configurado, um endereço de responsável cumprir a política de domínios de destinatários e o dia anterior tiver e-mails recebidos além de recusas por ciclo."
   },
   "feedback": {
     "title": "Avaliações",
@@ -5987,7 +5987,7 @@
   },
   "emailLog": {
     "title": "Registro de e-mail",
-    "description": "Cada e-mail que esta integração recebeu ou enviou dentro do período de retenção do registo (30 dias, salvo se a implantação o alterou), e por que um e-mail não foi tratado. Assuntos e corpos nunca são armazenados.",
+    "description": "Cada e-mail que esta integração recebeu ou enviou dentro do período de retenção do registo (30 dias, salvo se a implantação o alterou), e por que um e-mail não foi tratado. O registo de e-mail não armazena assuntos nem corpos.",
     "lookupLabel": "Procurar Message-ID",
     "lookupAction": "Procurar",
     "lookupHint": "O cabeçalho Message-ID do e-mail, em \"Mostrar original\" ou \"Ver código-fonte\" do cliente de e-mail.",

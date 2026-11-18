@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionsConfig;
+import ai.labs.eddi.connections.settings.ConnectionSettingsRules;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -255,9 +256,15 @@ public class EmailOwnerNotifier {
         if (connectionsConfig == null || !connectionsConfig.isResolvable()) {
             return null;
         }
-        ConnectionsConfig config = connectionsConfig.get();
-        String base = config.getPublicBaseUrl();
-        if (base == null || base.isBlank() || config.publicBaseUrlProblem().isPresent()) {
+        // One read, validated as read: a second read for the check could see a value
+        // an admin changed in between.
+        String base = connectionsConfig.get().getPublicBaseUrl();
+        if (base == null || base.isBlank()) {
+            return null;
+        }
+        try {
+            ConnectionSettingsRules.requireBarePublicOrigin(base, ConnectionsConfig.PUBLIC_BASE_URL, ConnectionSettingsRules.isDevOrTest());
+        } catch (IllegalArgumentException e) {
             return null;
         }
         return (base.endsWith("/") ? base.substring(0, base.length() - 1) : base) + mailLogPath(integrationId);

@@ -120,9 +120,16 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             return;
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            statement.execute(CREATE_TABLE);
+            // Only what is missing: even CREATE INDEX IF NOT EXISTS asks for a SHARE lock
+            // before it finds the index, and that request queues behind another
+            // replica's concurrent late build — and ledger writes queue behind it.
+            if (!PostgresLateIndexes.exists(connection, TABLE)) {
+                statement.execute(CREATE_TABLE);
+            }
             for (String index : INDEXES) {
-                statement.execute(index);
+                if (!PostgresLateIndexes.exists(connection, indexName(index))) {
+                    statement.execute(index);
+                }
             }
             schemaInitialized = true;
         } catch (SQLException e) {
@@ -134,6 +141,15 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             indexBuildLauncher.accept(() -> PostgresLateIndexes.buildWithRetries(dataSource::getConnection, INDEX_LOCK_CLASS, LATE_INDEXES,
                     "email ledger", "Listing an integration's mail log scans its rows until then"));
         }
+    }
+
+    /**
+     * The index name in a {@code CREATE INDEX IF NOT EXISTS <name> ON ...}
+     * statement.
+     */
+    static String indexName(String createIndex) {
+        String rest = createIndex.substring(createIndex.indexOf("IF NOT EXISTS ") + "IF NOT EXISTS ".length());
+        return rest.substring(0, rest.indexOf(' '));
     }
 
     /**

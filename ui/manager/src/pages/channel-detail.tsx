@@ -248,15 +248,17 @@ export function ChannelDetailPage() {
   const hasVersion = searchParams.has("version");
   const currentVersion = useChannelCurrentVersion(id!, !hasVersion);
   useEffect(() => {
-    if (hasVersion || currentVersion.data === undefined) return;
+    if (hasVersion || !currentVersion.isFetchedAfterMount || currentVersion.isFetching || currentVersion.data === undefined) return;
     const params = new URLSearchParams(location.search);
     params.set("version", String(currentVersion.data));
     navigate({ search: params.toString(), hash: location.hash }, { replace: true });
-  }, [hasVersion, currentVersion.data, location.search, location.hash, navigate]);
+  }, [hasVersion, currentVersion.isFetchedAfterMount, currentVersion.isFetching, currentVersion.data, location.search, location.hash, navigate]);
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version, hasVersion || currentVersion.isError);
+  // Without a version nothing loads until it is resolved: a failed lookup is an
+  // error with Retry, never a silent fallback to version 1.
+  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version, hasVersion);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -435,6 +437,19 @@ export function ChannelDetailPage() {
   // through editing — trading a stuck skeleton for silent data loss. Once a draft
   // exists the form stays mounted and a refetch failure is surfaced by the banner
   // below instead.
+  if (!hasVersion && currentVersion.isError) {
+    return (
+      <div data-testid="channel-detail-error">
+        <ErrorState
+          error={currentVersion.error}
+          message={t("common.error")}
+          onRetry={() => void currentVersion.refetch()}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
+
   if (isError && !draft) {
     return (
       <div data-testid="channel-detail-error">

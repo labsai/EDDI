@@ -519,7 +519,7 @@ export function EmailPlatformFields({
               <option value="off">{t("emailChannel.ownerDigestOff", "Off")}</option>
               <option value="daily">{t("emailChannel.ownerDigestDaily", "Daily")}</option>
             </select>
-            <p className={hintClass}>{t("emailChannel.ownerDigestHint", "Daily: allowed owner addresses get one email a day with the previous UTC day's inbound mail counts by outcome (no addresses or content). Sent only if the system mailer is configured, an owner address passes the recipient domain policy, and the previous day had inbound mail.")}</p>
+            <p className={hintClass}>{t("emailChannel.ownerDigestHint", "Daily: allowed owner addresses get one email a day with the previous UTC day's inbound mail counts by outcome (no addresses or content). Sent only if the system mailer is configured, an owner address passes the recipient domain policy, and the previous day had inbound mail other than loop refusals.")}</p>
           </div>
         </div>
       </details>

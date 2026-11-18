@@ -5763,8 +5763,11 @@ export const backupSyncHandlers = [
     const sorted = MOCK_EMAIL_LOG.filter(
       (row) =>
         (!url.searchParams.get("direction") || row.direction === url.searchParams.get("direction")) &&
+        (!url.searchParams.get("kind") || row.kind === url.searchParams.get("kind")) &&
         (!url.searchParams.get("state") || row.state === url.searchParams.get("state")) &&
-        (!url.searchParams.get("reason") || (row.reason ?? "").startsWith(url.searchParams.get("reason") ?? "")),
+        (!url.searchParams.get("reason") || (row.reason ?? "").startsWith(url.searchParams.get("reason") ?? "")) &&
+        (!url.searchParams.get("since") || Date.parse(row.createdAt) >= Date.parse(url.searchParams.get("since") ?? "")) &&
+        (!url.searchParams.get("until") || Date.parse(row.createdAt) < Date.parse(url.searchParams.get("until") ?? "")),
     ).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
     const after = url.searchParams.get("after");
     const start = after ? sorted.findIndex((row) => row.id === after) + 1 : 0;

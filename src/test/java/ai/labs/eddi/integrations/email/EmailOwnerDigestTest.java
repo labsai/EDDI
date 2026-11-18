@@ -203,7 +203,10 @@ class EmailOwnerDigestTest {
 
         assertTrue(notifier.sendDigestIfDue("int1", "Invoices", EmailChannelSettings.from(pc), TODAY_0010));
 
-        verify(mailer, times(1)).send(any(), anyList());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<MailAddress>> recipients = ArgumentCaptor.forClass(List.class);
+        verify(mailer, times(1)).send(any(), recipients.capture());
+        assertEquals(List.of("ops@contoso.com"), recipients.getValue().stream().map(MailAddress::address).toList());
     }
 
     @Test
@@ -216,13 +219,17 @@ class EmailOwnerDigestTest {
         var none = new ChannelIntegrationConfiguration();
         none.setName("None");
         when(directory.scan()).thenReturn(List.of(new EmailIntegration("int-daily", daily, settings("daily")),
-                new EmailIntegration("int-none", none, settings(null))));
+                new EmailIntegration("int-none", none, settings(null)), new EmailIntegration("int-turned-off", daily, settings("daily"))));
+        when(directory.find("int-daily")).thenReturn(Optional.of(new EmailIntegration("int-daily", daily, settings("daily"))));
+        // Switched off after the scan: the fresh read right before the send wins.
+        when(directory.find("int-turned-off")).thenReturn(Optional.of(new EmailIntegration("int-turned-off", daily, settings("off"))));
         when(owner.sendDigestIfDue(eq("int-daily"), eq("Daily"), any(), eq(TODAY_0010))).thenReturn(true);
         var sweeper = new EmailInboundSweeper(ledger, mock(IConversationService.class), directory, mock(EmailPollScheduler.class), owner,
                 new SimpleMeterRegistry(), Duration.ofMinutes(30));
 
         assertEquals(1, sweeper.sendDigests(TODAY_0010));
         verify(owner, never()).sendDigestIfDue(eq("int-none"), any(), any(), any());
+        verify(owner, never()).sendDigestIfDue(eq("int-turned-off"), any(), any(), any());
         verify(directory, never()).all(); // never the last-good fallback, which may name a removed owner
     }
 
