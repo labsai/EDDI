@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="screenshots/eddi-banner.jpg" alt="EDDI: multi-agent orchestration middleware for conversational AI" />
+  <img src="screenshots/eddi-banner.jpg" alt="EDDI: the open-source AI agent management system. Run, limit, approve, record." />
 </p>
 
 # EDDI
@@ -10,20 +10,27 @@
 
 [![Docker Pulls](https://img.shields.io/docker/pulls/labsai/eddi)](https://hub.docker.com/r/labsai/eddi) [![Latest Release](https://img.shields.io/github/v/release/labsai/EDDI?label=latest&color=blue)](https://github.com/labsai/EDDI/releases) [![License](https://img.shields.io/github/license/labsai/EDDI)](LICENSE) [![Repository: AI Ready](https://img.shields.io/badge/Repository-AI_Ready-blueviolet?logo=robot)](AGENTS.md)
 
-EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. The engine runs every turn through the same pipeline, enforces those settings, and records what happened. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, ships as a Red Hat-certified container image, and was selected as a UNIDO Trusted Partner for Industrial AI.
+**The open-source AI agent management system.** Run teams of AI agents on your own infrastructure, limit what they may do, put a person in front of the decisions that matter, and keep a record of every step.
+
+EDDI (E.D.D.I, Enhanced Dialog Driven Interface) is a server you run between your users, your LLMs and your business systems. An agent is a set of versioned JSON configurations, not application code: which model it uses, its prompt, its tools and knowledge, what it remembers, and what needs a human's approval. One Docker image serves the REST API, the admin dashboard and the chat UIs. It is Apache-2.0 licensed, ships as a Red Hat-certified container image, and was selected as a UNIDO Trusted Partner for Industrial AI.
 
 [Website](https://eddi.technology/) · [Documentation](https://docs.labs.ai/) · [Quick start](#quick-start) · [Docker Hub](https://hub.docker.com/r/labsai/eddi) · [Discussions](https://github.com/labsai/EDDI/discussions)
 
 ## Why EDDI
 
-- **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without redeploying the service, diff it, export it as a ZIP, or sync it to another instance.
-- **A strict engine around a creative model.** The engine, not the model, decides which tools an agent holds, what a conversation may cost, and which turns or tool calls wait for [a human's approval](docs/hitl.md). The [project philosophy](docs/project-philosophy.md) puts it as "the engine is strict so the AI can be creative."
-- **No dynamic code execution.** There is no `eval` and no script engine; custom logic runs in external MCP servers. Secrets sit in an envelope-encrypted vault, and the built-in tools refuse private and internal addresses (SSRF protection).
-- **Open protocols, both directions.** EDDI is an [MCP](docs/mcp-server.md) server (108 tools) and client, speaks [A2A](docs/a2a-protocol.md), and can present deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md).
-- **Built for regulated deployments.** An HMAC-secured [audit ledger](docs/audit-ledger.md), GDPR/CCPA erasure and export, and deployment guides for HIPAA and the EU AI Act.
-- **Runs where you run.** One command with Docker, or Kubernetes and OpenShift; MongoDB or PostgreSQL; any number of replicas behind a load balancer with NATS JetStream.
+AI agents now take real actions, and their mistakes are expensive. EDDI is built around four things you need before you let them:
 
-EDDI is a service you deploy, not a library you import. If you want agent logic inside your own Java application, a library such as [LangChain4j](https://github.com/langchain4j/langchain4j), which EDDI itself builds on, is the closer fit. EDDI is for teams that want agents as governed, versioned configuration on shared infrastructure.
+- **Run.** Agents work alone or [as a team](docs/group-conversations.md), with any of 19 model providers or a local model, on your servers. One command with Docker, or Kubernetes and OpenShift; MongoDB or PostgreSQL.
+- **Limit.** An agent holds only the tools its configuration grants, within rate limits and cost budgets. There is no `eval` and no script engine; custom logic runs in external MCP servers. Secrets sit in an envelope-encrypted [vault](docs/secrets-vault.md).
+- **Approve.** Whole turns, single tool calls or phases of a group discussion can [wait for a person](docs/hitl.md), in the Manager, in Slack or over MCP.
+- **Record.** Every step lands in an HMAC-secured [audit ledger](docs/audit-ledger.md), with GDPR/CCPA erasure and export and deployment guides for HIPAA and the EU AI Act.
+
+Two things make that practical:
+
+- **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without redeploying the service, diff it, export it as a ZIP, or sync it to another instance.
+- **Open protocols, both directions.** EDDI is an [MCP](docs/mcp-server.md) server (108 tools) and client, speaks [A2A](docs/a2a-protocol.md), and can present deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md).
+
+EDDI is a service you deploy, not a library you import. If you want agent logic inside your own Java application, a library such as [LangChain4j](https://github.com/langchain4j/langchain4j), which EDDI itself builds on, is the closer fit. The [project philosophy](docs/project-philosophy.md) explains the design: "the engine is strict so the AI can be creative."
 
 ## Quick start
 

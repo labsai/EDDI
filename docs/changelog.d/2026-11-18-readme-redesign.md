@@ -48,6 +48,17 @@ where are the docs, how do I build it. Sections:
 Headings no longer carry emoji, so their anchors are plain (`#quick-start`,
 `#development`).
 
+### Positioning
+
+The page now calls EDDI "the open-source AI agent management system" and
+organises **Why EDDI** around four verbs: run, limit, approve, record.
+"Multi-agent orchestration middleware" described one capability; what the
+product does around an agent (grant its tools, cap its cost, gate its actions,
+keep the ledger) is management, and that is what a reader evaluating it for a
+regulated setting is looking for. `AGENTS.md`, `docs/README.md` and the
+repository description still use the older phrase; aligning them is a separate
+decision.
+
 ### Nothing was deleted, it moved
 
 | Was in `README.md` | Now in |
