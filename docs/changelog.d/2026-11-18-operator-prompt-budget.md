@@ -23,10 +23,10 @@ casually.
   `dryRun`, which stays last). True writes `cacheSystemMessages` and `cacheTools` on the generated
   LLM task for `anthropic`; every other provider is left alone (the OpenAI family caches a repeated
   prefix by itself), and a value already set is kept. The Manager sends it when it activates or
-  upgrades the operator (`provisionOperator`). An older backend ignores the field. Tests in
+  upgrades the operator (`provisionOperator`). An older backend ignores the field (the setup request is not parsed strictly). Documented beside `dryRun` in `docs/architecture.md`. Tests in
   `AgentSetupApiDryRunTest` (mutation-checked: removing the call fails them) and `operator.test.ts`.
-- **Prompt trimmed toward small pages** (`system-prompt.ts`): `read_write` 142,220 → 116,490
-  characters, `read_only` 121,915 → 96,185. Condensed to the boundary, the common symptom and a
+- **Prompt trimmed toward small pages** (`system-prompt.ts`): `read_write` 142,220 → 117,122
+  characters, `read_only` 121,915 → 96,817. Condensed to the boundary, the common symptom and a
   page pointer: the signing-key block of the role section (10 KB → new
   [`agent-signing`](../agent-signing.md) page), the per-user event stream (→ `user-events`),
   approved-result actions (→ `group-approved-result-actions`), tool-call guardrails, edit-on-approve,
@@ -54,3 +54,10 @@ Token counts are characters ÷ 4; rounds per turn and how often each topic is as
 no test grades answer quality. Not done: a heading-scoped docs read (`?section=`) on
 `/administration/docs/{name}`, which would let the large pages serve as references; trimming the
 tool definitions (`PUT`/`POST /llmstore` are about 19,000 characters each).
+
+### Next
+
+Eleven open PRs edit `system-prompt.ts` (net about +13,000 characters together, measured from their
+diffs on 2026-11-18). Each also bumps `operator-revision.json`, so each must merge `main` before it
+lands and then meets the 125,000-character budget in its own CI: expect several to move detail to a
+docs page first.

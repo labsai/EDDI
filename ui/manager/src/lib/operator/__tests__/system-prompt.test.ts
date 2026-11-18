@@ -1340,16 +1340,23 @@ describe("6.7 feature knowledge in the quick reference (no endpoint needed)", ()
       ["NOT_SENT was never sent", '"group-approved-result-actions"'],
       ["you have no tool for it", '"email-integration"'],
       ['a mail loop', '"email-integration"'],
-      ["You have no tool for either, on purpose", '"agent-signing"'],
+      ["When asked to turn signing on, or why a vote or task failed this way", '"agent-signing"'],
       ['"The vote could not run: only 0 option(s) were available"', '"agent-signing"'],
       ["eddi.user-events.enabled=false", '"user-events"'],
       ["is intent, NOT proof", '"long-jobs"'],
       ["do not promise the budget can never be exceeded", '"tenant-quotas"'],
       ["silently lacks them", '"agent-ops-tools"'],
     ] as const) {
-      expect(flat).toContain(fact);
-      expect(flat).toContain(page);
+      // The page must be named in the same passage as the fact, not merely
+      // somewhere in the docs map further down.
+      const at = flat.indexOf(fact);
+      expect(at, fact).toBeGreaterThanOrEqual(0);
+      expect(flat.slice(at, at + 1200), `${page} near "${fact}"`).toContain(page);
     }
+  });
+
+  it("still says the operator has no tool to mint or revoke a signing key", () => {
+    expect(flat).toContain("You have no tool for either, on purpose");
   });
 
   it("warns that the largest pages are read whole and prefers the dedicated ones", () => {

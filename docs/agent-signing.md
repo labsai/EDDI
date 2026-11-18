@@ -18,7 +18,7 @@ POST /agentstore/agents/{id}/signing-keys/{keyVersion}/revoke?version={current}
 
 The private key stays in the [secrets vault](secrets-vault.md). The public key is added to the agent's `identity.keys` as a new agent version, and the agent signs its group-conversation messages with the newest key at once.
 
-- **Key version 0** is the legacy `identity.publicKey`, which is removed. Generating a key keeps it, and peers trust it for v0 signatures until it is revoked.
+- **Key version 0** is the legacy unversioned `identity.publicKey`. Generating a versioned key keeps it, and peers trust it for v0 signatures until it is revoked; revoking `keyVersion` 0 removes it.
 - **Revoking** deletes the private half from the vault, best effort. It does not stop anyone holding another copy from signing, and a node that already loaded the key can keep signing audit entries with it for up to 60 seconds (longer if the vault delete failed); those entries verify as `AGENT_KEY_REVOKED`. Once no node can load it, revoking the newest key stops the agent signing until a new one is generated.
 - **A revoked key is trusted for nothing**, whenever it signed, audit entries included. A peer that verifies treats such a message as not verifying.
 - **`identity` is engine-owned.** An agent save — through the Manager, the Platform Operator, an import or a sync — keeps the stored identity whatever the body says, so editing `identity.keys` or `validUntilMs` does nothing. Only the two endpoints above change keys.
