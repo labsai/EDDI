@@ -6,34 +6,64 @@ package ai.labs.eddi.modules.nlp.expressions.utilities;
 
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
+import ai.labs.eddi.modules.nlp.model.Unknown;
 import org.jboss.logging.Logger;
 
 /**
  * Reads back the expression string a parser stored on a conversation step
- * ({@code expressions:parsed}).
+ * ({@code expressions:parsed}), and builds the bounded {@code unknown}
+ * expression that stands in for a text too long to parse.
  * <p>
  * That string is built from user text, so it can be longer than
  * {@link ExpressionLimits} allow even though the input itself was accepted. A
- * consumer must not fail the whole turn for it: an over-long stored result is
- * read as "no expressions", exactly as if the parser had understood nothing.
+ * consumer must not fail the whole turn for it, and must not read it as "the
+ * user said nothing" either (an {@code empty} rule would fire): an over-long
+ * stored result is read as the same single bounded {@code unknown} the parser
+ * itself degrades to.
  */
 public final class StoredExpressions {
     private static final Logger LOGGER = Logger.getLogger(StoredExpressions.class);
+
+    /**
+     * How much of a text a degraded or pass-through {@code unknown(...)} expression
+     * carries.
+     */
+    public static final int MAX_UNKNOWN_PAYLOAD_CHARS = 1000;
 
     private StoredExpressions() {
     }
 
     /**
-     * @return the parsed expressions, or an empty list when {@code stored} is over
-     *         an {@link ExpressionLimits} bound
+     * @return the parsed expressions, or, when {@code stored} is over an
+     *         {@link ExpressionLimits} bound, one bounded {@code unknown}
+     *         expression made from its beginning
      */
     public static Expressions parseOrEmpty(IExpressionProvider provider, String stored) {
         try {
             Expressions parsed = provider.parseExpressions(stored);
             return parsed != null ? parsed : new Expressions();
         } catch (ExpressionLimitExceededException e) {
-            LOGGER.debugf("Stored expressions are over a limit, read as none: %s", e.getMessage());
-            return new Expressions();
+            LOGGER.debugf("Stored expressions are over a limit, read as one bounded unknown: %s", e.getMessage());
+            return boundedUnknown(stored);
         }
+    }
+
+    /**
+     * One {@code unknown} expression for {@code text}: the notation characters
+     * removed, at most {@link #MAX_UNKNOWN_PAYLOAD_CHARS} characters, never cut
+     * inside a surrogate pair (a lone surrogate cannot be stored as JSON by every
+     * database).
+     */
+    public static Expressions boundedUnknown(String text) {
+        Expressions expressions = new Expressions();
+        if (text == null) {
+            return expressions;
+        }
+        int end = Math.min(text.length(), MAX_UNKNOWN_PAYLOAD_CHARS);
+        if (end < text.length() && end > 0 && Character.isHighSurrogate(text.charAt(end - 1))) {
+            end--;
+        }
+        expressions.addAll(new Unknown(text.substring(0, end)).getExpressions());
+        return expressions;
     }
 }

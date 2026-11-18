@@ -19,7 +19,6 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.Data;
-import ai.labs.eddi.modules.nlp.model.Unknown;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import ai.labs.eddi.modules.nlp.bootstrap.ParserCorrectionExtensions;
@@ -95,13 +94,6 @@ public class InputParserTask implements ILifecycleTask {
     private static final String CONFIG_SEMANTIC_FALLBACK = "semanticFallback";
     private static final String CONFIG_PRESERVE_INPUT = "preserveInput";
     private static final String CONFIG_PASS_THROUGH = "passThrough";
-    /**
-     * How much of the text a degraded or pass-through {@code unknown(...)}
-     * expression carries. The expression is only there so that a catch-all rule
-     * matches; the text itself is kept in {@code input:normalized} and the output
-     * {@code input}.
-     */
-    static final int MAX_UNKNOWN_PAYLOAD_CHARS = 1000;
     /**
      * Upper bound on {@code maxAlternatives}: each one is a string in conversation
      * memory.
@@ -204,7 +196,7 @@ public class InputParserTask implements ILifecycleTask {
             List<IDictionary> temporaryDictionaries = prepareTemporaryDictionaries(memory, parser, userLanguage);
             String userInput = inputData.getResult();
             normalizedUserInput = parser.normalize(userInput, userLanguage);
-            storeNormalizedResultInMemory(memory.getCurrentStep(), normalizedUserInput, !parser.preservesInput());
+            storeNormalizedResultInMemory(memory.getCurrentStep(), userInput, normalizedUserInput, !parser.preservesInput());
             if (temporaryDictionaries.isEmpty() && parser.isPassThrough() && parser.getConfig().isIncludeUnknown()) {
                 // Nothing to understand the text with: one unknown expression for the
                 // whole text, no tokenising, no expression round trip.
@@ -264,13 +256,8 @@ public class InputParserTask implements ILifecycleTask {
         if (limits != null && InputParser.exceedsTokenLimit(normalizedInput, limits)) {
             currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
         }
-        Expressions expressions = boundedUnknown(normalizedInput);
+        Expressions expressions = StoredExpressions.boundedUnknown(normalizedInput);
         storeResultInMemory(currentStep, new Solution(expressions), List.of(), config, normalizedInput);
-    }
-
-    private static Expressions boundedUnknown(String text) {
-        String bounded = text.length() > MAX_UNKNOWN_PAYLOAD_CHARS ? text.substring(0, MAX_UNKNOWN_PAYLOAD_CHARS) : text;
-        return new Unknown(bounded).getExpressions();
     }
 
     /**
@@ -413,7 +400,7 @@ public class InputParserTask implements ILifecycleTask {
         return WHITESPACE.matcher(sanitized).replaceAll("_").toLowerCase(Locale.ROOT);
     }
 
-    private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String normalizedInput,
+    private static void storeNormalizedResultInMemory(IWritableConversationStep currentStep, String rawInput, String normalizedInput,
                                                       boolean overwriteInputOutput) {
         if (!isNullOrEmpty(normalizedInput)) {
             IData<String> expressionsData = new Data<>(INPUT_NORMALIZED.key(), normalizedInput);
@@ -427,6 +414,12 @@ public class InputParserTask implements ILifecycleTask {
             // Conversation re-asserts the placeholder when the turn ends.
             if (overwriteInputOutput || isSecretInputPlaceholder(currentStep)) {
                 currentStep.addConversationOutputString(INPUT.key(), normalizedInput);
+            } else if (rawInput != null && !rawInput.trim().isEmpty()) {
+                // The interior stays as typed; leading and trailing whitespace is stripped
+                // as it always was, so {memory.current.input} in a slot-filling property or
+                // an HTTP body, and a dynamicvaluematcher == 'yes', do not see a trailing
+                // newline.
+                currentStep.addConversationOutputString(INPUT.key(), rawInput.trim());
             }
         }
     }
@@ -447,12 +440,28 @@ public class InputParserTask implements ILifecycleTask {
         // merged with the ones already present on this step — it must never suppress
         // storing them, otherwise downstream behaviour rules would see no expressions
         // and no intents at all.
+        int maxLength = expressionProvider.maxExpressionLength();
+        if (maxLength > 0 && !isNullOrEmpty(sourceText) && joinStrings(", ", newExpressions).length() > maxLength) {
+            // The parsed form is longer than the expression parser will read back (one
+            // unbroken token, or a couple of hundred long ones): every rule that looks at
+            // it would fail the turn. Degrade this result to one bounded unknown
+            // expression — the text itself is untouched.
+            log.debugf("Parser result exceeds the expression limit of %d; reduced to one unknown expression", maxLength);
+            newExpressions = StoredExpressions.boundedUnknown(sourceText);
+            currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
+        }
         if (parserConfig.isAppendExpressions()) {
             IData<String> latestExpressions = currentStep.getLatestData(EXPRESSIONS_PARSED);
             if (latestExpressions != null) {
                 Expressions currentExpressions = StoredExpressions.parseOrEmpty(expressionProvider, latestExpressions.getResult());
-                currentExpressions.addAll(newExpressions);
-                newExpressions = currentExpressions.stream().distinct().collect(Collectors.toCollection(Expressions::new));
+                Expressions merged = new Expressions();
+                merged.addAll(currentExpressions);
+                merged.addAll(newExpressions);
+                merged = merged.stream().distinct().collect(Collectors.toCollection(Expressions::new));
+                // The earlier results stay when adding this one would pass the limit.
+                newExpressions = maxLength > 0 && !currentExpressions.isEmpty() && joinStrings(", ", merged).length() > maxLength
+                        ? currentExpressions
+                        : merged;
             }
         } else {
             // This result replaces an earlier parser's on this step: its diagnostics
@@ -464,18 +473,6 @@ public class InputParserTask implements ILifecycleTask {
         }
 
         String expressionString = joinStrings(", ", newExpressions);
-        int maxLength = expressionProvider.maxExpressionLength();
-        if (maxLength > 0 && expressionString.length() > maxLength && !isNullOrEmpty(sourceText)) {
-            // The parsed form is longer than the expression parser will read back (one
-            // unbroken token, or a couple of hundred long ones): every rule that looks at
-            // it would fail the turn. Degrade to one bounded unknown expression — the
-            // text itself is untouched.
-            log.debugf("Parser result of %d characters exceeds the expression limit of %d; reduced to one unknown expression",
-                    expressionString.length(), maxLength);
-            newExpressions = boundedUnknown(sourceText);
-            expressionString = joinStrings(", ", newExpressions);
-            currentStep.storeData(new Data<>(EXPRESSIONS_INPUT_TRUNCATED.key(), Boolean.TRUE));
-        }
         IData<String> expressionsData = new Data<>(EXPRESSIONS_PARSED.key(), expressionString);
         currentStep.storeData(expressionsData);
         currentStep.addConversationOutputString(KEY_EXPRESSIONS, expressionString);

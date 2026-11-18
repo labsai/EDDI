@@ -92,7 +92,7 @@ public class InputParser implements IInputParser {
 
     @Override
     public boolean isPassThrough() {
-        return !Boolean.FALSE.equals(config.getPassThrough()) && isNullOrEmpty(normalizers) && isNullOrEmpty(dictionaries)
+        return Boolean.TRUE.equals(config.getPassThrough()) && isNullOrEmpty(normalizers) && isNullOrEmpty(dictionaries)
                 && isNullOrEmpty(corrections) && semanticFallback == null;
     }
 

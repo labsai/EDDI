@@ -1164,6 +1164,10 @@ public class AgentSetupService {
     public ParserConfiguration createParserConfig() {
         var config = new ParserConfiguration();
         config.setExtensions(Map.of("dictionaries", List.of(), "corrections", List.of()));
+        // The wizard's single rule is a catch-all, so one unknown expression for the
+        // whole
+        // text is all the parser has to produce: no tokenising of pasted text.
+        config.setConfig(Map.of("passThrough", true));
         return config;
     }
 

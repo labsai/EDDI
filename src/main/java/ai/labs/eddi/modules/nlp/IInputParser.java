@@ -32,11 +32,11 @@ public interface IInputParser {
     }
 
     /**
-     * Whether the parser has nothing to understand text with: no normalizers,
-     * dictionaries, corrections or semantic fallback, and
-     * {@link Config#getPassThrough()} does not switch it off. Such a parser only
-     * has to produce one {@code unknown} expression so that a catch-all rule
-     * matches, and {@code InputParserTask} skips tokenising for it.
+     * Whether the parser has nothing to understand text with (no normalizers,
+     * dictionaries, corrections or semantic fallback) and
+     * {@link Config#getPassThrough()} asks for the single-expression form. Such a
+     * parser only has to produce one {@code unknown} expression so that a catch-all
+     * rule matches, and {@code InputParserTask} skips tokenising for it.
      */
     default boolean isPassThrough() {
         return false;
@@ -96,15 +96,17 @@ public interface IInputParser {
          */
         private int maxAlternatives = 0;
         /**
-         * {@code null}: automatic — keep the user's text as typed in the conversation
-         * output {@code input} when the parser has no normalizers. {@code true}: always
-         * keep it. {@code false}: always replace it with the normalised text.
+         * {@code null}: automatic — keep the interior of the user's text as typed in
+         * the conversation output {@code input} (leading and trailing whitespace is
+         * stripped) when the parser has no normalizers. {@code true}: always do so.
+         * {@code false}: always replace it with the normalised text.
          */
         private Boolean preserveInput;
         /**
-         * {@code null}: automatic — a parser without normalizers, dictionaries,
-         * corrections and semantic fallback yields a single {@code unknown} expression
-         * for the whole text. {@code false}: one {@code unknown} per word as before.
+         * {@code true}: a parser without normalizers, dictionaries, corrections and
+         * semantic fallback yields a single {@code unknown} expression for the whole
+         * text instead of one per word. {@code null} or {@code false}: one
+         * {@code unknown} per word. Opt-in; the setup wizard writes it.
          */
         private Boolean passThrough;
 
