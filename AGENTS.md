@@ -66,7 +66,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the three UIs (the jar then serves no UI) |
 | `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates, bound to the `validate` phase every build passes through: Checkstyle's import rules, and `formatter:validate`, which **reports** drift and never edits your files · the fix for a formatting failure (for a Checkstyle failure, delete the import it names) |
 
-> **The UIs build with Maven, at packaging time.** `compile`, `test` and `quarkus:dev` never run npm; `package`, `verify` and `install` run `npm ci` once at `ui/` and build all three apps (a few minutes) unless you pass `-DskipUi=true`. No local Node is needed — Maven downloads it into `ui/node/`. Generated UI output is never committed. Dev mode serves `/manage` and `/workforce` only if an earlier `./mvnw package` left the UIs in `target/classes`; for frontend work run `npm ci` once in `ui/` (an npm workspaces root with one lockfile), then `npm run dev` in the app's directory — its `AGENTS.md` has the port and the details.
+> **The UIs build with Maven, at packaging time.** `compile`, `test` and `quarkus:dev` never run npm; `package`, `verify` and `install` run `npm ci` once at `ui/` and build all three apps (a few minutes) unless you pass `-DskipUi=true`. No local Node is needed — Maven downloads it into `ui/node/`. Generated UI output is never committed. Dev mode serves `/manage` and `/workforce` only if an earlier `./mvnw package` left the UIs in `target/classes`; for frontend work run `npm ci` once in `ui/` (an npm workspaces root with one lockfile), then `npm run dev` in `ui/manager` (port 3000), `ui/workforce` (port 3002) or `ui/chat` (port 5174); each proxies the API to :7070, and each app is opened on its own port.
 
 > **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
 
@@ -170,6 +170,21 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Security hardening — SSRF-safe HTTP client, auth startup guard, security headers | [`docs/security.md`](docs/security.md) |
 | Agent sync (export/import, instance-to-instance), attachments, capability registry | [`docs/agent-sync-guide.md`](docs/agent-sync-guide.md), [`docs/attachments-guide.md`](docs/attachments-guide.md), [`docs/capability-match-guide.md`](docs/capability-match-guide.md) |
 | Tracing and metrics — per-task OpenTelemetry spans, Micrometer | [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md), [`docs/metrics.md`](docs/metrics.md) |
+
+### Planned — Read the Plan First
+
+Areas with a written plan and work still open. This list carries no status on purpose: the plan's opening block and the changelog say how far it got.
+
+| Area | Plan |
+| --- | --- |
+| Memory architecture — RAG threshold, context selection, auto-compaction, property consolidation | [`planning/memory-architecture-plan.md`](planning/memory-architecture-plan.md) |
+| Session forking and other agentic improvements | [`planning/agentic-improvements-plan.md`](planning/agentic-improvements-plan.md) |
+| Conversation chaining — cross-session context carry-over | [`planning/conversation-window-management.md`](planning/conversation-window-management.md) |
+| HITL — the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses | [`planning/hitl-framework-plan.md`](planning/hitl-framework-plan.md) |
+| Guardrails — config-driven input/output guardrails in `LlmTask` | [`planning/guardrails-architecture.md`](planning/guardrails-architecture.md) |
+| Multi-channel adapters (Teams) | [`planning/multi-agent-ux-improvements.md`](planning/multi-agent-ux-improvements.md) |
+| Documentation site cutover | [`planning/docs-site-migration-plan.md`](planning/docs-site-migration-plan.md) |
+| Native image (GraalVM) | [`planning/native-image-migration.md`](planning/native-image-migration.md) |
 
 Tests: instruction and branch coverage thresholds are enforced by JaCoCo (`pom.xml` has the numbers), so new code arrives with its tests.
 
@@ -314,7 +329,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. The langchain4j model builders are the exception: they need langchain4j's own client type and use `BoundedJdkHttpClient` (`modules/llm/impl/builder`), which caps response size. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |

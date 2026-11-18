@@ -8,7 +8,7 @@ The root [`AGENTS.md`](../../AGENTS.md) was edited 57 times between 2026-09-01 a
 change. Almost none of those edits changed a rule: they corrected a count, a CI job name, a
 version, a migration date or a roadmap row that some other file owns and had moved on from.
 The file is loaded into every session, so each such sentence also cost context every time.
-This pass removes that class of content (66 KB → 59 KB) and writes down what may go in.
+This pass removes that class of content (66 KB → 61 KB) and writes down what may go in.
 
 - **A maintenance rule at the top** ("Editing this file?"): no restating what `pom.xml`,
   `ci.yml` or `docs/` own, no history, features get a row in §3 and a page under `docs/`,
@@ -18,11 +18,14 @@ This pass removes that class of content (66 KB → 59 KB) and writes down what m
   discussion-style and test-method counts; Java, Node and Quarkus versions; the lists of CI
   job names; the repository-migration dates and the one-time `./mvnw clean` note; the
   GitBook cutover status; the count of Checkstyle violations in `src/test/java`; the
-  enumeration of `ToolSourceProvider` implementations; the "pending consolidation" status of
-  the outbound HTTP clients.
-- **§3 no longer carries an "In Progress / Upcoming" table.** It said of itself that it
-  lagged. The section now names the two sources that do not: the changelog for what landed
-  and [`planning/`](../../planning/) for what has not. §6 follows (it pointed at the table).
+  enumeration of `ToolSourceProvider` implementations. The outbound-HTTP row's "pending
+  consolidation" status became the standing exception it describes (`BoundedJdkHttpClient`
+  for the langchain4j model builders).
+- **§3's "In Progress / Upcoming" table became "Planned — Read the Plan First".** The old
+  table said of itself that it lagged. The new one maps an area to its plan under
+  [`planning/`](../../planning/) and carries no phase numbers and no status; the changelog
+  and each plan's opening block own those. Rows that had no plan to point at (DAG pipeline,
+  the time-travelling debugger) are gone. §6 follows (it pointed at the table).
 - **§2 rule 8 (changelog) is the rule plus a pointer** to [`README.md`](../changelog.d/README.md);
   the collator's mechanics, the CI job's matching rules and the size thresholds are in that
   README, in `ci.yml` and in the skill, and were a third copy here.
