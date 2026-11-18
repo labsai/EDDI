@@ -413,10 +413,13 @@ public interface IUserMemoryStore {
     List<UserMemoryEntry> getAllEntries(String userId) throws IResourceStore.ResourceStoreException;
 
     /**
-     * One page of a user's entries, <b>newest first</b> (by last update), read in
-     * the store so that only the page is loaded. Entries updated at the same
-     * instant may change places between two pages. The default reads everything and
-     * slices; both datastores override it.
+     * One page of a user's entries, <b>newest first</b> (by last update, then by
+     * id, so entries updated at the same instant keep their places and no entry is
+     * skipped or repeated between two pages of an unchanged store), read in the
+     * store so that only the page is loaded. Scoped exactly as
+     * {@link #getAllEntries}: the user's own entries, nothing else. The default
+     * reads everything and slices; both datastores override it, with an index on
+     * that order.
      *
      * @param offset
      *            entries to skip (negative counts as 0)

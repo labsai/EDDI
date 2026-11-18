@@ -110,6 +110,8 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
                 ON usermemories (user_id, visibility, source_agent_id, key);
             CREATE INDEX IF NOT EXISTS idx_um_user_updated
                 ON usermemories (user_id, updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_um_user_updated_id
+                ON usermemories (user_id, updated_at DESC, id DESC);
             CREATE INDEX IF NOT EXISTS idx_um_user_category
                 ON usermemories (user_id, category);
             CREATE UNIQUE INDEX IF NOT EXISTS idx_um_upsert_global
@@ -836,7 +838,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
     @Override
     public List<UserMemoryEntry> getAllEntries(String userId) throws IResourceStore.ResourceStoreException {
         ensureSchema();
-        String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC";
+        String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC, id DESC";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             List<UserMemoryEntry> entries = new ArrayList<>();
@@ -857,7 +859,7 @@ public class PostgresUserMemoryStore implements IUserMemoryStore {
             return new ArrayList<>();
         }
         ensureSchema();
-        String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?";
+        String sql = "SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, userId);
             ps.setInt(2, limit);

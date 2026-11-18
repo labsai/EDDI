@@ -146,6 +146,13 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_UPDATED_AT)),
                 new IndexOptions().name("idx_user_updated").background(true));
 
+        // Paging a user's entries (getEntriesPage): newest update first, the id
+        // breaking
+        // ties, so a page boundary never moves between two reads
+        memoriesCollection.createIndex(
+                Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.descending(FIELD_UPDATED_AT), Indexes.descending("_id")),
+                new IndexOptions().name("idx_user_updated_id").background(true));
+
         // Category filtering
         memoriesCollection.createIndex(Indexes.compoundIndex(Indexes.ascending(FIELD_USER_ID), Indexes.ascending(FIELD_CATEGORY)),
                 new IndexOptions().name("idx_user_category").background(true));
@@ -613,7 +620,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
     public List<UserMemoryEntry> getAllEntries(String userId) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkNotNull(userId, FIELD_USER_ID);
         List<UserMemoryEntry> entries = new ArrayList<>();
-        for (Document doc : memoriesCollection.find(eq(FIELD_USER_ID, userId)).sort(descending(FIELD_UPDATED_AT))) {
+        for (Document doc : memoriesCollection.find(eq(FIELD_USER_ID, userId)).sort(descending(FIELD_UPDATED_AT, "_id"))) {
             entries.add(documentToEntry(doc));
         }
         return entries;
@@ -626,7 +633,7 @@ public class MongoUserMemoryStore implements IUserMemoryStore {
         if (limit < 1) {
             return entries;
         }
-        for (Document doc : memoriesCollection.find(eq(FIELD_USER_ID, userId)).sort(descending(FIELD_UPDATED_AT)).skip(Math.max(offset, 0))
+        for (Document doc : memoriesCollection.find(eq(FIELD_USER_ID, userId)).sort(descending(FIELD_UPDATED_AT, "_id")).skip(Math.max(offset, 0))
                 .limit(limit)) {
             entries.add(documentToEntry(doc));
         }
