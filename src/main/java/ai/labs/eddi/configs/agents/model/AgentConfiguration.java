@@ -976,6 +976,31 @@ public class AgentConfiguration {
      */
     private Long turnDeadlineReserveMs;
 
+    // === Streaming: client disconnect ===
+
+    /** {@link #streamingClientDisconnect} value: cancel the turn and discard it. */
+    public static final String STREAMING_DISCONNECT_CANCEL = "cancel";
+
+    /**
+     * {@link #streamingClientDisconnect} value: let the turn finish and persist.
+     */
+    public static final String STREAMING_DISCONNECT_FINISH = "finish";
+
+    /**
+     * What a client that leaves {@code POST /agents/{conversationId}/stream} before
+     * its turn ended does to that turn: {@value #STREAMING_DISCONNECT_CANCEL} stops
+     * the model call and discards the turn (the user's input with it; the
+     * conversation settles on {@code EXECUTION_INTERRUPTED}),
+     * {@value #STREAMING_DISCONNECT_FINISH} lets the turn run to the end and
+     * persist, so the client finds the answer when it reloads. Unset (the default)
+     * follows {@code eddi.streaming.cancel-on-client-disconnect}. The resume stream
+     * keeps its own switch
+     * ({@code eddi.streaming.resume-cancel-on-client-disconnect}).
+     *
+     * @since 6.7.0
+     */
+    private String streamingClientDisconnect;
+
     // === Per-conversation LLM cost ceiling ===
 
     /**
@@ -1057,6 +1082,14 @@ public class AgentConfiguration {
 
     public void setTurnDeadlineReserveMs(Long turnDeadlineReserveMs) {
         this.turnDeadlineReserveMs = turnDeadlineReserveMs;
+    }
+
+    public String getStreamingClientDisconnect() {
+        return streamingClientDisconnect;
+    }
+
+    public void setStreamingClientDisconnect(String streamingClientDisconnect) {
+        this.streamingClientDisconnect = streamingClientDisconnect;
     }
 
     // === Persistent User Memory (Phase 11a) ===

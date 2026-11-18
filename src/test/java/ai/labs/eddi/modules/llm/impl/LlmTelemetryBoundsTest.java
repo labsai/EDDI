@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -31,6 +32,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -144,10 +146,11 @@ class LlmTelemetryBoundsTest {
         task.setId("t");
         task.setStreamingTimeoutSeconds(1);
 
-        var result = new StreamingLegacyChatExecutor(registry).execute(stalls, List.of(UserMessage.from("hi")), mock(ConversationEventSink.class),
-                task);
+        // A timeout after text fails the call (the streaming contract); it is counted
+        // all the same.
+        assertThrows(LifecycleException.class, () -> new StreamingLegacyChatExecutor(registry).execute(stalls, List.of(UserMessage.from("hi")),
+                mock(ConversationEventSink.class), task));
 
-        assertEquals(Boolean.TRUE, result.metadata().get("streamingTimeout"));
         assertEquals(1.0, registry.find("eddi.llm.stream.timeouts").tag("path", "legacy").counter().count());
     }
 }

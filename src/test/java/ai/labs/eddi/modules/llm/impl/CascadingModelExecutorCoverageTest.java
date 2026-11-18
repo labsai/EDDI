@@ -24,6 +24,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
@@ -277,7 +278,7 @@ class CascadingModelExecutorCoverageTest {
             StreamingChatResponseHandler h = inv.getArgument(1);
             h.onPartialResponse("Hello ");
             h.onPartialResponse("world");
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
@@ -315,7 +316,7 @@ class CascadingModelExecutorCoverageTest {
         doAnswer(inv -> {
             StreamingChatResponseHandler h = inv.getArgument(1);
             h.onPartialResponse("I'm not sure, I don't know."); // hedging → heuristic ~0.4
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("I'm not sure, I don't know.")).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("I'm not sure, I don't know.")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(expensiveStream).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 
@@ -348,7 +349,7 @@ class CascadingModelExecutorCoverageTest {
             StreamingChatResponseHandler h = inv.getArgument(1);
             Thread.sleep(120); // slower than the 5ms per-step timeout
             h.onPartialResponse("streamed answer");
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("streamed answer")).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("streamed answer")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
 

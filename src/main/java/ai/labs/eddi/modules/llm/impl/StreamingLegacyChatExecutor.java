@@ -4,10 +4,12 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
-import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
-import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
+import ai.labs.eddi.modules.llm.impl.ToolLoopStreamingChatModel.PartiallyStreamedRoundException;
+import ai.labs.eddi.modules.llm.impl.orchestration.ToolContextBudget;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
@@ -24,23 +26,44 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Executes streaming chat completion — tokens are emitted in real-time via the
- * {@link ConversationEventSink}.
+ * Executes a streaming chat completion without tools — tokens are emitted in
+ * real time via the {@link ConversationEventSink} — for the no-tools streaming
+ * path and for a cascade's live final step.
  * <p>
- * This class blocks until the full response is received (via
- * {@link AbandonableStreamCall}) so that the lifecycle workflow can proceed
- * synchronously while tokens stream to the client.
+ * <strong>One semantics with every other mode.</strong> The model call runs
+ * through {@link ToolLoopStreamingChatModel}, the same bridge the tool loop
+ * uses, and — on the no-tools path — inside {@link LegacyChatExecutor}, the
+ * same executor a non-streaming call uses. So this path retries exactly as the
+ * others do ({@code RetryConfiguration.executeWithRetry}: three attempts by
+ * default, only failures {@code LlmFailureClassifier} calls retryable,
+ * honouring {@code Retry-After} and the turn deadline), and only while nothing
+ * has reached the client; a stream counts as complete only with a finish
+ * reason; a failure after text reached the client fails the turn. It used to
+ * run its own loop, which made one attempt by default, retried every error
+ * class, ignored the turn deadline, and stored a stream that broke off — or
+ * ended in an error — as a normal answer.
+ * <p>
+ * This class blocks until the call ends so that the lifecycle workflow can
+ * proceed synchronously while tokens stream to the client.
  */
 class StreamingLegacyChatExecutor {
     private static final Logger LOGGER = Logger.getLogger(StreamingLegacyChatExecutor.class);
     private static final long DEFAULT_TIMEOUT_SECONDS = 120;
     private static final String KEY_TIMEOUT = "timeout";
 
+    /** The {@code path} tag of this executor's stream metrics. */
+    static final String PATH_LEGACY = "legacy";
+
+    /** responseValidation actions that leave a streaming timeout to the caller. */
+    private static final Set<String> PASSIVE_VALIDATION_ACTIONS = Set.of("warn", "ignore");
+
     /**
      * Optional — used to count providers that never emit partial responses (finding
      * F8). {@code null} in the direct-construction unit tests.
      */
     private final MeterRegistry meterRegistry;
+
+    private final LegacyChatExecutor legacyChatExecutor = new LegacyChatExecutor();
 
     /**
      * Tasks this executor has already warned about a below-backstop
@@ -60,29 +83,12 @@ class StreamingLegacyChatExecutor {
      * Result of a streaming chat execution, including response text and metadata.
      *
      * @param response
-     *            the full accumulated response text
+     *            the full response text
      * @param metadata
-     *            metadata about the streaming execution (finishReason, warnings)
+     *            metadata about the streaming execution (finishReason, warnings,
+     *            tokenUsage)
      */
     record StreamingResult(String response, Map<String, Object> metadata) {
-    }
-
-    /**
-     * Execute a streaming chat completion, emitting tokens via the event sink.
-     * <p>
-     * Backward-compatible wrapper that delegates to the task-aware overload with a
-     * null task (uses default timeout, no retry).
-     *
-     * @param streamingModel
-     *            the streaming-capable chat model
-     * @param messages
-     *            the full message list (system + history + user)
-     * @param eventSink
-     *            the sink to emit token events to
-     * @return the full accumulated response text (for memory storage)
-     */
-    String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
-        return execute(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED).response();
     }
 
     /**
@@ -93,16 +99,85 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
+     * Execute a streaming chat completion, emitting tokens via the event sink, with
+     * the default retry and no turn.
+     *
+     * @return the full response text (for memory storage)
+     */
+    String execute(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) throws LifecycleException {
+        return execute(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED).response();
+    }
+
+    /**
+     * Backward-compatible overload without a JSON response-format policy — the
+     * streamed request carries no response format.
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task)
+            throws LifecycleException {
+        return execute(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
+    }
+
+    /**
+     * As the full form, outside a conversation turn (no cancel flag, no deadline).
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy)
+            throws LifecycleException {
+        return execute(streamingModel, messages, eventSink, task, jsonPolicy, null);
+    }
+
+    /**
+     * Execute a streaming chat completion for the no-tools path: the task's retry
+     * policy (default three attempts) over the streaming bridge, inside the turn's
+     * deadline, polling the turn's cancel flag.
+     *
+     * @param task
+     *            task configuration (timeouts, retry, streaming contract; may be
+     *            null)
+     * @param jsonPolicy
+     *            decides whether the streamed request carries
+     *            {@code ResponseFormat.JSON} — such a request is not forwarded
+     *            token by token (partial JSON is not renderable) but emitted whole
+     *            once it completed
+     * @param memory
+     *            the turn ({@code null} outside one): its cancel flag, its
+     *            deadline, and the step that keeps a failed stream's partial text
+     * @return the response text and metadata
+     * @throws LifecycleException
+     *             when the call failed after its retries, failed after text reached
+     *             the client, ended without a finish reason, or was cancelled
+     */
+    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
+                            ConversationEventSink eventSink, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy,
+                            IConversationMemory memory)
+            throws LifecycleException {
+        StreamPolicy policy = streamPolicy(task, memory);
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY);
+        LegacyChatExecutor.ChatResult result;
+        try {
+            result = legacyChatExecutor.execute(bridge, messages, task != null ? task : new LlmConfiguration.Task(), jsonPolicy,
+                    memory != null ? memory.getTurnDeadline() : null);
+        } catch (LifecycleException e) {
+            PartiallyStreamedRoundException partial = partialFailure(e);
+            if (partial != null && keepsPartialText(policy, task, partial)) {
+                return salvaged(partial);
+            }
+            throw e;
+        }
+        Map<String, Object> metadata = new HashMap<>(result.responseMetadata() != null ? result.responseMetadata() : Map.of());
+        String text = answerText(result.response(), bridge);
+        emitUnlessStreamed(bridge, text, metadata, eventSink, isJsonRequest(jsonPolicy));
+        return new StreamingResult(text, metadata);
+    }
+
+    /**
      * Execute a streaming chat completion, emitting tokens via the event sink and
      * capturing the final response metadata (token usage). Used by the cascade to
      * stream the final step live without losing cost/token evidence.
      * <p>
-     * Unlike
-     * {@link #execute(StreamingChatModel, List, ConversationEventSink, LlmConfiguration.Task)},
-     * a mid-stream error is <em>always</em> propagated here, even when tokens were
-     * already emitted: the cascade must see the failure to fall back to the best
-     * previous step. Salvaging the partial text would let a failed final step be
-     * accepted as a successful one.
+     * Any failure is propagated, even when tokens were already emitted: the cascade
+     * must see the failure to fall back to the best previous step.
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink) {
         return executeCapturing(streamingModel, messages, eventSink, null, JsonResponseFormatPolicy.DISABLED);
@@ -112,17 +187,29 @@ class StreamingLegacyChatExecutor {
      * As
      * {@link #executeCapturing(StreamingChatModel, List, ConversationEventSink)},
      * but honouring the task's resolved streaming backstop (see
-     * {@link #resolveTimeoutSeconds(LlmConfiguration.Task)}).
+     * {@link #resolveTimeoutSeconds(LlmConfiguration.Task)}) and streaming
+     * contract.
      * <p>
      * The task's retry config is deliberately <em>not</em> applied: the cascade
      * owns escalation, and retrying inside a step would multiply spend against the
      * very model the cascade is about to escalate away from. Each step gets one
-     * attempt.
+     * attempt, and {@code onFailureAfterText: keepPartial} does not apply — a
+     * failed final step is never accepted as a successful one.
      */
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
                                   LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
-        var result = execute(streamingModel, messages, eventSink, task, false, 1, jsonPolicy);
-        return new StreamResult(result.response(), result.metadata());
+        StreamPolicy policy = streamPolicy(task, null);
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY);
+        ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
+        var requestBuilder = ChatRequest.builder().messages(messages);
+        if (responseFormat != null) {
+            requestBuilder.responseFormat(responseFormat);
+        }
+        ChatResponse response = bridge.chat(requestBuilder.build());
+        String text = answerText(completeResponseText(response), bridge);
+        Map<String, Object> metadata = buildMetadata(response);
+        emitUnlessStreamed(bridge, text, metadata, eventSink, responseFormat != null);
+        return new StreamResult(text, metadata);
     }
 
     /**
@@ -134,58 +221,11 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Execute a streaming chat completion with configurable timeout, retry on total
-     * failure, and response metadata capture (finish reason and token usage).
-     *
-     * @param streamingModel
-     *            the streaming-capable chat model
-     * @param messages
-     *            the full message list (system + history + user)
-     * @param eventSink
-     *            the sink to emit token events to
-     * @param task
-     *            task configuration (for timeout and retry settings, may be null)
-     * @param jsonPolicy
-     *            decides whether the streamed request carries
-     *            {@code ResponseFormat.JSON}; {@code null} is treated as
-     *            {@link JsonResponseFormatPolicy#DISABLED}
-     * @return a {@link StreamingResult} with the response text and metadata
+     * The streaming contract for {@code task} inside {@code memory}'s turn — also
+     * what the tool loop's streaming bridge is built with.
      */
-    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-                            ConversationEventSink eventSink, LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
-        return execute(streamingModel, messages, eventSink, task, true, resolveMaxAttempts(task), jsonPolicy);
-    }
-
-    /**
-     * Backward-compatible overload without a JSON response-format policy — the
-     * streamed request carries no response format.
-     */
-    StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-                            ConversationEventSink eventSink, LlmConfiguration.Task task) {
-        return execute(streamingModel, messages, eventSink, task, JsonResponseFormatPolicy.DISABLED);
-    }
-
-    /**
-     * Resolve the attempt count from the task's retry config, bounded at both ends.
-     *
-     * <p>
-     * At least one: {@code maxAttempts <= 0} means "don't retry", not "never call
-     * the model". Without that the retry loop body never runs and the caller gets a
-     * null response indistinguishable from silence.
-     * </p>
-     *
-     * <p>
-     * And at most {@code RetryConfiguration.MAX_ATTEMPTS_CEILING}. This used to
-     * read {@code getMaxAttempts()} raw, so the engine ceiling that bounds the tool
-     * loop did not apply here: the identical {@code retry} block was capped on one
-     * path and unbounded on the other, and a streaming task could hold its worker
-     * for as many attempts as the config asked for.
-     * </p>
-     */
-    private static int resolveMaxAttempts(LlmConfiguration.Task task) {
-        RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
-        int configured = retryConfig != null && retryConfig.getMaxAttempts() != null ? retryConfig.getMaxAttempts() : 1;
-        return Math.max(1, RetryConfiguration.clampAttempts(configured));
+    StreamPolicy streamPolicy(LlmConfiguration.Task task, IConversationMemory memory) {
+        return StreamPolicy.forTask(task, backstopSeconds(task), memory);
     }
 
     /**
@@ -202,6 +242,9 @@ class StreamingLegacyChatExecutor {
      * whole stream for providers whose native timeout does not fire (or does not
      * exist).</li>
      * </ul>
+     * A third, {@code streaming.idleTimeoutSeconds}, bounds the silence between two
+     * stream events once the first arrived.
+     * <p>
      * Precedence, preserving both back-compatible shapes:
      * <ol>
      * <li>an explicit positive {@code streamingTimeoutSeconds} always wins —
@@ -275,188 +318,98 @@ class StreamingLegacyChatExecutor {
     }
 
     /**
-     * Core streaming execution.
-     *
-     * @param salvagePartialOnError
-     *            when {@code true}, a mid-stream error that already produced tokens
-     *            returns the partial text with a {@code streaming_error_partial}
-     *            warning instead of throwing — the turn keeps whatever the model
-     *            managed to produce. When {@code false}, any error is propagated so
-     *            the caller can treat the step as failed.
-     * @param maxAttempts
-     *            number of attempts; already clamped to >= 1 by the caller.
-     * @param jsonPolicy
-     *            decides whether the streamed request carries
-     *            {@code ResponseFormat.JSON}. Streaming never carries tool
-     *            specifications, so the policy is resolved with
-     *            {@code toolsInRequest=false}.
+     * Emits the whole answer as one token when the call forwarded none of it: a
+     * JSON-formatted request (never forwarded token by token) or a provider that
+     * completes without partial responses (finding F8 — the answer used to be
+     * dropped). Only the latter is a degradation worth a warning and a metric.
      */
-    private StreamingResult execute(StreamingChatModel streamingModel, List<ChatMessage> messages,
-                                    ConversationEventSink eventSink, LlmConfiguration.Task task, boolean salvagePartialOnError, int maxAttempts,
-                                    JsonResponseFormatPolicy jsonPolicy) {
-
-        ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
-
-        LOGGER.debug("Executing with streaming (legacy mode)" + (responseFormat != null ? " with JSON response format" : ""));
-
-        long timeoutSeconds = backstopSeconds(task);
-
-        RetryConfiguration retryConfig = task != null ? task.getRetry() : null;
-
-        Map<String, Object> metadata = new HashMap<>();
-        String responseText = null;
-        // Carried across attempts so this loop honours the same total-backoff
-        // budget executeWithRetry applies. The per-sleep ceiling alone does not
-        // bound it: ten attempts at a configured 30s delay is 270s of blocked
-        // pipeline thread.
-        long totalBackoffMs = 0L;
-
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            // Each attempt reports its own outcome. Without this reset, a
-            // streamingTimeout/warning recorded by a failed attempt survives into a
-            // successful retry, and responseValidation then acts on a stale signal —
-            // replacing a perfectly good answer with the timeout fallback.
-            metadata.clear();
-
-            // One call per attempt: abandoning an attempt (timeout, interrupt, or a
-            // retried error) silences its still-running callback thread, so a late
-            // token never interleaves with the retry's tokens on the shared sink.
-            var call = AbandonableStreamCall.forwardingTo((token, firstOfCall) -> {
-                try {
-                    eventSink.onToken(token);
-                } catch (Exception e) {
-                    LOGGER.warnf("Error sending token event: %s", e.getMessage());
-                }
-            });
-
-            var requestBuilder = ChatRequest.builder().messages(messages);
-            if (responseFormat != null) {
-                requestBuilder.responseFormat(responseFormat);
-            }
-            streamingModel.chat(requestBuilder.build(), call);
-
-            boolean timedOut = false;
-            boolean interrupted = false;
-            try {
-                if (!call.await(timeoutSeconds)) {
-                    LOGGER.warn("Streaming chat timed out");
-                    timedOut = true;
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                LOGGER.warn("Streaming chat was interrupted");
-                interrupted = true;
-            }
-
-            // A timed-out or interrupted call is already abandoned, so this is exactly
-            // the text the client was sent — an in-flight emission is included whole.
-            responseText = call.forwardedText();
-            ChatResponse response = call.response();
-            Throwable error = call.error();
-            metadata.putAll(buildMetadata(response));
-
-            // Finding F8: a provider that completes without ever calling
-            // onPartialResponse leaves the accumulated buffer empty, and the buffer used
-            // to be the ONLY text source — onCompleteResponse's ChatResponse was read for
-            // metadata and its aiMessage().text() thrown away. The turn then returned a
-            // silent empty answer with no error, warning or metric. Fall back to the
-            // complete response, and emit the token to the sink so the SSE client is not
-            // left with nothing.
-            if (!timedOut && !interrupted && error == null && responseText.isEmpty()) {
-                String completeText = completeResponseText(response);
-                if (completeText != null && !completeText.isEmpty()) {
-                    LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
-                            + "This provider does not support incremental streaming.", completeText.length());
-                    metadata.put("streamingNoPartials", true);
-                    // putIfAbsent, NOT put: buildMetadata may already have recorded
-                    // "truncated" (finishReason=LENGTH) or "content_filter" — the only
-                    // signals LlmTask.applyResponseValidation dispatches on. Overwriting
-                    // them here would silently disable responseValidation.onTruncation /
-                    // onContentFilter for this provider. The transport-capability note is
-                    // the weaker signal and is already carried by streamingNoPartials.
-                    metadata.putIfAbsent("warning", "streaming_no_partials");
-                    incrementNoPartials();
-                    responseText = completeText;
-                    call.runUnlessAbandoned(() -> {
-                        try {
-                            eventSink.onToken(completeText);
-                        } catch (Exception e) {
-                            LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
-                        }
-                    });
-                }
-            }
-
-            // An interrupt is a cancellation request — the cascade cancelling a step, or
-            // the request being aborted. Never retry it (that would ignore the
-            // cancellation) and never report it as a successful empty response, which
-            // would let a cancelled step be accepted as a real answer. This matches how
-            // AgentOrchestrator treats a set interrupt flag.
-            if (interrupted) {
-                metadata.put("streamingInterrupted", true);
-                if (salvagePartialOnError && !responseText.isEmpty()) {
-                    metadata.put("warning", "streaming_interrupted_partial");
-                    LOGGER.warnf("Streaming interrupted with partial response (%d chars)", responseText.length());
-                    return new StreamingResult(responseText, metadata);
-                }
-                throw new RuntimeException("Streaming chat interrupted");
-            }
-
-            if (timedOut) {
-                incrementStreamTimeout();
-                metadata.put("streamingTimeout", true);
-                if (!responseText.isEmpty()) {
-                    // Partial response available — return it with a warning
-                    metadata.put("warning", "streaming_timeout_partial");
-                    LOGGER.warnf("Streaming timed out after %ds with partial response (%d chars)", timeoutSeconds, responseText.length());
-                    return new StreamingResult(responseText, metadata);
-                }
-                // No response at all — treat as retryable failure
-                if (attempt < maxAttempts) {
-                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
-                    if (slept >= 0) {
-                        totalBackoffMs += slept;
-                        LOGGER.warnf("Streaming timed out with empty response, retrying (attempt %d/%d)", attempt, maxAttempts);
-                        continue;
-                    }
-                    LOGGER.warnf("Streaming timed out with empty response and the retry backoff budget is spent after %d attempt(s)",
-                            attempt);
-                }
-                LOGGER.errorf("Streaming timed out with empty response after %d attempt(s)", attempt);
-                return new StreamingResult("", metadata);
-            }
-
-            if (error != null) {
-                if (salvagePartialOnError && !responseText.isEmpty()) {
-                    // Error fired but we have partial content — return it with warning
-                    metadata.put("warning", "streaming_error_partial");
-                    metadata.put("errorMessage", error.getMessage());
-                    LOGGER.warnf("Streaming error with partial response (%d chars): %s", responseText.length(), error.getMessage());
-                    return new StreamingResult(responseText, metadata);
-                }
-                // Nothing salvageable (no content, or the caller wants errors
-                // propagated) — retry if possible
-                if (attempt < maxAttempts) {
-                    call.abandon();
-                    long slept = RetryConfiguration.backoff(attempt, retryConfig, totalBackoffMs);
-                    if (slept >= 0) {
-                        totalBackoffMs += slept;
-                        LOGGER.warnf("Streaming error with empty response, retrying (attempt %d/%d): %s",
-                                attempt, maxAttempts, error.getMessage());
-                        continue;
-                    }
-                    LOGGER.warnf("Streaming error with empty response and the retry backoff budget is spent after %d attempt(s): %s",
-                            attempt, error.getMessage());
-                }
-                LOGGER.errorf("Streaming chat error after %d attempt(s): %s", attempt, error.getMessage());
-                throw new RuntimeException("Streaming chat failed", error);
-            }
-
-            // Success — break out of retry loop
-            break;
+    private void emitUnlessStreamed(ToolLoopStreamingChatModel bridge, String text, Map<String, Object> metadata,
+                                    ConversationEventSink eventSink, boolean jsonRequest) {
+        if (text.isEmpty() || !bridge.lastForwardedText().isEmpty()) {
+            return;
         }
+        if (!jsonRequest) {
+            LOGGER.warnf("Streaming provider emitted no partial responses; falling back to the complete response (%d chars). "
+                    + "This provider does not support incremental streaming.", text.length());
+            metadata.put("streamingNoPartials", true);
+            // putIfAbsent, NOT put: "truncated" (finishReason=LENGTH) or
+            // "content_filter" are the signals LlmTask.applyResponseValidation
+            // dispatches on, and the transport note is already carried by
+            // streamingNoPartials.
+            metadata.putIfAbsent("warning", "streaming_no_partials");
+            incrementNoPartials();
+        }
+        try {
+            eventSink.onToken(text);
+        } catch (Exception e) {
+            LOGGER.warnf("Error sending fallback token event: %s", e.getMessage());
+        }
+    }
 
-        return new StreamingResult(responseText, metadata);
+    /**
+     * The answer of a completed call: the complete response's text, or — for a
+     * provider whose complete response carries none — exactly the text that was
+     * streamed to the client.
+     */
+    private static String answerText(String completeText, ToolLoopStreamingChatModel bridge) {
+        if (completeText != null && !completeText.isEmpty()) {
+            return completeText;
+        }
+        return bridge.lastForwardedText();
+    }
+
+    private static boolean isJsonRequest(JsonResponseFormatPolicy jsonPolicy) {
+        return jsonPolicy != null && jsonPolicy.resolve(false) != null;
+    }
+
+    /**
+     * Whether a call that failed after forwarding text keeps that text as the
+     * answer: when the task opted into it ({@code onFailureAfterText:
+     * keepPartial}), or, for a timeout, when the task's responseValidation names an
+     * active {@code onStreamingTimeout} action — that policy exists to act on
+     * exactly this text.
+     */
+    private static boolean keepsPartialText(StreamPolicy policy, LlmConfiguration.Task task, PartiallyStreamedRoundException partial) {
+        if (policy.keepPartialText()) {
+            return true;
+        }
+        if (!partial.timedOut() || task == null || task.getResponseValidation() == null || !task.getResponseValidation().isEnabled()) {
+            return false;
+        }
+        String action = task.getResponseValidation().getOnStreamingTimeout();
+        return action != null && !PASSIVE_VALIDATION_ACTIONS.contains(action.toLowerCase());
+    }
+
+    /** The partial answer of a failed call, flagged as such. */
+    private static StreamingResult salvaged(PartiallyStreamedRoundException partial) {
+        Map<String, Object> metadata = new HashMap<>();
+        if (partial.timedOut()) {
+            metadata.put("streamingTimeout", true);
+            metadata.put("warning", "streaming_timeout_partial");
+        } else {
+            metadata.put("warning", "streaming_error_partial");
+        }
+        LOGGER.warnf("Streaming call failed after %d characters; keeping them as the answer (%s)", partial.partialText().length(),
+                metadata.get("warning"));
+        return new StreamingResult(partial.partialText(), metadata);
+    }
+
+    /**
+     * The partially-streamed failure inside {@code failure}'s cause chain, if any.
+     */
+    private static PartiallyStreamedRoundException partialFailure(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < 16; depth++) {
+            if (current instanceof PartiallyStreamedRoundException partial) {
+                return partial;
+            }
+            current = current.getCause();
+        }
+        return null;
+    }
+
+    private static String modelType(LlmConfiguration.Task task) {
+        return task != null && task.getType() != null ? task.getType() : "streaming";
     }
 
     /**
@@ -470,18 +423,6 @@ class StreamingLegacyChatExecutor {
         return response.aiMessage().text();
     }
 
-    /**
-     * L3: EDDI's streaming backstop fired. The provider's own timeout may report
-     * the failure through the telemetry listener much later — or, for a stream that
-     * simply stalls, never — so the abandonment is counted where EDDI decides it,
-     * at the moment it happens.
-     */
-    private void incrementStreamTimeout() {
-        if (meterRegistry != null) {
-            meterRegistry.counter("eddi.llm.stream.timeouts", "path", "legacy").increment();
-        }
-    }
-
     private void incrementNoPartials() {
         if (meterRegistry != null) {
             meterRegistry.counter("eddi.llm.streaming.no_partials").increment();
@@ -493,21 +434,10 @@ class StreamingLegacyChatExecutor {
         if (response != null && response.metadata() != null) {
             var meta = response.metadata();
             if (meta.finishReason() != null) {
-                var finishReason = meta.finishReason().toString();
-                metadata.put("finishReason", finishReason);
-
                 // Flag non-normal finish reasons for downstream validation, matching
                 // LegacyChatExecutor. Without this, responseValidation.onTruncation and
-                // onContentFilter are unreachable on the streaming path. A later
-                // timeout/error warning deliberately overwrites this — a transport
-                // failure is the more urgent signal.
-                if ("CONTENT_FILTER".equalsIgnoreCase(finishReason)) {
-                    metadata.put("warning", "content_filter");
-                    LOGGER.warnf("Streaming response was filtered by content policy (finishReason=%s)", finishReason);
-                } else if ("LENGTH".equalsIgnoreCase(finishReason)) {
-                    metadata.put("warning", "truncated");
-                    LOGGER.warnf("Streaming response was truncated due to token limit (finishReason=%s)", finishReason);
-                }
+                // onContentFilter are unreachable on the streaming path.
+                ToolLoopStreamingChatModel.putFinishReason(metadata, meta.finishReason());
             }
             if (meta.tokenUsage() != null) {
                 metadata.put("tokenUsage", ToolContextBudget.tokenUsageMap(meta.tokenUsage()));
@@ -531,21 +461,10 @@ class StreamingLegacyChatExecutor {
      * executor and hands the same one to the cascade, so per instance is per
      * process in production, and each test gets a fresh one without a reset hook.
      * <p>
-     * Explicitly bounded. An earlier comment claimed it was "bounded because a
-     * config edit re-keys the entry", which is backwards: re-keying ADDS a key and
-     * leaves the old one behind, so config edits are exactly what made this grow.
-     * Keyed on (taskId, timeoutMs), the key space is unbounded over the life of a
-     * process.
-     * <p>
-     * Bounded with a size check and a clear, NOT with a Caffeine cache: this is
-     * read on the per-request path, and putting cache machinery there measurably
-     * slowed it — two timing-sensitive tests failed on a 66ms budget when it was
-     * tried. A plain key set plus an O(1) size check costs nothing per call.
-     * <p>
-     * Clearing on overflow rather than refusing to add: a hard cap would silently
-     * stop warning about genuinely new misconfigurations, which is the failure mode
-     * this warning exists to prevent. Worst case here is that an already-warned
-     * task warns once more — noise, not silence.
+     * Explicitly bounded, with a size check and a clear rather than a Caffeine
+     * cache: this is read on the per-request path, and cache machinery there
+     * measurably slowed it. Clearing on overflow rather than refusing to add: a
+     * hard cap would silently stop warning about genuinely new misconfigurations.
      */
     private static final class ShortTimeoutWarnings {
         /** Upper bound on retained warn-suppression keys. */

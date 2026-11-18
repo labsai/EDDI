@@ -5,13 +5,16 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
+import dev.langchain4j.model.output.FinishReason;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -35,16 +38,21 @@ class StreamingLegacyChatExecutorTest {
         eventSink = mock(ConversationEventSink.class);
     }
 
+    private static ChatResponse done(String text) {
+        return ChatResponse.builder().aiMessage(AiMessage.from(text))
+                .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build();
+    }
+
     @Test
     @DisplayName("Should emit tokens and return full response")
-    void execute_emitsTokensAndReturnsFullResponse() {
+    void execute_emitsTokensAndReturnsFullResponse() throws Exception {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("Hello");
                 handler.onPartialResponse(" ");
                 handler.onPartialResponse("world");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build());
+                handler.onCompleteResponse(done("Hello world"));
             }
         };
 
@@ -61,11 +69,11 @@ class StreamingLegacyChatExecutorTest {
 
     @Test
     @DisplayName("Should handle empty response")
-    void execute_emptyResponse_returnsEmptyString() {
+    void execute_emptyResponse_returnsEmptyString() throws Exception {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("")).build());
+                handler.onCompleteResponse(done(""));
             }
         };
 
@@ -76,11 +84,8 @@ class StreamingLegacyChatExecutorTest {
     }
 
     @Test
-    @DisplayName("Should propagate streaming errors as RuntimeException when nothing was streamed")
-    void execute_error_throwsRuntimeException() {
-        // An error only propagates when no content arrived. If tokens were already
-        // streamed, the partial text is returned with a streaming_error_partial
-        // warning instead of throwing.
+    @DisplayName("Should fail the call when the provider errors before any token")
+    void execute_error_throws() {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
@@ -88,16 +93,13 @@ class StreamingLegacyChatExecutorTest {
             }
         };
 
-        RuntimeException ex = assertThrows(RuntimeException.class,
-                () -> executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink));
-
-        assertTrue(ex.getMessage().contains("Streaming chat failed"));
+        assertThrows(LifecycleException.class, () -> executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink));
         verify(eventSink, never()).onToken(anyString());
     }
 
     @Test
-    @DisplayName("Should return partial content when streaming errors after tokens were emitted")
-    void execute_errorAfterPartial_returnsPartialContent() {
+    @DisplayName("Should fail the call — not return the fragment — when the provider errors after tokens were emitted")
+    void execute_errorAfterPartial_fails() {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
@@ -106,20 +108,18 @@ class StreamingLegacyChatExecutorTest {
             }
         };
 
-        String result = executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink);
-
-        assertEquals("partial", result);
+        assertThrows(LifecycleException.class, () -> executor.execute(streamingModel, List.of(UserMessage.from("Hi")), eventSink));
         verify(eventSink).onToken("partial");
     }
 
     @Test
     @DisplayName("Should handle single-token response")
-    void execute_singleToken_emitsOneToken() {
+    void execute_singleToken_emitsOneToken() throws Exception {
         StreamingChatModel streamingModel = new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("OK");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("OK")).build());
+                handler.onCompleteResponse(done("OK"));
             }
         };
 
@@ -131,7 +131,7 @@ class StreamingLegacyChatExecutorTest {
 
     @Test
     @DisplayName("Should continue even if eventSink.onToken throws")
-    void execute_sinkThrows_continuesStreaming() {
+    void execute_sinkThrows_continuesStreaming() throws Exception {
         doThrow(new RuntimeException("sink error")).when(eventSink).onToken(anyString());
 
         StreamingChatModel streamingModel = new StreamingChatModel() {
@@ -139,7 +139,7 @@ class StreamingLegacyChatExecutorTest {
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("Hello");
                 handler.onPartialResponse(" world");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("Hello world")).build());
+                handler.onCompleteResponse(done("Hello world"));
             }
         };
 

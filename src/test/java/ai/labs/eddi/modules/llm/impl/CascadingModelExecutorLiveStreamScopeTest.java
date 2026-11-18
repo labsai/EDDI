@@ -20,6 +20,8 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -97,7 +99,7 @@ class CascadingModelExecutorLiveStreamScopeTest {
         doAnswer(inv -> {
             StreamingChatResponseHandler h = inv.getArgument(1);
             h.onPartialResponse(text);
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text)).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
         return streaming;

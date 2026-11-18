@@ -43,7 +43,9 @@ is on every snapshot in the `ERROR` state, a plain read of the conversation as w
 - `message` is a short, redacted digest: never a stack trace, a credential or a raw provider body. It is the
   same sentence the streaming `task_failed` event carries.
 - `taskId`, `taskType` and `errorType` say which lifecycle task failed and how it was classified for metrics
-  and audit (`timeout`, `transport`, `rate_limit`, `content_filter`, `stack_overflow` or `unknown`), as the `task_failed` event does. They are omitted when the
+  and audit (`timeout`, `transport`, `rate_limit`, `content_filter`, `stack_overflow` or `unknown`). The
+  streaming `task_failed` event names the task the same way but carries the failure class (`code`'s
+  vocabulary, with `UNKNOWN` where `code` says `TURN_FAILED`) as its `errorType`. They are omitted when the
   error did not come from a task, such as a rejected idempotency key. A failed turn whose entry predates
   `code`/`retryable` reports `code: "TURN_FAILED"`, `retryable: false`. The full per-task digest stays in
   `conversationOutputs[…].taskErrors`.

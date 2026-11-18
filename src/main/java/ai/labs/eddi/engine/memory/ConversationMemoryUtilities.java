@@ -555,8 +555,11 @@ public class ConversationMemoryUtilities {
                 // TASK_ERRORS: a failed turn's reason. Left off this list, it was
                 // written and then stripped from every default (non-detailed)
                 // response, so the caller got ERROR with nothing to say why.
+                // TURN_FINISH_REASON: why the answer is not a plain complete one
+                // (length, content_filter, empty) — the streamed done event reads it here.
                 if (key.startsWith(INPUT_INITIAL.key()) || key.equals(INPUT.key()) || key.startsWith(ACTIONS.key())
-                        || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX) || key.equals(TASK_ERRORS)) {
+                        || key.startsWith(OUTPUT_PREFIX) || key.startsWith(QUICK_REPLIES_PREFIX) || key.equals(TASK_ERRORS)
+                        || key.equals(TURN_FINISH_REASON)) {
                     newConversationOutput.put(key,
                             secretTurn ? maskedSecretTurnOutputValue(key, conversationOutput.get(key), needles) : conversationOutput.get(key));
                 }

@@ -900,7 +900,9 @@ class RetryConfigurationTest {
             long elapsedMs = (System.nanoTime() - start) / 1_000_000;
 
             assertTrue(interruptFlagAfterwards, "the interrupt must be re-asserted, not swallowed");
-            assertEquals(30_000L, slept, "the budgeted amount is still reported, so the caller's accounting stays honest");
+            // B11: reporting the sleep as completed made the caller issue one more billed
+            // call for a cancelled turn. -1 is "stop retrying".
+            assertEquals(-1L, slept, "an interrupted backoff tells the caller to stop retrying");
             assertTrue(elapsedMs < 5_000, "an already-interrupted thread must not actually sleep 30s, took " + elapsedMs + "ms");
         }
     }

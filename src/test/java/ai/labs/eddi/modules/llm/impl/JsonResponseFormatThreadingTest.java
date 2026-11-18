@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.lifecycle.ConversationEventSink;
+import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
@@ -33,6 +34,8 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.request.ResponseFormatType;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -267,11 +270,16 @@ class JsonResponseFormatThreadingTest {
                 public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                     captured.set(chatRequest);
                     handler.onPartialResponse("{}");
-                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("{}")).build());
+                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("{}")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
                 }
             };
 
-            var result = executor.execute(streamingModel, List.of(UserMessage.from("hi")), eventSink, plainTask(provider), policy);
+            StreamingLegacyChatExecutor.StreamingResult result;
+            try {
+                result = executor.execute(streamingModel, List.of(UserMessage.from("hi")), eventSink, plainTask(provider), policy);
+            } catch (LifecycleException e) {
+                throw new AssertionError("the streamed call failed", e);
+            }
             assertEquals("{}", result.response());
             assertNotNull(captured.get());
             return captured.get();

@@ -672,7 +672,7 @@ eddi_llm_cascade_step_errors_total          # Per-step failures; tags: provider,
 eddi_llm_failure_total                      # Failed model calls by failure class: each failed cascade step, and each failed single-model task (a cascade's overall failure is not counted twice); tags: class (TRANSIENT, RATE_LIMITED, QUOTA_EXHAUSTED, AUTH, ...), model (the resolved name, not a ${vars:...} template)
 eddi_llm_cascade_ceiling_exceeded_total     # Run cut short; tag: kind (cost|duration|spend — the conversation ceiling or tenant budget refused the next step)
 eddi_llm_turn_deadline_exceeded_total       # A layer stopped because the turn deadline left no room; tag: stage (attempt|sleep|attempt_timeout|cascade|tool|httpcall|httpcall_retry)
-eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout; tag: scope (attempt|cascade_step)
+eddi_llm_cancelled_total                    # An attempt / cascade step abandoned on timeout, or a streamed call stopped because its turn was cancelled; tag: scope (attempt|cascade_step|stream)
 eddi_llm_lazy_tools_activated_total         # Tools discover_tools loaded into the request (toolLoadingStrategy LAZY)
 eddi_llm_lazy_tools_refused_total           # Calls to a lazily-loaded tool the model had not loaded, refused NOT_EXECUTED before the gate; tag: source
 eddi_llm_cascade_tokens_total               # Tokens consumed; tag: provider
@@ -714,6 +714,12 @@ eddi_llm_recovery_total                     # Recovery actions of the LLM task; 
                                             # every action also writes one INFO line, "LLM recovery conversationId=... action=..." (see llm-resilience.md)
 eddi_llm_streaming_no_partials_total        # Provider streamed, but emitted no partial tokens
 eddi_llm_stream_timeouts_total              # EDDI abandoned a stream at its own backstop; tag: path (legacy|tool_loop)
+eddi_streaming_active                       # Gauge: native SSE streams open on this node; tag: kind (agent|group)
+eddi_streaming_closed_total                 # Native SSE streams ended; tags: kind, reason (completed|failed|cancelled|client_gone|idle_timeout|backpressure|refused)
+eddi_streaming_refused_total                # Streams refused because the node was at eddi.streaming.max-concurrent-streams; tag: kind
+eddi_streaming_first_token_seconds          # Timer: from opening a stream to its first token; tag: kind
+eddi_llm_stream_idle_timeouts_total         # A stream went silent for streaming.idleTimeoutSeconds after its first event; tag: path (legacy|tool_loop)
+eddi_llm_stream_incomplete_total            # A stream ended without a finish reason (a connection that closed mid-answer) and was failed; tag: path (legacy|tool_loop)
 eddi_llm_tool_context_evictions_total       # Exchanges dropped to fit the tool-context budget; tag: outcome (within_budget|still_over_budget)
 ```
 

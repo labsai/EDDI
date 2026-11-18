@@ -184,12 +184,53 @@ class ObservableStreamingChatModel implements StreamingChatModel {
         return new StreamingChatResponseHandler() {
             @Override
             public void onPartialResponse(String partialResponse) {
+                accumulate(partialResponse);
+                handler.onPartialResponse(partialResponse);
+            }
+
+            // The context variants and the non-text partials are forwarded as they
+            // came: the context carries the provider's StreamingHandle, which the
+            // streaming contract uses to stop a cancelled stream, and thinking and
+            // tool-call deltas are what keep a long silent round from looking idle.
+            // The interface defaults would drop the context, and the non-text partials
+            // altogether, whenever response logging is on.
+            @Override
+            public void onPartialResponse(PartialResponse partialResponse, PartialResponseContext context) {
+                accumulate(partialResponse != null ? partialResponse.text() : null);
+                handler.onPartialResponse(partialResponse, context);
+            }
+
+            @Override
+            public void onPartialThinking(PartialThinking partialThinking) {
+                handler.onPartialThinking(partialThinking);
+            }
+
+            @Override
+            public void onPartialThinking(PartialThinking partialThinking, PartialThinkingContext context) {
+                handler.onPartialThinking(partialThinking, context);
+            }
+
+            @Override
+            public void onPartialToolCall(PartialToolCall partialToolCall) {
+                handler.onPartialToolCall(partialToolCall);
+            }
+
+            @Override
+            public void onPartialToolCall(PartialToolCall partialToolCall, PartialToolCallContext context) {
+                handler.onPartialToolCall(partialToolCall, context);
+            }
+
+            @Override
+            public void onCompleteToolCall(CompleteToolCall completeToolCall) {
+                handler.onCompleteToolCall(completeToolCall);
+            }
+
+            private void accumulate(String partialResponse) {
                 if (partialResponse != null) {
                     synchronized (accumulated) {
                         accumulated.append(partialResponse);
                     }
                 }
-                handler.onPartialResponse(partialResponse);
             }
 
             @Override

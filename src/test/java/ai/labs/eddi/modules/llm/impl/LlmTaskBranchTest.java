@@ -27,6 +27,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import jakarta.inject.Provider;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -579,7 +581,7 @@ class LlmTaskBranchTest {
                         @Override
                         public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                             handler.onPartialResponse("private-intermediate");
-                            handler.onCompleteResponse(ChatResponse.builder().aiMessage(aiMessage("private-intermediate")).build());
+                            handler.onCompleteResponse(ChatResponse.builder().aiMessage(aiMessage("private-intermediate")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
                         }
                     };
                 }

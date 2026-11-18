@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.configs.agents.IAgentStore;
+import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.AgentMismatchException;
 import ai.labs.eddi.engine.api.IConversationService.AgentNotReadyException;
@@ -17,6 +19,8 @@ import ai.labs.eddi.engine.gdpr.ProcessingRestrictedException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableException;
 import ai.labs.eddi.engine.gdpr.ProcessingRestrictionUnavailableExceptionMapper;
 import ai.labs.eddi.engine.exception.InputTooLargeExceptionMapper;
+import ai.labs.eddi.engine.memory.MemoryKeys;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.tenancy.QuotaAccountingUnavailableException;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
@@ -86,10 +90,18 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>{@code approval_required} — the turn ended waiting for a human; sent just
  * before {@code done}</li>
  * <li>{@code task_failed} — a lifecycle task failed ({@code taskId},
- * {@code taskType}, {@code durationMs}, {@code errorType}, {@code error})</li>
+ * {@code taskType}, {@code durationMs}, {@code errorType} — the
+ * {@code FailureClass} name — and {@code error}, the redacted digest the turn's
+ * {@code error.message} also carries). Not sent for a cancelled turn.</li>
+ * <li>{@code cancelled} — the turn was cancelled and discarded
+ * ({@code conversationState}, {@code persisted: false}); sent just before
+ * {@code done}</li>
  * <li>{@code done} — the final event: a reduced snapshot
- * ({@code conversationState}, {@code hitlPausedAt}, {@code conversationOutputs}
- * and {@code error}, the last three when present); the full snapshot is
+ * ({@code conversationState}, {@code hitlPausedAt},
+ * {@code conversationOutputs}, {@code finishReason} and {@code error}, all but
+ * the first when present; {@code finishReason} is {@code length},
+ * {@code content_filter} or {@code empty} and is absent for a plain complete
+ * answer; a cancelled turn's done carries no outputs); the full snapshot is
  * available from the conversation GET endpoint</li>
  * <li>{@code error} — error during processing</li>
  * </ul>
@@ -153,6 +165,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * loses the exchange — the client sees the full answer when it reloads the
      * conversation. Deployments on flaky mobile networks, or ones where a lost turn
      * is more expensive than a wasted completion, should turn this off.
+     * </p>
+     *
+     * <p>
+     * This is the deployment default. An agent overrides it for its own
+     * conversations with {@code streamingClientDisconnect} ({@code cancel} or
+     * {@code finish}); see {@link #cancelOnDisconnectFor}.
      * </p>
      */
     private final boolean cancelOnClientDisconnect;
@@ -227,6 +245,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     static final String TURN_TIMEOUT_CODE = "turn_timeout";
 
+    /** The event sent before {@code done} for a turn that was cancelled. */
+    static final String EVENT_CANCELLED = "cancelled";
+
     /**
      * One daemon thread ticks every open turn stream. A tick only checks a clock
      * and, rarely, writes a comment line, so one thread serves any number of
@@ -263,6 +284,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      */
     @Inject
     RestAgentEngine restAgentEngine;
+
+    /**
+     * Reads an agent's {@code streamingClientDisconnect} when a {@code /stream}
+     * client leaves; nullable in unit tests (the deployment default then applies).
+     */
+    @Inject
+    IAgentStore agentStore;
 
     /** Reads {@code X-EDDI-Turn-Deadline-Ms}; nullable in unit tests. */
     @Inject
@@ -368,8 +396,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
 
         // Every outbound frame goes through this stream, which doubles as the
-        // client-disconnect detector — see SseStream.
-        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, cancelOnClientDisconnect);
+        // client-disconnect detector — see SseStream. The agent may override the
+        // deployment's disconnect policy (streamingClientDisconnect).
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, cancelOnClientDisconnect, true);
         stream.startKeepAlive();
 
         try {
@@ -387,7 +416,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     public void resumeStreaming(String conversationId, HitlDecision decision, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                                 List<String> returningFields, SseEventSink eventSink, Sse sse) {
         final String safeConversationId = sanitize(conversationId);
-        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, resumeCancelOnClientDisconnect);
+        final SseStream stream = new SseStream(conversationId, safeConversationId, eventSink, sse, resumeCancelOnClientDisconnect, false);
 
         // Admission is the plain /resume's, unchanged: the access checks, the decision
         // checks and the pre-commit refusals (400/403/404/409/503, a pause that is no
@@ -523,6 +552,12 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             public void onComplete(SimpleConversationMemorySnapshot snapshot) {
                 stream.markTerminal();
                 try {
+                    // A cancelled turn (/cancel, or a disconnect that cancels) is
+                    // discarded, not stored: say so with its own event before done, as the
+                    // group stream does, so a client can tell "stopped" from "answered".
+                    if (snapshot.getConversationState() == ConversationState.EXECUTION_INTERRUPTED) {
+                        stream.sendJson(EVENT_CANCELLED, new CancelledEvent(String.valueOf(snapshot.getConversationState()), false));
+                    }
                     // A turn that ends waiting for a human says so, with the id the
                     // decision must name, before the final snapshot.
                     if (snapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
@@ -729,10 +764,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
      * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the full
      * semantics and the config switch that turns this off.
      * <p>
-     * The cancel is issued at most once. When a send notices the disconnect it runs
-     * synchronously on the calling (pipeline worker) thread; when a keep-alive tick
-     * notices it, on a virtual thread ({@code clientGoneExecutor}). Either way it
-     * never touches the Vert.x event loop.
+     * The cancel is issued at most once, always on a virtual thread
+     * ({@code clientGoneExecutor}), whoever noticed the disconnect: a token send
+     * runs on the provider's callback thread under the model call's lock, where a
+     * store compare-and-set (and the agent lookup of
+     * {@code streamingClientDisconnect}) must not run, and a keep-alive tick runs
+     * on the thread every stream shares. It never touches the Vert.x event loop
+     * either.
      */
     private final class SseStream {
         private final String conversationId;
@@ -768,11 +806,22 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          */
         private long lastTurnEventMillis;
 
-        /** Whether this stream's vanished client cancels the turn it was following. */
+        /**
+         * Whether this stream's vanished client cancels the turn it was following — the
+         * deployment default when {@link #agentMayOverride}.
+         */
         private final boolean cancelOnDisconnect;
 
-        private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse, boolean cancelOnDisconnect) {
+        /**
+         * Whether the conversation's agent may override {@link #cancelOnDisconnect}
+         * ({@code streamingClientDisconnect}); the {@code /stream} turn, not a resume.
+         */
+        private final boolean agentMayOverride;
+
+        private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse, boolean cancelOnDisconnect,
+                boolean agentMayOverride) {
             this.cancelOnDisconnect = cancelOnDisconnect;
+            this.agentMayOverride = agentMayOverride;
             this.conversationId = conversationId;
             this.safeConversationId = safeConversationId;
             this.eventSink = eventSink;
@@ -915,10 +964,11 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     }
                 }
             }
-            // Outside the lock: the cancel can call back into this stream from
-            // another thread.
+            // Outside the lock, and off this thread: a send runs on the provider's
+            // callback thread under the model call's lock (a token) or on the pipeline
+            // thread, and the cancel reads the agent and compare-and-sets the store.
             if (gone) {
-                onClientGone();
+                clientGoneExecutor.execute(this::onClientGone);
             }
         }
 
@@ -964,7 +1014,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             if (terminal.get() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
-            if (!cancelOnDisconnect) {
+            boolean cancel = agentMayOverride ? cancelOnDisconnectFor(conversationId, cancelOnDisconnect) : cancelOnDisconnect;
+            if (!cancel) {
                 LOGGER.infof("SSE client disconnected from conversation %s — letting the turn finish and persist "
                         + "(cancel on client disconnect is disabled for this stream)", safeConversationId);
                 return;
@@ -1008,6 +1059,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     /** Payload of {@code approval_required}. */
     @JsonInclude(JsonInclude.Include.NON_NULL)
     private record ApprovalRequiredEvent(String pauseId, String pauseType, int callCount) {
+    }
+
+    /**
+     * Payload of {@code cancelled}: the state the conversation settles on and
+     * whether the turn was stored (it is not: a cancelled turn is discarded).
+     */
+    private record CancelledEvent(String conversationState, boolean persisted) {
     }
 
     /**
@@ -1112,6 +1170,64 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         return "[]";
     }
 
+    /**
+     * Whether a vanished {@code /stream} client cancels the turn of
+     * {@code conversationId}: the agent's {@code streamingClientDisconnect} when it
+     * sets one, else {@code deploymentDefault}. Read only when a client actually
+     * left, off the stream's threads; any failure to read the agent falls back to
+     * the default.
+     */
+    boolean cancelOnDisconnectFor(String conversationId, boolean deploymentDefault) {
+        if (agentStore == null) {
+            return deploymentDefault;
+        }
+        try {
+            var tail = conversationService.getConversationMemoryTail(conversationId);
+            var snapshot = tail != null ? tail.snapshot() : null;
+            if (snapshot == null || snapshot.getAgentId() == null) {
+                return deploymentDefault;
+            }
+            AgentConfiguration agent = agentStore.read(snapshot.getAgentId(), snapshot.getAgentVersion());
+            return resolveCancelOnDisconnect(agent != null ? agent.getStreamingClientDisconnect() : null, deploymentDefault);
+        } catch (Exception e) {
+            LOGGER.debugf("Could not read the client-disconnect policy of conversation %s's agent; using the deployment default: %s",
+                    sanitize(conversationId), e.getMessage());
+            return deploymentDefault;
+        }
+    }
+
+    /**
+     * {@code cancel} → {@code true}, {@code finish} → {@code false}, anything else
+     * (unset included) → {@code deploymentDefault}.
+     */
+    static boolean resolveCancelOnDisconnect(String setting, boolean deploymentDefault) {
+        if (setting == null || setting.isBlank()) {
+            return deploymentDefault;
+        }
+        String value = setting.trim();
+        if (AgentConfiguration.STREAMING_DISCONNECT_CANCEL.equalsIgnoreCase(value)) {
+            return true;
+        }
+        if (AgentConfiguration.STREAMING_DISCONNECT_FINISH.equalsIgnoreCase(value)) {
+            return false;
+        }
+        LOGGER.warnf("Unknown streamingClientDisconnect '%s' (expected cancel or finish); using the deployment default", sanitize(value));
+        return deploymentDefault;
+    }
+
+    /**
+     * The turn's {@code finishReason} ({@code length}, {@code content_filter},
+     * {@code empty}) from its output, or {@code null} for a plain complete answer.
+     */
+    static String finishReasonOf(List<ConversationOutput> outputs) {
+        if (outputs == null || outputs.isEmpty()) {
+            return null;
+        }
+        ConversationOutput last = outputs.get(outputs.size() - 1);
+        Object reason = last != null ? last.get(MemoryKeys.TURN_FINISH_REASON) : null;
+        return reason instanceof String text && !text.isBlank() ? text : null;
+    }
+
     private String toJson(SimpleConversationMemorySnapshot snapshot) {
         // Simplified JSON for the done event — the full snapshot is available
         // via the standard GET endpoint. We include the essential fields.
@@ -1132,9 +1248,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             if (snapshot.getHitlPausedAt() != null) {
                 sb.append(",\"hitlPausedAt\":\"").append(snapshot.getHitlPausedAt()).append("\"");
             }
-            if (snapshot.getConversationOutputs() != null) {
+            // A cancelled turn's outputs were never stored: sending them presented a
+            // discarded answer as the turn's result.
+            boolean discarded = snapshot.getConversationState() == ConversationState.EXECUTION_INTERRUPTED;
+            if (snapshot.getConversationOutputs() != null && !discarded) {
                 sb.append(",\"conversationOutputs\":")
                         .append(MAPPER.writeValueAsString(snapshot.getConversationOutputs()));
+                String finishReason = finishReasonOf(snapshot.getConversationOutputs());
+                if (finishReason != null) {
+                    sb.append(",\"finishReason\":").append(MAPPER.writeValueAsString(finishReason));
+                }
             }
             if (snapshot.getError() != null) {
                 sb.append(",\"error\":").append(MAPPER.writeValueAsString(snapshot.getError()));

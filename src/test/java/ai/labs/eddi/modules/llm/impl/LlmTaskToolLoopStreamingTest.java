@@ -29,6 +29,8 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.chat.response.StreamingChatResponseHandler;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -205,7 +207,7 @@ class LlmTaskToolLoopStreamingTest {
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("the whole ");
                 handler.onPartialResponse("agent answer");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
     }
@@ -215,7 +217,7 @@ class LlmTaskToolLoopStreamingTest {
         return new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
     }

@@ -243,7 +243,8 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | --- | --- | --- |
 | `task_start` | `{"taskId","taskType","index"}` | A lifecycle task begins. `taskId` is the task's registered id (`eddi://ai.labs.behavior` for a step configured as `ai.labs.rules`, `eddi://ai.labs.httpcalls` for `ai.labs.apicalls`); `index` is its position in the turn |
 | `task_complete` | `{"taskId","taskType","durationMs"}` plus, when present, `actions` (the actions in memory after the task), `toolTrace` (the LLM task's tool calls, arguments redacted) and `confidence` | A task finished |
-| `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead |
+| `task_failed` | `{"taskId","taskType","durationMs","errorType","error"}` — `errorType` is the failure class (`RATE_LIMITED`, `TRANSIENT`, `TIMEOUT`, `AUTH`, `BAD_REQUEST`, `QUOTA_EXHAUSTED`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND` or `UNKNOWN`), `error` the redacted sentence the turn's `error.message` carries | A task threw. By default that stops the turn: the conversation goes to `ERROR` and the stream still ends with `done`, whose snapshot has `"conversationState":"ERROR"` and a `taskErrors` entry. An agent whose [memory policy](memory-policy.md) continues on failure runs the next task instead. Not sent for a cancelled turn |
+| `cancelled` | `{"conversationState","persisted"}` — `EXECUTION_INTERRUPTED`, `false` | The turn was cancelled (`/cancel`, or a client disconnect that cancels) and is discarded. Sent immediately before `done`, whose snapshot then carries no `conversationOutputs` |
 | `token` | **Raw text**, not JSON | A chunk of model output, as the model streams it. Concatenate the chunks |
 | `tool_call` | `{"tool","callId"}` plus `displayName` and `display` only for a tool the agent's [`toolDisplay`](langchain.md#showing-a-tool-call-to-a-watching-client-tooldisplay) names | Sent right before a tool runs. **Never the arguments**, unless the designer allow-listed a few fields in `toolDisplay` |
 | `tool_result` | `{"tool","callId","status","durationMs","ok","summary"}` — `status` is `ok`, `error`, `not_executed` (refused or skipped before the tool ran: budget, quota, deadline, request changed after approval, or a result that reports `NOT_EXECUTED`) or `rejected` (a human declined it); `ok` is `status == "ok"`; `summary` is the start of the result, or of the refusal, redacted exactly like `task_complete`'s `toolTrace`, whitespace collapsed, at most 200 characters (may be empty) | Sent once for every `tool_call`, always after it in the same stream, whichever way the call ends — except a call cut off by a cancellation or a turn deadline interrupt, which ends the turn without its result; on a resume a gated call that is settled without running (declined, skipped) gets its `tool_call` immediately before its `tool_result`. **Never the raw result** |
@@ -253,7 +254,7 @@ data: {"conversationState":"READY","conversationOutputs":[{"input":"tell me some
 | `cascade_escalation` | `{"fromStep","toStep","confidence","threshold","reason","durationMs"}` | The cascade escalates to the next model |
 | `llm_retry` | `{"reason","attempt"}` | The LLM task asks the same model again after an unusable reply ([recovery policies](langchain.md#recovery-policies-retry-where-it-helps)) |
 | `guardrail_triggered` | `{"type","phase","action","taskId"}` — `phase` is `input` or `output`, `action` one of `block`, `redact`, `reprompt`, `warn` | An LLM task's [input or output guardrail](langchain.md#input-and-output-guardrails) fired. Sent before the answer; after a `block` the answer that follows is the block message |
-| `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, and `hitlPausedAt` when the turn paused | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags) |
+| `done` | A reduced snapshot: `conversationState`, `conversationOutputs`, `hitlPausedAt` when the turn paused, `error` when it failed, and `finishReason` (`length`, `content_filter` or `empty`) when the answer is not a plain complete one | **Terminal.** The turn completed. `GET /agents/{conversationId}` returns the full snapshot (properties, steps, undo and redo flags). What a streamed model call must do to count as complete is [the streaming contract](langchain.md#the-streaming-contract) |
 | `error` | `{"message", …}` | **Terminal.** The turn could not run or failed |
 
 > **`task_complete.toolTrace` carries arguments and results.** The `tool_call` and
@@ -275,7 +276,7 @@ Rules for clients:
 
   ```text
   event:task_failed
-  data: {"taskId":"eddi://ai.labs.llm","taskType":"langchain","durationMs":1196,"errorType":"transport","error":"Streaming chat failed: java.net.ConnectException"}
+  data: {"taskId":"eddi://ai.labs.llm","taskType":"langchain","durationMs":1196,"errorType":"TRANSIENT","error":"Task 'eddi://ai.labs.llm' failed: Chat model execution failed after 3 attempts: Connection refused"}
 
   event:done
   data: {"conversationState":"ERROR","conversationOutputs":[{"input":"hello","actions":["send_to_ai"],"taskErrors":[{"type":"errorDigest","taskId":"ai.labs.llm","taskType":"langchain","text":"Task 'eddi://ai.labs.llm' failed: Streaming chat failed:"}]}]}

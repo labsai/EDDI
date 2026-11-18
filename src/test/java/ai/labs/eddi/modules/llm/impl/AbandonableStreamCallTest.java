@@ -6,6 +6,9 @@ package ai.labs.eddi.modules.llm.impl;
 
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.PartialResponse;
+import dev.langchain4j.model.chat.response.PartialResponseContext;
+import dev.langchain4j.model.chat.response.StreamingHandle;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -141,6 +144,138 @@ class AbandonableStreamCallTest {
         assertTrue(call.await(30));
         assertEquals("", call.forwardedText());
         assertSame(COMPLETE, call.response());
+    }
+
+    @Test
+    @DisplayName("the first terminal callback wins: an error after completion does not turn the answer into a failure")
+    void completionThenErrorKeepsTheCompletion() throws InterruptedException {
+        var call = recordingCall();
+
+        call.onPartialResponse("done");
+        call.onCompleteResponse(COMPLETE);
+        call.onError(new IllegalStateException("late error"));
+
+        assertEquals(AbandonableStreamCall.Outcome.COMPLETED, call.await(30, 0, null));
+        assertSame(COMPLETE, call.response());
+        assertNull(call.error());
+    }
+
+    @Test
+    @DisplayName("the first terminal callback wins: nothing is forwarded after an error, and a late completion is ignored")
+    void errorThenTokensAreNotForwarded() throws InterruptedException {
+        var call = recordingCall();
+        var failure = new IllegalStateException("malformed frame");
+
+        call.onPartialResponse("good1 ");
+        call.onError(failure);
+        // The provider keeps streaming after its own error (the live #garbage case):
+        // the client must not get text the conversation will never store.
+        call.onPartialResponse("good2");
+        call.onCompleteResponse(COMPLETE);
+
+        assertEquals(AbandonableStreamCall.Outcome.FAILED, call.await(30, 0, null));
+        assertEquals(List.of("good1 "), sent);
+        assertEquals("good1 ", call.forwardedText());
+        assertSame(failure, call.error());
+        assertNull(call.response());
+    }
+
+    @Test
+    @DisplayName("a null or empty partial is activity, never the text \"null\"")
+    void nullPartialIsNotText() throws InterruptedException {
+        var call = recordingCall();
+
+        call.onPartialResponse((String) null);
+        call.onPartialResponse("");
+        call.onPartialResponse("x");
+        call.onCompleteResponse(COMPLETE);
+
+        assertTrue(call.await(30));
+        assertEquals(List.of("x"), sent);
+        assertEquals("x", call.forwardedText());
+    }
+
+    @Test
+    @DisplayName("a call that went silent after its first token ends IDLE_TIMEOUT and stops the provider's stream")
+    void idleGapEndsTheCallAndCancelsTheStream() throws InterruptedException {
+        var call = recordingCall();
+        var handle = new RecordingHandle();
+
+        call.onPartialResponse(new PartialResponse("first "), new PartialResponseContext(handle));
+
+        // 1s idle limit, 30s backstop: the call ends on the gap, not on the backstop.
+        long start = System.nanoTime();
+        assertEquals(AbandonableStreamCall.Outcome.IDLE_TIMEOUT, call.await(30, 1, null));
+        assertTrue(TimeUnit.NANOSECONDS.toSeconds(System.nanoTime() - start) < 10, "the idle limit, not the backstop, ended the wait");
+        assertTrue(handle.cancelled.get(), "an idle stream is cancelled at the provider, not just ignored");
+
+        call.onPartialResponse("late");
+        assertEquals(List.of("first "), sent);
+    }
+
+    @Test
+    @DisplayName("the idle limit does not start before the first event: time to first token is the backstop's business")
+    void idleLimitStartsWithTheFirstEvent() throws InterruptedException {
+        var call = recordingCall();
+
+        // No event at all for longer than the idle limit, then the answer.
+        var provider = new Thread(() -> {
+            try {
+                Thread.sleep(1_500);
+            } catch (InterruptedException e) {
+                return;
+            }
+            call.onPartialResponse("late but fine");
+            call.onCompleteResponse(COMPLETE);
+        });
+        provider.setDaemon(true);
+        provider.start();
+
+        assertEquals(AbandonableStreamCall.Outcome.COMPLETED, call.await(30, 1, null));
+        assertEquals("late but fine", call.forwardedText());
+    }
+
+    @Test
+    @DisplayName("a cancel flag raised while waiting ends the call CANCELLED and cancels the provider's stream")
+    void cancelFlagIsPolledAndCancelsTheStream() throws InterruptedException {
+        var call = recordingCall();
+        var handle = new RecordingHandle();
+        var cancelled = new AtomicBoolean();
+
+        call.onPartialResponse(new PartialResponse("token "), new PartialResponseContext(handle));
+        cancelled.set(true);
+
+        assertEquals(AbandonableStreamCall.Outcome.CANCELLED, call.await(30, 0, cancelled::get));
+        assertTrue(handle.cancelled.get());
+
+        call.onPartialResponse("after cancel");
+        assertEquals(List.of("token "), sent, "no token reaches the client after the cancel");
+    }
+
+    @Test
+    @DisplayName("a timed-out call cancels the provider's stream when the provider handed out a handle")
+    void timeoutCancelsTheStream() throws InterruptedException {
+        var call = recordingCall();
+        var handle = new RecordingHandle();
+        call.onPartialResponse(new PartialResponse("a"), new PartialResponseContext(handle));
+
+        assertEquals(AbandonableStreamCall.Outcome.TIMED_OUT, call.await(0, 0, null));
+        assertTrue(handle.cancelled.get());
+    }
+
+    /** A provider stream handle that records the cancel. */
+    private static final class RecordingHandle implements StreamingHandle {
+        final AtomicBoolean cancelled = new AtomicBoolean();
+
+        @Override
+        public void cancel() {
+            cancelled.set(true);
+        }
+
+        @Override
+        public boolean isCancelled() {
+            return cancelled.get();
+        }
     }
 
     /**

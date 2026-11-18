@@ -79,11 +79,11 @@ class LifecycleManagerStackOverflowTest {
     }
 
     @Test
-    @DisplayName("the failure is reported like any other: task_failed with its own error type")
+    @DisplayName("the failure is reported like any other: task_failed with the classifier's class (UNKNOWN for an overflow)")
     void overflowIsReportedAsTaskFailed() {
         assertThrows(LifecycleException.class, () -> lifecycleManager.executeLifecycle(memory, null));
 
-        verify(eventSink).onTaskFailed(eq(new TaskId("ai.labs.property")), eq("property"), anyLong(), eq("stack_overflow"), any());
+        verify(eventSink).onTaskFailed(eq(new TaskId("ai.labs.property")), eq("property"), anyLong(), eq("UNKNOWN"), any());
     }
 
     @Test

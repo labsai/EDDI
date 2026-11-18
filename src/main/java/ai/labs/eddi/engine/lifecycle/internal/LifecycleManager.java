@@ -555,12 +555,16 @@ public class LifecycleManager implements ILifecycleManager {
                         .description("Pipeline task execution errors")
                         .register(Metrics.globalRegistry)).increment();
 
-                // Emit SSE task_failed event for real-time admin monitoring
+                // Emit the SSE task_failed event. It reaches every client of the stream, end
+                // users included, so it carries what the REST error carries: the
+                // classifier's failure class and the redacted digest — never the audit
+                // summary above, whose audience is privileged (URLs and class names kept).
+                // A cancelled turn reports its cancel, not the failure the cancel caused.
                 var eventSinkRef = conversationMemory.getEventSink();
-                if (eventSinkRef != null) {
+                if (eventSinkRef != null && !conversationMemory.isCancelled()) {
                     try {
                         eventSinkRef.onTaskFailed(task.getId(), task.getType(),
-                                failDurationMs, errorType, errorSummary);
+                                failDurationMs, LlmFailureClassifier.classify(e).cls().name(), clientFailureDigest(task, e));
                     } catch (Exception sseEx) {
                         LOGGER.warnf(sseEx, "SSE task_failed emission failed for conversation '%s', task '%s'",
                                 sanitize(conversationMemory.getConversationId()), errTaskId);
@@ -1147,8 +1151,16 @@ public class LifecycleManager implements ILifecycleManager {
         }
     }
 
+    /**
+     * The sentence a client is told about a failed task — on the stream's
+     * {@code task_failed} event and in the turn's {@code error.message} alike.
+     */
+    static String clientFailureDigest(ILifecycleTask task, Throwable exception) {
+        return String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
+    }
+
     private String reportFailureToCallerUnguarded(ConversationStep step, ILifecycleTask task, Exception exception) {
-        String digestText = String.format("Task '%s' failed: %s", task.getId(), summarizeException(exception));
+        String digestText = clientFailureDigest(task, exception);
         var errorOutput = new LinkedHashMap<String, Object>();
         errorOutput.put("type", "errorDigest");
         errorOutput.put("taskId", task.getId().name());

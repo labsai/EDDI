@@ -778,6 +778,15 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
         private Integer streamingTimeoutSeconds;
 
         /**
+         * How a streamed model call is judged complete, how long it may go silent, and
+         * what a failure after text reached the client does. Absent means the
+         * deployment defaults ({@code eddi.llm.streaming.*}) and the default contract:
+         * a stream succeeds only when the provider names a finish reason, and a stream
+         * that fails after forwarding text fails the turn. See {@link StreamingConfig}.
+         */
+        private StreamingConfig streaming;
+
+        /**
          * Per-task multimodal capability overrides. Each of {@code vision},
          * {@code documents}, {@code audio} may be {@code "auto"} (defer to
          * deployment/built-in defaults), {@code "on"} (force enabled) or {@code "off"}
@@ -1448,6 +1457,14 @@ public record LlmConfiguration(@JsonProperty("tasks") List<Task> tasks) {
 
         public void setStreamingTimeoutSeconds(Integer streamingTimeoutSeconds) {
             this.streamingTimeoutSeconds = streamingTimeoutSeconds;
+        }
+
+        public StreamingConfig getStreaming() {
+            return streaming;
+        }
+
+        public void setStreaming(StreamingConfig streaming) {
+            this.streaming = streaming;
         }
 
         public MultimodalOverride getMultimodal() {

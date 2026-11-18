@@ -350,6 +350,16 @@ public final class MemoryKeys {
      */
     public static final String LLM_ERROR_PREFIX = "llm:error:";
 
+    /**
+     * Prefix of {@code llm:partial_output:<taskId>}: the text a streamed model call
+     * had already sent to the client when it failed. Error detail only — it is in
+     * the detailed conversation, never in the outputs the history builder replays
+     * to the model.
+     *
+     * @since 6.7.0
+     */
+    public static final String LLM_PARTIAL_OUTPUT_PREFIX = "llm:partial_output:";
+
     // ---- Output ----
 
     /**
@@ -368,6 +378,26 @@ public final class MemoryKeys {
      * {@code LifecycleManager}; one of the keys a non-detailed response keeps.
      */
     public static final String TASK_ERRORS = "taskErrors";
+
+    /**
+     * Output key saying why a turn's model answer is not a plain complete answer:
+     * {@code length} (cut off at the token limit), {@code content_filter} (filtered
+     * by the provider) or {@code empty} (the model returned no text). Absent for a
+     * normal answer. Written by {@code LlmTask}; one of the keys a non-detailed
+     * response keeps, and the {@code finishReason} of the streamed {@code done}
+     * event.
+     *
+     * @since 6.7.0
+     */
+    public static final String TURN_FINISH_REASON = "finishReason";
+
+    /**
+     * {@link #TURN_FINISH_REASON} of a turn whose LLM task, configured to add its
+     * answer to the output, got no text from the model.
+     *
+     * @since 6.7.0
+     */
+    public static final String TURN_FINISH_REASON_EMPTY = "empty";
 
     // ---- ApiCalls ----
 

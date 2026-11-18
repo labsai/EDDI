@@ -501,14 +501,12 @@ public class RetryConfiguration {
     }
 
     /**
-     * The engine ceiling on an attempt count, for retry loops that live outside
-     * {@link #executeWithRetry} — the streaming path runs its own.
+     * The engine ceiling on an attempt count, for code that reasons about attempts
+     * outside {@link #executeWithRetry} (the turn-budget warnings).
      *
      * <p>
-     * Public so that ceiling is uniform: while the streaming executor read
-     * {@code getMaxAttempts()} directly, {@code {"maxAttempts": 50}} was clamped on
-     * the tool-loop path and unbounded on the streaming one, for the same agent and
-     * the same config block.
+     * Public so that ceiling is uniform. Every model call path — the streaming ones
+     * included, since 6.7 — retries through {@link #executeWithRetry}.
      * </p>
      *
      * @see #MAX_ATTEMPTS_CEILING
@@ -606,8 +604,12 @@ public class RetryConfiguration {
      * @param totalBackoffMs
      *            what this execution has already slept
      * @return how long this call actually slept, to be added to
-     *         {@code totalBackoffMs}, or {@code -1} when the budget is spent and
-     *         the caller must stop retrying (nothing was slept)
+     *         {@code totalBackoffMs}, or {@code -1} when the caller must stop
+     *         retrying: the budget is spent (nothing was slept) or the sleep was
+     *         interrupted (the interrupt flag is restored). An interrupt is a
+     *         cancellation; it used to be swallowed and reported as a completed
+     *         sleep, so the caller issued one more billed call for a cancelled
+     *         turn.
      * @see #budgetedSleep(long, long)
      */
     public static long backoff(int attempt, RetryConfiguration retryConfig, long totalBackoffMs) {
@@ -628,6 +630,7 @@ public class RetryConfiguration {
             Thread.sleep(sleepFor);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
+            return -1L;
         }
         return sleepFor;
     }
