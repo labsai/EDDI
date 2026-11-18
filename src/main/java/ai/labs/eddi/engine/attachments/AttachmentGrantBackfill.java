@@ -16,7 +16,6 @@ import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -24,30 +23,44 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Copies the attachment grants kept in the legacy shape (on the blob) into
- * {@code attachment_grants}, once, at startup.
+ * {@code attachment_grants}, on every start.
  * <p>
  * <b>Why it is safe to run while the node serves traffic.</b> For this release
  * {@link IAttachmentStore#grantAccess} writes both shapes and every read takes
  * the union, so a grant the backfill has not reached yet still authorizes. The
  * backfill therefore runs on a virtual thread and never delays startup.
  * <p>
+ * <b>Every start, not once.</b> During a rolling upgrade a node of the previous
+ * release still writes grants in the legacy shape only — behind the cursor, or
+ * after a pass completed. A pass that ran once would never copy them. So each
+ * start runs a catch-up pass; it is idempotent, and after the first one it
+ * finds every grant already present.
+ * <p>
  * <b>Batched, bounded, resumable.</b> It pages
  * {@link IAttachmentGrantMigration#readLegacyGrants} {@value #BATCH_SIZE} blobs
- * at a time, at most {@value #MAX_BATCHES} pages per start. Inserts are
- * idempotent, so several nodes may run it at once and a run cut short is simply
- * repeated. Where the migration log can keep entries (MongoDB) the cursor is
- * kept between starts; elsewhere the next start pages from the beginning again.
+ * at a time, at most {@value #MAX_BATCHES} pages per start, and keeps its
+ * cursor in the store ({@link IAttachmentGrantMigration#readBackfillCursor}) on
+ * both databases, so a pass larger than one start's bound continues on the
+ * next. Inserts are idempotent, so several nodes may run it at once.
  * <p>
- * <b>Dangling grantees are skipped.</b> A grantee that no longer exists as a
- * conversation or as a group conversation is not copied — copying it would
- * re-create exactly the grants this release prunes. An existence check that
- * fails (rather than answering "absent") ends the pass without the completion
- * marker, so the next start retries it.
+ * <b>Grantees that no longer exist are skipped</b> — copying one would
+ * re-create exactly the grants this release prunes — and a copied grant whose
+ * grantee disappeared meanwhile is taken back. A copy is also refused for a
+ * blob deleted meanwhile. A lookup that fails (rather than answering "absent")
+ * skips that grant, is counted, and keeps the pass from being marked complete.
  * <p>
- * <b>The completion marker</b> ({@value #MIGRATION_KEY}) only records that
- * every legacy grant was copied. It switches nothing off: the legacy write and
- * read stay for this release (an old node in a rolling upgrade may still write
- * the legacy shape only), and a later release removes them.
+ * <b>Before copying</b> it waits for the grant indexes (the unique one stops
+ * concurrent nodes from writing duplicates) and removes grant rows whose blob
+ * is gone — rows a node of the previous release leaves behind when it deletes a
+ * blob.
+ * <p>
+ * <b>The completion marker</b> ({@value #MIGRATION_KEY}) records that a whole
+ * pass copied every legacy grant without a failed lookup. It switches nothing
+ * off and is no proof for later: an old node can write a legacy-only grant
+ * after it. <b>The release that drops the legacy read must therefore keep this
+ * catch-up pass and run it once more, under a new marker key, after the last
+ * node of the previous release is gone, before it stops reading the legacy
+ * shape.</b>
  *
  * @since 6.8.0
  */
@@ -57,7 +70,6 @@ public class AttachmentGrantBackfill {
     private static final Logger LOGGER = Logger.getLogger(AttachmentGrantBackfill.class);
 
     static final String MIGRATION_KEY = "attachment-grants-backfill-complete";
-    static final String CURSOR_KEY = "attachment-grants-backfill-cursor";
     static final int BATCH_SIZE = 500;
     static final int MAX_BATCHES = 2_000;
 
@@ -68,7 +80,8 @@ public class AttachmentGrantBackfill {
     }
 
     /** What one pass did. */
-    public record Result(long blobsRead, long grantsCopied, long grantsAlreadyPresent, long granteesSkipped, boolean complete) {
+    public record Result(long blobsRead, long grantsCopied, long grantsAlreadyPresent, long granteesSkipped, long lookupsFailed,
+            long danglingRowsRemoved, boolean complete) {
     }
 
     private final IAttachmentGrantMigration migration;
@@ -93,9 +106,6 @@ public class AttachmentGrantBackfill {
     /** One pass with the production bounds; never throws. */
     void runOnce() {
         try {
-            if (migrationLogStore.readMigrationLog(MIGRATION_KEY) != null) {
-                return;
-            }
             run(this::granteeExists, BATCH_SIZE, MAX_BATCHES);
         } catch (RuntimeException e) {
             LOGGER.warnf("The attachment grant backfill stopped; the next start resumes it. Grants still authorize meanwhile: %s",
@@ -104,8 +114,10 @@ public class AttachmentGrantBackfill {
     }
 
     /**
-     * Copies legacy grants, at most {@code maxBatches} pages of {@code batchSize}
-     * blobs, and writes the completion marker when the last page was reached.
+     * One pass: ensures the grant indexes, removes grant rows whose blob is gone,
+     * then copies legacy grants, at most {@code maxBatches} pages of
+     * {@code batchSize} blobs, and writes the completion marker when the last page
+     * was reached and no lookup failed.
      *
      * @return what was done, or {@code null} when a pass is already running here
      */
@@ -117,12 +129,26 @@ public class AttachmentGrantBackfill {
         long copied = 0;
         long present = 0;
         long skipped = 0;
+        long failed = 0;
+        long dangling = 0;
         boolean complete = false;
-        Map<String, Boolean> known = new HashMap<>();
         try {
-            String cursor = readCursor();
+            try {
+                migration.ensureGrantIndexes();
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not ensure the attachment grant indexes; copying anyway: %s", sanitize(e.getMessage()));
+            }
+            try {
+                dangling = migration.pruneGrantsWithoutBlob();
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not remove attachment grant rows whose blob is gone; the next start retries: %s", sanitize(e.getMessage()));
+            }
+            String cursor = migration.readBackfillCursor();
             for (int batch = 0; batch < maxBatches; batch++) {
                 IAttachmentGrantMigration.Page page = migration.readLegacyGrants(cursor, batchSize);
+                // Existence is cached for one page only, so a pass of many pages does
+                // not act on an answer from long ago.
+                Map<String, Boolean> known = new HashMap<>();
                 for (IAttachmentGrantMigration.LegacyGrants blob : page.blobs()) {
                     read++;
                     for (String grantee : blob.conversationIds()) {
@@ -131,24 +157,30 @@ public class AttachmentGrantBackfill {
                         }
                         Boolean exists = known.get(grantee);
                         if (exists == null) {
-                            exists = granteeCheck.exists(grantee);
-                            if (known.size() < 10_000) {
-                                known.put(grantee, exists);
+                            try {
+                                exists = granteeCheck.exists(grantee);
+                            } catch (Exception e) {
+                                failed++;
+                                LOGGER.debugf("Could not tell whether conversation '%s' exists; its grant on %s is copied on a later start: %s",
+                                        sanitize(grantee), blob.storageRef(), sanitize(e.getMessage()));
+                                continue;
                             }
+                            known.put(grantee, exists);
                         }
                         if (!exists) {
                             skipped++;
                         } else if (migration.copyGrant(blob.storageRef(), grantee)) {
                             copied++;
+                            takeBackIfGone(granteeCheck, blob.storageRef(), grantee);
                         } else {
                             present++;
                         }
                     }
                 }
                 cursor = page.nextCursor();
-                writeCursor(cursor);
+                migration.writeBackfillCursor(cursor);
                 if (cursor == null) {
-                    complete = true;
+                    complete = failed == 0;
                     break;
                 }
             }
@@ -156,15 +188,33 @@ public class AttachmentGrantBackfill {
                 migrationLogStore.createMigrationLog(new MigrationLog(MIGRATION_KEY));
             }
             LOGGER.infof("Attachment grant backfill: read %d blobs with legacy grants, copied %d grants, %d already present, skipped %d"
-                    + " grants of conversations that no longer exist%s", read, copied, present, skipped,
-                    complete ? "; complete" : "; not finished, the next start continues");
-            return new Result(read, copied, present, skipped, complete);
-        } catch (Exception e) {
+                    + " grants of conversations that no longer exist, %d lookups failed, removed %d grant rows whose blob is gone%s",
+                    read, copied, present, skipped, failed, dangling,
+                    complete ? "; complete" : "; not complete, the next start continues");
+            return new Result(read, copied, present, skipped, failed, dangling, complete);
+        } catch (RuntimeException e) {
             LOGGER.warnf("The attachment grant backfill stopped after %d blobs (%d grants copied); the next start resumes it: %s", read,
                     copied, sanitize(e.getMessage()));
-            return new Result(read, copied, present, skipped, false);
+            return new Result(read, copied, present, skipped, failed, dangling, false);
         } finally {
             running.set(false);
+        }
+    }
+
+    /**
+     * A grantee erased between its check and the copy keeps no row: an erasure
+     * prunes the grants a conversation holds, and a row written after that prune
+     * would carry the erased id for good. Checked again after the write; a failed
+     * re-check keeps the row (it authorizes nothing for a conversation that is
+     * gone).
+     */
+    private void takeBackIfGone(GranteeCheck granteeCheck, String storageRef, String grantee) {
+        try {
+            if (!granteeCheck.exists(grantee)) {
+                migration.removeGrant(storageRef, grantee);
+            }
+        } catch (Exception e) {
+            LOGGER.debugf("Could not re-check conversation '%s' after copying its grant: %s", sanitize(grantee), sanitize(e.getMessage()));
         }
     }
 
@@ -174,7 +224,10 @@ public class AttachmentGrantBackfill {
      * failure on either is rethrown — "could not tell" is never "gone".
      */
     boolean granteeExists(String conversationId) throws Exception {
-        if (conversationMemoryStore.getConversationState(conversationId) != null) {
+        // A stored conversation without a state field answers a null state; its
+        // revision (unversioned included) is non-null whenever the document exists.
+        if (conversationMemoryStore.getConversationState(conversationId) != null
+                || conversationMemoryStore.getRevision(conversationId) != null) {
             return true;
         }
         try {
@@ -182,14 +235,5 @@ public class AttachmentGrantBackfill {
         } catch (IResourceStore.ResourceNotFoundException e) {
             return false;
         }
-    }
-
-    private String readCursor() {
-        List<String> entries = migrationLogStore.readMigrationEntries(CURSOR_KEY);
-        return entries == null || entries.isEmpty() ? null : entries.getFirst();
-    }
-
-    private void writeCursor(String cursor) {
-        migrationLogStore.writeMigrationEntries(CURSOR_KEY, cursor == null ? List.of() : List.of(cursor));
     }
 }

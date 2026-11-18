@@ -18,10 +18,12 @@ import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSBuckets;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
@@ -91,6 +93,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     static final String GRANT_STORAGE_REF = "storageRef";
     static final String GRANT_CONVERSATION_ID = "conversationId";
     static final String GRANT_CREATED_AT = "createdAt";
+    static final String BACKFILL_COLLECTION = "attachment_grants_backfill";
+    private static final String BACKFILL_CURSOR = "cursor";
     /**
      * How long a quota lock is held at most before another upload may take it over.
      */
@@ -117,6 +121,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
      * refuse it.
      */
     private final MongoCollection<Document> grantsCollection;
+    /** The backfill's cursor, kept across starts. */
+    private final MongoCollection<Document> backfillCollection;
 
     @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520") // 20 MB
     long maxSizeBytes;
@@ -140,6 +146,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         this.filesCollection = database.getCollection(BUCKET_NAME + ".files");
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
         this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
+        this.backfillCollection = database.getCollection(BACKFILL_COLLECTION).withReadPreference(ReadPreference.primary());
     }
 
     /**
@@ -336,7 +343,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
 
     @Override
     public void grantAccess(String storageRef, String conversationId) throws AttachmentStoreException {
-        GridFSFile file = findFileByRef(storageRef);
+        // From the PRIMARY: a grant follows the upload it shares by milliseconds, and
+        // a lagging secondary would answer "not found".
+        GridFSFile file = primaryReadBucket.find(refFilter(storageRef)).first();
         if (file == null) {
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
@@ -391,9 +400,72 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         return new Page(blobs, blobs.size() < limit || last == null ? null : last.toHexString());
     }
 
+    /**
+     * Writes the row, then makes sure the blob still exists: a delete that ran in
+     * between would otherwise leave a row with no blob.
+     */
     @Override
     public boolean copyGrant(String storageRef, String conversationId) {
-        return upsertGrant(storageRef, conversationId);
+        boolean added = upsertGrant(storageRef, conversationId);
+        if (primaryReadBucket.find(refFilter(storageRef)).first() == null) {
+            removeGrant(storageRef, conversationId);
+            return false;
+        }
+        return added;
+    }
+
+    @Override
+    public void removeGrant(String storageRef, String conversationId) {
+        grantsCollection.deleteMany(Filters.and(Filters.eq(GRANT_STORAGE_REF, storageRef), Filters.eq(GRANT_CONVERSATION_ID, conversationId)));
+    }
+
+    /**
+     * One aggregation finds the rows whose {@code storageRef} matches no
+     * {@code metadata.storageRef}; a row keyed by an ObjectId hex (a blob stored
+     * before storageRef existed) is then checked by {@code _id} before it goes.
+     */
+    @Override
+    public long pruneGrantsWithoutBlob() {
+        List<Bson> pipeline = List.of(
+                Aggregates.lookup(BUCKET_NAME + ".files", GRANT_STORAGE_REF, "metadata." + META_STORAGE_REF, "blob"),
+                Aggregates.match(Filters.size("blob", 0)),
+                Aggregates.project(Projections.include(GRANT_STORAGE_REF)));
+        Set<String> candidates = new LinkedHashSet<>();
+        for (Document row : grantsCollection.aggregate(pipeline)) {
+            String ref = row.getString(GRANT_STORAGE_REF);
+            if (ref != null) {
+                candidates.add(ref);
+            }
+        }
+        long removed = 0;
+        for (String ref : candidates) {
+            if (ObjectId.isValid(ref) && primaryReadBucket.find(Filters.eq("_id", new ObjectId(ref))).first() != null) {
+                continue;
+            }
+            removed += grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, ref)).getDeletedCount();
+        }
+        return removed;
+    }
+
+    @Override
+    public void ensureGrantIndexes() {
+        ensureGrantIndexes(grantsCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+    }
+
+    @Override
+    public String readBackfillCursor() {
+        Document cursor = backfillCollection.find(Filters.eq("_id", BACKFILL_CURSOR)).first();
+        return cursor != null ? cursor.getString("value") : null;
+    }
+
+    @Override
+    public void writeBackfillCursor(String cursor) {
+        if (cursor == null) {
+            backfillCollection.deleteOne(Filters.eq("_id", BACKFILL_CURSOR));
+        } else {
+            backfillCollection.replaceOne(Filters.eq("_id", BACKFILL_CURSOR), new Document("_id", BACKFILL_CURSOR).append("value", cursor),
+                    new ReplaceOptions().upsert(true));
+        }
     }
 
     @Override

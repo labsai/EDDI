@@ -69,8 +69,15 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     private static final String CREATE_INDEX_TENANT = "CREATE INDEX IF NOT EXISTS idx_attach_tenant ON attachments (tenant_id)";
     private static final String ADD_USER_COLUMN = "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS user_id TEXT";
     private static final String CREATE_INDEX_USER = "CREATE INDEX IF NOT EXISTS idx_attach_user ON attachments (user_id)";
-    /** Lets pruning find the legacy grants a deleted conversation held. */
-    private static final String CREATE_INDEX_LEGACY_GRANTS = "CREATE INDEX IF NOT EXISTS idx_attach_grants ON attachments USING GIN (grants)";
+    /**
+     * Lets pruning find the legacy grants a deleted conversation held. Built
+     * CONCURRENTLY by {@link #ensureGrantIndexes()} on the backfill's thread, not
+     * in {@link #ensureSchema()}: a plain build holds a lock that blocks every
+     * upload and grant on a large table, on whichever request touched it first.
+     */
+    private static final String CREATE_INDEX_LEGACY_GRANTS = "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_grants ON attachments USING GIN (grants)";
+    private static final String CREATE_BACKFILL_TABLE = "CREATE TABLE IF NOT EXISTS attachment_grants_backfill (name TEXT PRIMARY KEY, cursor_value TEXT)";
+    private static final String BACKFILL_CURSOR = "cursor";
     private static final String CREATE_GRANTS_TABLE = """
             CREATE TABLE IF NOT EXISTS attachment_grants (
                 storage_ref TEXT NOT NULL,
@@ -123,9 +130,9 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             stmt.execute(CREATE_INDEX_TENANT);
             stmt.execute(ADD_USER_COLUMN);
             stmt.execute(CREATE_INDEX_USER);
-            stmt.execute(CREATE_INDEX_LEGACY_GRANTS);
             stmt.execute(CREATE_GRANTS_TABLE);
             stmt.execute(CREATE_INDEX_GRANTS_CONV);
+            stmt.execute(CREATE_BACKFILL_TABLE);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -231,9 +238,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 + "ELSE array_append(COALESCE(grants, '{}'), ?) END "
                 + "WHERE storage_ref = ?";
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            boolean autoCommit = conn.getAutoCommit();
-            conn.setAutoCommit(false);
-            try {
+            inTransaction(conn, () -> {
                 int updated;
                 try (PreparedStatement ps = conn.prepareStatement(legacy)) {
                     ps.setString(1, conversationId);
@@ -246,14 +251,8 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     // from "the store failed" gets the same answer on both backends.
                     throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
                 }
-                insertGrant(conn, storageRef, conversationId);
-                conn.commit();
-            } catch (SQLException | AttachmentStoreException | RuntimeException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(autoCommit);
-            }
+                return insertGrant(conn, storageRef, conversationId);
+            });
             LOGGER.debugf("Granted conversation '%s' access to attachment %s",
                     sanitize(conversationId), storageRef);
         } catch (SQLException e) {
@@ -303,13 +302,79 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         }
     }
 
+    /**
+     * Inserts only while the blob row exists, and locks it (FOR SHARE) for the
+     * statement: a concurrent delete either ran first (nothing inserted) or waits
+     * and then deletes the new row with the blob.
+     */
     @Override
     public boolean copyGrant(String storageRef, String conversationId) {
         ensureSchema();
-        try (Connection conn = dataSourceInstance.get().getConnection()) {
-            return insertGrant(conn, storageRef, conversationId);
+        String sql = "INSERT INTO attachment_grants (storage_ref, conversation_id) "
+                + "SELECT storage_ref, ? FROM attachments WHERE storage_ref = ? FOR SHARE ON CONFLICT DO NOTHING";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, conversationId);
+            ps.setString(2, storageRef);
+            return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to copy an attachment grant", e);
+        }
+    }
+
+    @Override
+    public void removeGrant(String storageRef, String conversationId) {
+        ensureSchema();
+        executeUpdate("DELETE FROM attachment_grants WHERE storage_ref = ? AND conversation_id = ?", storageRef, conversationId);
+    }
+
+    @Override
+    public long pruneGrantsWithoutBlob() {
+        ensureSchema();
+        return executeUpdate("DELETE FROM attachment_grants g WHERE NOT EXISTS (SELECT 1 FROM attachments a WHERE a.storage_ref = g.storage_ref)");
+    }
+
+    @Override
+    public void ensureGrantIndexes() {
+        ensureSchema();
+        // Outside a transaction (auto-commit), as CONCURRENTLY requires. A build that
+        // failed leaves an invalid index IF NOT EXISTS then skips; pruning still
+        // works without it, by a scan.
+        executeUpdate(CREATE_INDEX_LEGACY_GRANTS);
+    }
+
+    @Override
+    public String readBackfillCursor() {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT cursor_value FROM attachment_grants_backfill WHERE name = ?")) {
+            ps.setString(1, BACKFILL_CURSOR);
+            try (ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? rs.getString(1) : null;
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read the attachment grant backfill cursor", e);
+        }
+    }
+
+    @Override
+    public void writeBackfillCursor(String cursor) {
+        ensureSchema();
+        if (cursor == null) {
+            executeUpdate("DELETE FROM attachment_grants_backfill WHERE name = ?", BACKFILL_CURSOR);
+        } else {
+            executeUpdate("INSERT INTO attachment_grants_backfill (name, cursor_value) VALUES (?, ?) "
+                    + "ON CONFLICT (name) DO UPDATE SET cursor_value = EXCLUDED.cursor_value", BACKFILL_CURSOR, cursor);
+        }
+    }
+
+    private int executeUpdate(String sql, String... params) {
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            for (int i = 0; i < params.length; i++) {
+                ps.setString(i + 1, params[i]);
+            }
+            return ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new RuntimeException("Attachment grant statement failed", e);
         }
     }
 
@@ -337,9 +402,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             }
             // The blob and the grants on it in one transaction: a grant never outlives
             // its blob.
-            boolean autoCommit = conn.getAutoCommit();
-            conn.setAutoCommit(false);
-            try {
+            return inTransaction(conn, () -> {
                 boolean deleted;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachments WHERE storage_ref = ?")) {
@@ -351,25 +414,24 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     ps.setString(1, storageRef);
                     ps.executeUpdate();
                 }
-                conn.commit();
                 return deleted;
-            } catch (SQLException | RuntimeException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(autoCommit);
-            }
+            });
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to delete attachment", e);
         }
     }
 
     /**
-     * Deletes the conversation's blobs, the grants on them, and the grants the
-     * conversation <em>held</em> on other blobs in both shapes — in one
-     * transaction. The blobs go first: their DELETE waits for a concurrent
-     * {@link #grantAccess} on one of them to commit, so the grant deletes that
-     * follow see its row.
+     * Deletes the conversation's blobs, the grant rows on them and the grant rows
+     * the conversation <em>held</em> on other blobs in one transaction, then the
+     * conversation from the legacy grant lists of other blobs. The blobs go first:
+     * their DELETE waits for a concurrent {@link #grantAccess} on one of them to
+     * commit, so the grant delete that follows sees its row.
+     * <p>
+     * The legacy prune runs after the commit, as its own statement: it locks
+     * <em>other</em> conversations' blob rows, and holding this conversation's
+     * deleted rows at the same time let two such deletes wait on each other in
+     * opposite order (A's blob granted to B, B's blob granted to A).
      *
      * @return the number of blobs deleted
      */
@@ -377,10 +439,8 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     public long deleteByConversation(String conversationId) {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
-            boolean autoCommit = conn.getAutoCommit();
-            conn.setAutoCommit(false);
-            try {
-                List<String> refs = new ArrayList<>();
+            List<String> refs = new ArrayList<>();
+            int held = inTransaction(conn, () -> {
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachments WHERE conversation_id = ? RETURNING storage_ref")) {
                     ps.setString(1, conversationId);
@@ -390,32 +450,51 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                         }
                     }
                 }
-                int held;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachment_grants WHERE conversation_id = ? OR storage_ref = ANY(?)")) {
                     ps.setString(1, conversationId);
                     ps.setArray(2, conn.createArrayOf("text", refs.toArray()));
-                    held = ps.executeUpdate();
+                    return ps.executeUpdate();
                 }
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "UPDATE attachments SET grants = array_remove(grants, ?) WHERE grants @> ARRAY[?]::text[]")) {
-                    ps.setString(1, conversationId);
-                    ps.setString(2, conversationId);
-                    ps.executeUpdate();
-                }
-                conn.commit();
-                if (!refs.isEmpty() || held > 0) {
-                    LOGGER.debugf("Deleted %d attachments and %d grant rows for conversation '%s'", refs.size(), held, sanitize(conversationId));
-                }
-                return refs.size();
-            } catch (SQLException | RuntimeException e) {
-                conn.rollback();
-                throw e;
-            } finally {
-                conn.setAutoCommit(autoCommit);
+            });
+            try (PreparedStatement ps = conn.prepareStatement(
+                    "UPDATE attachments SET grants = array_remove(grants, ?) WHERE grants @> ARRAY[?]::text[]")) {
+                ps.setString(1, conversationId);
+                ps.setString(2, conversationId);
+                ps.executeUpdate();
             }
-        } catch (SQLException e) {
+            if (!refs.isEmpty() || held > 0) {
+                LOGGER.debugf("Deleted %d attachments and %d grant rows for conversation '%s'", refs.size(), held, sanitize(conversationId));
+            }
+            return refs.size();
+        } catch (SQLException | AttachmentStoreException e) {
             throw new RuntimeException("Failed to delete attachments", e);
+        }
+    }
+
+    /** Work run by {@link #inTransaction}. */
+    @FunctionalInterface
+    private interface TransactionWork<T> {
+        T run() throws SQLException, AttachmentStoreException;
+    }
+
+    /**
+     * Runs {@code work} in one transaction on {@code conn}: commits when it
+     * returns, rolls back when it throws, and restores the connection's auto-commit
+     * either way.
+     */
+    private static <T> T inTransaction(Connection conn, TransactionWork<T> work) throws SQLException, AttachmentStoreException {
+        boolean autoCommit = conn.getAutoCommit();
+        conn.setAutoCommit(false);
+        try {
+            T result = work.run();
+            conn.commit();
+            return result;
+        } catch (SQLException | AttachmentStoreException | RuntimeException e) {
+            conn.rollback();
+            throw e;
+        } finally {
+            conn.setAutoCommit(autoCommit);
         }
     }
 
@@ -491,9 +570,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                                    String conversationId, String tenantId, String userId, String filename, String mime,
                                    byte[] bytes)
             throws SQLException, AttachmentStoreException {
-        boolean autoCommit = conn.getAutoCommit();
-        conn.setAutoCommit(false);
-        try {
+        inTransaction(conn, () -> {
             if (conversationQuota) {
                 advisoryLock(conn, "conversation:" + conversationId);
             }
@@ -510,13 +587,8 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_USER, usage, bytes.length, maxPerUser, maxTotalBytesPerUser);
             }
             insert(conn, storageRef, conversationId, tenantId, userId, filename, mime, bytes);
-            conn.commit();
-        } catch (SQLException | AttachmentStoreException | RuntimeException e) {
-            conn.rollback();
-            throw e;
-        } finally {
-            conn.setAutoCommit(autoCommit);
-        }
+            return null;
+        });
     }
 
     private static void advisoryLock(Connection conn, String key) throws SQLException {

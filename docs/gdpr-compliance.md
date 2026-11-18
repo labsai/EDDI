@@ -119,7 +119,11 @@ principal, not a user: erasing or exporting it is refused with 400.
    re-run unable to reach the blobs. Re-run the erasure once the store is back.
    The same per-conversation delete removes the read grants on those blobs, and the
    grants those conversations held on other users' blobs (in `attachment_grants`
-   and in the legacy per-blob list), so no grant keeps the erased conversation's id
+   and in the legacy per-blob list), so no grant keeps the erased conversation's id.
+   One window remains while a cluster is being upgraded: a node of the previous
+   release deletes a blob without its `attachment_grants` rows. Those rows authorize
+   nothing, but they keep the grantee's conversation id until the next start of an
+   upgraded node removes every grant row whose blob is gone
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**

@@ -4,13 +4,21 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
+import ai.labs.eddi.configs.migration.IMigrationLogStore;
+import ai.labs.eddi.configs.migration.MigrationLogStore;
+import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
+import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
+import org.bson.codecs.configuration.CodecRegistries;
+import org.bson.codecs.pojo.PojoCodecProvider;
 import org.bson.types.ObjectId;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -18,6 +26,7 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.List;
 import java.util.Set;
 
@@ -38,11 +47,42 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
     @BeforeEach
     void setUp() {
         dropCollections("attachments.files", "attachments.chunks", GridFsAttachmentStore.LOCKS_COLLECTION,
-                GridFsAttachmentStore.GRANTS_COLLECTION);
+                GridFsAttachmentStore.GRANTS_COLLECTION, GridFsAttachmentStore.BACKFILL_COLLECTION, "migrationlog", "groupconversations");
         store = new GridFsAttachmentStore(getDatabase());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
         store.ensureIndexes();
+        // Production reads MigrationLog through its POJO codec; the bare test client
+        // has none.
+        migrationLog = new MigrationLogStore(getDatabase().withCodecRegistry(CodecRegistries.fromRegistries(getDatabase().getCodecRegistry(),
+                CodecRegistries.fromProviders(PojoCodecProvider.builder().automatic(true).build()))));
+        groupConversations = new GroupConversationStore(new MongoResourceStorageFactory(getDatabase()), documentBuilder);
+    }
+
+    private MigrationLogStore migrationLog;
+    private GroupConversationStore groupConversations;
+
+    @Override
+    public IMigrationLogStore migrationLog() {
+        return migrationLog;
+    }
+
+    @Override
+    public String createGroupConversation() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setGroupId("g-1");
+        gc.setState(GroupConversation.GroupConversationState.CREATED);
+        return groupConversations.create(gc);
+    }
+
+    @Override
+    public AttachmentGrantBackfill backfillWithRealStores() {
+        return new AttachmentGrantBackfill(store, migrationLog, new ConversationMemoryStore(getDatabase()), groupConversations);
+    }
+
+    @Override
+    public void seedGrantRow(String storageRef, String conversationId) {
+        grants().insertOne(new Document("storageRef", storageRef).append("conversationId", conversationId).append("createdAt", new Date()));
     }
 
     @Override

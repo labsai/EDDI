@@ -5,7 +5,6 @@
 package ai.labs.eddi.engine.attachments;
 
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
-import ai.labs.eddi.configs.migration.model.MigrationLog;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.Attachment;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentAccessDeniedException;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentNotFoundException;
@@ -15,11 +14,13 @@ import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -72,6 +73,21 @@ public interface AttachmentStoreContract {
      * which reads only the legacy shape.
      */
     void dropGrantRows();
+
+    /** Writes a new-shape grant row directly, whether or not its blob exists. */
+    void seedGrantRow(String storageRef, String conversationId);
+
+    /** The real migration log of this database, emptied before each test. */
+    IMigrationLogStore migrationLog();
+
+    /** Creates a group conversation in the real store and returns its id. */
+    String createGroupConversation() throws Exception;
+
+    /**
+     * A backfill over the real conversation and group-conversation stores of this
+     * database.
+     */
+    AttachmentGrantBackfill backfillWithRealStores();
 
     /** Realistic ids: 24-hex, the shape the ids take in production. */
     String OWNER = "6aba70011a25f8be7920e001";
@@ -285,30 +301,12 @@ public interface AttachmentStoreContract {
 
     // ------------------------------------------------------------- backfill
 
-    /** An in-memory migration log that keeps entries, as the MongoDB one does. */
-    final class MemoryMigrationLog implements IMigrationLogStore {
-        final Map<String, MigrationLog> logs = new HashMap<>();
-        final Map<String, List<String>> entries = new HashMap<>();
+    private AttachmentGrantBackfill backfill() {
+        return new AttachmentGrantBackfill(migration(), migrationLog(), null, null);
+    }
 
-        @Override
-        public MigrationLog readMigrationLog(String name) {
-            return logs.get(name);
-        }
-
-        @Override
-        public void createMigrationLog(MigrationLog migrationLog) {
-            logs.put(migrationLog.getName(), migrationLog);
-        }
-
-        @Override
-        public List<String> readMigrationEntries(String name) {
-            return entries.getOrDefault(name, List.of());
-        }
-
-        @Override
-        public void writeMigrationEntries(String name, List<String> list) {
-            entries.put(name, new ArrayList<>(list));
-        }
+    private boolean marked() {
+        return migrationLog().readMigrationLog(AttachmentGrantBackfill.MIGRATION_KEY) != null;
     }
 
     @Test
@@ -316,23 +314,36 @@ public interface AttachmentStoreContract {
         String ref = upload(OWNER, "legacy").storageRef();
         seedLegacyGrant(ref, GRANTEE);
         seedLegacyGrant(ref, GONE);
-        var log = new MemoryMigrationLog();
-        var backfill = new AttachmentGrantBackfill(migration(), log, null, null);
 
-        AttachmentGrantBackfill.Result result = backfill.run(id -> !GONE.equals(id), 500, 10);
+        AttachmentGrantBackfill.Result result = backfill().run(id -> !GONE.equals(id), 500, 10);
 
         assertTrue(result.complete());
         assertEquals(1, result.grantsCopied());
         assertEquals(1, result.granteesSkipped());
         assertEquals(1, grantRowsHeldBy(GRANTEE));
         assertEquals(0, grantRowsHeldBy(GONE), "a dangling grant is not re-created");
-        assertNotNull(log.readMigrationLog(AttachmentGrantBackfill.MIGRATION_KEY), "completion is recorded");
+        assertTrue(marked(), "completion is recorded");
         assertEquals(1, grantRowsOn(ref));
         assertEquals(List.of(GRANTEE, GONE), legacyGrantees(ref), "the legacy shape is left as it was for this release");
     }
 
     @Test
-    default void theBackfillIsResumableAndIdempotent() throws Exception {
+    default void theBackfillChecksGranteesAgainstTheRealStores() throws Exception {
+        String group = createGroupConversation();
+        String ref = upload(OWNER, "shared with a group").storageRef();
+        seedLegacyGrant(ref, group);
+        seedLegacyGrant(ref, GONE);
+
+        AttachmentGrantBackfill real = backfillWithRealStores();
+        AttachmentGrantBackfill.Result result = real.run(real::granteeExists, 500, 10);
+
+        assertTrue(result.complete(), result.toString());
+        assertEquals(1, grantRowsHeldBy(group), "an existing group conversation keeps its grant");
+        assertEquals(0, grantRowsHeldBy(GONE), "an id that names nothing is skipped");
+    }
+
+    @Test
+    default void theBackfillIsResumableAcrossStartsAndIdempotent() throws Exception {
         List<String> refs = new ArrayList<>();
         for (int i = 0; i < 5; i++) {
             String ref = upload(OWNER, "blob " + i).storageRef();
@@ -340,25 +351,22 @@ public interface AttachmentStoreContract {
             refs.add(ref);
         }
         upload(OWNER, "never granted");
-        var log = new MemoryMigrationLog();
-        var backfill = new AttachmentGrantBackfill(migration(), log, null, null);
 
-        // Two pages of two: cut short, no marker.
-        AttachmentGrantBackfill.Result first = backfill.run(id -> true, 2, 2);
+        // Two pages of two: cut short, no marker; the cursor is kept in the store.
+        AttachmentGrantBackfill.Result first = backfill().run(id -> true, 2, 2);
         assertFalse(first.complete());
         assertEquals(4, first.grantsCopied());
-        assertTrue(log.readMigrationLog(AttachmentGrantBackfill.MIGRATION_KEY) == null);
+        assertFalse(marked());
 
-        // The next start continues from the kept cursor.
-        AttachmentGrantBackfill.Result second = backfill.run(id -> true, 2, 10);
+        // The next start — a new instance — continues from the kept cursor.
+        AttachmentGrantBackfill.Result second = backfill().run(id -> true, 2, 10);
         assertTrue(second.complete());
         assertEquals(1, second.blobsRead(), "resumed after the first four");
         assertEquals(1, second.grantsCopied());
         assertEquals(5, grantRowsHeldBy(GRANTEE));
 
-        // Run again from scratch: nothing new.
-        AttachmentGrantBackfill.Result again = new AttachmentGrantBackfill(migration(), new MemoryMigrationLog(), null, null)
-                .run(id -> true, 2, 10);
+        // And the start after that runs the whole catch-up again: nothing new.
+        AttachmentGrantBackfill.Result again = backfill().run(id -> true, 2, 10);
         assertTrue(again.complete());
         assertEquals(0, again.grantsCopied());
         assertEquals(5, again.grantsAlreadyPresent());
@@ -368,17 +376,108 @@ public interface AttachmentStoreContract {
     }
 
     @Test
-    default void aFailedExistenceCheckEndsThePassWithoutTheMarker() throws Exception {
-        String ref = upload(OWNER, "unknown").storageRef();
-        seedLegacyGrant(ref, GRANTEE);
-        var log = new MemoryMigrationLog();
+    default void aLegacyOnlyGrantWrittenAfterCompletionIsCopiedOnTheNextStart() throws Exception {
+        String first = upload(OWNER, "first").storageRef();
+        seedLegacyGrant(first, GRANTEE);
+        assertTrue(backfill().run(id -> true, 500, 10).complete());
+        assertTrue(marked());
 
-        AttachmentGrantBackfill.Result result = new AttachmentGrantBackfill(migration(), log, null, null).run(id -> {
-            throw new IllegalStateException("database unreachable");
+        // A node of the previous release, still running, grants in the legacy shape
+        // only.
+        String later = upload(OTHER_OWNER, "later").storageRef();
+        seedLegacyGrant(later, GRANTEE);
+
+        AttachmentGrantBackfill.Result catchUp = backfill().run(id -> true, 500, 10);
+
+        assertEquals(1, catchUp.grantsCopied(), "the marker does not stop the catch-up");
+        assertEquals(1, grantRowsOn(later));
+    }
+
+    @Test
+    default void aFailedLookupSkipsThatGrantOnlyAndKeepsThePassIncomplete() throws Exception {
+        String ref = upload(OWNER, "two grantees").storageRef();
+        seedLegacyGrant(ref, STRANGER);
+        seedLegacyGrant(ref, GRANTEE);
+
+        AttachmentGrantBackfill.Result result = backfill().run(id -> {
+            if (STRANGER.equals(id)) {
+                throw new IllegalStateException("database unreachable");
+            }
+            return true;
         }, 500, 10);
 
+        assertEquals(1, result.lookupsFailed());
+        assertEquals(1, grantRowsHeldBy(GRANTEE), "the other grantee on the same blob is still copied");
+        assertEquals(0, grantRowsHeldBy(STRANGER), "could not tell is never copied");
         assertFalse(result.complete());
+        assertFalse(marked(), "a pass with a failed lookup is not complete");
+    }
+
+    @Test
+    default void aGranteeThatDisappearsDuringTheCopyIsTakenBack() throws Exception {
+        String ref = upload(OWNER, "erased meanwhile").storageRef();
+        seedLegacyGrant(ref, GRANTEE);
+        int[] calls = {0};
+
+        // Exists at the first check, gone at the re-check after the write.
+        backfill().run(id -> calls[0]++ == 0, 500, 10);
+
         assertEquals(0, grantRowsHeldBy(GRANTEE));
-        assertTrue(log.readMigrationLog(AttachmentGrantBackfill.MIGRATION_KEY) == null, "could not tell is never gone");
+    }
+
+    @Test
+    default void copyingAGrantForADeletedBlobWritesNothing() throws Exception {
+        String ref = upload(OWNER, "short-lived").storageRef();
+        assertTrue(store().delete(ref, OWNER));
+
+        assertFalse(migration().copyGrant(ref, GRANTEE));
+        assertEquals(0, grantRowsOn(ref));
+    }
+
+    @Test
+    default void grantRowsWhoseBlobIsGoneArePrunedOnTheNextStart() throws Exception {
+        String kept = upload(OWNER, "kept").storageRef();
+        store().grantAccess(kept, GRANTEE);
+        // An old node deleted a blob: the blob is gone, its grant row is not.
+        seedGrantRow("8d4f6f1e-0000-4000-8000-00000000dead", GRANTEE);
+
+        AttachmentGrantBackfill.Result result = backfill().run(id -> true, 500, 10);
+
+        assertEquals(1, result.danglingRowsRemoved());
+        assertEquals(0, grantRowsOn("8d4f6f1e-0000-4000-8000-00000000dead"));
+        assertEquals(1, grantRowsOn(kept), "a row whose blob exists stays");
+    }
+
+    // ------------------------------------------------------------ concurrency
+
+    @Test
+    default void crossGrantedConversationsCanBeDeletedConcurrently() throws Exception {
+        for (int round = 0; round < 20; round++) {
+            String a = "6aba70011a25f8be7920" + "%04x".formatted(round * 2 + 0x100);
+            String b = "6aba70011a25f8be7920" + "%04x".formatted(round * 2 + 0x101);
+            List<String> aBlobs = new ArrayList<>();
+            List<String> bBlobs = new ArrayList<>();
+            for (int i = 0; i < 3; i++) {
+                aBlobs.add(upload(a, "a" + i).storageRef());
+                bBlobs.add(upload(b, "b" + i).storageRef());
+            }
+            for (String ref : aBlobs) {
+                store().grantAccess(ref, b);
+            }
+            for (String ref : bBlobs) {
+                store().grantAccess(ref, a);
+            }
+            ExecutorService pool = Executors.newFixedThreadPool(2);
+            try {
+                Future<Long> deleteA = pool.submit(() -> store().deleteByConversation(a));
+                Future<Long> deleteB = pool.submit(() -> store().deleteByConversation(b));
+                assertEquals(3, deleteA.get(30, TimeUnit.SECONDS), "round " + round);
+                assertEquals(3, deleteB.get(30, TimeUnit.SECONDS), "round " + round);
+            } finally {
+                pool.shutdownNow();
+            }
+            assertEquals(0, grantRowsHeldBy(a));
+            assertEquals(0, grantRowsHeldBy(b));
+        }
     }
 }

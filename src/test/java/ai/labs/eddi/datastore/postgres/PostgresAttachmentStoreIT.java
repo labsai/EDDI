@@ -4,9 +4,16 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.configs.groups.model.GroupConversation;
+import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
+import ai.labs.eddi.configs.migration.IMigrationLogStore;
+import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.datastore.serialization.JsonSerialization;
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -39,9 +46,42 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store = new PostgresAttachmentStore(createDataSourceInstance());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
-        // The first call creates the schema; then start from empty tables.
+        // The first calls create the schemas; then start from empty tables.
         store.listByConversation(OWNER);
-        truncateTables(DATA_SOURCE, "attachments", "attachment_grants");
+        store.ensureGrantIndexes();
+        migrationLog = new PostgresMigrationLogStore(createDataSourceInstance());
+        migrationLog.readMigrationLog("schema");
+        truncateTables(DATA_SOURCE, "attachments", "attachment_grants", "attachment_grants_backfill", "migration_log");
+        json = new JsonSerialization(SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false));
+        groupConversations = new GroupConversationStore(new PostgresResourceStorageFactory(createDataSourceInstance(), json), null);
+    }
+
+    private PostgresMigrationLogStore migrationLog;
+    private JsonSerialization json;
+    private GroupConversationStore groupConversations;
+
+    @Override
+    public IMigrationLogStore migrationLog() {
+        return migrationLog;
+    }
+
+    @Override
+    public String createGroupConversation() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setGroupId("g-1");
+        gc.setState(GroupConversation.GroupConversationState.CREATED);
+        return groupConversations.create(gc);
+    }
+
+    @Override
+    public AttachmentGrantBackfill backfillWithRealStores() {
+        return new AttachmentGrantBackfill(store, migrationLog, new PostgresConversationMemoryStore(createDataSourceInstance(), json),
+                groupConversations);
+    }
+
+    @Override
+    public void seedGrantRow(String storageRef, String conversationId) {
+        execute("INSERT INTO attachment_grants (storage_ref, conversation_id) VALUES (?, ?)", storageRef, conversationId);
     }
 
     @Override
