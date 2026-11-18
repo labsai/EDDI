@@ -279,11 +279,16 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
        └─→ scope=longTerm (persisted across conversations)
        └─→ scope=secret (auto-vaulted via SecretsVault)
 
-3. Conversation turn ends
-   └─→ storePropertiesPermanently()
+3. Conversation turn ends — and is stored
+   └─→ storePropertiesPermanently() runs only AFTER the turn's conversation write succeeded
+       (handed over with IConversationMemory.deferUntilCommitted, run by ConversationStepRunner)
        └─→ longTerm properties that changed (or are owed) saved via IUserMemoryStore.upsert()
        └─→ Visibility applied at persistence boundary (explicit or config default)
+       └─→ a turn that is not stored writes no user memories; a failed upsert marks the
+           conversation ERROR, so the next turn rewrites every longTerm property
 ```
+
+Keys starting with `_gdpr_` (GDPR bookkeeping) or `conversation:` (the engine's own properties, such as the rolling summary) are never written as user memories, and `conversation:*` entries are never loaded into a conversation — `IUserMemoryStore.isRefusedWriteKey` / `isEngineKey`.
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If your feature needs to load/save cross-conversation state, extend the Conversation init/teardown logic. Do NOT create a new `ILifecycleTask` for session-level concerns.
 
@@ -533,7 +538,7 @@ When designing any new feature, always consider these before finalizing the desi
 - **Cost at scale**: If a feature uses LLM calls in background jobs, what happens with 10,000 users? Use dollar-based cost ceilings (`maxCostPerRun`) instead of call counts — call counts are meaningless because different operations cost vastly different amounts. Add incremental processing (only process what changed since last run) and round-robin fairness.
 - **Implicit context**: If code runs inside a conversation, don't pass `userId`/`agentId` as explicit parameters — the conversation always knows who the user is. Only external interfaces (REST, MCP) need explicit identification.
 - **Unification over duplication**: Before creating a parallel system (e.g., new store alongside old store), ask: can the new system replace the old one? Prefer unified systems with legacy compat methods over dual storage. When two features need similar infrastructure (e.g., LLM-based summarization for both Dream consolidation and conversation context), build one shared service, not two parallel implementations.
-- **Full data is never deleted by optimization**: Context management strategies (summarization, windowing) are about what the LLM _sees_, not what is _stored_. The full conversation is always preserved in the database. Summaries are derived views, not destructive transformations. If an agent needs to access the full original, it should be able to (via tools, REST API, or debugger).
+- **Full data is never deleted by optimization**: Context management strategies (summarization, windowing) are about what the LLM _sees_, not what is _stored_. No optimization removes a stored turn from the database. Summaries are derived views, not destructive transformations. If an agent needs to access the full original, it should be able to (via tools, REST API, or debugger). What the database holds is every turn that was *stored*: a turn whose write fails (size guard, data error, conflict, fence) is not in it, and its caller is told so (`TURN_NOT_STORED`) rather than answered as if it were — never deliver a turn's result before its write outcome is known (see `ConversationService#completeTurn`).
 
 ### Key Files
 

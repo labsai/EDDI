@@ -295,6 +295,8 @@ The `delete_all_user_memories` MCP tool and `DELETE /{userId}` REST endpoint per
 
 Keys starting with `_gdpr_` are reserved: agents, property setters and the memory/property REST and MCP endpoints cannot write or delete them.
 
+Keys starting with `conversation:` are the engine's own conversation properties (the rolling summary `conversation:running_summary` and `conversation:summary_through_step`). Memories are loaded into a conversation's properties, so a memory under such a key would replace the engine's value — a planted `conversation:summary_through_step` hid the whole history from the model. No write path accepts them (REST `400`, the `rememberFact` tool refuses, a `longTerm` property setter is not written back, MCP returns an error, and both stores refuse them), and an entry stored under one before this check existed is ignored when memories are loaded. Such an entry can still be deleted.
+
 ### What the user sees: "My memory" in Workforce
 
 A signed-in person reviews and deletes their own memory in Workforce, at `/workforce/memory` ("My memory" in the sidebar and the ⌘K switcher; see the [Workforce guide](workforce-guide.md#what-your-agents-remember-about-you)). The page is built on this REST API alone:
