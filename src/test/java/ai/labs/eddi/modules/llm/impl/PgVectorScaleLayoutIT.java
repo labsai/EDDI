@@ -55,6 +55,12 @@ import static org.mockito.Mockito.when;
  * drift from what langchain4j's filter mapper emits. {@code enable_seqscan} is
  * off for the test role, so an index that the predicate cannot use shows up as
  * a sequential scan instead of being out-costed on a small table.
+ * <p>
+ * Three cases run as a second role whose {@code search_path} is
+ * {@code myschema, public}: an unqualified table name resolves in
+ * {@code current_schema()} ({@code myschema}), never to an old-layout table of
+ * the same name in {@code public}, and indexes are looked up in their own
+ * table's schema, so a rebuild issues no {@code CREATE INDEX}.
  */
 @Testcontainers
 @DisplayName("pgvector v2 layout (Testcontainers)")
@@ -253,8 +259,7 @@ class PgVectorScaleLayoutIT {
             store.add(Embedding.from(new float[]{1f, 0f, 0f}), segment("written through docs"));
         });
 
-        // langchain4j created myschema.docs, and its layout was decided for that table
-        // —
+        // langchain4j created myschema.docs, and its layout was decided for that table,
         // not taken over from the old-layout public.docs further down the search_path.
         assertEquals("jsonb", metadataType(SCOPED_SCHEMA + ".docs"));
         assertEquals(Set.of("docs_pkey", "docs_hnsw_idx", "docs_doc_src_idx", "docs_src_run_idx"), indexes(SCOPED_SCHEMA, "docs").keySet());
@@ -354,7 +359,8 @@ class PgVectorScaleLayoutIT {
 
     /**
      * {@code public.
-     * <table>
+     *
+    <table>
      * } as every EDDI release up to 6.7 created it — json metadata, no index
      * besides the key — holding one row, and usable by the scoped role.
      */
