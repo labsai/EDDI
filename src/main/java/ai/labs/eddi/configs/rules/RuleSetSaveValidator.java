@@ -222,7 +222,15 @@ public final class RuleSetSaveValidator {
      */
     private static List<String> cycleWithin(Set<String> component, Map<String, Set<String>> dependencies) {
         List<String> path = new ArrayList<>();
+        // start at the first member in rule order, so the path reads the way the rules
+        // do
         String current = component.iterator().next();
+        for (String name : dependencies.keySet()) {
+            if (component.contains(name)) {
+                current = name;
+                break;
+            }
+        }
         while (!path.contains(current)) {
             path.add(current);
             String following = null;

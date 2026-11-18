@@ -290,5 +290,15 @@ class PrePostUtilsJsonInjectionTest {
             }
             return rendered.toString();
         });
+        // the expressions field is a separate pass: only the second field of each row
+        when(templatingEngine.processExpressionsTemplate(anyString(), any())).thenAnswer(invocation -> {
+            Map<String, Object> renderData = invocation.getArgument(1);
+            String rowDelimiter = String.valueOf(renderData.get(KEY_ROW_DELIMITER));
+            var rendered = new StringBuilder();
+            for (var row : renderedRows) {
+                rendered.append(row.size() > 1 ? row.get(1) : "").append(rowDelimiter);
+            }
+            return rendered.toString();
+        });
     }
 }

@@ -222,9 +222,10 @@ class InputParserTaskPassThroughTest {
         var smallTask = new InputParserTask(smallProvider, new HashMap<>(), new HashMap<>(), new HashMap<>(), new ObjectMapper(), null);
         MemoryContext ctx = TestMemoryFactory.createWithInput("hello wonderful world");
         var earlier = new Data<>("expressions:parsed", "greeting(hello)");
+        Data<String> input = new Data<>("input", "hello wonderful world");
         doAnswer(invocation -> {
             MemoryKey<?> key = invocation.getArgument(0);
-            return "expressions:parsed".equals(key.key()) ? earlier : null;
+            return "expressions:parsed".equals(key.key()) ? earlier : "input".equals(key.key()) ? input : null;
         }).when(ctx.currentStep()).getLatestData(any(MemoryKey.class));
         var config = passThroughConfig();
         config.setAppendExpressions(true);
