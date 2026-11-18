@@ -31,13 +31,13 @@ import java.util.regex.Pattern;
  * of one folder that are not trashed, paged — and can be told to answer any
  * request matching a URL fragment with a scripted error first.
  */
-final class FakeDrive implements DriveTransport {
+public final class FakeDrive implements DriveTransport {
 
-    static final String FOLDER = DriveFormat.FOLDER_MIME;
-    static final String SHORTCUT = DriveFormat.SHORTCUT_MIME;
-    static final String DOC = "application/vnd.google-apps.document";
-    static final String SHEET = "application/vnd.google-apps.spreadsheet";
-    static final String SLIDES = "application/vnd.google-apps.presentation";
+    public static final String FOLDER = DriveFormat.FOLDER_MIME;
+    public static final String SHORTCUT = DriveFormat.SHORTCUT_MIME;
+    public static final String DOC = "application/vnd.google-apps.document";
+    public static final String SHEET = "application/vnd.google-apps.spreadsheet";
+    public static final String SLIDES = "application/vnd.google-apps.presentation";
 
     private static final ObjectMapper JSON = new ObjectMapper();
     private static final Pattern PARENT = Pattern.compile("^'([^']+)' in parents and trashed = false$");
@@ -51,46 +51,46 @@ final class FakeDrive implements DriveTransport {
     final Map<String, Item> items = new LinkedHashMap<>();
     final Map<String, byte[]> contents = new LinkedHashMap<>();
     final Map<String, Deque<DriveResponse>> scripted = new LinkedHashMap<>();
-    final List<URI> requests = new ArrayList<>();
+    public final List<URI> requests = new ArrayList<>();
     final List<String> authorizations = new ArrayList<>();
-    boolean driveVisible = true;
+    public boolean driveVisible = true;
     int pageSize = 1000;
 
-    FakeDrive(String driveId) {
+    public FakeDrive(String driveId) {
         this.driveId = driveId;
     }
 
-    FakeDrive folder(String id, String name, String parent) {
+    public FakeDrive folder(String id, String name, String parent) {
         items.put(id, new Item(id, name, FOLDER, parent, null, null, 1L, null, null, false));
         return this;
     }
 
-    FakeDrive file(String id, String name, String mimeType, String parent, String content) {
+    public FakeDrive file(String id, String name, String mimeType, String parent, String content) {
         byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
         return file(id, name, mimeType, parent, bytes, "md5-" + id);
     }
 
-    FakeDrive file(String id, String name, String mimeType, String parent, byte[] bytes, String md5) {
+    public FakeDrive file(String id, String name, String mimeType, String parent, byte[] bytes, String md5) {
         items.put(id, new Item(id, name, mimeType, parent, (long) bytes.length, md5, 3L, null, null, false));
         contents.put(id, bytes);
         return this;
     }
 
     /** A Google-native file; {@code exports} maps export MIME type to content. */
-    FakeDrive nativeFile(String id, String name, String mimeType, String parent, long version,
-                         Map<String, byte[]> exports) {
+    public FakeDrive nativeFile(String id, String name, String mimeType, String parent, long version,
+                                Map<String, byte[]> exports) {
         items.put(id, new Item(id, name, mimeType, parent, null, null, version, null, null, false));
         exports.forEach((mime, bytes) -> contents.put(id + "|" + mime, bytes));
         return this;
     }
 
-    FakeDrive shortcut(String id, String name, String parent, String target, String targetMime) {
+    public FakeDrive shortcut(String id, String name, String parent, String target, String targetMime) {
         items.put(id, new Item(id, name, SHORTCUT, parent, null, null, 1L, target, targetMime, false));
         return this;
     }
 
     /** Moves an item to the trash: it stops being listed, and reads as trashed. */
-    FakeDrive trash(String id) {
+    public FakeDrive trash(String id) {
         Item item = items.get(id);
         items.put(id, new Item(item.id(), item.name(), item.mimeType(), item.parent(), item.size(), item.md5(),
                 item.version(), item.shortcutTarget(), item.shortcutTargetMime(), true));
@@ -101,16 +101,16 @@ final class FakeDrive implements DriveTransport {
      * Answers the next request whose URL contains {@code fragment} with these
      * responses first.
      */
-    FakeDrive script(String fragment, DriveResponse... responses) {
+    public FakeDrive script(String fragment, DriveResponse... responses) {
         scripted.computeIfAbsent(fragment, key -> new ArrayDeque<>()).addAll(List.of(responses));
         return this;
     }
 
-    static DriveResponse error(int status, String reason, String message) {
+    public static DriveResponse error(int status, String reason, String message) {
         return error(status, reason, message, null);
     }
 
-    static DriveResponse error(int status, String reason, String message, String retryAfter) {
+    public static DriveResponse error(int status, String reason, String message, String retryAfter) {
         ObjectNode body = JSON.createObjectNode();
         ObjectNode error = body.putObject("error");
         error.put("code", status);
@@ -122,7 +122,7 @@ final class FakeDrive implements DriveTransport {
         return new DriveResponse(status, headers, bytes(body), false);
     }
 
-    int countRequests(String fragment) {
+    public int countRequests(String fragment) {
         return (int) requests.stream().filter(uri -> uri.toString().contains(fragment)).count();
     }
 

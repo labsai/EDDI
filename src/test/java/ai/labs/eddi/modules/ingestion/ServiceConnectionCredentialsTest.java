@@ -139,6 +139,8 @@ class ServiceConnectionCredentialsTest {
     @DisplayName("a missing connection, or a name that is no connection name, is an AUTH failure with the fix")
     void missingConnection() {
         when(registry.find(any(ConnectionReference.class))).thenReturn(Optional.empty());
+        when(registry.require(any(ConnectionReference.class))).thenThrow(new ConnectionException(
+                ConnectionException.Reason.NOT_FOUND, "No connection named 'google-drive-sa' exists in tenant 'default'"));
 
         var missing = assertThrows(SourceException.class, () -> credentials.resolve("google-drive-sa", DRIVE_URL));
         assertTrue(missing.getMessage().contains("No connection named 'google-drive-sa'"), missing.getMessage());
@@ -177,5 +179,15 @@ class ServiceConnectionCredentialsTest {
 
         assertEquals(SourceError.Kind.AUTH, failure.error().kind());
         verify(resolver, never()).resolve(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a connection stored without a binding is SERVICE, as the resolver reads it")
+    void absentBindingIsService() throws SourceException {
+        var connection = serviceAccount(List.of("https://www.googleapis.com"));
+        connection.setBinding(null);
+        register(connection);
+
+        assertEquals("Bearer ya29.test-token", credentials.resolve("google-drive-sa", DRIVE_URL).headerValue());
     }
 }

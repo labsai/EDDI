@@ -60,12 +60,10 @@ public class ServiceConnectionCredentials implements SourceCredentials {
         } catch (ConnectionException e) {
             throw new SourceException(classify(connectionName, e), e);
         }
-        if (binding == null) {
-            throw new SourceException(new SourceError.Auth("No connection named '" + connectionName
-                    + "' exists. Create it (for Google Drive: an OAUTH2_JWT_BEARER connection holding the service "
-                    + "account's key), then run the source again."));
-        }
-        if (binding != Binding.SERVICE) {
+        // Empty is either no such connection or a document stored without a binding,
+        // which the resolver reads as SERVICE; resolve() below tells the two apart
+        // and names a missing one.
+        if (binding != null && binding != Binding.SERVICE) {
             throw new SourceException(new SourceError.Auth("Connection '" + connectionName + "' is bound " + binding
                     + ", but an ingestion run has no user and no caller whose credential it could use. A knowledge "
                     + "base source needs a SERVICE-bound connection, such as OAUTH2_JWT_BEARER with a service "
