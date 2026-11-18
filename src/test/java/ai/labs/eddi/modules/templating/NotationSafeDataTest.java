@@ -129,8 +129,8 @@ class NotationSafeDataTest {
     }
 
     @ParameterizedTest(name = "[{index}] item = {0}")
-    @ValueSource(strings = {"*", " * ", "* ", "\t*\n", "　*", "*　", " *", " * ", " *", " *",
-            " *", " *", " *", "​*", "⁠*", "﻿*", "\u0001*", "(*)", "*,", ",*,"})
+    @ValueSource(strings = {"*", " * ", "* ", "\t*\n", "\u3000*", "*\u3000", "\u2003*", "\u2003*\u2003", "\u2028*", "\u205F*",
+            "\u00A0*", "\u2007*", "\u202F*", "\u200B*", "\u2060*", "\uFEFF*", "\u0001*", "(*)", "*,", ",*,"})
     @DisplayName("no data value becomes the wildcard, whatever whitespace or notation surrounds the star")
     void unicodeWhitespaceDoesNotMakeAWildcard(String item) throws Exception {
         Map<String, Object> data = Map.of("properties", Map.of("item", item));
