@@ -578,6 +578,14 @@ class MongoScheduleStoreTest {
     }
 
     @Test
+    @DisplayName("readSchedulesByName — a limit of zero reads nothing (Mongo's limit(0) would mean no limit)")
+    void readSchedulesByNameZeroLimitIsEmpty() throws Exception {
+        assertTrue(store.readSchedulesByName("hitl-timeout-conv-1", 0).isEmpty());
+
+        verify(scheduleCollection, never()).find(any(Bson.class));
+    }
+
+    @Test
     @DisplayName("countPendingSchedulesByName — a driver failure becomes a ResourceStoreException")
     void countPendingSchedulesByNameStoreFailureIsWrapped() {
         when(scheduleCollection.countDocuments(any(Bson.class))).thenThrow(new IllegalStateException("cluster down"));

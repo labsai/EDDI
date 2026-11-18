@@ -485,7 +485,14 @@ public class MongoScheduleStore implements IScheduleStore {
 
     @Override
     public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
-        return readSchedulesWithFilter(eq(NAME, name), limit);
+        if (limit <= 0) {
+            return new ArrayList<>(); // Mongo's limit(0) means "no limit"; PostgreSQL returns nothing
+        }
+        // The primary: the sweep deletes by name on what this returns, and a lagging
+        // secondary that misses the armed row (or shows a stale enabled flag) would
+        // have it
+        // deleted and re-created.
+        return readSchedulesWithFilter(schedulePrimaryReadCollection, eq(NAME, name), limit);
     }
 
     @Override
@@ -905,10 +912,15 @@ public class MongoScheduleStore implements IScheduleStore {
     // ========================= Helpers =========================
 
     private List<ScheduleConfiguration> readSchedulesWithFilter(Bson filter, int limit) throws IResourceStore.ResourceStoreException {
-        try {
+        return readSchedulesWithFilter(scheduleCollection, filter, limit);
+    }
+
+    private List<ScheduleConfiguration> readSchedulesWithFilter(MongoCollection<Document> collection, Bson filter, int limit)
+            throws IResourceStore.ResourceStoreException {
+        try (var cursor = collection.find(filter).limit(limit).iterator()) {
             List<ScheduleConfiguration> result = new ArrayList<>();
-            for (var doc : scheduleCollection.find(filter).limit(limit)) {
-                result.add(fromDocument(doc));
+            while (cursor.hasNext()) {
+                result.add(fromDocument(cursor.next()));
             }
             return result;
         } catch (Exception e) {

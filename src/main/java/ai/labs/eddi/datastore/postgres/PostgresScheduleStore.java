@@ -555,6 +555,9 @@ public class PostgresScheduleStore implements IScheduleStore {
 
     @Override
     public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        if (limit <= 0) {
+            return new ArrayList<>(); // at most `limit` rows; PostgreSQL rejects a negative LIMIT
+        }
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();
                 PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {

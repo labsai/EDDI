@@ -588,6 +588,13 @@ class PostgresScheduleStoreUnitTest {
     }
 
     @Test
+    void readSchedulesByName_zeroLimitReadsNothing() throws Exception {
+        assertTrue(sut.readSchedulesByName("hitl-timeout-conv-1", 0).isEmpty());
+
+        verify(connection, never()).prepareStatement(anyString());
+    }
+
+    @Test
     void readSchedulesByName_wrapsADatabaseFailure() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("DB error"));
 
