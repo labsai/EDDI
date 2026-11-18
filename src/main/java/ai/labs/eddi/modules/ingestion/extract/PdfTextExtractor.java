@@ -211,8 +211,11 @@ public class PdfTextExtractor implements DocumentTextExtractor {
         return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
     }
 
-    /** Stops a page that runs too long or lays out too much. */
-    private static final class BoundedTextStripper extends PDFTextStripper {
+    /**
+     * Stops a page that runs too long or lays out too much. Package-private so
+     * {@link PdfStructureExtractor} measures pages under the same bounds.
+     */
+    static final class BoundedTextStripper extends PDFTextStripper {
 
         private final Instant deadline;
         private long glyphsLeft;
