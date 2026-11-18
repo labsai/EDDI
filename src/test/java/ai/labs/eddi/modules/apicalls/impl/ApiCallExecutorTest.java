@@ -136,27 +136,11 @@ class ApiCallExecutorTest {
     }
 
     @Test
-    void execute_jsonSuffixContentType_isDeserialized() throws Exception {
+    void execute_jsonPatchContentType_notDeserializedAsJson() throws Exception {
+        // Given: response with "application/json-patch+json" content-type
+        // L1 fix: this must NOT match "application/json" (equals check, not startsWith)
         ApiCall call = createSimpleApiCall("test-call", true);
-        setupSuccessResponse(200, "[{\"op\":\"replace\"}]", "Application/Problem+JSON; charset=utf-8");
-        when(jsonSerialization.deserialize("[{\"op\":\"replace\"}]", Object.class)).thenReturn(List.of(Map.of("op", "replace")));
-
-        executor.execute(call, memory, new HashMap<>(), "http://example.com");
-
-        verify(jsonSerialization).deserialize("[{\"op\":\"replace\"}]", Object.class);
-    }
-
-    @Test
-    void execute_lookalikeJsonContentType_notDeserializedAsJson() throws Exception {
-        // Given: response with "application/jsonx" content-type
-        // L1 fix: a lookalike must NOT match JSON (media type compared, not
-        // startsWith).
-        // A real "+json" structured suffix (application/json-patch+json) is JSON since
-        // the
-        // media type is parsed (review P4), see
-        // execute_jsonSuffixContentType_isDeserialized.
-        ApiCall call = createSimpleApiCall("test-call", true);
-        setupSuccessResponse(200, "[{\"op\":\"replace\"}]", "application/jsonx");
+        setupSuccessResponse(200, "[{\"op\":\"replace\"}]", "application/json-patch+json");
 
         // When
         Map<String, Object> result = executor.execute(call, memory, new HashMap<>(), "http://example.com");

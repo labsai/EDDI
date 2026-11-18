@@ -481,4 +481,47 @@ class ApiCallsTaskTest {
         assertFalse(ApiCallsTask.isFailureResult(Map.of("body", "legacy")));
         assertFalse(ApiCallsTask.isFailureResult(Map.of()));
     }
+
+    /**
+     * A declared tool argument in a string literal is escaped on the tool path, so
+     * it is no splice worth a warning — but only where the escaper actually runs: a
+     * JSON content type by its own predicate, and escaping not opted out.
+     */
+    @Test
+    void unescapedSplices_skipDeclaredArgumentsOnlyWhereTheyAreEscaped() {
+        ApiCall call = jsonCall("{\"a\":\"{name}\",\"b\":\"{properties.p}\",\"c\":\"{data:name}\"}", "application/json");
+        call.setParameters(Map.of("name", "the name"));
+        assertEquals(List.of("{properties.p}"), ApiCallsTask.unescapedSplices(call));
+
+        call.getRequest().setContentType("application/x-ndjson");
+        assertEquals(3, ApiCallsTask.unescapedSplices(call).size(), "a content type the escaper does not treat as JSON");
+
+        call.getRequest().setContentType("application/json");
+        call.setEscapeToolArguments(false);
+        assertEquals(3, ApiCallsTask.unescapedSplices(call).size(), "escaping opted out");
+    }
+
+    @Test
+    void toolArgumentFindings_nameTheConstructsCheckedPerCall() {
+        ApiCall call = jsonCall("{\"ids\":[{id ?: 0}],\"n\":{id}}", "application/json");
+        call.setArgumentSchema(Map.of("type", "object", "properties", Map.of("id", Map.of("type", "string"))));
+        List<String> findings = ApiCallsTask.toolArgumentFindings(call);
+        assertEquals(1, findings.size(), findings.toString());
+        assertTrue(findings.getFirst().contains("{id ?: 0}"), findings.toString());
+
+        call.setEscapeToolArguments(false);
+        assertTrue(ApiCallsTask.toolArgumentFindings(call).isEmpty());
+    }
+
+    private static ApiCall jsonCall(String body, String contentType) {
+        var request = new Request();
+        request.setMethod("post");
+        request.setPath("/x");
+        request.setContentType(contentType);
+        request.setBody(body);
+        var call = new ApiCall();
+        call.setName("c");
+        call.setRequest(request);
+        return call;
+    }
 }

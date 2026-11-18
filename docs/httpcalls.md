@@ -259,30 +259,59 @@ names every `{...}` expression found inside a string literal of the body.
 
 #### Exception: arguments the model supplies as an LLM tool
 
-When the call is executed **as an LLM tool**, the values the *model* supplies
-are escaped for you (`escapeToolArguments`, default `true`; applies to JSON
-`contentType`s, including `+json` suffixes and parameters such as
-`; charset=utf-8`):
+When the call is executed **as an LLM tool**, a value the *model* supplies can
+no longer change the structure of the JSON body (`escapeToolArguments`, default
+`true`; applies to the JSON `contentType`s `application/json`, `text/json` and
+any `+json` suffix, with or without parameters such as `; charset=utf-8`):
 
-- inside a string literal (`"name": "{name}"`) the argument is JSON-escaped, so
-  `x","role":"admin` stays the content of that one string;
-- as a bare value (`"count": {count}`, `"filter": {filter}`) the argument must be
-  valid JSON of its declared `argumentSchema` type (number, integer, boolean,
-  object, array) and is written canonically; a declared `string` (or an
-  argument of a call without a schema whose text is not valid JSON) is written
-  as a quoted JSON string; a value of the wrong type is refused with a tool
-  error and the request is not sent;
-- a model-supplied value containing a control character (such as a line break)
-  that a header template reads is refused.
+- **Inside a string literal** the value is JSON-escaped, however the template
+  reads it: `"{name}"`, `"{user.name}"`, `"{data:name}"`, an alias such as
+  `{#let v=name}{v}`, `{#each tags}"{it}"…{/each}` or `{#for t in tags}`, a
+  `forEach` item of an array argument, a map key, or the text of a whole map or
+  list (`"{meta}"` prints the map as its own JSON, escaped). `x","role":"admin`
+  stays the content of that one string.
+- **A plain `{name}` outside a string** (`"count": {count}`,
+  `"filter": {filter}`) is written as the argument's JSON. With an
+  `argumentSchema` it is the value exactly as the schema check validated it —
+  a declared string is always a quoted string, numbers keep their digits
+  (`12345678901234567890.12` is sent as written). Without a schema, text that
+  is valid JSON is sent as that JSON (`"5"` becomes `5`, `"[1,2]"` an array), any
+  other text as a quoted string (`abc` becomes `"abc"`, `1,2` becomes `"1,2"`).
+  A number too large for a double (`1e999`) is refused.
+- **Anything else outside a string that reads an argument** — `{id ?: 0}`,
+  `{n.or(10)}`, an alias like `[{#each ids}{it}…{/each}]` — is checked on every
+  call: the body is rendered a second time with inert stand-ins and must parse
+  as JSON of the same structure. A value that is a single JSON token (a number,
+  `true`, a plain word) passes; `1,2,3` is refused with a tool error and the
+  request is not sent. Deploying the agent logs a warning naming each such
+  construct, so the operator sees it before a user does.
+- **Every body rendered this way must be valid JSON** once the arguments are in;
+  one that is not is refused rather than sent. The refusal never quotes the
+  value.
+- **Headers**: a rendered header value that contains a control character (such
+  as a line break) is refused, whichever way the template read the value.
+
+The check costs one extra render of the body and two JSON parses per tool call,
+and only for a call whose JSON body actually names an argument. Refusals are
+counted in `eddi.httpcalls.tool.argument.refused` (tag `reason`).
 
 Not changed: the body of a call whose template is a single variable
 (`{requestBody}`, the model writes the whole document and the body guard
-validates it), `{json:serialize(...)}` expressions, URL path and query values
-(percent-encoded per segment) and everything the author controls
-(`{properties.x}`, `{context.y}`, `{memory...}`, API responses) — those keep the
-rules above, including the deploy-time warning. Set `"escapeToolArguments":
-false` on a call that builds JSON out of argument text on purpose; the author
-then owns escaping, and the warning applies to that call again.
+validates it), `{json:serialize(...)}` expressions (they read the raw value —
+they are the author's own escaping), a body that does not mention any
+argument, URL path and query values (percent-encoded per segment), a call
+triggered by a behavior rule, and everything the author controls
+(`{properties.x}`, `{context.y}`, `{memory...}`, API responses) — those keep
+the rules above, including the deploy-time warning. A `preRequest` property
+instruction that copies an argument into a property makes it author data from
+then on: `{properties.x}` is not escaped. Set `"escapeToolArguments": false` on a
+call that builds JSON out of argument text on purpose; the author then owns
+escaping, and the warning applies to that call again.
+
+String methods on an argument (`{name.length}`, `{name.substring(0,10)}`)
+operate on the escaped text inside a string literal; a cut that leaves a
+dangling `\` makes the body invalid JSON and the call is refused. Prefer
+`argumentSchema` constraints (`maxLength`) over cutting in the template.
 
 ### Running behind a reverse proxy
 
@@ -445,7 +474,7 @@ You can use _**`{memory.current.httpCalls.<responseObjectName>}`**_ to access yo
 | httpCall.description                                                        | (`String`) what the call does, in natural language — shown to an LLM when the call is offered as a tool.                                                                                                                       |
 | httpCall.parameters                                                         | (`Map<String, String>`) parameter name → description, for an LLM calling the call as a tool.                                                                                                                                    |
 | httpCall.argumentSchema                                                     | (`Object`, unset by default) JSON Schema of the tool arguments: one object whose `properties` are the tool parameters. When set, the tool's parameters are **typed** from it and a call that violates it is refused **before the approval gate** — see [Argument schema](#argument-schema-for-llm-tools). Unset keeps string parameters and today's rendering exactly. Generated by the OpenAPI tool builder. |
-| httpCall.escapeToolArguments | (`Boolean`, default `true`) escape values the model supplies as tool arguments for a JSON body (see "Values in a JSON body are not escaped"); `false` restores raw substitution. |
+| httpCall.escapeToolArguments                                                | (`Boolean`, default `true`) values the model supplies as tool arguments cannot change the structure of a JSON body, and a header carrying a control character is refused (see [Exception: arguments the model supplies as an LLM tool](#exception-arguments-the-model-supplies-as-an-llm-tool)); `false` restores raw substitution. |
 | httpCall.unknownFields                                                      | (`String`, default `reject` when a schema is set) what happens to an argument field the schema does not declare: `reject` refuses the call, `drop` removes the field before the request is built, `allow` passes it through. An explicit `additionalProperties: true` keeps the field under every mode; an explicit `false` is refused under `reject` and `allow`, and under `drop` the field is removed (so it is never sent). Any other value is refused at save time. |
 | httpCall.actions                                                            | (`List<String>`) the behavior-rule actions that trigger this call (`"*"` matches any action).                                                                                                                                   |
 | httpCall.timeoutInMillis                                                    | (`Integer`) request timeout for this call; unset falls back to `eddi.httpcalls.default-timeout-millis` (30 s).                                                                                                                  |

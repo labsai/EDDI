@@ -287,6 +287,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
     @Override
     public Map<String, Object> execute(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
             throws LifecycleException {
+        return execute(call, memory, templateDataObjects, targetServerUrl, null);
+    }
+
+    @Override
+    public Map<String, Object> execute(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl,
+                                       ToolArgumentBodyEscaper.Guard guard)
+            throws LifecycleException {
         if (call == null) {
             throw new IllegalArgumentException("call cannot be null");
         }
@@ -322,7 +329,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             templateDataObjects = prePostUtils.executePreRequestPropertyInstructions(memory, templateDataObjects, preRequest);
 
             if (call.getForEach() != null) {
-                return executeForEach(call, memory, templateDataObjects, targetServerUrl, ruleTriggered, toolPathMock, substitutedSecrets);
+                return executeForEach(call, memory, templateDataObjects, targetServerUrl, ruleTriggered, toolPathMock, substitutedSecrets,
+                        guard);
             }
 
             // Agent test harness: a test conversation gets its suite's mock (or a 501
@@ -338,7 +346,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 if (mocked != null) {
                     return Collections.emptyMap();
                 }
-                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+                executeFireAndForgetCalls(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory),
+                        guard);
                 return Collections.emptyMap();
             } else {
                 IRequest request;
@@ -393,7 +402,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         // instruction can write a property between attempts, and the guard has to
                         // judge the request it is actually about to send.
                         BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory),
-                                secretContextOf(memory));
+                                secretContextOf(memory), guard);
                         resolvedSecrets = built.resolvedSecrets();
                         substitutedSecrets.addAll(resolvedSecrets);
                         request = built.request();
@@ -504,7 +513,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         }
 
                         Object responseObject;
-                        if (ToolArgumentBodyEscaper.isJsonContentType(actualContentType)) {
+                        if (CONTENT_TYPE_APPLICATION_JSON.equals(actualContentType)) {
                             responseObject = redactedJsonResponse(rawBody, resolvedSecrets, resolveMaxResponseSize(call), call.getName());
                         } else {
                             if (!actualContentType.startsWith("<not-present>") && !actualContentType.startsWith("text")) {
@@ -598,6 +607,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
                 return result;
             }
+        } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+            // Not a failure of the call: the model's arguments were refused before
+            // anything was sent, and the message (value-free) is the tool's answer.
+            throw refused;
         } catch (Exception e) {
             if (e instanceof InterruptedException) {
                 // The wait (a delay or backoff on this thread) was cancelled; the step
@@ -719,7 +732,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
      */
     private Map<String, Object> executeForEach(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects,
                                                String targetServerUrl, boolean ruleTriggered, ToolMockRegistry.MockResult toolPathMock,
-                                               Set<String> substitutedSecrets)
+                                               Set<String> substitutedSecrets, ToolArgumentBodyEscaper.Guard guard)
             throws LifecycleException, ITemplatingEngine.TemplateEngineException, IOException {
         ForEachInstruction forEach = call.getForEach();
         String callName = call.getName();
@@ -755,6 +768,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, Property> conversationProperties = conversationPropertiesOf(memory);
         Function<String, Context> secretContext = secretContextOf(memory);
         String iterationName = ForEachItems.iterationName(forEach);
+        // An element of an array the model supplied is model text like the array.
+        ToolArgumentBodyEscaper.Guard itemGuard = guard == null ? null : guard.forIteration(forEach.getPathToTargetArray(), iterationName);
 
         // Built here, in order, on the turn's thread — see the method comment.
         List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
@@ -771,7 +786,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             }
             BuiltRequest built;
             try {
-                built = buildRequest(targetServerUrl, call, itemData, conversationProperties, secretContext);
+                built = buildRequest(targetServerUrl, call, itemData, conversationProperties, secretContext, itemGuard);
             } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
                 // This item's request cannot be built (a refused reference, a template
                 // that does not render): nothing of it is sent, and the others still are.
@@ -967,15 +982,22 @@ public class ApiCallExecutor implements IApiCallExecutor {
         Map<String, String> responseHeaders = response.getHttpHeader();
         String contentType = responseHeaders != null ? responseHeaders.get(CONTENT_TYPE) : null;
         contentType = contentType != null ? contentType.split(";")[0] : "<not-present>";
-        if (ToolArgumentBodyEscaper.isJsonContentType(contentType)) {
+        if (CONTENT_TYPE_APPLICATION_JSON.equals(contentType)) {
             return redactedJsonResponse(rawBody, secrets, resolveMaxResponseSize(call), call.getName());
         }
         return truncateResponseBody(redactSuccessText(rawBody, secrets), resolveMaxResponseSize(call), call.getName());
     }
 
     @Override
-    @SuppressWarnings("unchecked")
     public ResolvedRequest resolve(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl)
+            throws LifecycleException {
+        return resolve(call, memory, templateDataObjects, targetServerUrl, null);
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public ResolvedRequest resolve(ApiCall call, IConversationMemory memory, Map<String, Object> templateDataObjects, String targetServerUrl,
+                                   ToolArgumentBodyEscaper.Guard guard)
             throws LifecycleException {
         if (call == null) {
             throw new IllegalArgumentException("call cannot be null");
@@ -994,7 +1016,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory),
+                    guard);
             var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
@@ -1022,6 +1045,14 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // diverge (pre-request property instructions, batching, retries) may render
             // differently at execution, so its refusal here would be a guess — it falls
             // through to the generic failure below and is approved unpinned, as before.
+            if (canExecuteDivergeFromResolve(call)) {
+                throw new LifecycleException(
+                        "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", refused);
+            }
+            throw refused;
+        } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+            // The same reasoning as above: deterministic, value-free, and what
+            // execute() would answer — unless execution may render differently.
             if (canExecuteDivergeFromResolve(call)) {
                 throw new LifecycleException(
                         "could not resolve the request for ApiCall '" + LogSanitizer.sanitize(call.getName()) + "'", refused);
@@ -1162,7 +1193,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     private void executeFireAndForgetCalls(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
-                                           Map<String, Property> conversationProperties, Function<String, Context> secretContext)
+                                           Map<String, Property> conversationProperties, Function<String, Context> secretContext,
+                                           ToolArgumentBodyEscaper.Guard guard)
             throws ITemplatingEngine.TemplateEngineException, IRequest.HttpRequestException {
 
         var preRequest = call.getPreRequest();
@@ -1205,10 +1237,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // IRequest: the plaintexts the build resolved are what the log line below has
             // to be redacted by, and only the build knows them.
             List<BuiltRequest> requests = new ArrayList<>(batchIterationList.size());
+            ToolArgumentBodyEscaper.Guard itemGuard = guard == null
+                    ? null
+                    : guard.forIteration(batchRequest.getPathToTargetArray(), batchRequest.getIterationObjectName());
             for (Object iterationObject : batchIterationList) {
                 Map<String, Object> iterationData = new LinkedHashMap<>(templateDataObjects);
                 iterationData.put(batchRequest.getIterationObjectName(), iterationObject);
-                requests.add(buildRequest(targetServerUrl, call, iterationData, conversationProperties, secretContext));
+                requests.add(buildRequest(targetServerUrl, call, iterationData, conversationProperties, secretContext, itemGuard));
             }
 
             // The sending runs on a thread of its own; propagate() keeps the turn's
@@ -1218,7 +1253,8 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 return null;
             }), null);
         } else {
-            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext), callName);
+            executeFireAndForgetCall(buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, guard),
+                    callName);
         }
     }
 
@@ -1545,11 +1581,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * The same holds for any other exception whose message quotes the request.
      */
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
-                                      Map<String, Property> conversationProperties, Function<String, Context> secretContext)
+                                      Map<String, Property> conversationProperties, Function<String, Context> secretContext,
+                                      ToolArgumentBodyEscaper.Guard guard)
             throws ITemplatingEngine.TemplateEngineException {
         var resolvedSecrets = new ResolvedSecrets();
         try {
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets,
+                    guard);
             if (ApprovedCallScope.isActive()) {
                 // A human-approved tool call: judge the request exactly as it will be
                 // sent, after preRequest.propertyInstructions ran — the preview the
@@ -1733,7 +1771,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext,
-                                      ResolvedSecrets resolvedSecrets)
+                                      ResolvedSecrets resolvedSecrets, ToolArgumentBodyEscaper.Guard guard)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -1754,13 +1792,12 @@ public class ApiCallExecutor implements IApiCallExecutor {
         rejectConnectionReference(targetUriStr, "the request path");
         rejectExpiredSecretContext(targetUriStr, "the request path");
         var targetUri = URI.create(targetUriStr);
-        // On the LLM tool path the model's arguments are substituted through a
-        // rewritten copy of the body template (ToolArgumentBodyEscaper), so an
-        // argument cannot change the JSON around it. Absent on every other path.
-        String bodyTemplate = templateDataObjects.get(ToolArgumentBodyEscaper.REWRITTEN_BODY_KEY) instanceof String rewrittenBody
-                ? rewrittenBody
-                : requestConfig.getBody();
-        var requestBody = prePostUtils.templateValues(bodyTemplate, templateDataObjects);
+        // On the LLM tool path the model's arguments are rendered through the call's
+        // guard (ToolArgumentBodyEscaper), so an argument cannot change the JSON around
+        // it. Null on every other path: the configured body, rendered as always.
+        var requestBody = guard != null && guard.guardsBody()
+                ? guard.renderBody(templateDataObjects, prePostUtils::templateValues)
+                : prePostUtils.templateValues(requestConfig.getBody(), templateDataObjects);
         // Resolve global variable references, then vault references in request body
         requestBody = resolveGuardedVariables(requestConfig.getBody(), requestBody, "a request body", templateDataObjects, conversationProperties);
         requestBody = resolveSecrets(requestBody, resolvedSecrets, "a request body");
@@ -1820,6 +1857,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
         boolean headerCarriesCredential = false;
         for (String headerName : headers.keySet()) {
             String headerValue = prePostUtils.templateValues(headers.get(headerName), templateDataObjects);
+            if (guard != null) {
+                guard.checkHeader(headerName, headerValue);
+            }
             // Resolve global variable references, then vault references in headers
             headerValue = resolveGuardedVariables(headers.get(headerName), headerValue, "header '" + headerName + "'", templateDataObjects,
                     conversationProperties);

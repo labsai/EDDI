@@ -428,12 +428,15 @@ class HttpCallToolsProviderBodyGuardTest {
      */
     @Test
     void aPerPropertyTemplateIsUnaffected() throws Exception {
-        when(apiCallExecutor.execute(any(), any(), any(), anyString())).thenReturn(Map.of("httpCode", 200));
+        when(apiCallExecutor.execute(any(), any(), any(), anyString(), any())).thenReturn(Map.of("httpCode", 200));
         ToolExecutor executor = executorFor(jsonBodyCall("{\"name\":\"{name}\"}"));
 
         executor.execute(toolCall("{\"name\":\"Bot\"}"), "memory-1");
 
-        verify(apiCallExecutor, times(1)).execute(any(), any(), any(), anyString());
+        // Sent — through the argument-escaping guard, which is what a per-property
+        // JSON body now gets (ToolArgumentInjectionTest), not refused by the body
+        // guard.
+        verify(apiCallExecutor, times(1)).execute(any(), any(), any(), anyString(), any());
     }
 
     /**

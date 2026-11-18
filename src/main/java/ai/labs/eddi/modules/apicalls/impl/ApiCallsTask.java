@@ -234,23 +234,54 @@ public class ApiCallsTask implements ILifecycleTask {
                     || !request.getContentType().toLowerCase(Locale.ROOT).contains("json")) {
                 continue;
             }
-            List<String> spliced = expressionsInsideJsonStrings(request.getBody());
-            if (call.escapesToolArguments()) {
-                // A declared tool argument is JSON-escaped when the model supplies it
-                // (ToolArgumentBodyEscaper), so it no longer warrants a warning; every
-                // other expression (memory, properties, context) still does.
-                Set<String> declared = declaredArgumentNames(call);
-                spliced = spliced.stream().filter(expression -> {
-                    List<String> roots = ToolArgumentBodyEscaper.expressionRoots(expression);
-                    return roots.isEmpty() || !declared.contains(roots.get(0));
-                }).toList();
-            }
+            List<String> spliced = unescapedSplices(call);
             if (!spliced.isEmpty()) {
                 LOGGER.warnf("httpCall '%s' (uri:%s) splices %s into a JSON string literal of its body without escaping. A value "
                         + "containing a quote changes the JSON structure; write {json:serialize(...)} in place of the quoted "
                         + "expression instead (see docs/httpcalls.md).", call.getName(), uriObj, String.join(", ", spliced));
             }
+            List<String> checkedPerCall = toolArgumentFindings(call);
+            if (!checkedPerCall.isEmpty()) {
+                LOGGER.warnf("httpCall '%s' (uri:%s), called as an LLM tool: %s. Such a value is sent only when it renders as a single "
+                        + "JSON token (a number, boolean or plain word); anything else refuses the call. Write the argument as a plain "
+                        + "{name} (typed by argumentSchema) or inside a JSON string (see docs/httpcalls.md).", call.getName(), uriObj,
+                        String.join("; ", checkedPerCall));
+            }
         }
+    }
+
+    /**
+     * Whether the tool path escapes this call's arguments: not opted out, and a
+     * JSON content type by the escaper's own predicate.
+     */
+    private static boolean escapesArguments(ApiCall call) {
+        return call.escapesToolArguments() && ToolArgumentBodyEscaper.isJsonContentType(call.getRequest().getContentType());
+    }
+
+    /**
+     * The expressions spliced unescaped into a JSON string literal of the call's
+     * body. A declared tool argument is JSON-escaped when the model supplies it
+     * (ToolArgumentBodyEscaper), so it does not count where the escaper runs; every
+     * other expression (memory, properties, context) still does.
+     */
+    static List<String> unescapedSplices(ApiCall call) {
+        List<String> spliced = expressionsInsideJsonStrings(call.getRequest().getBody());
+        if (!escapesArguments(call)) {
+            return spliced;
+        }
+        Set<String> declared = declaredArgumentNames(call);
+        return spliced.stream().filter(expression -> !ToolArgumentBodyEscaper.isArgumentExpression(expression, declared)).toList();
+    }
+
+    /**
+     * The constructs of the call's body that read a tool argument outside a JSON
+     * string other than as a plain {@code {name}} — judged per call, and refused
+     * when the value is more than one JSON token.
+     */
+    static List<String> toolArgumentFindings(ApiCall call) {
+        return escapesArguments(call)
+                ? ToolArgumentBodyEscaper.deployTimeFindings(call.getRequest().getBody(), declaredArgumentNames(call))
+                : List.of();
     }
 
     /**

@@ -29,6 +29,7 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import ai.labs.eddi.modules.apicalls.impl.ConfigReferenceRefusedException;
+import ai.labs.eddi.modules.apicalls.impl.ToolArgumentBodyEscaper;
 import ai.labs.eddi.modules.apicalls.impl.ResolvedRequest;
 import ai.labs.eddi.modules.llm.capability.JsonResponseFormatPolicy;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
@@ -1134,10 +1135,11 @@ class ToolLoopRunner {
      * field, never a value — goes back to the model as the tool result so it can
      * correct the request instead of waiting on a decision.
      * <p>
-     * Only {@link ConfigReferenceRefusedException} counts. Any other failure to
-     * resolve is not known to be deterministic (and its message may quote the
-     * material being rendered), so those calls stay gated and are approved
-     * unpinned, exactly as before.
+     * Only {@link ConfigReferenceRefusedException} and a refusal of the call's
+     * arguments ({@link ToolArgumentBodyEscaper.ArgumentRefusedException}) count.
+     * Any other failure to resolve is not known to be deterministic (and its
+     * message may quote the material being rendered), so those calls stay gated and
+     * are approved unpinned, exactly as before.
      */
     private static Screened refuseDoomedGatedCalls(ToolApprovalGate.GateResult gateResult,
                                                    Map<String, ToolRequestResolver> resolvers,
@@ -1171,6 +1173,17 @@ class ToolLoopRunner {
                 step.put("tool", req.name());
                 withCallId(step, req);
                 step.put("error", "credential_reference_refused");
+                trace.add(step);
+            } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+                // Equally certain: execution refuses the same arguments before sending.
+                LOGGER.warnf("Refusing gated tool '%s' before asking for approval: its arguments cannot be placed in the request.",
+                        sanitize(req.name()));
+                addResult(currentMessages, aiMessage, req, errorJson(refused.getMessage()), exchangeRecorder);
+                Map<String, Object> step = new HashMap<>();
+                step.put("type", "tool_error");
+                step.put("tool", req.name());
+                withCallId(step, req);
+                step.put("error", "tool_argument_refused");
                 trace.add(step);
             } catch (Exception e) {
                 // Not known to be deterministic: leave it to the pause, which pins it

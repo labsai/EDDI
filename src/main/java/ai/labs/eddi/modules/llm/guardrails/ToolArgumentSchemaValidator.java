@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.guardrails;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.cfg.JsonNodeFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.JsonNodeFactory;
@@ -109,10 +110,15 @@ public final class ToolArgumentSchemaValidator {
 
     /**
      * Strict, like every other parser of model output in the tool path: a value
-     * followed by trailing text is not a JSON document.
+     * followed by trailing text is not a JSON document. Lossless for numbers: a
+     * decimal keeps its digits ({@code 12345678901234567890.12} is not rounded to a
+     * double, {@code 1.50} keeps its scale), so the value sent is the value the
+     * model wrote and validated.
      */
     private static final ObjectMapper MAPPER = JsonMapper.builder()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
+            .enable(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS)
+            .disable(JsonNodeFeature.STRIP_TRAILING_BIGDECIMAL_ZEROES)
             .build();
 
     /**
