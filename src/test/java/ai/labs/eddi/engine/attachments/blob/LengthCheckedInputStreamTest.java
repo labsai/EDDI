@@ -32,7 +32,9 @@ class LengthCheckedInputStreamTest {
 
     @Test
     void passesAStreamOfUnknownLengthUpToMaxBytes() throws Exception {
-        assertEquals(10, new LengthCheckedInputStream(bytes(10), -1, 10).readAllBytes().length);
+        try (LengthCheckedInputStream in = new LengthCheckedInputStream(bytes(10), -1, 10)) {
+            assertEquals(10, in.readAllBytes().length);
+        }
     }
 
     @Test
@@ -62,7 +64,7 @@ class LengthCheckedInputStreamTest {
     void countsSkippedBytes() throws Exception {
         LengthCheckedInputStream in = new LengthCheckedInputStream(bytes(20), -1, 10);
 
-        assertEquals(Reason.EXCEEDS_MAX_BYTES, assertThrows(BlobLengthException.class, () -> in.skip(15)).reason());
+        assertEquals(Reason.EXCEEDS_MAX_BYTES, assertThrows(BlobLengthException.class, () -> assertEquals(15, in.skip(15))).reason());
     }
 
     @Test

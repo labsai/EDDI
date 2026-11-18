@@ -51,7 +51,9 @@ public final class BlobBackendHeapProbe {
         try {
             String key = BlobKeys.random();
             long start = System.nanoTime();
-            backend.put(key, new SeededInputStream(SEED, size), size, size);
+            try (InputStream upload = new SeededInputStream(SEED, size)) {
+                backend.put(key, upload, size, size);
+            }
             long put = System.nanoTime();
             String read;
             try (InputStream in = backend.get(key)) {

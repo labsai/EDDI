@@ -82,7 +82,7 @@ public interface BlobBackendContract {
         int c = chunkBytes();
         for (int size : new int[]{0, 1, c - 1, c, c + 1, 3 * c + 17}) {
             String key = BlobKeys.random();
-            backend().put(key, new SeededInputStream(size, size), size, Math.max(1, size));
+            putSeeded(key, size, size, size, Math.max(1, size));
 
             try (InputStream in = backend().get(key)) {
                 assertEquals(SeededInputStream.sha256(size, size), SeededInputStream.sha256(in), "content of a " + size + " B object");
@@ -96,7 +96,7 @@ public interface BlobBackendContract {
         int size = 2 * chunkBytes() + 5;
         String key = BlobKeys.random();
 
-        backend().put(key, new SeededInputStream(42, size), -1, 10L * chunkBytes());
+        putSeeded(key, 42, size, -1, 10L * chunkBytes());
 
         try (InputStream in = backend().get(key)) {
             assertEquals(SeededInputStream.sha256(42, size), SeededInputStream.sha256(in));
@@ -107,9 +107,9 @@ public interface BlobBackendContract {
     default void refusesAnExistingKeyAndKeepsTheOriginal() throws Exception {
         int size = 2 * chunkBytes() + 3;
         String key = BlobKeys.random();
-        backend().put(key, new SeededInputStream(1, size), size, size);
+        putSeeded(key, 1, size, size, size);
 
-        assertThrows(FileAlreadyExistsException.class, () -> backend().put(key, new SeededInputStream(2, size), size, size));
+        assertThrows(FileAlreadyExistsException.class, () -> putSeeded(key, 2, size, size, size));
         assertThrows(FileAlreadyExistsException.class, () -> backend().put(key, InputStream.nullInputStream(), 0, 1));
 
         try (InputStream in = backend().get(key)) {
@@ -125,7 +125,7 @@ public interface BlobBackendContract {
         String key = BlobKeys.random();
 
         BlobLengthException e = assertThrows(BlobLengthException.class,
-                () -> backend().put(key, new SeededInputStream(3, 3L * c + 5), 2L * c + 10, 100L * c));
+                () -> putSeeded(key, 3, 3L * c + 5, 2L * c + 10, 100L * c));
 
         assertEquals(Reason.EXCEEDS_DECLARED_LENGTH, e.reason());
         assertNothingStored(key);
@@ -137,7 +137,7 @@ public interface BlobBackendContract {
         String key = BlobKeys.random();
 
         BlobLengthException e = assertThrows(BlobLengthException.class,
-                () -> backend().put(key, new SeededInputStream(4, 3L * c), -1, 2L * c + 10));
+                () -> putSeeded(key, 4, 3L * c, -1, 2L * c + 10));
 
         assertEquals(Reason.EXCEEDS_MAX_BYTES, e.reason());
         assertNothingStored(key);
@@ -169,7 +169,7 @@ public interface BlobBackendContract {
         String key = BlobKeys.random();
 
         BlobLengthException e = assertThrows(BlobLengthException.class,
-                () -> backend().put(key, new SeededInputStream(6, 2L * c + 5), 3L * c, 3L * c));
+                () -> putSeeded(key, 6, 2L * c + 5, 3L * c, 3L * c));
 
         assertEquals(Reason.SHORTER_THAN_DECLARED, e.reason());
         assertNothingStored(key);
@@ -238,7 +238,7 @@ public interface BlobBackendContract {
     @Test
     default void rejectsNegativeRanges() throws Exception {
         String key = BlobKeys.random();
-        backend().put(key, new SeededInputStream(10, 10), 10, 10);
+        putSeeded(key, 10, 10, 10, 10);
 
         assertThrows(IllegalArgumentException.class, () -> backend().getRange(key, -1, 5));
         assertThrows(IllegalArgumentException.class, () -> backend().getRange(key, 0, -5));
@@ -251,8 +251,8 @@ public interface BlobBackendContract {
         int size = 2 * chunkBytes() + 1;
         String key = BlobKeys.random();
         String other = BlobKeys.random();
-        backend().put(key, new SeededInputStream(11, size), size, size);
-        backend().put(other, new SeededInputStream(12, size), size, size);
+        putSeeded(key, 11, size, size, size);
+        putSeeded(other, 12, size, size, size);
 
         backend().delete(key);
         assertDoesNotThrow(() -> backend().delete(key));
@@ -272,7 +272,7 @@ public interface BlobBackendContract {
         String a2 = "a0a0a0-" + BlobKeys.random();
         String b1 = "b1b1b1-" + BlobKeys.random();
         for (String key : List.of(a1, a2, b1)) {
-            backend().put(key, new SeededInputStream(13, 5), 5, 5);
+            putSeeded(key, 13, 5, 5, 5);
         }
         backend().put("a0a0a0-empty", InputStream.nullInputStream(), 0, 1);
 
@@ -322,6 +322,15 @@ public interface BlobBackendContract {
     }
 
     // --- helpers --------------------------------------------------------------
+
+    /**
+     * Puts {@code size} seeded bytes, closing the source whatever {@code put} does.
+     */
+    private void putSeeded(String key, long seed, long size, long declaredLength, long maxBytes) throws IOException {
+        try (InputStream source = new SeededInputStream(seed, size)) {
+            backend().put(key, source, declaredLength, maxBytes);
+        }
+    }
 
     private void assertNothingStored(String key) throws Exception {
         assertEquals(Optional.empty(), backend().stat(key), "stat");
