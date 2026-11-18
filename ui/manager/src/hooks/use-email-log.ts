@@ -18,9 +18,13 @@ export function useEmailLog(id: string, filters: EmailLogFilters, enabled = true
   });
 }
 
-/** Looks one Message-ID up in an integration's mail log. */
+/**
+ * Looks one Message-ID up in an integration's mail log. Silent: the component
+ * shows a miss and any other failure inline, so no global error toast.
+ */
 export function useEmailLogLookup(id: string) {
   return useMutation({
     mutationFn: (messageId: string) => lookupEmailLog(id, messageId),
+    meta: { silent: true },
   });
 }

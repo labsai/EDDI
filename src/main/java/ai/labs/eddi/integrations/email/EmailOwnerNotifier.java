@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -21,6 +22,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -32,11 +34,12 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.LocalTime;
 import java.time.ZoneOffset;
-import java.util.ArrayList;
 import java.util.HexFormat;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.UUID;
 
@@ -106,6 +109,13 @@ public class EmailOwnerNotifier {
     private final MeterRegistry meterRegistry;
     private final NotifyRecipientPolicy recipientPolicy;
     private final Duration retention;
+
+    /**
+     * For the digest's absolute mail-log link. Field-injected so the constructor
+     * stays the one the tests use.
+     */
+    @Inject
+    Instance<ConnectionsConfig> connectionsConfig;
 
     @Inject
     public EmailOwnerNotifier(SystemMailer mailer, IEmailMailboxStateStore stateStore, IEmailMessageLedger ledger, MeterRegistry meterRegistry,
@@ -211,11 +221,15 @@ public class EmailOwnerNotifier {
             return false;
         }
         long total = counts.values().stream().mapToLong(Long::longValue).sum();
-        if (total == 0) {
+        // Loop refusals alone are no reason to mail: a digest (or any automated
+        // mail) that reached a polled mailbox is refused as a loop, and counting it
+        // would make tomorrow's digest send itself again, every day.
+        long loops = counts.entrySet().stream().filter(e -> e.getKey().startsWith(LOOP_OUTCOME)).mapToLong(Map.Entry::getValue).sum();
+        if (total - loops == 0) {
             return false;
         }
         String subject = "[EDDI] Daily mail digest: " + flatten(integrationName == null ? integrationId : integrationName);
-        String text = digestText(integrationId, integrationName, yesterdayStart, counts, total);
+        String text = digestText(integrationId, integrationName, yesterdayStart, counts, total, mailLogUrl(integrationId));
         for (String recipient : allowedOwners(settings, true)) {
             send(integrationId, Reason.DIGEST, day, from, recipient, subject, text, now);
         }
@@ -225,27 +239,61 @@ public class EmailOwnerNotifier {
     /** The digest goes out from this time of the UTC day on. */
     static final LocalTime DIGEST_NOT_BEFORE = LocalTime.of(0, 5);
 
+    /** The outcome key prefix of a refusal as a mail loop. */
+    static final String LOOP_OUTCOME = "refused:loop";
+
     /** Where the Manager shows an integration's mail log. */
     static String mailLogPath(String integrationId) {
         return "/manage/channels/" + integrationId + "#mail-log";
     }
 
-    static String digestText(String integrationId, String integrationName, Instant dayStart, Map<String, Long> counts, long total) {
+    /**
+     * The mail log's absolute URL from {@code eddi.connections.public-base-url} (as
+     * the HITL approval mails build theirs), or null when none usable is set.
+     */
+    String mailLogUrl(String integrationId) {
+        if (connectionsConfig == null || !connectionsConfig.isResolvable()) {
+            return null;
+        }
+        ConnectionsConfig config = connectionsConfig.get();
+        String base = config.getPublicBaseUrl();
+        if (base == null || base.isBlank() || config.publicBaseUrlProblem().isPresent()) {
+            return null;
+        }
+        return (base.endsWith("/") ? base.substring(0, base.length() - 1) : base) + mailLogPath(integrationId);
+    }
+
+    /**
+     * @param link
+     *            the mail log's absolute URL, or null to name the page instead
+     */
+    static String digestText(String integrationId, String integrationName, Instant dayStart, Map<String, Long> counts, long total, String link) {
         String name = flatten(integrationName == null ? integrationId : integrationName);
-        StringBuilder text = new StringBuilder("Mail received by the email integration '").append(name).append("' (").append(integrationId)
-                .append(") on ").append(dayStart.atZone(ZoneOffset.UTC).toLocalDate()).append(" (UTC), by outcome:\n\n");
+        StringBuilder text = new StringBuilder("Mail recorded by the email integration '").append(name).append("' (").append(integrationId)
+                .append(") on ").append(dayStart.atZone(ZoneOffset.UTC).toLocalDate())
+                .append(" (UTC; the day EDDI fetched it, not when it was delivered), by outcome:\n\n");
         new TreeMap<>(counts).forEach((outcome, n) -> text.append("  ").append(outcome).append(": ").append(n).append('\n'));
-        text.append("\n  total: ").append(total).append("\n\nWhy each mail was or was not acted on: the Mail log of the integration in the ")
-                .append("EDDI Manager (").append(mailLogPath(integrationId))
-                .append(", sign-in required). No addresses, subjects or bodies are included here.\n");
+        text.append("\n  total: ").append(total).append("\n\nWhy each mail was or was not acted on: ");
+        if (link != null) {
+            text.append(link).append(" (sign-in required).");
+        } else {
+            text.append("the Mail log of the integration in the EDDI Manager (").append(mailLogPath(integrationId)).append(", sign-in required).");
+        }
+        text.append(" No addresses, subjects or bodies are included here.\n");
         return text.toString();
     }
 
+    /**
+     * The owner addresses inside the domain policy, normalised and each once. The
+     * integration's own polled address is left out: it would only receive the mail
+     * back as a loop.
+     */
     private List<String> allowedOwners(EmailChannelSettings settings, boolean countRefusals) {
-        List<String> allowed = new ArrayList<>();
+        String own = settings.address() == null ? null : AddressNormalizer.tryNormalize(settings.address()).orElse(null);
+        Set<String> allowed = new LinkedHashSet<>();
         for (String address : settings.ownerNotifyAddresses()) {
             Optional<String> recipient = AddressNormalizer.tryNormalize(address);
-            if (recipient.isEmpty()) {
+            if (recipient.isEmpty() || recipient.get().equals(own)) {
                 continue;
             }
             if (!recipientPolicy.allows(recipient.get())) {
@@ -256,7 +304,7 @@ public class EmailOwnerNotifier {
             }
             allowed.add(recipient.get());
         }
-        return allowed;
+        return List.copyOf(allowed);
     }
 
     private void send(String integrationId, String integrationName, Reason reason, String day, MailAddress from, String recipient, Instant now) {

@@ -166,7 +166,10 @@ public class EmailInboundSweeper {
      */
     int sendDigests(Instant now) {
         int sent = 0;
-        for (EmailIntegration integration : directory.all()) {
+        // A fresh read, never the directory's last-good fallback: a stale list could
+        // still name an owner an editor removed. A failed read sends nothing this
+        // tick (the next one retries; nothing was claimed).
+        for (EmailIntegration integration : directory.scan()) {
             EmailChannelSettings settings = integration.settings();
             if (settings == null || !settings.dailyOwnerDigest()) {
                 continue;

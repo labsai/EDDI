@@ -5618,7 +5618,7 @@
     "ownerDigest": "Täglicher Mail-Bericht",
     "ownerDigestOff": "Aus",
     "ownerDigestDaily": "Täglich",
-    "ownerDigestHint": "Täglich: Die Inhaberadressen erhalten zusätzlich einmal am Tag eine E-Mail mit den Mail-Zahlen des Vortags nach Ergebnis (keine Adressen, keine Inhalte), sofern der Systemmailer konfiguriert ist."
+    "ownerDigestHint": "Täglich: Zulässige Inhaberadressen erhalten einmal am Tag eine E-Mail mit den eingehenden Mail-Zahlen des vorigen UTC-Tags nach Ergebnis (keine Adressen, keine Inhalte). Sie wird nur gesendet, wenn der Systemmailer konfiguriert ist, eine Inhaberadresse die Empfängerdomain-Richtlinie erfüllt und am Vortag Mail eingegangen ist."
   },
   "feedback": {
     "title": "Feedback",
@@ -5935,7 +5935,7 @@
   },
   "emailLog": {
     "title": "Mail-Protokoll",
-    "description": "Jede Mail, die diese Integration in den letzten 30 Tagen empfangen oder gesendet hat, und warum eine Mail nicht bearbeitet wurde. Betreff und Text werden nie gespeichert.",
+    "description": "Jede Mail, die diese Integration innerhalb der Aufbewahrungsfrist des Protokolls (30 Tage, sofern das Deployment sie nicht geändert hat) empfangen oder gesendet hat, und warum eine Mail nicht bearbeitet wurde. Betreff und Text werden nie gespeichert.",
     "lookupLabel": "Message-ID nachschlagen",
     "lookupAction": "Nachschlagen",
     "lookupHint": "Der Message-ID-Header der Mail, aus „Original anzeigen“ oder „Quelltext anzeigen“ des Mailprogramms.",

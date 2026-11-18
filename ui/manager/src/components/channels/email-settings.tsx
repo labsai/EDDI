@@ -515,11 +515,11 @@ export function EmailPlatformFields({
           </div>
           <div className="space-y-1">
             <label htmlFor={`${uid}-digest`} className={labelClass}>{t("emailChannel.ownerDigest", "Daily mail digest")}</label>
-            <select id={`${uid}-digest`} data-testid="email-owner-digest" className={selectClass} value={pc.ownerDigest === "daily" ? "daily" : "off"} onChange={(e) => set("ownerDigest", e.target.value === "daily" ? "daily" : "")}>
+            <select id={`${uid}-digest`} data-testid="email-owner-digest" className={selectClass} value={String(pc.ownerDigest ?? "").trim().toLowerCase() === "daily" ? "daily" : "off"} onChange={(e) => set("ownerDigest", e.target.value === "daily" ? "daily" : "")}>
               <option value="off">{t("emailChannel.ownerDigestOff", "Off")}</option>
               <option value="daily">{t("emailChannel.ownerDigestDaily", "Daily")}</option>
             </select>
-            <p className={hintClass}>{t("emailChannel.ownerDigestHint", "Daily: the owner addresses also get one email a day with the previous day's mail counts by outcome (no addresses or content), if the system mailer is configured.")}</p>
+            <p className={hintClass}>{t("emailChannel.ownerDigestHint", "Daily: allowed owner addresses get one email a day with the previous UTC day's inbound mail counts by outcome (no addresses or content). Sent only if the system mailer is configured, an owner address passes the recipient domain policy, and the previous day had inbound mail.")}</p>
           </div>
         </div>
       </details>

@@ -5670,7 +5670,7 @@
     "ownerDigest": "Récapitulatif quotidien des e-mails",
     "ownerDigestOff": "Désactivé",
     "ownerDigestDaily": "Quotidien",
-    "ownerDigestHint": "Quotidien : les adresses des responsables reçoivent aussi un e-mail par jour avec le nombre d'e-mails de la veille par résultat (sans adresses ni contenu), si l'expéditeur système est configuré."
+    "ownerDigestHint": "Quotidien : les adresses de responsables autorisées reçoivent un e-mail par jour avec le nombre d'e-mails entrants de la veille (jour UTC) par résultat (sans adresses ni contenu). Envoyé uniquement si l'expéditeur système est configuré, si une adresse de responsable respecte la politique de domaines destinataires et si la veille a reçu des e-mails."
   },
   "feedback": {
     "title": "Avis",
@@ -5987,7 +5987,7 @@
   },
   "emailLog": {
     "title": "Journal des e-mails",
-    "description": "Chaque e-mail reçu ou envoyé par cette intégration au cours des 30 derniers jours, et pourquoi un e-mail n'a pas été traité. Les objets et les corps ne sont jamais enregistrés.",
+    "description": "Chaque e-mail reçu ou envoyé par cette intégration pendant la durée de conservation du journal (30 jours, sauf si le déploiement l'a modifiée), et pourquoi un e-mail n'a pas été traité. Les objets et les corps ne sont jamais enregistrés.",
     "lookupLabel": "Rechercher un Message-ID",
     "lookupAction": "Rechercher",
     "lookupHint": "L'en-tête Message-ID de l'e-mail, depuis « Afficher l'original » ou « Afficher la source » du client de messagerie.",

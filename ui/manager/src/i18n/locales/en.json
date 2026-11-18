@@ -5618,7 +5618,7 @@
     "ownerDigest": "Daily mail digest",
     "ownerDigestOff": "Off",
     "ownerDigestDaily": "Daily",
-    "ownerDigestHint": "Daily: the owner addresses also get one email a day with the previous day's mail counts by outcome (no addresses or content), if the system mailer is configured."
+    "ownerDigestHint": "Daily: allowed owner addresses get one email a day with the previous UTC day's inbound mail counts by outcome (no addresses or content). Sent only if the system mailer is configured, an owner address passes the recipient domain policy, and the previous day had inbound mail."
   },
   "feedback": {
     "title": "Feedback",
@@ -5935,7 +5935,7 @@
   },
   "emailLog": {
     "title": "Mail log",
-    "description": "Every mail this integration received or sent in the last 30 days, and why a mail was not acted on. Subjects and bodies are never stored.",
+    "description": "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. Subjects and bodies are never stored.",
     "lookupLabel": "Look up Message-ID",
     "lookupAction": "Look up",
     "lookupHint": "The Message-ID header of the mail, from the mail client's \"show original\" or \"view source\".",

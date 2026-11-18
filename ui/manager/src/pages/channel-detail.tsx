@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
-import { useParams, useSearchParams, useNavigate } from "react-router-dom";
+import { useParams, useSearchParams, useNavigate, useLocation } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
@@ -21,7 +21,7 @@ import { plaintextSecretFields, redactPlaintextSecrets } from "@/lib/channel-sec
 import { AgentPicker } from "@eddi/app-kit/components/shared/agent-picker";
 import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
-import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
+import { useChannel, useChannelCurrentVersion, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailMailLog } from "@/components/channels/email-mail-log";
@@ -242,10 +242,21 @@ export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
+  // A link without ?version (the owner digest's) opens the current version, not
+  // version 1: resolve it, then put it in the URL (keeping the #mail-log hash).
+  const hasVersion = searchParams.has("version");
+  const currentVersion = useChannelCurrentVersion(id!, !hasVersion);
+  useEffect(() => {
+    if (hasVersion || currentVersion.data === undefined) return;
+    const params = new URLSearchParams(location.search);
+    params.set("version", String(currentVersion.data));
+    navigate({ search: params.toString(), hash: location.hash }, { replace: true });
+  }, [hasVersion, currentVersion.data, location.search, location.hash, navigate]);
   const parsedVersion = Number(searchParams.get("version") ?? "1");
   const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
 
-  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version, hasVersion || currentVersion.isError);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -286,6 +297,9 @@ export function ChannelDetailPage() {
 
   const isWebhook = draft?.channelType === "webhook";
   const isEmail = draft?.channelType === "email";
+  // The mail log belongs to the saved version: an unsaved switch to email has
+  // no log yet (and a switch away still has one).
+  const savedIsEmail = config?.channelType === "email";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
     : `${window.location.origin}/integrations/slack/events`;
@@ -575,10 +589,10 @@ export function ChannelDetailPage() {
       )}
 
       {/* Email: the mail log — why a mail was or was not acted on. The owner digest links here (#mail-log). */}
-      {isEmail && id && (
+      {savedIsEmail && id && (
         <section id="mail-log" className="rounded-xl border border-border bg-card p-5 space-y-3 scroll-mt-4" data-testid="email-mail-log-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><Inbox className="h-4 w-4 text-primary" />{t("emailLog.title", "Mail log")}</h2>
-          <EmailMailLog channelId={id} />
+          <EmailMailLog key={id} channelId={id} />
         </section>
       )}
 

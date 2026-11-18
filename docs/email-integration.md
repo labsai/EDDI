@@ -373,12 +373,14 @@ the rows (none shows a subject or a body, since the ledger stores neither):
 
   Filters: `direction` (`IN`, `OUT`), `kind` (`TRIGGER` = an inbound mail in either mode, `REPLY`, `NOTIFY`,
   `NOTICE`), `state`, `reason` (a prefix such as `blocked` or `loop:own_address`), and `since`/`until` (ISO-8601
-  instants; `until` is exclusive). `limit` defaults to 50 and is clamped to 1–200. An unknown or malformed value, or a cursor this log did not issue, is a 400.
+  instants; `until` is exclusive). `limit` defaults to 50 and is clamped to 1–200. An unknown or malformed value, or a
+  malformed cursor, is a 400. A cursor is a position (time and row id), not a credential: the listing stays limited to
+  the integration in the path whatever cursor is sent.
   A row has `id, kind, direction, messageId, state, reason, reasonCategory, conversationId, counterpart` (the sender
   of an inbound mail, the recipient of an outbound one), `attempts, createdAt, updatedAt`. The lookup is a POST so
-  the Message-ID, which usually names a domain, stays out of access logs. It returns the row with that id, or 404: an
-  inbound mail's, or that of a reply or notice EDDI sent (which carries a Message-ID of its own; the reply to a
-  mail shares its `conversationId`).
+  the Message-ID, which usually names a domain, stays out of access logs. It returns an **array** of the rows with
+  that id, inbound first — an inbound mail's, and that of a reply or notice EDDI sent (which carries a Message-ID of
+  its own; the reply to a mail shares its `conversationId`) — or 404 when there is none.
 - **The daily digest** (`ownerDigest: daily`): from 00:05 UTC, one mail per day to the `ownerNotifyAddresses` that
   pass `eddi.mail.notify.allowed-recipient-domains`, with the previous UTC day's inbound counts by outcome
   (`done`, `refused:<category>`, `deferred:<category>`, …) and the Manager link. It holds counts only, no addresses,
@@ -409,9 +411,11 @@ What the reason means. The category is the part before the first `:`:
 | `requeued_stale_claim` | `RECEIVED` | A claim outlived its node; the next poll processes the mail |
 | `unauthenticated:unsigned_message_id`, `duplicate:replayed_signature` | `REFUSED` | *Coming with the inbound-mail hardening (signed headers only):* a mail whose signature covers no `Message-ID`, or a replay of a signature already seen. Its marker rows (`signature_seen`) are hidden from the log |
 
-A mail with **no row at all** was never fetched. It may sit in another folder (`folder` is polled, spam folders are
-not), have arrived before the integration existed, or be older than the retention. Check the mailbox and the poll's
-state in the [Operations](#operations) logs.
+When **no row is found**, first rule out the filters and paging (clear the filters, load more). Then: the row may
+have expired (`eddi.email.ledger-retention`, 30 days by default — a mail fetched and processed earlier leaves no
+trace once its row is gone), or the mail was never fetched — it may sit in another folder (`folder` is polled, spam
+folders are not) or have arrived before the integration existed. Check the mailbox and the poll's state in the
+[Operations](#operations) logs.
 
 ## Operations
 

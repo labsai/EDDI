@@ -23,6 +23,7 @@ import org.bson.Document;
 import org.bson.conversions.Bson;
 
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -284,10 +285,10 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
             filters.add(Filters.regex(F_ERROR, "^" + Pattern.quote(query.reasonPrefix())));
         }
         if (query.since() != null) {
-            filters.add(Filters.gte(F_CREATED, Date.from(query.since())));
+            filters.add(Filters.gte(F_CREATED, ceilToMillis(query.since())));
         }
         if (query.until() != null) {
-            filters.add(Filters.lt(F_CREATED, Date.from(query.until())));
+            filters.add(Filters.lt(F_CREATED, ceilToMillis(query.until())));
         }
         if (!query.includeMarkers()) {
             filters.add(Filters.ne(F_ERROR, MARKER_REASON));
@@ -306,7 +307,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public Map<String, Long> countInboundByOutcome(String integrationId, Instant since, Instant until) {
         Bson match = Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
-                Filters.gte(F_CREATED, Date.from(since)), Filters.lt(F_CREATED, Date.from(until)), Filters.ne(F_ERROR, MARKER_REASON));
+                Filters.gte(F_CREATED, ceilToMillis(since)), Filters.lt(F_CREATED, ceilToMillis(until)), Filters.ne(F_ERROR, MARKER_REASON));
         Document groupKey = new Document("state", "$" + F_STATE).append("error", "$" + F_ERROR);
         Map<String, Long> counts = new TreeMap<>();
         for (Document group : rows.aggregate(List.of(Aggregates.match(match), Aggregates.group(groupKey, Accumulators.sum("n", 1L))))) {
@@ -315,6 +316,16 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
             counts.merge(IEmailMessageLedger.outcomeKey(State.valueOf(key.getString("state")), key.getString("error")), n.longValue(), Long::sum);
         }
         return counts;
+    }
+
+    /**
+     * The smallest millisecond at or after {@code instant}. A BSON date holds
+     * milliseconds and {@code Date.from} truncates, which would move a finer
+     * {@code since}/{@code until} across a row stored at that millisecond.
+     */
+    static Date ceilToMillis(Instant instant) {
+        Instant truncated = instant.truncatedTo(ChronoUnit.MILLIS);
+        return Date.from(truncated.equals(instant) ? instant : truncated.plusMillis(1));
     }
 
     static Document toDocument(LedgerEntry entry) {

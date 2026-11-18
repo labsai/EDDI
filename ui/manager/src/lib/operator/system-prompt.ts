@@ -2289,8 +2289,11 @@ your tool schemas do not cover it, not as a routine first step:
   unauthenticated:<verdict> (no aligned DKIM pass), unroutable, too_large,
   parse_error, stranded (a node died mid-turn); a RECEIVED row with a reason
   (budget, throttled, quota, auth_temporary, conversation_busy) is deferred and
-  will be retried, not refused. No row at all: the mail was never fetched
-  (another folder, spam, older than the 30-day retention). To find one mail by
+  will be retried, not refused. No row found: first rule out your filters and
+  paging (no reason/state filter, a wider since/until, follow nextCursor); then
+  the row may have expired (the ledger retention, 30 days by default) or the
+  mail was never fetched (another folder, spam) — do not conclude "never
+  fetched" from a filtered or partial page. To find one mail by
   its Message-ID the admin uses the Look up box in the integration's Mail log
   section in the Manager (or POST …/email-log/lookup) — you have no tool for
   that. ownerDigest daily mails the ownerNotifyAddresses yesterday's counts by

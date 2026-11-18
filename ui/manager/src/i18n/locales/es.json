@@ -5670,7 +5670,7 @@
     "ownerDigest": "Resumen diario de correo",
     "ownerDigestOff": "Desactivado",
     "ownerDigestDaily": "Diario",
-    "ownerDigestHint": "Diario: las direcciones de los responsables reciben además un correo al día con el recuento de correos del día anterior por resultado (sin direcciones ni contenido), si el remitente del sistema está configurado."
+    "ownerDigestHint": "Diario: las direcciones de responsables permitidas reciben un correo al día con el recuento de correos entrantes del día UTC anterior por resultado (sin direcciones ni contenido). Solo se envía si el remitente del sistema está configurado, una dirección de responsable cumple la política de dominios de destinatarios y el día anterior hubo correo entrante."
   },
   "feedback": {
     "title": "Valoraciones",
@@ -5987,7 +5987,7 @@
   },
   "emailLog": {
     "title": "Registro de correo",
-    "description": "Cada correo que esta integración recibió o envió en los últimos 30 días, y por qué no se atendió un correo. Los asuntos y cuerpos nunca se guardan.",
+    "description": "Cada correo que esta integración recibió o envió dentro del periodo de retención del registro (30 días, salvo que el despliegue lo haya cambiado), y por qué no se atendió un correo. Los asuntos y cuerpos nunca se guardan.",
     "lookupLabel": "Buscar Message-ID",
     "lookupAction": "Buscar",
     "lookupHint": "La cabecera Message-ID del correo, desde «Mostrar original» o «Ver código fuente» del cliente de correo.",

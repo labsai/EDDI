@@ -813,6 +813,9 @@ export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "E
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
 /** What the mocked ingestion status says for a `replace=true` ingestion. */
+/** The mock email integration, the only channel with a mail log. */
+export const MOCK_EMAIL_CHANNEL_ID = "ch-email";
+
 /** Rows of `GET /channelstore/channels/{id}/email-log`, shaped like the backend's `EmailLogView`. */
 export const MOCK_EMAIL_LOG = [
   {
@@ -5751,18 +5754,28 @@ export const backupSyncHandlers = [
 
   // An email integration's mail log (`EmailLogView` rows): no subject or body,
   // the reason in `reason` and its part before the first ':' in `reasonCategory`.
-  http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+  // Only the email fixture has a mail log (any other channel is a 404, as on the
+  // backend). Newest first, ties by id descending; `limit` and the `after` cursor
+  // page like the backend's keyset (the mock's cursor is the last row's id).
+  http.get("*/channelstore/channels/:id/email-log", ({ request, params }) => {
+    if (params.id !== MOCK_EMAIL_CHANNEL_ID) return HttpResponse.json({ error: "not an email integration" }, { status: 404 });
     const url = new URL(request.url);
-    const rows = MOCK_EMAIL_LOG.filter(
+    const sorted = MOCK_EMAIL_LOG.filter(
       (row) =>
         (!url.searchParams.get("direction") || row.direction === url.searchParams.get("direction")) &&
         (!url.searchParams.get("state") || row.state === url.searchParams.get("state")) &&
         (!url.searchParams.get("reason") || (row.reason ?? "").startsWith(url.searchParams.get("reason") ?? "")),
-    );
-    return HttpResponse.json({ rows, nextCursor: null });
+    ).sort((a, b) => b.createdAt.localeCompare(a.createdAt) || (a.id < b.id ? 1 : a.id > b.id ? -1 : 0));
+    const after = url.searchParams.get("after");
+    const start = after ? sorted.findIndex((row) => row.id === after) + 1 : 0;
+    const limit = Math.min(Math.max(Number(url.searchParams.get("limit") ?? "50") || 50, 1), 200);
+    const rows = sorted.slice(start, start + limit);
+    const nextCursor = start + limit < sorted.length ? (rows[rows.length - 1]?.id ?? null) : null;
+    return HttpResponse.json({ rows, nextCursor });
   }),
 
-  http.post("*/channelstore/channels/:id/email-log/lookup", async ({ request }) => {
+  http.post("*/channelstore/channels/:id/email-log/lookup", async ({ request, params }) => {
+    if (params.id !== MOCK_EMAIL_CHANNEL_ID) return HttpResponse.json({ error: "not an email integration" }, { status: 404 });
     const body = (await request.json()) as { messageId?: string };
     const rows = MOCK_EMAIL_LOG.filter((row) => row.messageId === body.messageId);
     return rows.length > 0 ? HttpResponse.json(rows) : HttpResponse.json({ error: "not found" }, { status: 404 });

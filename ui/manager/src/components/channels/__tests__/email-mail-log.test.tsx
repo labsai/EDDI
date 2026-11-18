@@ -3,6 +3,7 @@ import { screen, waitFor } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
 import { server } from "@eddi/app-kit/test/mocks/server";
+import { MOCK_EMAIL_LOG } from "@eddi/app-kit/test/mocks/handlers";
 import { EmailMailLog } from "@/components/channels/email-mail-log";
 import { EmailPlatformFields } from "@/components/channels/email-settings";
 
@@ -19,20 +20,47 @@ describe("EmailMailLog", () => {
 
   it("sends the filters to the server and starts a new list", async () => {
     const seen: string[] = [];
+    const row = (id: string) => ({ ...MOCK_EMAIL_LOG[0], id });
     server.use(
       http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
-        seen.push(new URL(request.url).search);
-        return HttpResponse.json({ rows: [], nextCursor: null });
+        const query = new URL(request.url).search;
+        seen.push(query);
+        return HttpResponse.json({ rows: [row(query.includes("state=") ? "filtered" : "unfiltered")], nextCursor: null });
       }),
     );
     renderWithProviders(<EmailMailLog channelId="ch-email" />);
-    await screen.findByTestId("empty-state");
+    expect(await screen.findByTestId("email-log-row-unfiltered")).toBeInTheDocument();
 
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "REFUSED");
     await userEvent.selectOptions(screen.getByTestId("email-log-filter-reason"), "blocked");
 
+    expect(await screen.findByTestId("email-log-row-filtered")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-log-row-unfiltered")).not.toBeInTheDocument();
     await waitFor(() => expect(seen.some((q) => q.includes("state=REFUSED") && q.includes("reason=blocked"))).toBe(true));
     expect(seen[0]).not.toContain("state=");
+
+    // "All" removes the key again: the unfiltered list, from the same query key.
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-state"), "");
+    await userEvent.selectOptions(screen.getByTestId("email-log-filter-reason"), "");
+    expect(await screen.findByTestId("email-log-row-unfiltered")).toBeInTheDocument();
+  });
+
+  it("hides rows already loaded once the log answers 403 (edit access withdrawn)", async () => {
+    let forbidden = false;
+    server.use(
+      http.get("*/channelstore/channels/:id/email-log", () =>
+        forbidden
+          ? HttpResponse.json({ error: "forbidden" }, { status: 403 })
+          : HttpResponse.json({ rows: [{ ...MOCK_EMAIL_LOG[0], id: "kept" }], nextCursor: null }),
+      ),
+    );
+    const { queryClient } = renderWithProviders(<EmailMailLog channelId="ch-email" />);
+    expect(await screen.findByTestId("email-log-row-kept")).toBeInTheDocument();
+
+    forbidden = true;
+    await queryClient.refetchQueries({ queryKey: ["channels", "ch-email", "email-log"] });
+
+    await waitFor(() => expect(screen.queryByTestId("email-log-row-kept")).not.toBeInTheDocument());
   });
 
   it("loads the next page with the cursor the server returned", async () => {

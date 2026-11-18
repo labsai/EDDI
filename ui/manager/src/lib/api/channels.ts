@@ -82,6 +82,11 @@ export function getChannel(
   );
 }
 
+/** The current (latest) version of a channel integration. */
+export function getChannelCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/channelstore/channels/${seg(id)}/currentversion`);
+}
+
 /**
  * The response header a channel-integration save carries advice in. The save
  * succeeded (201 / 200); the value is a comma-separated list of stable codes,

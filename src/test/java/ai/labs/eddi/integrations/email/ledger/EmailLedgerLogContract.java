@@ -19,6 +19,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -81,15 +82,16 @@ interface EmailLedgerLogContract {
     @Test
     @DisplayName("mail log: paging over rows with equal timestamps neither repeats nor skips one")
     default void pagingOverTies() {
-        Set<String> expected = new HashSet<>();
+        List<String> expectedOrder = new ArrayList<>();
         for (int i = 0; i < 7; i++) {
             LedgerEntry r = inbound("int-1", State.DONE, null, T0);
             ledger().insertIfAbsent(r);
-            expected.add(r.id());
+            expectedOrder.add(r.id());
         }
+        expectedOrder.sort(Comparator.reverseOrder()); // ties: id descending (binary, as Mongo and COLLATE "C" compare)
         LedgerEntry oldest = inbound("int-1", State.DONE, null, T0.minusSeconds(1));
         ledger().insertIfAbsent(oldest);
-        expected.add(oldest.id());
+        expectedOrder.add(oldest.id());
 
         List<String> seen = new ArrayList<>();
         Cursor after = null;
@@ -101,9 +103,7 @@ interface EmailLedgerLogContract {
             pages++;
         } while (after != null && pages < 10);
 
-        assertEquals(8, seen.size(), "no row repeated: " + seen);
-        assertEquals(expected, new HashSet<>(seen));
-        assertEquals(oldest.id(), seen.get(seen.size() - 1), "the older row comes last");
+        assertEquals(expectedOrder, seen, "newest first, ties by id descending, no row repeated or skipped");
         assertEquals(3, pages);
     }
 
@@ -133,6 +133,22 @@ interface EmailLedgerLogContract {
                 "the prefix is literal, '%' is no wildcard");
         assertEquals(Set.of(refusedLoop.id(), unauthenticated.id()),
                 ids(ledger().findByIntegration("int-1", query(null, null, null, null, T0.minusSeconds(20), T0))), "since inclusive, until exclusive");
+        Instant justAfterDone = T0.plusNanos(500);
+        assertEquals(Set.of(), ids(ledger().findByIntegration("int-1", query(Direction.IN, null, null, null, justAfterDone, null))),
+                "a since finer than the store's precision does not round down onto a row");
+        assertEquals(Set.of(done.id()), ids(ledger().findByIntegration("int-1", query(Direction.IN, null, State.DONE, null, null, justAfterDone))),
+                "an until finer than the store's precision does not round down past a row");
+    }
+
+    @Test
+    @DisplayName("mail log: a reason prefix outside the BMP matches exactly as Java's startsWith does")
+    default void supplementaryPrefix() {
+        LedgerEntry relay = inbound("int-1", State.REFUSED, "relay:\uD83D\uDCE7 rejected", T0);
+        ledger().insertIfAbsent(relay);
+        ledger().insertIfAbsent(inbound("int-1", State.REFUSED, "relay:x", T0.minusSeconds(1)));
+
+        assertEquals(Set.of(relay.id()), ids(ledger().findByIntegration("int-1", query(null, null, null, "relay:\uD83D\uDCE7", null, null))));
+        assertEquals(Set.of(relay.id()), ids(ledger().findByIntegration("int-1", query(null, null, null, "relay:\uD83D\uDCE7 ", null, null))));
     }
 
     @Test

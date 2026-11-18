@@ -57,6 +57,8 @@ export const EMAIL_LOG_REASON_CATEGORIES = [
   "budget",
   "throttled",
   "quota",
+  "auth_temporary",
+  "reply_rebuild_failed",
 ] as const;
 
 export const EMAIL_LOG_PAGE_SIZE = 50;

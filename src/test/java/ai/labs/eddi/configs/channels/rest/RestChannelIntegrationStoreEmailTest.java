@@ -282,6 +282,7 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(ForbiddenException.class, () -> guarded.lookupEmailLog(ID, new EmailLogView.LookupRequest("<m@x.example>")));
         verify(support, never()).mailLog(any(), any());
         verify(support, never()).lookup(any(), any());
+        verify(support, never()).lookup(any(), any());
     }
 
     @Test
@@ -294,6 +295,7 @@ class RestChannelIntegrationStoreEmailTest {
         assertThrows(NotFoundException.class, () -> sut.readEmailLog(ID, null, null, null, null, null, null, null, null));
         assertThrows(NotFoundException.class, () -> sut.lookupEmailLog(ID, new EmailLogView.LookupRequest("<m@x.example>")));
         verify(support, never()).mailLog(any(), any());
+        verify(support, never()).lookup(any(), any());
     }
 
     @Test

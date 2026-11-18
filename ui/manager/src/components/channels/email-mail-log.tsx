@@ -140,22 +140,27 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
       else delete next[key];
       return next;
     });
-  const { hash } = useLocation();
+  const { hash, key: locationKey } = useLocation();
   // The owner digest links to `…#mail-log`; the section only exists once the
   // channel has loaded, after the router's own (hash-less) scroll handling.
+  // Keyed on the navigation too, so following the same anchor again scrolls again.
   useEffect(() => {
     if (hash === "#mail-log") document.getElementById("mail-log")?.scrollIntoView?.({ block: "start" });
-  }, [hash]);
+  }, [hash, locationKey]);
+  // Edit access withdrawn while the page is open: the refetch is a 403, and the
+  // rows loaded before it must not stay on screen. Other failures (network, a
+  // failed next page) keep what is already shown.
+  const forbidden = isApiError(log.error) && log.error.status === 403;
 
   return (
     <div className="space-y-4" data-testid="email-mail-log">
       <p className="text-xs text-muted-foreground">
         {t(
           "emailLog.description",
-          "Every mail this integration received or sent in the last 30 days, and why a mail was not acted on. Subjects and bodies are never stored.",
+          "Every mail this integration received or sent within the log's retention (30 days unless the deployment changed it), and why a mail was not acted on. Subjects and bodies are never stored.",
         )}
       </p>
-      <MessageIdLookup channelId={channelId} />
+      <MessageIdLookup key={channelId} channelId={channelId} />
       <div className="flex flex-wrap gap-2">
         <label className="sr-only" htmlFor={`${uid}-direction`}>{t("emailLog.colDirection", "Direction")}</label>
         <select id={`${uid}-direction`} className={selectClass} data-testid="email-log-filter-direction" value={filters.direction ?? ""} onChange={(e) => setFilter("direction", e.target.value)}>
@@ -183,9 +188,9 @@ export function EmailMailLog({ channelId }: { channelId: string }) {
       {log.isSuccess && rows.length === 0 && (
         <EmptyState icon={Inbox} title={t("emailLog.empty", "No mail in the log")} description={t("emailLog.emptyHint", "Nothing matches these filters, or the integration has not fetched any mail yet.")} />
       )}
-      {rows.length > 0 && <LogTable rows={rows} testId="email-log-table" />}
-      {log.hasNextPage && (
-        <Button variant="outline" size="sm" onClick={() => void log.fetchNextPage()} disabled={log.isFetchingNextPage} data-testid="email-log-load-more">
+      {rows.length > 0 && !forbidden && <LogTable rows={rows} testId="email-log-table" />}
+      {log.hasNextPage && !forbidden && (
+        <Button variant="outline" size="sm" onClick={() => void log.fetchNextPage()} disabled={log.isFetching} data-testid="email-log-load-more">
           {t("emailLog.loadMore", "Load more")}
         </Button>
       )}

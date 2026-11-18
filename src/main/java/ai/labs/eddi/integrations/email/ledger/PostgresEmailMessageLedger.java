@@ -18,12 +18,15 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.TreeMap;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 /**
  * PostgreSQL implementation of {@link IEmailMessageLedger}.
@@ -76,9 +79,19 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_integration_created ON email_message_ledger "
-                    + "(integration_id, created_at DESC, id COLLATE \"C\" DESC)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
+
+    /**
+     * Indexes added after ledgers already held rows: built {@code CONCURRENTLY} in
+     * the background ({@link PostgresLateIndexes}), so an upgrade never blocks
+     * ledger writes — and with them mail processing — for the length of a plain
+     * {@code CREATE INDEX}. Until one exists its query scans.
+     */
+    static final List<String[]> LATE_INDEXES = List.<String[]>of(
+            new String[]{"idx_email_ledger_integration_created", "email_message_ledger (integration_id, created_at DESC, id COLLATE \"C\" DESC)"});
+
+    /** Advisory-lock class of the late index builds (ASCII "eeml"). */
+    private static final int INDEX_LOCK_CLASS = 0x65656d6c;
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -87,6 +100,10 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
      */
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
+    private final AtomicBoolean lateIndexBuildStarted = new AtomicBoolean();
+
+    /** Where the late index build runs; a test may swap it for a no-op. */
+    Consumer<Runnable> indexBuildLauncher = task -> Thread.ofVirtual().name("pg-email-ledger-index-build").start(task);
 
     @Inject
     public PostgresEmailMessageLedger(Instance<DataSource> dataSourceInstance) {
@@ -112,6 +129,21 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             LOGGER.errorf(e, "Failed to create the %s schema", TABLE);
             throw e;
         }
+        if (lateIndexBuildStarted.compareAndSet(false, true)) {
+            DataSource dataSource = dataSourceInstance.get();
+            indexBuildLauncher.accept(() -> PostgresLateIndexes.buildWithRetries(dataSource::getConnection, INDEX_LOCK_CLASS, LATE_INDEXES,
+                    "email ledger", "Listing an integration's mail log scans its rows until then"));
+        }
+    }
+
+    /**
+     * The smallest microsecond at or after {@code instant}: PostgreSQL stores
+     * microseconds, and the driver rounds a finer bind value to the nearest one,
+     * which would move a bound across a row stored at that microsecond.
+     */
+    static Instant ceilToMicros(Instant instant) {
+        Instant truncated = instant.truncatedTo(ChronoUnit.MICROS);
+        return truncated.equals(instant) ? instant : truncated.plus(1, ChronoUnit.MICROS);
     }
 
     @Override
@@ -437,18 +469,18 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             parameters.add(query.state().name());
         }
         if (query.reasonPrefix() != null) {
-            // LEFT(), not LIKE: reasons contain '_', which LIKE would read as a wildcard.
-            sql.append(" AND LEFT(last_error, ?) = ?");
-            parameters.add(query.reasonPrefix().length());
+            // starts_with, not LIKE: reasons contain '_', which LIKE reads as a wildcard
+            // (and not LEFT(n), which counts characters where Java counts UTF-16 units).
+            sql.append(" AND starts_with(last_error, ?)");
             parameters.add(query.reasonPrefix());
         }
         if (query.since() != null) {
             sql.append(" AND created_at >= ?");
-            parameters.add(timestamp(query.since()));
+            parameters.add(timestamp(ceilToMicros(query.since())));
         }
         if (query.until() != null) {
             sql.append(" AND created_at < ?");
-            parameters.add(timestamp(query.until()));
+            parameters.add(timestamp(ceilToMicros(query.until())));
         }
         if (!query.includeMarkers()) {
             sql.append(" AND (last_error IS NULL OR last_error <> ?)");
@@ -485,8 +517,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 + "AND created_at < ? AND (last_error IS NULL OR last_error <> ?) GROUP BY state, last_error";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, integrationId);
-            statement.setTimestamp(2, timestamp(since));
-            statement.setTimestamp(3, timestamp(until));
+            statement.setTimestamp(2, timestamp(ceilToMicros(since)));
+            statement.setTimestamp(3, timestamp(ceilToMicros(until)));
             statement.setString(4, MARKER_REASON);
             Map<String, Long> counts = new TreeMap<>();
             try (ResultSet rows = statement.executeQuery()) {
