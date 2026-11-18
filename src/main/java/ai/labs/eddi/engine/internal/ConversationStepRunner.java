@@ -7,6 +7,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.datastore.IResourceStore.ResourceNotFoundException;
 import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.alerts.TurnOutcome;
 import ai.labs.eddi.engine.alerts.model.ErrorKind;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -1303,6 +1304,12 @@ class ConversationStepRunner {
      */
     void reportTurnOutcome(IConversationMemory memory, TurnWait wait) {
         try {
+            if (memory != null && AgentTestConversations.isTestUserId(memory.getUserId())) {
+                // An agent-test conversation is a probe, not production traffic: a test
+                // case that expects a failure must not page anyone. Metrics and the
+                // test runner's own reporting do not depend on this hook.
+                return;
+            }
             ErrorKind kind = classifyTurnOutcome(memory, wait);
             if (kind != null && memory != null) {
                 conversationService

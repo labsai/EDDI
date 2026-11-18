@@ -147,6 +147,9 @@ A save is validated and the error (`INVALID_RULE`) names every field that is wro
 | `COST_CEILING` | had a model call refused by the agent's `maxCostPerConversationUsd` |
 | `TENANT_BUDGET` | had a model call refused by the tenant's monthly budget (or because its accounting could not answer) |
 
+Turns of [agent-test](agent-testing.md) conversations (user id `agent-test:…`) are never
+reported to `CONVERSATION_ERROR` or `OUTPUT_MATCH` rules: a test case that expects a failure must not page anyone.
+
 Both the regular turn path and the HITL resume path report outcomes. A tool loop
 stopped mid-way by the cost ceiling is not reported on that turn (the loop ends
 with a normal answer); the next turn's model call is refused and reported.

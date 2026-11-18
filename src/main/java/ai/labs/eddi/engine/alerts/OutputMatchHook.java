@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.alerts;
 
+import ai.labs.eddi.engine.agenttests.AgentTestConversations;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -52,7 +53,8 @@ public class OutputMatchHook {
     public void onCleanTurn(IConversationMemory memory) {
         try {
             String agentId = memory.getAgentId();
-            if (agentId == null) {
+            if (agentId == null || AgentTestConversations.isTestUserId(memory.getUserId())) {
+                // Agent-test conversations are probes, never production traffic.
                 return;
             }
             Optional<OutputNeeds> cached = ruleCache.cachedOutputNeeds(agentId);
