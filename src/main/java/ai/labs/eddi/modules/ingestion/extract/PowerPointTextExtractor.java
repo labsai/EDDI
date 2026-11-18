@@ -144,13 +144,35 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
     private static String readSlide(byte[] slideXml, ExtractionLimits limits) {
         StringBuilder text = new StringBuilder();
         StringBuilder paragraph = new StringBuilder();
+        boolean visibleOnly = limits.visibleTextOnly();
+        // Shapes nest (a group holds shapes): the depth at which one was marked hidden,
+        // so that its text stays out until that very shape ends.
+        int shapeDepth = 0;
+        int hiddenAtDepth = 0;
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(slideXml)) {
             XMLStreamReader xml = reader.reader();
             while (xml.hasNext() && text.length() < limits.maxCharacters()) {
                 int event = xml.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
-                        case "t" -> paragraph.append(xml.getElementText());
+                        case "sld" -> {
+                            // A slide marked "hide slide" is not shown in the presentation.
+                            if (visibleOnly && "0".equals(OpenXmlPackage.attribute(xml, "show"))) {
+                                return "";
+                            }
+                        }
+                        case "sp", "grpSp", "pic", "graphicFrame" -> shapeDepth++;
+                        case "cNvPr" -> {
+                            if (visibleOnly && hiddenAtDepth == 0 && isHidden(OpenXmlPackage.attribute(xml, "hidden"))) {
+                                hiddenAtDepth = Math.max(shapeDepth, 1);
+                            }
+                        }
+                        case "t" -> {
+                            String run = xml.getElementText();
+                            if (hiddenAtDepth == 0) {
+                                paragraph.append(run);
+                            }
+                        }
                         case "br" -> paragraph.append(' ');
                         default -> {
                             // Shapes, transitions, animation timings.
@@ -159,6 +181,11 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
                 } else if (event == XMLStreamConstants.END_ELEMENT && "p".equals(xml.getLocalName())) {
                     appendLine(text, paragraph.toString());
                     paragraph.setLength(0);
+                } else if (event == XMLStreamConstants.END_ELEMENT && isShape(xml.getLocalName())) {
+                    if (hiddenAtDepth == shapeDepth) {
+                        hiddenAtDepth = 0;
+                    }
+                    shapeDepth = Math.max(0, shapeDepth - 1);
                 }
             }
         } catch (XMLStreamException e) {
@@ -166,6 +193,14 @@ public class PowerPointTextExtractor implements DocumentTextExtractor {
         }
         appendLine(text, paragraph.toString());
         return text.toString().strip();
+    }
+
+    private static boolean isShape(String localName) {
+        return "sp".equals(localName) || "grpSp".equals(localName) || "pic".equals(localName) || "graphicFrame".equals(localName);
+    }
+
+    private static boolean isHidden(String value) {
+        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
     }
 
     private static void appendLine(StringBuilder text, String line) {

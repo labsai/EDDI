@@ -81,7 +81,14 @@ public final class HiddenContentFilter {
         /** Web pages and uploaded HTML: only what has no legitimate page use. */
         PAGE,
         /** E-mail bodies: anything the recipient's client would not show. */
-        MAIL
+        MAIL,
+        /**
+         * An HTML file read without running its script — an upload with
+         * {@code visibleTextOnly}: page mode, plus the elements the markup hides
+         * outright ({@code display:none}, {@code hidden}, zero opacity, off-screen,
+         * zero-size). Stylesheet rules are not read, and no background is assumed.
+         */
+        VISIBLE
     }
 
     private static final Rgb WHITE = new Rgb(255, 255, 255);
@@ -125,6 +132,8 @@ public final class HiddenContentFilter {
         int removed = removeComments(doc);
         if (mode == Mode.MAIL) {
             removed += HiddenStylesheetRules.removeMatching(doc);
+        }
+        if (mode == Mode.MAIL || mode == Mode.VISIBLE) {
             removed += removeHiddenElements(doc);
         }
         removed += removeInvisibleText(doc, mode);

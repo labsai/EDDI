@@ -40,6 +40,11 @@ public class WordTextExtractor implements DocumentTextExtractor {
         StringBuilder paragraph = new StringBuilder();
         String pendingStyle = null;
         boolean inNumbering = false;
+        boolean visibleOnly = limits.visibleTextOnly();
+        // Text of a run marked hidden (w:vanish) or set at one point or less is what a
+        // reader never sees, and what a prompt-injection carrier is made of.
+        boolean runHidden = false;
+        boolean inParagraphProperties = false;
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(archive.part(DOCUMENT_PART))) {
             XMLStreamReader xml = reader.reader();
@@ -47,7 +52,27 @@ public class WordTextExtractor implements DocumentTextExtractor {
                 int event = xml.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
-                        case "t" -> paragraph.append(xml.getElementText());
+                        case "t" -> {
+                            // Consumed either way, so the reader stays in step.
+                            String text = xml.getElementText();
+                            if (!runHidden) {
+                                paragraph.append(text);
+                            }
+                        }
+                        case "r" -> runHidden = false;
+                        case "pPr" -> inParagraphProperties = true;
+                        case "vanish" -> {
+                            // In a paragraph's own properties it hides the paragraph mark, not
+                            // text.
+                            if (visibleOnly && !inParagraphProperties && !isOff(OpenXmlPackage.attribute(xml, "val"))) {
+                                runHidden = true;
+                            }
+                        }
+                        case "sz" -> {
+                            if (visibleOnly && !inParagraphProperties && isTiny(OpenXmlPackage.attribute(xml, "val"))) {
+                                runHidden = true;
+                            }
+                        }
                         case "tab" -> paragraph.append(' ');
                         case "br" -> paragraph.append('\n');
                         case "pStyle" -> pendingStyle = OpenXmlPackage.attribute(xml, "val");
@@ -56,6 +81,10 @@ public class WordTextExtractor implements DocumentTextExtractor {
                             // Everything else is layout.
                         }
                     }
+                } else if (event == XMLStreamConstants.END_ELEMENT && "pPr".equals(xml.getLocalName())) {
+                    inParagraphProperties = false;
+                } else if (event == XMLStreamConstants.END_ELEMENT && "r".equals(xml.getLocalName())) {
+                    runHidden = false;
                 } else if (event == XMLStreamConstants.END_ELEMENT && "p".equals(xml.getLocalName())) {
                     appendParagraph(markdown, paragraph.toString(), pendingStyle, inNumbering);
                     paragraph.setLength(0);
@@ -68,6 +97,29 @@ public class WordTextExtractor implements DocumentTextExtractor {
         }
         appendParagraph(markdown, paragraph.toString(), pendingStyle, inNumbering);
         return Extraction.capped(markdown.toString(), limits.maxCharacters());
+    }
+
+    /**
+     * A toggle property such as {@code w:vanish}: present means on, unless it says
+     * it is off.
+     */
+    private static boolean isOff(String value) {
+        return value != null && (value.equals("0") || value.equalsIgnoreCase("false") || value.equalsIgnoreCase("off"));
+    }
+
+    /**
+     * {@code w:sz} is in half-points; two is one point, which no reader can read.
+     */
+    private static boolean isTiny(String halfPoints) {
+        if (halfPoints == null) {
+            return false;
+        }
+        try {
+            int size = Integer.parseInt(halfPoints.trim());
+            return size > 0 && size <= 2;
+        } catch (NumberFormatException e) {
+            return false;
+        }
     }
 
     private static void appendParagraph(StringBuilder markdown, String text, String style, boolean numbered) {

@@ -26,6 +26,7 @@ import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.crawl.WebSourceConnector;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.ExtractionLimits;
+import ai.labs.eddi.modules.ingestion.extract.HtmlDocumentExtractor;
 import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.files.UploadSourceConnector;
@@ -1319,7 +1320,12 @@ public class IngestionPipeline {
         private void onPage(SourceDocument document, Content.HtmlPage page) {
             seen++;
             try {
-                String markdown = converter.convert(page.html(), document.citationUrl(),
+                // Off unless the source asks: a page hides accordions and tabs that script
+                // reveals, which a knowledge base wants — see IngestionSettings.
+                String html = source.settings().visibleTextOnlyOrDefault(false)
+                        ? HtmlDocumentExtractor.withoutHiddenElements(page.html())
+                        : page.html();
+                String markdown = converter.convert(html, document.citationUrl(),
                         source.settings().maxContentLengthOrDefault());
                 logIfTruncated(document);
                 acceptDocument(document, markdown);
@@ -1385,7 +1391,8 @@ public class IngestionPipeline {
         private ExtractionLimits extractionLimits() {
             if (extractionLimits == null) {
                 extractionLimits = ExtractionLimits.defaults()
-                        .withMaxCharacters(source.settings().maxContentLengthOrDefault());
+                        .withMaxCharacters(source.settings().maxContentLengthOrDefault())
+                        .withVisibleTextOnly(source.settings().visibleTextOnlyOrDefault(source.isUpload()));
             }
             return extractionLimits;
         }

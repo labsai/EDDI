@@ -11,9 +11,11 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 
 /**
@@ -54,7 +56,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         List<String> sharedStrings = archive.has(SHARED_STRINGS)
                 ? readSharedStrings(archive.part(SHARED_STRINGS))
                 : List.of();
-        Map<String, String> sheets = sheetsInWorkbookOrder(archive);
+        Map<String, String> sheets = sheetsInWorkbookOrder(archive, limits.visibleTextOnly());
 
         StringBuilder markdown = new StringBuilder();
         int rendered = 0;
@@ -84,18 +86,27 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
      * order the tabs appear in, and is unrelated to ZIP entry order or to the
      * numbers in the part names.
      */
-    private static Map<String, String> sheetsInWorkbookOrder(OpenXmlPackage archive) {
+    private static Map<String, String> sheetsInWorkbookOrder(OpenXmlPackage archive, boolean visibleOnly) {
         Map<String, String> byRelationshipId = archive.has(WORKBOOK_RELS)
                 ? readRelationships(archive.part(WORKBOOK_RELS))
                 : Map.of();
 
         Map<String, String> sheets = new LinkedHashMap<>();
+        boolean skippedHidden = false;
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(archive.part(WORKBOOK))) {
             XMLStreamReader xml = reader.reader();
             while (xml.hasNext()) {
                 if (xml.next() == XMLStreamConstants.START_ELEMENT && "sheet".equals(xml.getLocalName())) {
                     String name = OpenXmlPackage.attribute(xml, "name");
                     String part = byRelationshipId.get(OpenXmlPackage.relationshipId(xml));
+                    // "hidden" is a sheet the author tucked away; "veryHidden" cannot even be
+                    // unhidden from the Excel menu. Neither is something a reader sees.
+                    String state = OpenXmlPackage.attribute(xml, "state");
+                    boolean hiddenSheet = "hidden".equalsIgnoreCase(state) || "veryHidden".equalsIgnoreCase(state);
+                    if (visibleOnly && hiddenSheet) {
+                        skippedHidden = true;
+                        continue;
+                    }
                     if (name != null && part != null && archive.has(part)) {
                         sheets.putIfAbsent(name, part);
                     }
@@ -105,7 +116,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
             throw new UnreadableDocumentException("This workbook's sheet index could not be read.", e);
         }
 
-        if (sheets.isEmpty()) {
+        if (sheets.isEmpty() && !skippedHidden) {
             // Some generators write no relationships. Part order is then the only
             // ordering available, and the numbers in the names are better than nothing.
             archive.parts().keySet().stream()
@@ -167,6 +178,9 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         String cellType = null;
         int column = -1;
         StringBuilder cell = new StringBuilder();
+        boolean visibleOnly = limits.visibleTextOnly();
+        Set<Integer> hiddenColumns = new HashSet<>();
+        boolean rowHidden = false;
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(sheetXml)) {
             XMLStreamReader xml = reader.reader();
@@ -174,6 +188,13 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                 int event = xml.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
+                        case "col" -> {
+                            if (visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden"))) {
+                                addColumnRange(hiddenColumns, OpenXmlPackage.attribute(xml, "min"), OpenXmlPackage.attribute(xml, "max"),
+                                        limits.maxColumnsPerSheet());
+                            }
+                        }
+                        case "row" -> rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden"));
                         case "c" -> {
                             cellType = OpenXmlPackage.attribute(xml, "t");
                             column = columnOf(OpenXmlPackage.attribute(xml, "r"));
@@ -186,9 +207,11 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     if ("c".equals(xml.getLocalName())) {
-                        placeCell(row, column, resolve(cell.toString(), cellType, sharedStrings), limits);
+                        // A hidden column keeps its place, empty, so the others stay aligned.
+                        placeCell(row, column, hiddenColumns.contains(column) ? "" : resolve(cell.toString(), cellType, sharedStrings),
+                                limits);
                     } else if ("row".equals(xml.getLocalName())) {
-                        if (row.stream().anyMatch(value -> !value.isEmpty())) {
+                        if (!rowHidden && row.stream().anyMatch(value -> !value.isEmpty())) {
                             rows.add(List.copyOf(row));
                         }
                         row = new ArrayList<>();
@@ -199,6 +222,26 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
             throw new UnreadableDocumentException("A sheet in this workbook could not be read.", e);
         }
         return rows;
+    }
+
+    private static boolean isOn(String value) {
+        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
+    }
+
+    /**
+     * {@code min} and {@code max} are 1-based and inclusive; kept to the columns
+     * that are read.
+     */
+    private static void addColumnRange(Set<Integer> columns, String min, String max, int maxColumns) {
+        try {
+            int from = Integer.parseInt(min.trim()) - 1;
+            int to = Math.min(Integer.parseInt(max.trim()) - 1, maxColumns - 1);
+            for (int column = Math.max(0, from); column <= to; column++) {
+                columns.add(column);
+            }
+        } catch (NumberFormatException | NullPointerException e) {
+            // A range that cannot be read hides nothing: the cells are kept.
+        }
     }
 
     /**

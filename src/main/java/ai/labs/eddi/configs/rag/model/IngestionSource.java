@@ -538,6 +538,20 @@ public class IngestionSource {
         /** Wall-clock ceiling for one run. */
         private Integer timeBudgetMinutes = 10;
 
+        /**
+         * Leave out text the document hides from a reader. Unset means the default,
+         * which differs by source type: {@code true} for an upload (Word text marked
+         * hidden, hidden Excel sheets, rows and columns, hidden PowerPoint slides and
+         * shapes, hidden HTML elements), {@code false} for a crawl, where a page hides
+         * accordions and tabs that a script reveals and that a knowledge base wants.
+         * Retrieved text is prompt input, and hidden text is the classic carrier for
+         * instructions aimed at a model, so set it {@code true} on a web source for
+         * content you do not control, or {@code false} on an upload whose hidden sheets
+         * are data you do want. A PDF is not affected: its invisible text is also an
+         * OCR'd scan's only text.
+         */
+        private Boolean visibleTextOnly;
+
         void validate(String sourceName) {
             if (maxContentLength != null && maxContentLength <= 0) {
                 throw new IllegalArgumentException(
@@ -585,6 +599,22 @@ public class IngestionSource {
 
         public int timeBudgetMinutesOrDefault() {
             return timeBudgetMinutes == null ? 10 : timeBudgetMinutes;
+        }
+
+        /**
+         * Whether hidden text is left out, for a source that is or is not an upload —
+         * see {@link #visibleTextOnly}.
+         */
+        public boolean visibleTextOnlyOrDefault(boolean upload) {
+            return visibleTextOnly == null ? upload : visibleTextOnly;
+        }
+
+        public Boolean getVisibleTextOnly() {
+            return visibleTextOnly;
+        }
+
+        public void setVisibleTextOnly(Boolean visibleTextOnly) {
+            this.visibleTextOnly = visibleTextOnly;
         }
 
         public Integer getMaxContentLength() {
