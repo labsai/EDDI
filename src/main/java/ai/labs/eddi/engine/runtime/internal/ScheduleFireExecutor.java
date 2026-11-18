@@ -374,7 +374,11 @@ public class ScheduleFireExecutor {
             // A turn still queued when this fire gives up is dropped instead of run
             // (ProcessingTurn.callerHasGivenUp), so a timed-out fire leaves no late turn.
             Duration turnBudget = fireTimeout != null ? fireTimeout : DEFAULT_FIRE_TIMEOUT;
-            inputData.setCallerGivesUpAtEpochMs(System.currentTimeMillis() + turnBudget.toMillis());
+            // Counted from the START of the fire, not from here: the poller's watchdog
+            // runs from dispatch, so a slow startup (conversation creation) must not push
+            // this deadline past the interrupt, or a turn the watchdog gave up on could
+            // still be dropped too late.
+            inputData.setCallerGivesUpAtEpochMs(startedAt.toEpochMilli() + turnBudget.toMillis());
             // A conversation this fire started already ran its startup workflow under
             // the allowance (createNewConversation); the turn gets what is left, so
             // startup and turn share ONE maxCostPerFire instead of each getting it.
