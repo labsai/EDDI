@@ -394,6 +394,8 @@ class KnowledgeBaseReembedServiceTest {
     @DisplayName("another store: a collection that rejects a search with the probe vector refuses before anything is touched")
     void collectionRejectingTheProbeRefuses() {
         knowledgeBase.setStoreType("qdrant");
+        // No recorded size — the usual case for vectors from before sizes were tracked.
+        when(guard.recordedSize(eq(ID), any())).thenReturn(null);
         when(probedStore.search(any())).thenThrow(new RuntimeException("Vector dimension error: expected dim: 1536, got 768"));
 
         var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
