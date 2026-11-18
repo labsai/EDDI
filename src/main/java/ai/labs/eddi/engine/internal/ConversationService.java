@@ -2896,6 +2896,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             public ConversationGroups.MembershipCheck getGroupMembershipCheck() {
                 return groupMembershipCheck();
             }
+
+            @Override
+            public void countLongTermWrite(String outcome) {
+                ConversationService.this.countLongTermWrite(outcome);
+            }
         };
     }
 

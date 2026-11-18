@@ -265,10 +265,12 @@ class ConversationStepRunnerLeaseTest {
     }
 
     @Test
-    @DisplayName("without a lease (single node) nothing is fenced and the store is not touched")
+    @DisplayName("without a lease (single node) the turn writes with the loaded fence as its token, and nothing is raised")
     void noLeaseNoFence() throws Exception {
         runTurn(null);
-        verify(memory, never()).setFenceToken(any());
+        // F2: the token of the document it loaded (none stored: 0), so a write the
+        // watchdog abandons can be fenced off; the happy path costs no store call.
+        verify(memory).setFenceToken(0L);
         verify(store, never()).raiseFence(anyString(), anyLong());
     }
 

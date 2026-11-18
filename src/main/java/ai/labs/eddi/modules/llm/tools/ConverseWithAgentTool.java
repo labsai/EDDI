@@ -355,7 +355,7 @@ public class ConverseWithAgentTool {
 
             // The turn ran but is not in the delegated conversation: never an answer.
             if (snapshot != null && TurnNotStored.isNotStored(snapshot.getError())) {
-                return "⚠️ Agent conversation %s: %s".formatted(convId, snapshot.getError().message());
+                return "⚠️ Agent conversation %s: %s".formatted(convId, TurnNotStored.userMessage(snapshot.getError()));
             }
 
             String response = extractResponse(snapshot);

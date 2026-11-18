@@ -67,4 +67,13 @@ public interface IPropertiesHandler {
     default int getMaxAttachmentsPerTurn() {
         return AttachmentContextExtractor.DEFAULT_MAX_ATTACHMENTS_PER_TURN;
     }
+
+    /**
+     * Counts an outcome of a turn's long-term memory writes
+     * ({@code eddi_turn_long_term_writes_total{outcome}}), e.g. a make-up write
+     * skipped because a newer value is stored. Does nothing by default.
+     */
+    default void countLongTermWrite(String outcome) {
+        // no-op by default
+    }
 }

@@ -99,3 +99,43 @@ An independent review of the branch found one regression and eight gaps.
 
 - The HITL resume path still answers before its own write (documented in conversation-memory.md).
 - UI: a "not saved — retry" affordance for `turn_not_stored` (the error is shown; the partial answer stays on screen).
+
+## 🐛 fix(engine): second review — no stale long-term writes, late writes fenced (2026-11-18)
+
+**Repo:** EDDI (`fix/turn-not-stored-reported-done`)
+
+### What changed and why
+
+- **Start turn (F1).** The store's id is put on the memory of a new conversation, so the start turn's owed markers are
+  cleared like any turn's (before, its first say turn re-wrote them and could overwrite a newer value).
+- **Make-up writes yield (F4).** An owed key now carries the time this conversation changed it
+  (`pendingLongTermWritesSince`, a new field of the stored conversation; older documents read it as empty). A write
+  that makes up for an earlier turn reads the user memory store first and leaves a value that is already equal, or
+  newer than that time, alone (`eddi_turn_long_term_writes_total{outcome="skipped_newer"}`). A key changed in the
+  current turn keeps last-writer-wins.
+- **Late writes are fenced (F2).** On a single node every turn now writes with the fencing token of the document it
+  loaded; when the watchdog gives up on a turn whose write is still running, the document's fence is raised above
+  that token (one write, on that path only), so the late write is refused instead of landing next to the caller's
+  retry. The next turn on the node writes with the raised token.
+- **Marker clean-up after the answer (F3).** The conditional clearing write runs after the caller has its answer; a
+  miss is benign (no WARN, not counted as a conflict).
+- **One claim per delivery (F5).** A not-stored delivery claims the turn's answer with one compare-and-set, and only
+  the claimant counts it.
+- **Channel-neutral texts (F9)** for Slack and tool results; the REST messages are unchanged.
+- **Calibration (F13)** also covers non-ASCII text, numbers, nested values, properties and a redo cache.
+
+### Behaviour an upgrader notices
+
+- A say turn's answer waits for the conversation write and, when long-term properties changed, for the user-memory
+  write.
+- Single-node conversations get a `_fence` field (0 until a write is abandoned).
+
+### Left open
+
+- In a cluster the late write of an abandoned turn is fenced only when the conversation's next turn starts (that turn
+  raises the fence); between the two it can still land.
+- In NATS degraded mode (several nodes, no leases) a fence raised on one node is not known to another: that node's next
+  turn of the conversation is refused as `fenced` once and succeeds after a reload.
+- The size check at admission walks the stored snapshot once more per turn (an estimate walk, no serialisation): about 95 ms for a 16 MB document of 2,000 steps x 30 results on a desktop JVM, so roughly 190 ms per turn at that size with the write-time check; small conversations cost well under a millisecond.
+- The scheduler and continuations still treat a refused over-limit conversation like any failure (retry); that is
+  another branch.

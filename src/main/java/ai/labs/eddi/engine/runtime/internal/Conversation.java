@@ -1038,6 +1038,10 @@ public class Conversation implements IConversation {
         // carry them, or no reader (the writer included) can ever match it.
         List<String> groupIds = ConversationGroups.resolveGroupIds(conversationMemory, propertiesHandler.getGroupMembershipCheck());
         Set<String> written = new LinkedHashSet<>();
+        Map<String, Long> owedSince = new LinkedHashMap<>(conversationMemory.getPendingLongTermWritesSince());
+        // Read once, and only when a make-up write needs it (rare): see
+        // isNewerElsewhere.
+        List<UserMemoryEntry> stored = null;
         try {
             for (Map.Entry<String, Property> propertyEntry : conversationMemory.getConversationProperties().entrySet()) {
                 Property property = propertyEntry.getValue();
@@ -1066,6 +1070,22 @@ public class Conversation implements IConversation {
                 }
                 // Apply visibility at persistence boundary only
                 Visibility vis = ConversationGroups.persistedVisibility(property, config, groupIds);
+                if (writeOwed && property.equals(longTermBaseline.get(propertyEntry.getKey()))) {
+                    // A make-up write: owed by an earlier turn (its write failed, or the node
+                    // stopped before it), not changed in this one. The value may have been
+                    // written since by another conversation of this user — then that newer
+                    // value stands (F4). A key this turn changed keeps last-writer-wins.
+                    if (stored == null) {
+                        stored = store.getAllEntries(userId);
+                    }
+                    if (isNewerElsewhere(stored, propertyEntry.getKey(), property, vis, agentId, owedSince.get(propertyEntry.getKey()))) {
+                        LOGGER.infof("[MEMORY] Not making up the owed write of '%s' in conversation %s: the stored value is newer or "
+                                + "already the same", sanitize(propertyEntry.getKey()), sanitize(conversationId));
+                        propertiesHandler.countLongTermWrite("skipped_newer");
+                        pending.remove(propertyEntry.getKey());
+                        continue;
+                    }
+                }
                 if (vis == Visibility.self && property.getVisibility() == Visibility.group) {
                     LOGGER.debugf("[MEMORY] longTerm property '%s' has group visibility but conversation '%s' belongs to no group — "
                             + "storing it as self.", sanitize(propertyEntry.getKey()), sanitize(conversationId));
@@ -1084,12 +1104,46 @@ public class Conversation implements IConversation {
             pending.clear();
         } finally {
             conversationMemory.setPendingLongTermWrites(pending);
+            owedSince.keySet().retainAll(pending);
+            conversationMemory.setPendingLongTermWritesSince(owedSince);
             liftContestedMarkers(written);
         }
 
         // The turn's writes are now the new baseline — a resume that persists twice
         // within the same Conversation must not rewrite them a second time.
         captureLongTermBaseline();
+    }
+
+    /**
+     * Whether an owed make-up write of {@code key} must not be made: the user
+     * memory store already holds this value, or a value updated after this
+     * conversation changed the key ({@code changedAt}; a marker without a time
+     * counts as old). Only the entry the write would replace is compared — the
+     * global one for a global write, this agent's own otherwise.
+     */
+    static boolean isNewerElsewhere(List<UserMemoryEntry> stored, String key, Property property, Visibility visibility, String agentId,
+                                    Long changedAt) {
+        if (stored == null) {
+            return false;
+        }
+        long since = changedAt != null ? changedAt : 0L;
+        for (UserMemoryEntry entry : stored) {
+            if (entry == null || !key.equals(entry.key())) {
+                continue;
+            }
+            boolean sameSlot = visibility == Visibility.global
+                    ? entry.visibility() == Visibility.global
+                    : entry.visibility() != Visibility.global && Objects.equals(agentId, entry.sourceAgentId());
+            if (!sameSlot) {
+                continue;
+            }
+            // Compared as text: the stores decode numbers to whatever type they like.
+            if (String.valueOf(entry.value()).equals(String.valueOf(PropertyValues.valueOf(property)))) {
+                return true;
+            }
+            return entry.updatedAt() != null && entry.updatedAt().toEpochMilli() > since;
+        }
+        return false;
     }
 
     /**
@@ -1120,12 +1174,19 @@ public class Conversation implements IConversation {
             return;
         }
         Set<String> pending = new LinkedHashSet<>(conversationMemory.getPendingLongTermWrites());
+        Map<String, Long> since = new LinkedHashMap<>(conversationMemory.getPendingLongTermWritesSince());
+        long now = System.currentTimeMillis();
         properties.forEach((key, property) -> {
             if (property != null && property.getScope() == Scope.longTerm && !property.equals(longTermBaseline.get(key))) {
                 pending.add(key);
+                // When this conversation changed it: a later make-up write yields to a
+                // value another conversation wrote after this time (F4).
+                since.put(key, now);
             }
         });
+        since.keySet().retainAll(pending);
         conversationMemory.setPendingLongTermWrites(pending);
+        conversationMemory.setPendingLongTermWritesSince(since);
     }
 
     /**

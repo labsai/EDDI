@@ -197,6 +197,13 @@ public class ConversationMemorySnapshot {
      * @see ai.labs.eddi.engine.memory.IConversationMemory#getPendingLongTermWrites()
      */
     private Set<String> pendingLongTermWrites = new LinkedHashSet<>();
+    /**
+     * When this conversation changed each owed key (epoch ms). Absent in older
+     * documents; a key without a time is treated as old.
+     *
+     * @see ai.labs.eddi.engine.memory.IConversationMemory#getPendingLongTermWritesSince()
+     */
+    private Map<String, Long> pendingLongTermWritesSince = new LinkedHashMap<>();
     private List<ConversationStepSnapshot> conversationSteps = new LinkedList<>();
     private Stack<ConversationStepSnapshot> redoCache = new Stack<>();
     /**
@@ -753,6 +760,14 @@ public class ConversationMemorySnapshot {
 
     public void setPendingLongTermWrites(Set<String> pendingLongTermWrites) {
         this.pendingLongTermWrites = pendingLongTermWrites == null ? new LinkedHashSet<>() : pendingLongTermWrites;
+    }
+
+    public Map<String, Long> getPendingLongTermWritesSince() {
+        return pendingLongTermWritesSince;
+    }
+
+    public void setPendingLongTermWritesSince(Map<String, Long> pendingLongTermWritesSince) {
+        this.pendingLongTermWritesSince = pendingLongTermWritesSince == null ? new LinkedHashMap<>() : pendingLongTermWritesSince;
     }
 
     public List<ConversationStepSnapshot> getConversationSteps() {

@@ -516,6 +516,31 @@ public interface IConversationMemory extends Serializable {
         // no-op by default
     }
 
+    /**
+     * When this conversation last changed each owed key (epoch milliseconds), for
+     * the keys of {@link #getPendingLongTermWrites()}. A write that makes up for an
+     * earlier turn checks it against the user memory store and leaves a value
+     * another conversation wrote later alone (F4). A key with no time (a marker
+     * stored before the times existed) is treated as old.
+     */
+    default Map<String, Long> getPendingLongTermWritesSince() {
+        return Map.of();
+    }
+
+    /** See {@link #getPendingLongTermWritesSince()}. */
+    default void setPendingLongTermWritesSince(Map<String, Long> since) {
+        // no-op by default
+    }
+
+    /**
+     * The id the store gave a conversation on its first write, for a memory that
+     * was created without one (the conversation's start turn). Ignored once the
+     * memory has an id.
+     */
+    default void assignConversationId(String conversationId) {
+        // no-op by default
+    }
+
     // === Agent version following ===
 
     /**

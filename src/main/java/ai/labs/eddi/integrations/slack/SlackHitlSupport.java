@@ -488,7 +488,7 @@ public final class SlackHitlSupport {
         }
         if (TurnNotStored.isNotStored(snapshot.getError())) {
             // The turn ran but is not in the conversation: say so instead of "no response".
-            return "⚠️ " + snapshot.getError().message();
+            return "⚠️ " + TurnNotStored.userMessage(snapshot.getError());
         }
         var outputs = snapshot.getConversationOutputs();
         if (outputs == null || outputs.isEmpty()) {

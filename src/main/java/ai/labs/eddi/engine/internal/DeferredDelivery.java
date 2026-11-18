@@ -24,7 +24,7 @@ import java.util.function.Consumer;
  * that ends {@code AWAITING_HUMAN} was announced as paused while the store
  * still held the previous state. So every say turn's delivery is deferred until
  * its write outcome is known; a failed write is reported through
- * {@link #markNotStored} as a {@link TurnNotStored} error instead of the
+ * {@link #deliverNotStored} as a {@link TurnNotStored} error instead of the
  * answer.
  * <p>
  * <b>Contract.</b> The completion callback {@link #defer defers} the delivery
@@ -73,9 +73,31 @@ final class DeferredDelivery {
      */
     void deliver(ConversationState effectiveState) {
         Consumer<ConversationState> delivery = pending.getAndSet(null);
-        if (delivery == null) {
-            return;
+        if (delivery != null) {
+            run(delivery, effectiveState);
         }
+    }
+
+    /**
+     * Claims the delivery for a turn that is not (verifiably) stored and runs it
+     * with {@code error} — one compare-and-set, so it can neither report a turn
+     * another path already answered (a stored one, or one with a more precise
+     * reason) nor have its reason overwritten (F5).
+     *
+     * @return whether this call made the delivery
+     */
+    boolean deliverNotStored(TurnError error) {
+        Consumer<ConversationState> delivery = pending.getAndSet(null);
+        if (delivery == null) {
+            return false;
+        }
+        // Set by the claimant only, before the delivery reads it.
+        this.notStored = error;
+        run(delivery, ConversationState.ERROR);
+        return true;
+    }
+
+    private void run(Consumer<ConversationState> delivery, ConversationState effectiveState) {
         try {
             delivery.accept(effectiveState);
         } catch (RuntimeException e) {
@@ -89,16 +111,6 @@ final class DeferredDelivery {
     boolean isPending() {
         return pending.get() != null;
     }
-
-    /**
-     * Records that the turn's write failed, so the delivery reports the turn as not
-     * stored instead of delivering its answer. Called by the persistence step
-     * before {@link #deliver}.
-     */
-    void markNotStored(TurnError error) {
-        this.notStored = error;
-    }
-
     /**
      * The error of a turn whose write failed, or {@code null} when it was stored
      * (or never reached its write).

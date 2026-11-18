@@ -731,6 +731,29 @@ public class ConversationMemory implements IConversationMemory {
         this.pendingLongTermWrites = keys == null ? new LinkedHashSet<>() : new LinkedHashSet<>(keys);
     }
 
+    /**
+     * See {@link IConversationMemory#getPendingLongTermWritesSince()}; persisted
+     * like the keys.
+     */
+    private transient Map<String, Long> pendingLongTermWritesSince = new LinkedHashMap<>();
+
+    @Override
+    public Map<String, Long> getPendingLongTermWritesSince() {
+        return pendingLongTermWritesSince;
+    }
+
+    @Override
+    public void setPendingLongTermWritesSince(Map<String, Long> since) {
+        this.pendingLongTermWritesSince = since == null ? new LinkedHashMap<>() : new LinkedHashMap<>(since);
+    }
+
+    @Override
+    public void assignConversationId(String conversationId) {
+        if (this.conversationId == null) {
+            this.conversationId = conversationId;
+        }
+    }
+
     // === HITL pause bookmark ===
     // The `transient` keyword only exempts these fields from Java serialization of
     // this LIVE object — they ARE persisted: ConversationMemoryUtilities copies

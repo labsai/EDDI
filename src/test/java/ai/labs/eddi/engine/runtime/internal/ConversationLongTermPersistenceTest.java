@@ -100,6 +100,66 @@ class ConversationLongTermPersistenceTest {
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
 
+    /**
+     * F4: this conversation wrote K=1, the node stopped between the user-memory
+     * upsert and the marker clean-up, then another conversation of the same user
+     * wrote K=2. The make-up write of this conversation's next turn must not put
+     * K=1 back.
+     */
+    @Test
+    @DisplayName("F4 — an owed make-up write yields to a newer value another conversation stored")
+    void makeUpWriteYieldsToANewerValue() throws Exception {
+        long changedAt = System.currentTimeMillis() - 60_000;
+        memory.setConversationState(ConversationState.READY);
+        memory.getConversationProperties().put("K", new Property("K", "1", Scope.longTerm));
+        memory.setPendingLongTermWrites(Set.of("K"));
+        memory.setPendingLongTermWritesSince(Map.of("K", changedAt));
+        var newer = new UserMemoryEntry("e", "user-1", "K", "2", "fact", Visibility.global, "agent-2", List.of(), "conv-b", false, 0,
+                Instant.ofEpochMilli(changedAt + 1_000), Instant.ofEpochMilli(changedAt + 1_000));
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(newer));
+
+        nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
+
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+        verify(propertiesHandler).countLongTermWrite("skipped_newer");
+        assertTrue(memory.getPendingLongTermWrites().isEmpty(), "the marker is settled, not retried forever");
+    }
+
+    @Test
+    @DisplayName("F4 — an owed make-up write with nothing newer stored is still made")
+    void makeUpWriteWithNothingNewerIsMade() throws Exception {
+        long changedAt = System.currentTimeMillis() - 60_000;
+        memory.setConversationState(ConversationState.READY);
+        memory.getConversationProperties().put("K", new Property("K", "1", Scope.longTerm));
+        memory.setPendingLongTermWrites(Set.of("K"));
+        memory.setPendingLongTermWritesSince(Map.of("K", changedAt));
+        var older = new UserMemoryEntry("e", "user-1", "K", "0", "fact", Visibility.global, "agent-1", List.of(), "conv-a", false, 0,
+                Instant.ofEpochMilli(changedAt - 1_000), Instant.ofEpochMilli(changedAt - 1_000));
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(older));
+
+        nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
+
+        verify(userMemoryStore).upsert(argThat(e -> "K".equals(e.key()) && "1".equals(String.valueOf(e.value()))));
+    }
+
+    @Test
+    @DisplayName("F4 — a key changed in the current turn keeps last-writer-wins, whatever is stored")
+    void currentTurnChangeIsWrittenRegardless() throws Exception {
+        var newer = new UserMemoryEntry("e", "user-1", "K", "2", "fact", Visibility.global, "agent-2", List.of(), "conv-b", false, 0,
+                Instant.now(), Instant.now());
+        when(userMemoryStore.getAllEntries("user-1")).thenReturn(List.of(newer));
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("K", new Property("K", "3", Scope.longTerm));
+
+        conversation.say("make it 3", new LinkedHashMap<>());
+        commit();
+
+        verify(userMemoryStore).upsert(argThat(e -> "K".equals(e.key()) && "3".equals(String.valueOf(e.value()))));
+        assertTrue(memory.getPendingLongTermWritesSince().isEmpty());
+    }
+
     @Test
     @DisplayName("A6 — a longTerm property under an engine key (conversation:*) is never written back")
     void engineKeyLongTermPropertyIsNotWritten() throws Exception {

@@ -342,7 +342,9 @@ class ConversationServiceTurnNotStoredTest {
     @DisplayName("S1: a write that outlasts the watchdog is answered 'outcome_unknown', never as done")
     void writeOutlastingTheWatchdogIsNeverDone() throws Exception {
         conversationService = service(1);
+        AtomicReference<Long> zombieToken = new AtomicReference<>();
         when(conversationMemoryStore.storeConversationMemorySnapshot(any())).thenAnswer(inv -> {
+            zombieToken.set(((ConversationMemorySnapshot) inv.getArgument(0)).getFenceToken());
             long until = System.currentTimeMillis() + 2500;
             while (System.currentTimeMillis() < until) {
                 try {
@@ -360,6 +362,10 @@ class ConversationServiceTurnNotStoredTest {
         assertEquals("outcome_unknown", answer.getError().errorType());
         assertTrue(answer.getError().message().contains("may not have been stored"), answer.getError().message());
         assertTrue(answer.getConversationOutputs().isEmpty());
+        // F2: the late write must lose. It carries the token of the document it loaded
+        // (no fence stored: 0); the fence is raised above it, so the store refuses it.
+        verify(conversationMemoryStore).raiseFence(CONVERSATION_ID, 1L);
+        assertEquals(0L, zombieToken.get());
     }
 
     // ─── the size limit ───
@@ -520,6 +526,13 @@ class ConversationServiceTurnNotStoredTest {
         verify(userMemoryStore).upsert(argThat((UserMemoryEntry entry) -> "favorite_color".equals(entry.key())));
         assertEquals(List.of("stored", "long-term write"), events, "written after, and only because, the conversation was stored");
         assertNull(started.get().takeAfterCommit(), "nothing left behind for a committer that never comes");
+        // F1: the store's id is put on the memory, so the owed marker is cleared and
+        // the
+        // first say turn has nothing stale to make up.
+        assertEquals(CONVERSATION_ID, started.get().getConversationId());
+        verify(conversationMemoryStore).storeConversationMemorySnapshotIfState(
+                argThat(snapshot -> CONVERSATION_ID.equals(snapshot.getConversationId()) && snapshot.getPendingLongTermWrites().isEmpty()),
+                eq(ConversationState.READY));
     }
 
     // ─── delivery order and surfaces ───

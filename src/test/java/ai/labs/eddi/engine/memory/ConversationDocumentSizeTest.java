@@ -89,6 +89,76 @@ class ConversationDocumentSizeTest {
         }
     }
 
+    /**
+     * F13: the same bounds with non-ASCII text (2- and 3-byte UTF-8, surrogate
+     * pairs), numbers and booleans, nested maps and lists, conversation properties,
+     * owed long-term markers and a redo cache.
+     */
+    @Test
+    @DisplayName("calibration on rich documents: never below the real BSON size, at most 35% above it")
+    void calibratedOnRichDocuments() throws Exception {
+        var bson = new ObjectMapper(new BsonFactory());
+        bson.registerModule(new JavaTimeModule());
+        bson.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+        new SerializationCustomizer(false).customize(bson);
+
+        for (int[] shape : new int[][]{{2000, 30, 1}, {200, 30, 12}, {500, 10, 2000}, {10, 5, 12}, {300, 20, 40}}) {
+            var snapshot = rich(shape[0], shape[1], shape[2]);
+            long real = bson.writeValueAsBytes(snapshot).length;
+            long estimate = ConversationDocumentSize.estimate(snapshot);
+            String shown = "rich steps=%d results=%d valueLength=%d: estimate %d, BSON %d".formatted(shape[0], shape[1], shape[2], estimate,
+                    real);
+            assertTrue(estimate >= real, shown);
+            assertTrue(estimate <= real * 1.35, shown);
+        }
+    }
+
+    private static ConversationMemorySnapshot rich(int steps, int results, int valueLength) {
+        var snapshot = new ConversationMemorySnapshot();
+        snapshot.setConversationId("aabbccddeeff112233445566");
+        snapshot.setAgentId("agent-1");
+        snapshot.setUserId("user-1");
+        for (int p = 0; p < 20; p++) {
+            snapshot.getConversationProperties().put("prop" + p,
+                    new Property("prop" + p, "wert-" + "ü".repeat(valueLength), Property.Scope.longTerm));
+        }
+        snapshot.getConversationProperties().put("nested",
+                new Property("nested", Map.of("a", Map.of("b", List.of(1, 2.5, "日本")), "n", 42), Property.Scope.conversation));
+        snapshot.getPendingLongTermWrites().add("prop1");
+        snapshot.getPendingLongTermWritesSince().put("prop1", 1_763_000_000_000L);
+        for (int i = 0; i < steps; i++) {
+            var step = richStep(i, results, valueLength);
+            snapshot.getConversationSteps().add(step);
+            snapshot.getConversationOutputs().add(step.getConversationOutput());
+            if (i % 50 == 0) {
+                snapshot.getRedoCache().push(richStep(i, results, valueLength));
+            }
+        }
+        return snapshot;
+    }
+
+    private static ConversationStepSnapshot richStep(int i, int results, int valueLength) {
+        var step = new ConversationStepSnapshot();
+        var workflow = new WorkflowRunSnapshot();
+        for (int r = 0; r < results; r++) {
+            Object value = switch (r % 5) {
+                case 0 -> "v".repeat(valueLength);
+                case 1 -> List.of("a", 7, 3.14, true);
+                case 2 -> Map.of("k", "日本語".repeat(Math.max(1, valueLength / 3)), "deep", Map.of("x", Map.of("y", List.of(Map.of("z", i)))));
+                case 3 -> (long) i * r;
+                default -> "émoji 😀 " + "é".repeat(valueLength);
+            };
+            workflow.getLifecycleTasks().add(new ResultSnapshot("key:" + r, value, List.of(value), new Date(), "wf-1", r % 2 == 0));
+        }
+        step.getWorkflows().add(workflow);
+        var output = new ConversationOutput();
+        output.put("input", "hallo Grüße " + i);
+        output.put("actions", List.of("greet"));
+        output.put("output", List.of(Map.of("type", "text", "text", "antwort " + "ö".repeat(valueLength))));
+        step.setConversationOutput(output);
+        return step;
+    }
+
     private static ConversationMemorySnapshot generated(int steps, int results, int valueLength) {
         var snapshot = new ConversationMemorySnapshot();
         snapshot.setConversationId("aabbccddeeff112233445566");

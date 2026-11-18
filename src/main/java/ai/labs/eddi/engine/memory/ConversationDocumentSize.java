@@ -104,6 +104,7 @@ public final class ConversationDocumentSize {
         size += walk.value(snapshot.getHitlApprovalContext(), 0);
         size += walk.value(snapshot.getConversationOutputs(), 0);
         size += walk.value(snapshot.getPendingLongTermWrites(), 0);
+        size += walk.value(snapshot.getPendingLongTermWritesSince(), 0);
         Map<String, Property> properties = snapshot.getConversationProperties();
         if (properties != null) {
             for (Map.Entry<String, Property> entry : properties.entrySet()) {

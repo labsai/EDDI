@@ -115,10 +115,34 @@ public final class TurnNotStored {
             return httpStatus;
         }
 
-        /** The caller-facing error. */
+        /** The caller-facing error (its message is written for API clients). */
         public TurnError error() {
             return new TurnError(ERROR_CODE, retryable, retryAfterMs, message, null, null, tag);
         }
+
+        /**
+         * The same outcome in words an end user reads — in a Slack thread, or a tool
+         * result an agent relays (F9). Channel-neutral: nothing about reloading or
+         * reading "the conversation" through an API.
+         */
+        public String userMessage() {
+            return switch (this) {
+                case CONVERSATION_TOO_LARGE -> "This conversation has reached its size limit, so the message was not saved. Please start a "
+                        + "new conversation.";
+                case DATA_REJECTED -> "The message could not be saved because it contains characters that cannot be stored. Please "
+                        + "rephrase it and send it again.";
+                case CONFLICT -> "The message was not saved because the conversation changed at the same moment. Please send it again.";
+                case FENCED -> "The message was not saved because the conversation was being handled elsewhere. Please send it again.";
+                case CONVERSATION_ENDED -> "This conversation has ended, so the message was not saved.";
+                case STORE_FAILURE, OUTCOME_UNKNOWN -> "There was a technical problem, so the message may not have been saved. Please "
+                        + "check whether it went through before sending it again.";
+            };
+        }
+    }
+
+    /** {@link Reason#userMessage()} of a not-stored error. */
+    public static String userMessage(TurnError error) {
+        return reasonOf(error).userMessage();
     }
 
     /**

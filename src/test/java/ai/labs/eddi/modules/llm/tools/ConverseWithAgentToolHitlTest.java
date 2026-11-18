@@ -142,7 +142,8 @@ class ConverseWithAgentToolHitlTest {
         String result = tool.converseWithAgent("agent-b", "hello", "conv-x");
 
         assertFalse(result.startsWith("✅"), result);
-        assertTrue(result.contains("may not have been stored"), result);
+        assertTrue(result.contains("may not have been saved"), result);
+        assertFalse(result.contains("Read the conversation"), "F9: no API wording towards an end user");
     }
 
     @Test

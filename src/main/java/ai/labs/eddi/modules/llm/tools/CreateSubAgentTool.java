@@ -394,7 +394,7 @@ public class CreateSubAgentTool {
                         }
                     } else if (snapshot != null && TurnNotStored.isNotStored(snapshot.getError())) {
                         // Ran but not stored in the sub-agent's conversation: never a reply.
-                        response = "[Initial message not stored: " + snapshot.getError().message() + "]";
+                        response = "[Initial message not stored: " + TurnNotStored.userMessage(snapshot.getError()) + "]";
                     } else {
                         response = extractResponse(snapshot);
                     }
