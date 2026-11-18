@@ -15,6 +15,7 @@ import ai.labs.eddi.modules.ingestion.connector.Partition;
 import ai.labs.eddi.modules.ingestion.connector.SourceConnector;
 import ai.labs.eddi.modules.ingestion.connector.SourceConnectors;
 import ai.labs.eddi.modules.ingestion.connector.SourceContext;
+import ai.labs.eddi.modules.ingestion.connector.SourceCredentials;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument.Content;
 import ai.labs.eddi.modules.ingestion.connector.SourceError;
@@ -44,6 +45,8 @@ import java.util.Map;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertSame;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -95,6 +98,8 @@ class IngestionPipelineConnectorTest {
         List<Partition> partitions = List.of(Partition.IMPLICIT);
         SourceException discoveryFailure;
         SourceException fetchFailure;
+        String summary;
+        SourceContext lastContext;
         final List<String> fetched = new ArrayList<>();
 
         @Override
@@ -112,8 +117,9 @@ class IngestionPipelineConnectorTest {
             if (discoveryFailure != null) {
                 throw discoveryFailure;
             }
+            lastContext = context.source();
             discovery.accept(context);
-            return DiscoveryResult.of(StopReason.COMPLETED, coverage);
+            return new DiscoveryResult(StopReason.COMPLETED, coverage, null, null, summary);
         }
 
         @Override
@@ -396,5 +402,51 @@ class IngestionPipelineConnectorTest {
             }
         };
         assertEquals(WebCrawler.StopReason.BYTE_LIMIT, run(connector).stopReason());
+    }
+    @Test
+    @DisplayName("a document the connector skips is counted as skipped, not failed or seen")
+    void reportedSkipsAreCounted() {
+        var connector = new Scripted();
+        connector.discovery = context -> {
+            context.reportSkipped("img", "files of type image/png are not read");
+            context.accept(WorkItem.prefetched(text("a", "Alpha"), context.partition()));
+        };
+
+        IngestionReport report = run(connector);
+
+        assertEquals(1, report.documentsSkipped());
+        assertEquals(0, report.documentsFailed());
+        assertEquals(1, report.documentsSeen());
+        assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome());
+    }
+
+    @Test
+    @DisplayName("a preview returns the connector's listing summary as its message; a run does not record it")
+    void previewCarriesSummary() {
+        var connector = new Scripted();
+        connector.summary = "Google Drive listing: 1 file(s) to read";
+        connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha"), context.partition()));
+
+        IngestionReport preview = pipeline(connector).run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.PREVIEW);
+        assertEquals(IngestionReport.Outcome.PREVIEW, preview.outcome());
+        assertEquals("Google Drive listing: 1 file(s) to read", preview.message());
+
+        IngestionReport run = run(connector);
+        assertEquals(IngestionReport.Outcome.COMPLETED, run.outcome());
+        assertNull(run.message(), "a run's message is its error column");
+    }
+
+    @Test
+    @DisplayName("the pipeline hands its credential resolver to the connector; by hand it refuses")
+    void credentialsReachTheConnector() {
+        var connector = new Scripted();
+        IngestionPipeline pipeline = pipeline(connector);
+        pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+        assertSame(SourceCredentials.NONE, connector.lastContext.credentials());
+
+        SourceCredentials service = (name, url) -> null;
+        pipeline.sourceCredentials = service;
+        pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
+        assertSame(service, connector.lastContext.credentials());
     }
 }

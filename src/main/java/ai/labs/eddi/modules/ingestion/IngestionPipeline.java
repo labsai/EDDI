@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.ingestion.connector.Partition;
 import ai.labs.eddi.modules.ingestion.connector.SourceConnector;
 import ai.labs.eddi.modules.ingestion.connector.SourceConnectors;
 import ai.labs.eddi.modules.ingestion.connector.SourceContext;
+import ai.labs.eddi.modules.ingestion.connector.SourceCredentials;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument.Content;
 import ai.labs.eddi.modules.ingestion.connector.SourceError;
@@ -145,6 +146,15 @@ public class IngestionPipeline {
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final MeterRegistry meterRegistry;
+
+    /**
+     * Where a connector gets the credential for an authenticated provider —
+     * {@code SERVICE} connections only. Field-injected so the hand-assembled
+     * pipeline keeps working: it gets {@link SourceCredentials#NONE}, which
+     * refuses, and the two built-in connectors never ask.
+     */
+    @Inject
+    SourceCredentials sourceCredentials = SourceCredentials.NONE;
 
     /**
      * The pipeline with the two built-in connectors, for callers that assemble it
@@ -329,13 +339,18 @@ public class IngestionPipeline {
                 collector.storeRefused = new InMemoryStoreRetiredException(knowledgeBaseId).getMessage();
             }
 
-            IngestionReport report = collector.toReport(sourceRun.stopReason(), null, startedAt);
+            if (sourceRun.summary() != null && mode == Mode.INGEST) {
+                LOGGER.infof("Source '%s': %s", LogSanitizer.sanitize(source.getName()),
+                        LogSanitizer.sanitize(sourceRun.summary()));
+            }
+            IngestionReport report = collector.toReport(sourceRun.stopReason(), null, startedAt,
+                    mode == Mode.PREVIEW ? sourceRun.summary() : null);
             finish(mode, runId, sourceKey, report, statusFor(collector), trigger);
             return report;
         } catch (Throwable t) {
             LOGGER.errorf(t, "Ingestion failed for source '%s'", LogSanitizer.sanitize(source.getName()));
             try {
-                IngestionReport report = collector.toReport(null, describe(t), startedAt);
+                IngestionReport report = collector.toReport(null, describe(t), startedAt, null);
                 finish(mode, runId, sourceKey, report, IngestionRun.Status.FAILED, trigger);
                 if (t instanceof Error error) {
                     // Recorded, then rethrown: an Error says the JVM is in trouble and
@@ -768,7 +783,7 @@ public class IngestionPipeline {
      *            the connector's explanation when coverage fell short, for the log
      */
     private record SourceRun(WebCrawler.StopReason stopReason, Coverage coverage, boolean coveredWholeSource,
-            String incompleteReason) {
+            String incompleteReason, String summary) {
     }
 
     /**
@@ -782,7 +797,8 @@ public class IngestionPipeline {
      */
     private SourceRun discover(SourceConnector connector, IngestionSource source, String sourceKey, String runId,
                                Mode mode, Collector collector) {
-        SourceContext context = new SourceContext(source, sourceKey, runId, mode == Mode.PREVIEW);
+        SourceContext context = new SourceContext(source, sourceKey, runId, mode == Mode.PREVIEW,
+                sourceCredentials);
         DiscoveryResult result;
         try {
             List<Partition> partitions = connector.listPartitions(context);
@@ -811,7 +827,7 @@ public class IngestionPipeline {
             case INCREMENTAL, PARTIAL -> false;
         };
         return new SourceRun(WebCrawler.StopReason.valueOf(result.stopReason().name()), result.coverage(), covered,
-                result.incompleteReason());
+                result.incompleteReason(), result.summary());
     }
 
     /**
@@ -925,6 +941,15 @@ public class IngestionPipeline {
                         LogSanitizer.sanitize(error.reason()), error.getClass().getSimpleName());
             }
             collector.onFailure(documentId, error);
+        }
+
+        @Override
+        public void reportSkipped(String documentId, String reason) {
+            if (LOGGER.isDebugEnabled()) {
+                LOGGER.debugf("Source '%s' skipped %s: %s", LogSanitizer.sanitize(context.source().getName()),
+                        LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(reason));
+            }
+            collector.onSkipped();
         }
 
         @Override
@@ -1227,6 +1252,15 @@ public class IngestionPipeline {
             }
             var known = stateStore.lookup(sourceKey, documentId);
             return known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(versionToken);
+        }
+
+        /**
+         * A document the connector chose not to hand over. Not seen and not failed: it
+         * was never this run's to ingest.
+         */
+        void onSkipped() {
+            skipped++;
+            reportProgress(false);
         }
 
         void onUnchanged(String documentId) {
@@ -1664,7 +1698,13 @@ public class IngestionPipeline {
             return textSegments.size();
         }
 
-        IngestionReport toReport(WebCrawler.StopReason stopReason, String error, Instant startedAt) {
+        /**
+         * @param summary
+         *            the connector's description of what it listed, returned as the
+         *            message of a preview that did not fail; null for a run, where the
+         *            message is the error column of the run history
+         */
+        IngestionReport toReport(WebCrawler.StopReason stopReason, String error, Instant startedAt, String summary) {
             double cost = currentCost();
             if (error == null && superseded) {
                 error = "The run stopped: its source was purged, removed or reaped while it was running";
@@ -1684,7 +1724,7 @@ public class IngestionPipeline {
                     replaceUnsupported, tombstoningSkipped,
                     stopReason,
                     Duration.between(startedAt, Instant.now()),
-                    error);
+                    error != null ? error : summary);
         }
     }
 

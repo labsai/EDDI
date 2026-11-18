@@ -298,7 +298,7 @@ public class RagSourceIngestionService {
             return;
         }
         IngestionSource now = current == null ? null : current.findSource(sourceIdOf(source));
-        if (now == null || now.isUpload() != source.isUpload()) {
+        if (now == null || !now.sameTypeAs(source)) {
             LOGGER.warnf("Source '%s' of knowledge base %s was removed while it was running; removing what the "
                     + "run wrote after that", LogSanitizer.sanitize(source.getName()),
                     LogSanitizer.sanitize(ragConfigId));
@@ -515,6 +515,7 @@ public class RagSourceIngestionService {
         capped.setType(source.getType());
         capped.setWeb(source.getWeb());
         capped.setUpload(source.getUpload());
+        capped.setGoogleDrive(source.getGoogleDrive());
         capped.setCron(null);
 
         var settings = new IngestionSource.IngestionSettings();
@@ -995,7 +996,7 @@ public class RagSourceIngestionService {
                 continue;
             }
             IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
-            if (now != null && now.isUpload() == source.isUpload()) {
+            if (now != null && now.sameTypeAs(source)) {
                 continue;
             }
             LOGGER.warnf("Source '%s' of knowledge base %s %s. Everything the knowledge base learned from it%s "

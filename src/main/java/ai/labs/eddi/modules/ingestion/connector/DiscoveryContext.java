@@ -62,6 +62,20 @@ public interface DiscoveryContext {
     void reportFailure(String documentId, String location, SourceError error);
 
     /**
+     * Reports a document discovery found and deliberately did not hand over — a
+     * format nothing can read, a name the source excludes, a file over the size
+     * limit. Counted as skipped, not as failed: a drive full of images is not a
+     * drive full of errors. The document is not recorded as seen, so one that was
+     * ingested before and is now skipped is reconciled like any other absence.
+     *
+     * @param reason
+     *            for the log; never a credential
+     */
+    default void reportSkipped(String documentId, String reason) {
+        // A framework that does not count skips loses nothing but the number.
+    }
+
+    /**
      * Whether the framework wants discovery to stop: the run was cancelled or
      * superseded, or a budget was spent. Checked between documents; a connector
      * that sees true returns with {@link StopReason#CANCELLED} and
