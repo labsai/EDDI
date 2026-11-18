@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.doNothing;
@@ -235,20 +236,19 @@ class IngestionPipelineConnectorTest {
     }
 
     @Test
-    @DisplayName("a held store whose binding could not be read back is checked against the current expansion, never skipped")
-    void missingBindingFallsBackToTheCurrentExpansion() {
-        Map<String, String> current = Map.of("password", "${vault:store-key}");
+    @DisplayName("a held store whose binding cannot be read back stops the run: a fresh expansion could name another secret")
+    void missingBindingFailsClosed() {
         when(storeFactory.bindingOf(any())).thenReturn(null);
-        when(storeFactory.credentialBinding(any())).thenReturn(current);
-        doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
-                .when(storeFactory).requireGranted(any(RagConfiguration.class), eq(current), any());
+        when(storeFactory.credentialBinding(any())).thenReturn(Map.of("password", "${vault:store-key}"));
         var connector = new Scripted();
         connector.discovery = context -> context.accept(WorkItem.prefetched(text("a", "Alpha body"), context.partition()));
 
         IngestionReport report = run(connector);
 
         assertEquals(0, report.documentsIngested());
-        assertTrue(String.valueOf(report.message()).contains("store-key"), report.message());
+        assertTrue(String.valueOf(report.message()).contains("could not be verified"), report.message());
+        // Never re-checked against the fresh expansion in its place.
+        verify(storeFactory, never()).requireGranted(any(RagConfiguration.class), any(Map.class), any());
     }
 
     @Test

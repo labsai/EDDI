@@ -44,6 +44,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -1194,6 +1195,33 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a sweep the vault grant refuses fails the run and keeps the chunks (#1179)")
+        void aRefusedSweepFailsTheRun() {
+            FakeSite before = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a>"
+                            + "<a href=\"" + SITE + "/gone\">g</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."))
+                    .page(SITE + "/gone", pageWith("Will vanish."));
+            pipelineFor(before).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            stateStore.purgeSource(IngestionPipeline.stateKey(KB_RESOURCE_ID, source()));
+            FakeSite after = new FakeSite()
+                    .page(SITE + "/", "<html><body><a href=\"" + SITE + "/keep\">k</a></body></html>")
+                    .page(SITE + "/keep", pageWith("Still here."));
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+            pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+
+            // Nothing changed, so the sweep's delete is the run's first store use since
+            // it acquired the store: the re-check there refuses.
+            doThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"))
+                    .when(storeFactory).requireGranted(any(RagConfiguration.class), any(Map.class), any());
+
+            IngestionReport report = pipelineFor(after).run(KB_RESOURCE_ID, knowledgeBase(), sweptAfter(2), Mode.INGEST);
+
+            assertTrue(String.valueOf(report.message()).contains("is not resolved for"), report.message());
+            assertFalse(embeddingStore.segmentsOf(SITE + "/gone").isEmpty(), "not swept without the grant");
+        }
+
+        @Test
         @DisplayName("a page only briefly absent after a purge keeps its content")
         void aBrieflyAbsentPageSurvives() {
             // The sweep used to run on the first run after a purge, so a page that
@@ -1851,6 +1879,17 @@ class IngestionPipelineTest {
             // Deferring this to the next run means a source with no cron keeps
             // answering from a document the operator was told was deleted.
             assertTrue(embeddingStore.segments().isEmpty());
+        }
+
+        @Test
+        @DisplayName("forgetting a source rethrows a refusal from the store lookup's own check, so the caller keeps the files (#1179)")
+        void forgetSourceRethrowsTheLookupsRefusal() {
+            // The grant-only pre-check passes; the lookup's check, a moment later, refuses.
+            when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class), any()))
+                    .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:store-key} is not resolved for no agent"));
+
+            assertThrows(SecretResolver.SecretNotGrantedException.class,
+                    () -> uploadPipeline().forgetSource(KB_RESOURCE_ID, knowledgeBase(), uploadSource()));
         }
 
         @Test

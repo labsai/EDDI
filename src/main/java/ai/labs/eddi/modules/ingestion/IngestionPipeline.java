@@ -1141,11 +1141,8 @@ public class IngestionPipeline {
             store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             // What the store was built with, read from the factory's own cache key: a
             // second expansion could differ from the one the store's credential came from.
-            storeBinding = embeddingStoreFactory.bindingOf(store);
-            if (storeBinding == null) {
-                // Invalidated between the lookup and here: the current expansion, never none.
-                storeBinding = embeddingStoreFactory.credentialBinding(knowledgeBase);
-            }
+            storeBinding = requireBinding(embeddingStoreFactory.bindingOf(store), embeddingStoreFactory.credentialBinding(knowledgeBase),
+                    "vector store");
         }
 
         private EmbeddingModel model() {
@@ -1153,10 +1150,8 @@ public class IngestionPipeline {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
                 model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
-                modelBinding = embeddingModelFactory.bindingOf(model);
-                if (modelBinding == null) {
-                    modelBinding = embeddingModelFactory.credentialBinding(knowledgeBase);
-                }
+                modelBinding = requireBinding(embeddingModelFactory.bindingOf(model), embeddingModelFactory.credentialBinding(knowledgeBase),
+                        "embedding model");
             } else {
                 embeddingModelFactory.requireGranted(knowledgeBase, modelBinding, RagIngestionService.KNOWLEDGE_BASE_INGESTION);
             }
@@ -1529,6 +1524,26 @@ public class IngestionPipeline {
             }
             stateStore.markTombstoned(sourceKey, List.of(documentId));
             tombstoned++;
+        }
+
+        /**
+         * The binding a held client was built with, or a refusal when it cannot be
+         * known. The factory's cache entry can be invalidated between the lookup and
+         * the read-back; a fresh expansion is then no substitute, since a variable
+         * repointed meanwhile would name another secret than the client uses. A client
+         * whose parameters name nothing (an in-memory store, a model without
+         * credentials) has nothing to check, so an empty current expansion is accepted.
+         */
+        private Map<String, String> requireBinding(Map<String, String> builtWith, Map<String, String> current, String what) {
+            if (builtWith != null) {
+                return builtWith;
+            }
+            if (current == null || current.isEmpty()) {
+                return Map.of();
+            }
+            throw new SecretResolver.SecretNotGrantedException("The credential the " + what + " of knowledge base '"
+                    + LogSanitizer.sanitize(knowledgeBase.getName()) + "' was built with could not be verified (its cache entry "
+                    + "changed while the run started). The run stops; the next run starts with a fresh one.");
         }
 
         /** A vault grant refusal outside a document's processing: ends the run. */
