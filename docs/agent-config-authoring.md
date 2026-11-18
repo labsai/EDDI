@@ -151,7 +151,7 @@ A context entry whose key starts with `properties` and whose type is `expression
 
 ### `property(...)` values
 
-A leaf value inside `property(name(value))` is kept verbatim as a string (`1.2.3`, `01234`, `api.openai.com`, a phone number), except a plain integer without a leading zero or sign, which is stored as a number (an `int`, or a `long` beyond the int range). Nothing in a value can fail the turn.
+A leaf value inside `property(name(value))` is kept verbatim as a string (`1.2.3`, `01234`, `api.openai.com`, a phone number), except a plain integer of ASCII digits without a leading zero or sign, which is stored as a number (an `int`, or a `long` beyond the int range; one beyond the `long` range, such as `9223372036854775808`, stays a string), and `true` or `false` in any letter case, which is stored as a boolean (`property(flag(false))`). Digits of another script (`١٢`) stay the text as written. Nothing in a value can fail the turn.
 
 ### Capturing user input vs. setting fixed values
 

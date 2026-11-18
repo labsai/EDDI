@@ -23,7 +23,7 @@ An integration that sent `properties*` expression context to set properties must
 
 ### Behaviour changes for upgraders
 
-- A decimal leaf in `property(...)` (`3.14`) is now stored as the string `3.14`, not as a float (a float would corrupt `1.10`). A Qute comparison such as `{#if properties.price > 1}` or a body that expects a number changes with it: compare after converting, for example `{#if properties.price.toDouble > 1}`, or keep the number in a `valueDouble` instruction.
+- A decimal leaf in `property(...)` (`3.14`) is now stored as the string `3.14`, not as a float (a float would corrupt `1.10`). A Qute comparison such as `{#if properties.price > 1}` or a body that expects a number changes with it: keep the number in a `valueDouble` instruction when a rule or template has to compare it.
 - Numeric rules compare exactly: `unknown(1)` still matches `1`, `1.0` and `1,0`, but integers above 2^24 no longer collide.
 
 Files: `PropertySetter`, `CharacterUtilities`, `Value`; docs in `agent-config-authoring.md`.
@@ -35,7 +35,7 @@ Files: `PropertySetter`, `CharacterUtilities`, `Value`; docs in `agent-config-au
 ### What changed and why
 
 - `InputParser.normalize` always trims and collapses runs of spaces, and `InputParserTask` wrote the result over the conversation output `input`, which is what the model's history, the conversation log and `{memory.current.input}` read: pasted code and tables lost their indentation, even for an agent with no normalizers. The overwrite now happens only when the parser has normalizers (or `preserveInput: false`); otherwise the output `input` keeps the interior of the user's text exactly as typed and only loses leading and trailing whitespace, as it always did (so `{memory.current.input}` in a slot-filling property or an HTTP body, and a `dynamicvaluematcher == 'yes'`, do not see a trailing newline). A turn flagged `secretInput` keeps the previous behaviour (the plaintext for the turn, the placeholder re-asserted by `Conversation` at the end), so the vaulting flow is unchanged. `input:normalized` is still written.
-- One unbroken token over 32,768 characters, or about 200 tokens of 165 characters, produced an `expressions:parsed` string over `eddi.expressions.max-length`; the next rule that read it threw and failed the turn. The parser now reduces an over-long result to one bounded `unknown(...)` expression (and sets `expressions:inputTruncated`), and every reader of the stored string (`InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`, the append merge) treats `ExpressionLimitExceededException` as "no expressions" (`StoredExpressions.parseOrEmpty`).
+- One unbroken token over 32,768 characters, or about 200 tokens of 165 characters, produced an `expressions:parsed` string over `eddi.expressions.max-length`; the next rule that read it threw and failed the turn. The parser now reduces an over-long result to one bounded `unknown(...)` expression (and sets `expressions:inputTruncated`), and every reader of the stored string (`InputMatcher`, `RulesEvaluationTask`, `PropertySetterTask`, the append merge) reads an over-limit stored string as that one bounded `unknown(...)` expression, not as an empty list, so an empty-input rule does not match (`StoredExpressions.parseOrEmpty`). The `unknown(...)` is sized to the provider's limit, an integer or decimal token over the limit is read as an unknown word, and the diagnostics (`expressions:matches`, `:confidence`, `:alternatives`) are published only for a reading that is kept.
 - LLM-first fast path, opt-in with `passThrough: true` (the setup wizard writes it): a parser with no normalizers, dictionaries, corrections or semantic fallback, and no quick replies to match, stores one `unknown(<text>)` expression (notation characters removed, at most 1,000 characters, not cut inside a surrogate pair) without tokenising. Wizard-created agents keep matching their catch-all `inputmatcher "*"`.
 - `docs/security.md` said conversation memory keeps the input verbatim; it now says exactly what is kept: `input:initial` always, and the output `input` minus leading and trailing whitespace whenever the parser has no normalizers.
 
@@ -56,14 +56,14 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 ### What changed and why
 
 - A ruleset with a `dependency` cycle saved, deployed READY and then made `POST /agents/{id}/start` answer an empty HTTP 500. `RuleSetSaveValidator` (called from `RuleSetStore.validate`) now refuses on save a dependency cycle (rules are told apart by name, as the loop guard does), a `dependency` on a name no rule has, and two rules of one group with the same name. Unnamed rules cannot be referenced, so they only matter as a dangling target. Stored rulesets still load and deploy: the checks run on save only.
-- At runtime a failing `CONVERSATION_START` turn no longer propagates out of `Conversation.init`: the conversation is created in state `ERROR` with the reason in the step's `taskErrors`, as a failed `say` turn is, instead of a bare HTTP 500.
-- `OutputGeneration.getOutputs` looped forever when every entry of an action had `timesOccurred` below -1 (or the entry list was empty). The loop now stops when there is nothing left to select, and `OutputStore` refuses `timesOccurred < -1` on create and update.
+- A failing `CONVERSATION_START` turn answers `422 agent_start_failed` and creates no conversation (see below); a rule-set failure on a later turn is a task error of that turn.
+- `OutputGeneration.getOutputs` looped forever when every entry of an action had `timesOccurred` below -1 (or the entry list was empty). One extraction now decides: nothing selectable gives an empty result. `OutputStore` refuses `timesOccurred < -1` on an interactive create and update.
 - An output set whose `lang` does not match the conversation's still produces nothing (matching is unchanged), but the task now logs a WARN once per deployed configuration (`IOutputGeneration.claimLanguageMismatchLog`).
 
 ### Behaviour changes for upgraders
 
-- Saving a ruleset with a dependency cycle, a dangling dependency or duplicate rule names in a group is refused (HTTP 400, rule named). This includes import and sync: an exported agent whose ruleset has such a defect is refused on import until it is fixed. (#1417 changes the same validator for legacy configs: its `ExistingRuleSetWrite` scope should also skip `RuleSetSaveValidator`.)
-- An output set with `timesOccurred` below -1 is refused on save.
+- Saving a ruleset with a dependency cycle, a dangling dependency or duplicate rule names in a group is refused (HTTP 400, rule named). Only conditions the runtime keeps count (the children of a `connector` or `negation`); every independent cycle is reported. Import, sync, upgrade and duplicate only warn (see below).
+- An output set with `timesOccurred` below -1 is refused on an interactive save; a lenient write keeps the entry, which stays unselectable.
 
 ## 🔒 fix(templating): data cannot inject expression notation into quick replies; smaller pipeline items (2026-11-18)
 
@@ -78,7 +78,8 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 ### Left as it was
 
 `behavior_rules:fail` is still written every turn: `docs/developer-quickstart.md` presents it as a debugging aid, so a reader exists.
-
+
+
 
 ## 🐛 fix(start,rules,templating): review follow-up (2026-11-18)
 
@@ -88,7 +89,8 @@ Files: `InputParserTask`, `IInputParser`, `InputParser`, `IExpressionProvider`, 
 
 - **`POST /agents/{id}/start`:** the `catch` in `Conversation.init` that kept the conversation in state `ERROR` is gone; it removed the documented `422 agent_misconfigured` and persisted a conversation for every start of a broken agent. Instead a start turn whose rule evaluation fails (`RuleEvaluationFailedException`, marked `AgentStartFailure`) answers `422 {"error":"agent_start_failed","message":<fixed text>,"retryable":false}` and creates no conversation. A vault outage, a database error and an interrupt stay a 500, as documented; the marker is deliberately not "every task failure". See `docs/rest-api-reference.md`.
 - **Lenient writes:** the rule-graph checks and the `timesOccurred` check refuse an interactive save (REST, MCP, the Manager) only. Import, sync, upgrade and duplicate run inside `LenientConfigWrite` and log one WARN per problem instead, so an archive that imported before still imports.
-- **Quick-reply expressions:** `NotationSafeData` is also applied in the LLM fallback's quick replies, and a data value that is only `*` is dropped (an expression named `*` equals every expression).
+- **Quick-reply expressions:** a quick reply's `expressions` is rendered by `ITemplatingEngine.processExpressionsTemplate`, an engine with a result mapper that strips `(`, `)` and `,` from every value an expression emits (and drops a value that is only `*`, which equals every expression). Conditions, loops and filters see the original data, the template's literal text is kept, and label and expression of one quick reply come from the same row. The same renderer serves output templates, `postResponse` quick replies and the LLM fallback quick replies.
+- **`property(...)` leaves:** digits of other scripts stay the text as written (`property(customerCode(١٢))` stores `١٢`); they are converted only where a number is compared or converted. A 19-digit integer is a number when it fits a `long`.
 - **Parser:** `passThrough` is opt-in (the setup wizard writes it); a stored over-long `expressions:parsed` reads as one bounded `unknown(...)` and no longer as "the user said nothing"; with `appendExpressions` the earlier results are kept when a new result would pass the limit; the bounded text is never cut inside a surrogate pair.
 
 ### Behaviour changes for upgraders

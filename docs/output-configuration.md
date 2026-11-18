@@ -158,7 +158,7 @@ Now let's look at a more complex output configuration file:
 
 ### `timesOccurred`
 
-`timesOccurred` is 0 for the first time an action occurs, 1 for the second, and so on. A value below `-1` can never be selected and is refused when the output set is saved.
+`timesOccurred` is 0 for the first time an action occurs, 1 for the second, and so on. A value below `-1` can never be selected. An interactive save (REST, MCP, the Manager) refuses it; import, sync, upgrade and duplicate keep such a legacy entry and log a warning, and the entry stays unselectable.
 
 ### Output set language (`lang`)
 
