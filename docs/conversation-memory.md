@@ -251,16 +251,21 @@ AI says: {memory.current.output}
 
 ### When a turn is not stored
 
-A turn's write can fail after the turn has run: the document would exceed `eddi.conversations.max-document-bytes` (default 14 MiB, checked before the write on both backends; MongoDB's own limit is 16 MB), the database refuses the content (a PostgreSQL data error), another request or node changed the conversation meanwhile (revision conflict, cluster fence), or the database fails. Then:
+A turn's write can fail after the turn has run: the document would exceed `eddi.conversations.max-document-bytes` (default 14 MiB, estimated before the write on both backends; MongoDB's own limit is 16 MB), the database refuses the content (a PostgreSQL data error), another request or node changed or ended the conversation meanwhile (revision conflict, cluster fence, lost lease), or the database does not confirm the write. Then:
 
-- **the turn is not in the conversation** — nothing of it was written, and the long-term properties it set are not written to the user memory store either (that write runs only after a successful store);
-- **the caller is told**: the REST say and rerun answer `507` (too large), `422` (data rejected), `409` (conflict, fenced) or `503` (store failure) with `{"error": {"code": "TURN_NOT_STORED", "errorType": "<reason>", …}}` and never a `200`; a stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done` (its tokens were already sent); every other surface (`/v1`, A2A, schedules, group members, channels) receives the turn as failed (`ERROR`, with the same error);
-- **the conversation is marked `ERROR`**, except after a conflict or a fence, where the writer that won owns the document and its state stands. The next turn runs normally — except for `conversation_too_large`, which fails every further turn the same way: start a new conversation;
-- a retry with the same `Idempotency-Key` runs the turn again;
+- **the turn is not in the conversation** (or, for an unconfirmed write, may not be), and the long-term properties it set are not written to the user memory store — that write runs only after a successful store;
+- **the caller is told**, never with a `200` or a `done` event. The REST say and rerun answer with `{"error": {"code": "TURN_NOT_STORED", "errorType": "<reason>", …}}` and the reason's status: `507` `conversation_too_large`, `422` `data_rejected`, `409` `conflict` / `fenced` (with `Retry-After`), `410` `conversation_ended`, `503` `store_failure` (the database did not confirm the write — it *may not* have been stored) and `503` `outcome_unknown` (the turn did not finish in time or failed after its answer was produced). For the last two, read the conversation before sending again; a retry with the same `Idempotency-Key` is safe in every case. A stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done` (its tokens were already sent). Every other surface (`/v1`, A2A, MCP, Slack, schedules, group members, sub-agent tools) receives the turn as failed: state `ERROR`, the same error, and no outputs — nothing it could present as the answer;
+- **the conversation is marked `ERROR`** after a failed write, except after a conflict, a fence or an end, where the writer that won owns the document and its state stands. The next turn runs normally;
+- dead letters of such turns (cluster mode) are kept as traces and are not replayable — the caller was told to send it again;
 - it is counted as `eddi_turn_not_stored_total{reason}` and logged with the conversation, the agent and the reason.
 
-So what is guaranteed is: every turn the caller was told succeeded is stored, and a stored conversation is never rewritten or pruned by windowing or summaries. Turns that failed to store, cancelled turns and turns abandoned by the watchdog are not in it.
+**A conversation over the size limit** is refused before a turn runs: the REST say and rerun answer `507` with `error.code` `CONVERSATION_TOO_LARGE` (a stream: an `error` event with `code` `conversation_too_large`), and nothing is spent on the turn. Undo, redo, end and the resume of a pending approval keep working on such a conversation. Start a new conversation. On PostgreSQL this limit is new: conversations there had no size limit before.
 
+**The HITL resume path is the exception:** a resumed turn still answers its caller before its own write. Its long-term memory writes do wait for the write, and a failed write marks the conversation `ERROR`.
+
+So what is guaranteed is: every say turn its caller was told succeeded is stored, and a stored conversation is never rewritten or pruned by windowing or summaries. Turns that failed to store, cancelled turns and turns abandoned by the watchdog are not in it.
+
+**Long-term memories after the store.** The keys a turn's long-term properties owe the user memory store stay recorded in the stored conversation (`pendingLongTermWrites`) until the write has succeeded; then they are cleared with a second, conditional write of the document. If the user-memory write fails, or the node stops in between, the stored turn is still reported as stored, the failure is counted (`eddi_turn_long_term_writes_total{outcome="failed"}`), and the next turn writes the owed keys (upserts are idempotent). This also holds for the conversation's start turn.
 ### What Is Cached
 
 **Conversation memory is not cached.** Every turn loads it from the datastore and saves it back:
@@ -664,7 +669,7 @@ if the turn completed (not paused, cancelled or abandoned):
 state: IN_PROGRESS → READY (ENDED on CONVERSATION_END, ERROR on failure)
 ```
 
-`ConversationStepRunner` then saves the snapshot to the datastore. Only when that succeeds does it run `storePropertiesPermanently()` — only longTerm properties that changed (or are owed) are upserted to `IUserMemoryStore`, with visibility applied at this boundary — update the cached state and answer the caller. A turn whose store fails writes no user memories. When the store succeeds but the user-memory write fails, the conversation is marked `ERROR` and the next turn writes every longTerm property again. `secret` properties are not handled here: they were vaulted when their property instruction ran.
+`ConversationStepRunner` then saves the snapshot to the datastore. Only when that succeeds does it run `storePropertiesPermanently()` — only longTerm properties that changed (or are owed) are upserted to `IUserMemoryStore`, with visibility applied at this boundary — update the cached state and answer the caller. A turn whose store fails writes no user memories. When the store succeeds but the user-memory write fails, the turn stays stored and the owed keys recorded in it are written by the next turn. `secret` properties are not handled here: they were vaulted when their property instruction ran.
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
 

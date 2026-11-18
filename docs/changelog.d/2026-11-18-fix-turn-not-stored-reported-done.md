@@ -29,8 +29,8 @@ handling. Six turns in a row were lost this way in the live test.
   is refused with `ConversationTooLargeException` and reported as above. What is stored is unchanged.
 - **Long-term memories after the write (A5).** `Conversation` no longer upserts changed `longTerm` properties inside the
   pipeline: it hands the write to the committer (`IConversationMemory#deferUntilCommitted`), which runs it right after a
-  successful store (say and resume). A turn that is not stored writes no user memories; a failed upsert marks the
-  conversation `ERROR`, so the next turn rewrites every long-term property.
+  successful store (say, start and resume). A turn that is not stored writes no user memories; a failed upsert is made up by the next
+  turn (see the follow-up entry below).
 - **Engine keys are not memories (A6).** `IUserMemoryStore.isEngineKey` (`conversation:*`) joins the GDPR prefix in
   `rejectReservedKey`, so both stores, REST, MCP, the `rememberFact` tool, the property setter's write-back, Dream and
   the legacy migration refuse or skip them; an entry stored earlier is ignored when memories are loaded.
@@ -61,3 +61,41 @@ handling. Six turns in a row were lost this way in the live test.
 - The HITL resume path still answers before its write (its long-term writes now wait for it).
 - `/status` during a running turn (A10), the storage diet (A3/A4), NUL stripping on PostgreSQL and streaming
   finish-reason semantics are separate branches.
+
+## 🐛 fix(engine): review follow-up — start-turn memories, no "done" without a confirmed write (2026-11-18)
+
+**Repo:** EDDI (`fix/turn-not-stored-reported-done`)
+
+### What changed and why
+
+An independent review of the branch found one regression and eight gaps.
+
+- **Start-turn memories (M1).** Long-term properties set by the `CONVERSATION_START` turn were never written: the
+  start path stores the conversation but did not run the deferred write. The deferred write now runs inside the
+  runner's store methods (`ConversationStepRunner#commitDeferredWork`), so every path that stores a turn — say, start,
+  resume — runs it. A write dropped with an unstored turn is counted
+  (`eddi_turn_long_term_writes_total{outcome="discarded"}`).
+- **Durable owed markers (S5).** The stored document keeps `pendingLongTermWrites` until the user-memory write has
+  succeeded; then a second, conditional write clears them. A failed write no longer marks a stored turn `ERROR` (that
+  made schedules, A2A and `/v1` retry a stored turn); it is counted (`outcome="failed"`) and the next turn makes it up.
+- **Never "done" without a confirmed write (S1, S2).** The backstop delivery (watchdog gave up during the write, a
+  failure after the answer, a dropped turn) now reports `outcome_unknown` or `fenced`, never the answer; a turn whose
+  lease was lost reports `fenced`.
+- **Dead letters (S3).** Lease-lost, fenced and conflict dead letters are marked `answeredRetry` (not replayable):
+  their callers were told to send the turn again.
+- **No answer on any surface (S4).** A not-stored snapshot carries no outputs, steps or properties
+  (`TurnNotStored.withoutAnswer`), so MCP, Slack, the sub-agent tools and group members cannot present it as a reply;
+  Slack posts the error text, MCP adds the `error`.
+- **Size limit at admission (S6).** A conversation already over `eddi.conversations.max-document-bytes` is refused
+  before the pipeline runs (507 `CONVERSATION_TOO_LARGE`; stream code `conversation_too_large`, added to the UI's
+  pre-turn refusal codes). Undo/redo and the resume of a pending approval are no longer size-guarded.
+  **PostgreSQL:** conversations there had no size limit before; one over 14 MiB now refuses new turns.
+- **Size estimate calibrated (S7)** against the BSON the MongoDB store writes (field names, ISO timestamps): never
+  below it, at most 35% above, in a test.
+- **Wording (S8).** `store_failure` (database did not confirm) and `outcome_unknown` say the turn *may* not have been
+  stored and are not retryable; a conflict with an end answers 410 `conversation_ended`.
+
+### Left open
+
+- The HITL resume path still answers before its own write (documented in conversation-memory.md).
+- UI: a "not saved — retry" affordance for `turn_not_stored` (the error is shown; the partial answer stays on screen).

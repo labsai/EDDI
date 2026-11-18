@@ -293,7 +293,7 @@ Rules for clients:
 - **An `error` before anything ran carries a `code`.** When the turn is refused
   up front — the cases the blocking endpoint answers with a status — the event is
   `{"message":"…","code":"…"}` with `code` one of `awaiting_approval`,
-  `conversation_not_found`, `input_too_large`, `conversation_ended`,
+  `conversation_not_found`, `input_too_large`, `conversation_ended`, `conversation_too_large`,
   `agent_not_ready`, `agent_mismatch`, `quota_exceeded`,
   `quota_accounting_unavailable`, `processing_restricted` or
   `restriction_status_unavailable`. Branch on `code`, show `message`. Captured:
@@ -311,7 +311,7 @@ Rules for clients:
 - **A turn that ran but was not stored ends with an `error`, not `done`.** Its
   tokens are already on the wire, so the last event is
   `{"message":"…","code":"turn_not_stored","reason":"…","retryable":…}` —
-  `reason` one of `conversation_too_large`, `data_rejected`, `conflict`,
+  `reason` one of `conversation_too_large`, `data_rejected`, `conflict`, `conversation_ended`, `outcome_unknown`,
   `fenced`, `store_failure` (see
   [When a turn is not stored](conversation-memory.md#when-a-turn-is-not-stored)).
   The turn is not in the conversation: show the error in place of the streamed
@@ -644,7 +644,8 @@ admin endpoints, described under
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
 | `422` | `{"error": "agent_misconfigured", "message": "API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: ...", "retryable": false}` | `POST /agents/{agentId}/start` only: the agent's own `CONVERSATION_START` turn hit a configuration it cannot run — a `${vault:…}` reference that names no secret in the tenant it is looked up in (or no vault is configured), or a secret sent to a host its [`allowedHosts`](secrets-vault.md#destination-allow-list-allowedhosts) does not name. No conversation was created; fix the configuration rather than retrying. A server-side failure (the vault could not be read, the database failed) stays a `500` |
 | `408` | `{"error": {"code": "REQUEST_TIMEOUT", …}}` | The caller's wait for the turn ran out (`eddi_turn_rejected_total` / `eddi_turn_skipped_total` `reason="caller_timed_out"`, see [metrics.md](metrics.md)). The turn may still finish: read the conversation before sending again |
-| `409`, `422`, `503`, `507` | `{"error": {"code": "TURN_NOT_STORED", "errorType": "conflict" \| "fenced" \| "data_rejected" \| "store_failure" \| "conversation_too_large", "retryable": …, "message": …}}` | `POST /agents/{conversationId}` and `/rerun`: the turn ran but its conversation write failed, so it is not in the conversation — `409` another request or node changed the conversation meanwhile, `422` the database refused the content, `503` the database failed (both with `Retry-After`), `507` the conversation reached `eddi.conversations.max-document-bytes` (start a new one). A stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done`. See [Conversation memory](conversation-memory.md#when-a-turn-is-not-stored) |
+| `409`, `410`, `422`, `503`, `507` | `{"error": {"code": "TURN_NOT_STORED", "errorType": "conflict" \| "fenced" \| "conversation_ended" \| "data_rejected" \| "store_failure" \| "outcome_unknown" \| "conversation_too_large", "retryable": …, "message": …}}` | `POST /agents/{conversationId}` and `/rerun`: the turn ran but is not (or not verifiably) in the conversation — `409` another request or node changed the conversation meanwhile (with `Retry-After`), `410` it was ended meanwhile, `422` the database refused the content, `503` `store_failure` the database did not confirm the write and `503` `outcome_unknown` the turn did not finish in time — for these two it *may* have been stored, so read the conversation before sending again — and `507` the conversation reached `eddi.conversations.max-document-bytes`. A stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done`. See [Conversation memory](conversation-memory.md#when-a-turn-is-not-stored) |
+| `507` | `{"error": {"code": "CONVERSATION_TOO_LARGE", …}}` | `POST /agents/{conversationId}` and `/rerun`: the stored conversation is already over `eddi.conversations.max-document-bytes`; the message was refused before it ran. Start a new conversation |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |

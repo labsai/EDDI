@@ -284,8 +284,9 @@ Properties have a well-defined lifecycle managed by `Conversation.java`:
        (handed over with IConversationMemory.deferUntilCommitted, run by ConversationStepRunner)
        └─→ longTerm properties that changed (or are owed) saved via IUserMemoryStore.upsert()
        └─→ Visibility applied at persistence boundary (explicit or config default)
-       └─→ a turn that is not stored writes no user memories; a failed upsert marks the
-           conversation ERROR, so the next turn rewrites every longTerm property
+       └─→ a turn that is not stored writes no user memories; the stored document keeps the
+           owed keys (pendingLongTermWrites) until the upsert succeeded, so a failed or
+           interrupted upsert is made up by the next turn
 ```
 
 Keys starting with `_gdpr_` (GDPR bookkeeping) or `conversation:` (the engine's own properties, such as the rolling summary) are never written as user memories, and `conversation:*` entries are never loaded into a conversation — `IUserMemoryStore.isRefusedWriteKey` / `isEngineKey`.
