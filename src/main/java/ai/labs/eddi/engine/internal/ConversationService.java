@@ -1292,6 +1292,15 @@ public class ConversationService implements IConversationService, UserErasurePar
     public void say(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
                     List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler)
             throws Exception {
+        if (idempotencyKeyOf(inputData, rerunOnly) != null) {
+            // A keyed turn (a scheduled fire's) is admitted exactly as the conversation-id
+            // overload admits one: without it, a retry that loaded the conversation after
+            // the first attempt's turn committed ran that turn a second time.
+            sayKeyed(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly,
+                    responseHandler, requireSnapshot(conversationId), () -> say(environment, agentId, conversationId, returnDetailed,
+                            returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler));
+            return;
+        }
         say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler,
                 null);
     }
@@ -2246,7 +2255,24 @@ public class ConversationService implements IConversationService, UserErasurePar
         requireInputWithinLimit(inputData);
         var snapshot = requireSnapshot(conversationId);
         refuseIfSoftDeleted(conversationId, snapshot);
+        sayKeyed(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
+                rerunOnly, responseHandler, snapshot,
+                () -> say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler));
+    }
 
+    /**
+     * The one admission path of a turn that may carry an {@code Idempotency-Key},
+     * behind both {@code say} overloads: a duplicate is answered with the turn it
+     * duplicates (stored, or still running on this node) instead of running again.
+     *
+     * @param retry
+     *            runs the request again from the top, for a duplicate whose running
+     *            turn was refused before it ran
+     */
+    private void sayKeyed(Environment environment, String agentId, String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly,
+                          List<String> returningFields, InputData inputData, boolean rerunOnly, ConversationResponseHandler responseHandler,
+                          ConversationMemorySnapshot snapshot, TurnIdempotencyService.Retry retry)
+            throws Exception {
         String key = idempotencyKeyOf(inputData, rerunOnly);
         ConversationResponseHandler handler = responseHandler;
         if (key != null) {
@@ -2263,8 +2289,7 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
             if (!turnIdempotency.admitOrServe(conversationId, key, inputData.getRequestedTurnDeadlineMs(),
                     () -> storedOutcome(snapshot, key, returnDetailed, returnCurrentStepOnly, returningFields), sink,
-                    () -> currentSnapshotOf(conversationId, returnDetailed, returnCurrentStepOnly, returningFields),
-                    () -> say(conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, responseHandler))) {
+                    () -> currentSnapshotOf(conversationId, returnDetailed, returnCurrentStepOnly, returningFields), retry)) {
                 return;
             }
             // First sight of the key: this request runs the turn, and everything it
@@ -2293,8 +2318,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             };
         }
         try {
-            say(snapshot.getEnvironment(), snapshot.getAgentId(), conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData,
-                    rerunOnly, handler, snapshot);
+            say(environment, agentId, conversationId, returnDetailed, returnCurrentStepOnly, returningFields, inputData, rerunOnly, handler,
+                    snapshot);
         } catch (Exception | Error e) {
             if (key != null) {
                 turnIdempotency.abandon(conversationId, key, e);
