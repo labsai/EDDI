@@ -5614,7 +5614,11 @@
     "replyTemplate": "답장 템플릿",
     "replyTemplateHint": "에이전트의 답변을 감쌉니다. 답변은 텍스트로 삽입되며 템플릿으로 실행되지 않습니다. 변수:",
     "noteDkim": "답장에는 메일함 도메인에 대해 발신 메일에 DKIM 서명을 하는 메일 서버와 해당 도메인의 DMARC 레코드가 필요합니다. {{productName}}은(는) 서명하지 않습니다. 이것이 없으면 답장이 스팸으로 분류되거나 거부됩니다. Exchange Online과 대부분의 호스팅 업체는 도메인에 DKIM을 활성화하면 제출된 메일에 서명합니다.",
-    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "ownerDigest": "일일 메일 요약",
+    "ownerDigestOff": "끄기",
+    "ownerDigestDaily": "매일",
+    "ownerDigestHint": "매일: 시스템 메일러가 구성되어 있으면 소유자 주소로 전날 메일 수를 결과별로 정리한 메일이 하루에 한 번 추가로 발송됩니다(주소나 내용은 포함되지 않음)."
   },
   "feedback": {
     "title": "피드백",
@@ -5928,5 +5932,27 @@
     "approved": "변경이 승인되어 적용되었습니다",
     "rejected": "변경이 거부되었습니다. 아무것도 적용되지 않았습니다",
     "approveBlockedDirty": "먼저 할당량 편집 내용을 저장하거나 페이지를 새로 고쳐 버리세요. 승인 후에 저장하면 승인된 할당량을 덮어씁니다."
+  },
+  "emailLog": {
+    "title": "메일 로그",
+    "description": "이 통합이 지난 30일 동안 받거나 보낸 모든 메일과 메일이 처리되지 않은 이유입니다. 제목과 본문은 저장되지 않습니다.",
+    "lookupLabel": "Message-ID 조회",
+    "lookupAction": "조회",
+    "lookupHint": "메일 클라이언트의 \"원본 보기\" 또는 \"소스 보기\"에서 확인할 수 있는 메일의 Message-ID 헤더입니다.",
+    "lookupNotFound": "로그에 이 Message-ID의 메일이 없습니다. 가져온 적이 없거나(다른 폴더, 스팸) 로그 보존 기간보다 오래된 메일입니다.",
+    "directionIn": "수신",
+    "directionOut": "발신",
+    "allDirections": "모든 방향",
+    "allStates": "모든 상태",
+    "allReasons": "모든 사유",
+    "colTime": "시간",
+    "colDirection": "방향",
+    "colCounterpart": "발신자 / 수신자",
+    "colState": "상태",
+    "colReason": "사유",
+    "colConversation": "대화",
+    "empty": "로그에 메일이 없습니다",
+    "emptyHint": "이 필터와 일치하는 항목이 없거나 통합이 아직 메일을 가져오지 않았습니다.",
+    "loadMore": "더 보기"
   }
 }

@@ -284,6 +284,18 @@ export const READ_ENDPOINTS: readonly string[] = [
   "GET /ragstore/rags/{id}/ingestion/{ingestionId}/status",
   "GET /ragstore/rags/{id}/sources/{sourceId}/runs",
   "GET /ragstore/rags/{id}/sources/{sourceId}/files",
+  // An email integration's mail log (EDDI 6.8+): one row per mail it received or
+  // sent — state, refusal reason, conversation id and the counterpart address,
+  // never a subject or body — so "why didn't EDDI answer my mail?" has an
+  // answer. The backend requires edit access to the integration, as for its
+  // suppression list.
+  //
+  // Deliberately NOT granted: `POST …/email-log/lookup` (the by-Message-ID
+  // lookup). It reads only, but it is a POST, and the gate decides by method —
+  // READ_ENDPOINTS means "GETs" (see TEST_DRIVE_WRITES). The listing's `since`/
+  // `until`/`reason` filters find the same row; the admin has the lookup box in
+  // the Manager.
+  "GET /channelstore/channels/{id}/email-log",
   // Audit
   "GET /auditstore/agent/{agentId}",
   // Administrative actions — who changed, deployed, imported, erased or was

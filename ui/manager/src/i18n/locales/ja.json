@@ -5614,7 +5614,11 @@
     "replyTemplate": "返信テンプレート",
     "replyTemplateHint": "エージェントの回答を包みます。回答はテキストとして挿入され、テンプレートとして実行されることはありません。変数：",
     "noteDkim": "返信には、メールボックスのドメインについて送信メールに DKIM 署名するメールサーバーと、そのドメインの DMARC レコードが必要です。{{productName}} は署名しません。これらがないと返信は迷惑メールになるか拒否されます。Exchange Online と多くのホスティング事業者は、ドメインで DKIM を有効にすると送信されたメールに署名します。",
-    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "ownerDigest": "日次メールダイジェスト",
+    "ownerDigestOff": "オフ",
+    "ownerDigestDaily": "毎日",
+    "ownerDigestHint": "毎日：システムメーラーが設定されている場合、オーナーのアドレスにも前日のメール件数を結果別にまとめたメールが1日1通届きます（アドレスや内容は含みません）。"
   },
   "feedback": {
     "title": "フィードバック",
@@ -5928,5 +5932,27 @@
     "approved": "変更を承認して適用しました",
     "rejected": "変更を却下しました。何も適用されていません",
     "approveBlockedDirty": "先にクォータの編集を保存するか、ページを再読み込みして破棄してください。承認後に保存すると、承認されたクォータが上書きされます。"
+  },
+  "emailLog": {
+    "title": "メールログ",
+    "description": "この連携が過去30日間に受信または送信したすべてのメールと、処理されなかったメールの理由。件名と本文は保存されません。",
+    "lookupLabel": "Message-ID を検索",
+    "lookupAction": "検索",
+    "lookupHint": "メールの Message-ID ヘッダー。メールクライアントの「オリジナルを表示」または「ソースを表示」で確認できます。",
+    "lookupNotFound": "この Message-ID のメールはログにありません。取得されていない（別のフォルダー、迷惑メール）か、ログの保持期間より古いメールです。",
+    "directionIn": "受信",
+    "directionOut": "送信",
+    "allDirections": "すべての方向",
+    "allStates": "すべての状態",
+    "allReasons": "すべての理由",
+    "colTime": "日時",
+    "colDirection": "方向",
+    "colCounterpart": "送信者 / 受信者",
+    "colState": "状態",
+    "colReason": "理由",
+    "colConversation": "会話",
+    "empty": "ログにメールはありません",
+    "emptyHint": "このフィルターに一致するものがないか、連携がまだメールを取得していません。",
+    "loadMore": "さらに読み込む"
   }
 }

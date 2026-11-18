@@ -5614,7 +5614,11 @@
     "replyTemplate": "Antwortvorlage",
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
-    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "ownerDigest": "Täglicher Mail-Bericht",
+    "ownerDigestOff": "Aus",
+    "ownerDigestDaily": "Täglich",
+    "ownerDigestHint": "Täglich: Die Inhaberadressen erhalten zusätzlich einmal am Tag eine E-Mail mit den Mail-Zahlen des Vortags nach Ergebnis (keine Adressen, keine Inhalte), sofern der Systemmailer konfiguriert ist."
   },
   "feedback": {
     "title": "Feedback",
@@ -5928,5 +5932,27 @@
     "approved": "Änderung genehmigt und angewendet",
     "rejected": "Änderung abgelehnt; nichts wurde angewendet",
     "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
+  },
+  "emailLog": {
+    "title": "Mail-Protokoll",
+    "description": "Jede Mail, die diese Integration in den letzten 30 Tagen empfangen oder gesendet hat, und warum eine Mail nicht bearbeitet wurde. Betreff und Text werden nie gespeichert.",
+    "lookupLabel": "Message-ID nachschlagen",
+    "lookupAction": "Nachschlagen",
+    "lookupHint": "Der Message-ID-Header der Mail, aus „Original anzeigen“ oder „Quelltext anzeigen“ des Mailprogramms.",
+    "lookupNotFound": "Keine Mail mit dieser Message-ID im Protokoll. Sie wurde nie abgerufen (anderer Ordner, Spam) oder ist älter als die Aufbewahrungsdauer des Protokolls.",
+    "directionIn": "Ein",
+    "directionOut": "Aus",
+    "allDirections": "Alle Richtungen",
+    "allStates": "Alle Zustände",
+    "allReasons": "Alle Gründe",
+    "colTime": "Zeit",
+    "colDirection": "Richtung",
+    "colCounterpart": "Absender / Empfänger",
+    "colState": "Zustand",
+    "colReason": "Grund",
+    "colConversation": "Konversation",
+    "empty": "Keine Mail im Protokoll",
+    "emptyHint": "Nichts passt zu diesen Filtern, oder die Integration hat noch keine Mail abgerufen.",
+    "loadMore": "Mehr laden"
   }
 }

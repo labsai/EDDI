@@ -5666,7 +5666,11 @@
     "replyTemplate": "Modelo de resposta",
     "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
     "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o {{productName}} não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
-    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "ownerDigest": "Resumo diário de e-mail",
+    "ownerDigestOff": "Desligado",
+    "ownerDigestDaily": "Diário",
+    "ownerDigestHint": "Diário: os endereços dos responsáveis também recebem um e-mail por dia com as contagens de e-mails do dia anterior por resultado (sem endereços nem conteúdo), se o remetente do sistema estiver configurado."
   },
   "feedback": {
     "title": "Avaliações",
@@ -5980,5 +5984,27 @@
     "approved": "Alteração aprovada e aplicada",
     "rejected": "Alteração rejeitada; nada foi aplicado",
     "approveBlockedDirty": "Guarde primeiro as suas alterações à quota ou recarregue a página para as descartar: guardá-las depois de uma aprovação substituiria a quota aprovada."
+  },
+  "emailLog": {
+    "title": "Registro de e-mail",
+    "description": "Cada e-mail que esta integração recebeu ou enviou nos últimos 30 dias, e por que um e-mail não foi tratado. Assuntos e corpos nunca são armazenados.",
+    "lookupLabel": "Procurar Message-ID",
+    "lookupAction": "Procurar",
+    "lookupHint": "O cabeçalho Message-ID do e-mail, em \"Mostrar original\" ou \"Ver código-fonte\" do cliente de e-mail.",
+    "lookupNotFound": "Nenhum e-mail com este Message-ID no registro. Nunca foi buscado (outra pasta, spam) ou é mais antigo que a retenção do registro.",
+    "directionIn": "Entrada",
+    "directionOut": "Saída",
+    "allDirections": "Todas as direções",
+    "allStates": "Todos os estados",
+    "allReasons": "Todos os motivos",
+    "colTime": "Hora",
+    "colDirection": "Direção",
+    "colCounterpart": "Remetente / destinatário",
+    "colState": "Estado",
+    "colReason": "Motivo",
+    "colConversation": "Conversa",
+    "empty": "Nenhum e-mail no registro",
+    "emptyHint": "Nada corresponde a estes filtros, ou a integração ainda não buscou nenhum e-mail.",
+    "loadMore": "Carregar mais"
   }
 }

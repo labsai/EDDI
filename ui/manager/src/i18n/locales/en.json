@@ -5614,7 +5614,11 @@
     "replyTemplate": "Reply template",
     "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
     "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
-    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "ownerDigest": "Daily mail digest",
+    "ownerDigestOff": "Off",
+    "ownerDigestDaily": "Daily",
+    "ownerDigestHint": "Daily: the owner addresses also get one email a day with the previous day's mail counts by outcome (no addresses or content), if the system mailer is configured."
   },
   "feedback": {
     "title": "Feedback",
@@ -5928,5 +5932,27 @@
     "approved": "Change approved and applied",
     "rejected": "Change rejected; nothing was applied",
     "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
+  },
+  "emailLog": {
+    "title": "Mail log",
+    "description": "Every mail this integration received or sent in the last 30 days, and why a mail was not acted on. Subjects and bodies are never stored.",
+    "lookupLabel": "Look up Message-ID",
+    "lookupAction": "Look up",
+    "lookupHint": "The Message-ID header of the mail, from the mail client's \"show original\" or \"view source\".",
+    "lookupNotFound": "No mail with this Message-ID in the log. It was never fetched (another folder, spam), or it is older than the log's retention.",
+    "directionIn": "In",
+    "directionOut": "Out",
+    "allDirections": "All directions",
+    "allStates": "All states",
+    "allReasons": "All reasons",
+    "colTime": "Time",
+    "colDirection": "Direction",
+    "colCounterpart": "Sender / recipient",
+    "colState": "State",
+    "colReason": "Reason",
+    "colConversation": "Conversation",
+    "empty": "No mail in the log",
+    "emptyHint": "Nothing matches these filters, or the integration has not fetched any mail yet.",
+    "loadMore": "Load more"
   }
 }

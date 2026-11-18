@@ -513,6 +513,14 @@ export function EmailPlatformFields({
             <p className={hintClass}>{t("emailChannel.ownerNotifyHint", "Up to 5, comma-separated. They get one email a day when the integration stops on a budget, if the system mailer is configured.")}</p>
             {problemFor("ownerNotifyTooMany", "ownerNotifyInvalid")}
           </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-digest`} className={labelClass}>{t("emailChannel.ownerDigest", "Daily mail digest")}</label>
+            <select id={`${uid}-digest`} data-testid="email-owner-digest" className={selectClass} value={pc.ownerDigest === "daily" ? "daily" : "off"} onChange={(e) => set("ownerDigest", e.target.value === "daily" ? "daily" : "")}>
+              <option value="off">{t("emailChannel.ownerDigestOff", "Off")}</option>
+              <option value="daily">{t("emailChannel.ownerDigestDaily", "Daily")}</option>
+            </select>
+            <p className={hintClass}>{t("emailChannel.ownerDigestHint", "Daily: the owner addresses also get one email a day with the previous day's mail counts by outcome (no addresses or content), if the system mailer is configured.")}</p>
+          </div>
         </div>
       </details>
     </div>

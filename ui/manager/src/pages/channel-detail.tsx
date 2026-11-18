@@ -10,7 +10,7 @@ import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import {
   Cable, Save, Trash2, ArrowLeft, Plus, X, Copy, Check,
   Bot, Users, ChevronDown, ChevronUp, Hash,
-  ExternalLink, Star, AlertTriangle, ShieldCheck,
+  ExternalLink, Star, AlertTriangle, ShieldCheck, Inbox,
 } from "lucide-react";
 import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
@@ -24,6 +24,7 @@ import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { EmailMailLog } from "@/components/channels/email-mail-log";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -570,6 +571,14 @@ export function ChannelDetailPage() {
         <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3" data-testid="email-setup-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.setupTitle", "Setup and security")}</h2>
           <EmailSecurityNotes conversation={emailMode(draft?.platformConfig ?? {}) === "conversation"} />
+        </section>
+      )}
+
+      {/* Email: the mail log — why a mail was or was not acted on. The owner digest links here (#mail-log). */}
+      {isEmail && id && (
+        <section id="mail-log" className="rounded-xl border border-border bg-card p-5 space-y-3 scroll-mt-4" data-testid="email-mail-log-section">
+          <h2 className="text-sm font-semibold flex items-center gap-2"><Inbox className="h-4 w-4 text-primary" />{t("emailLog.title", "Mail log")}</h2>
+          <EmailMailLog channelId={id} />
         </section>
       )}
 

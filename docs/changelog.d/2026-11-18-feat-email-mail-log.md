@@ -26,6 +26,15 @@ Phase 2 of the email channel v2 plan: before EDDI starts ignoring mail it was no
   for a quiet day. No new scheduler.
 - `docs/email-integration.md`: "Troubleshooting: why didn't EDDI act on a mail?" with the reason table, both endpoints
   and the digest; `ownerDigest` in the keys table.
+- Manager: a **Mail log** section on an email integration's page (`#mail-log`): filters by direction, state and
+  reason category, "load more" on the cursor, and a "Look up Message-ID" box (`email-mail-log.tsx`,
+  `use-email-log.ts`, `lib/api/email-log.ts`); a "Daily mail digest" select in the email settings. i18n in all 11
+  locales, MSW handlers (`MOCK_EMAIL_LOG`), the two operations added to `openapi-operations.json` by hand in the
+  generator's order (regenerating needs a backend built from this branch), tests in `email-mail-log.test.tsx`.
+- Platform Operator: `GET /channelstore/channels/{id}/email-log` on the read allow-list and a "why didn't the
+  platform answer my mail?" paragraph in the prompt; revision 81 → 82. The `POST …/lookup` is deliberately not
+  granted: it only reads, but the gate decides by method and `READ_ENDPOINTS` means GETs — the listing's filters
+  find the same row.
 
 **Design decisions**
 

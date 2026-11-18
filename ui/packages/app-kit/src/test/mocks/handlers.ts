@@ -813,7 +813,53 @@ export const MOCK_OUTPUT_IMAGE = { type: "image", uri: "/eddi-icon.svg", alt: "E
 export const MOCK_TASK_ERROR_TEXT = "Task 'eddi://ai.labs.llm' failed: `temperature` is deprecated for this model.";
 
 /** What the mocked ingestion status says for a `replace=true` ingestion. */
-export const MOCK_REPLACE_WARNING = "The new version is stored, but the previous version is still retrievable (mock).";
+/** Rows of `GET /channelstore/channels/{id}/email-log`, shaped like the backend's `EmailLogView`. */
+export const MOCK_EMAIL_LOG = [
+  {
+    id: "log-1",
+    kind: "TRIGGER",
+    direction: "IN",
+    messageId: "<CAF0001@mail.supplier-a.example>",
+    state: "REFUSED",
+    reason: "blocked:not_allowlisted",
+    reasonCategory: "blocked",
+    conversationId: null,
+    counterpart: "billing@unknown.example",
+    attempts: 0,
+    createdAt: "2026-11-17T10:00:00Z",
+    updatedAt: "2026-11-17T10:00:01Z",
+  },
+  {
+    id: "log-2",
+    kind: "TRIGGER",
+    direction: "IN",
+    messageId: "<CAF0002@mail.supplier-a.example>",
+    state: "DONE",
+    reason: null,
+    reasonCategory: null,
+    conversationId: "6a1b2c3d4e5f60718293a4b5",
+    counterpart: "invoices@supplier-a.example",
+    attempts: 0,
+    createdAt: "2026-11-17T09:00:00Z",
+    updatedAt: "2026-11-17T09:00:30Z",
+  },
+  {
+    id: "log-3",
+    kind: "REPLY",
+    direction: "OUT",
+    messageId: "<CAF0002@mail.supplier-a.example>",
+    state: "SENT",
+    reason: null,
+    reasonCategory: null,
+    conversationId: "6a1b2c3d4e5f60718293a4b5",
+    counterpart: "invoices@supplier-a.example",
+    attempts: 1,
+    createdAt: "2026-11-17T09:00:31Z",
+    updatedAt: "2026-11-17T09:00:32Z",
+  },
+] as const;
+
+export const MOCK_REPLACE_WARNING ="The new version is stored, but the previous version is still retrievable (mock).";
 
 function readSeed<T>(key: string): T | null {
   try {
@@ -5700,6 +5746,25 @@ export const backupSyncHandlers = [
         lastModifiedOn: Date.now() - 900000,
       },
     ]);
+  }),
+
+  // An email integration's mail log (`EmailLogView` rows): no subject or body,
+  // the reason in `reason` and its part before the first ':' in `reasonCategory`.
+  http.get("*/channelstore/channels/:id/email-log", ({ request }) => {
+    const url = new URL(request.url);
+    const rows = MOCK_EMAIL_LOG.filter(
+      (row) =>
+        (!url.searchParams.get("direction") || row.direction === url.searchParams.get("direction")) &&
+        (!url.searchParams.get("state") || row.state === url.searchParams.get("state")) &&
+        (!url.searchParams.get("reason") || (row.reason ?? "").startsWith(url.searchParams.get("reason") ?? "")),
+    );
+    return HttpResponse.json({ rows, nextCursor: null });
+  }),
+
+  http.post("*/channelstore/channels/:id/email-log/lookup", async ({ request }) => {
+    const body = (await request.json()) as { messageId?: string };
+    const rows = MOCK_EMAIL_LOG.filter((row) => row.messageId === body.messageId);
+    return rows.length > 0 ? HttpResponse.json(rows) : HttpResponse.json({ error: "not found" }, { status: 404 });
   }),
 
   http.get("*/channelstore/channels/:id", ({ params }) => {

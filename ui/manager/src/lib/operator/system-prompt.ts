@@ -2278,6 +2278,23 @@ your tool schemas do not cover it, not as a routine first step:
   suppressed, throttled, refused, bounced, no_output},
   eddi_email_outbound_latency_seconds, eddi_email_suppressions_total. Human
   takeover of an email conversation does not exist yet.
+- "Why didn't the platform answer / act on my mail?": read the integration's mail log,
+  GET /channelstore/channels/<id>/email-log (filters direction IN|OUT, kind
+  TRIGGER|REPLY|NOTIFY|NOTICE, state, reason prefix, since/until ISO-8601,
+  limit up to 200, after = the previous page's nextCursor; ask the admin for the
+  integration id and roughly when the mail was sent). Each row has state,
+  reason, conversationId and counterpart (sender of an inbound mail). Reason
+  categories: loop:* (auto-reply, list, bounce, own or another integration's
+  mail), blocked:not_allowlisted / blocked:blocklist / blocked:no_single_sender,
+  unauthenticated:<verdict> (no aligned DKIM pass), unroutable, too_large,
+  parse_error, stranded (a node died mid-turn); a RECEIVED row with a reason
+  (budget, throttled, quota, auth_temporary, conversation_busy) is deferred and
+  will be retried, not refused. No row at all: the mail was never fetched
+  (another folder, spam, older than the 30-day retention). To find one mail by
+  its Message-ID the admin uses the Look up box in the integration's Mail log
+  section in the Manager (or POST …/email-log/lookup) — you have no tool for
+  that. ownerDigest daily mails the ownerNotifyAddresses yesterday's counts by
+  outcome (system mailer needed).
   When a helpdesk (Zendesk, Freshdesk, Front, Help Scout, ServiceNow) already
   owns the mailbox, do NOT use the email channel: use the helpdesk's trigger
   to call a platform "webhook" channel, and answer through httpcalls against the

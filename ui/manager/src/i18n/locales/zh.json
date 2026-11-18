@@ -5614,7 +5614,11 @@
     "replyTemplate": "回复模板",
     "replyTemplateHint": "包裹智能体的回答；回答作为文本插入，绝不会作为模板执行。变量：",
     "noteDkim": "回复需要一台为邮箱所在域使用 DKIM 签名外发邮件的邮件服务器，以及该域的 DMARC 记录——{{productName}} 不签名。缺少它们，回复会进入垃圾邮件或被拒收。为该域启用 DKIM 后，Exchange Online 和大多数托管商都会对提交的邮件签名。",
-    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "ownerDigest": "每日邮件摘要",
+    "ownerDigestOff": "关闭",
+    "ownerDigestDaily": "每日",
+    "ownerDigestHint": "每日：若已配置系统邮件发送器，负责人地址每天还会收到一封邮件，按结果统计前一天的邮件数量（不含地址和内容）。"
   },
   "feedback": {
     "title": "反馈",
@@ -5928,5 +5932,27 @@
     "approved": "更改已批准并应用",
     "rejected": "更改已拒绝；未应用任何内容",
     "approveBlockedDirty": "请先保存您对配额的编辑，或重新加载页面以放弃这些编辑：在批准后再保存会覆盖已批准的配额。"
+  },
+  "emailLog": {
+    "title": "邮件日志",
+    "description": "此集成在过去 30 天内收到或发送的每封邮件，以及某封邮件未被处理的原因。主题和正文从不保存。",
+    "lookupLabel": "查找 Message-ID",
+    "lookupAction": "查找",
+    "lookupHint": "邮件的 Message-ID 标头，可在邮件客户端的“显示原始邮件”或“查看源代码”中找到。",
+    "lookupNotFound": "日志中没有此 Message-ID 的邮件。它从未被获取（在其他文件夹或垃圾邮件中），或已超过日志的保留期限。",
+    "directionIn": "收",
+    "directionOut": "发",
+    "allDirections": "所有方向",
+    "allStates": "所有状态",
+    "allReasons": "所有原因",
+    "colTime": "时间",
+    "colDirection": "方向",
+    "colCounterpart": "发件人 / 收件人",
+    "colState": "状态",
+    "colReason": "原因",
+    "colConversation": "会话",
+    "empty": "日志中没有邮件",
+    "emptyHint": "没有符合这些筛选条件的邮件，或该集成尚未获取任何邮件。",
+    "loadMore": "加载更多"
   }
 }
