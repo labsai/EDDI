@@ -49,6 +49,8 @@ import {
   type OAuthConfig,
   type StaticAuth,
 } from "@eddi/app-kit/lib/api/connections";
+import { getConnectionCurrentVersion } from "@eddi/app-kit/lib/api/connections";
+import { useResolvedVersion } from "@/hooks/use-resolved-version";
 import {
   bindingFor,
   isOAuthType,
@@ -90,10 +92,16 @@ export function ConnectionDetailPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
 
-  const parsedVersion = Number(searchParams.get("version") ?? "1");
-  const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
+  // A bare link (no ?version) opens the CURRENT version, not version 1 — saving
+  // from version 1 of a resource that has moved on is a conflict.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useResolvedVersion(["connections"], id, searchParams.get("version"), getConnectionCurrentVersion);
+  const version = resolvedVersion ?? 1;
 
-  const { data: config, isLoading, isError, error, refetch } = useConnection(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useConnection(resolvedVersion !== undefined ? id! : "", version);
   const updateMutation = useUpdateConnection();
   const deleteMutation = useDeleteConnection();
 
@@ -463,6 +471,18 @@ export function ConnectionDetailPage() {
 
   // Only a failed INITIAL load replaces the page. A background refetch failure
   // must not throw away a form the user is part way through editing.
+  if (versionLookupFailed) {
+    return (
+      <div data-testid="connection-version-error">
+        <ErrorState
+          message={t("common.versionLookupFailed", "Could not find the current version.")}
+          onRetry={retryVersionLookup}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
+
   if (isError && !draft) {
     return (
       <div data-testid="connection-detail-error">

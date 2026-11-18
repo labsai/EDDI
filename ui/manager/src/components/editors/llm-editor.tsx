@@ -102,6 +102,7 @@ import {
   BUILT_IN_TOOLS,
 } from "@eddi/app-kit/components/editors/llm/types";
 
+import { useReportInvalid } from "@eddi/app-kit/components/editors/editor-validity";
 import { ProviderSelect } from "@eddi/app-kit/components/shared/provider-select";
 import { SELF_HOSTED_PROVIDER_ID, getDefaultBaseUrl, getProviderRegions } from "@eddi/app-kit/lib/llm-provider-catalog";
 
@@ -271,6 +272,14 @@ function TaskEditor({
       ? numberProblem(temperatureValue, temperatureRange)
       : null;
   const providerInfo = getProviderConfig(task.type ?? "");
+  // An invalid temperature is shown inline; it also blocks Save in the layout,
+  // which would otherwise persist a value the backend cannot parse.
+  useReportInvalid(
+    temperatureProblem
+      ? t("llmEditor.temperatureBlocksSave", "The temperature is not valid — fix it before saving.")
+      : null,
+    "temperature",
+  );
 
   /**
    * Changing the provider keeps the parameters (the grid shows what carries

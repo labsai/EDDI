@@ -161,7 +161,7 @@ export function updateResource(
   id: string,
   version: number,
   body: unknown
-): Promise<{ location: string }> {
+): Promise<{ location: string; warnings?: unknown }> {
   return api.put(`${basePath(rt)}/${seg(id)}?version=${version}`, body);
 }
 

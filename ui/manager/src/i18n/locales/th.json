@@ -219,7 +219,8 @@
       "forbidden": "คุณไม่มีสิทธิ์ดูสิ่งนี้",
       "notFound": "ไม่พบ — อาจถูกลบไปแล้ว"
     },
-    "rename": "เปลี่ยนชื่อ"
+    "rename": "เปลี่ยนชื่อ",
+    "versionLookupFailed": "ไม่พบเวอร์ชันปัจจุบัน"
   },
   "agents": {
     "confirmDeleteDescription": "การดำเนินการนี้ไม่สามารถย้อนกลับได้ เอเจนต์และข้อมูลทั้งหมดจะถูกลบอย่างถาวร",
@@ -692,7 +693,11 @@
     "step_llm": "โมเดล",
     "step_apispec": "สเปก API",
     "step_features": "ฟีเจอร์",
-    "step_review": "ตรวจสอบ"
+    "step_review": "ตรวจสอบ",
+    "providerResetNote": "การเปลี่ยนผู้ให้บริการรีเซ็ต: {{fields}} ค่าเหล่านี้เป็นของผู้ให้บริการเดิม สลับกลับเพื่อเรียกคืน",
+    "resetModel": "ชื่อโมเดล",
+    "resetApiKey": "คีย์ API",
+    "resetBaseUrl": "URL หลัก"
   },
   "packages": {
     "confirmDeleteDescription": "การดำเนินการนี้ไม่สามารถย้อนกลับได้ เวิร์กโฟลว์และข้อมูลทั้งหมดจะถูกลบอย่างถาวร",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "อัปเดตเอเจนต์และบันทึก",
     "keepEditing": "แก้ไขต่อ",
     "discardChanges": "ทิ้งการเปลี่ยนแปลง",
-    "deployDone": "ปรับใช้แล้ว — การเปลี่ยนแปลงมีผลแล้ว"
+    "deployDone": "ปรับใช้แล้ว — การเปลี่ยนแปลงมีผลแล้ว",
+    "loadingEditor": "กำลังโหลดตัวแก้ไข…",
+    "saveErrorReason": "ไม่ได้บันทึก: {{reason}}",
+    "savedWithWarnings": "บันทึกแล้ว พร้อมคำเตือน",
+    "dismissWarnings": "ปิด"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "จอง แสดงรายการ และยกเลิกการติดตามผลครั้งเดียวสำหรับการสนทนาของเอเจนต์เองหรือการสนทนาใหม่ การทำงานแต่ละครั้งมีเพดานค่าใช้จ่าย",
     "agentOpsMaxPending": "จำนวนที่รอพร้อมกัน",
     "agentOpsHorizon": "ช่วงเวลา (วัน สูงสุด 90)",
-    "agentOpsCostPerFire": "เพดานค่าใช้จ่ายต่อการทำงาน ($)"
+    "agentOpsCostPerFire": "เพดานค่าใช้จ่ายต่อการทำงาน ($)",
+    "temperatureBlocksSave": "ค่า temperature ไม่ถูกต้อง — แก้ไขก่อนบันทึก"
   },
   "outputEditor": {
     "labelPlaceholder": "ป้ายลิงก์...",

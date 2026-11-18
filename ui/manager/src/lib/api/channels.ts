@@ -72,6 +72,11 @@ export function getChannelDescriptors(
   );
 }
 
+/** The channel's current (newest) version — `GET /channelstore/channels/{id}/currentversion`. */
+export function getChannelCurrentVersion(id: string): Promise<number> {
+  return api.get<number>(`/channelstore/channels/${seg(id)}/currentversion`);
+}
+
 export function getChannel(
   id: string,
   version?: number,

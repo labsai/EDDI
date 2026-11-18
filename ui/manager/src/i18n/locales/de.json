@@ -219,7 +219,8 @@
       "forbidden": "Sie haben keine Berechtigung, dies anzuzeigen.",
       "notFound": "Nicht gefunden – möglicherweise wurde es gelöscht."
     },
-    "rename": "Umbenennen"
+    "rename": "Umbenennen",
+    "versionLookupFailed": "Die aktuelle Version konnte nicht ermittelt werden."
   },
   "agents": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Agent und alle seine Daten werden dauerhaft entfernt.",
@@ -692,7 +693,11 @@
     "step_llm": "Modell",
     "step_apispec": "API-Spezifikation",
     "step_features": "Funktionen",
-    "step_review": "Überprüfen"
+    "step_review": "Überprüfen",
+    "providerResetNote": "Der Anbieterwechsel hat zurückgesetzt: {{fields}}. Sie gehören zum vorherigen Anbieter; wechseln Sie zurück, dann sind sie wieder da.",
+    "resetModel": "Modellname",
+    "resetApiKey": "API-Schlüssel",
+    "resetBaseUrl": "Basis-URL"
   },
   "packages": {
     "confirmDeleteDescription": "Diese Aktion kann nicht rückgängig gemacht werden. Der Workflow und alle seine Daten werden dauerhaft entfernt.",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "Agent aktualisieren und speichern",
     "keepEditing": "Weiter bearbeiten",
     "discardChanges": "Änderungen verwerfen",
-    "deployDone": "Bereitgestellt — die Änderung ist aktiv"
+    "deployDone": "Bereitgestellt — die Änderung ist aktiv",
+    "loadingEditor": "Editor wird geladen …",
+    "saveErrorReason": "Nicht gespeichert: {{reason}}",
+    "savedWithWarnings": "Gespeichert, mit Warnungen",
+    "dismissWarnings": "Schließen"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "Einmalige Wiedervorlagen für die eigene Unterhaltung des Agenten oder eine neue buchen, auflisten und stornieren. Jeder Lauf hat eine Kostenobergrenze.",
     "agentOpsMaxPending": "Gleichzeitig wartend",
     "agentOpsHorizon": "Horizont (Tage, max. 90)",
-    "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)"
+    "agentOpsCostPerFire": "Kostenobergrenze pro Lauf ($)",
+    "temperatureBlocksSave": "Die Temperatur ist ungültig – bitte vor dem Speichern korrigieren."
   },
   "outputEditor": {
     "labelPlaceholder": "Link-Beschriftung...",

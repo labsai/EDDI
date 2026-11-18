@@ -4,6 +4,7 @@ import { useTheme } from "@eddi/ui";
 import "@eddi/app-kit/lib/monaco-setup";
 import Editor, { type OnMount, type BeforeMount, type Monaco } from "@monaco-editor/react";
 import { useCallback, useEffect, useId, useRef } from "react";
+import { useTranslation } from "react-i18next";
 import type { editor } from "monaco-editor";
 
 /**
@@ -100,6 +101,14 @@ export function JsonEditor({
   jsonSchema,
 }: JsonEditorProps) {
   const { resolvedTheme } = useTheme();
+  const { t } = useTranslation();
+  /**
+   * True while the format-on-mount pass runs. Its edit is the editor tidying the
+   * text it was given, not the user changing the document: reporting it through
+   * `onChange` marked an unedited document as dirty (Save lit up, the navigation
+   * guard asked to discard changes nobody made).
+   */
+  const mountFormattingRef = useRef(false);
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   // Unique per mounted editor: the model's path is what the schema's
   // fileMatch is scoped to.
@@ -108,12 +117,20 @@ export function JsonEditor({
   const handleMount: OnMount = useCallback(
     (editor) => {
       editorRef.current = editor;
-      // Auto-format on mount
-      setTimeout(() => {
-        editor.getAction("editor.action.formatDocument")?.run();
+      // Auto-format on mount — but never report that pass as an edit.
+      if (readOnly) return;
+      setTimeout(async () => {
+        mountFormattingRef.current = true;
+        try {
+          await editor.getAction("editor.action.formatDocument")?.run();
+        } catch {
+          // Formatting is cosmetic; an invalid document simply stays as it is.
+        } finally {
+          mountFormattingRef.current = false;
+        }
       }, 100);
     },
-    []
+    [readOnly]
   );
 
   const handleBeforeMount: BeforeMount = useCallback(
@@ -136,6 +153,7 @@ export function JsonEditor({
 
   const handleChange = useCallback(
     (val: string | undefined) => {
+      if (mountFormattingRef.current) return;
       if (val !== undefined && onChange) {
         onChange(val);
       }
@@ -176,7 +194,7 @@ export function JsonEditor({
           <div className="flex items-center justify-center" style={{ height }}>
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
               <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary border-t-transparent" />
-              Loading editor...
+              {t("editor.loadingEditor", "Loading editor…")}
             </div>
           </div>
         }

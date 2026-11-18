@@ -66,6 +66,7 @@ import { toast } from "sonner";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { BUILT_IN_TOOLS } from "@eddi/app-kit/components/editors/llm/types";
 import { readCapped } from "@/lib/read-capped";
+import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 
 /* ================================================================
    Types & Constants
@@ -184,7 +185,46 @@ export function AgentWizardPage() {
     [],
   );
 
+  // Everything typed here — prompts and API keys included — is lost on browser
+  // Back, a sidebar click or a reload until the agent exists. `update` always
+  // produces a new object, so identity with the initial state means untouched.
+  useUnsavedChangesGuard(state !== INITIAL_STATE && result === null);
+
+  /**
+   * What the user typed for each provider they left, so switching back (or on to
+   * a provider they already filled in) restores it instead of starting blank.
+   * A key stays tied to the provider it was typed for — it is never carried to
+   * another vendor's endpoint.
+   */
+  const providerMemory = useRef<Record<string, { model: string; apiKey: string; baseUrl: string }>>({});
+  /** Set when a provider switch reset something the user had typed, so it is not silent. */
+  const [resetNote, setResetNote] = useState<string[]>([]);
+
   function handleProviderChange(providerId: string) {
+    if (providerId === state.provider) return;
+    providerMemory.current[state.provider] = {
+      model: state.model,
+      apiKey: state.apiKey,
+      baseUrl: state.baseUrl,
+    };
+    const keepsUrl = supportsBaseUrl(providerId) && !isCompatibleSwitch(state.provider, providerId);
+    const remembered = providerMemory.current[providerId];
+    if (remembered) {
+      setResetNote([]);
+      update({
+        provider: providerId,
+        ...remembered,
+        // A proxy URL carried across two non-compatible providers stays.
+        baseUrl: keepsUrl && state.baseUrl ? state.baseUrl : remembered.baseUrl,
+      });
+      return;
+    }
+    const wasDefaultModel = state.model === (getProviderConfig(state.provider)?.defaultModel ?? "");
+    const cleared: string[] = [];
+    if (state.model.trim() !== "" && !wasDefaultModel) cleared.push("model");
+    if (state.apiKey.trim() !== "") cleared.push("apiKey");
+    if (state.baseUrl.trim() !== "" && !keepsUrl) cleared.push("baseUrl");
+    setResetNote(cleared);
     update({
       provider: providerId,
       // The new provider's default, not blank: a model id from the previous
@@ -614,6 +654,7 @@ export function AgentWizardPage() {
             onModelChange={(model) => update({ model })}
             onApiKeyChange={(apiKey) => update({ apiKey })}
             onBaseUrlChange={(baseUrl) => update({ baseUrl })}
+            resetNote={resetNote}
           />
         )}
         {step?.id === "apispec" && (
@@ -893,11 +934,14 @@ function LlmStep({
   onModelChange,
   onApiKeyChange,
   onBaseUrlChange,
+  resetNote = [],
 }: {
   provider: string;
   model: string;
   apiKey: string;
   baseUrl: string;
+  /** What the last provider switch reset: any of "model", "apiKey", "baseUrl". */
+  resetNote?: string[];
   onProviderChange: (v: string) => void;
   onModelChange: (v: string) => void;
   onApiKeyChange: (v: string) => void;
@@ -947,6 +991,25 @@ function LlmStep({
             />
             <ChevronDown className="pointer-events-none absolute inset-e-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           </div>
+          {resetNote.length > 0 && (
+            <p className="mt-1.5 text-xs text-warn-700 dark:text-warn-300" role="status" data-testid="wizard-provider-reset-note">
+              {t(
+                "setupWizard.providerResetNote",
+                "Switching provider reset: {{fields}}. They belong to the previous provider; switch back and they return.",
+                {
+                  fields: resetNote
+                    .map((f) =>
+                      f === "model"
+                        ? t("setupWizard.resetModel", "model name")
+                        : f === "apiKey"
+                          ? t("setupWizard.resetApiKey", "API key")
+                          : t("setupWizard.resetBaseUrl", "base URL"),
+                    )
+                    .join(", "),
+                },
+              )}
+            </p>
+          )}
         </div>
 
         {/* Region — only for compatible providers with more than one endpoint.

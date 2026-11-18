@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { EditorValidityContext, type EditorValidity } from "@eddi/app-kit/components/editors/editor-validity";
 import { JsonEditor } from "./json-editor";
 import { VersionPicker, type VersionInfo } from "./version-picker";
 import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows, Rocket } from "lucide-react";
@@ -35,6 +36,11 @@ export interface ConfigEditorLayoutProps {
   saveSuccess?: boolean;
   /** Save error message */
   saveError?: string;
+  /**
+   * Warnings the last successful save answered with ("saved, but …"). Shown
+   * until the next edit or save.
+   */
+  saveWarnings?: string[];
   /** Read-only mode */
   readOnly?: boolean;
   /** Static children for the form view (fallback placeholder if absent) */
@@ -85,6 +91,7 @@ export function ConfigEditorLayout({
   isSaveAndDeploying = false,
   saveSuccess = false,
   saveError,
+  saveWarnings,
   readOnly = false,
   children,
   renderFormEditor,
@@ -107,6 +114,35 @@ export function ConfigEditorLayout({
   editedDataRef.current = editedData;
   /** Why the last Save click did nothing — shown instead of a silent no-op. */
   const [invalidJson, setInvalidJson] = useState<string | null>(null);
+  /** Field problems the form editor reported (id -> reason); any entry blocks Save. */
+  const [fieldProblems, setFieldProblems] = useState<Record<string, string>>({});
+  const validity = useMemo<EditorValidity>(
+    () => ({
+      report: (id, reason) =>
+        setFieldProblems((prev) => {
+          if (reason === null) {
+            if (!(id in prev)) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          }
+          return prev[id] === reason ? prev : { ...prev, [id]: reason };
+        }),
+    }),
+    [],
+  );
+  const blockingReason = Object.values(fieldProblems)[0] ?? null;
+  /** The warnings array the user dismissed — a newer save brings a new array. */
+  const [dismissedWarnings, setDismissedWarnings] = useState<string[] | undefined>(undefined);
+
+  // A failed save must not cost the draft: the buffer is what the user typed, and
+  // `data` did not change. The ref only exists to recognise "this is what was
+  // saved" when the refetch lands — after a failure there is no such refetch, and
+  // leaving it set let an unrelated later refetch (a window focus, another tab's
+  // save) overwrite the draft because it still equalled the "saved" payload.
+  useEffect(() => {
+    if (saveError) savedPayloadRef.current = null;
+  }, [saveError]);
 
   // Reset edited data when the source data changes (version switch, initial
   // load, the new version a save created) — but only when doing so loses
@@ -176,17 +212,18 @@ export function ConfigEditorLayout({
   }, [editedData, t]);
 
   const handleSave = useCallback(() => {
+    if (blockingReason) return;
     if (!validJsonOrExplain()) return;
     savedPayloadRef.current = editedData;
     onSave(editedData);
-  }, [editedData, onSave, validJsonOrExplain]);
+  }, [editedData, onSave, validJsonOrExplain, blockingReason]);
 
   const handleSaveAndDeploy = useCallback(() => {
-    if (!onSaveAndDeploy) return;
+    if (!onSaveAndDeploy || blockingReason) return;
     if (!validJsonOrExplain()) return;
     savedPayloadRef.current = editedData;
     onSaveAndDeploy(editedData);
-  }, [editedData, onSaveAndDeploy, validJsonOrExplain]);
+  }, [editedData, onSaveAndDeploy, validJsonOrExplain, blockingReason]);
 
   const handleJsonChange = useCallback((val: string) => {
     setEditedData(val);
@@ -207,14 +244,15 @@ export function ConfigEditorLayout({
         const target = e.target instanceof Node ? e.target : document.activeElement;
         if (!containerRef.current || !target || !containerRef.current.contains(target)) return;
         e.preventDefault();
-        if (isDirty && !busy) handleSave();
+        if (isDirty && !busy && !blockingReason) handleSave();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [readOnly, isDirty, busy, handleSave]);
+  }, [readOnly, isDirty, busy, blockingReason, handleSave]);
 
   return (
+    <EditorValidityContext.Provider value={validity}>
     <div ref={containerRef} className="space-y-4" data-testid="config-editor-layout">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -269,6 +307,11 @@ export function ConfigEditorLayout({
               {saveError}
             </span>
           )}
+          {blockingReason && !readOnly && isDirty && (
+            <span className="text-xs font-medium text-destructive" role="alert" data-testid="save-blocked-reason">
+              {blockingReason}
+            </span>
+          )}
           {invalidJson && (
             <span className="text-xs font-medium text-destructive" role="alert" data-testid="save-invalid-json">
               {t("editor.invalidJsonNotSaved", "Not saved — the JSON is invalid: {{reason}}", {
@@ -289,7 +332,8 @@ export function ConfigEditorLayout({
               </button>
               <button
                 onClick={handleSave}
-                disabled={!isDirty || isSaving || isSaveAndDeploying}
+                disabled={!isDirty || isSaving || isSaveAndDeploying || !!blockingReason}
+                title={blockingReason ?? undefined}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
                 data-testid="save-btn"
               >
@@ -301,7 +345,8 @@ export function ConfigEditorLayout({
               {onSaveAndDeploy && (
                 <button
                   onClick={handleSaveAndDeploy}
-                  disabled={!isDirty || isSaving || isSaveAndDeploying}
+                  disabled={!isDirty || isSaving || isSaveAndDeploying || !!blockingReason}
+                  title={blockingReason ?? undefined}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-700"
                   data-testid="save-test-btn"
                 >
@@ -315,6 +360,33 @@ export function ConfigEditorLayout({
           )}
         </div>
       </div>
+
+      {saveWarnings && saveWarnings.length > 0 && dismissedWarnings !== saveWarnings && !isDirty && (
+        <div
+          className="rounded-lg border border-warn-300 bg-warn-50 p-3 text-sm text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="status"
+          data-testid="save-warnings"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">{t("editor.savedWithWarnings", "Saved, with warnings")}</p>
+              <ul className="mt-1 list-disc ps-5">
+                {saveWarnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedWarnings(saveWarnings)}
+              className="text-xs underline"
+              data-testid="save-warnings-dismiss"
+            >
+              {t("editor.dismissWarnings", "Dismiss")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div
@@ -446,5 +518,6 @@ export function ConfigEditorLayout({
       />
 
     </div>
+    </EditorValidityContext.Provider>
   );
 }

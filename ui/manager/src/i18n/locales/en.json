@@ -219,7 +219,8 @@
       "forbidden": "You don't have permission to view this.",
       "notFound": "Not found — it may have been deleted."
     },
-    "rename": "Rename"
+    "rename": "Rename",
+    "versionLookupFailed": "Could not find the current version."
   },
   "createOrWizard": {
     "title": "New {{type}}",
@@ -721,7 +722,11 @@
     "step_llm": "Model",
     "step_apispec": "API Spec",
     "step_features": "Features",
-    "step_review": "Review"
+    "step_review": "Review",
+    "providerResetNote": "Switching provider reset: {{fields}}. They belong to the previous provider; switch back and they return.",
+    "resetModel": "model name",
+    "resetApiKey": "API key",
+    "resetBaseUrl": "base URL"
   },
   "packages": {
     "confirmDeleteDescription": "This action cannot be undone. The workflow and all its data will be permanently removed.",
@@ -1004,7 +1009,11 @@
     "updateAgentAndSave": "Update agent and save",
     "keepEditing": "Keep editing",
     "discardChanges": "Discard changes",
-    "deployDone": "Deployed — the change is live"
+    "deployDone": "Deployed — the change is live",
+    "loadingEditor": "Loading editor…",
+    "saveErrorReason": "Not saved: {{reason}}",
+    "savedWithWarnings": "Saved, with warnings",
+    "dismissWarnings": "Dismiss"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1675,7 +1684,8 @@
     "agentOpsFollowUpDesc": "Book, list and cancel one-off check-backs for the agent's own conversation or a fresh one. Every fire carries a cost ceiling.",
     "agentOpsMaxPending": "Waiting at once",
     "agentOpsHorizon": "Horizon (days, max 90)",
-    "agentOpsCostPerFire": "Cost ceiling per fire ($)"
+    "agentOpsCostPerFire": "Cost ceiling per fire ($)",
+    "temperatureBlocksSave": "The temperature is not valid — fix it before saving."
   },
   "outputEditor": {
     "labelPlaceholder": "Link label...",

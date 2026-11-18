@@ -219,7 +219,8 @@
       "forbidden": "이 항목을 볼 권한이 없습니다.",
       "notFound": "찾을 수 없음 — 삭제되었을 수 있습니다."
     },
-    "rename": "이름 바꾸기"
+    "rename": "이름 바꾸기",
+    "versionLookupFailed": "현재 버전을 찾을 수 없습니다."
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",
@@ -692,7 +693,11 @@
     "step_llm": "모델",
     "step_apispec": "API 사양",
     "step_features": "기능",
-    "step_review": "검토"
+    "step_review": "검토",
+    "providerResetNote": "공급자를 바꾸면서 {{fields}}이(가) 초기화되었습니다. 이전 공급자의 값이므로 다시 돌아가면 복원됩니다.",
+    "resetModel": "모델 이름",
+    "resetApiKey": "API 키",
+    "resetBaseUrl": "기본 URL"
   },
   "packages": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 워크플로와 모든 데이터가 영구적으로 제거됩니다.",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "에이전트 업데이트 후 저장",
     "keepEditing": "계속 편집",
     "discardChanges": "변경 사항 취소",
-    "deployDone": "배포됨 — 변경 사항이 적용되었습니다"
+    "deployDone": "배포됨 — 변경 사항이 적용되었습니다",
+    "loadingEditor": "편집기를 불러오는 중…",
+    "saveErrorReason": "저장되지 않음: {{reason}}",
+    "savedWithWarnings": "저장됨, 경고 있음",
+    "dismissWarnings": "닫기"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "에이전트 자신의 대화 또는 새 대화에 대한 일회성 후속 확인을 예약, 조회, 취소합니다. 각 실행에는 비용 상한이 있습니다.",
     "agentOpsMaxPending": "동시 대기 수",
     "agentOpsHorizon": "기간(일, 최대 90)",
-    "agentOpsCostPerFire": "실행당 비용 상한($)"
+    "agentOpsCostPerFire": "실행당 비용 상한($)",
+    "temperatureBlocksSave": "temperature 값이 올바르지 않습니다. 저장하기 전에 수정하세요."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",

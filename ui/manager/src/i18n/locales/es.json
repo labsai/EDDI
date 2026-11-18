@@ -219,7 +219,8 @@
       "forbidden": "No tienes permiso para ver esto.",
       "notFound": "No encontrado: puede que se haya eliminado."
     },
-    "rename": "Renombrar"
+    "rename": "Renombrar",
+    "versionLookupFailed": "No se pudo encontrar la versión actual."
   },
   "agents": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El agente y todos sus datos se eliminarán permanentemente.",
@@ -693,7 +694,11 @@
     "step_llm": "Modelo",
     "step_apispec": "Especificación de API",
     "step_features": "Funciones",
-    "step_review": "Revisión"
+    "step_review": "Revisión",
+    "providerResetNote": "Al cambiar de proveedor se restablecieron: {{fields}}. Pertenecen al proveedor anterior; si vuelves, reaparecen.",
+    "resetModel": "nombre del modelo",
+    "resetApiKey": "clave de API",
+    "resetBaseUrl": "URL base"
   },
   "packages": {
     "confirmDeleteDescription": "Esta acción no se puede deshacer. El workflow y todos sus datos se eliminarán permanentemente.",
@@ -977,7 +982,11 @@
     "updateAgentAndSave": "Actualizar el agente y guardar",
     "keepEditing": "Seguir editando",
     "discardChanges": "Descartar cambios",
-    "deployDone": "Desplegado: el cambio ya está activo"
+    "deployDone": "Desplegado: el cambio ya está activo",
+    "loadingEditor": "Cargando el editor…",
+    "saveErrorReason": "No guardado: {{reason}}",
+    "savedWithWarnings": "Guardado, con advertencias",
+    "dismissWarnings": "Descartar"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1652,7 +1661,8 @@
     "agentOpsFollowUpDesc": "Reservar, listar y cancelar seguimientos puntuales para la conversación del agente o una nueva. Cada ejecución lleva un tope de coste.",
     "agentOpsMaxPending": "En espera a la vez",
     "agentOpsHorizon": "Horizonte (días, máx. 90)",
-    "agentOpsCostPerFire": "Tope de coste por ejecución ($)"
+    "agentOpsCostPerFire": "Tope de coste por ejecución ($)",
+    "temperatureBlocksSave": "La temperatura no es válida: corrígela antes de guardar."
   },
   "outputEditor": {
     "labelPlaceholder": "Etiqueta del enlace...",

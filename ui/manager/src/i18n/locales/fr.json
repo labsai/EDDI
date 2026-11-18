@@ -219,7 +219,8 @@
       "forbidden": "Vous n'avez pas l'autorisation de consulter ceci.",
       "notFound": "Introuvable — il a peut-être été supprimé."
     },
-    "rename": "Renommer"
+    "rename": "Renommer",
+    "versionLookupFailed": "Impossible de trouver la version actuelle."
   },
   "agents": {
     "confirmDeleteDescription": "Cette action est irréversible. L'agent et toutes ses données seront définitivement supprimés.",
@@ -693,7 +694,11 @@
     "step_llm": "Modèle",
     "step_apispec": "Spécification d'API",
     "step_features": "Fonctionnalités",
-    "step_review": "Récapitulatif"
+    "step_review": "Récapitulatif",
+    "providerResetNote": "Le changement de fournisseur a réinitialisé : {{fields}}. Ils appartiennent au fournisseur précédent ; revenez en arrière pour les retrouver.",
+    "resetModel": "nom du modèle",
+    "resetApiKey": "clé API",
+    "resetBaseUrl": "URL de base"
   },
   "packages": {
     "confirmDeleteDescription": "Cette action est irréversible. Le workflow et toutes ses données seront définitivement supprimés.",
@@ -977,7 +982,11 @@
     "updateAgentAndSave": "Mettre à jour l'agent et enregistrer",
     "keepEditing": "Continuer à modifier",
     "discardChanges": "Abandonner les modifications",
-    "deployDone": "Déployé — la modification est active"
+    "deployDone": "Déployé — la modification est active",
+    "loadingEditor": "Chargement de l’éditeur…",
+    "saveErrorReason": "Non enregistré : {{reason}}",
+    "savedWithWarnings": "Enregistré, avec des avertissements",
+    "dismissWarnings": "Fermer"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1652,7 +1661,8 @@
     "agentOpsFollowUpDesc": "Programmer, lister et annuler des rappels ponctuels pour la conversation de l'agent ou une nouvelle. Chaque déclenchement a un plafond de coût.",
     "agentOpsMaxPending": "En attente simultanément",
     "agentOpsHorizon": "Horizon (jours, max. 90)",
-    "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)"
+    "agentOpsCostPerFire": "Plafond de coût par déclenchement ($)",
+    "temperatureBlocksSave": "La température n’est pas valide — corrigez-la avant d’enregistrer."
   },
   "outputEditor": {
     "labelPlaceholder": "Libellé du lien...",

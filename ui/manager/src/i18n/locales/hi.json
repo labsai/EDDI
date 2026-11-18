@@ -219,7 +219,8 @@
       "forbidden": "आपको इसे देखने की अनुमति नहीं है।",
       "notFound": "नहीं मिला — हो सकता है इसे हटा दिया गया हो।"
     },
-    "rename": "नाम बदलें"
+    "rename": "नाम बदलें",
+    "versionLookupFailed": "वर्तमान संस्करण नहीं मिला।"
   },
   "agents": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। एजेंट और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -692,7 +693,11 @@
     "step_llm": "मॉडल",
     "step_apispec": "API विनिर्देश",
     "step_features": "सुविधाएँ",
-    "step_review": "समीक्षा"
+    "step_review": "समीक्षा",
+    "providerResetNote": "प्रदाता बदलने पर रीसेट हुआ: {{fields}}। ये पिछले प्रदाता के हैं; वापस जाने पर लौट आएँगे।",
+    "resetModel": "मॉडल का नाम",
+    "resetApiKey": "API कुंजी",
+    "resetBaseUrl": "बेस URL"
   },
   "packages": {
     "confirmDeleteDescription": "इस क्रिया को पूर्ववत नहीं किया जा सकता। Workflow और इसका सारा डेटा स्थायी रूप से हटा दिया जाएगा।",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "एजेंट अपडेट करें और सहेजें",
     "keepEditing": "संपादन जारी रखें",
     "discardChanges": "बदलाव छोड़ें",
-    "deployDone": "डिप्लॉय हो गया — बदलाव लागू है"
+    "deployDone": "डिप्लॉय हो गया — बदलाव लागू है",
+    "loadingEditor": "एडिटर लोड हो रहा है…",
+    "saveErrorReason": "सहेजा नहीं गया: {{reason}}",
+    "savedWithWarnings": "सहेजा गया, चेतावनियों के साथ",
+    "dismissWarnings": "बंद करें"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "एजेंट की अपनी बातचीत या नई बातचीत के लिए एक-बार के फ़ॉलो-अप बुक करें, सूचीबद्ध करें और रद्द करें। हर रन की लागत सीमा होती है।",
     "agentOpsMaxPending": "एक साथ प्रतीक्षारत",
     "agentOpsHorizon": "अवधि (दिन, अधिकतम 90)",
-    "agentOpsCostPerFire": "प्रति रन लागत सीमा ($)"
+    "agentOpsCostPerFire": "प्रति रन लागत सीमा ($)",
+    "temperatureBlocksSave": "तापमान मान्य नहीं है — सहेजने से पहले ठीक करें।"
   },
   "outputEditor": {
     "labelPlaceholder": "लिंक लेबल...",

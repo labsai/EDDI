@@ -3,6 +3,8 @@ import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
+import { getChannelCurrentVersion } from "@/lib/api/channels";
+import { useResolvedVersion } from "@/hooks/use-resolved-version";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -241,10 +243,16 @@ export function ChannelDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const parsedVersion = Number(searchParams.get("version") ?? "1");
-  const version = Number.isFinite(parsedVersion) ? parsedVersion : 1;
+  // A bare link (no ?version) opens the CURRENT version, not version 1 — saving
+  // from version 1 of a resource that has moved on is a conflict.
+  const {
+    version: resolvedVersion,
+    lookupFailed: versionLookupFailed,
+    retry: retryVersionLookup,
+  } = useResolvedVersion(["channels"], id, searchParams.get("version"), getChannelCurrentVersion);
+  const version = resolvedVersion ?? 1;
 
-  const { data: config, isLoading, isError, error, refetch } = useChannel(id!, version);
+  const { data: config, isLoading, isError, error, refetch } = useChannel(resolvedVersion !== undefined ? id! : "", version);
   const updateMutation = useUpdateChannel();
   const deleteMutation = useDeleteChannel();
 
@@ -410,6 +418,18 @@ export function ChannelDetailPage() {
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
+
+  if (versionLookupFailed) {
+    return (
+      <div data-testid="channel-version-error">
+        <ErrorState
+          message={t("common.versionLookupFailed", "Could not find the current version.")}
+          onRetry={retryVersionLookup}
+          retryLabel={t("common.retry")}
+        />
+      </div>
+    );
+  }
 
   // A missing channel or bad version previously left the skeleton spinning
   // forever, because only `isLoading` was consulted.

@@ -219,7 +219,8 @@
       "forbidden": "ليس لديك إذن لعرض هذا.",
       "notFound": "غير موجود — ربما تم حذفه."
     },
-    "rename": "إعادة التسمية"
+    "rename": "إعادة التسمية",
+    "versionLookupFailed": "تعذّر العثور على الإصدار الحالي."
   },
   "agents": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة الوكيل وجميع بياناته نهائياً.",
@@ -696,7 +697,11 @@
     "step_llm": "النموذج",
     "step_apispec": "مواصفات API",
     "step_features": "الميزات",
-    "step_review": "المراجعة"
+    "step_review": "المراجعة",
+    "providerResetNote": "أدى تغيير المزوّد إلى إعادة تعيين: {{fields}}. تخص المزوّد السابق؛ عُد إليه لاستعادتها.",
+    "resetModel": "اسم النموذج",
+    "resetApiKey": "مفتاح API",
+    "resetBaseUrl": "عنوان URL الأساسي"
   },
   "packages": {
     "confirmDeleteDescription": "لا يمكن التراجع عن هذا الإجراء. ستتم إزالة مسار العمل وجميع بياناته نهائياً.",
@@ -1019,7 +1024,11 @@
     "updateAgentAndSave": "تحديث الوكيل والحفظ",
     "keepEditing": "متابعة التحرير",
     "discardChanges": "تجاهل التغييرات",
-    "deployDone": "تم النشر — التغيير نافذ الآن"
+    "deployDone": "تم النشر — التغيير نافذ الآن",
+    "loadingEditor": "جارٍ تحميل المحرر…",
+    "saveErrorReason": "لم يتم الحفظ: {{reason}}",
+    "savedWithWarnings": "تم الحفظ مع تحذيرات",
+    "dismissWarnings": "إغلاق"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1706,7 +1715,8 @@
     "agentOpsFollowUpDesc": "حجز متابعات لمرة واحدة وعرضها وإلغاؤها لمحادثة الوكيل أو لمحادثة جديدة. لكل تشغيل سقف تكلفة.",
     "agentOpsMaxPending": "منتظرة في وقت واحد",
     "agentOpsHorizon": "المدى (أيام، بحد أقصى 90)",
-    "agentOpsCostPerFire": "سقف التكلفة لكل تشغيل ($)"
+    "agentOpsCostPerFire": "سقف التكلفة لكل تشغيل ($)",
+    "temperatureBlocksSave": "درجة الحرارة غير صالحة — صحّحها قبل الحفظ."
   },
   "outputEditor": {
     "labelPlaceholder": "تسمية الرابط...",

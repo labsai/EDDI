@@ -219,7 +219,8 @@
       "forbidden": "Você não tem permissão para ver isto.",
       "notFound": "Não encontrado — pode ter sido excluído."
     },
-    "rename": "Mudar o nome"
+    "rename": "Mudar o nome",
+    "versionLookupFailed": "Não foi possível encontrar a versão atual."
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -693,7 +694,11 @@
     "step_llm": "Modelo",
     "step_apispec": "Especificação da API",
     "step_features": "Recursos",
-    "step_review": "Revisão"
+    "step_review": "Revisão",
+    "providerResetNote": "A troca de provedor redefiniu: {{fields}}. Eles pertencem ao provedor anterior; volte e eles retornam.",
+    "resetModel": "nome do modelo",
+    "resetApiKey": "chave de API",
+    "resetBaseUrl": "URL base"
   },
   "packages": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O workflow e todos os seus dados serão removidos permanentemente.",
@@ -977,7 +982,11 @@
     "updateAgentAndSave": "Atualizar o agente e guardar",
     "keepEditing": "Continuar editando",
     "discardChanges": "Descartar alterações",
-    "deployDone": "Implantado — a alteração já está ativa"
+    "deployDone": "Implantado — a alteração já está ativa",
+    "loadingEditor": "Carregando o editor…",
+    "saveErrorReason": "Não salvo: {{reason}}",
+    "savedWithWarnings": "Salvo, com avisos",
+    "dismissWarnings": "Dispensar"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1652,7 +1661,8 @@
     "agentOpsFollowUpDesc": "Marcar, listar e cancelar acompanhamentos pontuais para a conversa do agente ou uma nova. Cada execução tem um teto de custo.",
     "agentOpsMaxPending": "Em espera em simultâneo",
     "agentOpsHorizon": "Horizonte (dias, máx. 90)",
-    "agentOpsCostPerFire": "Teto de custo por execução ($)"
+    "agentOpsCostPerFire": "Teto de custo por execução ($)",
+    "temperatureBlocksSave": "A temperatura não é válida — corrija antes de salvar."
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",

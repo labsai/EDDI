@@ -27,7 +27,19 @@ export interface CascadeContext {
   agentWorkflowVersion?: number;
 }
 
+/**
+ * The warnings a save answered with (`{"warnings":[…]}` next to the new version),
+ * as plain strings; anything else the server put there is ignored.
+ */
+export function saveWarningsOf(response: { warnings?: unknown } | null | undefined): string[] {
+  const raw = response?.warnings;
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((w): w is string => typeof w === "string" && w.trim() !== "");
+}
+
 export interface CascadeResult {
+  /** Warnings the resource save answered with — saved, but the author should read them. */
+  warnings?: string[];
   newResourceVersion: number;
   newWorkflowVersion?: number;
   newAgentVersion?: number;
@@ -151,7 +163,11 @@ export async function cascadeSaveResource(
       return { newResourceVersion: resourceVersion };
     }
     const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
-    return { newResourceVersion: requireVersionFromLocation(saveResult.location, "resource") };
+    const warnings = saveWarningsOf(saveResult);
+    return {
+      newResourceVersion: requireVersionFromLocation(saveResult.location, "resource"),
+      ...(warnings.length > 0 ? { warnings } : {}),
+    };
   }
 
   // 1. Read and check both parents — nothing has been written yet.
@@ -159,6 +175,7 @@ export async function cascadeSaveResource(
 
   // 2. Save the resource config
   let newResourceVersion: number;
+  let warnings: string[] = [];
   const partial: CascadePartialResult = {};
   if (options?.skipResourceSave) {
     newResourceVersion = resourceVersion;
@@ -166,6 +183,7 @@ export async function cascadeSaveResource(
     const saveResult = await updateResource(rt, resourceId, resourceVersion, body);
     newResourceVersion = requireVersionFromLocation(saveResult.location, "resource");
     partial.newResourceVersion = newResourceVersion;
+    warnings = saveWarningsOf(saveResult);
   }
 
   // 3. + 4. Point the workflow at it, then the agent at the new workflow
@@ -178,7 +196,12 @@ export async function cascadeSaveResource(
     partial,
     options?.compatible === true,
   );
-  return { newResourceVersion, newWorkflowVersion, newAgentVersion };
+  return {
+    newResourceVersion,
+    newWorkflowVersion,
+    newAgentVersion,
+    ...(warnings.length > 0 ? { warnings } : {}),
+  };
 }
 
 export interface CascadeVersionResult {

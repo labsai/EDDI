@@ -207,6 +207,7 @@ export function ResourceDetailPage() {
 
   // Save feedback state
   const [saveSuccess, setSaveSuccess] = useState(false);
+  const [saveWarnings, setSaveWarnings] = useState<string[] | undefined>(undefined);
 
   // Delete dialog state
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
@@ -300,6 +301,7 @@ export function ResourceDetailPage() {
     async (jsonString: string) => {
       if (currentVersion === undefined) return;
       setSaveSuccess(false);
+      setSaveWarnings(undefined);
       try {
         const parsed = JSON.parse(jsonString);
 
@@ -315,6 +317,7 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: (result) => {
+                setSaveWarnings(result.warnings);
                 const newAgentVersion = result.newAgentVersion;
                 setCascadeCompatible(false);
                 /*
@@ -397,6 +400,7 @@ export function ResourceDetailPage() {
             },
             {
               onSuccess: async (result) => {
+                setSaveWarnings(result.warnings);
                 toast.success(t("editor.saved"));
                 setSaveSuccess(true);
                 setPreviousResourceVersion(currentVersion);
@@ -780,9 +784,12 @@ export function ResourceDetailPage() {
             saveSuccess={saveSuccess}
             saveError={
               cascadeSave.isError
-                ? t("editor.saveError", "Failed to save")
+                ? t("editor.saveErrorReason", "Not saved: {{reason}}", {
+                    reason: describeSaveError(cascadeSave.error, t),
+                  })
                 : undefined
             }
+            saveWarnings={saveWarnings}
             renderFormEditor={EDITOR_MAP[type ?? ""]}
             jsonSchema={jsonSchema}
             onCompare={() => setShowDiff(true)}

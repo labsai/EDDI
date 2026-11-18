@@ -149,7 +149,7 @@ describe("ResourceDetailPage — retrying a Save that failed partway", () => {
 
       // The first try wrote the resource, then stopped.
       await waitFor(() => expect(chain.resource).toBe(2));
-      await waitFor(() => expect(screen.getByText(new RegExp(`${hop} unavailable`))).toBeInTheDocument());
+      await waitFor(() => expect(screen.getAllByText(new RegExp(`${hop} unavailable`)).length).toBeGreaterThan(0));
       expect(chain.agent).toBe(1);
 
       // Retry: the page moved onto the version it wrote. Whether the editor

@@ -381,9 +381,12 @@ export function StudioEditorPanel({
         saveSuccess={saveSuccess}
         saveError={
           cascadeSave.isError
-            ? t("editor.saveError", "Failed to save")
+            ? t("editor.saveErrorReason", "Not saved: {{reason}}", {
+                reason: describeSaveError(cascadeSave.error, t),
+              })
             : undefined
         }
+        saveWarnings={cascadeSave.data?.warnings}
         renderFormEditor={EDITOR_MAP[slug]}
         jsonSchema={jsonSchema}
       />

@@ -219,7 +219,8 @@
       "forbidden": "これを表示する権限がありません。",
       "notFound": "見つかりません。削除された可能性があります。"
     },
-    "rename": "名前を変更"
+    "rename": "名前を変更",
+    "versionLookupFailed": "現在のバージョンが見つかりませんでした。"
   },
   "agents": {
     "confirmDeleteDescription": "この操作は元に戻せません。エージェントとそのすべてのデータが完全に削除されます。",
@@ -692,7 +693,11 @@
     "step_llm": "モデル",
     "step_apispec": "API 仕様",
     "step_features": "機能",
-    "step_review": "確認"
+    "step_review": "確認",
+    "providerResetNote": "プロバイダーを切り替えたため {{fields}} をリセットしました。以前のプロバイダーの値なので、戻すと復元されます。",
+    "resetModel": "モデル名",
+    "resetApiKey": "API キー",
+    "resetBaseUrl": "ベース URL"
   },
   "packages": {
     "confirmDeleteDescription": "この操作は元に戻せません。ワークフローとそのすべてのデータが完全に削除されます。",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "エージェントを更新して保存",
     "keepEditing": "編集を続ける",
     "discardChanges": "変更を破棄",
-    "deployDone": "デプロイしました — 変更が反映されています"
+    "deployDone": "デプロイしました — 変更が反映されています",
+    "loadingEditor": "エディターを読み込んでいます…",
+    "saveErrorReason": "保存されませんでした: {{reason}}",
+    "savedWithWarnings": "保存しました（警告あり）",
+    "dismissWarnings": "閉じる"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "エージェント自身の会話または新しい会話向けに、1回限りのフォローアップを予約・一覧・キャンセルします。各実行にはコスト上限があります。",
     "agentOpsMaxPending": "同時に待機できる数",
     "agentOpsHorizon": "期間（日、最大90）",
-    "agentOpsCostPerFire": "実行あたりのコスト上限（$）"
+    "agentOpsCostPerFire": "実行あたりのコスト上限（$）",
+    "temperatureBlocksSave": "temperature が無効です。保存する前に修正してください。"
   },
   "outputEditor": {
     "labelPlaceholder": "リンクラベル...",

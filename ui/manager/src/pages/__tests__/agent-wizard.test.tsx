@@ -1352,4 +1352,21 @@ describe("AgentWizardPage", () => {
     const custom = within(region).getByRole("option", { name: "Custom URL (set below)" });
     expect(custom).toBeDisabled();
   });
+  it("says what a provider switch reset, and restores it when the user switches back", async () => {
+    const user = userEvent.setup();
+    await openLlmStep(user);
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    const model = screen.getByTestId("wizard-model");
+    await user.clear(model);
+    await user.type(model, "my-custom-model");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "mistral");
+    expect(screen.getByTestId("wizard-provider-reset-note")).toBeInTheDocument();
+    expect(screen.getByTestId("wizard-model")).not.toHaveValue("my-custom-model");
+
+    await user.selectOptions(screen.getByTestId("wizard-provider"), "openai");
+    expect(screen.getByTestId("wizard-model")).toHaveValue("my-custom-model");
+    expect(screen.queryByTestId("wizard-provider-reset-note")).not.toBeInTheDocument();
+  });
 });

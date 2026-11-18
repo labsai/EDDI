@@ -219,7 +219,8 @@
       "forbidden": "您无权查看此内容。",
       "notFound": "未找到——可能已被删除。"
     },
-    "rename": "重命名"
+    "rename": "重命名",
+    "versionLookupFailed": "找不到当前版本。"
   },
   "agents": {
     "confirmDeleteDescription": "此操作无法撤销。该智能体及其所有数据将被永久删除。",
@@ -692,7 +693,11 @@
     "step_llm": "模型",
     "step_apispec": "API 规范",
     "step_features": "功能",
-    "step_review": "检查"
+    "step_review": "检查",
+    "providerResetNote": "切换提供商已重置：{{fields}}。它们属于之前的提供商，切换回去即可恢复。",
+    "resetModel": "模型名称",
+    "resetApiKey": "API 密钥",
+    "resetBaseUrl": "基础 URL"
   },
   "packages": {
     "confirmDeleteDescription": "此操作无法撤销。该工作流及其所有数据将被永久删除。",
@@ -963,7 +968,11 @@
     "updateAgentAndSave": "更新智能体并保存",
     "keepEditing": "继续编辑",
     "discardChanges": "放弃更改",
-    "deployDone": "已部署 — 更改已生效"
+    "deployDone": "已部署 — 更改已生效",
+    "loadingEditor": "正在加载编辑器…",
+    "saveErrorReason": "未保存：{{reason}}",
+    "savedWithWarnings": "已保存，但有警告",
+    "dismissWarnings": "关闭"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1643,8 @@
     "agentOpsFollowUpDesc": "为智能体自己的对话或新对话预约、列出和取消一次性回访。每次触发都有费用上限。",
     "agentOpsMaxPending": "同时等待数量",
     "agentOpsHorizon": "时间范围（天，最多 90）",
-    "agentOpsCostPerFire": "每次触发的费用上限（$）"
+    "agentOpsCostPerFire": "每次触发的费用上限（$）",
+    "temperatureBlocksSave": "温度值无效——请先修正再保存。"
   },
   "outputEditor": {
     "labelPlaceholder": "链接标签...",
