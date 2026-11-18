@@ -1810,7 +1810,7 @@ How values resolve, once keys become available:
 
 - **Every key is optional.** Unset means the deployment default, `eddi.documents.defaults.<path>` (for example `eddi.documents.defaults.split.maxUnitTokens=8000`), and without one the built-in default.
 - **Operator bounds.** Some numbers (counts, bytes, depth, dollars) have an operator bound. A value above it is refused when the configuration is saved, with the bound named. A stored value above it (a bound tightened after the save) is clamped with a warning when the agent is deployed: a bound never un-deploys an agent.
-- **Stored keys that are not available** (a configuration written directly to the database, or saved by a newer EDDI and then run on this one) do not stop a deploy. Every save path — the REST API, JSON patch, ZIP import, agent setup and upgrade — refuses them: they are ignored, and the deploy log names each one at WARN.
+- **Stored keys that are not available do not stop a deploy.** Every save path — the REST API, JSON patch, ZIP import, agent setup and upgrade — refuses them, so they reach a stored configuration only by being written directly to the database or saved by a newer EDDI. At deploy such a key is ignored, and the deploy log names it at WARN.
 
 The full shape, with every key at its default:
 

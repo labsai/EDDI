@@ -81,6 +81,9 @@ public final class DocumentsConfigValidator {
      *             naming {@code fieldPath} and the offending key
      */
     public static void validate(DocumentsConfig config, String fieldPath) {
+        if (config == null) {
+            return; // no block: the operator bounds are not even read
+        }
         validate(config, fieldPath, LIVE_KEYS, DocumentBounds.current());
     }
 

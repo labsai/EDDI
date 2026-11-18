@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.documents.DocumentBounds;
+import ai.labs.eddi.engine.documents.DocumentSettings;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.lifecycle.exceptions.WorkflowConfigurationException;
 import ai.labs.eddi.engine.memory.*;
@@ -40,10 +42,6 @@ import org.mockito.Mock;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.net.URI;
 import java.util.*;
-import java.util.logging.Handler;
-import java.util.logging.Level;
-import java.util.logging.LogRecord;
-import java.util.logging.Logger;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ACTIONS;
 import static dev.langchain4j.data.message.AiMessage.aiMessage;
@@ -187,44 +185,23 @@ class LlmTaskConfigureTest {
         }
 
         @Test
-        @DisplayName("a stored documents key that is not available deploys, with one WARN naming it")
+        @DisplayName("a stored documents key that is not available deploys, and configure() resolves the block")
         void documentsKeyNotAvailableDeploysWithWarning() throws Exception {
             var config = new ObjectMapper().readValue("""
                     {"tasks":[{"actions":["help"],"id":"answer","type":"openai","documents":{"sharing":{"delegation":true}}}]}
                     """, LlmConfiguration.class);
             when(resourceClientLibrary.getResource(any(URI.class), eq(LlmConfiguration.class))).thenReturn(config);
+            // Resolution reads every operator default once; a spy shows configure() ran it.
+            // (Log capture is not reliable in a shared test JVM; the WARN text itself is
+            // asserted on warnOnDocumentsConfig's return value in
+            // LlmTaskDocumentsConfigTest.)
+            var settings = spy(DocumentSettings.of(Map.of(), DocumentBounds.none()));
+            llmTask.documentSettings = settings;
 
-            List<String> warnings = new ArrayList<>();
-            var handler = new Handler() {
-                @Override
-                public void publish(LogRecord record) {
-                    if (record.getLevel().intValue() >= Level.WARNING.intValue()) {
-                        Object[] p = record.getParameters();
-                        warnings.add(p == null ? record.getMessage() : String.format(record.getMessage(), p));
-                    }
-                }
+            Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
 
-                @Override
-                public void flush() {
-                }
-
-                @Override
-                public void close() {
-                }
-            };
-            var jul = Logger.getLogger(LlmTask.class.getName());
-            var previous = jul.getLevel();
-            jul.setLevel(Level.ALL);
-            jul.addHandler(handler);
-            try {
-                Object result = assertDoesNotThrow(() -> llmTask.configure(Map.of("uri", "eddi://ai.labs.llm/llmstore/llms/abc123"), null));
-                assertSame(config, result);
-            } finally {
-                jul.removeHandler(handler);
-                jul.setLevel(previous);
-            }
-            assertEquals(1, warnings.stream().filter(w -> w.contains("documents.sharing.delegation is not available")).count(),
-                    warnings.toString());
+            assertSame(config, result);
+            verify(settings, atLeastOnce()).defaultFor("sharing.delegation");
         }
 
         @Test

@@ -3942,27 +3942,34 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
      * unknown name) or clamped to an operator bound. Never throws: a stored
      * configuration (written directly to the database, or by a newer version) or a
      * bound tightened later must not un-deploy an agent — only the next
-     * <em>save</em> of such a value is refused.
+     * <em>save</em> of such a value is refused. A task without a block is resolved
+     * too, so an operator default that is ignored or clamped is reported for it.
+     *
+     * @return the lines logged, in order (for tests: log capture is not reliable
+     *         across a shared test JVM)
      */
-    static void warnOnDocumentsConfig(LlmConfiguration llmConfiguration, DocumentSettings settings) {
+    static List<String> warnOnDocumentsConfig(LlmConfiguration llmConfiguration, DocumentSettings settings) {
+        List<String> logged = new ArrayList<>();
         if (llmConfiguration == null || llmConfiguration.tasks() == null) {
-            return;
+            return logged;
         }
         for (var task : llmConfiguration.tasks()) {
-            if (task == null || task.getDocuments() == null) {
+            if (task == null) {
                 continue;
             }
             String taskId = task.getId() != null ? sanitize(task.getId()) : "<unnamed>";
             try {
                 var effective = EffectiveDocumentsConfig.resolve(task.getDocuments(), settings != null ? settings : DocumentSettings.none());
                 for (String warning : effective.clampWarnings()) {
-                    LOGGER.warnf("LLM task '%s': %s", taskId, warning);
+                    logged.add(String.format("LLM task '%s': %s", taskId, warning));
                 }
             } catch (RuntimeException e) {
-                LOGGER.warnf("LLM task '%s': the documents block could not be resolved (%s); built-in defaults apply", taskId,
-                        e.getClass().getSimpleName());
+                logged.add(String.format("LLM task '%s': the documents block could not be resolved (%s); built-in defaults apply", taskId,
+                        e.getClass().getSimpleName()));
             }
         }
+        logged.forEach(LOGGER::warn);
+        return logged;
     }
 
     /**

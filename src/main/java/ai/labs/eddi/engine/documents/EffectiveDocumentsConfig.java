@@ -13,6 +13,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Locale;
+import java.util.Optional;
 import java.util.Set;
 import java.util.function.Function;
 
@@ -242,9 +243,19 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
         private final Set<String> liveKeys;
         private final List<String> warnings = new ArrayList<>();
 
+        private final DocumentBounds bounds;
+
         Resolver(DocumentSettings settings, Set<String> liveKeys) {
             this.settings = settings;
             this.liveKeys = liveKeys;
+            DocumentBounds read;
+            try {
+                read = settings.bounds();
+            } catch (RuntimeException e) {
+                warnings.add("the operator bounds cannot be read and are ignored");
+                read = DocumentBounds.none();
+            }
+            this.bounds = read != null ? read : DocumentBounds.none();
         }
 
         private boolean live(String path, String textValue) {
@@ -276,7 +287,7 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 }
                 ignoredDesigner(path);
             }
-            var configured = settings.defaultFor(path);
+            var configured = readDefault(path);
             if (configured.isEmpty()) {
                 return null;
             }
@@ -363,7 +374,7 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 }
                 ignoredDesigner(path);
             }
-            var configured = settings.defaultFor(path);
+            var configured = readDefault(path);
             if (configured.isEmpty()) {
                 return builtIn;
             }
@@ -384,7 +395,8 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             if (known.isEmpty()) {
                 return values.stream().filter(v -> v != null && !v.isBlank()).toList();
             }
-            List<String> kept = values.stream().filter(known::contains).toList();
+            // Set.of(...).contains(null) throws, and a stored list may hold a null
+            List<String> kept = values.stream().filter(v -> v != null && known.contains(v)).toList();
             if (kept.size() != values.size()) {
                 warnings.add("documents." + path + " contains unknown values, which are ignored");
             }
@@ -407,13 +419,26 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 warnings.add("documents." + path + " must not be negative; the default applies");
                 return fallback;
             }
-            var bound = settings.bounds().boundFor(path);
+            var bound = bounds.boundFor(path);
             if (bound.isPresent() && value > bound.get()) {
                 warnings.add("documents." + path + " is above the operator bound of " + formatNumber(bound.get()) + " ("
                         + DocumentBounds.propertyFor(path) + ") and is clamped to it");
                 return bound.get();
             }
             return value;
+        }
+
+        /**
+         * The operator default for {@code path}; a lookup that fails counts as unset,
+         * with a warning.
+         */
+        private Optional<String> readDefault(String path) {
+            try {
+                return settings.defaultFor(path);
+            } catch (RuntimeException e) {
+                ignoredDefault(path, "cannot be read");
+                return Optional.empty();
+            }
         }
 
         private static <E extends Enum<E>> E parseEnum(Class<E> type, String name) {

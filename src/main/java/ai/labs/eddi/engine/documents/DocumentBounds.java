@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.documents;
 
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.jboss.logging.Logger;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -35,6 +36,8 @@ public final class DocumentBounds {
     // --- WP-0.1: the mechanism only; no key is live, so none is bounded yet ---
     );
 
+    private static final Logger LOGGER = Logger.getLogger(DocumentBounds.class);
+
     private static final DocumentBounds NONE = new DocumentBounds(Map.of());
 
     private final Map<String, Double> bounds;
@@ -43,12 +46,30 @@ public final class DocumentBounds {
         this.bounds = Map.copyOf(bounds);
     }
 
-    /** The bounds this deployment configures. */
+    /**
+     * The bounds this deployment configures. A bound that cannot be parsed, or is
+     * negative or not finite, is skipped with a WARN: a mistyped operator property
+     * must neither break every LLM configuration save nor clamp values below zero.
+     */
     public static DocumentBounds current() {
+        if (BOUND_PROPERTIES.isEmpty()) {
+            return NONE;
+        }
         Map<String, Double> read = new LinkedHashMap<>();
         var config = ConfigProvider.getConfig();
-        BOUND_PROPERTIES.forEach((path, property) -> config.getOptionalValue(property, Double.class)
-                .ifPresent(value -> read.put(path, value)));
+        BOUND_PROPERTIES.forEach((path, property) -> {
+            try {
+                config.getOptionalValue(property, Double.class).ifPresent(value -> {
+                    if (Double.isFinite(value) && value >= 0) {
+                        read.put(path, value);
+                    } else {
+                        LOGGER.warnf("%s must be a non-negative number; the bound is ignored", property);
+                    }
+                });
+            } catch (RuntimeException e) {
+                LOGGER.warnf("%s is not a number; the bound is ignored", property);
+            }
+        });
         return read.isEmpty() ? NONE : new DocumentBounds(read);
     }
 

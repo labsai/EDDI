@@ -7,12 +7,13 @@ package ai.labs.eddi.modules.llm.model;
 import java.util.List;
 
 /**
- * The agent-level {@code documents} JSON of the design
- * ({@code planning/pdf-image-extraction-and-agent-file-sharing.md} §14),
- * written out literally — <b>not</b> derived from {@link DocumentsConfig} — so
- * that a key missing from the class, or a default that drifts, fails a test
- * instead of being agreed with. {@code "bridge": null} is the design's value
- * (off); {@link #BRIDGE_SET} is the one block that has no fields yet.
+ * The agent-level {@code documents} JSON of the design (the PDF documents
+ * design, §14 "configuration"; its shape is also documented in
+ * {@code docs/langchain.md}, "Documents"), written out literally — <b>not</b>
+ * derived from {@link DocumentsConfig} — so that a key missing from the class,
+ * or a default that drifts, fails a test instead of being agreed with.
+ * {@code "bridge": null} is the design's value (off); {@link #BRIDGE_SET} is
+ * the one block that has no fields yet.
  */
 public final class DocumentsDesignJson {
 

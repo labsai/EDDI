@@ -36,6 +36,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.spy;
 
 @DisplayName("EffectiveDocumentsConfig")
 class EffectiveDocumentsConfigTest {
@@ -274,6 +276,31 @@ class EffectiveDocumentsConfigTest {
             assertEquals(OnReady.NOTE, e.large().onReady());
             assertFalse(e.audio().extract());
             assertEquals(3, e.clampWarnings().size(), e.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("a null element in a stored closed-name list is dropped, not thrown on")
+        void nullListElement() throws Exception {
+            var e = assertDoesNotThrow(
+                    () -> EffectiveDocumentsConfig.resolve(parse("{\"library\":{\"scopes\":[\"self\",null]}}"), DocumentSettings.none(), LIVE));
+            assertEquals(List.of("self"), e.library().scopes());
+            assertEquals(1, e.clampWarnings().size(), e.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("an operator default or bound lookup that throws counts as unset, with a warning")
+        void failingOperatorLookups() {
+            var settings = spy(DocumentSettings.none());
+            doThrow(new IllegalStateException("config")).when(settings).defaultFor("split.maxUnitTokens");
+            doThrow(new IllegalStateException("config")).when(settings).bounds();
+
+            var e = assertDoesNotThrow(() -> EffectiveDocumentsConfig.resolve(null, settings, LIVE));
+
+            assertEquals(12000, e.split().maxUnitTokens());
+            assertTrue(e.clampWarnings().contains("eddi.documents.defaults.split.maxUnitTokens cannot be read and is ignored"),
+                    e.clampWarnings().toString());
+            assertTrue(e.clampWarnings().contains("the operator bounds cannot be read and are ignored"), e.clampWarnings().toString());
+            assertEquals(2, e.clampWarnings().size(), e.clampWarnings().toString());
         }
     }
 }
