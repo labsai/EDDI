@@ -52,6 +52,8 @@ class RestAgentEngineStreamingTest {
         conversationService = mock(IConversationService.class);
         conversationAccessGuard = mock(ConversationAccessGuard.class);
         streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard);
+        // Disconnect handling runs on a virtual thread in production; here at once.
+        streaming.sseStreams.clientGoneExecutor = Runnable::run;
     }
 
     @Nested
@@ -602,6 +604,7 @@ class RestAgentEngineStreamingTest {
         @DisplayName("with eddi.streaming.cancel-on-client-disconnect off, a disconnect lets the turn finish and persist")
         void disconnectDoesNotCancelWhenTheSwitchIsOff() throws Exception {
             streaming = new RestAgentEngineStreaming(conversationService, conversationAccessGuard, false);
+            streaming.sseStreams.clientGoneExecutor = Runnable::run;
 
             var handler = start("conv-6");
             when(eventSink.isClosed()).thenReturn(true);
@@ -874,14 +877,15 @@ class RestAgentEngineStreamingTest {
         }
 
         @Test
-        @DisplayName("anything else stays opaque: fixed message + correlationId, no code")
+        @DisplayName("anything else stays opaque: fixed message + correlationId, the generic internal_error code, not retryable")
         void unknownExceptionsStayOpaque() throws Exception {
             String payload = errorPayloadFor(
                     new RuntimeException("mongodb://replica-set-member:27017 unreachable"));
 
             assertTrue(payload.contains("Internal server error"), payload);
             assertTrue(payload.contains("correlationId"), payload);
-            assertFalse(payload.contains("\"code\""), payload);
+            assertTrue(payload.contains("\"code\":\"internal_error\""), payload);
+            assertTrue(payload.contains("\"retryable\":false"), payload);
             assertFalse(payload.contains("mongodb://"), payload);
         }
     }

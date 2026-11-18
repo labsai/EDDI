@@ -11,6 +11,7 @@ import dev.langchain4j.model.chat.StreamingChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.FinishReason;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Metrics;
 import org.jboss.logging.Logger;
 
@@ -137,6 +138,8 @@ class ToolLoopStreamingChatModel implements ChatModel {
     private final StreamPolicy policy;
     private final String modelType;
     private final String metricPath;
+    /** Where the stream meters go: the caller's registry, else the global one. */
+    private final MeterRegistry meters;
 
     /**
      * Exactly the text forwarded to the sink by the most recent completed call.
@@ -165,6 +168,12 @@ class ToolLoopStreamingChatModel implements ChatModel {
 
     ToolLoopStreamingChatModel(StreamingChatModel delegate, ConversationEventSink eventSink, StreamPolicy policy, String modelType,
             String metricPath) {
+        this(delegate, eventSink, policy, modelType, metricPath, null);
+    }
+
+    ToolLoopStreamingChatModel(StreamingChatModel delegate, ConversationEventSink eventSink, StreamPolicy policy, String modelType,
+            String metricPath, MeterRegistry meters) {
+        this.meters = meters != null ? meters : Metrics.globalRegistry;
         this.delegate = delegate;
         this.eventSink = eventSink;
         this.policy = policy;
@@ -316,7 +325,7 @@ class ToolLoopStreamingChatModel implements ChatModel {
 
     private void count(String name) {
         try {
-            Metrics.globalRegistry.counter(name, "path", metricPath).increment();
+            meters.counter(name, "path", metricPath).increment();
         } catch (RuntimeException e) {
             LOGGER.debugf("%s metric emit failed: %s", name, e.getMessage());
         }
@@ -324,7 +333,7 @@ class ToolLoopStreamingChatModel implements ChatModel {
 
     private void countCancelled() {
         try {
-            Metrics.globalRegistry.counter("eddi.llm.cancelled", "scope", "stream").increment();
+            meters.counter("eddi.llm.cancelled", "scope", "stream").increment();
         } catch (RuntimeException e) {
             LOGGER.debugf("stream-cancel metric emit failed: %s", e.getMessage());
         }

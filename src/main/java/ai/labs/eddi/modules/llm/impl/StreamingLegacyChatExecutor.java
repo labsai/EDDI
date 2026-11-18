@@ -153,7 +153,7 @@ class StreamingLegacyChatExecutor {
                             IConversationMemory memory)
             throws LifecycleException {
         StreamPolicy policy = streamPolicy(task, memory);
-        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY);
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry);
         LegacyChatExecutor.ChatResult result;
         try {
             result = legacyChatExecutor.execute(bridge, messages, task != null ? task : new LlmConfiguration.Task(), jsonPolicy,
@@ -199,7 +199,7 @@ class StreamingLegacyChatExecutor {
     StreamResult executeCapturing(StreamingChatModel streamingModel, List<ChatMessage> messages, ConversationEventSink eventSink,
                                   LlmConfiguration.Task task, JsonResponseFormatPolicy jsonPolicy) {
         StreamPolicy policy = streamPolicy(task, null);
-        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY);
+        var bridge = new ToolLoopStreamingChatModel(streamingModel, eventSink, policy, modelType(task), PATH_LEGACY, meterRegistry);
         ResponseFormat responseFormat = jsonPolicy != null ? jsonPolicy.resolve(false) : null;
         var requestBuilder = ChatRequest.builder().messages(messages);
         if (responseFormat != null) {

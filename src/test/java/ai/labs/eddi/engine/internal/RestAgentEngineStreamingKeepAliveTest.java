@@ -78,10 +78,10 @@ class RestAgentEngineStreamingKeepAliveTest {
     private RestAgentEngineStreaming streaming(boolean cancelOnDisconnect, int intervalSeconds) {
         var streaming = new RestAgentEngineStreaming(conversationService, mock(ConversationAccessGuard.class),
                 cancelOnDisconnect, intervalSeconds);
-        streaming.shutdownKeepAlive();
-        streaming.keepAliveScheduler = scheduler;
-        streaming.clockMillis = now::get;
-        streaming.clientGoneExecutor = clientGone::add;
+        streaming.sseStreams = SseStreams.unmetered();
+        streaming.sseStreams.scheduler = scheduler;
+        streaming.sseStreams.clock = now::get;
+        streaming.sseStreams.clientGoneExecutor = clientGone::add;
         return streaming;
     }
 

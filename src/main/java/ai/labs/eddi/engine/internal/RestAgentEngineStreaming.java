@@ -35,7 +35,6 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.security.ClientContextGuard;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
-import jakarta.annotation.PreDestroy;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.BadRequestException;
@@ -49,14 +48,9 @@ import org.jboss.logging.Logger;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.LongSupplier;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -136,7 +130,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     static final String DEFAULT_KEEPALIVE_INTERVAL_SECONDS = "" + DEFAULT_KEEPALIVE_INTERVAL;
 
     /** The SSE comment text of a keep-alive frame ({@code : keep-alive}). */
-    static final String KEEPALIVE_COMMENT = "keep-alive";
+    static final String KEEPALIVE_COMMENT = SseChannel.KEEPALIVE_COMMENT;
 
     private final IConversationService conversationService;
     private final ConversationAccessGuard conversationAccessGuard;
@@ -249,26 +243,13 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     static final String EVENT_CANCELLED = "cancelled";
 
     /**
-     * One daemon thread ticks every open turn stream. A tick only checks a clock
-     * and, rarely, writes a comment line, so one thread serves any number of
-     * streams. Replaceable in unit tests, which run the tick by hand.
+     * The shared SSE transport — one keep-alive thread for every stream, the
+     * disconnect executor, the per-stream buffering limits, the node's stream
+     * capacity and the stream meters ({@link SseStreams}). Field-injected with an
+     * unmetered default so the directly constructed unit tests keep it non-null.
      */
-    ScheduledExecutorService keepAliveScheduler = Executors.newSingleThreadScheduledExecutor(r -> {
-        Thread t = new Thread(r, "eddi-sse-keepalive");
-        t.setDaemon(true);
-        return t;
-    });
-
-    /** Monotonic clock in milliseconds; replaceable in unit tests. */
-    LongSupplier clockMillis = () -> TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
-
-    /**
-     * Runs the disconnect handling a keep-alive tick discovers. Cancelling a turn
-     * reads and writes the store, so it must not run on the one tick thread every
-     * stream shares; a virtual thread per (rare) disconnect keeps the ticks on
-     * time. Replaceable in unit tests.
-     */
-    Executor clientGoneExecutor = runnable -> Thread.ofVirtual().name("eddi-sse-client-gone").start(runnable);
+    @Inject
+    SseStreams sseStreams = SseStreams.unmetered();
 
     /**
      * Removes the engine-reserved keys from client-supplied context. Field-injected
@@ -346,11 +327,6 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         this(conversationService, conversationAccessGuard, Boolean.parseBoolean(DEFAULT_CANCEL_ON_CLIENT_DISCONNECT));
     }
 
-    @PreDestroy
-    void shutdownKeepAlive() {
-        keepAliveScheduler.shutdownNow();
-    }
-
     @Override
     public void sayStreaming(String conversationId, Boolean returnDetailed, Boolean returnCurrentStepOnly, List<String> returningFields,
                              InputData inputData, SseEventSink eventSink, Sse sse) {
@@ -408,7 +384,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             stream.markTerminal();
             stream.send("error", buildKnownConditionOrOpaqueErrorEvent(
                     "Failed to start streaming for conversation " + safeConversationId, e));
-            stream.close();
+            stream.close(SseChannel.CloseReason.FAILED);
         }
     }
 
@@ -424,9 +400,16 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         // touched, so each surfaces as the plain HTTP error it is on /resume rather
         // than as an 'error' event on a 200 stream. The stream object only holds the
         // sink; it writes nothing until its first send.
-        Response refusal = restAgentEngine.resumeStreaming(conversationId, decision,
-                turnHandler(stream, safeConversationId, true), returnDetailed, returnCurrentStepOnly, returningFields);
+        Response refusal;
+        try {
+            refusal = restAgentEngine.resumeStreaming(conversationId, decision,
+                    turnHandler(stream, safeConversationId, true), returnDetailed, returnCurrentStepOnly, returningFields);
+        } catch (RuntimeException e) {
+            stream.releaseIfUnused();
+            throw e;
+        }
         if (refusal != null) {
+            stream.releaseIfUnused();
             throw new WebApplicationException(refusal);
         }
         // The decision is committed: only now keep the connection warm. A turn that
@@ -493,7 +476,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                 try {
                     stream.send("error", skippedResumeErrorEvent(snapshot));
                 } finally {
-                    stream.close();
+                    stream.close(SseChannel.CloseReason.FAILED);
                 }
             }
 
@@ -569,7 +552,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     // Send the final snapshot as JSON
                     stream.send("done", toJson(snapshot));
                 } finally {
-                    stream.close();
+                    stream.close(closeReasonOf(snapshot.getConversationState()));
                 }
             }
 
@@ -580,7 +563,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
                     stream.send("error", logAndBuildOpaqueErrorEvent(
                             "Streaming error for conversation " + safeConversationId, error));
                 } finally {
-                    stream.close();
+                    stream.close(SseChannel.CloseReason.FAILED);
                 }
             }
 
@@ -681,7 +664,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
         // WARN, not ERROR with stack trace: the request was rejected by design.
         LOGGER.warnf("%s: %s", context, e.getMessage());
-        return String.format("{\"message\":\"%s\",\"code\":\"%s\"}", escapeJson(message), code);
+        return typedError(message, code);
     }
 
     /**
@@ -702,7 +685,8 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         String correlationId = UUID.randomUUID().toString();
         LOGGER.errorf(error, "%s [correlationId=%s]: %s", context, correlationId,
                 error != null ? error.getMessage() : "null");
-        return String.format("{\"message\":\"Internal server error\",\"correlationId\":\"%s\"}", correlationId);
+        return String.format("{\"message\":\"Internal server error\",\"code\":\"%s\",\"retryable\":false,\"correlationId\":\"%s\"}",
+                INTERNAL_ERROR_CODE, correlationId);
     }
 
     /**
@@ -775,36 +759,9 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
     private final class SseStream {
         private final String conversationId;
         private final String safeConversationId;
-        private final SseEventSink eventSink;
-        private final Sse sse;
-        /**
-         * Set once the terminal ({@code done}/{@code error}) frame is being emitted.
-         */
-        private final AtomicBoolean terminal = new AtomicBoolean();
+        private final SseChannel channel;
         /** Guarantees the disconnect cancel is signalled at most once per stream. */
         private final AtomicBoolean cancelSignalled = new AtomicBoolean();
-        /**
-         * Serialises writes to the sink: the turn's events and the keep-alive tick come
-         * from different threads, and a comment line must never land between two lines
-         * of an event.
-         */
-        private final Object writeLock = new Object();
-        /** When the last frame was written; guarded by {@link #writeLock}. */
-        private long lastWriteMillis;
-        private volatile ScheduledFuture<?> keepAlive;
-        /**
-         * Set once one of this turn's own events was written, which proves the turn is
-         * the one running. Until then it may still be queued behind another turn of the
-         * same conversation, and a conversation-wide cancel would interrupt that other
-         * turn instead.
-         */
-        private volatile boolean turnEventSent;
-        /**
-         * When the turn's last event was written (a keep-alive comment does not count);
-         * guarded by {@link #writeLock}. Read by the turn-timeout backstop (see
-         * {@link RestAgentEngineStreaming#agentTimeoutSeconds}).
-         */
-        private long lastTurnEventMillis;
 
         /**
          * Whether this stream's vanished client cancels the turn it was following — the
@@ -818,119 +775,27 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          */
         private final boolean agentMayOverride;
 
+        /**
+         * Opens the stream on the shared transport, or refuses it with {@code 503} when
+         * the node is at its stream capacity — before the sink is touched.
+         */
         private SseStream(String conversationId, String safeConversationId, SseEventSink eventSink, Sse sse, boolean cancelOnDisconnect,
                 boolean agentMayOverride) {
             this.cancelOnDisconnect = cancelOnDisconnect;
             this.agentMayOverride = agentMayOverride;
             this.conversationId = conversationId;
             this.safeConversationId = safeConversationId;
-            this.eventSink = eventSink;
-            this.sse = sse;
-            this.lastWriteMillis = clockMillis.getAsLong();
+            // The backstop (see agentTimeoutSeconds): a turn the watchdog gave up on
+            // whose body never returned is ended after the timeout plus one interval of
+            // silence. Ticked by the keep-alive, so off with it.
+            long backstopSeconds = agentTimeoutSeconds > 0 ? (long) agentTimeoutSeconds + keepAliveIntervalSeconds : 0L;
+            this.channel = sseStreams.open(SseStreams.Kind.AGENT, "conversation " + safeConversationId, eventSink, sse,
+                    keepAliveIntervalSeconds, backstopSeconds, this::onClientGone, this::sendTurnTimeout);
         }
 
-        /**
-         * Starts the keep-alive tick for this stream, unless it is turned off. The tick
-         * runs at the interval and writes a comment only when the stream has been
-         * silent for at least one whole interval.
-         */
+        /** Starts the keep-alive tick for this stream, unless it is turned off. */
         void startKeepAlive() {
-            if (keepAliveIntervalSeconds <= 0) {
-                return;
-            }
-            try {
-                // A tick only writes after a whole silent interval, so ticking once per
-                // interval could leave a gap of almost two. A quarter interval caps it at
-                // about 1.25.
-                long tickMillis = Math.max(1L, TimeUnit.SECONDS.toMillis(keepAliveIntervalSeconds) / 4);
-                keepAlive = keepAliveScheduler.scheduleAtFixedRate(this::keepAliveTick, tickMillis, tickMillis,
-                        TimeUnit.MILLISECONDS);
-            } catch (Exception e) {
-                // A rejected schedule (shutting down) must not fail the turn.
-                LOGGER.debugf("SSE keep-alive not scheduled for conversation %s: %s", safeConversationId, e.getMessage());
-            }
-        }
-
-        void keepAliveTick() {
-            if (terminal.get()) {
-                stopKeepAlive();
-                return;
-            }
-            if (turnTimedOut()) {
-                endTimedOutTurn();
-                return;
-            }
-            boolean gone = false;
-            synchronized (writeLock) {
-                if (clockMillis.getAsLong() - lastWriteMillis < TimeUnit.SECONDS.toMillis(keepAliveIntervalSeconds)) {
-                    return;
-                }
-                if (eventSink.isClosed()) {
-                    gone = true;
-                } else {
-                    try {
-                        eventSink.send(sse.newEventBuilder().comment(KEEPALIVE_COMMENT).build());
-                        lastWriteMillis = clockMillis.getAsLong();
-                    } catch (Exception e) {
-                        LOGGER.debugf("Failed to send SSE keep-alive for conversation %s: %s", safeConversationId,
-                                e.getMessage());
-                        gone = eventSink.isClosed();
-                    }
-                }
-            }
-            if (gone) {
-                stopKeepAlive();
-                // Only a turn that has started may be cancelled from here: a stream still
-                // queued behind another turn of the same conversation would otherwise
-                // interrupt that turn. A queued turn's own first event finds the sink
-                // closed and cancels it then, as before.
-                if (turnEventSent) {
-                    clientGoneExecutor.execute(this::onClientGone);
-                }
-            }
-        }
-
-        private void stopKeepAlive() {
-            ScheduledFuture<?> future = keepAlive;
-            if (future != null) {
-                future.cancel(false);
-            }
-        }
-
-        /**
-         * Whether the turn has gone silent for longer than the watchdog lets a live
-         * turn run (see {@link RestAgentEngineStreaming#agentTimeoutSeconds}). Never
-         * before the turn's first event: until then it may still be queued.
-         */
-        private boolean turnTimedOut() {
-            if (agentTimeoutSeconds <= 0 || !turnEventSent) {
-                return false;
-            }
-            long limitMillis = TimeUnit.SECONDS.toMillis((long) agentTimeoutSeconds + keepAliveIntervalSeconds);
-            synchronized (writeLock) {
-                return clockMillis.getAsLong() - lastTurnEventMillis > limitMillis;
-            }
-        }
-
-        /**
-         * Ends a stream whose turn the watchdog gave up on and whose body never
-         * returned, with an {@code error} event the client can act on, unless the
-         * turn's own terminal frame got there first. The turn itself was already
-         * abandoned (cancel flag and interrupt), so nothing is cancelled here.
-         */
-        private void endTimedOutTurn() {
-            if (!terminal.compareAndSet(false, true)) {
-                return;
-            }
-            LOGGER.warnf("Turn stream of conversation %s carried no event of its turn for longer than "
-                    + "systemRuntime.agentTimeoutInSeconds (%d s) plus one keep-alive interval — ending it with a %s error",
-                    safeConversationId, agentTimeoutSeconds, TURN_TIMEOUT_CODE);
-            try {
-                send("error", String.format("{\"message\":\"%s\",\"code\":\"%s\"}",
-                        "The turn did not finish within the agent timeout; its outcome is discarded", TURN_TIMEOUT_CODE));
-            } finally {
-                close();
-            }
+            channel.startKeepAlive();
         }
 
         /**
@@ -938,80 +803,62 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
          * our own doing and must not be mistaken for a client disconnect.
          */
         void markTerminal() {
-            terminal.set(true);
+            channel.markTerminal();
         }
 
         void send(String eventName, String data) {
-            boolean gone = false;
-            synchronized (writeLock) {
-                if (eventSink.isClosed()) {
-                    LOGGER.debugf("SSE sink closed, dropping event: %s", eventName);
-                    gone = true;
-                } else {
-                    try {
-                        eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, padDataLines(data)).build());
-                        lastWriteMillis = clockMillis.getAsLong();
-                        lastTurnEventMillis = lastWriteMillis;
-                        turnEventSent = true;
-                    } catch (Exception e) {
-                        LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
-                        // RESTEasy Reactive throws IllegalStateException synchronously when the
-                        // sink closed between the check above and the write. Re-checking the
-                        // sink (rather than treating every send failure as a disconnect) keeps
-                        // an unrelated failure — a broken event payload, say — from cancelling
-                        // a turn whose client is still connected and waiting.
-                        gone = eventSink.isClosed();
-                    }
-                }
-            }
-            // Outside the lock, and off this thread: a send runs on the provider's
-            // callback thread under the model call's lock (a token) or on the pipeline
-            // thread, and the cancel reads the agent and compare-and-sets the store.
-            if (gone) {
-                clientGoneExecutor.execute(this::onClientGone);
-            }
+            channel.send(eventName, data);
         }
 
         /**
-         * Serialize a typed event payload to JSON via Jackson and send it. Preferred
-         * over hand-built JSON strings — the mapper handles string escaping and number
-         * formatting. Falls back to an empty object on the (unexpected) serialization
-         * failure so a single bad payload cannot break the stream.
+         * Serialize a typed event payload to JSON via Jackson and send it. Falls back
+         * to an empty object on the (unexpected) serialization failure so a single bad
+         * payload cannot break the stream.
          */
         void sendJson(String eventName, Object payload) {
-            String data;
-            try {
-                data = MAPPER.writeValueAsString(payload);
-            } catch (Exception e) {
-                LOGGER.warnf("Failed to serialize '%s' event payload: %s", eventName, e.getMessage());
-                data = "{}";
-            }
-            send(eventName, data);
+            channel.sendJson(eventName, payload);
         }
 
-        void close() {
-            stopKeepAlive();
-            try {
-                if (!eventSink.isClosed()) {
-                    eventSink.close();
-                }
-            } catch (Exception e) {
-                LOGGER.debugf("Error closing SSE sink: %s", e.getMessage());
+        void close(SseChannel.CloseReason reason) {
+            channel.close(reason);
+        }
+
+        /**
+         * Frees the slot of a stream that was refused before it wrote anything; the
+         * plain HTTP error that follows is written by the framework.
+         */
+        void releaseIfUnused() {
+            if (!channel.eventSent()) {
+                channel.releaseUnused();
             }
         }
 
         /**
-         * The client is no longer reading this stream. Cancel the turn it was waiting
-         * on — once, and never for a stream that already delivered its terminal frame.
+         * Ends a stream whose turn the watchdog gave up on and whose body never
+         * returned, with an {@code error} event the client can act on. The turn itself
+         * was already abandoned (cancel flag and interrupt), so nothing is cancelled
+         * here. Called by the transport's backstop, which closes the stream afterwards.
+         */
+        private void sendTurnTimeout() {
+            LOGGER.warnf("Turn stream of conversation %s carried no event of its turn for longer than "
+                    + "systemRuntime.agentTimeoutInSeconds (%d s) plus one keep-alive interval — ending it with a %s error",
+                    safeConversationId, agentTimeoutSeconds, TURN_TIMEOUT_CODE);
+            channel.send("error", typedError("The turn did not finish within the agent timeout; its outcome is discarded",
+                    TURN_TIMEOUT_CODE));
+        }
+
+        /**
+         * The client is no longer reading this stream (or could not keep up). Cancel
+         * the turn it was waiting on — once, and never for a stream that already
+         * delivered its terminal frame. Runs on the transport's disconnect executor,
+         * never on a provider callback or the shared tick thread.
          * <p>
-         * Skipped entirely when {@code eddi.streaming.cancel-on-client-disconnect} is
-         * off: the turn then finishes and persists normally, so a transient drop does
-         * not cost the user their message. See
+         * Skipped when the effective disconnect policy is {@code finish}: the turn then
+         * finishes and persists normally. See
          * {@link RestAgentEngineStreaming#cancelOnClientDisconnect} for the trade-off.
          */
         private void onClientGone() {
-            stopKeepAlive();
-            if (terminal.get() || !cancelSignalled.compareAndSet(false, true)) {
+            if (channel.isTerminal() || !cancelSignalled.compareAndSet(false, true)) {
                 return;
             }
             boolean cancel = agentMayOverride ? cancelOnDisconnectFor(conversationId, cancelOnDisconnect) : cancelOnDisconnect;
@@ -1089,7 +936,7 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
             code = "resume_dropped";
             message = "The conversation changed while your decision was queued - it was not applied; reload the conversation";
         }
-        return String.format("{\"message\":\"%s\",\"code\":\"%s\"}", escapeJson(message), code);
+        return typedError(message, code);
     }
 
     /** Typed payload for the {@code cascade_step_start} SSE event. */
@@ -1213,6 +1060,38 @@ public class RestAgentEngineStreaming implements IRestAgentEngineStreaming {
         }
         LOGGER.warnf("Unknown streamingClientDisconnect '%s' (expected cancel or finish); using the deployment default", sanitize(value));
         return deploymentDefault;
+    }
+
+    /** The {@code code} of the opaque internal-error event. */
+    static final String INTERNAL_ERROR_CODE = "internal_error";
+
+    /**
+     * Error codes a client may simply retry after a moment: the condition is
+     * temporary (a deployment finishing, a store failing over, a busy conversation,
+     * a stalled turn). Every other code needs a change first — a decision, a new
+     * conversation, less input — or is final.
+     */
+    static final Set<String> RETRYABLE_ERROR_CODES = Set.of("agent_not_ready", "quota_accounting_unavailable", "restriction_status_unavailable",
+            "conversation_busy", TURN_TIMEOUT_CODE);
+
+    /**
+     * An {@code error} event body: {@code message}, a stable {@code code} and
+     * whether retrying the same request is sensible ({@code retryable}).
+     */
+    String typedError(String message, String code) {
+        return String.format("{\"message\":\"%s\",\"code\":\"%s\",\"retryable\":%s}", escapeJson(message), code,
+                RETRYABLE_ERROR_CODES.contains(code));
+    }
+
+    /** How a turn stream ended, for {@code eddi.streaming.closed{reason}}. */
+    static SseChannel.CloseReason closeReasonOf(ConversationState state) {
+        if (state == ConversationState.ERROR) {
+            return SseChannel.CloseReason.FAILED;
+        }
+        if (state == ConversationState.EXECUTION_INTERRUPTED) {
+            return SseChannel.CloseReason.CANCELLED;
+        }
+        return SseChannel.CloseReason.COMPLETED;
     }
 
     /**

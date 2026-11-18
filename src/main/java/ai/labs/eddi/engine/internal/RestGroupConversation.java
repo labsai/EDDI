@@ -109,6 +109,28 @@ public class RestGroupConversation implements IRestGroupConversation {
     @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-conversation", defaultValue = "104857600")
     long maxAttachmentBytesPerConversation = 104_857_600L;
 
+    /**
+     * The shared SSE transport the discussion streams write through — the same one
+     * the agent turn stream uses. Field-injected with an unmetered default so the
+     * constructor the tests use stays as it is.
+     */
+    @Inject
+    SseStreams sseStreams = SseStreams.unmetered();
+
+    /**
+     * As on the agent stream: {@code eddi.streaming.keepalive-interval-seconds}.
+     */
+    @ConfigProperty(name = "eddi.streaming.keepalive-interval-seconds", defaultValue = RestAgentEngineStreaming.DEFAULT_KEEPALIVE_INTERVAL_SECONDS)
+    int keepAliveIntervalSeconds = RestAgentEngineStreaming.DEFAULT_KEEPALIVE_INTERVAL;
+
+    /**
+     * {@code systemRuntime.agentTimeoutInSeconds}: every member turn and the
+     * synthesis is bounded by it, so a discussion stream silent for longer (plus a
+     * keep-alive interval) after its first event is stuck and is ended.
+     */
+    @ConfigProperty(name = "systemRuntime.agentTimeoutInSeconds", defaultValue = "60")
+    int agentTimeoutSeconds = 60;
+
     @Inject
     public RestGroupConversation(IGroupConversationService groupConversationService,
             IJsonSerialization jsonSerialization,
@@ -321,13 +343,23 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     @Override
     public void discussStreaming(String groupId, DiscussRequest request, SseEventSink eventSink, Sse sse) {
+        SseChannel channel = openGroupStream(eventSink, sse);
+        try {
+            discussStreaming(groupId, request, channel);
+        } catch (RuntimeException e) {
+            releaseIfUnused(channel);
+            throw e;
+        }
+    }
+
+    private void discussStreaming(String groupId, DiscussRequest request, SseChannel channel) {
         String rejection = request == null ? "A request body is required." : rejectionReason(request.question(), request.userId());
         if (rejection == null) {
             rejection = attachmentRejectionReason(request);
         }
         if (rejection != null) {
-            sendErrorEvent(eventSink, sse, rejection);
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, rejection);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         // Thrown, not turned into an SSE event: nothing has been written to the sink
@@ -339,7 +371,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (userId == null || userId.isBlank())
                 userId = "anonymous";
 
-            var listener = createStreamingListener(eventSink, sse);
+            var listener = createStreamingListener(channel);
             List<Attachment> attachments = toAttachments(request.attachments());
             if (attachments == null) {
                 groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
@@ -349,22 +381,22 @@ public class RestGroupConversation implements IRestGroupConversation {
 
         } catch (IGroupConversationService.GroupAttachmentRejectedException e) {
             LOGGER.infof("Group streaming discussion rejected (attachment %s quota) for group %s", e.getScope(), sanitize(groupId));
-            sendErrorEvent(eventSink, sse, quotaRejection(e));
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, quotaRejection(e));
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (TeamBudgetRefusedException e) {
             LOGGER.infof("Group streaming discussion refused (team budget, %s) for group %s", e.reason(), sanitize(groupId));
-            sendErrorEvent(eventSink, sse, budgetRefusalText(e));
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, budgetRefusalText(e));
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IResourceStore.ResourceNotFoundException e) {
             // Curated event text: the SSE body is rendered by the chat UI, so never push
             // the raw message (it used to embed the caller-supplied groupId).
             LOGGER.infof("Group streaming discussion → not found for group %s: %s", sanitize(groupId), e.getMessage());
-            sendErrorEvent(eventSink, sse, "Group not found.");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Group not found.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (Exception e) {
             LOGGER.errorf("Group streaming discussion failed: %s", e.getMessage());
-            sendErrorEvent(eventSink, sse, "Group discussion could not be started.");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Group discussion could not be started.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         }
     }
 
@@ -805,19 +837,29 @@ public class RestGroupConversation implements IRestGroupConversation {
     @Override
     public void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request,
                                             SseEventSink eventSink, Sse sse) {
+        SseChannel channel = openGroupStream(eventSink, sse);
+        try {
+            continueDiscussionStreaming(groupId, gcId, request, channel);
+        } catch (RuntimeException e) {
+            releaseIfUnused(channel);
+            throw e;
+        }
+    }
+
+    private void continueDiscussionStreaming(String groupId, String gcId, DiscussRequest request, SseChannel channel) {
         String rejection = request == null ? "'question' is required" : rejectionReason(request.question(), request.userId());
         if (rejection != null) {
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+            sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent(rejection)));
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         if (request.attachments() != null && !request.attachments().isEmpty()) {
             // See rejectAttachmentsOnContinue — a continuation cannot share new files.
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+            sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent(
                             "Attachments cannot be added on a continuation round.")));
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         try {
@@ -830,7 +872,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             // cancelled for HITL streams the awaiting_approval / cancelled /
             // member_pause_skipped events (and round_start) instead of silently
             // swallowing them and hanging the client.
-            var listener = createStreamingListener(eventSink, sse);
+            var listener = createStreamingListener(channel);
 
             // Captured here, on the request thread: on the executor's thread the request
             // scope is gone, so the member turns' own capture finds nobody and every
@@ -854,12 +896,12 @@ public class RestGroupConversation implements IRestGroupConversation {
         } catch (ForbiddenException e) {
             throw e;
         } catch (IResourceStore.ResourceNotFoundException e) {
-            sendErrorEvent(eventSink, sse, "Group conversation not found.");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Group conversation not found.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (Exception e) {
             LOGGER.errorf("Continue discussion streaming setup failed: %s", e.getMessage());
-            sendErrorEvent(eventSink, sse, "The continuation could not be started.");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "The continuation could not be started.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         }
     }
 
@@ -867,15 +909,25 @@ public class RestGroupConversation implements IRestGroupConversation {
     @RunOnVirtualThread
     public void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request,
                                            SseEventSink eventSink, Sse sse) {
+        SseChannel channel = openGroupStream(eventSink, sse);
+        try {
+            approveGroupPhaseStreaming(groupId, gcId, request, channel);
+        } catch (RuntimeException e) {
+            releaseIfUnused(channel);
+            throw e;
+        }
+    }
+
+    private void approveGroupPhaseStreaming(String groupId, String gcId, GroupApprovalRequest request, SseChannel channel) {
         if (request == null || request.getDecision() == null || request.getDecision().getVerdict() == null) {
-            sendErrorEvent(eventSink, sse, "Request body must include a 'decision' with a 'verdict' field");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Request body must include a 'decision' with a 'verdict' field");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         if (request.getDecision().getNote() != null
                 && request.getDecision().getNote().length() > MAX_HITL_NOTE_LENGTH) {
-            sendErrorEvent(eventSink, sse, "Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Decision note exceeds the maximum length of " + MAX_HITL_NOTE_LENGTH + " characters");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         try {
@@ -884,8 +936,8 @@ public class RestGroupConversation implements IRestGroupConversation {
             // Streaming endpoint has no Response to return — surface the mismatch as
             // a terminal SSE error instead of letting a WebApplicationException abort
             // the stream opaquely.
-            sendErrorEvent(eventSink, sse, e.getMessage());
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, e.getMessage());
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
             return;
         }
         requireResumeUseAccess(groupId);
@@ -896,9 +948,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             // gets the outcome of their decision, not the member turns that follow it.
             var owner = groupConversationService.readGroupConversation(gcId).getUserId();
             if (hitlAccessGuard.mayReadResumedDiscussion(owner)) {
-                groupConversationService.resumeDiscussion(gcId, request, createStreamingListener(eventSink, sse));
+                groupConversationService.resumeDiscussion(gcId, request, createStreamingListener(channel));
             } else {
-                var approverListener = new ApproverStreamingListener(eventSink, sse);
+                var approverListener = new ApproverStreamingListener(channel);
                 groupConversationService.resumeDiscussion(gcId, request, approverListener);
                 // Only now is the resumed run enqueued: a submit failure throws
                 // above with the pause restored, and the catch below reports it.
@@ -908,39 +960,39 @@ public class RestGroupConversation implements IRestGroupConversation {
             // Curated messages throughout (parity with the non-streaming
             // approveGroupPhase): never forward e.getMessage() over SSE — it can
             // embed the caller-supplied gcId/taskIds and internal detail.
-            sendErrorEvent(eventSink, sse,
+            sendErrorEvent(channel,
                     "The group conversation was modified concurrently — reload and retry.");
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IResourceStore.ResourceNotFoundException
                 | IGroupConversationStore.GroupConversationGoneException e) {
             // deleted concurrently — a genuine 404 equivalent
-            sendErrorEvent(eventSink, sse, "Group conversation not found.");
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, "Group conversation not found.");
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IGroupConversationService.GroupPlanMismatchException e) {
             // Still awaiting approval, but not on the plan this decision was made for.
-            sendErrorEvent(eventSink, sse, PLAN_CHANGED_MESSAGE);
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, PLAN_CHANGED_MESSAGE);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IGroupConversationService.GroupPauseMismatchException e) {
             // Still awaiting approval, but not the pause this decision was made for.
-            sendErrorEvent(eventSink, sse, PAUSE_CHANGED_MESSAGE);
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, PAUSE_CHANGED_MESSAGE);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IGroupConversationService.GroupDiscussionException e) {
             // wrong-state (e.g., double-approve) — the current state is discoverable
             // via the approval-status endpoint.
-            sendErrorEvent(eventSink, sse,
+            sendErrorEvent(channel,
                     "Group conversation is not awaiting approval — it may have been resolved, cancelled, "
                             + "or already approved.");
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (IllegalArgumentException e) {
             // the same 400 detail as the non-streaming path
             LOGGER.infof("Streaming approve of group conversation %s rejected (invalid request): %s", sanitize(gcId), sanitize(e.getMessage()));
-            sendErrorEvent(eventSink, sse, invalidApprovalDetail(e));
-            closeQuietly(eventSink);
+            sendErrorEvent(channel, invalidApprovalDetail(e));
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         } catch (Exception e) {
             LOGGER.error("Failed to approve group conversation " + sanitize(gcId), e);
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+            sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR,
                     toJson(new GroupConversationEventSink.GroupErrorEvent("Failed to process group approval.")));
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         }
     }
 
@@ -975,12 +1027,12 @@ public class RestGroupConversation implements IRestGroupConversation {
      * JSON-safe error event — the message goes through the serializer, never string
      * concatenation.
      */
-    private void sendErrorEvent(SseEventSink eventSink, Sse sse, String message) {
+    private void sendErrorEvent(SseChannel channel, String message) {
         // The documented event set uses "group_error" for every application-level
         // failure; a raw "error" name additionally collides with the browser
         // EventSource's built-in transport-error event, so clients cannot tell an
         // invalid approval body from a dropped connection (#36).
-        sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR,
+        sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR,
                 toJson(new GroupConversationEventSink.GroupErrorEvent(message)));
     }
 
@@ -1164,150 +1216,150 @@ public class RestGroupConversation implements IRestGroupConversation {
 
     // --- SSE Helpers ---
 
-    private GroupDiscussionEventListener createStreamingListener(SseEventSink eventSink, Sse sse) {
+    private GroupDiscussionEventListener createStreamingListener(SseChannel channel) {
         return new GroupDiscussionEventListener() {
             @Override
             public void onRoundStart(GroupConversationEventSink.RoundStartEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_ROUND_START, toJson(event));
             }
 
             @Override
             public void onGroupStart(GroupConversationEventSink.GroupStartEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_START, toJson(event));
             }
 
             @Override
             public void onPhaseStart(GroupConversationEventSink.PhaseStartEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_PHASE_START, toJson(event));
             }
 
             @Override
             public void onSpeakerStart(GroupConversationEventSink.SpeakerStartEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_SPEAKER_START, toJson(event));
             }
 
             @Override
             public void onSpeakerComplete(GroupConversationEventSink.SpeakerCompleteEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_SPEAKER_COMPLETE, toJson(event));
             }
 
             @Override
             public void onPhaseComplete(GroupConversationEventSink.PhaseCompleteEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_PHASE_COMPLETE, toJson(event));
             }
 
             @Override
             public void onSynthesisStart(GroupConversationEventSink.SynthesisStartEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_SYNTHESIS_START, toJson(event));
             }
 
             @Override
             public void onGroupComplete(GroupConversationEventSink.GroupCompleteEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
-                closeQuietly(eventSink);
+                sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_COMPLETE, toJson(event));
+                closeQuietly(channel, SseChannel.CloseReason.COMPLETED);
             }
 
             @Override
             public void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
-                closeQuietly(eventSink);
+                sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+                closeQuietly(channel, SseChannel.CloseReason.FAILED);
             }
 
             @Override
             public void onTaskPlanCreated(GroupConversationEventSink.TaskPlanCreatedEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_TASK_PLAN_CREATED, toJson(event));
             }
 
             @Override
             public void onTaskVerified(GroupConversationEventSink.TaskVerifiedEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_TASK_VERIFIED, toJson(event));
             }
 
             @Override
             public void onHitlPause(GroupConversationEventSink.HitlPauseEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_AWAITING_APPROVAL, toJson(event));
-                closeQuietly(eventSink);
+                sendEvent(channel, GroupConversationEventSink.EVENT_AWAITING_APPROVAL, toJson(event));
+                closeQuietly(channel, SseChannel.CloseReason.COMPLETED);
             }
 
             @Override
             public void onHumanInputRequested(GroupConversationEventSink.HumanInputRequestedEvent event) {
                 // I6: terminal for THIS stream, like an approval pause — the leg
                 // ends; a submission opens its own resumed stream if it wants one.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HUMAN_INPUT_REQUESTED, toJson(event));
-                closeQuietly(eventSink);
+                sendEvent(channel, GroupConversationEventSink.EVENT_HUMAN_INPUT_REQUESTED, toJson(event));
+                closeQuietly(channel, SseChannel.CloseReason.COMPLETED);
             }
 
             @Override
             public void onHitlResume(GroupConversationEventSink.HitlResumeEvent event) {
                 // Deliberately does NOT close — the stream continues with the
                 // resumed discussion's phase/speaker events.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(event));
             }
 
             @Override
             public void onCancelled(GroupConversationEventSink.CancelledEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
-                closeQuietly(eventSink);
+                sendEvent(channel, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+                closeQuietly(channel, SseChannel.CloseReason.CANCELLED);
             }
 
             @Override
             public void onMemberPauseSkipped(GroupConversationEventSink.MemberPauseSkippedEvent event) {
                 // Not terminal — the discussion continues past the skipped member.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_PAUSE_SKIPPED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_MEMBER_PAUSE_SKIPPED, toJson(event));
             }
 
             @Override
             public void onConvergenceChecked(GroupConversationEventSink.ConvergenceCheckedEvent event) {
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CONVERGENCE_CHECKED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_CONVERGENCE_CHECKED, toJson(event));
             }
 
             @Override
             public void onConvergenceReached(GroupConversationEventSink.ConvergenceReachedEvent event) {
                 // Not terminal — the discussion carries on with the phases that follow.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CONVERGENCE_REACHED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_CONVERGENCE_REACHED, toJson(event));
             }
 
             @Override
             public void onDecisionReached(GroupConversationEventSink.DecisionReachedEvent event) {
                 // Not terminal — a decision can be reached mid-discussion (e.g. a
                 // debate verdict before a later synthesis phase).
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_DECISION_REACHED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_DECISION_REACHED, toJson(event));
             }
 
             @Override
             public void onRetroRecorded(GroupConversationEventSink.RetroRecordedEvent event) {
                 // Not terminal — a retro can precede further phases.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_RETRO_RECORDED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_RETRO_RECORDED, toJson(event));
             }
 
             @Override
             public void onArtifactUpdated(GroupConversationEventSink.ArtifactUpdatedEvent event) {
                 // Not terminal — artifacts are edited throughout the discussion.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_ARTIFACT_UPDATED, toJson(event));
             }
 
             @Override
             public void onTeamHandoff(GroupConversationEventSink.TeamHandoffEvent event) {
                 // Not terminal — a handoff can happen at any turn or at completion.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_TEAM_HANDOFF, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_TEAM_HANDOFF, toJson(event));
             }
 
             @Override
             public void onCostUpdated(GroupConversationEventSink.CostUpdatedEvent event) {
                 // Not terminal — spend accrues for the whole run.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_COST_UPDATED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_COST_UPDATED, toJson(event));
             }
 
             @Override
             public void onStanceUpdated(GroupConversationEventSink.StanceUpdatedEvent event) {
                 // Not terminal — a stance is recomputed at every phase boundary.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_STANCE_UPDATED, toJson(event));
             }
 
             @Override
             public void onMemberToolCall(GroupConversationEventSink.MemberToolCallEvent event) {
                 // Not terminal — liveness signal while a member's tool loop runs.
-                sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
+                sendEvent(channel, GroupConversationEventSink.EVENT_MEMBER_TOOL_CALL, toJson(event));
             }
         };
     }
@@ -1334,13 +1386,11 @@ public class RestGroupConversation implements IRestGroupConversation {
      */
     private final class ApproverStreamingListener implements GroupDiscussionEventListener {
 
-        private final SseEventSink eventSink;
-        private final Sse sse;
+        private final SseChannel channel;
         private GroupConversationEventSink.HitlResumeEvent pendingResume;
 
-        private ApproverStreamingListener(SseEventSink eventSink, Sse sse) {
-            this.eventSink = eventSink;
-            this.sse = sse;
+        private ApproverStreamingListener(SseChannel channel) {
+            this.channel = channel;
         }
 
         @Override
@@ -1356,9 +1406,9 @@ public class RestGroupConversation implements IRestGroupConversation {
             if (pendingResume == null) {
                 return;
             }
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(pendingResume));
+            sendEvent(channel, GroupConversationEventSink.EVENT_HITL_RESUME, toJson(pendingResume));
             pendingResume = null;
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.COMPLETED);
         }
 
         @Override
@@ -1367,46 +1417,66 @@ public class RestGroupConversation implements IRestGroupConversation {
                 resumeEnqueued();
                 return;
             }
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
+            sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_COMPLETE,
                     toJson(new GroupConversationEventSink.GroupCompleteEvent(event.state(), null)));
-            closeQuietly(eventSink);
+            closeQuietly(channel, SseChannel.CloseReason.COMPLETED);
         }
 
         @Override
         public synchronized void onGroupError(GroupConversationEventSink.GroupErrorEvent event) {
             pendingResume = null;
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
-            closeQuietly(eventSink);
+            sendEvent(channel, GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(event));
+            closeQuietly(channel, SseChannel.CloseReason.FAILED);
         }
 
         @Override
         public synchronized void onCancelled(GroupConversationEventSink.CancelledEvent event) {
             pendingResume = null;
-            sendEvent(eventSink, sse, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
-            closeQuietly(eventSink);
+            sendEvent(channel, GroupConversationEventSink.EVENT_CANCELLED, toJson(event));
+            closeQuietly(channel, SseChannel.CloseReason.CANCELLED);
         }
     }
 
-    private void sendEvent(SseEventSink eventSink, Sse sse, String eventName, String data) {
-        if (eventSink.isClosed()) {
-            LOGGER.debugf("SSE sink closed, dropping event: %s", eventName);
-            return;
-        }
-        try {
-            eventSink.send(sse.newEventBuilder().name(eventName).data(String.class, data).build());
-        } catch (Exception e) {
-            LOGGER.warnf("Failed to send SSE event '%s': %s", eventName, e.getMessage());
+    /**
+     * Opens a discussion stream on the shared SSE transport ({@link SseStreams}):
+     * the same keep-alive, disconnect detection, bounded buffering and silence
+     * backstop as the agent turn stream. Refused with {@code 503} when the node is
+     * at its stream capacity.
+     * <p>
+     * A client that leaves does not cancel the discussion: a discussion is
+     * persisted round by round and costs several turns, so it runs on and the
+     * client reads the outcome when it reloads. Its stream is closed and released
+     * at once instead of being written to (and buffered for) nobody.
+     */
+    private SseChannel openGroupStream(SseEventSink eventSink, Sse sse) {
+        long backstop = agentTimeoutSeconds > 0 ? (long) agentTimeoutSeconds + keepAliveIntervalSeconds : 0L;
+        SseChannel[] holder = new SseChannel[1];
+        SseChannel channel = sseStreams.open(SseStreams.Kind.GROUP, "group discussion stream", eventSink, sse, keepAliveIntervalSeconds,
+                backstop, () -> LOGGER.info("Group discussion stream client disconnected — the discussion continues and persists"),
+                () -> holder[0].send(GroupConversationEventSink.EVENT_GROUP_ERROR, toJson(new GroupConversationEventSink.GroupErrorEvent(
+                        "The discussion stream carried no event for longer than the agent timeout; reload the discussion to see its state."))));
+        holder[0] = channel;
+        channel.startKeepAlive();
+        return channel;
+    }
+
+    /**
+     * Frees the slot of a stream refused before it wrote anything (a plain HTTP
+     * error follows).
+     */
+    private static void releaseIfUnused(SseChannel channel) {
+        if (!channel.eventSent()) {
+            channel.releaseUnused();
         }
     }
 
-    private void closeQuietly(SseEventSink eventSink) {
-        try {
-            if (!eventSink.isClosed()) {
-                eventSink.close();
-            }
-        } catch (Exception e) {
-            LOGGER.debugf("Error closing SSE sink: %s", e.getMessage());
-        }
+    private void sendEvent(SseChannel channel, String eventName, String data) {
+        channel.send(eventName, data);
+    }
+
+    private void closeQuietly(SseChannel channel, SseChannel.CloseReason reason) {
+        channel.markTerminal();
+        channel.close(reason);
     }
 
     private String toJson(Object obj) {

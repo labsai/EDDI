@@ -57,6 +57,32 @@ cancel no longer runs on the provider's callback thread under the stream lock: i
 and the step are not stored (the tenant ledger and the metrics are still charged for what the provider billed). Keeping
 the input needs a persisted turn journal, a separate planned branch.
 
+### A transport that scales (B7, B11)
+
+The agent turn stream, its resume and the group discussion streams now write through one transport,
+[`SseChannel`](../../src/main/java/ai/labs/eddi/engine/internal/SseChannel.java) on the registry
+[`SseStreams`](../../src/main/java/ai/labs/eddi/engine/internal/SseStreams.java):
+
+- **No thread per stream.** Writes never wait for the client; keep-alive, the silence backstop and disconnect
+  detection are one fixed-rate entry per stream on one process-wide daemon scheduler thread; disconnect handling (a
+  store read and compare-and-set) runs on a virtual thread started only when a client actually leaves.
+- **Bounded buffering.** Each write is counted until its `CompletionStage` completes; a client more than
+  `eddi.streaming.max-pending-events` (512) events or `eddi.streaming.max-pending-bytes` (1 MiB) behind is
+  disconnected (reason `backpressure`, the stream's disconnect policy applies) instead of being buffered for.
+- **No head-of-line coupling.** The write lock is held only for the non-blocking hand-over; the shared tick only
+  `tryLock`s it, so a stalled stream never delays another stream's heartbeat or end.
+- **Capacity.** `eddi.streaming.max-concurrent-streams` (5000, `0` = unlimited) open streams per node; the next is
+  refused `503` + `Retry-After: 5` + `{"code":"streams_at_capacity","retryable":true}` before its turn starts.
+- **Certain cleanup.** Every terminal path releases the registry slot, the tick and the sink exactly once.
+- **Meters:** `eddi.streaming.active{kind}`, `eddi.streaming.closed{kind,reason}`, `eddi.streaming.refused{kind}`,
+  `eddi.streaming.first_token{kind}`.
+- **Errors carry `code` and `retryable`** on every `error` event (opaque failures: `internal_error`, not retryable).
+- **The group stream** gets keep-alive, disconnect detection (a leaving client releases the stream; the discussion
+  continues and persists) and the silence backstop (`group_error` after the agent timeout plus one interval).
+- **Proxy headers (B7):** [`SseResponseHeadersFilter`](../../src/main/java/ai/labs/eddi/engine/internal/SseResponseHeadersFilter.java)
+  adds `Cache-Control: no-cache` and `X-Accel-Buffering: no` to every `text/event-stream` response that did not set
+  them.
+
 ### Upgrade notes
 
 - A provider or OpenAI-compatible server that never sends `finish_reason` now fails every streamed turn until the task
@@ -89,12 +115,12 @@ the input needs a persisted turn journal, a separate planned branch.
 **Files:** `modules/llm/impl/{AbandonableStreamCall, ToolLoopStreamingChatModel, StreamingLegacyChatExecutor,
 StreamPolicy, StreamingSettings, ObservableStreamingChatModel, LlmTask}.java`, `modules/llm/model/{StreamingConfig,
 LlmConfiguration}.java`, `engine/lifecycle/internal/LifecycleManager.java`, `engine/internal/RestAgentEngineStreaming.java`,
-`engine/memory/{MemoryKeys, ConversationMemoryUtilities}.java`, `configs/agents/model/AgentConfiguration.java`,
+`engine/internal/{SseChannel, SseStreams, SseResponseHeadersFilter, RestGroupConversation}.java`, `engine/memory/{MemoryKeys, ConversationMemoryUtilities}.java`, `configs/agents/model/AgentConfiguration.java`,
 `configs/shared/RetryConfiguration.java`; docs: `langchain.md`, `llm-resilience.md`, `rest-api-reference.md`,
 `conversations.md`, `configuration-reference.md`, `metrics.md`.
 
 **Tests:** `StreamingContractParityTest` (the same scripted provider behaviours through the non-streaming, plain
 streaming and tool-loop streaming paths), `AbandonableStreamCallTest`, `ToolLoopStreamingChatModelTest`,
 `StreamingLegacyChatExecutorRetryTest` (rewritten: it pinned the salvage and the single attempt),
-`LifecycleManagerTaskFailedEventTest`, `ConversationMemoryUtilitiesFinishReasonTest`; adjusted where tests pinned the
+`LifecycleManagerTaskFailedEventTest`, `ConversationMemoryUtilitiesFinishReasonTest`, `SseChannelLoadTest` (4,000 simulated streams: healthy, stalled, leaving, never reading — bounded buffers, no cross-stream delay, full cleanup), `RestAgentEngineStreamingContractTest`, `RestGroupConversationStreamTransportTest`, `SseResponseHeadersFilterTest`; adjusted where tests pinned the
 old outcome.
