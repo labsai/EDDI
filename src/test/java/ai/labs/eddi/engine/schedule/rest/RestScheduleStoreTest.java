@@ -563,6 +563,31 @@ class RestScheduleStoreTest {
     }
 
     @Test
+    void createSchedule_reservedTimeoutName_rejectedEvenWithoutTheMarker() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        ScheduleConfiguration plain = makeCronSchedule("v2");
+        plain.setName("hitl-timeout-conv-1");
+
+        Response response = rest.createSchedule(plain);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).createSchedule(any());
+    }
+
+    @Test
+    void updateSchedule_reservedTimeoutName_rejected() throws Exception {
+        when(identity.hasRole("eddi-admin")).thenReturn(true);
+        when(scheduleStore.readSchedule("r1")).thenReturn(makeCronSchedule("r1"));
+        ScheduleConfiguration plain = makeCronSchedule("r1");
+        plain.setName("hitl-timeout-group-gc-1");
+
+        Response response = rest.updateSchedule("r1", plain);
+
+        assertEquals(400, response.getStatus());
+        verify(scheduleStore, never()).updateSchedule(eq("r1"), any());
+    }
+
+    @Test
     void createSchedule_hitlBody_rejectedForAdmin() throws Exception {
         // Even an admin cannot mint a HITL timeout schedule via REST.
         when(identity.hasRole("eddi-admin")).thenReturn(true);

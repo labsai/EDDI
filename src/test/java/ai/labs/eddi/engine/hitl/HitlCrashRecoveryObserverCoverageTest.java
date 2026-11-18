@@ -216,10 +216,12 @@ class HitlCrashRecoveryObserverCoverageTest {
                     pausedSummary("AUTO_REJECT", "PT30M", pausedAt)));
             when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(null);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
 
         @Test
@@ -237,9 +239,11 @@ class HitlCrashRecoveryObserverCoverageTest {
             snap.setHitlPausedAt(null);
             when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snap);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
     }
 
@@ -424,9 +428,11 @@ class HitlCrashRecoveryObserverCoverageTest {
             when(gcStore.findByState(GroupConversationState.AWAITING_APPROVAL)).thenReturn(List.of(gc));
             when(gcStore.read(GC_ID)).thenReturn(null);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
 
         @Test
@@ -438,9 +444,11 @@ class HitlCrashRecoveryObserverCoverageTest {
             var current = pausedGc("AUTO_APPROVE", "PT10M", Instant.now().minus(1, ChronoUnit.MINUTES));
             when(gcStore.read(GC_ID)).thenReturn(current);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
 
         @Test

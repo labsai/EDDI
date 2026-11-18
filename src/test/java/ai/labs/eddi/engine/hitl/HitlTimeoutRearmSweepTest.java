@@ -361,19 +361,125 @@ class HitlTimeoutRearmSweepTest {
         }
 
         @Test
-        @DisplayName("S2: rows that cannot be read are replaced, not failed on every sweep")
-        void unreadableRowsHealed() throws Exception {
+        @DisplayName("a failed read writes nothing: armed and hand-disabled rows stay as they are, the next sweep reads again")
+        void failedReadLeavesRowsAlone() throws Exception {
             Instant pausedAt = Instant.now().minusSeconds(10);
             regularPause("AUTO_REJECT", "PT5M", pausedAt);
-            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(300));
-            when(scheduleStore.readSchedulesByName(anyString(), anyInt()))
-                    .thenThrow(new ResourceStoreException("malformed row"))
-                    .thenAnswer(invocation -> rows.stream().filter(row -> REGULAR_NAME.equals(row.getName())).toList());
+            ScheduleConfiguration armed = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt,
+                    pausedAt.plusSeconds(300));
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenThrow(new ResourceStoreException("transient"));
 
             sweeps(SWEEPS);
 
+            assertEquals(List.of(armed), rowsNamed(REGULAR_NAME));
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a result that hit its bound is not classified as 'missing': nothing is deleted by name")
+        void truncatedResultNotDeleted() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            for (int i = 0; i < 100; i++) {
+                armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", Instant.now().minus(Duration.ofHours(2 + i)),
+                        Instant.now().plus(Duration.ofHours(10)));
+            }
+            when(scheduleStore.readSchedulesByName(anyString(), anyInt())).thenAnswer(
+                    invocation -> rows.stream().filter(row -> REGULAR_NAME.equals(row.getName())).limit((int) invocation.getArgument(1))
+                            .toList());
+
+            sweeps(2);
+
+            assertEquals(100, rowsNamed(REGULAR_NAME).size());
+            verify(scheduleStore, never()).deleteSchedulesByName(anyString());
+            verify(scheduleStore, never()).createSchedule(any());
+        }
+
+        @Test
+        @DisplayName("a row that is not a HITL timeout under the reserved name does not pass for the pause's timeout")
+        void foreignRowDoesNotCountAsArmed() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            var foreign = new ScheduleConfiguration();
+            foreign.setName(REGULAR_NAME);
+            foreign.setEnabled(true);
+            foreign.setNextFire(Instant.now().plus(Duration.ofDays(30)));
+            foreign.setId("schedule-foreign");
+            rows.add(foreign);
+
+            sweeps(1);
+
             verify(scheduleStore, times(1)).createSchedule(any());
-            assertEquals(1, rowsNamed(REGULAR_NAME).size());
+        }
+
+        @Test
+        @DisplayName("the withdrawal after a vanished pause removes only the row this sweep created, not a newer pause's timeout")
+        void withdrawalKeepsNewerPausesRow() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(10);
+            Instant newerPause = Instant.now().minusSeconds(1);
+            regularPause("AUTO_REJECT", "PT5M", pausedAt);
+            doAnswer(invocation -> {
+                String id = invocation.getArgument(0);
+                rows.removeIf(row -> id.equals(row.getId()));
+                return null;
+            }).when(scheduleStore).deleteSchedule(anyString());
+            var gone = new ConversationMemorySnapshot();
+            gone.setConversationState(ConversationState.AWAITING_HUMAN);
+            gone.setHitlPausedAt(newerPause); // the scanned pause was resumed; a new one began
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenAnswer(invocation -> {
+                armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", newerPause, newerPause.plusSeconds(300));
+                return gone;
+            });
+
+            sweeps(1);
+
+            List<ScheduleConfiguration> named = rowsNamed(REGULAR_NAME);
+            assertEquals(1, named.size(), "the newer pause's own timeout must survive");
+            assertEquals(HitlDecision.pauseIdOf(newerPause), named.get(0).getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY));
+        }
+
+        @Test
+        @DisplayName("the one-hour backoff counts only completed rows of this pause, not an earlier pause's later fire")
+        void backoffIgnoresEarlierPausesFire() throws Exception {
+            Instant pausedAt = Instant.now().minusSeconds(600);
+            regularPause("AUTO_REJECT", "PT30S", pausedAt);
+            armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT", pausedAt, pausedAt.plusSeconds(30));
+            Instant ownFire = Instant.now().minusSeconds(500);
+            pollAt(ownFire);
+            ScheduleConfiguration earlier = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_REJECT",
+                    pausedAt.minus(Duration.ofHours(1)), pausedAt.minusSeconds(3000));
+            earlier.setEnabled(false);
+            earlier.setNextFire(null);
+            earlier.setLastFired(Instant.now().minusSeconds(100)); // later than this pause's own fire
+
+            sweeps(1);
+
+            assertEquals(ownFire.plus(HitlCrashRecoveryObserver.SPENT_REARM_BACKOFF), rowsNamed(REGULAR_NAME).get(0).getNextFire());
+        }
+
+        @Test
+        @DisplayName("a pause restored after a lost resume keeps a row of its own that a person disabled")
+        void restoredPauseKeepsHandDisabledRow() throws Exception {
+            Instant pausedAt = Instant.now().minus(Duration.ofHours(1));
+            ScheduleConfiguration disabled = armedRow(REGULAR_NAME, HitlSchedules.SURFACE_REGULAR, CONV_ID, "AUTO_APPROVE", pausedAt,
+                    pausedAt.plusSeconds(60));
+            disabled.setEnabled(false);
+            var snapshot = new ConversationMemorySnapshot();
+            snapshot.setAgentId("agent-1");
+            snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+            snapshot.setHitlPausedAt(pausedAt);
+            snapshot.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_APPROVE);
+            snapshot.setHitlApprovalTimeout("PT1M");
+            when(memStore.findConversationIdsByState(ConversationState.IN_PROGRESS)).thenReturn(List.of(CONV_ID));
+            when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(snapshot);
+            when(memStore.compareAndSetState(CONV_ID, ConversationState.IN_PROGRESS, ConversationState.AWAITING_HUMAN))
+                    .thenReturn(true);
+
+            observer.runRecovery(Instant.now());
+
+            assertEquals(List.of(disabled), rowsNamed(REGULAR_NAME));
+            assertFalse(disabled.isEnabled());
         }
 
         @Test

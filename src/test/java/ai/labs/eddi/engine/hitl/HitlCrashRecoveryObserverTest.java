@@ -221,11 +221,13 @@ class HitlCrashRecoveryObserverTest {
             resumed.setConversationState(ConversationState.READY);
             when(memStore.loadConversationMemorySnapshot(CONV_ID)).thenReturn(resumed);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
             // deleted twice: once before create (idempotent replace), once to withdraw
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
 
         @Test
@@ -242,12 +244,14 @@ class HitlCrashRecoveryObserverTest {
             when(memStore.loadConversationMemorySnapshot(CONV_ID))
                     .thenReturn(awaitingSnapshot(newerPausedAt));
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
             // deleted twice: once before create (idempotent replace), once to withdraw
             // the stale schedule (state is AWAITING_HUMAN but the bookmark differs)
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-" + CONV_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
 
         @Test
@@ -524,10 +528,12 @@ class HitlCrashRecoveryObserverTest {
             resumed.setState(GroupConversationState.IN_PROGRESS);
             when(gcStore.read(GC_ID)).thenReturn(resumed);
 
+            when(scheduleStore.createSchedule(any())).thenReturn("new-1");
             observer(true, true).runRecovery();
 
             verify(scheduleStore).createSchedule(any());
-            verify(scheduleStore, times(2)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore, times(1)).deleteSchedulesByName("hitl-timeout-group-" + GC_ID);
+            verify(scheduleStore).deleteSchedule("new-1");
         }
     }
 

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.hitl;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -82,6 +83,15 @@ public final class HitlSchedules {
             metadata.put(METADATA_PAUSE_ID_KEY, pauseId);
         }
         return metadata;
+    }
+
+    /**
+     * True for a name in the timeout namespace ({@code hitl-timeout-...}, group
+     * timeouts included). Crash recovery treats a row under such a name as the
+     * pause's timeout, so only the server may write one.
+     */
+    public static boolean isReservedTimeoutName(String name) {
+        return name != null && name.trim().toLowerCase(Locale.ROOT).startsWith(NAME_PREFIX_REGULAR);
     }
 
     /** True if the metadata marks a HITL timeout schedule. */
