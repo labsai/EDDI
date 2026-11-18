@@ -24,7 +24,13 @@ class ChildJvmTest {
         public static void main(String[] args) {
             System.out.println("max=" + Runtime.getRuntime().maxMemory());
             System.out.println("args=" + String.join(",", args));
-            System.exit(Integer.parseInt(args[0]));
+            int status;
+            try {
+                status = Integer.parseInt(args[0]);
+            } catch (NumberFormatException e) {
+                status = 2; // the tests always pass a number; anything else is a test bug
+            }
+            System.exit(status);
         }
     }
 
