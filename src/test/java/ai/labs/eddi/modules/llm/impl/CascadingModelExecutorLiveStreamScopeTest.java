@@ -99,7 +99,8 @@ class CascadingModelExecutorLiveStreamScopeTest {
         doAnswer(inv -> {
             StreamingChatResponseHandler h = inv.getArgument(1);
             h.onPartialResponse(text);
-            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
+            h.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(text))
+                    .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             return null;
         }).when(streaming).chat(any(ChatRequest.class), any(StreamingChatResponseHandler.class));
         return streaming;

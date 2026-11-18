@@ -270,7 +270,8 @@ class JsonResponseFormatThreadingTest {
                 public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                     captured.set(chatRequest);
                     handler.onPartialResponse("{}");
-                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("{}")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
+                    handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from("{}"))
+                            .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
                 }
             };
 

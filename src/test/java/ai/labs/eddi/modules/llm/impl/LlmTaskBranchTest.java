@@ -581,7 +581,8 @@ class LlmTaskBranchTest {
                         @Override
                         public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                             handler.onPartialResponse("private-intermediate");
-                            handler.onCompleteResponse(ChatResponse.builder().aiMessage(aiMessage("private-intermediate")).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
+                            handler.onCompleteResponse(ChatResponse.builder().aiMessage(aiMessage("private-intermediate"))
+                                    .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
                         }
                     };
                 }

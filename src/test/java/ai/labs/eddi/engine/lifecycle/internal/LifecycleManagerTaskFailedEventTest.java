@@ -36,11 +36,11 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * B6 / live S-5: the streaming {@code task_failed} event reaches every client of
- * the stream, end users included. It used to carry the old substring classifier
- * ("unknown" for 401, 429, 500 and timeouts) and the audit summary meant for a
- * privileged audience. It now carries what the REST error carries: the
- * {@code LlmFailureClassifier} class and the redacted digest.
+ * B6 / live S-5: the streaming {@code task_failed} event reaches every client
+ * of the stream, end users included. It used to carry the old substring
+ * classifier ("unknown" for 401, 429, 500 and timeouts) and the audit summary
+ * meant for a privileged audience. It now carries what the REST error carries:
+ * the {@code LlmFailureClassifier} class and the redacted digest.
  */
 @DisplayName("LifecycleManager — the task_failed event a client sees")
 class LifecycleManagerTaskFailedEventTest {

@@ -207,7 +207,8 @@ class LlmTaskToolLoopStreamingTest {
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
                 handler.onPartialResponse("the whole ");
                 handler.onPartialResponse("agent answer");
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER))
+                        .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
     }
@@ -217,7 +218,8 @@ class LlmTaskToolLoopStreamingTest {
         return new StreamingChatModel() {
             @Override
             public void chat(ChatRequest chatRequest, StreamingChatResponseHandler handler) {
-                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER)).metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
+                handler.onCompleteResponse(ChatResponse.builder().aiMessage(AiMessage.from(FINAL_ANSWER))
+                        .metadata(ChatResponseMetadata.builder().finishReason(FinishReason.STOP).build()).build());
             }
         };
     }
