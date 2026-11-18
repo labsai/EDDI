@@ -149,3 +149,7 @@ GR1–GR4.
 [`McpHitlTools.java`](../../src/main/java/ai/labs/eddi/engine/mcp/McpHitlTools.java),
 [`SlackGroupDiscussionListener.java`](../../src/main/java/ai/labs/eddi/integrations/slack/SlackGroupDiscussionListener.java);
 docs: [`group-conversations.md`](../group-conversations.md), [`metrics.md`](../metrics.md).
+The two new counters are charted in
+[`eddi-full-metrics-dashboard.json`](../monitoring/eddi-full-metrics-dashboard.json): unanswered
+rounds by `outcome` on "Discussions started vs failed", unanswered VERIFY passes beside the
+unparseable ones on "Unparseable / unanswered VERIFY verdicts".

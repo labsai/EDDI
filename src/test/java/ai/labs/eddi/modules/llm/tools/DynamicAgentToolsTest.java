@@ -930,10 +930,33 @@ class DynamicAgentToolsTest {
             // Act
             String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
 
-            // Assert
-            assertTrue(result.contains("✅"), "Should contain success marker (tool itself succeeded)");
-            assertTrue(result.contains("ERROR state") || result.contains("failed to produce output"),
-                    "Should indicate the agent entered ERROR state");
+            // Assert — an ERROR without output is a failure, reported as one. It used to
+            // be a "✅ Agent response" wrapping the placeholder "[Agent failed to produce
+            // output — ...]", which the delegating model could take for the other agent's
+            // answer. Now: the tool's failure marker and a fixed text that says outright
+            // there is no answer.
+            assertEquals("❌ Agent '" + AGENT_ID + "' failed to produce an answer: its conversation (" + CONVERSATION_ID
+                    + ") ended in ERROR. This is not the agent's answer; retry later or proceed without it.", result);
+            assertFalse(result.contains("✅"), "a failed delegation must not carry the success marker");
+            assertFalse(result.contains("Agent response"), "nothing may read as the other agent's answer");
+        }
+
+        @Test
+        @DisplayName("ERROR conversation state with an empty-string output is still a failure")
+        void converseWithAgent_errorStateEmptyOutput_returnsErrorMessage() throws Exception {
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationId(CONVERSATION_ID);
+            snapshot.setConversationState(ConversationState.ERROR);
+            var output = new ConversationOutput();
+            output.put("output", List.of(""));
+            snapshot.setConversationOutputs(List.of(output));
+
+            stubSayWithSnapshot(snapshot);
+
+            String result = tool.converseWithAgent(AGENT_ID, "Hello", CONVERSATION_ID);
+
+            assertTrue(result.startsWith("❌ Agent '" + AGENT_ID + "' failed to produce an answer"), result);
+            assertFalse(result.contains("[no response]"), result);
         }
 
         @Test
