@@ -33,15 +33,15 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
-
 import org.jboss.logging.Logger;
+
 import java.math.BigDecimal;
 import java.net.URI;
 import java.util.*;
 
 import static ai.labs.eddi.configs.properties.model.Property.Scope.conversation;
-import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
+import static ai.labs.eddi.utils.RuntimeUtilities.checkNotNull;
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static java.lang.Boolean.parseBoolean;
 
@@ -50,8 +50,8 @@ import static java.lang.Boolean.parseBoolean;
  */
 @ApplicationScoped
 public class PropertySetterTask implements ILifecycleTask {
-    public static final String ID = "ai.labs.property";
     private static final Logger LOGGER = Logger.getLogger(PropertySetterTask.class);
+    public static final String ID = "ai.labs.property";
     public static final TaskId TASK_ID = new TaskId(ID);
 
     private static final String EXPRESSIONS_PARSED_IDENTIFIER = "expressions:parsed";
@@ -63,8 +63,8 @@ public class PropertySetterTask implements ILifecycleTask {
     private static final String CONTEXT_IDENTIFIER = "context";
     private static final String PROPERTIES_IDENTIFIER = "properties";
     private static final String KEY_SET_ON_ACTIONS = "setOnActions";
-    private static final String NAME = "name";
     private static final String KEY_ACCEPT_CLIENT_PROPERTIES = "acceptClientProperties";
+    private static final String NAME = "name";
     private static final String VALUE_STRING = "valueString";
     private static final String VALUE_OBJECT = "valueObject";
     private static final String VALUE_LIST = "valueList";
@@ -301,8 +301,8 @@ public class PropertySetterTask implements ILifecycleTask {
     public Object configure(Map<String, Object> configuration, Map<String, Object> extensions) throws WorkflowConfigurationException {
 
         List<SetOnActions> setOnActionsList = new LinkedList<>();
-
         boolean acceptClientProperties = parseBoolean(String.valueOf(configuration.getOrDefault(KEY_ACCEPT_CLIENT_PROPERTIES, false)));
+
         if (configuration.containsKey(KEY_SET_ON_ACTIONS)) {
             setOnActionsList.addAll(parseRawConfig(configuration));
         }
@@ -314,8 +314,8 @@ public class PropertySetterTask implements ILifecycleTask {
                     URI uri = URI.create(uriObj.toString());
                     var propertySetterConfig = resourceClientLibrary.getResource(uri, PropertySetterConfiguration.class);
                     setOnActionsList.addAll(propertySetterConfig.getSetOnActions());
-                }
                     acceptClientProperties |= propertySetterConfig.isAcceptClientProperties();
+                }
             }
         } catch (ServiceException e) {
             String message = "Error while fetching PropertySetterConfiguration!\n" + e.getLocalizedMessage();
