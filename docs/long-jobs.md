@@ -235,8 +235,9 @@ MCP `fire_schedule_now` tool refuses it) and is never exported with its agent.
   `job.finished` when the last turn of a job ran (`state`: `done`, or why it stopped — `limit`,
   `cost_ceiling`, …) and `job.failed` when a continuation fire failed. Ids only. A schedule
   write that failed raises no `job.finished` while the recovery sweep will arm the stored decision
-  (the sweep is on): the job is not over. With the sweep off it raises `job.finished` with
-  `schedule_failed`, after retiring the decision.
+  (the sweep is on): the job is not over. With the sweep off, or with no stored decision it could
+  arm, it raises `job.finished` with `schedule_failed`, after retiring the decision — and nothing
+  at all if the decision cannot be retired.
 - **Metrics** — `eddi_continuation_scheduled_total`, `eddi_continuation_run_total`,
   `eddi_continuation_refused_total{reason}` and `eddi_continuation_recovered_total`; see [Metrics](metrics.md#self-continuation-metrics).
 
