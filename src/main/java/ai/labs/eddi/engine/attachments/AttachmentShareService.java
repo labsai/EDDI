@@ -15,11 +15,13 @@ import org.jboss.logging.Logger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -213,15 +215,6 @@ public class AttachmentShareService {
     }
 
     /**
-     * {@link #share(String, ConversationListing, List, String, ShareReason, SharePolicy, ShareParties)}
-     * with no parties known to the audit entry.
-     */
-    public ShareResult share(String sourceConversationId, ConversationListing listing, List<AttachmentSelector> selectors,
-                             String targetConversationId, ShareReason reason, SharePolicy policy) {
-        return share(sourceConversationId, listing, selectors, targetConversationId, reason, policy, ShareParties.UNKNOWN);
-    }
-
-    /**
      * Shares files of the source conversation with the target conversation.
      * <p>
      * Source and target are derived by the <strong>caller</strong> (server code),
@@ -231,7 +224,13 @@ public class AttachmentShareService {
      * cannot be shared yet); of an allowed MIME type; the source must be below
      * {@code maxDepth}; the call below {@code maxFilesPerShare}; the turn below
      * {@code maxSharesPerTurn}. Then the root is granted to the target, the share
-     * is counted against both caps, metered and audited.
+     * is counted against both caps, metered and audited. A selector repeated in the
+     * same call is shared once.
+     * <p>
+     * There is deliberately no overload without {@code parties}: the user id on the
+     * audit entry is what lets the ledger pseudonymise it when the user is erased,
+     * so every caller has to say who it is (or pass {@link ShareParties#UNKNOWN} on
+     * purpose).
      *
      * @param sourceConversationId
      *            the conversation the calling tool is bound to
@@ -246,8 +245,8 @@ public class AttachmentShareService {
      * @param policy
      *            the limits
      * @param parties
-     *            who the share is between, for the audit entry (may be
-     *            {@code null})
+     *            who the share is between, for the audit entry; {@code null} is
+     *            read as {@link ShareParties#UNKNOWN}
      */
     public ShareResult share(String sourceConversationId, ConversationListing listing, List<AttachmentSelector> selectors,
                              String targetConversationId, ShareReason reason, SharePolicy policy, ShareParties parties) {
@@ -266,15 +265,21 @@ public class AttachmentShareService {
             callRefusal = Refusal.TARGET;
         }
         int sharedByThisCall = 0;
+        Set<AttachmentSelector> seen = new HashSet<>();
         for (AttachmentSelector selector : selectors) {
+            if (selector != null && !seen.add(selector)) {
+                // The same file asked for twice in one call: answered once.
+                continue;
+            }
+            if (callRefusal != null) {
+                // Nothing in this call is shared, so no file is looked up: no store
+                // reads, and no name of a file the source might not be able to read.
+                refuse(refused, UNKNOWN_FILE, callRefusal);
+                continue;
+            }
             Optional<ConversationListing.Entry> listed = selector != null ? list.entryForRoot(selector.storageRef()) : Optional.empty();
             // A file the listing does not hold has no name the model may see.
             String name = listed.map(ConversationListing.Entry::displayName).orElse(UNKNOWN_FILE);
-            if (callRefusal != null) {
-                refuse(refused, listed.isPresent() && mayRead(listed.get().rootRef(), sourceConversationId) ? name : UNKNOWN_FILE,
-                        callRefusal);
-                continue;
-            }
             if (listed.isEmpty()) {
                 refuse(refused, name, Refusal.NOT_FOUND);
                 continue;

@@ -87,6 +87,15 @@ class ConversationListingTest {
     }
 
     @Test
+    void displayNames_areStripped_soTheModelCanWriteThem() {
+        var store = new InMemoryAttachmentStore().put(REF_A, " notes.txt ", "text/plain", 1, SOURCE);
+        var listing = ConversationListing.of(SOURCE, store, Set.of(), List.of());
+
+        assertEquals(List.of("notes.txt"), listing.displayNames());
+        assertEquals(1, new AttachmentShareService(store, null, null).resolveNames(listing, List.of("notes.txt")).resolved().size());
+    }
+
+    @Test
     void duplicateNames_areKept() {
         var store = new InMemoryAttachmentStore().put(REF_A, "report.pdf", "application/pdf", 10, SOURCE).put(REF_B, "report.pdf",
                 "application/pdf", 20, SOURCE);

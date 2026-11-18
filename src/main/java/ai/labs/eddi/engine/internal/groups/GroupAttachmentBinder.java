@@ -17,6 +17,7 @@ import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -46,12 +47,13 @@ public class GroupAttachmentBinder {
     /**
      * @param shareService
      *            decides whether a passed-through reference may be shared — the
-     *            rule every agent-to-agent path uses
+     *            rule every agent-to-agent path uses; must be built over the same
+     *            store as {@code attachmentStore}
      */
     public GroupAttachmentBinder(IAttachmentStore attachmentStore, String defaultTenantId, AttachmentShareService shareService) {
         this.attachmentStore = attachmentStore;
         this.defaultTenantId = defaultTenantId;
-        this.shareService = shareService;
+        this.shareService = Objects.requireNonNull(shareService, "shareService");
     }
 
     /**
@@ -155,7 +157,9 @@ public class GroupAttachmentBinder {
      * On success {@code gc} is granted read access as well.
      */
     private boolean mayPassThrough(String storageRef, GroupConversation gc, String trustedSourceConversationId) {
-        if (!shareService.mayRead(storageRef, trustedSourceConversationId)) {
+        // No store to grant through means nothing can be passed on, whatever the
+        // share service's own store says.
+        if (attachmentStore == null || !shareService.mayRead(storageRef, trustedSourceConversationId)) {
             // The source id is caller-supplied: sanitized (LogSanitizer's rule).
             LOGGER.warnf("Refused an attachment storageRef for group conversation '%s': only references the caller's own "
                     + "conversation can read are shared (source conversation: '%s')", gc.getId(),

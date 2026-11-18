@@ -16,6 +16,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -28,6 +29,7 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
@@ -85,7 +87,7 @@ class AttachmentShareServiceTest {
     }
 
     private ShareResult share(List<AttachmentSelector> selectors, SharePolicy policy) {
-        return service.share(SOURCE, listing, selectors, TARGET, ShareReason.DELEGATION, policy);
+        return service.share(SOURCE, listing, selectors, TARGET, ShareReason.DELEGATION, policy, ShareParties.UNKNOWN);
     }
 
     @Nested
@@ -202,6 +204,43 @@ class AttachmentShareServiceTest {
         }
 
         @Test
+        void repeatedSelector_isSharedOnce() throws Exception {
+            var counter = TurnCounter.local();
+
+            var result = share(List.of(AttachmentSelector.wholeFile(REF_PDF), AttachmentSelector.wholeFile(REF_PDF),
+                    AttachmentSelector.wholeFile(REF_PNG)), new SharePolicy(2, 10, 3, 0, Set.of(), counter));
+
+            assertEquals(List.of("report.pdf", "chart.png"), result.shared().stream().map(ShareResult.Shared::fileName).toList());
+            assertTrue(result.refused().isEmpty());
+            assertEquals(2, counter.get());
+            verify(store).grantAccess(REF_PDF, TARGET);
+            verify(ledger, times(2)).submit(any());
+        }
+
+        @Test
+        void callRefusal_readsNoStore_andNamesNoFile() {
+            var mockStore = mock(IAttachmentStore.class);
+            var s = new AttachmentShareService(mockStore, registry, ledger);
+
+            var result = s.share(SOURCE, listing, List.of(AttachmentSelector.wholeFile(REF_PDF)), SOURCE, ShareReason.DELEGATION, open(),
+                    ShareParties.UNKNOWN);
+
+            assertEquals(new ShareResult.Refused(AttachmentShareService.UNKNOWN_FILE, Refusal.TARGET.text()), result.refused().get(0));
+            verifyNoInteractions(mockStore);
+        }
+
+        @Test
+        void nullMimeEntry_allowsNothing_ratherThanEverything() {
+            var allowed = new HashSet<String>();
+            allowed.add(null);
+            var policy = new SharePolicy(10, 10, 3, 0, allowed, null);
+
+            assertFalse(policy.allowsMimeType("application/pdf"));
+            assertEquals(Refusal.MIME_TYPE.text(), share(List.of(AttachmentSelector.wholeFile(REF_PDF)), policy).refused().get(0).reason());
+            assertTrue(new SharePolicy(10, 10, 3, 0, Set.of(" Application/PDF "), null).allowsMimeType("application/pdf"));
+        }
+
+        @Test
         void auditCarriesTheParties() {
             service.share(SOURCE, listing, List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET, ShareReason.DELEGATION, open(),
                     new ShareParties("user-1", "agent-a", 4, "agent-b", "production"));
@@ -240,7 +279,7 @@ class AttachmentShareServiceTest {
         @Test
         void readableFileMissingFromTheGivenListing_isRefused() throws Exception {
             var result = service.share(SOURCE, ConversationListing.empty(), List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET,
-                    ShareReason.DELEGATION, open());
+                    ShareReason.DELEGATION, open(), ShareParties.UNKNOWN);
 
             assertTrue(result.shared().isEmpty());
             verify(store, never()).grantAccess(any(), any());
@@ -251,7 +290,7 @@ class AttachmentShareServiceTest {
             var strangers = ConversationListing.of(STRANGER, store, Set.of(), List.of());
 
             var result = service.share(SOURCE, strangers, List.of(AttachmentSelector.wholeFile(REF_FOREIGN)), TARGET,
-                    ShareReason.DELEGATION, open());
+                    ShareReason.DELEGATION, open(), ShareParties.UNKNOWN);
 
             assertTrue(result.shared().isEmpty());
             assertEquals(Refusal.NOT_FOUND.text(), result.refused().get(0).reason());
@@ -349,7 +388,7 @@ class AttachmentShareServiceTest {
         void targetMustBeAnotherConversation() throws Exception {
             for (String target : Arrays.asList(null, "", SOURCE)) {
                 var result = service.share(SOURCE, listing, List.of(AttachmentSelector.wholeFile(REF_PDF)), target,
-                        ShareReason.DELEGATION, open());
+                        ShareReason.DELEGATION, open(), ShareParties.UNKNOWN);
                 assertEquals(Refusal.TARGET.text(), result.refused().get(0).reason());
             }
             verify(store, never()).grantAccess(any(), any());
@@ -360,7 +399,7 @@ class AttachmentShareServiceTest {
             var none = new AttachmentShareService((IAttachmentStore) null, registry, ledger);
 
             var result = none.share(SOURCE, listing, List.of(AttachmentSelector.wholeFile(REF_PDF)), TARGET, ShareReason.DELEGATION,
-                    open());
+                    open(), ShareParties.UNKNOWN);
 
             assertEquals(Refusal.UNAVAILABLE.text(), result.refused().get(0).reason());
             assertFalse(none.mayRead(REF_PDF, SOURCE));
@@ -375,7 +414,7 @@ class AttachmentShareServiceTest {
 
             assertFalse(cdi.mayRead(REF_PDF, SOURCE));
             assertEquals(Refusal.UNAVAILABLE.text(), cdi.share(SOURCE, listing, List.of(AttachmentSelector.wholeFile(REF_PDF)),
-                    TARGET, ShareReason.DELEGATION, open()).refused().get(0).reason());
+                    TARGET, ShareReason.DELEGATION, open(), ShareParties.UNKNOWN).refused().get(0).reason());
         }
 
         @Test

@@ -109,7 +109,7 @@ class AttachmentShareAuthorizationMatrixTest {
         var policy = new SharePolicy(5, 10, MAX_DEPTH, depth.value, Set.of(), null);
 
         ShareResult result = service.share(source, listing, List.of(AttachmentSelector.wholeFile(FILE)), TARGET_CONV,
-                ShareReason.DELEGATION, policy);
+                ShareReason.DELEGATION, policy, ShareParties.UNKNOWN);
 
         if (expected == null) {
             assertEquals(1, result.shared().size(), result.toString());
@@ -139,7 +139,7 @@ class AttachmentShareAuthorizationMatrixTest {
             String target = String.format("65f0a1b2c3d4e5f6a7b8%04x", 0xa000 + depth);
             var listing = ConversationListing.of(source, store, Set.of(), List.of());
             var result = service.share(source, listing, List.of(AttachmentSelector.wholeFile(FILE)), target, ShareReason.DELEGATION,
-                    new SharePolicy(5, 10, MAX_DEPTH, depth, Set.of(), null));
+                    new SharePolicy(5, 10, MAX_DEPTH, depth, Set.of(), null), ShareParties.UNKNOWN);
             shared = !result.shared().isEmpty();
             if (!shared) {
                 break;

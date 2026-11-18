@@ -56,7 +56,8 @@ public record ConversationListing(List<Entry> entries) {
      * One file the conversation may name.
      *
      * @param displayName
-     *            what the model sees — the file name, or {@value #UNNAMED}
+     *            what the model sees — the file name without surrounding
+     *            whitespace, or {@value #UNNAMED}
      * @param selector
      *            the file (or recorded part) this entry stands for
      * @param mimeType
@@ -125,7 +126,9 @@ public record ConversationListing(List<Entry> entries) {
             if (a == null || a.storageRef() == null || a.storageRef().isBlank() || withheld.contains(a.storageRef())) {
                 continue;
             }
-            String name = a.filename() != null && !a.filename().isBlank() ? a.filename() : UNNAMED;
+            // Stripped, because SelectorText strips what the model writes: a stored
+            // "notes.txt " must be nameable as "notes.txt".
+            String name = a.filename() != null && !a.filename().isBlank() ? a.filename().strip() : UNNAMED;
             unique.putIfAbsent(a.storageRef(),
                     new Entry(name, AttachmentSelector.wholeFile(a.storageRef()), a.mimeType(), a.sizeBytes(), false));
         }

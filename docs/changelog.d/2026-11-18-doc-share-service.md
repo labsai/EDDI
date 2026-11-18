@@ -17,14 +17,16 @@ Agents are about to hand files to each other (delegation, group tasks, handoff, 
 
 ### Design decisions
 
-- **Deviation from the plan's signature:** `share` has a seven-argument overload with a `ShareParties` record (user id, source agent id and version, target agent id, environment) for the audit entry; the plan's six-argument form delegates with all of them unknown. The service never loads a conversation to find them — the caller holds the memory. Without the user id, the ledger cannot pseudonymise the entry on erasure; the entry carries no file name for that reason.
-- **The read check runs before the policy checks**, right after the listing check, so a hand-built or stale listing is refused as `not found` with the requested name withheld (`(unknown file)`), and depth or caps never answer for a file the source cannot read.
+- **Deviation from the plan's signature:** `share` takes a seventh argument, a `ShareParties` record (user id, source agent id and version, target agent id, environment), for the audit entry. There is deliberately no six-argument overload: the user id is what lets the ledger pseudonymise the entry when the user is erased, so every caller must supply it or pass `ShareParties.UNKNOWN` on purpose. The service never loads a conversation to find them — the caller holds the memory. The entry carries no file name.
+- **The read check runs before the policy checks**, right after the listing check, so a hand-built or stale listing is refused as `not found` with the requested name withheld (`(unknown file)`), and depth or caps never answer for a file the source cannot read. A call refused as a whole (no store, bad target) reads no store and names no file.
+- A selector repeated in one call is shared once (one grant, one slot, one audit entry). Display names are stripped of surrounding whitespace, as is what the model writes, so `notes.txt ` is nameable. A `null` entry in `SharePolicy.allowedMimeTypes` allows nothing rather than emptying the set into "any".
 - `SharePolicy.sharesThisTurn == null` is replaced by a counter local to the policy instance.
+- `GroupAttachmentBinder`'s three-argument constructor rejects a null service, and the binder refuses a pass-through when it has no store to grant through, whatever the service's store says.
 - Repeated `grantAccess` is idempotent on both stores by construction (MongoDB `$addToSet`; PostgreSQL appends only when absent). Verified by reading the code; there is no attachment-store IT yet — WP-2a.1 adds the contract ITs.
 
 ### Tests
 
-`AttachmentShareServiceTest`, `AttachmentShareAuthorizationMatrixTest` (owner / grantee / stranger × listed / withheld / another conversation's listing × depth below / at the limit, plus a depth chain), `SelectorTextTest`, `ConversationListingTest`, all with 24-hex ids. Mutations run: dropping the listing check, `>=` → `>` in the depth check, and removing the per-turn cap each fail a test.
+`AttachmentShareServiceTest`, `AttachmentShareAuthorizationMatrixTest` (owner / grantee / stranger × listed / withheld / another conversation's listing × depth below / at the limit, plus a depth chain), `SelectorTextTest`, `ConversationListingTest` and `GroupConversationServiceAttachmentShareTest` (the injected service decides the binder's pass-through), all with 24-hex ids. Mutations run: dropping the listing check, `>=` → `>` in the depth check, and removing the per-turn cap each fail a test.
 
 ### Next
 

@@ -43,7 +43,10 @@ public record SharePolicy(int maxFilesPerShare, int maxSharesPerTurn, int maxDep
     public SharePolicy {
         allowedMimeTypes = allowedMimeTypes == null
                 ? Set.of()
-                : allowedMimeTypes.stream().map(m -> m.toLowerCase(Locale.ROOT)).collect(Collectors.toUnmodifiableSet());
+                // A null entry becomes "", which matches no stored (validated) MIME type:
+                // dropping it instead could empty the set and so allow every type.
+                : allowedMimeTypes.stream().map(m -> m == null ? "" : m.strip().toLowerCase(Locale.ROOT))
+                        .collect(Collectors.toUnmodifiableSet());
         if (sharesThisTurn == null) {
             sharesThisTurn = TurnCounter.local();
         }
@@ -51,6 +54,7 @@ public record SharePolicy(int maxFilesPerShare, int maxSharesPerTurn, int maxDep
 
     /** Whether {@code mimeType} may be shared under this policy. */
     public boolean allowsMimeType(String mimeType) {
-        return allowedMimeTypes.isEmpty() || mimeType != null && allowedMimeTypes.contains(mimeType.toLowerCase(Locale.ROOT));
+        return allowedMimeTypes.isEmpty()
+                || mimeType != null && !mimeType.isBlank() && allowedMimeTypes.contains(mimeType.strip().toLowerCase(Locale.ROOT));
     }
 }
