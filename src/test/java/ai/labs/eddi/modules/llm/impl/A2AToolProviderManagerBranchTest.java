@@ -146,7 +146,7 @@ class A2AToolProviderManagerBranchTest {
 
             // After cooldown, circuit should be removed (auto-reset)
             // The discoverTools call should try to discover (circuit resets)
-            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             // The circuit should have been removed
             assertFalse(breakers.containsKey(url));
