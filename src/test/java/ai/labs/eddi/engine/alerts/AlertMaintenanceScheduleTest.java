@@ -144,6 +144,29 @@ class AlertMaintenanceScheduleTest {
         verify(store, never()).deleteSchedule(any());
     }
 
+    /**
+     * The case the dedupe exists for: the best-ranked copy sits on a page boundary
+     * and is read twice, beside a real duplicate. Ranked with its own second copy,
+     * it was deleted as an "extra" along with the duplicate, and no maintenance
+     * schedule was left.
+     */
+    @Test
+    @DisplayName("the survivor read twice across pages is kept, the real duplicate is removed")
+    void theSurvivorReadTwiceIsKeptAndTheDuplicateRemoved() throws Exception {
+        ScheduleConfiguration survivor = row("a-oldest", AlertSchedules.maintenanceMetadata());
+        survivor.setCreatedAt(Instant.parse("2026-11-18T10:00:01Z"));
+        ScheduleConfiguration duplicate = row("b-newer", AlertSchedules.maintenanceMetadata());
+        duplicate.setCreatedAt(Instant.parse("2026-11-18T10:00:02Z"));
+        // Two full pages would be needed to reproduce the shift; the store returning
+        // the boundary row twice in one scan is the same input to the ranking.
+        when(store.readAllSchedules(anyInt(), anyInt(), anyBoolean())).thenReturn(List.of(survivor, duplicate, survivor));
+
+        schedule.removeDuplicates();
+
+        verify(store).deleteSchedule("b-newer");
+        verify(store, never()).deleteSchedule("a-oldest");
+    }
+
     @Test
     @DisplayName("a single maintenance schedule is never deleted")
     void aSingleScheduleIsKept() throws Exception {

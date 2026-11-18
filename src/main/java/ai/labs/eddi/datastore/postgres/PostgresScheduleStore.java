@@ -154,7 +154,12 @@ public class PostgresScheduleStore implements IScheduleStore {
             // creator's access snapshot a fire re-checks USE against.
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS disabled_reason VARCHAR(64)",
             "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS creator_teams TEXT",
-            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS creator_admin BOOLEAN NOT NULL DEFAULT false"};
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS creator_admin BOOLEAN NOT NULL DEFAULT false",
+            // The conversation the first attempt of an occurrence started
+            // (conversationStrategy=new), so its retries continue it. NULL on older rows
+            // means "none" — see IScheduleStore#recordOccurrenceConversation.
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS occurrence_run_id VARCHAR(512)",
+            "ALTER TABLE eddi_schedules ADD COLUMN IF NOT EXISTS occurrence_conversation_id VARCHAR(255)"};
 
     /**
      * Bulk delete by user, overriding the portable scan-and-delete default.
@@ -454,6 +459,31 @@ public class PostgresScheduleStore implements IScheduleStore {
             ps.executeUpdate();
         } catch (SQLException e) {
             throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
+        }
+    }
+
+    /**
+     * Two columns, conditional in the WHERE clause — see
+     * {@link IScheduleStore#recordOccurrenceConversation}. {@code IS DISTINCT FROM}
+     * treats a NULL column (a row written before it existed) as "not this run".
+     */
+    @Override
+    public boolean recordOccurrenceConversation(String scheduleId, String runId, String conversationId, String replacedConversationId)
+            throws IResourceStore.ResourceStoreException {
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("""
+                        UPDATE eddi_schedules SET occurrence_run_id=?, occurrence_conversation_id=?, updated_at=?
+                        WHERE id=? AND (occurrence_run_id IS DISTINCT FROM ? OR occurrence_conversation_id IS NOT DISTINCT FROM ?)""")) {
+            ps.setString(1, runId);
+            ps.setString(2, conversationId);
+            ps.setLong(3, Instant.now().toEpochMilli());
+            ps.setString(4, scheduleId);
+            ps.setString(5, runId);
+            ps.setString(6, replacedConversationId);
+            return ps.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to record the occurrence conversation of " + scheduleId, e);
         }
     }
 
@@ -1020,16 +1050,21 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire, String disabledReason)
+            throws IResourceStore.ResourceStoreException {
         ensureSchema();
         long nowMs = Instant.now().toEpochMilli();
+        // A disable reason goes into the same fenced statement (see
+        // IScheduleStore#markCompleted), never into a second write by id.
+        boolean withReason = nextFire == null && disabledReason != null;
         String sql = (nextFire != null ? """
                 UPDATE eddi_schedules SET fire_status='PENDING', last_fired=?, fail_count=0,
                     claimed_by=NULL, claimed_at=NULL, fire_id=NULL, next_retry_at=NULL,
                     next_fire=?, updated_at=? WHERE id=?""" : """
                 UPDATE eddi_schedules SET fire_status='PENDING', last_fired=?, fail_count=0,
                     claimed_by=NULL, claimed_at=NULL, fire_id=NULL, next_retry_at=NULL,
-                    enabled=false, next_fire=NULL, updated_at=? WHERE id=?""") + fenceOn(expectedFireId);
+                    enabled=false, next_fire=NULL, %supdated_at=? WHERE id=?""".formatted(withReason ? "disabled_reason=?, " : ""))
+                + fenceOn(expectedFireId);
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setLong(1, nowMs);
             if (nextFire != null) {
@@ -1038,9 +1073,13 @@ public class PostgresScheduleStore implements IScheduleStore {
                 ps.setString(4, scheduleId);
                 bindFence(ps, 5, expectedFireId);
             } else {
-                ps.setLong(2, nowMs);
-                ps.setString(3, scheduleId);
-                bindFence(ps, 4, expectedFireId);
+                int index = 2;
+                if (withReason) {
+                    ps.setString(index++, disabledReason);
+                }
+                ps.setLong(index++, nowMs);
+                ps.setString(index++, scheduleId);
+                bindFence(ps, index, expectedFireId);
             }
             ps.executeUpdate();
         } catch (SQLException e) {
@@ -1347,6 +1386,8 @@ public class PostgresScheduleStore implements IScheduleStore {
         config.setAgentVersion(rs.getInt("agent_version"));
         config.setConversationStrategy(rs.getString("conversation_strategy"));
         config.setPersistentConversationId(rs.getString("persistent_conversation_id"));
+        config.setOccurrenceRunId(rs.getString("occurrence_run_id"));
+        config.setOccurrenceConversationId(rs.getString("occurrence_conversation_id"));
         config.setCreatedBy(rs.getString("created_by"));
         config.setDisabledReason(rs.getString("disabled_reason"));
         config.setCreatorTeams(deserializeTeams(rs.getString("creator_teams")));

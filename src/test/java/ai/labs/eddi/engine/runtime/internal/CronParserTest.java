@@ -9,6 +9,9 @@ import java.time.Duration;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.Month;
+import java.time.Year;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.zone.ZoneOffsetTransition;
@@ -120,8 +123,8 @@ class CronParserTest {
 
     /**
      * A starred day-of-week combines with the day of month by AND, so "29 February
-     * that is a Sunday" has gaps of 28 years; the scan window must be a full
-     * Gregorian cycle for such an expression to have a successor.
+     * that is a Sunday" has gaps of 28 years. The old nine-year window found 2032
+     * and then no successor.
      */
     @Test
     void computeNextFire_leapDaySunday_hasASuccessorTwentyEightYearsLater() {
@@ -133,10 +136,112 @@ class CronParserTest {
                 CronParser.computeNextFire("*/15 9 29 2 */7", ZonedDateTime.of(2032, 2, 29, 9, 45, 0, 0, UTC).toInstant(), UTC));
     }
 
+    /**
+     * The longest gap there is: a Sunday 29 February in 2088 is followed by the
+     * next one in 2128, because 2100 is not a leap year. A nine-year window could
+     * not see it; the window now covers twice that gap.
+     */
+    @Test
+    void computeNextFire_leapDaySundayAcross2100_findsTheFortyYearGap() {
+        Instant in2088 = ZonedDateTime.of(2088, 2, 29, 9, 0, 0, 0, UTC).toInstant();
+        assertEquals(ZonedDateTime.of(2128, 2, 29, 9, 0, 0, 0, UTC).toInstant(), CronParser.computeNextFire("0 9 29 2 */7", in2088, UTC));
+        assertEquals(ZonedDateTime.of(2128, 2, 29, 9, 0, 0, 0, UTC).toInstant(),
+                CronParser.computeNextFire("* 9 29 2 */7", ZonedDateTime.of(2088, 2, 29, 9, 59, 0, 0, UTC).toInstant(), UTC));
+    }
+
+    /**
+     * {@link CronParser#LONGEST_GAP_YEARS} measured, not asserted: over 1600-2800
+     * (three full 400-year Gregorian cycles) the longest run of years between two
+     * occurrences of one date on one weekday. 29 February gives the maximum; every
+     * other date stays far below it.
+     */
+    @Test
+    void longestGapBetweenADateOnAWeekday_isTheDocumentedOne() {
+        int leapDayMax = 0;
+        int otherMax = 0;
+        for (int month = 1; month <= 12; month++) {
+            for (int day = 1; day <= Month.of(month).maxLength(); day++) {
+                int[] lastYear = new int[8];
+                for (int year = 1600; year <= 2800; year++) {
+                    if (month == 2 && day == 29 && !Year.isLeap(year)) {
+                        continue;
+                    }
+                    int weekday = LocalDate.of(year, month, day).getDayOfWeek().getValue();
+                    if (lastYear[weekday] != 0) {
+                        int gap = year - lastYear[weekday];
+                        if (month == 2 && day == 29) {
+                            leapDayMax = Math.max(leapDayMax, gap);
+                        } else {
+                            otherMax = Math.max(otherMax, gap);
+                        }
+                    }
+                    lastYear[weekday] = year;
+                }
+            }
+        }
+        assertEquals(CronParser.LONGEST_GAP_YEARS, leapDayMax);
+        assertTrue(otherMax < CronParser.LONGEST_GAP_YEARS, "other dates recur within " + otherMax + " years");
+        assertTrue(CronParser.MAX_SCAN_YEARS > CronParser.LONGEST_GAP_YEARS);
+    }
+
+    /**
+     * "Never matches" is said exactly when it is true: for every month and day of
+     * month, with the weekday field starred (no restriction), restricted the AND
+     * way ({@code *}{@code /7}, Sundays) and the OR way ({@code 1}), the expression
+     * is refused if and only if the date does not exist — and otherwise its next
+     * fire really is in that month.
+     */
+    @Test
+    void computeNextFire_refusesExactlyTheDatesThatDoNotExist() {
+        Instant from = Instant.parse("2026-11-18T00:00:00Z");
+        for (int month = 1; month <= 12; month++) {
+            for (int day = 1; day <= 31; day++) {
+                boolean exists = day <= Month.of(month).maxLength();
+                for (String dow : List.of("*", "*/7", "1")) {
+                    String cron = "0 0 " + day + " " + month + " " + dow;
+                    boolean orSemantics = dow.equals("1");
+                    if (exists || orSemantics) {
+                        Instant next = CronParser.computeNextFire(cron, from, UTC);
+                        assertEquals(month, next.atZone(UTC).getMonthValue(), cron);
+                    } else {
+                        var e = assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire(cron, from, UTC), cron);
+                        assertTrue(e.getMessage().contains("matches no calendar day"), cron + ": " + e.getMessage());
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * An expression that can never match is refused from its fields, before any
+     * scan: {@code previewCron} takes a caller-chosen expression over REST and MCP,
+     * so refusing one must not cost a walk of the scan window. The message is the
+     * static check's, not the scan's "could not compute … within N years".
+     */
     @Test
     void computeNextFire_neverMatchingCronStillThrows() {
-        assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire("0 0 30 2 *", Instant.parse("2027-03-01T00:00:00Z"), UTC));
-        assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire("* * 31 4 *", Instant.parse("2027-03-01T00:00:00Z"), UTC));
+        for (String cron : List.of("0 0 30 2 *", "* * 31 4 *", "* * 30,31 2 *", "* * 31 2,4,6,9,11 *", "*/5 * 30 2 */7")) {
+            var e = assertThrows(IllegalStateException.class, () -> CronParser.computeNextFire(cron, Instant.parse("2027-03-01T00:00:00Z"), UTC),
+                    cron);
+            assertTrue(e.getMessage().contains("matches no calendar day"), cron + ": " + e.getMessage());
+        }
+    }
+
+    /**
+     * The worst satisfiable cases — the longest gap, ten fires in a row as a
+     * preview asks for, and the minute-by-minute walker — stay cheap: the scan
+     * steps by month and day and stops at the real successor.
+     */
+    @Test
+    void computeNextFire_worstCasesAreBounded() {
+        assertTimeoutPreemptively(Duration.ofSeconds(10), () -> {
+            for (String cron : List.of("0 9 29 2 */7", "59 23 29 2 */7", "* * 29 2 */7", "* * 29 2 1")) {
+                Instant cursor = Instant.parse("2026-11-18T00:00:00Z");
+                for (int i = 0; i < 10; i++) {
+                    cursor = CronParser.computeNextFire(cron, cursor, UTC);
+                }
+            }
+        });
     }
 
     @Test

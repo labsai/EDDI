@@ -2199,6 +2199,9 @@ class RestScheduleStoreTest {
         setField(rest, "maxSchedulesPerOwner", 1);
         when(scheduleStore.countEnabledSchedulesCreatedBy(any())).thenReturn(50);
         when(scheduleStore.createSchedule(any())).thenReturn("new-id");
+        // Control: the same authenticated creator, enabled, IS over the cap — so the
+        // 201 below is the disabled exemption, not a cap that never applied.
+        assertEquals(429, rest.createSchedule(newCronBody()).getStatus());
         var body = newCronBody();
         body.setEnabled(false);
 

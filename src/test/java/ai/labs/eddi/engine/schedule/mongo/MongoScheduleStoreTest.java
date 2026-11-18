@@ -170,6 +170,55 @@ class MongoScheduleStoreTest {
         assertSame(expected, result);
     }
 
+    /**
+     * The occurrence record is kept out of JSON (a client can neither see nor set
+     * it), so the Jackson build cannot read it: the store reads it from the
+     * document itself. A row written before the fields existed reads as none.
+     */
+    @Test
+    @DisplayName("readSchedule — reads the occurrence record from the document; an old row has none")
+    void readScheduleReadsTheOccurrenceRecord() throws Exception {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(iterable);
+        ArgumentCaptor<Document> built = ArgumentCaptor.forClass(Document.class);
+        when(documentBuilder.build(built.capture(), eq(ScheduleConfiguration.class))).thenAnswer(inv -> new ScheduleConfiguration());
+
+        when(iterable.first()).thenReturn(new Document("_id", "sched-1").append("occurrenceRunId", "sched-1@5000")
+                .append("occurrenceConversationId", "conv-7"));
+        ScheduleConfiguration recorded = store.readSchedule("sched-1");
+        assertEquals("sched-1@5000", recorded.getOccurrenceRunId());
+        assertEquals("conv-7", recorded.getOccurrenceConversationId());
+        assertFalse(built.getValue().containsKey("occurrenceConversationId"), "read by the store, not handed to the JSON build");
+
+        when(iterable.first()).thenReturn(new Document("_id", "sched-1"));
+        ScheduleConfiguration legacy = store.readSchedule("sched-1");
+        assertNull(legacy.getOccurrenceRunId());
+        assertNull(legacy.getOccurrenceConversationId());
+    }
+
+    @Test
+    @DisplayName("recordOccurrenceConversation — two-field $set, first record of a run wins")
+    void recordOccurrenceConversationIsConditional() throws Exception {
+        UpdateResult matched = mock(UpdateResult.class);
+        when(matched.getMatchedCount()).thenReturn(1L);
+        UpdateResult missed = mock(UpdateResult.class);
+        when(missed.getMatchedCount()).thenReturn(0L);
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(matched, missed);
+
+        assertTrue(store.recordOccurrenceConversation("sched-1", "sched-1@5000", "conv-a", null));
+        assertFalse(store.recordOccurrenceConversation("sched-1", "sched-1@5000", "conv-b", null));
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection, times(2)).updateOne(filter.capture(), update.capture());
+        String where = filter.getAllValues().get(0).toString();
+        assertTrue(where.contains("occurrenceRunId") && where.contains("$ne") && where.contains("sched-1@5000"), where);
+        assertTrue(where.contains("occurrenceConversationId"), "a replaced conversation may be overwritten: " + where);
+        String set = update.getAllValues().get(0).toString();
+        assertTrue(set.contains("conv-a") && set.contains("occurrenceRunId"), set);
+        assertFalse(set.contains("fireStatus") || set.contains("nextFire") || set.contains("enabled"), "nothing but the record: " + set);
+    }
+
     @Test
     @DisplayName("readSchedule — throws ResourceNotFoundException when not found")
     void readScheduleNotFound() {
@@ -1069,6 +1118,31 @@ class MongoScheduleStoreTest {
             assertTrue(rendered.contains("fireId") && rendered.contains("sched-1_fire-a"),
                     "a late fire must not be able to overwrite a newer claim by schedule id alone: " + rendered);
         }
+    }
+
+    /**
+     * A cron with no further match is completed and disabled with its reason in ONE
+     * update, filtered on the fire's claim. The reason used to be a second,
+     * unfenced write by id, which overwrote an operator who re-enabled the schedule
+     * or changed its cron in between.
+     */
+    @Test
+    @DisplayName("markCompleted — the no-next-fire reason is part of the fenced completion")
+    void markCompletedRecordsTheDisableReasonInTheFencedWrite() throws Exception {
+        when(scheduleCollection.updateOne(any(Bson.class), any(Bson.class))).thenReturn(mock(UpdateResult.class));
+
+        store.markCompleted("sched-1", "sched-1_fire-a", null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+        store.markCompleted("sched-1", "sched-1_fire-b", null);
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        ArgumentCaptor<Bson> update = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection, times(2)).updateOne(filter.capture(), update.capture());
+        assertTrue(filter.getAllValues().get(0).toString().contains("sched-1_fire-a"), filter.getAllValues().get(0).toString());
+        String exhausted = update.getAllValues().get(0).toString();
+        assertTrue(exhausted.contains("disabledReason") && exhausted.contains(ScheduleConfiguration.DISABLED_NO_NEXT_FIRE), exhausted);
+        assertTrue(exhausted.contains("enabled"), exhausted);
+        assertFalse(update.getAllValues().get(1).toString().contains("disabledReason"),
+                "a used-up one-shot keeps no reason: " + update.getAllValues().get(1));
     }
 
     /**

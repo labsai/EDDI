@@ -25,6 +25,7 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -1470,28 +1471,69 @@ class SchedulePollerServiceTest {
 
         poller.pollAndAwait();
 
-        verify(scheduleStore).markCompleted(eq("sched-never"), eq(schedule.getFireId()), isNull());
-        verify(scheduleStore).setScheduleEnabled("sched-never", false, null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+        verify(scheduleStore).markCompleted(eq("sched-never"), eq(schedule.getFireId()), isNull(), eq(ScheduleConfiguration.DISABLED_NO_NEXT_FIRE));
         verify(scheduleStore, never()).markFailed(any(), any(), any());
         verify(fireExecutor, times(1)).fire(any(), any(), anyInt());
         assertEquals(1.0, meterRegistry.counter("eddi.schedule.nextfire.exhausted").count());
     }
 
-    /** An operator who re-enabled the schedule meanwhile is not overwritten. */
+    /**
+     * Completion and the no-next-fire disable are ONE store operation fenced on the
+     * fire's claim. The disable used to be a second write by id alone, after
+     * markCompleted had released the claim: an operator who enabled the schedule or
+     * changed its cron in between was overwritten, and the schedule stayed
+     * disabled. A read-then-write check in between only narrowed that window. The
+     * retry of a failed completion is fenced the same way.
+     */
     @Test
-    void poll_noNextFire_doesNotOverwriteAScheduleReEnabledMeanwhile() throws Exception {
+    void poll_noNextFire_disablesInTheFencedCompletion_neverByASecondWriteById() throws Exception {
         var schedule = makeCronSchedule("sched-never2", "0 0 30 2 *", "Hello");
-        var reEnabled = makeCronSchedule("sched-never2", "0 9 * * *", "Hello");
-        reEnabled.setEnabled(true);
         when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
         when(scheduleStore.tryClaim(eq("sched-never2"), eq("test-instance"), any(), any())).thenReturn(true);
-        when(scheduleStore.readSchedule("sched-never2")).thenReturn(reEnabled);
         when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenReturn(makeFireLog("sched-never2", FireStatus.COMPLETED.name()));
+        doThrow(new IResourceStore.ResourceStoreException("blip")).doNothing().when(scheduleStore)
+                .markCompleted(eq("sched-never2"), any(), any(), any());
 
         poller.pollAndAwait();
 
-        verify(scheduleStore).markCompleted(eq("sched-never2"), eq(schedule.getFireId()), isNull());
-        verify(scheduleStore, never()).setScheduleEnabled(eq("sched-never2"), eq(false), any(), any());
+        verify(scheduleStore, times(2)).markCompleted(eq("sched-never2"), eq(schedule.getFireId()), isNull(),
+                eq(ScheduleConfiguration.DISABLED_NO_NEXT_FIRE));
+        verify(scheduleStore, never()).setScheduleEnabled(any(), anyBoolean(), any(), any());
+        verify(scheduleStore, never()).setScheduleEnabled(any(), anyBoolean(), any());
+        verify(scheduleStore, never()).markCompleted(eq("sched-never2"), any(), any());
+    }
+
+    /**
+     * The fire's turn gives up at dispatch + fire timeout, and the watchdog
+     * interrupts at dispatch + fire timeout + grace: the executor can only count
+     * from the same origin if the poller tells it when it dispatched.
+     */
+    @Test
+    void poll_stampsTheDispatchTimeTheWatchdogCountsFrom() throws Exception {
+        var schedule = makeCronSchedule("sched-dispatch", "0 9 * * *", "Hello");
+        when(scheduleStore.findDueSchedules(any(), any(), anyInt())).thenReturn(List.of(schedule));
+        when(scheduleStore.tryClaim(eq("sched-dispatch"), eq("test-instance"), any(), any())).thenReturn(true);
+        var seen = new AtomicReference<Instant>();
+        when(fireExecutor.fire(eq(schedule), eq("test-instance"), eq(1))).thenAnswer(inv -> {
+            seen.set(((ScheduleConfiguration) inv.getArgument(0)).getDispatchedAt());
+            return makeFireLog("sched-dispatch", FireStatus.COMPLETED.name());
+        });
+        Instant before = Instant.now();
+
+        poller.pollAndAwait();
+
+        assertNotNull(seen.get(), "the fire must know when its watchdog started");
+        assertFalse(seen.get().isBefore(before), seen.get().toString());
+    }
+
+    @Test
+    void manualClaim_stampsTheDispatchTime() throws Exception {
+        var schedule = makeCronSchedule("sched-manual-dispatch", "0 9 * * *", "Hello");
+        when(scheduleStore.tryClaimAnyTime(eq("sched-manual-dispatch"), eq("test-instance"), any(), any())).thenReturn(true);
+
+        assertTrue(poller.claimForManualFire(schedule));
+
+        assertNotNull(schedule.getDispatchedAt());
     }
 
     /** The fire has happened; a failing bookkeeping write must not repeat it. */

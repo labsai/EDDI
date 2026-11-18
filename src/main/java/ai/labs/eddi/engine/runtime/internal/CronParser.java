@@ -8,11 +8,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Month;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.zone.ZoneRules;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -44,17 +46,32 @@ public final class CronParser {
             Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12"));
 
     /**
-     * How far {@link #computeNextFire} looks ahead before it gives up: one full
-     * 400-year Gregorian cycle, after which every date and weekday alignment
-     * repeats, so a satisfiable expression always has a successor inside it. A
-     * smaller window is not enough once the day fields combine: a 29 February that
-     * must also be a Sunday has gaps of 28 years, and one that spans 2100 (not a
-     * leap year) is longer still. Only an expression that can never match walks the
-     * whole window, which takes a few hundred thousand cheap day steps. The old
-     * two-year window made {@code 0 9 29 2 *} fire once and then fail to compute
-     * its successor.
+     * The longest gap, in years, between two successive matching days of any
+     * expression this parser accepts: 40, for 29 February combined with one weekday
+     * ({@code 0 9 29 2 *}{@code /7} — a Sunday 29 February — matches in 2088 and
+     * next in 2128). Within 1901-2099 such a date recurs every 28 years; a century
+     * year that is not a leap year (2100) stretches the cycle to 40. Every other
+     * date on a given weekday recurs within 12 years, a lone 29 February within 8,
+     * and anything else within a year. (The grammar has no {@code L}, {@code W} or
+     * {@code #}.) {@code CronParserTest} measures it over a full 400-year Gregorian
+     * cycle.
      */
-    static final int MAX_SCAN_YEARS = 400;
+    static final int LONGEST_GAP_YEARS = 40;
+
+    /**
+     * How far {@link #computeNextFire} looks ahead: twice
+     * {@link #LONGEST_GAP_YEARS} and a year, so a satisfiable expression always
+     * finds its successor inside the window — even when the clocks skip the only
+     * matching times of one matching day (a spring-forward gap), and the match
+     * after it is another gap away. Whether an expression can match at all is
+     * decided BEFORE the scan, from its fields ({@link #canEverMatch}), so an
+     * expression that never matches (30 February) is refused at once rather than by
+     * walking the window — the scan's cost is bounded by the real gap, never by the
+     * window. The old nine-year window found {@code 0 9 29 2 *}{@code /7}'s fire in
+     * 2032 and then failed to find 2060's, and the two-year one before it made
+     * {@code 0 9 29 2 *} fire once and stop.
+     */
+    static final int MAX_SCAN_YEARS = 2 * LONGEST_GAP_YEARS + 1;
 
     private CronParser() {
     }
@@ -96,8 +113,9 @@ public final class CronParser {
      *             if the expression does not have exactly 5 fields or a field is
      *             invalid
      * @throws IllegalStateException
-     *             if the expression has no fire within {@link #MAX_SCAN_YEARS}
-     *             years after {@code after}
+     *             if the expression can never match a date (e.g.
+     *             {@code 0 0 30 2 *}, 30 February) — decided from the fields, see
+     *             {@link #canEverMatch}; every other expression has a next fire
      */
     public static Instant computeNextFire(String cronExpression, Instant after, ZoneId zoneId) {
         String[] parts = cronExpression.trim().split("\\s+");
@@ -117,6 +135,12 @@ public final class CronParser {
         // Vixie's DOM_STAR/DOW_STAR flag. If only one is restricted, the starred
         // field is always true, so the AND below reduces to the restricted field.
         boolean bothDayFieldsRestricted = !parts[2].trim().startsWith("*") && !parts[4].trim().startsWith("*");
+
+        // Before the scan, so an expression that can never fire costs nothing to refuse
+        // and the scan below is only ever bounded by a real gap (LONGEST_GAP_YEARS).
+        if (!canEverMatch(daysOfMonth, months, daysOfWeek, bothDayFieldsRestricted)) {
+            throw new IllegalStateException("Cron expression matches no calendar day: " + cronExpression);
+        }
 
         if (isFixedTime(parts)) {
             return nextFixedTimeFire(after, zoneId, minutes, hours, daysOfMonth, months, daysOfWeek, bothDayFieldsRestricted, cronExpression);
@@ -443,6 +467,37 @@ public final class CronParser {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid number '" + token + "' in field: " + field, e);
         }
+    }
+
+    /**
+     * Whether any calendar day can ever match, decided from the fields alone.
+     * <ul>
+     * <li>Both day fields restricted (OR): every month has every weekday, so any
+     * month in the set matches.</li>
+     * <li>Otherwise (AND): some listed day of month must exist in some listed month
+     * — 29 February counts, it exists in leap years. Across the Gregorian cycle
+     * every existing date falls on every weekday, so the weekday field cannot rule
+     * it out (it is never empty).</li>
+     * </ul>
+     * So the expressions that never match are exactly those naming only dates that
+     * do not exist: {@code 30 2}, {@code 31 4}, {@code 30,31 2},
+     * {@code 31 2,4,6,9,11}.
+     */
+    static boolean canEverMatch(Set<Integer> daysOfMonth, Set<Integer> months, Set<Integer> daysOfWeek, boolean bothRestricted) {
+        if (months.isEmpty() || daysOfWeek.isEmpty() || daysOfMonth.isEmpty()) {
+            return false;
+        }
+        if (bothRestricted) {
+            return true;
+        }
+        int smallestDay = Collections.min(daysOfMonth);
+        for (int month : months) {
+            // Month.maxLength(): the longest the month can be, 29 for February.
+            if (smallestDay <= Month.of(month).maxLength()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

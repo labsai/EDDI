@@ -489,6 +489,10 @@ public class SchedulePollerService {
         inFlight.add(fire);
         try {
             Duration deadline = batchDeadline();
+            // Before the watchdog is armed, so the fire's turn gives up (origin + fire
+            // timeout) no later than the watchdog interrupts it (origin + fire timeout +
+            // grace): ScheduleFireExecutor counts its give-up time from here.
+            schedule.setDispatchedAt(Instant.now());
             fire.deadline = fireWatchdog.schedule(() -> {
                 if (!task.isDone()) {
                     task.cancel(true);
@@ -702,12 +706,16 @@ public class SchedulePollerService {
                     schedule.getName(), schedule.getId(), e.getMessage(), ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
         }
         // markCompleted with a null nextFire disables the schedule (fix #5 in the
-        // stores).
+        // stores). An exhausted cron records its reason in that same write, fenced on
+        // this fire's claim: a separate disable by id afterwards overwrote an operator
+        // who re-enabled the schedule or changed its cron in between. A retry below is
+        // fenced the same way, so it cannot land after such a change either.
         for (int attempt = 1; attempt <= COMPLETE_ATTEMPTS; attempt++) {
             try {
-                scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
-                if (exhausted && stillDisabledByThisCompletion(schedule.getId())) {
-                    scheduleStore.setScheduleEnabled(schedule.getId(), false, null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+                if (exhausted) {
+                    scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), null, ScheduleConfiguration.DISABLED_NO_NEXT_FIRE);
+                } else {
+                    scheduleStore.markCompleted(schedule.getId(), schedule.getFireId(), nextFire);
                 }
                 return;
             } catch (Exception e) {
@@ -721,22 +729,6 @@ public class SchedulePollerService {
                     }
                 }
             }
-        }
-    }
-
-    /**
-     * Whether the row is still the one {@code markCompleted(..., null)} just
-     * disabled: disabled and with no reason. If an operator enabled it, or an
-     * update changed it, between the two writes, the reason must not overwrite
-     * that. This narrows the window rather than closing it (the two writes are not
-     * one store operation); an unreadable row is treated as unchanged.
-     */
-    private boolean stillDisabledByThisCompletion(String scheduleId) {
-        try {
-            ScheduleConfiguration stored = scheduleStore.readSchedule(scheduleId);
-            return stored == null || (!stored.isEnabled() && stored.getDisabledReason() == null);
-        } catch (Exception e) {
-            return true;
         }
     }
 
@@ -990,6 +982,9 @@ public class SchedulePollerService {
         if (claimed) {
             // Its turn gets a key of its own: a manual fire is one click, not a retry.
             schedule.setManualFire(true);
+            // The origin of its give-up time, taken before runWithinDeadline starts the
+            // bound the caller waits on (see dispatch).
+            schedule.setDispatchedAt(Instant.now());
         }
         return claimed;
     }

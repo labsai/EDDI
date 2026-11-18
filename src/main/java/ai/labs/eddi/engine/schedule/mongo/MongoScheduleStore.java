@@ -88,6 +88,8 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String METADATA = "metadata";
     private static final String PERSISTENT_CONVERSATION_ID = "persistentConversationId";
     private static final String DISABLED_REASON = "disabledReason";
+    private static final String OCCURRENCE_RUN_ID = "occurrenceRunId";
+    private static final String OCCURRENCE_CONVERSATION_ID = "occurrenceConversationId";
 
     private final MongoCollection<Document> scheduleCollection;
     /**
@@ -302,6 +304,25 @@ public class MongoScheduleStore implements IScheduleStore {
                     combine(set(PERSISTENT_CONVERSATION_ID, conversationId), set(UPDATED_AT, nowMs)));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
+        }
+    }
+
+    /**
+     * Two-field {@code $set}, conditional in the filter — see
+     * {@link IScheduleStore#recordOccurrenceConversation}. {@code ne} also matches
+     * a row that has no such field yet (written before it existed).
+     */
+    @Override
+    public boolean recordOccurrenceConversation(String scheduleId, String runId, String conversationId, String replacedConversationId)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            UpdateResult result = scheduleCollection.updateOne(
+                    and(eq(ID, scheduleId), or(ne(OCCURRENCE_RUN_ID, runId), eq(OCCURRENCE_CONVERSATION_ID, replacedConversationId))),
+                    combine(set(OCCURRENCE_RUN_ID, runId), set(OCCURRENCE_CONVERSATION_ID, conversationId),
+                            set(UPDATED_AT, epochMillis(Instant.now()))));
+            return result.getMatchedCount() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to record the occurrence conversation of " + scheduleId, e);
         }
     }
 
@@ -708,7 +729,8 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire, String disabledReason)
+            throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             var updates = new ArrayList<Bson>();
@@ -727,6 +749,10 @@ public class MongoScheduleStore implements IScheduleStore {
             } else {
                 updates.add(set(ENABLED, false));
                 updates.add(set(NEXT_FIRE, null));
+                if (disabledReason != null) {
+                    // In the same fenced update: see IScheduleStore#markCompleted.
+                    updates.add(set(DISABLED_REASON, disabledReason));
+                }
             }
 
             scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), combine(updates));
@@ -1113,8 +1139,15 @@ public class MongoScheduleStore implements IScheduleStore {
             Instant createdAt = readEpochMillis(doc, "createdAt");
             Instant updatedAt = readEpochMillis(doc, "updatedAt");
             stripFields(doc, "nextFire", "lastFired", "claimedAt", "nextRetryAt", "createdAt", "updatedAt");
+            // Fire-path state the model keeps out of JSON (so a client can neither see
+            // nor set it): read here, not by the Jackson build.
+            String occurrenceRunId = doc.get(OCCURRENCE_RUN_ID) instanceof String s ? s : null;
+            String occurrenceConversationId = doc.get(OCCURRENCE_CONVERSATION_ID) instanceof String s ? s : null;
+            stripFields(doc, OCCURRENCE_RUN_ID, OCCURRENCE_CONVERSATION_ID);
 
             ScheduleConfiguration config = documentBuilder.build(doc, ScheduleConfiguration.class);
+            config.setOccurrenceRunId(occurrenceRunId);
+            config.setOccurrenceConversationId(occurrenceConversationId);
             config.setNextFire(nextFire);
             config.setLastFired(lastFired);
             config.setClaimedAt(claimedAt);

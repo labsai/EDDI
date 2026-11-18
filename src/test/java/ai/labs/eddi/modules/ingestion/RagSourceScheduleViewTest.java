@@ -14,6 +14,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.time.DayOfWeek;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -116,6 +117,28 @@ class RagSourceScheduleViewTest {
 
         assertNotNull(preview.error());
         assertTrue(preview.nextFires().isEmpty());
+    }
+
+    /**
+     * 29 February on a Sunday is valid and fires every 28 years, or 40 across 2100.
+     * The old nine-year scan found the first fire and then called the expression
+     * "never matches" when it looked for the second. Ten fires reach 2128, past the
+     * 40-year gap 2088 → 2128.
+     */
+    @Test
+    @DisplayName("a valid cron with decades between fires is previewed, not reported as never matching")
+    void decadesBetweenFiresArePreviewed() {
+        var preview = service.previewCron("0 9 29 2 */7", 10);
+
+        assertNull(preview.error(), preview.error());
+        assertEquals(10, preview.nextFires().size());
+        for (Instant fire : preview.nextFires()) {
+            var date = fire.atZone(ZoneOffset.UTC).toLocalDate();
+            assertEquals(29, date.getDayOfMonth(), date.toString());
+            assertEquals(2, date.getMonthValue(), date.toString());
+            assertEquals(DayOfWeek.SUNDAY, date.getDayOfWeek(), date.toString());
+        }
+        assertTrue(preview.nextFires().stream().anyMatch(f -> f.atZone(ZoneOffset.UTC).getYear() == 2128), preview.nextFires().toString());
     }
 
     @Test

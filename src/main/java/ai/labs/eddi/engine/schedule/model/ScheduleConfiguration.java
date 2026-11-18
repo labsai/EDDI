@@ -208,6 +208,30 @@ public class ScheduleConfiguration {
     // stored.
     @JsonIgnore
     private transient boolean manualFire;
+    // When the poller (or a manual fire) handed this copy to the fire executor: the
+    // origin of the watchdog that interrupts the fire, and so of the give-up time
+    // of
+    // its turn. Never serialized or stored.
+    @JsonIgnore
+    private transient Instant dispatchedAt;
+
+    /**
+     * The conversation the first attempt of a due occurrence started, for
+     * {@code conversationStrategy=new}, and the run it belongs to
+     * ({@code ScheduleFireExecutor.runIdOf}). A retry of the same occurrence
+     * continues that conversation instead of starting another, so the occurrence's
+     * idempotency key — which is scoped to one conversation — finds a turn that
+     * committed late. Written by the fire path alone
+     * ({@link ai.labs.eddi.engine.schedule.IScheduleStore#recordOccurrenceConversation});
+     * never read from or written to JSON, so a client can neither see nor set it.
+     * Absent on rows written before it existed, which reads as "none".
+     */
+    @JsonIgnore
+    private String occurrenceRunId;
+
+    /** @see #occurrenceRunId */
+    @JsonIgnore
+    private String occurrenceConversationId;
 
     public ScheduleConfiguration() {
     }
@@ -525,6 +549,36 @@ public class ScheduleConfiguration {
     @JsonIgnore
     public void setManualFire(boolean manualFire) {
         this.manualFire = manualFire;
+    }
+
+    @JsonIgnore
+    public Instant getDispatchedAt() {
+        return dispatchedAt;
+    }
+
+    @JsonIgnore
+    public void setDispatchedAt(Instant dispatchedAt) {
+        this.dispatchedAt = dispatchedAt;
+    }
+
+    @JsonIgnore
+    public String getOccurrenceRunId() {
+        return occurrenceRunId;
+    }
+
+    @JsonIgnore
+    public void setOccurrenceRunId(String occurrenceRunId) {
+        this.occurrenceRunId = occurrenceRunId;
+    }
+
+    @JsonIgnore
+    public String getOccurrenceConversationId() {
+        return occurrenceConversationId;
+    }
+
+    @JsonIgnore
+    public void setOccurrenceConversationId(String occurrenceConversationId) {
+        this.occurrenceConversationId = occurrenceConversationId;
     }
 
     @JsonInclude(JsonInclude.Include.NON_EMPTY)
