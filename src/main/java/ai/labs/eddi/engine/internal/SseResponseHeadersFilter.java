@@ -46,7 +46,7 @@ public class SseResponseHeadersFilter {
 
     static void handle(RoutingContext context) {
         HttpServerResponse response = context.response();
-        context.addHeadersEndHandler(v -> addIfEventStream(response));
+        context.addHeadersEndHandler(_ -> addIfEventStream(response));
         context.next();
     }
 

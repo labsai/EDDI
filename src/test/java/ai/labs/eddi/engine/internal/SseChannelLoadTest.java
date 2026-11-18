@@ -243,7 +243,12 @@ class SseChannelLoadTest {
                 () -> capped.open(SseStreams.Kind.AGENT, "c", refusedSink, sse, 0, 0, null, null));
 
         assertEquals(503, refused.getResponse().getStatus());
-        int retryAfter = Integer.parseInt(String.valueOf(refused.getResponse().getHeaders().getFirst("Retry-After")));
+        int retryAfter;
+        try {
+            retryAfter = Integer.parseInt(String.valueOf(refused.getResponse().getHeaders().getFirst("Retry-After")));
+        } catch (NumberFormatException e) {
+            throw new AssertionError("Retry-After is not a number", e);
+        }
         assertTrue(retryAfter >= SseStreams.RETRY_AFTER_MIN_SECONDS
                 && retryAfter < SseStreams.RETRY_AFTER_MIN_SECONDS + SseStreams.RETRY_AFTER_SPREAD_SECONDS,
                 "Retry-After is spread so refused clients do not return together: " + retryAfter);
@@ -475,7 +480,7 @@ class SseChannelLoadTest {
                     private final AtomicInteger writes = new AtomicInteger();
 
                     @Override
-                    public CompletionStage<?> send(OutboundSseEvent event) {
+                    public synchronized CompletionStage<?> send(OutboundSseEvent event) {
                         super.send(event);
                         var stage = new CompletableFuture<Void>();
                         int write = writes.incrementAndGet();

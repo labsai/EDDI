@@ -318,7 +318,7 @@ class RestAgentEngineStreamingContractTest {
         var cancels = new CountDownLatch(streams);
         // The store is slow: every queued cancel waits until the gate opens.
         var storeGate = new CountDownLatch(1);
-        doAnswer(invocation -> {
+        doAnswer(_ -> {
             int now = running.incrementAndGet();
             peak.accumulateAndGet(now, Math::max);
             storeGate.await(60, TimeUnit.SECONDS);

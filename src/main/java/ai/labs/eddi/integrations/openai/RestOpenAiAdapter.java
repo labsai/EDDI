@@ -165,8 +165,11 @@ public class RestOpenAiAdapter {
                                     @Context HttpHeaders httpHeaders,
                                     @Context ContainerRequestContext requestContext) {
         requireEnabled();
+        if (request == null) {
+            throw OpenAiApiException.badRequest(OpenAiErrorResponse.CODE_INVALID_REQUEST_FIELD, "Request body is required.");
+        }
 
-        var model = applyStatelessOverride(resolveOrFail(request == null ? null : request.model()), request);
+        var model = applyStatelessOverride(resolveOrFail(request.model()), request);
         String userId = requireUserId(requestContext);
         Map<String, String> headers = flatten(httpHeaders);
 

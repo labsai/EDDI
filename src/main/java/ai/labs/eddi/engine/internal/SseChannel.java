@@ -335,7 +335,7 @@ final class SseChannel {
             settle(bytes);
             return;
         }
-        stage.whenComplete((ignored, failure) -> {
+        stage.whenComplete((_, failure) -> {
             settle(bytes);
             if (failure != null) {
                 try {
