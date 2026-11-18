@@ -246,7 +246,20 @@ AI says: {memory.current.output}
 
 1. **During a turn**: the memory is a Java object on the heap, read and written by the pipeline's tasks
 2. **After the turn**: it is converted to a `ConversationMemorySnapshot` and saved to the datastore — MongoDB or PostgreSQL, whichever the deployment uses. A turn that only added a step is appended; undo, redo, rerun and HITL pause/resume rewrite the document. Writes are guarded by an optimistic revision (`_rev`), so two writers cannot silently overwrite each other
-3. **On the next turn**: the snapshot is loaded from the datastore again and converted back into a live memory object
+3. **Then the caller is answered**: the reply (REST response, the stream's `done` event, the `/v1` completion) is sent only once the write has succeeded — see [When a turn is not stored](#when-a-turn-is-not-stored)
+4. **On the next turn**: the snapshot is loaded from the datastore again and converted back into a live memory object
+
+### When a turn is not stored
+
+A turn's write can fail after the turn has run: the document would exceed `eddi.conversations.max-document-bytes` (default 14 MiB, checked before the write on both backends; MongoDB's own limit is 16 MB), the database refuses the content (a PostgreSQL data error), another request or node changed the conversation meanwhile (revision conflict, cluster fence), or the database fails. Then:
+
+- **the turn is not in the conversation** — nothing of it was written, and the long-term properties it set are not written to the user memory store either (that write runs only after a successful store);
+- **the caller is told**: the REST say and rerun answer `507` (too large), `422` (data rejected), `409` (conflict, fenced) or `503` (store failure) with `{"error": {"code": "TURN_NOT_STORED", "errorType": "<reason>", …}}` and never a `200`; a stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done` (its tokens were already sent); every other surface (`/v1`, A2A, schedules, group members, channels) receives the turn as failed (`ERROR`, with the same error);
+- **the conversation is marked `ERROR`**, except after a conflict or a fence, where the writer that won owns the document and its state stands. The next turn runs normally — except for `conversation_too_large`, which fails every further turn the same way: start a new conversation;
+- a retry with the same `Idempotency-Key` runs the turn again;
+- it is counted as `eddi_turn_not_stored_total{reason}` and logged with the conversation, the agent and the reason.
+
+So what is guaranteed is: every turn the caller was told succeeded is stored, and a stored conversation is never rewritten or pruned by windowing or summaries. Turns that failed to store, cancelled turns and turns abandoned by the watchdog are not in it.
 
 ### What Is Cached
 
@@ -480,13 +493,15 @@ memory.getCurrentStep().storeData(
 ### 7. Memory Persistence
 
 ```java
-// Conversation: step-scoped properties dropped, changed longTerm properties
-// upserted to the user memory store, state IN_PROGRESS → READY
+// Conversation: step-scoped properties dropped, state IN_PROGRESS → READY,
+// the longTerm write handed to the committer
 
-// ConversationService: snapshot saved to the datastore (MongoDB or PostgreSQL)
+// ConversationStepRunner: size guard, then the snapshot saved to the datastore
+// (MongoDB or PostgreSQL)
 conversationMemoryStore.storeConversationMemorySnapshot(snapshot);
 
-// ...and the state cached for 30 seconds
+// ...then the changed longTerm properties upserted to the user memory store,
+// the state cached for 30 seconds, and only now the caller answered
 cacheConversationState("conv-123", ConversationState.READY);
 ```
 
@@ -644,20 +659,18 @@ on every exit of the turn
 if the turn completed (not paused, cancelled or abandoned):
   postConversationLifecycleTasks()
     ├─→ record the turn's property changes (for undo/redo)
-    └─→ storePropertiesPermanently()
-          └─→ only longTerm properties that changed (or are owed) are upserted
-              to IUserMemoryStore, with visibility applied at this boundary
+    └─→ hand storePropertiesPermanently() to the committer (it runs after the store)
 
 state: IN_PROGRESS → READY (ENDED on CONVERSATION_END, ERROR on failure)
 ```
 
-`ConversationService` then saves the snapshot to the datastore and updates the cached state. `secret` properties are not handled here: they were vaulted when their property instruction ran.
+`ConversationStepRunner` then saves the snapshot to the datastore. Only when that succeeds does it run `storePropertiesPermanently()` — only longTerm properties that changed (or are owed) are upserted to `IUserMemoryStore`, with visibility applied at this boundary — update the cached state and answer the caller. A turn whose store fails writes no user memories. When the store succeeds but the user-memory write fails, the conversation is marked `ERROR` and the next turn writes every longTerm property again. `secret` properties are not handled here: they were vaulted when their property instruction ran.
 
 > **Key insight**: Persistent state is a **session concern** handled in `Conversation.java` init/teardown — NOT a pipeline task. If a feature needs to load/save cross-conversation state, it extends the Conversation init/teardown logic. The pipeline processes data for a single turn; session boundaries manage what persists between turns.
 
 ## What the LLM sees
 
-Conversation memory has two audiences. Pipeline tasks (behavior rules, property setter, and so on) see the **full memory**: every step and every data key. The LLM sees only a **windowed view** that `ConversationHistoryBuilder` assembles from the last N conversation outputs, converted to chat messages. "The conversation is too long" is therefore two different problems: the LLM context window (what the model sees) and the stored document size. Windowing and summaries change only the first; the full conversation always stays in the database. See [Conversation Window Management](langchain.md#conversation-window-management) and [Rolling Conversation Summary](langchain.md#rolling-conversation-summary), and [Memory Policy](memory-policy.md) for what is hidden from the model after a failed task.
+Conversation memory has two audiences. Pipeline tasks (behavior rules, property setter, and so on) see the **full memory**: every step and every data key. The LLM sees only a **windowed view** that `ConversationHistoryBuilder` assembles from the last N conversation outputs, converted to chat messages. "The conversation is too long" is therefore two different problems: the LLM context window (what the model sees) and the stored document size. Windowing and summaries change only the first; they never remove anything from the stored conversation, which keeps every turn that was stored (see [When a turn is not stored](#when-a-turn-is-not-stored) for the turns that are not). See [Conversation Window Management](langchain.md#conversation-window-management) and [Rolling Conversation Summary](langchain.md#rolling-conversation-summary), and [Memory Policy](memory-policy.md) for what is hidden from the model after a failed task.
 
 ## Conversation store and lifecycle
 

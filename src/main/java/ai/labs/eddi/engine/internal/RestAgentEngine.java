@@ -513,6 +513,11 @@ public class RestAgentEngine implements IRestAgentEngine {
                 // always had); the structured reason rides along under `error`, and the
                 // provider's own wait, when it gave one, as Retry-After.
                 TurnError error = snapshot.getError();
+                if (TurnNotStored.isNotStored(error)) {
+                    // The turn ran but its write failed: never a 200 for it (A1).
+                    response.resume(notStoredResponse(error));
+                    return;
+                }
                 Long retryAfterSeconds = error != null ? error.retryAfterSeconds() : null;
                 if (retryAfterSeconds != null) {
                     response.resume(Response.ok(snapshot).header("Retry-After", retryAfterSeconds).build());
@@ -650,6 +655,23 @@ public class RestAgentEngine implements IRestAgentEngine {
     /** {@code {"error": {code, retryable, retryAfterMs, message}}} */
     static Map<String, TurnError> errorBody(TurnError error) {
         return Map.of("error", error);
+    }
+
+    /**
+     * The answer to a turn that ran but was not stored: the status of its
+     * {@linkplain TurnNotStored.Reason reason} (507 too large, 422 data rejected,
+     * 409 conflict or fenced, 503 store failure), the error under {@code error}
+     * with the reason as {@code errorType}, and {@code Retry-After} when retrying
+     * can succeed. No snapshot: the conversation does not contain this turn.
+     */
+    static Response notStoredResponse(TurnError error) {
+        TurnNotStored.Reason reason = TurnNotStored.reasonOf(error);
+        var builder = Response.status(reason.httpStatus()).type(MediaType.APPLICATION_JSON).entity(errorBody(error));
+        Long retryAfterSeconds = error.retryAfterSeconds();
+        if (retryAfterSeconds != null) {
+            builder.header("Retry-After", retryAfterSeconds);
+        }
+        return builder.build();
     }
 
     /**

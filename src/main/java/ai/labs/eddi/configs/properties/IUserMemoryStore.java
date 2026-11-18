@@ -52,29 +52,66 @@ public interface IUserMemoryStore {
     }
 
     /**
-     * Refuses a {@linkplain #isReservedKey reserved key}. For callers that validate
-     * before reaching the store (REST, MCP, the LLM tool) so they can answer with a
-     * readable refusal rather than a store failure.
+     * Prefix of the conversation properties the engine keeps for itself, such as
+     * the rolling summary ({@code conversation:running_summary}) and the step it
+     * covers ({@code conversation:summary_through_step}). See {@link #isEngineKey}.
+     */
+    String ENGINE_KEY_PREFIX = "conversation:";
+
+    /**
+     * Whether a key names one of the engine's own conversation properties. User
+     * memories are loaded into the conversation's properties, so a memory under
+     * such a key would overwrite the engine's value — a planted
+     * {@code conversation:summary_through_step} hid the whole history from the
+     * model, a planted {@code conversation:running_summary} put text into the
+     * system prompt (A6). Such keys are refused on every write and skipped when
+     * memories are loaded into a conversation; unlike {@linkplain #isReservedKey
+     * reserved GDPR keys} an existing entry under one may still be deleted.
+     * <p>
+     * Exact prefix match, case-sensitive, after trimming.
+     */
+    static boolean isEngineKey(String key) {
+        return key != null && key.trim().startsWith(ENGINE_KEY_PREFIX);
+    }
+
+    /**
+     * Whether no memory may be written under {@code key}: a
+     * {@linkplain #isReservedKey GDPR key} (written only through
+     * {@link #upsertReserved}) or an {@linkplain #isEngineKey engine key}.
+     */
+    static boolean isRefusedWriteKey(String key) {
+        return isReservedKey(key) || isEngineKey(key);
+    }
+
+    /**
+     * Refuses a {@linkplain #isRefusedWriteKey key no memory may be written under}.
+     * The stores call it on every ordinary write; callers that validate before
+     * reaching the store (REST, MCP, the LLM tool) call it too, so they can answer
+     * with a readable refusal rather than a store failure.
      *
      * @throws ReservedMemoryKeyException
      *             if {@code key} is reserved
      */
     static void rejectReservedKey(String key) {
-        if (isReservedKey(key)) {
+        if (isRefusedWriteKey(key)) {
             throw new ReservedMemoryKeyException(key);
         }
     }
 
     /**
-     * A write named a key reserved for GDPR bookkeeping. Unchecked, and an
-     * {@link IllegalArgumentException}, because it is a caller error that no retry
-     * fixes — REST surfaces map it to 400.
+     * A write named a key reserved for GDPR bookkeeping or for the engine's own
+     * conversation properties. Unchecked, and an {@link IllegalArgumentException},
+     * because it is a caller error that no retry fixes — REST surfaces map it to
+     * 400.
      */
     final class ReservedMemoryKeyException extends IllegalArgumentException {
 
         public ReservedMemoryKeyException(String key) {
-            super("Memory keys starting with '" + RESERVED_KEY_PREFIX + "' are reserved for GDPR bookkeeping and cannot be written "
-                    + "or deleted here (key: '" + key + "').");
+            super(isEngineKey(key)
+                    ? "Memory keys starting with '" + ENGINE_KEY_PREFIX + "' are the engine's own conversation properties and cannot be "
+                            + "stored as memories (key: '" + key + "')."
+                    : "Memory keys starting with '" + RESERVED_KEY_PREFIX + "' are reserved for GDPR bookkeeping and cannot be written "
+                            + "or deleted here (key: '" + key + "').");
         }
     }
 

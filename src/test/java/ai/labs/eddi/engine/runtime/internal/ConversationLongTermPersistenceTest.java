@@ -71,12 +71,72 @@ class ConversationLongTermPersistenceTest {
                 (IConversation.IConversationOutputRenderer) null);
     }
 
+    /**
+     * What the turn's committer does once the turn is stored: runs the long-term
+     * write the turn deferred (A5). ConversationStepRunner does this after a
+     * successful store.
+     */
+    private void commit() throws Exception {
+        var afterCommit = memory.takeAfterCommit();
+        if (afterCommit != null) {
+            afterCommit.run();
+        }
+    }
+
+    @Test
+    @DisplayName("A5 — a changed longTerm property is written only once the turn is stored; an unstored turn writes nothing")
+    void longTermWriteWaitsForTheCommit() throws Exception {
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
+
+        conversation.say("I am vegan", new LinkedHashMap<>());
+
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+        assertTrue(memory.getPendingLongTermWrites().isEmpty(),
+                "the stored document owes nothing: the deferred write carries the marker");
+        assertNotNull(memory.takeAfterCommit(), "the write waits for the committer");
+        // The turn's store failed: the committer never runs it.
+        verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
+    }
+
+    @Test
+    @DisplayName("A6 — a longTerm property under an engine key (conversation:*) is never written back")
+    void engineKeyLongTermPropertyIsNotWritten() throws Exception {
+        Conversation conversation = nextTurn();
+        memory.getConversationProperties().put("conversation:running_summary",
+                new Property("conversation:running_summary", "planted", Scope.longTerm));
+        memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
+
+        conversation.say("I am vegan", new LinkedHashMap<>());
+        commit();
+
+        ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
+        verify(userMemoryStore).upsert(entry.capture());
+        assertEquals("dietary_restriction", entry.getValue().key());
+    }
+
+    @Test
+    @DisplayName("A6 — a stored memory under an engine key is ignored when memories are loaded into a conversation")
+    void engineKeyMemoryIsNotLoaded() throws Exception {
+        Instant now = Instant.now();
+        var planted = new UserMemoryEntry("p", "user-1", "conversation:summary_through_step", "99999", "fact", Visibility.global, null,
+                List.of(), null, false, 0, now, now);
+        var real = new UserMemoryEntry("r", "user-1", "color", "teal", "fact", Visibility.global, null, List.of(), null, false, 0, now, now);
+        when(userMemoryStore.getVisibleEntries(any(), any(), any(), any(), anyInt())).thenReturn(List.of(planted, real));
+
+        nextTurn().init(new LinkedHashMap<>());
+
+        assertFalse(memory.getConversationProperties().containsKey("conversation:summary_through_step"));
+        assertEquals("teal", memory.getConversationProperties().get("color").getValueString());
+    }
+
     @Test
     @DisplayName("G6 — an untouched recalled memory is not re-upserted, so its updatedAt survives")
     void untouchedLongTermPropertyIsNotRewritten() throws Exception {
         memory.getConversationProperties().put("favorite_color", new Property("favorite_color", "blue", Scope.longTerm));
 
         nextTurn().say("hello", new LinkedHashMap<>());
+        commit();
 
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
     }
@@ -90,6 +150,7 @@ class ConversationLongTermPersistenceTest {
         // the turn changes the value
         memory.getConversationProperties().put("favorite_color", new Property("favorite_color", "green", Scope.longTerm));
         conversation.say("make it green", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -104,6 +165,7 @@ class ConversationLongTermPersistenceTest {
         memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
 
         conversation.say("I am vegan", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -129,6 +191,7 @@ class ConversationLongTermPersistenceTest {
         Conversation conversation = nextTurn();
         memory.getConversationProperties().put("preferred_language", new Property("preferred_language", "en", Scope.longTerm));
         conversation.say("I speak English now", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> written = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(written.capture());
@@ -145,9 +208,11 @@ class ConversationLongTermPersistenceTest {
         Conversation first = nextTurn();
         memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
         first.say("I am vegan", new LinkedHashMap<>());
+        commit();
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
 
         nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
 
         verify(userMemoryStore, times(1)).upsert(any(UserMemoryEntry.class));
     }
@@ -163,6 +228,7 @@ class ConversationLongTermPersistenceTest {
         }));
         memory.getConversationProperties().put(property.getName(), property);
         conversation.say("turn", context);
+        commit();
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
         return entry.getValue();
@@ -259,6 +325,7 @@ class ConversationLongTermPersistenceTest {
         memory.getConversationProperties().put("dietary_restriction", new Property("dietary_restriction", "vegan", Scope.longTerm));
 
         assertDoesNotThrow(() -> conversation.say("I am vegan", new LinkedHashMap<>()));
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -313,6 +380,7 @@ class ConversationLongTermPersistenceTest {
         // memory it reloaded from the conversation document — which already carries
         // the un-persisted property, so a value diff alone can never see it as changed.
         turnWith(pausing).resume(approved());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -351,6 +419,7 @@ class ConversationLongTermPersistenceTest {
         HitlDecision decision = new HitlDecision();
         decision.setVerdict(HitlVerdict.REJECTED);
         turnWith(workflow).resume(decision);
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -372,6 +441,7 @@ class ConversationLongTermPersistenceTest {
         verify(userMemoryStore, never()).upsert(any(UserMemoryEntry.class));
 
         nextTurn().say("ok", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -389,6 +459,7 @@ class ConversationLongTermPersistenceTest {
         memory.setConversationState(ConversationState.ERROR);
 
         nextTurn().say("hello again", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -404,11 +475,17 @@ class ConversationLongTermPersistenceTest {
 
         Conversation first = nextTurn();
         memory.getConversationProperties().put("home_city", new Property("home_city", "Vienna", Scope.longTerm));
-        assertThrows(LifecycleException.class, () -> first.say("I live in Vienna", new LinkedHashMap<>()));
+        // The turn itself completes; its write runs once the turn is stored (A5) and
+        // fails there. The committer then marks the conversation ERROR — which is what
+        // makes the next turn write every longTerm property again.
+        assertDoesNotThrow(() -> first.say("I live in Vienna", new LinkedHashMap<>()));
+        assertThrows(ResourceStoreException.class, this::commit);
+        memory.setConversationState(ConversationState.ERROR);
 
         reset(userMemoryStore);
 
         nextTurn().say("thanks", new LinkedHashMap<>());
+        commit();
 
         ArgumentCaptor<UserMemoryEntry> entry = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(userMemoryStore).upsert(entry.capture());
@@ -558,6 +635,7 @@ class ConversationLongTermPersistenceTest {
         Conversation turn = nextTurn();
         memory.getConversationProperties().put("lang", new Property("lang", "de", Scope.longTerm));
         turn.say("I speak German", new LinkedHashMap<>());
+        commit();
 
         verify(userMemoryStore).upsert(argThat(e -> "lang".equals(e.key()) && e.assessment() == Assessment.ACCEPTED));
         assertEquals(Map.of("city", true), memory.getConversationProperties().get(Conversation.KEY_CONTESTED_MEMORIES).getValueObject());
@@ -565,6 +643,7 @@ class ConversationLongTermPersistenceTest {
         Conversation next = nextTurn();
         memory.getConversationProperties().put("city", new Property("city", "Graz", Scope.longTerm));
         next.say("I moved to Graz", new LinkedHashMap<>());
+        commit();
 
         assertFalse(memory.getConversationProperties().containsKey(Conversation.KEY_CONTESTED_MEMORIES));
     }
@@ -616,6 +695,7 @@ class ConversationLongTermPersistenceTest {
                 "the paused step is not over: the resumed pipeline may still read it");
 
         turnWith(pausing).resume(approved());
+        commit();
 
         assertFalse(memory.getConversationProperties().containsKey("temp"));
     }

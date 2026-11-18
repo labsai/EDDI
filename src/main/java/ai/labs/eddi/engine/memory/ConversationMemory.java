@@ -39,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -82,6 +83,8 @@ public class ConversationMemory implements IConversationMemory {
      * {@link #setLeaseLostCheck}.
      */
     private transient volatile BooleanSupplier leaseLostCheck;
+    /** See {@link #deferUntilCommitted}. */
+    private final transient AtomicReference<AfterCommit> afterCommit = new AtomicReference<>();
     /**
      * Optimistic-concurrency revision of the document this memory was loaded from.
      * See {@link IConversationMemory#getRevision()}.
@@ -691,6 +694,17 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setLeaseLostCheck(BooleanSupplier leaseLost) {
         this.leaseLostCheck = leaseLost;
+    }
+
+    @Override
+    public boolean deferUntilCommitted(AfterCommit action) {
+        afterCommit.set(action);
+        return true;
+    }
+
+    @Override
+    public AfterCommit takeAfterCommit() {
+        return afterCommit.getAndSet(null);
     }
 
     @Override

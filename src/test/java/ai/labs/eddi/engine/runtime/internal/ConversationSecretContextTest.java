@@ -103,6 +103,14 @@ class ConversationSecretContextTest {
         return new Conversation(List.of(workflow), memory, propertiesHandler, outputRenderer);
     }
 
+    /** Runs the long-term write the turn deferred until it is stored (A5). */
+    private void commit() throws Exception {
+        var afterCommit = memory.takeAfterCommit();
+        if (afterCommit != null) {
+            afterCommit.run();
+        }
+    }
+
     private static Map<String, Context> contexts(String token, Boolean secret) {
         var tokenContext = new Context(Context.ContextType.string, token);
         tokenContext.setSecret(secret);
@@ -192,6 +200,7 @@ class ConversationSecretContextTest {
         pipelineCopiesToken(TOKEN);
 
         conversation().say("hello", contexts(TOKEN, true));
+        commit();
 
         var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(store, atLeastOnce()).upsert(written.capture());
@@ -388,6 +397,7 @@ class ConversationSecretContextTest {
         }).when(lifecycleManager).executeLifecycle(any(), any());
 
         conversation().say("hello", contexts(pin, true));
+        commit();
 
         assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pin").getValueString());
         assertEquals(PLACEHOLDER, memory.getConversationProperties().get("pinNumber").getValueString());
@@ -463,6 +473,7 @@ class ConversationSecretContextTest {
         when(store.getVisibleEntries(anyString(), anyString(), anyList(), anyString(), anyInt())).thenReturn(List.of(entry));
 
         conversation().init(contexts(secret, true));
+        commit();
 
         var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
         verify(store, atLeastOnce()).upsert(written.capture());

@@ -317,7 +317,9 @@ public class DreamService {
         // has no owning agent, so whole-set maintenance used to include it: a stale
         // prune deleted it — lifting a legal restriction with no admin involved and
         // no audit entry — and a consolidation could rewrite it.
-        entries = entries.stream().filter(entry -> !IUserMemoryStore.isReservedKey(entry.key())).toList();
+        // Engine keys (conversation:*) are not memories either: the store refuses them,
+        // so a consolidation over one would fail, and they are never loaded (A6).
+        entries = entries.stream().filter(entry -> !IUserMemoryStore.isRefusedWriteKey(entry.key())).toList();
         if (dreamConfig.isCrossAgentMaintenance()) {
             return entries;
         }

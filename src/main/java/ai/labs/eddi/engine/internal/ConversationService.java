@@ -192,6 +192,17 @@ public class ConversationService implements IConversationService, UserErasurePar
     int maxInputChars;
 
     /**
+     * The largest conversation document a write may produce, in bytes (estimated;
+     * see {@code ConversationStepRunner#requireWithinDocumentLimit}); {@code <= 0}
+     * leaves it to the database. The default stays below MongoDB's 16 MB document
+     * limit and applies to PostgreSQL as well, so both backends refuse the same
+     * turn. Field-injected; {@code 0} (off) for the services tests build with
+     * {@code new}.
+     */
+    @ConfigProperty(name = "eddi.conversations.max-document-bytes", defaultValue = "14680064")
+    long maxConversationDocumentBytes;
+
+    /**
      * Bounds for {@code context} entries of type {@code expressions}, applied with
      * {@link #maxInputChars} on the same entry points. Field-injected for the same
      * reason as {@link #attachmentStore}; a directly constructed instance falls
@@ -1364,6 +1375,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     }
 
                     @Override
+                    public void notStored(SimpleConversationMemorySnapshot snapshot) {
+                        // The tokens cannot be taken back: the stream ends with an error that
+                        // says the turn was not stored, not with a done event for it.
+                        streamingHandler.onError(new TurnNotStored.TurnNotStoredException(snapshot.getError()));
+                    }
+
+                    @Override
                     public ConversationEventSink eventSink() {
                         return eventSink;
                     }
@@ -1393,6 +1411,16 @@ public class ConversationService implements IConversationService, UserErasurePar
         void completed(SimpleConversationMemorySnapshot snapshot);
 
         void skipped(SimpleConversationMemorySnapshot snapshot);
+
+        /**
+         * The turn ran but its write failed: the snapshot is marked {@code ERROR} and
+         * carries a {@link TurnNotStored} error. A plain turn is completed with it (the
+         * REST layer answers it with an error status); a streamed one ends with an
+         * {@code error} event instead of {@code done}.
+         */
+        default void notStored(SimpleConversationMemorySnapshot snapshot) {
+            completed(snapshot);
+        }
 
         /**
          * The turn was dropped unrun because its caller had stopped waiting
@@ -1692,7 +1720,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                            completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
+                            completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed, listener::notStored);
                         });
 
                 if (conversation.isEnded()) {
@@ -1707,7 +1735,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.rerun(inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
-                            listener.pipelineFailed(e);
+                            // After the (deferred) snapshot, as before the delivery waited for the write.
+                            processingTurn.deferredDelivery.runAfterDelivery(() -> listener.pipelineFailed(e));
                         }
                         return null;
                     };
@@ -1718,7 +1747,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.say(inputData.getInput(), inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
-                            listener.pipelineFailed(e);
+                            // After the (deferred) snapshot, as before the delivery waited for the write.
+                            processingTurn.deferredDelivery.runAfterDelivery(() -> listener.pipelineFailed(e));
                         }
                         return null;
                     };
@@ -2676,9 +2706,10 @@ public class ConversationService implements IConversationService, UserErasurePar
             if (!storedIsLongTerm && !targetIsLongTerm) {
                 return;
             }
-            // GDPR bookkeeping is never written from a conversation — the store refuses
-            // it, as the turn boundary does (Conversation.storePropertiesPermanently).
-            if (IUserMemoryStore.isReservedKey(key)) {
+            // GDPR bookkeeping and engine keys are never written from a conversation —
+            // the store refuses them, as the turn boundary does
+            // (Conversation.storePropertiesPermanently).
+            if (IUserMemoryStore.isRefusedWriteKey(key)) {
                 return;
             }
             try {
@@ -3300,6 +3331,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         conversationStepRunner.logConversationError(loggingContext, conversationId, t);
     }
 
+    /** See {@link ConversationStepRunner#runAfterCommit}. */
+    boolean runAfterCommit(Map<String, String> loggingContext, String conversationId, IConversationMemory memory) {
+        return conversationStepRunner.runAfterCommit(loggingContext, conversationId, memory);
+    }
+
     private IConversationMemory loadAndValidateConversationMemory(String agentId, String conversationId)
             throws ResourceStoreException, ResourceNotFoundException, AgentMismatchException {
         return conversationStepRunner.loadAndValidateConversationMemory(agentId, conversationId);
@@ -3336,42 +3372,67 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Completes a turn towards the client — the single place that decides WHEN the
      * sync response / streaming {@code done} may be sent.
      * <p>
-     * <b>Ordering contract.</b>
+     * <b>Ordering contract.</b> No turn is delivered here. Its memory is only
+     * written afterwards by the runtime's {@code onComplete}
+     * ({@code ConversationStepRunner.runGuardedConversationStep}), so the delivery
+     * is deferred and runs from that persistence step once the write's outcome is
+     * known:
      * <ul>
-     * <li>A turn that ends {@code AWAITING_HUMAN} is NOT delivered here. Its pause
-     * is only written afterwards by the runtime's {@code onComplete}
-     * ({@code ConversationStepRunner.runGuardedConversationStep}), and a client
-     * told "paused" before that write reads {@code approval-status} /
-     * {@code pending-approvals} and finds no pause (or one with no details). The
-     * delivery is deferred and runs from that persistence step, with the state the
-     * store really holds — so a pause that was not committed (lost CAS, cancel
-     * race, store failure) is reported as what it became, never as a phantom pause.
-     * The state cache is updated from the same committed state.</li>
-     * <li>Every other turn is delivered immediately, exactly as before: its
-     * snapshot already matches what the store will hold (or a revision-conflict
-     * handler corrects it), and the next turn of the conversation is serialized
-     * behind this one by the coordinator, so holding it back would add latency for
-     * no consistency gain.</li>
+     * <li>stored — the snapshot is delivered as it is (a pause with the state the
+     * store really holds, so a pause that was not committed is reported as what it
+     * became, never as a phantom pause);</li>
+     * <li>not stored (the write failed: document too large, a data error, a fence,
+     * a revision conflict, any driver failure) — the snapshot is marked
+     * {@code ERROR} with a {@link TurnNotStored} error and handed to
+     * {@code notStoredCompletion}, never delivered as done;</li>
+     * <li>discarded (cancelled, abandoned) — the snapshot carries the state the
+     * store holds.</li>
      * </ul>
-     * The delivery runs at most once; the turn's {@code finally} and its failure
-     * callback flush a still-pending one, so the stream always terminates.
+     * Delivered from the pipeline's callback, before the write, a turn whose write
+     * then failed was answered 200/{@code READY} although it did not exist (A1);
+     * the price of the order is the write's latency on every answer. The state
+     * cache is updated from the delivered state. The delivery runs at most once;
+     * the turn's {@code finally} and its failure callback flush a still-pending
+     * one, so the stream always terminates.
      */
     private void completeTurn(ProcessingTurn processingTurn, String conversationId, SimpleConversationMemorySnapshot memorySnapshot,
-                              Consumer<SimpleConversationMemorySnapshot> clientCompletion) {
-        if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-            processingTurn.deferredDelivery.defer(committedState -> {
-                if (committedState != null) {
-                    memorySnapshot.setConversationState(committedState);
-                    cacheConversationState(conversationId, committedState);
-                }
+                              Consumer<SimpleConversationMemorySnapshot> clientCompletion,
+                              Consumer<SimpleConversationMemorySnapshot> notStoredCompletion) {
+        processingTurn.deferredDelivery.defer(committedState -> {
+            TurnError notStored = processingTurn.deferredDelivery.notStored();
+            if (notStored != null) {
+                memorySnapshot.setConversationState(ConversationState.ERROR);
+                memorySnapshot.setError(notStored);
                 processingTurn.release();
-                clientCompletion.accept(memorySnapshot);
-            });
-            return;
+                notStoredCompletion.accept(memorySnapshot);
+                return;
+            }
+            if (committedState != null) {
+                memorySnapshot.setConversationState(committedState);
+            }
+            TurnError error = processingTurn.deferredDelivery.error();
+            if (error != null) {
+                memorySnapshot.setError(error);
+            }
+            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+            processingTurn.release();
+            clientCompletion.accept(memorySnapshot);
+        });
+    }
+
+    /**
+     * A turn ran but its write failed ({@code eddi_turn_not_stored_total}, tagged
+     * by {@link TurnNotStored.Reason#tag()}). Never throws.
+     */
+    void countTurnNotStored(TurnNotStored.Reason reason) {
+        try {
+            Counter counter = meterRegistry.counter("eddi.turn.not_stored", "reason", reason.tag());
+            if (counter != null) {
+                counter.increment();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count a turn that was not stored: %s", e.getMessage());
         }
-        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-        processingTurn.release();
-        clientCompletion.accept(memorySnapshot);
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {

@@ -338,11 +338,13 @@ public class PropertiesMigrationService {
                 // Skip MongoDB internal fields and the userId field itself
                 if ("_id".equals(key) || "userId".equals(key))
                     continue;
-                if (IUserMemoryStore.isReservedKey(key)) {
+                if (IUserMemoryStore.isRefusedWriteKey(key)) {
                     // The store refuses these, and counting the refusal as a failure
                     // would keep the legacy collection from ever being retired. A legacy
-                    // property can never have been a GDPR flag, which postdates it.
-                    LOGGER.warnf("[MIGRATION] Skipping legacy key='%s' for userId='%s': reserved for GDPR bookkeeping", key, userId);
+                    // property can never have been a GDPR flag, which postdates it; an
+                    // engine key (conversation:*) is never a memory.
+                    LOGGER.warnf("[MIGRATION] Skipping legacy key='%s' for userId='%s': reserved for GDPR bookkeeping or the engine",
+                            key, userId);
                     continue;
                 }
 

@@ -300,6 +300,36 @@ public interface IConversationMemory extends Serializable {
         return false;
     }
 
+    /**
+     * A side effect of a turn that must happen only once the turn's conversation
+     * write has succeeded — the turn's long-term property writes to the user memory
+     * store (A5). Run by whoever stores the turn, right after the store; a turn
+     * that is not stored never runs it.
+     */
+    @FunctionalInterface
+    interface AfterCommit {
+        void run() throws Exception;
+    }
+
+    /**
+     * Hands {@code action} to the turn's committer, to run once the turn is stored.
+     * Transient, never persisted; at most one per turn, a later call replaces it.
+     *
+     * @return {@code false} when this memory cannot defer it (the caller then runs
+     *         the action at once, as before the deferral existed)
+     */
+    default boolean deferUntilCommitted(AfterCommit action) {
+        return false;
+    }
+
+    /**
+     * Takes the action {@link #deferUntilCommitted} left, or {@code null}. The
+     * committer calls it once, right after the turn's store succeeded.
+     */
+    default AfterCommit takeAfterCommit() {
+        return null;
+    }
+
     // === HITL pause bookmark ===
 
     /** Workflow ID where the pipeline paused. */

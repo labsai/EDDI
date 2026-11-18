@@ -126,7 +126,7 @@ public class RestUserMemoryStore implements IRestUserMemoryStore {
         // Ownership first: a caller with no access to this user learns nothing
         // about which keys are reserved — they get the same 403 as for any key.
         ownershipValidator.validateUserAccess(identity, entry.userId());
-        if (IUserMemoryStore.isReservedKey(entry.key())) {
+        if (IUserMemoryStore.isRefusedWriteKey(entry.key())) {
             return reservedKeyRefusal(entry.key());
         }
         try {

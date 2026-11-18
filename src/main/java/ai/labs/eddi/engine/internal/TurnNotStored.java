@@ -1,0 +1,186 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.engine.internal;
+
+import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
+import ai.labs.eddi.engine.memory.ConversationFencedException;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
+import ai.labs.eddi.engine.model.TurnError;
+import com.mongodb.MongoException;
+import org.bson.BsonMaximumSizeExceededException;
+
+import java.sql.SQLException;
+import java.util.Set;
+
+/**
+ * A turn that ran but whose conversation write failed — and what its caller is
+ * told about it.
+ * <p>
+ * A turn's answer is delivered only after its write (see
+ * {@code ConversationService#completeTurn}). When the write fails, the caller
+ * gets a {@link TurnError} with code {@value #ERROR_CODE} instead of the
+ * answer, and the reason is one of a small, stable set ({@link Reason}). The
+ * driver's own text never reaches the caller: a MongoDB or PostgreSQL message
+ * can name collections, hosts, SQL or the rejected content.
+ */
+public final class TurnNotStored {
+
+    /** The {@code error.code} of a turn that ran but was not stored. */
+    public static final String ERROR_CODE = "TURN_NOT_STORED";
+
+    /**
+     * MongoDB: BSONObjectTooLarge, and "resulting document after update is larger
+     * than 16 MB".
+     */
+    private static final Set<Integer> MONGO_DOCUMENT_TOO_LARGE_CODES = Set.of(10334, 17419);
+
+    /** How deep the cause chain is searched. */
+    private static final int MAX_CAUSE_DEPTH = 16;
+
+    private TurnNotStored() {
+    }
+
+    /**
+     * Why the write failed. {@link #tag()} is the stable client-facing reason (the
+     * {@code errorType} of the error, the {@code reason} of the streamed error
+     * event, and the {@code reason} tag of {@code eddi_turn_not_stored_total}).
+     */
+    public enum Reason {
+        /**
+         * The conversation document reached its size limit (the database's, or
+         * {@code eddi.conversations.max-document-bytes}). Every further turn of this
+         * conversation fails the same way: start a new conversation.
+         */
+        CONVERSATION_TOO_LARGE("conversation_too_large", false, null, 507,
+                "The turn ran but was not stored: this conversation has reached its size limit. Start a new conversation."),
+        /** The database refused the turn's content (PostgreSQL data exception). */
+        DATA_REJECTED("data_rejected", false, null, 422,
+                "The turn ran but was not stored: the database refused its content. Remove unusual characters and send it again."),
+        /** Another writer changed the conversation while the turn ran. */
+        CONFLICT("conflict", true, 2000L, 409,
+                "The turn ran but was not stored: the conversation was changed by another request while it ran. Reload the conversation and send it again."),
+        /** Cluster mode: another node took the conversation over. */
+        FENCED("fenced", true, 2000L, 409,
+                "The turn ran but was not stored: another node took over the conversation while it ran. Send it again."),
+        /** Any other failure of the write (unavailable database, driver error). */
+        STORE_FAILURE("store_failure", true, 5000L, 503,
+                "The turn ran but was not stored: the database could not store it. Send it again shortly.");
+
+        private final String tag;
+        private final boolean retryable;
+        private final Long retryAfterMs;
+        private final int httpStatus;
+        private final String message;
+
+        Reason(String tag, boolean retryable, Long retryAfterMs, int httpStatus, String message) {
+            this.tag = tag;
+            this.retryable = retryable;
+            this.retryAfterMs = retryAfterMs;
+            this.httpStatus = httpStatus;
+            this.message = message;
+        }
+
+        public String tag() {
+            return tag;
+        }
+
+        /** The status the synchronous REST turn answers with. */
+        public int httpStatus() {
+            return httpStatus;
+        }
+
+        /** The caller-facing error. */
+        public TurnError error() {
+            return new TurnError(ERROR_CODE, retryable, retryAfterMs, message, null, null, tag);
+        }
+    }
+
+    /**
+     * Classifies a failed conversation write. Walks the cause chain, because the
+     * stores wrap the driver exception (PostgreSQL: {@code SQLException} in a
+     * {@code ResourceStoreException}).
+     */
+    public static Reason classify(Throwable failure) {
+        Throwable current = failure;
+        for (int depth = 0; current != null && depth < MAX_CAUSE_DEPTH; depth++) {
+            Reason reason = classifyOne(current);
+            if (reason != null) {
+                return reason;
+            }
+            Throwable cause = current.getCause();
+            current = cause == current ? null : cause;
+        }
+        return Reason.STORE_FAILURE;
+    }
+
+    private static Reason classifyOne(Throwable t) {
+        if (t instanceof ConversationTooLargeException) {
+            return Reason.CONVERSATION_TOO_LARGE;
+        }
+        if (t instanceof ConversationFencedException) {
+            return Reason.FENCED;
+        }
+        if (t instanceof ConcurrentConversationModificationException) {
+            return Reason.CONFLICT;
+        }
+        if (t instanceof BsonMaximumSizeExceededException) {
+            return Reason.CONVERSATION_TOO_LARGE;
+        }
+        if (t instanceof MongoException mongo && MONGO_DOCUMENT_TOO_LARGE_CODES.contains(mongo.getCode())) {
+            return Reason.CONVERSATION_TOO_LARGE;
+        }
+        if (t instanceof SQLException sql && sql.getSQLState() != null) {
+            String state = sql.getSQLState();
+            // Class 22: data exception (an untranslatable character such as U+0000,
+            // a value out of range). Class 54: program limit exceeded (a value or
+            // row too large for the server).
+            if (state.startsWith("22")) {
+                return Reason.DATA_REJECTED;
+            }
+            if (state.startsWith("54")) {
+                return Reason.CONVERSATION_TOO_LARGE;
+            }
+        }
+        return null;
+    }
+
+    /** Whether {@code error} reports a turn that ran but was not stored. */
+    public static boolean isNotStored(TurnError error) {
+        return error != null && ERROR_CODE.equals(error.code());
+    }
+
+    /**
+     * The reason of a not-stored error; {@link Reason#STORE_FAILURE} when it names
+     * none this version knows.
+     */
+    public static Reason reasonOf(TurnError error) {
+        if (error != null) {
+            for (Reason reason : Reason.values()) {
+                if (reason.tag.equals(error.errorType())) {
+                    return reason;
+                }
+            }
+        }
+        return Reason.STORE_FAILURE;
+    }
+
+    /**
+     * Ends a streamed turn that was not stored: the tokens are already on the wire,
+     * so the stream's terminal event is an {@code error} carrying this error
+     * instead of {@code done}.
+     */
+    public static final class TurnNotStoredException extends RuntimeException {
+        private final transient TurnError error;
+
+        public TurnNotStoredException(TurnError error) {
+            super(error != null ? error.message() : "The turn ran but was not stored");
+            this.error = error;
+        }
+
+        public TurnError getError() {
+            return error;
+        }
+    }
+}

@@ -203,7 +203,7 @@ public class McpMemoryTools {
             return errorJson("value is required");
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
-        if (IUserMemoryStore.isReservedKey(key))
+        if (IUserMemoryStore.isRefusedWriteKey(key))
             return errorJson(new IUserMemoryStore.ReservedMemoryKeyException(key).getMessage());
         try {
             var vis = visibility != null && !visibility.isBlank() ? Visibility.valueOf(visibility.trim().toLowerCase()) : Visibility.self;
