@@ -209,8 +209,8 @@ public class MongoScheduleStore implements IScheduleStore {
         // produced (see writeScheduleInstants).
         writeScheduleInstants(doc, schedule);
         scheduleCollection.insertOne(doc);
-        LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", schedule.getName(), id, schedule.getTriggerType(),
-                schedule.getAgentId());
+        LOGGER.infof("Created schedule '%s' (id=%s, type=%s) for Agent %s", sanitize(schedule.getName()), sanitize(id), schedule.getTriggerType(),
+                sanitize(schedule.getAgentId()));
     }
 
     @Override
