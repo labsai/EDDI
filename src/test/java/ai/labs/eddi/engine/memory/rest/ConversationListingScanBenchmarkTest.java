@@ -144,7 +144,7 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
             AtomicLong idQueries = new AtomicLong();
             IConversationDescriptorStore descriptors = countingDescriptors(backend.descriptorStore, descriptorsRead, descriptorQueries);
             IConversationMemoryStore memory = countingMemory(backend.memoryStore, summaryQueries, idQueries);
-            RestConversationStore listing = new ListingOver(backend, descriptors, memory).listing(true);
+            RestConversationStore listing = new ListingOver(descriptors, memory).listing(true);
             if ("before".equals(path)) {
                 listing.maxStateIdSet = -1;
                 listing.maxRejectedScan = Integer.MAX_VALUE;
@@ -171,7 +171,7 @@ class ConversationListingScanBenchmarkTest extends MongoTestBase {
 
     /** The backend with its stores swapped for counting ones. */
     private static final class ListingOver extends ListingBackend {
-        ListingOver(ListingBackend backend, IConversationDescriptorStore descriptors, IConversationMemoryStore memory) {
+        ListingOver(IConversationDescriptorStore descriptors, IConversationMemoryStore memory) {
             super(memory, descriptors);
         }
 
