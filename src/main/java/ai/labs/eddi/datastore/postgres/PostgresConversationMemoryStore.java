@@ -1178,13 +1178,20 @@ public class PostgresConversationMemoryStore implements IConversationMemoryStore
         ensureSchema();
         // Plan §10(a): AWAITING_HUMAN does not count as active (mirrors the Mongo
         // store) — otherwise a forgotten approval blocks undeploy/GC forever.
-        String sql = "SELECT COUNT(*) FROM conversation_memories "
-                + "WHERE AGENT_ID = ? AND AGENT_VERSION = ? AND conversation_state NOT IN (?, ?)";
+        // A null version used to throw a NullPointerException here (setInt of a null
+        // Integer). MongoDB
+        // answers eq(version, null) with the documents that have no version, and so do
+        // we.
+        String sql = "SELECT COUNT(*) FROM conversation_memories WHERE AGENT_ID = ? AND "
+                + (agentVersion == null ? "AGENT_VERSION IS NULL" : "AGENT_VERSION = ?") + " AND conversation_state NOT IN (?, ?)";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, agentId);
-            ps.setInt(2, agentVersion);
-            ps.setString(3, ENDED.toString());
-            ps.setString(4, ConversationState.AWAITING_HUMAN.toString());
+            int index = 1;
+            ps.setString(index++, agentId);
+            if (agentVersion != null) {
+                ps.setInt(index++, agentVersion);
+            }
+            ps.setString(index++, ENDED.toString());
+            ps.setString(index, ConversationState.AWAITING_HUMAN.toString());
             try (ResultSet rs = ps.executeQuery()) {
                 rs.next();
                 return rs.getLong(1);

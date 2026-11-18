@@ -172,6 +172,21 @@ class PostgresSchemaTest {
     }
 
     @Test
+    void widenToText_altersOnlyAVarcharColumn() throws Exception {
+        ResultSet varchar = mock(ResultSet.class);
+        when(varchar.next()).thenReturn(true);
+        when(varchar.getString(1)).thenReturn("character varying");
+        when(statement.executeQuery(contains("data_type"))).thenReturn(varchar);
+
+        PostgresSchema.widenToText(statement, "eddi_schedules", "name");
+        verify(statement).execute("ALTER TABLE eddi_schedules ALTER COLUMN name TYPE TEXT");
+
+        when(varchar.getString(1)).thenReturn("text");
+        PostgresSchema.widenToText(statement, "eddi_schedules", "name");
+        verify(statement, times(1)).execute(contains("ALTER TABLE"));
+    }
+
+    @Test
     void columnChecksRejectAnythingButAPlainIdentifier() {
         assertThrows(IllegalArgumentException.class, () -> PostgresSchema.columnMissing(statement, "audit_ledger'; DROP TABLE x; --", "c"));
     }

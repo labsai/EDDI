@@ -489,6 +489,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         // The field path is rendered as a traversal expression rather than bound as
         // a literal key, so a dotted fieldName means the same thing here as it does
         // on MongoDB (which resolves dotted paths natively in its filter).
+        if (expectedValue == null) {
+            // MongoDB's {field: null} matches an absent key; "= NULL" matches nothing in
+            // SQL, so
+            // a CAS that expects the field to be absent could never succeed here.
+            updateIfMatches(newResource, fieldName, null, toTextPathExpression(fieldName) + " IS NULL", List.of());
+            return;
+        }
         updateIfMatches(newResource, fieldName, expectedValue, toTextPathExpression(fieldName) + " = ?");
     }
 

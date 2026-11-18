@@ -61,7 +61,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     private static final String CREATE_SCHEDULES_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedules (
                 id VARCHAR(64) PRIMARY KEY,
-                name VARCHAR(512),
+                name TEXT,
                 agent_id VARCHAR(255),
                 agent_version INTEGER,
                 environment VARCHAR(64),
@@ -274,6 +274,9 @@ public class PostgresScheduleStore implements IScheduleStore {
         try {
             PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresScheduleStore", stmt -> {
                 stmt.execute(CREATE_SCHEDULES_TABLE);
+                // the name is whatever the caller chose; a 600-character one answered 500 here
+                // and 201 on MongoDB
+                PostgresSchema.widenToText(stmt, "eddi_schedules", "name");
                 stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
                 stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
                 for (String addColumn : ADD_PAYLOAD_COLUMNS) {

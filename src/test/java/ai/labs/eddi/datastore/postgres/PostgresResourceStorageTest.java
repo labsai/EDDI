@@ -1269,6 +1269,23 @@ class PostgresResourceStorageTest {
     }
 
     @Test
+    void storeIfFieldEquals_nullExpectedValue_matchesAnAbsentField() throws Exception {
+        TestConfig config = new TestConfig("value1");
+        when(jsonSerialization.serialize(config)).thenReturn("{}");
+        IResourceStorage.IResource<TestConfig> resource = storage.newResource(VALID_UUID, 2, config);
+        when(preparedStatement.executeUpdate()).thenReturn(1);
+
+        assertDoesNotThrow(() -> storage.storeIfFieldEquals(resource, "state", null));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection).prepareStatement(sql.capture());
+        // MongoDB's {state: null} matches a document without the field; "= ?" bound to
+        // NULL never does
+        assertTrue(sql.getValue().contains("data ->> 'state' IS NULL"), sql.getValue());
+        verify(preparedStatement, never()).setString(eq(5), any());
+    }
+
+    @Test
     void storeIfFieldEquals_deleted_throwsResourceNotFoundException() throws Exception {
         TestConfig config = new TestConfig("value1");
         when(jsonSerialization.serialize(config)).thenReturn("{\"state\":\"AWAITING_APPROVAL\"}");

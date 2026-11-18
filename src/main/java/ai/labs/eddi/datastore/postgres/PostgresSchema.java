@@ -216,6 +216,24 @@ public final class PostgresSchema {
         }
     }
 
+    /**
+     * Changes a {@code VARCHAR(n)} column to {@code TEXT}, only when it still is
+     * one. A length limit on a column that holds caller-chosen text turns one
+     * over-long value into a failed statement (and, in a batch, into a lost batch)
+     * where MongoDB stores it; the change from {@code VARCHAR(n)} to {@code TEXT}
+     * rewrites nothing. Does nothing when the catalogue cannot say.
+     */
+    public static void widenToText(Statement statement, String table, String column) throws SQLException {
+        boolean varchar;
+        try (ResultSet rs = statement.executeQuery("SELECT data_type FROM information_schema.columns WHERE table_schema = current_schema() "
+                + "AND table_name = '" + identifier(table) + "' AND column_name = '" + identifier(column) + "'")) {
+            varchar = rs != null && rs.next() && "character varying".equals(rs.getString(1));
+        }
+        if (varchar) {
+            statement.execute("ALTER TABLE " + identifier(table) + " ALTER COLUMN " + identifier(column) + " TYPE TEXT");
+        }
+    }
+
     private static String identifier(String name) {
         if (name == null || !IDENTIFIER.matcher(name).matches()) {
             throw new IllegalArgumentException("not a plain identifier: " + name);

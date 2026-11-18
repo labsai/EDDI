@@ -390,6 +390,22 @@ class PostgresConversationMemoryStoreUnitTest {
     }
 
     @Test
+    void getActiveConversationCount_nullVersion_countsRowsWithoutOneInsteadOfThrowing() throws Exception {
+        when(preparedStatement.executeQuery()).thenReturn(resultSet);
+        when(resultSet.next()).thenReturn(true);
+        when(resultSet.getLong(1)).thenReturn(0L);
+
+        assertEquals(0L, store.getActiveConversationCount("agent-1", null));
+
+        var sql = ArgumentCaptor.forClass(String.class);
+        verify(connection, atLeastOnce()).prepareStatement(sql.capture());
+        assertTrue(sql.getAllValues().stream().anyMatch(s -> s.contains("AGENT_VERSION IS NULL") && s.contains("conversation_state NOT IN")));
+        verify(preparedStatement, never()).setInt(anyInt(), anyInt());
+        verify(preparedStatement).setString(1, "agent-1");
+        verify(preparedStatement).setString(2, "ENDED");
+    }
+
+    @Test
     void getActiveConversationCount_sqlException_throwsRuntimeException() throws Exception {
         when(preparedStatement.executeQuery()).thenThrow(new SQLException("error"));
         assertThrows(RuntimeException.class, () -> store.getActiveConversationCount("a", 1));
