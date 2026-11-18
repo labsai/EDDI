@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.mcp;
 
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
+import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.runtime.client.factory.IRestInterfaceFactory;
@@ -227,11 +228,11 @@ final class McpToolUtils {
         return "{\"error\":\"" + escapeJsonString(message) + "\"}";
     }
 
-    // There is deliberately no errorJson(prefix, Throwable): it echoed any
-    // exception's text — a datastore or driver message — to the caller. A tool that
-    // catches an exception answers with toolFailure(...), which describes only what
-    // the caller caused and logs the rest under a reference id. A scan in
-    // McpToolErrorLeakScanTest keeps it from coming back.
+    // There is deliberately no overload that takes a message prefix and an
+    // exception: it echoed any exception's text — a datastore or driver message —
+    // to the caller. A tool that catches an exception answers with toolFailure,
+    // which describes only what the caller caused and logs the rest under a
+    // reference id. McpToolErrorLeakScanTest keeps the overload from coming back.
 
     /**
      * The error a tool answers when its body throws, without leaking internals.
@@ -386,9 +387,25 @@ final class McpToolUtils {
         return new IllegalArgumentException(argument + " is not valid JSON" + where);
     }
 
+    /**
+     * A failure whose message a tool authored for its caller — a missing trigger,
+     * an empty reply — and that {@link #isCallerFacing} therefore lets through.
+     */
+    static final class CallerFacingException extends RuntimeException {
+
+        CallerFacingException(String message) {
+            super(message);
+        }
+    }
+
     /** Whether a failure is one the caller made and may be told about verbatim. */
     static boolean isCallerFacing(Throwable e) {
-        return e instanceof ClientErrorException || (e instanceof IllegalArgumentException && thrownByEddi(e))
+        return e instanceof ClientErrorException || (e instanceof IllegalArgumentException && thrownByEddi(e)) || e instanceof CallerFacingException
+        // The conversation service's own refusals ("Agent not deployed", the turn's
+        // conversation has ended, the input is too large): authored for the caller.
+                || e instanceof IConversationService.AgentNotReadyException || e instanceof IConversationService.AgentMismatchException
+                || e instanceof IConversationService.ConversationEndedException || e instanceof IConversationService.InputTooLargeException
+                || e instanceof IConversationService.ConversationNotFoundException
                 || e instanceof IResourceStore.ResourceNotFoundException || e instanceof IResourceStore.ResourceModifiedException
                 // A discussion refusal the engine authored ("no phases are defined", the
                 // depth limit) — but not one that wraps an underlying failure, whose

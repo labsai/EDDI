@@ -232,7 +232,8 @@ class McpConversationToolsTest {
         String result = tools.talkToAgent(AGENT_ID, CONV_ID, "Hello!", null);
 
         assertTrue(result.contains("error"));
-        assertTrue(result.contains("Connection lost"));
+        assertFalse(result.contains("Connection lost"), "an internal failure is not echoed to the caller");
+        assertTrue(result.contains("reference"), result);
     }
 
     // --- chatWithAgent (composite) ---

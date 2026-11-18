@@ -985,7 +985,7 @@ public class McpConversationTools {
                 }
                 if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
                     userConversationStore.deleteUserConversation(intent, userId);
-                    throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
+                    throw new CallerFacingException("Agent trigger for intent '" + intent + "' no longer exists");
                 }
                 throw triggerEx; // Rethrow transient DB errors
             }
@@ -1016,7 +1016,7 @@ public class McpConversationTools {
         // Create a new conversation from the Agent trigger
         AgentTriggerConfiguration trigger = agentTriggerStore.readAgentTrigger(intent);
         if (trigger == null || trigger.getAgentDeployments().isEmpty()) {
-            throw new RuntimeException("No Agent trigger configured for intent: " + intent);
+            throw new CallerFacingException("No Agent trigger configured for intent: " + intent);
         }
 
         // A random deployment, as RestAgentManagement.selectAgentDeployment picks it:
@@ -1093,7 +1093,7 @@ public class McpConversationTools {
                         if (snapshot != null) {
                             responseFuture.complete(snapshot);
                         } else {
-                            responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+                            responseFuture.completeExceptionally(new CallerFacingException("Agent returned null response"));
                         }
                     }
 
@@ -1110,6 +1110,9 @@ public class McpConversationTools {
             // Unwrap the skip signal so callers can catch it directly.
             if (e.getCause() instanceof ConversationSkippedException cse) {
                 throw cse;
+            }
+            if (e.getCause() instanceof CallerFacingException refusal) {
+                throw refusal;
             }
             throw e;
         }
