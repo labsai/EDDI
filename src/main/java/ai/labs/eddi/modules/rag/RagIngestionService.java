@@ -198,7 +198,7 @@ public class RagIngestionService {
             // base whose embedding model changed would otherwise add new vectors next to
             // the old ones.
             if (vectorSpaceGuard != null) {
-                vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, ragConfig);
             }
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
@@ -259,8 +259,9 @@ public class RagIngestionService {
             List<Embedding> embeddings = model.embedAll(segments).content();
             if (vectorSpaceGuard != null) {
                 // Again, now that the provider has answered: a re-embed may have started
-                // while this document was being embedded.
-                vectorSpaceGuard.requireCompatible(ragConfigId, ragConfig);
+                // while this document was being embedded — on any node, so the record is
+                // read from the store, not from this node's cache.
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, ragConfig);
             }
             if (vectorSpaceGuard != null && !embeddings.isEmpty()) {
                 vectorSpaceGuard.verifyDimension(ragConfigId, ragConfig, embeddings.get(0).dimension(), true);

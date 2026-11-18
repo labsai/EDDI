@@ -15,10 +15,12 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory.RemovalOutcome;
 import ai.labs.eddi.modules.rag.OperatorFailureException;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
 import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.AuthenticationException;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -66,6 +68,7 @@ class KnowledgeBaseReembedServiceTest {
     private RagConfiguration knowledgeBase;
 
     @BeforeEach
+    @SuppressWarnings("unchecked")
     void setUp() {
         pipeline = mock(IngestionPipeline.class);
         sources = mock(RagSourceIngestionService.class);
@@ -93,7 +96,12 @@ class KnowledgeBaseReembedServiceTest {
         when(pipeline.claimForMaintenance(eq(ID), any())).thenReturn(Optional.of("claim"));
         when(sources.runAsync(eq(ID), any(), any(), any(), any())).thenReturn(Optional.of("run-1"));
         when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.CHUNKS_DELETED);
+        probedStore = mock(EmbeddingStore.class);
+        when(storeFactory.getOrCreate(anyString(), any())).thenReturn(probedStore);
     }
+
+    /** What a collection store answers the probe search with. */
+    private EmbeddingStore<TextSegment> probedStore;
 
     private String key(IngestionSource source) {
         return IngestionPipeline.stateKeyForSourceId(ID, source.effectiveId());
@@ -151,7 +159,7 @@ class KnowledgeBaseReembedServiceTest {
     void crashWhileDeleting() {
         doThrow(new IllegalStateException("db down")).when(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
 
-        assertThrows(IllegalStateException.class, () -> service.reembed(ID, knowledgeBase));
+        assertThrows(KnowledgeBaseReembedService.ReembedIncompleteException.class, () -> service.reembed(ID, knowledgeBase));
 
         verify(stateStore).invalidateContent(key(web));
         verify(stateStore).invalidateContent(key(upload));
@@ -167,7 +175,7 @@ class KnowledgeBaseReembedServiceTest {
     void crashAfterDeleteBeforeReset() {
         doThrow(new IllegalStateException("record store down")).when(guard).reset(eq(ID), any(), anyBoolean());
 
-        assertThrows(IllegalStateException.class, () -> service.reembed(ID, knowledgeBase));
+        assertThrows(KnowledgeBaseReembedService.ReembedIncompleteException.class, () -> service.reembed(ID, knowledgeBase));
 
         InOrder order = inOrder(stateStore, storeFactory);
         order.verify(stateStore).invalidateContent(key(web));
@@ -306,30 +314,94 @@ class KnowledgeBaseReembedServiceTest {
     }
 
     @Test
-    @DisplayName("pgvector: a table of its own is recreated at the new size, and the result says so")
+    @DisplayName("pgvector: a table of its own that changes size is dropped whole and recreated, and the result says so")
     void ownTableIsRecreated() {
         pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, 1536, false));
-        when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.TABLE_DROPPED);
+        when(storeFactory.dropKnowledgeBaseTable(ID, knowledgeBase)).thenReturn(RemovalOutcome.TABLE_DROPPED);
 
         var result = service.reembed(ID, knowledgeBase);
 
         assertEquals(Boolean.TRUE, result.tableRecreated());
         assertTrue(result.warnings().isEmpty());
         verify(guard).reset(ID, knowledgeBase, true);
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
     }
 
     @Test
-    @DisplayName("pgvector: a busy table is not dropped, and the result says it keeps its old size and what to do")
-    void busyTableIsReported() {
+    @DisplayName("pgvector: a table that has to change size but stays busy is refused with TABLE_BUSY; nothing is removed, the mark is taken back")
+    void busyTableIsRefused() {
         pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, 1536, false));
-        when(storeFactory.removeKnowledgeBaseVectors(anyString(), any())).thenReturn(RemovalOutcome.TABLE_BUSY);
+        when(guard.markRebuilding(ID, knowledgeBase)).thenReturn("v1|openai|old|||");
+        when(storeFactory.dropKnowledgeBaseTable(ID, knowledgeBase)).thenReturn(RemovalOutcome.TABLE_BUSY);
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_TABLE_BUSY, refused.code());
+        assertTrue(refused.getMessage().contains("Nothing was removed"), refused.getMessage());
+        verify(storeFactory, never()).removeKnowledgeBaseVectors(anyString(), any());
+        verify(guard).unmarkRebuilding(ID, knowledgeBase, "v1|openai|old|||");
+        verify(guard, never()).reset(anyString(), any(), anyBoolean());
+        verify(pipeline).releaseClaim(ID, web, "claim");
+    }
+
+    @Test
+    @DisplayName("pgvector: a table whose size stays is emptied of this knowledge base's rows only; busy or shared is then no obstacle")
+    void sameSizeTableKeepsTable() {
+        pgvector(NEW_SIZE, new PgVectorTableInfo(true, true, NEW_SIZE, true));
+        when(storeFactory.removeKnowledgeBaseVectors(ID, knowledgeBase)).thenReturn(RemovalOutcome.TABLE_KEPT_SHARED);
 
         var result = service.reembed(ID, knowledgeBase);
 
         assertEquals(Boolean.FALSE, result.tableRecreated());
-        assertEquals(1, result.warnings().size());
-        assertTrue(result.warnings().get(0).contains("1536") && result.warnings().get(0).contains("768"), result.warnings().get(0));
-        assertTrue(result.warnings().get(0).contains("DROP TABLE") || result.warnings().get(0).contains("re-embed again"));
+        verify(storeFactory, never()).dropKnowledgeBaseTable(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("the durable rebuild mark is written before any content hash is forgotten or any vector removed")
+    void marksBeforeTouchingAnything() {
+        service.reembed(ID, knowledgeBase);
+
+        InOrder order = inOrder(guard, stateStore, storeFactory);
+        order.verify(guard).markRebuilding(ID, knowledgeBase);
+        order.verify(stateStore).invalidateContent(key(web));
+        order.verify(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
+        order.verify(guard).reset(eq(ID), eq(knowledgeBase), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("a failure in the middle of the delete keeps the mark: the knowledge base stays refused until a re-embed completes")
+    void midDeleteFailureKeepsTheMark() {
+        doThrow(new IllegalStateException("db down")).when(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
+
+        var incomplete = assertThrows(KnowledgeBaseReembedService.ReembedIncompleteException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals("db down", incomplete.getCause().getMessage());
+        verify(guard, never()).unmarkRebuilding(anyString(), any(), any());
+    }
+
+    @Test
+    @DisplayName("a store that cannot delete by metadata removed nothing: the mark is taken back")
+    void unsupportedDeleteTakesTheMarkBack() {
+        when(guard.markRebuilding(ID, knowledgeBase)).thenReturn("before");
+        doThrow(new UnsupportedOperationException("cannot delete by metadata")).when(storeFactory).removeKnowledgeBaseVectors(ID, knowledgeBase);
+
+        assertThrows(UnsupportedOperationException.class, () -> service.reembed(ID, knowledgeBase));
+
+        verify(guard).unmarkRebuilding(ID, knowledgeBase, "before");
+    }
+
+    @Test
+    @DisplayName("another store: a collection that rejects a search with the probe vector refuses before anything is touched")
+    void collectionRejectingTheProbeRefuses() {
+        knowledgeBase.setStoreType("qdrant");
+        when(probedStore.search(any())).thenThrow(new RuntimeException("Vector dimension error: expected dim: 1536, got 768"));
+
+        var refused = assertThrows(ReembedRefusedException.class, () -> service.reembed(ID, knowledgeBase));
+
+        assertEquals(KnowledgeBaseReembedService.CODE_STORE_PROBE_FAILED, refused.code());
+        verify(pipeline, never()).claimForMaintenance(anyString(), any());
+        verify(stateStore, never()).invalidateContent(anyString());
+        verify(guard, never()).markRebuilding(anyString(), any());
     }
 
     @Test

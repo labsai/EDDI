@@ -116,7 +116,10 @@ class PgVectorScaleLayoutIT {
     @Test
     @DisplayName("a new knowledge base gets a jsonb table with HNSW and metadata indexes, and its queries use them")
     void newTableIsIndexedAndUsed() throws Exception {
-        EmbeddingStore<TextSegment> store = factory.getOrCreate(KB_ID, kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
+        // The write path: a read of a knowledge base whose table does not exist yet
+        // creates nothing.
+        EmbeddingStore<TextSegment> store = factory.getOrCreateForIngestion(KB_ID,
+                kb("id", "scaled", Map.of("hnswEfSearch", "77", "insertBatchSize", "500")));
         var eddiStore = assertInstanceOf(EddiPgVectorEmbeddingStore.class, EmbeddingStoreFactory.unwrap(store));
 
         assertEquals("jsonb", metadataType(TABLE));
@@ -213,7 +216,7 @@ class PgVectorScaleLayoutIT {
     @DisplayName("layout v1 still creates a new table the old way")
     void explicitV1() throws Exception {
         String id = "65f0aa11bb22cc33dd44ee99";
-        factory.getOrCreate(id, kb("id", "v1", Map.of("layout", "v1")));
+        factory.getOrCreateForIngestion(id, kb("id", "v1", Map.of("layout", "v1")));
         String table = "eddi_kbid_" + id;
         assertEquals("json", metadataType(table));
         assertEquals(Set.of(table + "_pkey"), indexes(table).keySet());

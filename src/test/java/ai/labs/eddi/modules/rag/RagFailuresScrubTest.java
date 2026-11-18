@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.sql.SQLException;
+import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -56,6 +57,21 @@ class RagFailuresScrubTest {
         assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(new IllegalArgumentException("Invalid URI scheme in https://u:p@h/")));
         assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(new IllegalArgumentException("x".repeat(500))));
         String rule = "Invalid integer value for storeParameters.port";
+        assertEquals(rule, RagFailures.clientMessage(new IllegalArgumentException(rule)));
+    }
+
+    @Test
+    @DisplayName("a short IllegalArgumentException that quotes its input — an enum or UUID parse, a file path — is the generic sentence")
+    void parseTextAndPathsAreGeneric() {
+        IllegalArgumentException enumParse = assertThrows(IllegalArgumentException.class, () -> Thread.State.valueOf("hunter2"));
+        IllegalArgumentException uuidParse = assertThrows(IllegalArgumentException.class, () -> UUID.fromString("hunter2"));
+
+        assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(enumParse));
+        assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(uuidParse));
+        assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(new IllegalArgumentException("cannot read C:\\data\\eddi\\kb.json")));
+        assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(new IllegalArgumentException("cannot read /var/lib/eddi/kb.json")));
+        assertEquals(RagFailures.GENERIC, RagFailures.clientMessage(new IllegalArgumentException("cannot read \\\\fileserver\\share")));
+        String rule = "storeParameters.table must be a plain table name";
         assertEquals(rule, RagFailures.clientMessage(new IllegalArgumentException(rule)));
     }
 

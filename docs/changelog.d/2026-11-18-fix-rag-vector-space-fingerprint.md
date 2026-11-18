@@ -27,10 +27,12 @@ raw `PSQLException` and the failing `INSERT`. Now:
   at the first rejected credential, unknown model, space mismatch or store (`SQLException`) failure instead of calling
   the provider once per remaining document (H5).
 - `GET /ragstore/rags/{id}/vector-space` shows the recorded and the configured space.
-  `POST /ragstore/rags/{id}/reembed` claims every source, removes the knowledge base's vectors, records the
-  new space and starts a run of every enabled source (follow them in each source's run history). A pgvector
-  table that is then empty is dropped so the next write recreates it for the new vector size. Text sent through
-  `POST /ingest` is not kept by EDDI and cannot be rebuilt; the answer lists it under `notReEmbedded`.
+  `POST /ragstore/rags/{id}/reembed` checks first (one embedding call; the store must take the new size),
+  claims every source, marks the knowledge base "rebuilding" for every node, removes its vectors (a pgvector
+  table that changes size is dropped whole, atomically), records the new space and starts a run of every enabled
+  source (follow them in each source's run history). Text sent through `POST /ingest` is not kept by EDDI and
+  cannot be rebuilt; the answer lists it under `notReEmbedded`. The full contract is the table in
+  [`rag.md`](../rag.md#changing-the-embedding-model).
 - `PUT /ragstore/rags/{id}` still saves a changed model but answers `200` with
   `{"warnings": [...], "code": "EMBEDDING_SPACE_CHANGED"}` when the store location stays. The `docs/rag.md`
   passage that promised automatic re-embedding on a model change is corrected (it was true for in-memory stores
@@ -77,8 +79,7 @@ paragraph) are deleted. `PdfStreamBudget` and the `SourceConnector` abstraction 
 ### What is left
 
 Not done here: the Manager's RAG editor does not show the mismatch state, the re-embed action or the save-time
-warning yet; no Micrometer meter (a new `eddi.*` meter needs panels in both full-metrics dashboards, and
-`eddi.ingestion.errors` already counts the failed documents of a refused run); RG4 (a pgvector `table` that names
+warning yet (the contract table in `rag.md` is what it should read); RG4 (a pgvector `table` that names
 one of EDDI's own tables), RG5 (an `/ingest` of the same name appends unless `replace=true`: by design), RG6 (a
 refused web start page reports `FAILED` with no reason in the run record), the retrieval turn deadline and the
 in-memory default store losing `/ingest` documents on restart (documented).
@@ -110,7 +111,7 @@ An independent review found the single-knowledge-base case sound and these gaps;
 - **S1/S3/S4/S5/S6/S7/S8/N3.** Real pgvector column size; `eddi_rag_vector_space_refused_total{reason}` plus a once-a-minute
   WARN without stack trace; the empty-table drop runs in one transaction under `LOCK TABLE … ACCESS EXCLUSIVE NOWAIT`, a table
   that is not an EDDI pgvector table is never touched, a search on a node whose cache points at a dropped table reads it as
-  empty, a direct `/ingest` is refused while its knowledge base is re-embedded (on that instance); no input-echo, URL-credential or driver text to
+  empty, a direct `/ingest` is refused while its knowledge base is re-embedded (cluster-wide since the third round); no input-echo, URL-credential or driver text to
   clients; `reembed` refuses a version that is not the latest; nothing is adopted or reset while a variable is unresolved;
   hidden-content extraction keeps autofilter/grouped Excel rows, handles `specVanish`/`webHidden`, no longer lets a hidden
   connector swallow the next PowerPoint shape, and says "only hidden sheets" for a workbook that has nothing else; a refused
@@ -136,3 +137,41 @@ An independent review found the single-knowledge-base case sound and these gaps;
   be seen (`localhost` vs `127.0.0.1`, DNS aliases) are documented.
 - **`visibleTextOnly`**: a hidden Excel row is kept only inside an `autoFilter` range or when grouped; `StoreParameterChecks.EDDI_TABLES`
   now holds all the tables EDDI creates and a test derives the list from the `CREATE TABLE IF NOT EXISTS` statements.
+
+### Third review round (same branch) — `reembed` deletes vectors, so every exit was walked
+
+- **A durable, cluster-wide "rebuilding" mark.** `reembed` writes it into the knowledge base's model record before it forgets a
+  hash or removes a vector (`VectorSpaceGuard.markRebuilding`); search, `/ingest` and source runs are refused while it is set, on
+  every node, and `GET …/vector-space` shows `rebuilding: true`. Recording the new space replaces it; a refusal before anything was
+  removed takes it back. A re-embed that fails or dies part-way **leaves it**, so the knowledge base is refused with the advice to
+  re-embed again instead of answering from half its vectors (before, a failure after a partial delete left it searchable and the
+  old record in force). The per-instance maintenance mark stays as a fast path. The failure is `503 REEMBED_INCOMPLETE`; a failure
+  before anything was removed is `503 REEMBED_NOT_STARTED` (was one `503` saying "could not be emptied" for both).
+- **Writes never use the record cache.** A source run reads the record from the database once at its start, `POST /ingest` before
+  the store is built and again just before writing (`requireCompatibleForWrite`): a node with a 30-second-old record could
+  otherwise write vectors of the old model into a knowledge base another node had just re-embedded. Searches keep the cache.
+- **A pgvector table that changes size is dropped whole, or not at all.** It used to be emptied row by row first and then dropped
+  only if not busy (`NOWAIT`), so a search in flight left an empty knowledge base whose new vectors the old column refused (the
+  answer only carried a warning). Now `EmbeddingStoreFactory.dropKnowledgeBaseTable` drops it in one transaction under an exclusive
+  lock (waiting up to 5 s), only while every row carries the knowledge base's tag; busy is `409 TABLE_BUSY` and a table that became
+  shared is `409 SHARED_TABLE_SIZE`, both with **nothing removed**. A same-size re-embed deletes by tag as before. `warnings` in the
+  `202` is now always empty.
+- **Collections of another size are found before deleting.** Most Qdrant/Chroma/Elasticsearch/Atlas locations have no recorded
+  size (nothing records one for vectors from before sizes were tracked), which let a re-embed to a model of another size delete
+  everything and then fail every insert. `reembed` now searches the collection once with the probe vector; a rejection is `409
+  STORE_PROBE_FAILED` with nothing touched.
+- **No input echoed through a short `IllegalArgumentException`.** `RagFailures.clientMessage` also withholds enum and UUID parse
+  texts and file paths.
+- **Lenient older-config writes, proven by behaviour.** The source-text guard test is replaced by tests that drive the upgrade's real
+  dispatch and the import's merge update against a store whose interactive update refuses (`UpgradeExecutorTest.ragUpdateIsLenient`,
+  `RestImportServiceLegacyRagTest.mergeUpdateIsLenient`). Create paths of import and upgrade write directly to the store and never
+  validated; duplicate does not validate either.
+- **The Testcontainers ITs.** `PgVectorScaleLayoutIT` created its tables with a read, which no longer creates anything — it uses the
+  write path now (it would have failed in CI). `PgVectorVectorSpaceIT` covers the whole-table drop (own rows, shared, busy past the
+  lock timeout).
+- **Tests.** `KnowledgeBaseReembedRecoveryTest` plays each failure through against the in-memory ingestion state store and the real
+  guard, with a second guard standing for another node.
+
+**Behaviour changes in this round:** `reembed` answers `409 TABLE_BUSY` or `409 STORE_PROBE_FAILED` where it used to delete and
+warn or delete and fail later; a knowledge base whose re-embed failed part-way is refused until it is re-embedded again; `503`
+answers of `reembed` carry a `code`.

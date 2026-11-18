@@ -1206,11 +1206,48 @@ public class EmbeddingStoreFactory {
      * to drop, say — is a failure.
      */
     private RemovalOutcome dropPgVectorTableIfEmpty(String ragConfigId, RagConfiguration config) {
+        return dropPgVectorTable(ragConfigId, config, null);
+    }
+
+    /**
+     * Drops a knowledge base's whole pgvector table, so the next write recreates it
+     * for the vector size then configured — the one way a pgvector table changes
+     * its size. Atomic: under an exclusive lock, and only when the table holds no
+     * row without this knowledge base's chunk tag; otherwise nothing at all is
+     * removed. Waits up to {@link #DROP_LOCK_TIMEOUT} for searches and writes in
+     * flight to finish.
+     *
+     * @return {@link RemovalOutcome#TABLE_DROPPED} or
+     *         {@link RemovalOutcome#NO_TABLE} when the vectors are gone;
+     *         {@link RemovalOutcome#TABLE_BUSY} or
+     *         {@link RemovalOutcome#TABLE_KEPT_SHARED} when nothing was removed
+     * @throws IllegalArgumentException
+     *             when the table is not an EDDI pgvector table
+     */
+    public RemovalOutcome dropKnowledgeBaseTable(String ragConfigId, RagConfiguration config) {
+        requireId(ragConfigId);
+        if (!"pgvector".equals(config.getStoreType())) {
+            throw new IllegalArgumentException("Only a pgvector knowledge base has a table of its own to drop");
+        }
+        return dropPgVectorTable(ragConfigId, config, KnowledgeBaseStorage.chunkKbId(ragConfigId, config));
+    }
+
+    /** How long a re-embed waits for the exclusive lock that drops a table. */
+    public static final String DROP_LOCK_TIMEOUT = "5s";
+
+    /**
+     * @param ownChunkKbId
+     *            null: drop only an empty table, without waiting for the lock;
+     *            otherwise drop the table when every row in it carries this tag,
+     *            waiting up to {@link #DROP_LOCK_TIMEOUT} for the lock
+     */
+    private RemovalOutcome dropPgVectorTable(String ragConfigId, RagConfiguration config, String ownChunkKbId) {
         PgVectorTarget target = pgVectorTarget(ragConfigId, config);
         String quoted = PgVectorSchema.quotedTable(target.table());
         var key = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
         try (Connection connection = target.dataSource().getConnection()) {
             if (!PgVectorSchema.inspect(connection, target.table()).exists()) {
+                invalidateStore(key);
                 return RemovalOutcome.NO_TABLE;
             }
             if (!PgVectorSchema.layoutMatches(connection, target.table())) {
@@ -1219,7 +1256,13 @@ public class EmbeddingStoreFactory {
             connection.setAutoCommit(false);
             try {
                 try (Statement statement = connection.createStatement()) {
-                    statement.execute("LOCK TABLE " + quoted + " IN ACCESS EXCLUSIVE MODE NOWAIT");
+                    if (ownChunkKbId == null) {
+                        statement.execute("LOCK TABLE " + quoted + " IN ACCESS EXCLUSIVE MODE NOWAIT");
+                    } else {
+                        // Waits for the searches and writes in flight, then gives up with 55P03.
+                        statement.execute("SET LOCAL lock_timeout = '" + DROP_LOCK_TIMEOUT + "'");
+                        statement.execute("LOCK TABLE " + quoted + " IN ACCESS EXCLUSIVE MODE");
+                    }
                 } catch (SQLException lock) {
                     connection.rollback();
                     if (UNDEFINED_TABLE.equals(lock.getSQLState())) {
@@ -1232,13 +1275,10 @@ public class EmbeddingStoreFactory {
                     }
                     throw lock;
                 }
-                try (Statement statement = connection.createStatement();
-                        ResultSet rows = statement.executeQuery("SELECT 1 FROM " + quoted + " LIMIT 1")) {
-                    if (rows.next()) {
-                        connection.rollback();
-                        LOGGER.infof("pgvector table %s still holds rows of other knowledge bases; it is not dropped", sanitize(target.table()));
-                        return RemovalOutcome.TABLE_KEPT_SHARED;
-                    }
+                if (holdsRows(connection, quoted, ownChunkKbId)) {
+                    connection.rollback();
+                    LOGGER.infof("pgvector table %s still holds rows of other knowledge bases; it is not dropped", sanitize(target.table()));
+                    return RemovalOutcome.TABLE_KEPT_SHARED;
                 }
                 try (Statement statement = connection.createStatement()) {
                     statement.executeUpdate("DROP TABLE " + quoted);
@@ -1251,13 +1291,13 @@ public class EmbeddingStoreFactory {
                 connection.setAutoCommit(true);
             }
         } catch (SQLException e) {
-            throw new IllegalStateException("pgvector: could not drop the empty table " + sanitize(target.table()) + " (SQLState "
+            throw new IllegalStateException("pgvector: could not drop the table " + sanitize(target.table()) + " (SQLState "
                     + sanitize(String.valueOf(e.getSQLState())) + "; the database user may lack the privilege to drop it): "
                     + sanitize(e.getMessage()), e);
         }
         // The cached store was built over the table that is gone.
         invalidateStore(key);
-        LOGGER.infof("Dropped the empty pgvector table %s of knowledge base %s; the next write recreates it", sanitize(target.table()),
+        LOGGER.infof("Dropped the pgvector table %s of knowledge base %s; the next write recreates it", sanitize(target.table()),
                 sanitize(ragConfigId));
         return RemovalOutcome.TABLE_DROPPED;
     }
@@ -1265,6 +1305,26 @@ public class EmbeddingStoreFactory {
     private void invalidateStore(StoreCacheKey key) {
         cache.invalidate(key);
         columnDimensions.invalidate(key);
+    }
+
+    /**
+     * Whether the table holds any row ({@code ownChunkKbId} null), or any row that
+     * does not carry that chunk tag.
+     */
+    private static boolean holdsRows(Connection connection, String quoted, String ownChunkKbId) throws SQLException {
+        if (ownChunkKbId == null) {
+            try (Statement statement = connection.createStatement();
+                    ResultSet rows = statement.executeQuery("SELECT 1 FROM " + quoted + " LIMIT 1")) {
+                return rows.next();
+            }
+        }
+        try (PreparedStatement statement = connection.prepareStatement("SELECT 1 FROM " + quoted + " WHERE (metadata->>'"
+                + KnowledgeBaseStorage.METADATA_KB_ID + "') IS DISTINCT FROM ? LIMIT 1")) {
+            statement.setString(1, ownChunkKbId);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next();
+            }
+        }
     }
 
     private static final String UNDEFINED_TABLE = "42P01";

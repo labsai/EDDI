@@ -56,6 +56,15 @@ import java.util.concurrent.ConcurrentHashMap;
  * another to re-embed. That cannot be verified against the vectors already
  * there. It is not done when the configured space cannot be resolved
  * ({@code ${vars:…}} that did not resolve): the call is refused, retryable.
+ *
+ * <h2>In a cluster</h2>
+ * <p>
+ * Reads are cached per node for {@link #CACHE_TTL}. A search may therefore use
+ * a record up to that old; a write never does
+ * ({@link #requireCompatibleForWrite}), because a vector written into the wrong
+ * space stays. A re-embed marks the record durably before it removes anything
+ * ({@link #markRebuilding}), so every node refuses the knowledge base while it
+ * is being rebuilt, and after a re-embed that died half-way.
  */
 @ApplicationScoped
 public class VectorSpaceGuard {
@@ -113,8 +122,23 @@ public class VectorSpaceGuard {
         this.storeFactory = factory;
     }
 
-    /** What a check found. */
-    public record Status(boolean applicable, VectorSpace stored, VectorSpace configured, boolean matches) {
+    /**
+     * What the model record holds while a re-embed removes and rebuilds the
+     * vectors, followed by what it held before. Durable and shared by every node: a
+     * write anywhere in the cluster that reads it is refused, and a re-embed that
+     * died half-way leaves it behind, so the knowledge base is refused — never
+     * searched half-empty — until it is re-embedded again.
+     */
+    static final String REBUILDING_PREFIX = "rebuilding|";
+
+    /**
+     * What a check found.
+     *
+     * @param rebuilding
+     *            a re-embed is removing and rebuilding the vectors, or one did not
+     *            finish; search and ingest are refused until one does
+     */
+    public record Status(boolean applicable, VectorSpace stored, VectorSpace configured, boolean matches, boolean rebuilding) {
     }
 
     /**
@@ -232,15 +256,23 @@ public class VectorSpaceGuard {
     public Status status(String ragConfigId, RagConfiguration config) {
         Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null) {
-            return new Status(false, null, null, true);
+            return new Status(false, null, null, true, false);
         }
         VectorSpace configured = configured(config);
-        VectorSpace stored = stored(identity);
-        return new Status(true, stored, configured, stored == null || !configured.conflictsWith(stored));
+        String raw = read(identity.modelKey(), false);
+        if (isRebuilding(raw)) {
+            return new Status(true, storedFrom(raw.substring(REBUILDING_PREFIX.length()), identity), configured, false, true);
+        }
+        VectorSpace stored = storedFrom(raw, identity);
+        return new Status(true, stored, configured, stored == null || !configured.conflictsWith(stored), false);
     }
 
-    private VectorSpace stored(Identity identity) {
-        VectorSpace model = VectorSpace.decode(read(identity.modelKey()));
+    private static boolean isRebuilding(String raw) {
+        return raw != null && raw.startsWith(REBUILDING_PREFIX);
+    }
+
+    private VectorSpace storedFrom(String raw, Identity identity) {
+        VectorSpace model = VectorSpace.decode(raw);
         if (model == null) {
             return null;
         }
@@ -281,21 +313,46 @@ public class VectorSpaceGuard {
      *             when the configured space cannot be resolved
      */
     public void requireCompatible(String ragConfigId, RagConfiguration config) {
+        requireCompatible(ragConfigId, config, false);
+    }
+
+    /**
+     * {@link #requireCompatible} for a caller about to write vectors: the record is
+     * read from the store, not from this node's cache, so a re-embed or a model
+     * change made on another node a moment ago is seen — a write into the wrong
+     * space would stay in the knowledge base, a stale search only lasts the cache's
+     * lifetime. One state-store read per call.
+     */
+    public void requireCompatibleForWrite(String ragConfigId, RagConfiguration config) {
+        requireCompatible(ragConfigId, config, true);
+    }
+
+    private void requireCompatible(String ragConfigId, RagConfiguration config, boolean fresh) {
         Identity identity = identityOf(variables, ragConfigId, config);
         if (identity == null) {
             return;
         }
         if (underMaintenance.contains(ragConfigId)) {
             refused("maintenance");
-            throw new VectorSpaceMismatchException("This knowledge base is being re-embedded right now. Its vectors are removed and "
-                    + "rebuilt, so searching and ingesting wait until the runs it started have filled it again.");
+            throw new VectorSpaceMismatchException(rebuildingMessage(ragConfigId));
         }
         VectorSpace configured = configured(config);
-        VectorSpace stored;
+        String raw;
         try {
-            stored = stored(identity);
+            raw = read(identity.modelKey(), fresh);
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "Could not read the vector space of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
+            return;
+        }
+        if (isRebuilding(raw)) {
+            refused("maintenance");
+            throw new VectorSpaceMismatchException(rebuildingMessage(ragConfigId));
+        }
+        VectorSpace stored;
+        try {
+            stored = storedFrom(raw, identity);
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not read the vector size of knowledge base %s; not checking it", LogSanitizer.sanitize(ragConfigId));
             return;
         }
         if (stored == null) {
@@ -396,6 +453,52 @@ public class VectorSpaceGuard {
         }
     }
 
+    /**
+     * Writes the durable "being rebuilt" mark into the knowledge base's model
+     * record, before anything is removed. Every node refuses search and ingest once
+     * it reads the mark (a write at once — see {@link #requireCompatibleForWrite} —
+     * a search within the cache's lifetime), and the mark outlives a crash of the
+     * re-embed, so a knowledge base whose vectors may be half gone is refused
+     * rather than answered from what is left. {@link #reset} replaces it;
+     * {@link #unmarkRebuilding} puts back what was there when nothing was removed
+     * after all.
+     *
+     * @return what the record held before, for {@link #unmarkRebuilding}; null when
+     *         nothing is tracked for this configuration
+     */
+    public String markRebuilding(String ragConfigId, RagConfiguration config) {
+        Identity identity = identityOf(variables, ragConfigId, config);
+        if (identity == null) {
+            return null;
+        }
+        String previous = read(identity.modelKey(), true);
+        if (isRebuilding(previous)) {
+            // A re-embed that did not finish: what it saw before is still the truth.
+            previous = previous.substring(REBUILDING_PREFIX.length());
+        }
+        String before = previous == null ? "" : previous;
+        write(identity.modelKey(), REBUILDING_PREFIX + before);
+        return before;
+    }
+
+    /**
+     * Takes the mark back, restoring the record {@link #markRebuilding} returned:
+     * for a re-embed that was refused before a single vector was removed.
+     */
+    public void unmarkRebuilding(String ragConfigId, RagConfiguration config, String previous) {
+        Identity identity = identityOf(variables, ragConfigId, config);
+        if (identity == null || previous == null) {
+            return;
+        }
+        write(identity.modelKey(), previous);
+    }
+
+    private static String rebuildingMessage(String ragConfigId) {
+        return "This knowledge base is being re-embedded, or a re-embed of it did not finish: its vectors are removed and made "
+                + "again, so searching and ingesting are refused until that is done. If none of its sources is running, re-embed "
+                + "it again (POST /ragstore/rags/" + ragConfigId + "/reembed).";
+    }
+
     /** Marks a knowledge base as being re-embedded by this instance. */
     public void beginMaintenance(String ragConfigId) {
         underMaintenance.add(ragConfigId);
@@ -432,7 +535,16 @@ public class VectorSpaceGuard {
     }
 
     private String read(String key) {
-        String cached = recorded.getIfPresent(key);
+        return read(key, false);
+    }
+
+    /**
+     * @param fresh
+     *            read from the state store, not from this node's cache (which is
+     *            refreshed with what was read)
+     */
+    private String read(String key, boolean fresh) {
+        String cached = fresh ? null : recorded.getIfPresent(key);
         if (cached == null) {
             cached = stateStore.storeFingerprint(key).orElse(null);
             // An absent record is remembered too (as ""): a knowledge base with no size

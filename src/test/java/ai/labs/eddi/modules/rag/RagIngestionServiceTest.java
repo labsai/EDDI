@@ -500,7 +500,7 @@ class RagIngestionServiceTest {
     void aKnowledgeBaseWhoseStoreHoldsAnotherEmbeddingSpace_isNotWritten() {
         wireRealStore(embeddingStore);
         VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
-        doThrow(new VectorSpaceMismatchException("holds emb-8, configured other-8")).when(guard).requireCompatible(anyString(), any());
+        doThrow(new VectorSpaceMismatchException("holds emb-8, configured other-8")).when(guard).requireCompatibleForWrite(anyString(), any());
         service.vectorSpaceGuard = guard;
 
         String id = service.ingest(KB, "Refunds within 47 days.", "policy.txt", createConfig());

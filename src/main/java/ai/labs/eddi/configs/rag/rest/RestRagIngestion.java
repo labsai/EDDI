@@ -882,7 +882,12 @@ public class RestRagIngestion implements IRestRagIngestion {
             body.put("stored", describeSpace(status.stored()));
             body.put("configured", describeSpace(status.configured()));
             body.put("matches", status.matches());
-            if (!status.matches()) {
+            body.put("rebuilding", status.rebuilding());
+            if (status.rebuilding()) {
+                body.put("action", "A re-embed is removing and rebuilding the vectors, or one did not finish: search and ingest are refused "
+                        + "until one does. If none of its sources is running, re-embed again: POST /ragstore/rags/" + ragConfigId
+                        + "/reembed?version=" + version);
+            } else if (!status.matches()) {
                 body.put("action", "Search and ingest are refused until the knowledge base is re-embedded: "
                         + "POST /ragstore/rags/" + ragConfigId + "/reembed?version=" + version);
             }
@@ -974,11 +979,18 @@ public class RestRagIngestion implements IRestRagIngestion {
                     .build();
         } catch (UnsupportedOperationException e) {
             return Response.status(Response.Status.NOT_IMPLEMENTED).entity(Map.of("error", RagFailures.scrub(e.getMessage()))).build();
-        } catch (RuntimeException e) {
-            LOGGER.errorf(e, "Re-embedding knowledge base %s failed before any source was run", sanitize(ragConfigId));
+        } catch (KnowledgeBaseReembedService.ReembedIncompleteException e) {
+            LOGGER.errorf(e, "Re-embedding knowledge base %s failed while its vectors were removed", sanitize(ragConfigId));
             return Response.status(Response.Status.SERVICE_UNAVAILABLE)
-                    .entity(Map.of("error", "The vector store could not be emptied, so nothing was re-embedded. "
-                            + RagFailures.clientMessage(e)))
+                    .entity(Map.of("error", "The knowledge base's vectors could not all be removed, so no source was run. Some may be "
+                            + "gone already: search and ingest stay refused until a re-embed completes. Re-embed again once the "
+                            + "vector store is reachable. " + RagFailures.clientMessage(e.getCause()), "code", "REEMBED_INCOMPLETE"))
+                    .build();
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Re-embedding knowledge base %s failed before anything was removed", sanitize(ragConfigId));
+            return Response.status(Response.Status.SERVICE_UNAVAILABLE)
+                    .entity(Map.of("error", "The re-embed could not be prepared, so no vector was removed. Try again. "
+                            + RagFailures.clientMessage(e), "code", "REEMBED_NOT_STARTED"))
                     .build();
         }
         if (result.refused()) {

@@ -322,6 +322,53 @@ class PgVectorVectorSpaceIT {
     }
 
     @Test
+    @DisplayName("a table that has to change size is dropped whole while it holds only this knowledge base's rows")
+    void ownTableIsDroppedWhole() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee14";
+        RagConfiguration config = kb("whole", "m", 3, null);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 3f, 2f, 1f);
+
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED, factory.dropKnowledgeBaseTable(id, config));
+
+        assertFalse(tableExists("eddi_kbid_" + id));
+        assertNull(factory.pgVectorColumnDimension(id, config), "nothing is remembered about the dropped table");
+    }
+
+    @Test
+    @DisplayName("a table that has to change size but holds another knowledge base's rows is not touched at all")
+    void sharedTableIsNotDroppedWhole() throws Exception {
+        String a = "65f0aa11bb22cc33dd44ee15";
+        String b = "65f0aa11bb22cc33dd44ee16";
+        RagConfiguration configA = kb("a", "m", 3, "shared_whole");
+        addRow(factory.getOrCreateForIngestion(a, configA), a, 1f, 2f, 3f);
+        addRow(factory.getOrCreateForIngestion(b, kb("b", "m", 3, "shared_whole")), b, 1f, 2f, 3f);
+
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_KEPT_SHARED, factory.dropKnowledgeBaseTable(a, configA));
+
+        assertEquals(2, rowCount("shared_whole"), "neither knowledge base lost a row");
+    }
+
+    @Test
+    @DisplayName("a table that has to change size and stays busy past the lock timeout is not touched at all")
+    void busyTableIsNotDroppedWhole() throws Exception {
+        String id = "65f0aa11bb22cc33dd44ee17";
+        RagConfiguration config = kb("busy-whole", "m", 3, null);
+        addRow(factory.getOrCreateForIngestion(id, config), id, 1f, 2f, 3f);
+
+        try (Connection reader = admin(); Statement s = reader.createStatement()) {
+            reader.setAutoCommit(false);
+            // Held for longer than the drop waits: the lock times out (55P03).
+            s.execute("SELECT count(*) FROM eddi_kbid_" + id);
+            assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_BUSY, factory.dropKnowledgeBaseTable(id, config));
+            reader.rollback();
+        }
+
+        assertEquals(1, rowCount("eddi_kbid_" + id), "the busy table keeps its rows");
+        assertEquals(EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED, factory.dropKnowledgeBaseTable(id, config));
+    }
+
+    @Test
     @DisplayName("the column size is read from the catalogue and remembered per store: asking again costs no query")
     void columnSizeIsRememberedPerStore() throws Exception {
         String id = "65f0aa11bb22cc33dd44ee13";

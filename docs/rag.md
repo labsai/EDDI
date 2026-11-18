@@ -326,6 +326,22 @@ ranks by meaningless scores and still answers. So a knowledge base on an externa
 (`pgvector`, `mongodb-atlas`, `elasticsearch`, `qdrant`, `chroma`) **knows which embedding space its
 store holds** and refuses to work in any other.
 
+> **Upgrading to the version with this check.** Nothing has to be done.
+>
+> - Older configurations keep importing, syncing and upgrading: values an interactive save now refuses
+>   (an unknown store type, a host with a port, a blank name, `minScore` outside 0..1, `maxResults` below 1)
+>   are brought into range or kept, with a WARN naming the knowledge base and the field. Only
+>   `POST`/`PUT /ragstore/rags` refuse them.
+> - Every existing knowledge base **adopts the space it is configured for on its first use** after the
+>   upgrade (logged once). That cannot be checked against the vectors already stored: one whose model was
+>   changed before the upgrade stays as wrong as it was, and the next change is caught.
+> - Two knowledge bases that **share a table or collection** each get their own record, so they may hold
+>   different models of the same size. A pgvector table keeps one vector size: a model of another size is
+>   refused for the knowledge base that tries it, with the real column size named, and re-embedding it
+>   is refused (`SHARED_TABLE_SIZE`, naming the others) until it has a table of its own. Two same-named
+>   knowledge bases in the 6.5.0 name layout share their chunks outright, so neither can be re-embedded
+>   (`SHARED_CHUNKS`) until they are given separate tables.
+
 **What is recorded — two things, because two different things are true.**
 
 - *Which model made a knowledge base's vectors*: the embedding provider, the model (or Azure
@@ -377,8 +393,8 @@ the old and the new model. The refusal above is what then makes the change safe.
 elsewhere (another table, collection or server) starts empty and warns about nothing.
 
 A node that still holds a store for a table another node dropped reads it as empty rather than failing
-with "relation does not exist", and rebuilds it on the next write; a record cached on another node is
-refreshed within 30 seconds, so a node may refuse for that long after a re-embed.
+with "relation does not exist", and rebuilds it on the next write. How long another node can be behind is
+under **In a cluster** below.
 
 **Re-embedding.** `GET /ragstore/rags/{id}/vector-space?version=N` shows the recorded and the
 configured space and whether they match. `POST /ragstore/rags/{id}/reembed?version=N` (EDIT) then:
@@ -405,9 +421,12 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
        recreate it. If a size is recorded for it and differs, the re-embed is refused —
        `SHARED_TABLE_SIZE` while other knowledge bases keep vectors there, `STORE_CANNOT_CHANGE_SIZE` when
        this one is alone, which says to recreate the collection with the new size (or point
-       `collectionName`/`indexName` at a new one) and re-embed. A collection EDDI never ingested into since
-       sizes are tracked has no recorded size, so it cannot be judged here: the first ingestion is refused
-       with the same advice;
+       `collectionName`/`indexName` at a new one) and re-embed. Most collections have no recorded size
+       (nothing records one for vectors written before sizes were tracked), so EDDI then **searches the
+       collection once with the probe vector**: a collection of another size rejects it, and the re-embed is
+       refused (`STORE_PROBE_FAILED`) before anything is deleted. The same answer comes when the collection
+       does not exist yet (run the sources instead) or the store cannot be reached (retry); the log has the
+       store's own words;
      - *in-memory*: nothing to decide, the store is replaced;
    - the other knowledge bases cannot all be checked (`503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE`): one could not
      be read, or its store parameters could not be resolved, so it cannot be ruled out that it shares the
@@ -416,41 +435,61 @@ configured space and whether they match. `POST /ragstore/rags/{id}/reembed?versi
      the one whose data is lost;
 1. claims every source, so nothing runs while the vectors go — a run in flight anywhere answers `409`
    and changes nothing;
-2. **forgets every source's content hashes first**, so that after a crash at any later point the next run —
+2. **marks the knowledge base "rebuilding"**, durably and for every node: from here search, `/ingest` and
+   every source run are refused (`409` `VECTOR_SPACE_MISMATCH`, "being re-embedded, or a re-embed of it did
+   not finish") until step 5 replaces the mark. A write anywhere in the cluster sees the mark at once (it
+   reads the record from the database, not from the node's cache); a search on another node within 30
+   seconds. A re-embed that dies or fails part-way **leaves the mark**: the knowledge base is refused, not
+   answered from half its vectors, until it is re-embedded again. A refusal before anything was removed
+   takes the mark back;
+3. **forgets every source's content hashes**, so that after a crash at any later point the next run —
    scheduled or manual — embeds everything again instead of reporting "unchanged" over an empty store;
-3. removes every vector of this knowledge base from its store, by its chunk tag (for pgvector, a table
-   that is then empty is dropped, under an exclusive lock and in one transaction, and recreated by the
-   next write, which is how a new vector size gets a new column; a table that still holds other
-   knowledge bases' rows, or is busy, is left alone, a table that is not an EDDI pgvector table is never
-   touched, and a store that cannot delete by metadata answers `501` — empty it by hand first). The
-   answer's `tableRecreated` says which: `true` when the pgvector table was dropped, `false` when it was
-   busy or still holds other knowledge bases' rows — then `warnings` says that the table keeps its old
-   column size, that ingestion of the new size is refused until it is dropped, and what to do. A direct
-   `/ingest` on **the same instance** is refused (`409` `VECTOR_SPACE_MISMATCH`, "being re-embedded")
-   while this runs; the mark is per instance, not cluster-wide;
-4. records the configured space as this knowledge base's, and forgets the location's vector size when
-   nothing else keeps vectors there;
-5. forgets each source's ingestion state and starts an ordinary run of every enabled source.
+4. removes every vector of this knowledge base:
+   - *pgvector, same vector size*: its rows are deleted by its chunk tag; a table that is then empty is
+     dropped under an exclusive lock (and recreated by the next write); one that is busy or still holds
+     other knowledge bases' rows is left as it is, which is fine — its size is already the new one;
+   - *pgvector, another vector size*: the **whole table is dropped in one transaction**, under an exclusive
+     lock, and only while every row in it carries this knowledge base's tag; the next write recreates it
+     for the new size. It waits up to 5 seconds for searches and writes in flight. If the table stays busy
+     (`409` `TABLE_BUSY`) or rows of another knowledge base appeared (`409` `SHARED_TABLE_SIZE`), **nothing is
+     removed** and the record is as it was; re-embed again later;
+   - *another store*: the chunks are deleted by tag; the collection stays. A store that cannot delete by
+     metadata answers `501` and nothing is removed — empty it by hand first;
+   - *in-memory*: the store is dropped.
 
-| Status and `code` | When |
-| --- | --- |
-| `202` | Vectors removed, runs started. Body: `{"status": "started", "kbId", "sources": [{"sourceId", "runId" or null, "note" or null}], "notReEmbedded": [text]}` |
-| `409` `SHARED_CHUNKS` | Another knowledge base keeps its chunks under the same tag in the same store (6.5.0 name layout). `knowledgeBases` lists them |
-| `409` `SHARED_TABLE_SIZE` | A pgvector table other knowledge bases keep rows in would have to change its vector size |
-| `409` `NOT_LATEST_VERSION` | `version` is not the latest. `latestVersion` says which is |
-| `409` `EMBEDDING_PROBE_FAILED` | The embedding call with the new settings failed; nothing was removed. The error says why (credentials, model, rate limit) |
-| `409` `NOT_A_PGVECTOR_TABLE` | `storeParameters.table` names a table that is not an EDDI pgvector table |
-| `409` `DIMENSION_SETTING_MISMATCH` | pgvector: `storeParameters.dimension` is not the size the new model returns |
-| `409` `STORE_CANNOT_CHANGE_SIZE` | The collection keeps another vector size and EDDI cannot recreate it; the error says what to do |
-| `409` `EMBEDDING_SETTINGS_UNRESOLVED` | An embedding setting names a variable that cannot be resolved now; retry |
-| `409` (no code) | A run is in flight for a source (`sourceId`) |
-| `501` | The store cannot delete by metadata |
-| `503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE` | Another knowledge base could not be read or resolved, so sharers cannot be ruled out; nothing was changed |
-| `503` | The vector store failed; the sources' hashes were already forgotten, so the next run of each embeds everything again |
+   A table that is not an EDDI pgvector table is never touched. The answer's `tableRecreated` is `true`
+   when the pgvector table was dropped (or did not exist), `false` when only this knowledge base's rows
+   were deleted;
+5. records the configured space as this knowledge base's (which clears the mark), and forgets the
+   location's vector size when nothing else keeps vectors there;
+6. forgets each source's ingestion state and starts an ordinary run of every enabled source.
 
-The `409` bodies are `{"error": text, "code": …}`; a refused search, ingest or run uses `code: VECTOR_SPACE_MISMATCH`.
-The `202` body also carries `tableRecreated` (`true`, `false`, or `null` for any store but pgvector) and `warnings`
-(a list of what is still to do).
+The whole contract, for a client (the RAG screens of the Manager read this table):
+
+| Status and `code` | When | What is left |
+| --- | --- | --- |
+| `202` | Vectors removed, runs started. Body below | Record = the configured space; runs filling it |
+| `409` `NOT_LATEST_VERSION` | `version` is not the latest. `latestVersion` says which is | Unchanged |
+| `409` `EMBEDDING_SETTINGS_UNRESOLVED` | An embedding setting or a store parameter names a variable that cannot be resolved now; retry | Unchanged |
+| `409` `SHARED_CHUNKS` | Another knowledge base keeps its chunks under the same tag in the same store (6.5.0 name layout). `knowledgeBases` lists them | Unchanged |
+| `409` `EMBEDDING_PROBE_FAILED` | The embedding call with the new settings failed. The error says why (credentials, model, rate limit) | Unchanged |
+| `409` `NOT_A_PGVECTOR_TABLE` | `storeParameters.table` names a table that is not an EDDI pgvector table | Unchanged |
+| `409` `DIMENSION_SETTING_MISMATCH` | pgvector: `storeParameters.dimension` is not the size the new model returns | Unchanged |
+| `409` `SHARED_TABLE_SIZE` | The vector size would change in a table or collection other knowledge bases keep vectors in. `knowledgeBases` lists them where known | Unchanged (when found under the lock, the content hashes are already forgotten) |
+| `409` `STORE_CANNOT_CHANGE_SIZE` | A collection with a recorded size of another size, used by this knowledge base alone; the error says what to do | Unchanged |
+| `409` `STORE_PROBE_FAILED` | The collection rejected a search with a vector of the new size, does not exist, or could not be reached | Unchanged |
+| `409` `TABLE_BUSY` | pgvector, size change: the table stayed in use past the lock timeout | Vectors and record unchanged; content hashes forgotten |
+| `409` (no `code`, `sourceId`) | A run is in flight for that source | Unchanged |
+| `501` | The store cannot delete by metadata | Vectors and record unchanged; content hashes forgotten |
+| `503` `KNOWLEDGE_BASE_SCAN_INCOMPLETE` | Another knowledge base could not be read or resolved, so sharers cannot be ruled out. The log names it | Unchanged |
+| `503` `REEMBED_NOT_STARTED` | The re-embed could not be prepared (the state store or the vector store failed before anything was removed); retry | Vectors unchanged |
+| `503` `REEMBED_INCOMPLETE` | The removal failed part-way | Some vectors may be gone; **marked "rebuilding"** (refused everywhere) and content hashes forgotten. Re-embed again |
+
+The `202` body: `{"status": "started", "kbId", "sources": [{"sourceId", "runId" or null, "note" or null}],
+"notReEmbedded": [text], "tableRecreated": true | false | null (not pgvector), "warnings": []}` — `warnings` is
+always present and today always empty: a situation that would need one is refused instead. The `409` and
+`503` bodies are `{"error": text, "code": …}`; a refused search, ingest or run uses `code: VECTOR_SPACE_MISMATCH`.
+`GET …/vector-space` answers `rebuilding: true` while the mark is set.
 
 **What counts as "the same place".** Two knowledge bases share a store when their locations are equal after
 global variables are resolved the way the store factory resolves them (`${vars:host}` and the host it stands
@@ -459,11 +498,23 @@ cannot see are **not** recognised: `localhost` and `127.0.0.1`, two DNS names of
 reference and the secret it holds, a connection string written two ways. Where such aliases exist, give each
 knowledge base a table or collection of its own — which is the safe setup anyway.
 
-**In a cluster.** The "being re-embedded" mark that refuses a direct `/ingest` is held by the instance that
-runs the re-embed; another instance does not see it. Each instance caches a record for up to 30 seconds, and
-the column size it read from a pgvector table for up to a minute (or until the store is rebuilt), so another
-node may refuse — or, for a store that does not check the column itself, accept — for that long after a
-re-embed. Sources are claimed in the shared state store, so those are safe cluster-wide.
+**In a cluster.** The records and the "rebuilding" mark live in EDDI's shared database. Each node caches a
+record for up to 30 seconds for **searches** — so for that long after a model change or a re-embed on another
+node a search there may still be answered under the old record (and, during a re-embed, from a store being
+emptied and refilled), or refused under it. **Writes never use the cache**: a source run reads the record
+from the database once when it starts, and `POST /ingest` reads it before the store is built and again just
+before the vectors are written, so no node writes into a space another node has just changed or marked. The
+column size read from a pgvector table is remembered for up to a minute (or until the store is rebuilt or
+its table dropped); a stale value there is fail-safe, because PostgreSQL itself refuses a vector of the wrong
+size. Sources are claimed in the shared state store, so concurrent runs and a concurrent second re-embed (on
+any node) are refused with `409` and change nothing.
+
+**Cost per call.** Steady state, the check adds no query to a search or a document: per knowledge base and
+node, two state-store reads every 30 seconds (the model and the size record), and for pgvector three catalogue
+queries a minute (table, layout, column size). A write adds one state-store read per source run, and two per
+`POST /ingest` call. A search of a pgvector knowledge base whose table does not exist yet costs one catalogue
+query (the table is not created by a read). A re-embed reads every knowledge base's current configuration once
+(to find the ones sharing its store) and, for pgvector, scans the table once for other knowledge bases' rows.
 
 The `202` answer has, per source, the `runId` to follow in
 `GET /ragstore/rags/{id}/sources/{sourceId}/runs`, and a list `notReEmbedded`. **Documents sent

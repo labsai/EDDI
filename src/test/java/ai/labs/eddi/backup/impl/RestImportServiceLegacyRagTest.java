@@ -8,23 +8,40 @@ import ai.labs.eddi.backup.IZipArchive;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.migration.IMigrationManager;
 import ai.labs.eddi.configs.migration.TemplateSyntaxMigrator;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.IRestRagStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.configs.rag.rest.RestRagStore;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.SpaceContext;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
+import jakarta.enterprise.inject.Instance;
+import jakarta.enterprise.inject.spi.CDI;
+import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.MockedStatic;
 
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Method;
 import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * A knowledge base from an older archive still imports: values an interactive
@@ -73,6 +90,44 @@ class RestImportServiceLegacyRagTest {
         assertEquals("legacy-store", withoutSources.getStoreType());
         assertEquals("db:5432", withoutSources.getStoreParameters().get("host"));
         assertEquals("  ", withoutSources.getName());
+    }
+
+    /**
+     * A merge or sync of an archive updates an existing knowledge base: run through
+     * the import's own update, against a store whose interactive update refuses
+     * what an older version accepted.
+     */
+    @Test
+    @DisplayName("a merge or sync updates an existing knowledge base through the lenient update, never the interactive one")
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void mergeUpdateIsLenient() throws Exception {
+        RestRagStore ragStore = mock(RestRagStore.class);
+        when(ragStore.updateRag(anyString(), any(), any())).thenThrow(new BadRequestException("minScore must be between 0 and 1"));
+        when(ragStore.updateRagLenient(anyString(), any(), any())).thenReturn(Response.ok().build());
+        IRagStore documents = mock(IRagStore.class);
+        when(documents.read("kb-1", 3)).thenReturn(new RagConfiguration());
+        Class<?> transactionClass = Class.forName(RestImportService.class.getName() + "$ImportTransaction");
+        Constructor<?> newTransaction = transactionClass.getDeclaredConstructor();
+        newTransaction.setAccessible(true);
+        Method updateRag = RestImportService.class.getDeclaredMethod("updateRag", RagConfiguration.class, String.class, Integer.class,
+                transactionClass);
+        updateRag.setAccessible(true);
+
+        try (MockedStatic<CDI> cdiMock = mockStatic(CDI.class)) {
+            CDI cdi = mock(CDI.class);
+            cdiMock.when(CDI::current).thenReturn(cdi);
+            Instance rest = mock(Instance.class);
+            when(cdi.select(IRestRagStore.class)).thenReturn(rest);
+            when(rest.get()).thenReturn(ragStore);
+            Instance stored = mock(Instance.class);
+            when(cdi.select(IRagStore.class)).thenReturn(stored);
+            when(stored.get()).thenReturn(documents);
+
+            updateRag.invoke(importService, old(), "kb-1", 3, newTransaction.newInstance());
+        }
+
+        verify(ragStore).updateRagLenient(eq("kb-1"), eq(3), any(RagConfiguration.class));
+        verify(ragStore, never()).updateRag(anyString(), any(), any());
     }
 
     @Test

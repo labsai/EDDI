@@ -20,14 +20,10 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
@@ -100,20 +96,11 @@ class RestRagStoreLegacyConfigTest {
         verify(double_).updateRag(KB_ID, 1, config);
     }
 
-    @Test
-    @DisplayName("an upgrade, a sync and an import all reach the store through that one helper, never through updateRag directly")
-    void everyOlderConfigPathUsesTheHelper() throws Exception {
-        // The upgrade executor and the import service — which a sync of an archive from
-        // another instance goes
-        // through — are the two callers; neither may call the interactive update itself
-        // again.
-        for (String file : new String[]{"UpgradeExecutor.java", "RestImportService.java"}) {
-            String source = Files.readString(Path.of("src/main/java/ai/labs/eddi/backup/impl", file));
-            assertTrue(source.contains("RestRagStore.updateOlderConfig("), file);
-            assertFalse(source.matches("(?s).*getStore\\(IRestRagStore\\.class\\)\\.updateRag\\(.*"), file);
-            assertFalse(source.contains("store::updateRag"), file);
-        }
-    }
+    // That the upgrade (and with it a live sync) and an archive merge reach the
+    // store
+    // through this helper is proven where they run: UpgradeExecutorTest
+    // .ragUpdateIsLenient and RestImportServiceLegacyRagTest.mergeUpdateIsLenient
+    // drive the real dispatch against a store whose interactive update refuses.
 
     @Test
     @DisplayName("an interactive save refuses it with a 400")

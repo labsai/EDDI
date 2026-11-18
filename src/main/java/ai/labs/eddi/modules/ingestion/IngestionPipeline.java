@@ -420,8 +420,9 @@ public class IngestionPipeline {
             if (vectorSpaceGuard != null) {
                 // Before the store is built (which may create its table) and before
                 // anything is embedded: the run fails with the reason, instead of
-                // writing vectors of another model next to the old ones.
-                vectorSpaceGuard.requireCompatible(ragConfigId, knowledgeBase);
+                // writing vectors of another model next to the old ones. Read from the
+                // store, not this node's cache: once per run.
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, knowledgeBase);
             }
             collector.store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, knowledgeBase);
             current = EmbeddingStoreFactory.fingerprintOf(collector.store);

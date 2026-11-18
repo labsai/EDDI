@@ -47,6 +47,15 @@ public final class RagFailures {
     private static final Pattern URL_USERINFO = Pattern.compile("(?i)(\\b[a-z][a-z0-9+.-]*://)[^/\\s@?#]*@");
     private static final Pattern URL_QUERY_OR_FRAGMENT = Pattern.compile("(?i)(\\b[a-z][a-z0-9+.-]*://[^\\s?#]*)[?#]\\S*");
 
+    /**
+     * Texts the JDK writes about the input it could not parse, and file paths:
+     * {@code Enum.valueOf} ("No enum constant a.b.C.x"), {@code UUID.fromString}
+     * ("Invalid UUID string: x"), {@code Paths.get}/{@code File} ("C:\…",
+     * "/var/…").
+     */
+    private static final Pattern QUOTES_INPUT = Pattern.compile(
+            "No enum constant|Invalid UUID|[A-Za-z]:\\\\|(?:^|[\\s'\"(])/[^\\s/]+/|\\\\\\\\[^\\s\\\\]+\\\\");
+
     private RagFailures() {
     }
 
@@ -95,7 +104,8 @@ public final class RagFailures {
 
     private static boolean isAuthorMessage(Throwable failure) {
         String message = failure.getMessage();
-        if (message == null || message.isBlank() || message.length() > MAX_AUTHOR_MESSAGE || message.contains("://")) {
+        if (message == null || message.isBlank() || message.length() > MAX_AUTHOR_MESSAGE || message.contains("://")
+                || QUOTES_INPUT.matcher(message).find()) {
             return false;
         }
         for (Throwable t = failure; t != null && !(t.getCause() == t); t = t.getCause()) {

@@ -200,7 +200,7 @@ class RestRagIngestionInspectionTest {
         VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
         rest.vectorSpaceGuard = guard;
         when(guard.status(eq(KB_ID), any())).thenReturn(new VectorSpaceGuard.Status(true,
-                new VectorSpace("openai", "emb-8", "", "", 8), new VectorSpace("openai", "other-8", "", "", null), false));
+                new VectorSpace("openai", "emb-8", "", "", 8), new VectorSpace("openai", "other-8", "", "", null), false, false));
 
         Response response = rest.readVectorSpace(KB_ID, 1);
 
@@ -339,7 +339,7 @@ class RestRagIngestionInspectionTest {
     }
 
     @Test
-    @DisplayName("a store that cannot be emptied is 503 with a sentence, not the driver's text")
+    @DisplayName("a store that fails before anything is removed is 503 REEMBED_NOT_STARTED with a sentence, not the driver's text")
     void reembedStoreFailure() {
         KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
         rest.reembedService = service;
@@ -348,7 +348,40 @@ class RestRagIngestionInspectionTest {
         Response response = rest.reembed(KB_ID, 1);
 
         assertEquals(503, response.getStatus());
-        assertFalse(((String) ((Map<?, ?>) response.getEntity()).get("error")).contains("secret-host"));
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertFalse(((String) body.get("error")).contains("secret-host"));
+        assertEquals("REEMBED_NOT_STARTED", body.get("code"));
+    }
+
+    @Test
+    @DisplayName("a removal that failed part-way is 503 REEMBED_INCOMPLETE, saying the knowledge base stays refused until re-embedded")
+    void reembedIncompleteRemoval() {
+        KnowledgeBaseReembedService service = mock(KnowledgeBaseReembedService.class);
+        rest.reembedService = service;
+        when(service.reembed(eq(KB_ID), any())).thenThrow(new KnowledgeBaseReembedService.ReembedIncompleteException(
+                new IllegalStateException("insert failed", new SQLException("relation eddi_kbid_x does not exist", "42P01"))));
+
+        Response response = rest.reembed(KB_ID, 1);
+
+        assertEquals(503, response.getStatus());
+        Map<?, ?> body = (Map<?, ?>) response.getEntity();
+        assertEquals("REEMBED_INCOMPLETE", body.get("code"));
+        assertTrue(((String) body.get("error")).contains("Re-embed again"), (String) body.get("error"));
+        assertFalse(((String) body.get("error")).contains("eddi_kbid_x"));
+    }
+
+    @Test
+    @DisplayName("the vector-space endpoint says when a re-embed is under way or did not finish")
+    void vectorSpaceRebuilding() {
+        VectorSpaceGuard guard = mock(VectorSpaceGuard.class);
+        rest.vectorSpaceGuard = guard;
+        when(guard.status(eq(KB_ID), any())).thenReturn(new VectorSpaceGuard.Status(true, null,
+                new VectorSpace("openai", "other-8", "", "", null), false, true));
+
+        Map<?, ?> body = (Map<?, ?>) rest.readVectorSpace(KB_ID, 1).getEntity();
+
+        assertEquals(true, body.get("rebuilding"));
+        assertTrue(((String) body.get("action")).contains("re-embed again"), (String) body.get("action"));
     }
 
     @Test

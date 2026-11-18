@@ -11,10 +11,15 @@ import ai.labs.eddi.configs.rag.rest.KnowledgeBaseStorageGuard;
 import ai.labs.eddi.modules.ingestion.IIngestionStateStore.IngestionRun;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory.RemovalOutcome;
 import ai.labs.eddi.modules.rag.RagFailures;
 import ai.labs.eddi.modules.rag.VectorSpaceGuard;
-import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.utils.LogSanitizer;
+import dev.langchain4j.data.embedding.Embedding;
+import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.model.embedding.request.EmbeddingInputType;
+import dev.langchain4j.store.embedding.EmbeddingSearchRequest;
+import dev.langchain4j.store.embedding.EmbeddingStore;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
@@ -35,18 +40,27 @@ import java.util.Optional;
  * "unchanged":
  * <ol>
  * <li>refuse what cannot be done safely (another knowledge base keeps the same
- * chunks, or a shared pgvector table would have to change its column
- * size);</li>
+ * chunks; the new settings cannot embed; the store would refuse vectors of the
+ * new size — measured with one embedding call and, for a collection store, one
+ * search with that vector);</li>
  * <li>claim every source's run slot, so nothing runs while the vectors go (a
  * run in flight anywhere refuses the whole operation, and nothing has been
  * changed);</li>
- * <li><b>forget every source's content hashes first</b>
+ * <li><b>mark the vector-space record "rebuilding"</b>
+ * ({@link VectorSpaceGuard#markRebuilding}), durably: every node refuses search
+ * and ingest from here until the record is reset, also after a crash;</li>
+ * <li><b>forget every source's content hashes</b>
  * ({@link IIngestionStateStore#invalidateContent}): from here a run, scheduled
  * or manual, embeds everything again whatever happens next;</li>
- * <li>remove the knowledge base's vectors, record the configured space, and —
- * per source — forget the state and start an ordinary run. Those runs are the
+ * <li>remove the knowledge base's vectors — for a pgvector table that changes
+ * its size, by dropping the whole table in one locked transaction, refused as a
+ * whole when it is busy — record the configured space (which clears the mark),
+ * and per source forget the state and start an ordinary run. Those runs are the
  * background run with status: they appear in each source's run history.</li>
  * </ol>
+ * A refusal before anything was removed takes the mark back; a failure in the
+ * middle of a delete leaves it, so the knowledge base is refused, with the
+ * advice to re-embed again, instead of answering from what is left.
  *
  * <p>
  * What it cannot rebuild is reported, not hidden. Text sent through
@@ -71,6 +85,8 @@ public class KnowledgeBaseReembedService {
     public static final String CODE_NOT_A_PGVECTOR_TABLE = "NOT_A_PGVECTOR_TABLE";
     public static final String CODE_DIMENSION_SETTING = "DIMENSION_SETTING_MISMATCH";
     public static final String CODE_STORE_CANNOT_RESIZE = "STORE_CANNOT_CHANGE_SIZE";
+    public static final String CODE_STORE_PROBE_FAILED = "STORE_PROBE_FAILED";
+    public static final String CODE_TABLE_BUSY = "TABLE_BUSY";
 
     private final IngestionPipeline pipeline;
     private final RagSourceIngestionService sources;
@@ -111,12 +127,14 @@ public class KnowledgeBaseReembedService {
      * @param notReEmbedded
      *            what could not be made again from what EDDI keeps
      * @param tableRecreated
-     *            pgvector only: whether the table was dropped to be recreated at
-     *            the configured vector size (false when it was busy or still holds
-     *            other knowledge bases' rows, and so keeps its old size); null for
-     *            any other store
+     *            pgvector only: whether the table was dropped, to be recreated by
+     *            the next write at the configured vector size (false when only this
+     *            knowledge base's rows were deleted, because the table already has
+     *            the new size and is busy or holds other knowledge bases' rows);
+     *            null for any other store
      * @param warnings
-     *            what the operator still has to do, in words
+     *            what the operator still has to do, in words; empty today — a
+     *            situation that would need one is refused instead
      */
     public record Result(String busySourceId, List<SourceOutcome> sources, List<String> notReEmbedded, Boolean tableRecreated,
             List<String> warnings) {
@@ -155,17 +173,34 @@ public class KnowledgeBaseReembedService {
     }
 
     /**
+     * The removal failed part-way: some vectors may be gone. The knowledge base
+     * keeps its "rebuilding" mark — search and ingest are refused — and its
+     * sources' content hashes are forgotten, so re-embedding again is the recovery.
+     */
+    public static class ReembedIncompleteException extends RuntimeException {
+
+        public ReembedIncompleteException(RuntimeException cause) {
+            super("The vectors could not all be removed", cause);
+        }
+    }
+
+    /**
      * @throws ReembedRefusedException
-     *             when another knowledge base keeps the same chunks, or a shared
-     *             pgvector table would have to change its column size; nothing was
-     *             changed
+     *             when it cannot be done safely (the codes are the class's
+     *             {@code CODE_*} constants); no vector was removed. A refusal after
+     *             the claims ({@link #CODE_TABLE_BUSY}, or a table that became
+     *             shared) has already forgotten the sources' content hashes
      * @throws UnsupportedOperationException
-     *             when the vector store cannot delete by metadata; the ingestion
-     *             state is marked for a rebuild, the vectors are untouched
+     *             when the vector store cannot delete by metadata; the content
+     *             hashes are forgotten, the vectors and the record untouched
+     * @throws ReembedIncompleteException
+     *             when the store failed in the middle of the removal (or the record
+     *             could not be reset after it); the claims are released, the record
+     *             keeps its "rebuilding" mark and the content hashes are forgotten,
+     *             so re-embedding again is the recovery
      * @throws RuntimeException
-     *             when the store failed; the claims are released, and the sources'
-     *             content hashes were already forgotten, so the next run of each
-     *             embeds everything again
+     *             any other failure, before anything was removed; the record is as
+     *             it was
      */
     public Result reembed(String ragConfigId, RagConfiguration knowledgeBase) {
         // Before anything is claimed or removed: an unresolved variable refuses the
@@ -176,11 +211,17 @@ public class KnowledgeBaseReembedService {
                 : storageGuard.sharersOf(ragConfigId, knowledgeBase, vectorSpaceGuard::locationOf);
         requireNoSharedChunks(ragConfigId, knowledgeBase, sharers);
         // One embedding call with the new settings, before anything is removed: it
-        // proves the credentials and the model
-        // work, and it measures the size the new vectors have — the number every check
-        // below needs.
-        int newSize = probeVectorSize(knowledgeBase);
-        Integer columnBefore = requireSizeFeasible(ragConfigId, knowledgeBase, sharers, newSize);
+        // proves the credentials and the model work, and it measures the size the new
+        // vectors have — the number every check below needs.
+        Embedding probe = probe(knowledgeBase);
+        int newSize = probe.dimension();
+        Integer columnBefore = requireSizeFeasible(ragConfigId, knowledgeBase, sharers, probe);
+        // A pgvector table changes its vector size only by being dropped and recreated.
+        // The drop is then the removal itself — atomic, and refused as a whole while
+        // the table is busy — instead of deleting the chunks first and finding out
+        // afterwards that the table cannot go, which left an empty knowledge base
+        // whose new vectors the old column refused.
+        boolean recreateTable = "pgvector".equals(knowledgeBase.getStoreType()) && columnBefore != null && columnBefore != newSize;
 
         List<IngestionSource> all = new ArrayList<>();
         if (knowledgeBase.getSources() != null) {
@@ -201,22 +242,48 @@ public class KnowledgeBaseReembedService {
 
         // A direct /ingest on this instance is refused until the vectors are made
         // again.
-        EmbeddingStoreFactory.RemovalOutcome removal = null;
+        RemovalOutcome removal = null;
+        String recordBefore = null;
+        boolean marked = false;
+        boolean removing = false;
         vectorSpaceGuard.beginMaintenance(ragConfigId);
         try {
-            // First, and durable: from here every run — scheduled, manual, or the next
-            // one after a crash — embeds everything again, whatever happens below.
-            // Without it, vectors gone + record reset + state "unchanged" left the
-            // knowledge base empty with nothing to say so.
+            // Durable and cluster-wide, before anything is touched: every node refuses
+            // search and ingest from here, and a re-embed that dies below leaves the mark
+            // behind — the knowledge base is refused until it is re-embedded again,
+            // never answered from half its vectors.
+            recordBefore = vectorSpaceGuard.markRebuilding(ragConfigId, knowledgeBase);
+            marked = true;
+            // Durable too: from here every run — scheduled, manual, or the next one after
+            // a crash — embeds everything again, whatever happens below. Without it,
+            // vectors gone + record reset + state "unchanged" left the knowledge base
+            // empty with nothing to say so.
             for (IngestionSource source : all) {
                 stateStore.invalidateContent(IngestionPipeline.stateKey(ragConfigId, source));
             }
-            removal = embeddingStoreFactory.removeKnowledgeBaseVectors(ragConfigId, knowledgeBase);
-            boolean emptied = removal == EmbeddingStoreFactory.RemovalOutcome.STORE_DROPPED
-                    || removal == EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED || removal == EmbeddingStoreFactory.RemovalOutcome.NO_TABLE;
+            removing = true;
+            if (recreateTable) {
+                removal = embeddingStoreFactory.dropKnowledgeBaseTable(ragConfigId, knowledgeBase);
+                if (removal == RemovalOutcome.TABLE_BUSY || removal == RemovalOutcome.TABLE_KEPT_SHARED) {
+                    removing = false;
+                    throw tableNotDropped(removal, columnBefore, newSize);
+                }
+            } else {
+                removal = embeddingStoreFactory.removeKnowledgeBaseVectors(ragConfigId, knowledgeBase);
+            }
+            boolean emptied = removal == RemovalOutcome.STORE_DROPPED || removal == RemovalOutcome.TABLE_DROPPED
+                    || removal == RemovalOutcome.NO_TABLE;
+            // Replaces the mark with the configured space.
             vectorSpaceGuard.reset(ragConfigId, knowledgeBase, emptied || sharers.isEmpty());
         } catch (RuntimeException e) {
+            boolean untouched = nothingRemoved(removing, e);
+            if (marked && untouched) {
+                restoreRecord(ragConfigId, knowledgeBase, recordBefore);
+            }
             release(ragConfigId, claimed, claims);
+            if (!untouched) {
+                throw new ReembedIncompleteException(e);
+            }
             throw e;
         } finally {
             vectorSpaceGuard.endMaintenance(ragConfigId);
@@ -241,27 +308,62 @@ public class KnowledgeBaseReembedService {
                 outcomes.add(new SourceOutcome(sourceId, null, "The source is disabled; enable and run it to embed it again."));
                 continue;
             }
-            Optional<String> runId = sources.runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.MANUAL, report -> {
-            });
+            Optional<String> runId;
+            try {
+                runId = sources.runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.MANUAL, report -> {
+                });
+            } catch (RuntimeException e) {
+                // Its state is gone, so its next run — scheduled or manual — embeds it all.
+                LOGGER.errorf(e, "Could not start the run of source %s of knowledge base %s after re-embedding",
+                        LogSanitizer.sanitize(sourceId), LogSanitizer.sanitize(ragConfigId));
+                outcomes.add(new SourceOutcome(sourceId, null, "Its run could not be started; run the source to embed it again."));
+                continue;
+            }
             outcomes.add(runId.isPresent()
                     ? new SourceOutcome(sourceId, runId.get(), null)
                     : new SourceOutcome(sourceId, null, "A run started for it in the meantime and will embed everything again."));
         }
         Boolean tableRecreated = null;
-        List<String> warnings = new ArrayList<>();
         if ("pgvector".equals(knowledgeBase.getStoreType()) && removal != null) {
-            tableRecreated = removal == EmbeddingStoreFactory.RemovalOutcome.TABLE_DROPPED
-                    || removal == EmbeddingStoreFactory.RemovalOutcome.NO_TABLE;
-            if (!tableRecreated && columnBefore != null && columnBefore != newSize) {
-                warnings.add("The pgvector table was " + (removal == EmbeddingStoreFactory.RemovalOutcome.TABLE_BUSY
-                        ? "in use and could not be dropped"
-                        : "not dropped because other knowledge bases keep rows in it")
-                        + ", so it keeps its old vector size of " + columnBefore + " and the new vectors (" + newSize + " dimensions) "
-                        + "will be refused. Once the table is idle and empty, drop it (DROP TABLE) or re-embed again; the next write "
-                        + "recreates it.");
-            }
+            // A table that keeps its size (busy, or shared) is fine here: its size is
+            // already the new one — a size change goes through the drop above, or is
+            // refused.
+            tableRecreated = removal == RemovalOutcome.TABLE_DROPPED || removal == RemovalOutcome.NO_TABLE;
         }
-        return new Result(null, outcomes, List.of(DIRECT_INGEST_NOTE), tableRecreated, warnings);
+        return new Result(null, outcomes, List.of(DIRECT_INGEST_NOTE), tableRecreated, List.of());
+    }
+
+    /**
+     * Whether a failure inside the removal step left every vector where it was: the
+     * step had not started, or it refused before deleting (a busy or shared table,
+     * a store that cannot delete by metadata, a table that is not EDDI's). A store
+     * error in the middle of a delete is not such a case — some vectors may be
+     * gone.
+     */
+    private static boolean nothingRemoved(boolean removing, RuntimeException e) {
+        return !removing || e instanceof UnsupportedOperationException || e instanceof IllegalArgumentException;
+    }
+
+    private void restoreRecord(String ragConfigId, RagConfiguration knowledgeBase, String recordBefore) {
+        try {
+            vectorSpaceGuard.unmarkRebuilding(ragConfigId, knowledgeBase, recordBefore);
+        } catch (RuntimeException e) {
+            // Safe as it is: the mark refuses the knowledge base until it is re-embedded.
+            LOGGER.errorf(e, "Could not take back the rebuild mark of knowledge base %s although nothing was removed; it is refused "
+                    + "until it is re-embedded", LogSanitizer.sanitize(ragConfigId));
+        }
+    }
+
+    private static ReembedRefusedException tableNotDropped(RemovalOutcome removal, int columnBefore, int newSize) {
+        if (removal == RemovalOutcome.TABLE_BUSY) {
+            return new ReembedRefusedException(CODE_TABLE_BUSY, "The pgvector table has vectors of " + columnBefore + " dimensions "
+                    + "and the new ones have " + newSize + ", so it has to be dropped and recreated, but it stayed in use (searches or "
+                    + "writes still running after " + EmbeddingStoreFactory.DROP_LOCK_TIMEOUT + "). Nothing was removed. Re-embed "
+                    + "again when the knowledge base is less busy.", List.of());
+        }
+        return new ReembedRefusedException(CODE_SHARED_TABLE_SIZE, "Rows of another knowledge base appeared in the pgvector table "
+                + "after the check, and a table cannot change its vector size (" + columnBefore + " to " + newSize + ") while it is "
+                + "shared. Nothing was removed. Give this knowledge base a table of its own (storeParameters.table).", List.of());
     }
 
     /**
@@ -292,14 +394,14 @@ public class KnowledgeBaseReembedService {
      * proof that the credentials and the model work. A re-embed that cannot embed
      * must not delete anything.
      */
-    private int probeVectorSize(RagConfiguration knowledgeBase) {
+    private Embedding probe(RagConfiguration knowledgeBase) {
         try {
-            int size = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT).embed("vector size probe").content()
-                    .dimension();
-            if (size <= 0) {
+            Embedding embedding = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT).embed("vector size probe")
+                    .content();
+            if (embedding == null || embedding.dimension() <= 0) {
                 throw new IllegalStateException("the embedding model returned an empty vector");
             }
-            return size;
+            return embedding;
         } catch (RuntimeException e) {
             LOGGER.warnf(e, "The embedding probe of a re-embed failed");
             throw new ReembedRefusedException(CODE_EMBEDDING_FAILED, "The embedding model could not be called with this knowledge "
@@ -319,16 +421,19 @@ public class KnowledgeBaseReembedService {
      * <li><b>Qdrant, Chroma, Elasticsearch, Atlas</b>: a collection keeps its
      * dimension and EDDI cannot recreate it. When a size is recorded for the
      * location and differs: refused while other knowledge bases keep vectors there,
-     * and refused with what the operator must do when this one is alone. A location
-     * with no recorded size (never ingested since sizes are tracked) cannot be
-     * judged here; the first ingestion is then refused with the same advice.</li>
+     * and refused with what the operator must do when this one is alone. Then —
+     * because most locations have no recorded size (nothing records one for vectors
+     * written before sizes were tracked) — one search with the probe vector: a
+     * collection of another size rejects it, and the re-embed is refused before
+     * anything is deleted.</li>
      * <li><b>in-memory</b>: nothing to decide, the store is replaced.</li>
      * </ul>
      *
      * @return the pgvector column size before the re-embed, or null
      */
     private Integer requireSizeFeasible(String ragConfigId, RagConfiguration knowledgeBase, List<KnowledgeBaseStorageGuard.Sharer> sharers,
-                                        int newSize) {
+                                        Embedding probe) {
+        int newSize = probe.dimension();
         String type = knowledgeBase.getStoreType();
         if ("pgvector".equals(type)) {
             String chunkKbId = KnowledgeBaseStorage.chunkKbId(ragConfigId, knowledgeBase);
@@ -357,10 +462,11 @@ public class KnowledgeBaseReembedService {
             return null;
         }
         Integer recorded = vectorSpaceGuard.recordedSize(ragConfigId, knowledgeBase);
+        String location = KnowledgeBaseStorage.physicalNameParameter(type);
         if (recorded == null || recorded == newSize) {
+            requireStoreAcceptsSize(ragConfigId, knowledgeBase, probe, location);
             return null;
         }
-        String location = KnowledgeBaseStorage.physicalNameParameter(type);
         if (!sharers.isEmpty()) {
             throw new ReembedRefusedException(CODE_SHARED_TABLE_SIZE, "Other knowledge bases keep vectors of " + recorded + " dimensions in "
                     + "this store, and the new vectors have " + newSize + ". A store keeps one vector size. Nothing was changed. Give "
@@ -371,6 +477,28 @@ public class KnowledgeBaseReembedService {
                 + " dimensions and keeps that size: EDDI can delete chunks from it but cannot recreate it. The new vectors have " + newSize
                 + ". Nothing was changed. Delete or recreate the " + location + " in the vector store with the new size, or point "
                 + "storeParameters." + location + " at a new one, then re-embed.", List.of());
+    }
+
+    /**
+     * One search with the probe vector, filtered to this knowledge base's chunks:
+     * Qdrant, Chroma, Elasticsearch and Atlas reject a query vector whose size is
+     * not the collection's, so a collection that would refuse every new vector is
+     * found before the old ones are deleted.
+     */
+    private void requireStoreAcceptsSize(String ragConfigId, RagConfiguration knowledgeBase, Embedding probe, String location) {
+        try {
+            EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase);
+            store.search(EmbeddingSearchRequest.builder().queryEmbedding(probe).maxResults(1).minScore(0.0)
+                    .filter(EmbeddingStoreFactory.retrievalFilter(ragConfigId, knowledgeBase)).build());
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "The vector store of knowledge base %s did not accept a search with a vector of %d dimensions",
+                    LogSanitizer.sanitize(ragConfigId), probe.dimension());
+            throw new ReembedRefusedException(CODE_STORE_PROBE_FAILED, "A search in this knowledge base's vector store with a vector "
+                    + "of the new size (" + probe.dimension() + " dimensions) failed, so nothing was removed. Either its " + location
+                    + " holds vectors of another size — it keeps that size: delete or recreate it in the vector store, or point "
+                    + "storeParameters." + location + " at a new one — or it does not exist yet (run the sources instead), or the "
+                    + "store could not be reached (try again). The server log has the store's answer.", List.of());
+        }
     }
 
     private static int declaredDimension(RagConfiguration knowledgeBase) {
