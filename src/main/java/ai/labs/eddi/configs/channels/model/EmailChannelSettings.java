@@ -466,14 +466,6 @@ public record EmailChannelSettings(
     }
 
     /**
-     * Whether {@code normalizedAddress} reaches this mailbox as its own: the
-     * {@code address}, a plus-address of it, or an alias.
-     */
-    public boolean receivesAs(String normalizedAddress) {
-        return isOwnAddress(normalizedAddress) || isPlusAddressOf(normalizedAddress, address);
-    }
-
-    /**
      * Whether {@code candidate} is {@code base} with a non-empty plus-tag:
      * {@code invoices+urgent@contoso.com} of {@code invoices@contoso.com}.
      */

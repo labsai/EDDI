@@ -475,7 +475,9 @@ public class EmailInboundProcessor {
         Map<String, Object> routeData = route.toMap();
         if (existingConversation != null) {
             Owner owner = ownerOf(existingConversation);
-            if (owner.unreadable()) {
+            // Without the owner's agent its allowedSenders cannot be checked: when any
+            // target restricts its senders, the mail waits rather than skip the check.
+            if (owner.unreadable() || (owner.agentId() == null && anyTargetRestrictsSenders(ctx.integration()))) {
                 return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
             }
             ChannelTarget ownerTarget = targetOfAgent(ctx.integration(), owner.agentId(), target);
@@ -924,6 +926,15 @@ public class EmailInboundProcessor {
             return true;
         }
         return authenticated && SenderPatterns.matchesAny(sender, allowed);
+    }
+
+    /** Whether any target of the integration names {@code allowedSenders}. */
+    static boolean anyTargetRestrictsSenders(ChannelIntegrationConfiguration integration) {
+        if (integration == null || integration.getTargets() == null) {
+            return false;
+        }
+        return integration.getTargets().stream()
+                .anyMatch(target -> target != null && target.getAllowedSenders() != null && !target.getAllowedSenders().isEmpty());
     }
 
     /**

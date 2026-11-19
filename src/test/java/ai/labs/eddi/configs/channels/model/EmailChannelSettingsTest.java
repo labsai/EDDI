@@ -293,8 +293,6 @@ class EmailChannelSettingsTest {
             assertTrue(settings.isOwnAddress("ap@contoso.com"));
             assertTrue(settings.isOwnAddress("invoices@contoso.com"));
             assertFalse(settings.isOwnAddress("invoices+x@contoso.com"), "a plus-address is received, not sent from");
-            assertTrue(settings.receivesAs("invoices+x@contoso.com"));
-            assertFalse(settings.receivesAs("sales@contoso.com"));
 
             assertTrue(refused(with("aliases", "not an address"), "aliases entry 1 is not a plain email address"));
             assertTrue(refused(with("aliases", "invoices@contoso.com"), "is platformConfig.address itself"));

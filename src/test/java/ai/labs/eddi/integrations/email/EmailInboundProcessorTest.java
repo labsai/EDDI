@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.email;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
@@ -1038,6 +1039,44 @@ class EmailInboundProcessorTest {
 
                 assertEquals(Disposition.DEFERRED, processor.process(conversationContext(target("intake", AGENT)), mail.polled(1), Instant.now()));
                 assertEquals("store_unavailable", row(mail).lastError());
+            }
+
+            @Test
+            @DisplayName("a conversation read without an agent id defers the mail when a target restricts its senders")
+            void ownerWithoutAgentDefers() throws Exception {
+                existingConversation();
+                when(conversations.readConversation(eq("conv-A"), any(), any(), any())).thenReturn(new SimpleConversationMemorySnapshot());
+                var restricted = target("intake", AGENT);
+                restricted.setAllowedSenders(List.of("*@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID);
+
+                assertEquals(Disposition.DEFERRED, processor.process(conversationContext(restricted), mail.polled(1), Instant.now()));
+                assertEquals("store_unavailable", row(mail).lastError());
+                assertEquals(List.of(), sayConversations);
+            }
+
+            @Test
+            @DisplayName("a reply to a group discussion's reply, routed to the GROUP target, starts a new discussion")
+            void replyToGroupReplyStartsDiscussion() throws Exception {
+                Instant now = Instant.now();
+                ledger.insertIfAbsent(new LedgerEntry("in-g", INTEGRATION, Kind.TRIGGER, Direction.IN, "<g-first@supplier.com>", "group-conv-1", null,
+                        "k-in-g", "alice@supplier.com", State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+                ledger.insertIfAbsent(new LedgerEntry("out-g", INTEGRATION, Kind.REPLY, Direction.OUT, "<eddi.group-reply@contoso.com>",
+                        "group-conv-1",
+                        null, "k-out-g", "alice@supplier.com", State.SENT, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+                when(conversations.getConversationState("group-conv-1"))
+                        .thenThrow(new IConversationService.ConversationNotFoundException("not a 1:1 conversation"));
+                var panel = target("panel", "0d0d0d0d0d0d0d0d0d0d0d0d");
+                panel.setType(ChannelTarget.TargetType.GROUP);
+                var discussion = new GroupConversation();
+                discussion.setId("group-conv-2");
+                when(groups.startAndDiscussAsync(anyString(), anyString(), anyString(), any())).thenReturn(discussion);
+
+                processor.process(conversationContext(panel), EmailTestMail.mail().header("In-Reply-To: <eddi.group-reply@contoso.com>").polled(1),
+                        now);
+
+                verify(groups).startAndDiscussAsync(eq("0d0d0d0d0d0d0d0d0d0d0d0d"), anyString(), anyString(), any());
+                assertEquals(List.of(), sayConversations);
             }
 
             @Test
