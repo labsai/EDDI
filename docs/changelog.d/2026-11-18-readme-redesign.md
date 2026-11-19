@@ -166,6 +166,13 @@ reviewer for the first time, and some of it was wrong:
 - **A wizard-created agent is not in Workforce**: the wizard deploys to `test`,
   and Workforce lists production agents marked as listed.
 
+### The test count
+
+The Tests badge said 20,000+. CI now runs more than 50,000: about 38,400 JUnit,
+11,300 Vitest and 500 Playwright. The badge says 50,000+, and `AGENTS.md` gives
+the breakdown and why a grep for `@Test` counts fewer (parameterized tests run
+once per case). Coverage is stated for the backend, which is where the gate is.
+
 ### Not done here
 
 - The repository description and topics on GitHub are settings, not files. The

@@ -173,7 +173,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Agent sync (export/import, instance-to-instance), attachments, capability registry | [`docs/agent-sync-guide.md`](docs/agent-sync-guide.md), [`docs/attachments-guide.md`](docs/attachments-guide.md), [`docs/capability-match-guide.md`](docs/capability-match-guide.md) |
 | Tracing and metrics — per-task OpenTelemetry spans, Micrometer | [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md), [`docs/metrics.md`](docs/metrics.md) |
 
-Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts them; the Manager and Chat UI suites come on top), with >90% instruction / >80% branch coverage enforced (OpenSSF Gold).
+Tests: more than 50,000 run in CI: about 38,400 JUnit (unit and integration), 11,300 Vitest across the Manager, Workforce, Chat UI and the shared packages, and 500 Playwright end-to-end. `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts about 29,800 JUnit methods, fewer than the 38,400 that run because a parameterized test runs once per case. The backend enforces >90% instruction / >80% branch coverage (OpenSSF Gold).
 
 ### In Progress / Upcoming
 
