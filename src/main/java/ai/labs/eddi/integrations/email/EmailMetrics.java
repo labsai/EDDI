@@ -45,6 +45,11 @@ public final class EmailMetrics {
     public static final String PARSE_ERROR = "parse_error";
     public static final String DEFERRED = "deferred";
     public static final String UNROUTABLE = "unroutable";
+    /**
+     * Refused by {@code actWhen: addressed}: the mail did not address the
+     * integration.
+     */
+    public static final String NOT_ADDRESSED = "not_addressed";
     public static final String FAILED = "failed";
 
     private final MeterRegistry registry;

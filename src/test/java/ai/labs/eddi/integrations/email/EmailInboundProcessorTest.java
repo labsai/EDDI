@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
+import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
@@ -706,6 +707,352 @@ class EmailInboundProcessorTest {
             processor.process(context(Map.of()), EmailTestMail.mail().messageId(root).polled(1), Instant.now());
             processor.process(context(Map.of()), EmailTestMail.mail().header("References: " + root).polled(2), Instant.now());
             assertEquals(List.of("conv-1", "conv-2"), sayConversations);
+        }
+    }
+
+    @Nested
+    @DisplayName("addressing, mentions and per-target rules (email v2 plan §7)")
+    class Addressing {
+
+        static final String FINANCE = "0f0f0f0f0f0f0f0f0f0f0f0f";
+        static final String LEGAL = "0e0e0e0e0e0e0e0e0e0e0e0e";
+
+        ChannelTarget finance;
+        ChannelTarget legal;
+
+        @BeforeEach
+        void targets() {
+            finance = target("finance", FINANCE, "money");
+            finance.setMentions(List.of("finance"));
+            finance.setAddresses(List.of("invoices+finance@contoso.com"));
+            legal = target("legal", LEGAL);
+            legal.setMentions(List.of("legal"));
+        }
+
+        IntegrationContext addressedContext(Map<String, String> extra) {
+            Map<String, String> all = new HashMap<>(extra);
+            all.put("actWhen", "addressed");
+            return context(all, target("intake", AGENT), finance, legal);
+        }
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> mailContext(int turn) {
+            return (Map<String, Object>) inputs.get(turn).getContext().get("mail").getValue();
+        }
+
+        /**
+         * An aligned pass whose signature covers these headers, with these signed To /
+         * Cc instances.
+         */
+        MailAuthentication signed(List<String> to, List<String> cc, String... covered) {
+            return new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of(covered), to.stream().map(a -> new MailAddress(a, null)).toList(),
+                            cc.stream().map(a -> new MailAddress(a, null)).toList(), "sig-" + System.nanoTime()));
+        }
+
+        @Test
+        @DisplayName("actWhen addressed: EDDI only in Cc of a human thread runs nothing and is recorded not_addressed")
+        void ccOnlyNotAddressed() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com");
+
+            assertEquals(Disposition.SETTLED, processor.process(addressedContext(Map.of()), mail.polled(1), Instant.now()));
+
+            assertEquals(State.REFUSED, row(mail).state());
+            assertEquals("not_addressed", row(mail).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("actWhen always (the default): the same mail runs as before")
+        void alwaysUnchanged() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com");
+            processor.process(context(Map.of(), target("intake", AGENT), finance, legal), mail.polled(1), Instant.now());
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+            assertEquals(Map.of("addressed", false, "why", "none"), mailContext(0).get("addressing"));
+        }
+
+        @Test
+        @DisplayName("not_addressed comes after the allowlist and authentication, so their reasons win")
+        void refusalsWinOverNotAddressed() throws Exception {
+            EmailTestMail stranger = EmailTestMail.mail().from("eve@elsewhere.com").to("carol@supplier.com");
+            processor.process(addressedContext(Map.of("senderAllowlist", "*@supplier.com")), stranger.polled(1), Instant.now());
+            assertEquals("blocked:not_allowlisted", row(stranger).lastError());
+
+            verdict = new MailAuthentication(MailAuthentication.Verdict.NONE, null);
+            EmailTestMail unauthenticated = EmailTestMail.mail().to("carol@supplier.com");
+            processor.process(addressedContext(Map.of()), unauthenticated.polled(2), Instant.now());
+            assertEquals("unauthenticated:none", row(unauthenticated).lastError());
+        }
+
+        @Test
+        @DisplayName("not_addressed comes before the budgets: refused at once, not held for tomorrow, and no turn counted")
+        void notAddressedBeforeBudget() throws Exception {
+            Instant now = Instant.parse("2026-11-19T10:00:00Z");
+            stateStore.addSpend(INTEGRATION, "2026-11-19", 5.0, now);
+            EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com");
+
+            assertEquals(Disposition.SETTLED, processor.process(addressedContext(Map.of("dailyCostBudgetUsd", "1")), mail.polled(1), now));
+
+            assertEquals("not_addressed", row(mail).lastError());
+            verify(ownerNotifier, never()).notifyOnce(anyString(), any(), any(), any(), any());
+            assertEquals(0, ledger.countInboundTurns(INTEGRATION, "alice@supplier.com", now.minus(Duration.ofDays(1))));
+        }
+
+        @Test
+        @DisplayName("@finance in the sender's own text routes to finance and addresses EDDI; the context says why and how")
+        void mentionRoutes() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com")
+                    .body("@finance please book this one.\n\nThanks, Alice");
+
+            processor.process(addressedContext(Map.of()), mail.polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+            assertEquals(Map.of("addressed", true, "why", "mention"), mailContext(0).get("addressing"));
+            assertEquals(Map.of("target", "finance", "source", "mention", "alsoAddressed", List.of()), mailContext(0).get("route"));
+            assertTrue(inputs.get(0).getInput().contains("@finance please book"), "the mention never changes the text");
+        }
+
+        @Test
+        @DisplayName("the same mention inside quoted history, an inline-quoted line or a signature neither routes nor addresses")
+        void quotedMentionIgnored() throws Exception {
+            var ctx = addressedContext(Map.of());
+            EmailTestMail quoted = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com")
+                    .body("Agreed.\n\nOn Tue, 17 Nov 2026 at 10:15, Bob <bob@supplier.com> wrote:\n> @finance please book\n");
+            EmailTestMail inline = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com")
+                    .body("> @finance please book\nok");
+            EmailTestMail signature = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com")
+                    .body("Thanks.\n-- \nAlice\nFollow @finance");
+
+            processor.process(ctx, quoted.polled(1), Instant.now());
+            processor.process(ctx, inline.polled(2), Instant.now());
+            processor.process(ctx, signature.polled(3), Instant.now());
+
+            assertEquals("not_addressed", row(quoted).lastError());
+            assertEquals("not_addressed", row(inline).lastError());
+            assertEquals("not_addressed", row(signature).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("signed view: an unsigned To prepended to a replayed signed mail does not make it addressed")
+        void unsignedToDoesNotAddress() throws Exception {
+            verdict = signed(List.of("carol@supplier.com"), List.of(), "from", "date", "message-id", "subject", "to", "cc");
+            EmailTestMail replay = EmailTestMail.mail().to("carol@supplier.com").header("To: invoices@contoso.com");
+
+            processor.process(addressedContext(Map.of()), replay.polled(1), Instant.now());
+
+            assertEquals("not_addressed", row(replay).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("signed view: the same To, signed, does address it (the test above fails for the right reason)")
+        void signedToAddresses() throws Exception {
+            verdict = signed(List.of("carol@supplier.com", "invoices@contoso.com"), List.of(), "from", "date", "message-id", "subject", "to");
+            EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com").header("To: invoices@contoso.com");
+
+            processor.process(addressedContext(Map.of()), mail.polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+            assertEquals(Map.of("addressed", true, "why", "to_thread_start"), mailContext(0).get("addressing"));
+        }
+
+        @Test
+        @DisplayName("signed view: an unsigned To or Cc naming a target's address routes nothing")
+        void unsignedAddressDoesNotRoute() throws Exception {
+            var ctx = context(Map.of(), target("intake", AGENT), finance, legal);
+            verdict = signed(List.of("invoices@contoso.com"), List.of(), "from", "date", "message-id", "subject", "to", "cc");
+            processor.process(ctx, EmailTestMail.mail().header("To: invoices+finance@contoso.com").polled(1), Instant.now());
+            processor.process(ctx, EmailTestMail.mail().header("Cc: invoices+finance@contoso.com").polled(2), Instant.now());
+
+            ArgumentCaptor<String> agents = ArgumentCaptor.forClass(String.class);
+            verify(conversations, times(2)).startConversation(any(), agents.capture(), anyString(), any());
+            assertEquals(List.of(AGENT, AGENT), agents.getAllValues());
+            assertEquals(List.of("invoices@contoso.com"), mailContext(0).get("to"), "the agent sees the signed To only");
+            assertEquals(List.of(), mailContext(1).get("cc"));
+        }
+
+        @Test
+        @DisplayName("signed view: the same address, signed in Cc, routes to the target by address")
+        void signedCcRoutes() throws Exception {
+            var ctx = context(Map.of(), target("intake", AGENT), finance, legal);
+            verdict = signed(List.of("invoices@contoso.com"), List.of("invoices+finance@contoso.com"), "from", "date", "message-id", "subject", "to",
+                    "cc");
+            processor.process(ctx, EmailTestMail.mail().header("Cc: invoices+finance@contoso.com").polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(FINANCE), anyString(), any());
+            assertEquals("address_cc", ((Map<?, ?>) mailContext(0).get("route")).get("source"));
+        }
+
+        @Test
+        @DisplayName("signed view: an unsigned Subject carrying a trigger word routes nothing")
+        void unsignedSubjectDoesNotRoute() throws Exception {
+            var ctx = context(Map.of(), target("intake", AGENT), finance, legal);
+            verdict = signed(List.of("invoices@contoso.com"), List.of(), "from", "date", "message-id", "to", "cc");
+            processor.process(ctx, EmailTestMail.mail().subject("money").polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+            assertEquals("default", ((Map<?, ?>) mailContext(0).get("route")).get("source"));
+        }
+
+        @Test
+        @DisplayName("allowedSenders: a sender not on a target's list is refused, never rerouted to the default")
+        void targetNotAllowedWithoutFallback() throws Exception {
+            finance.setAllowedSenders(List.of("*@trusted.com"));
+            EmailTestMail mail = EmailTestMail.mail().body("@finance please");
+
+            processor.process(context(Map.of(), target("intake", AGENT), finance, legal), mail.polled(1), Instant.now());
+
+            assertEquals(State.REFUSED, row(mail).state());
+            assertEquals("blocked:target_not_allowed", row(mail).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("allowedSenders applies to the default target too, and lets a matching sender through")
+        void allowedSendersOnDefault() throws Exception {
+            var intake = target("intake", AGENT);
+            intake.setAllowedSenders(List.of("*@supplier.com"));
+            processor.process(context(Map.of(), intake, finance), EmailTestMail.mail().polled(1), Instant.now());
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+
+            intake.setAllowedSenders(List.of("boss@supplier.com"));
+            EmailTestMail other = EmailTestMail.mail();
+            processor.process(context(Map.of(), intake, finance), other.polled(2), Instant.now());
+            assertEquals("blocked:target_not_allowed", row(other).lastError());
+        }
+
+        @Test
+        @DisplayName("allowedSenders requires authentication: an unauthenticated From that matches is refused")
+        void allowedSendersNeedAuthentication() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.NONE, null);
+            var intake = target("intake", AGENT);
+            intake.setAllowedSenders(List.of("*@supplier.com"));
+            EmailTestMail mail = EmailTestMail.mail();
+
+            processor.process(context(Map.of("requireAuthentication", "false"), intake), mail.polled(1), Instant.now());
+
+            assertEquals("blocked:target_not_allowed", row(mail).lastError());
+            verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("mail from an alias is the integration's own: refused like mail from its address")
+        void aliasIsOwn() throws Exception {
+            EmailTestMail mail = EmailTestMail.mail().from("ap@contoso.com");
+            processor.process(context(Map.of("aliases", "ap@contoso.com")), mail.polled(1), Instant.now());
+            assertEquals("loop:own_address", row(mail).lastError());
+        }
+
+        @Nested
+        @DisplayName("continuations (conversation mode)")
+        class Continuations {
+
+            static final String REPLY_ID = "<eddi.reply-1@contoso.com>";
+
+            IntegrationContext conversationContext(ChannelTarget... targets) {
+                return context(Map.of("mode", "conversation", "smtpHost", "smtp.contoso.com"), targets);
+            }
+
+            /**
+             * Agent AGENT's conversation conv-A, started by alice, which EDDI answered with
+             * REPLY_ID.
+             */
+            void existingConversation() throws Exception {
+                Instant now = Instant.now();
+                ledger.insertIfAbsent(new LedgerEntry("in-1", INTEGRATION, Kind.TRIGGER, Direction.IN, "<first@supplier.com>", "conv-A", null, "k-in",
+                        "alice@supplier.com", State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+                ledger.insertIfAbsent(new LedgerEntry("out-1", INTEGRATION, Kind.REPLY, Direction.OUT, REPLY_ID, "conv-A", null, "k-out",
+                        "alice@supplier.com", State.SENT, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+                var owner = new SimpleConversationMemorySnapshot();
+                owner.setAgentId(AGENT);
+                when(conversations.readConversation(eq("conv-A"), any(), any(), any())).thenReturn(owner);
+            }
+
+            @Test
+            @DisplayName("a reply to agent A's mail mentioning @legal runs in A's conversation, recording the refused redirect")
+            void redirectRefused() throws Exception {
+                existingConversation();
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal can you check this?");
+
+                assertEquals(Disposition.SETTLED,
+                        processor.process(conversationContext(target("intake", AGENT), finance, legal), mail.polled(1), Instant.now()));
+
+                verify(conversations, never()).startConversation(any(), anyString(), anyString(), any());
+                assertEquals(List.of("conv-A"), sayConversations);
+                @SuppressWarnings("unchecked")
+                Map<String, Object> route = (Map<String, Object>) mailContext(0).get("route");
+                assertEquals("legal", route.get("redirectRefused"));
+                assertEquals("mention", route.get("source"));
+                handlers.get(0).onComplete(snapshot(ConversationState.READY, 0));
+                assertEquals(State.DONE, row(mail).state(), "the mail log shows it done");
+            }
+
+            @Test
+            @DisplayName("a reply without explicit addressing records no redirect")
+            void noRedirectBySubject() throws Exception {
+                existingConversation();
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).subject("Re: money");
+
+                processor.process(conversationContext(target("intake", AGENT), finance, legal), mail.polled(1), Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations);
+                assertFalse(((Map<?, ?>) mailContext(0).get("route")).containsKey("redirectRefused"));
+            }
+
+            @Test
+            @DisplayName("a mention of a GROUP target in A's thread still continues A's conversation, never starts a discussion")
+            void groupMentionContinues() throws Exception {
+                existingConversation();
+                var panel = target("panel", "0d0d0d0d0d0d0d0d0d0d0d0d");
+                panel.setType(ChannelTarget.TargetType.GROUP);
+                panel.setMentions(List.of("panel"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@panel thoughts?");
+
+                processor.process(conversationContext(target("intake", AGENT), panel), mail.polled(1), Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations);
+                verify(groups, never()).startAndDiscussAsync(anyString(), anyString(), anyString(), any());
+            }
+
+            @Test
+            @DisplayName("the owner's allowedSenders apply to a continuation even when the routed target allows the sender")
+            void ownerAllowedSendersApply() throws Exception {
+                existingConversation();
+                var intake = target("intake", AGENT);
+                intake.setAllowedSenders(List.of("boss@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal please");
+
+                processor.process(conversationContext(intake, finance, legal), mail.polled(1), Instant.now());
+
+                assertEquals("blocked:target_not_allowed", row(mail).lastError());
+                assertEquals(List.of(), sayConversations);
+            }
+
+            @Test
+            @DisplayName("an owner that cannot be read defers the mail instead of skipping the check")
+            void unreadableOwnerDefers() throws Exception {
+                existingConversation();
+                when(conversations.readConversation(eq("conv-A"), any(), any(), any())).thenThrow(new IResourceStore.ResourceStoreException("down"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID);
+
+                assertEquals(Disposition.DEFERRED, processor.process(conversationContext(target("intake", AGENT)), mail.polled(1), Instant.now()));
+                assertEquals("store_unavailable", row(mail).lastError());
+            }
+
+            @Test
+            @DisplayName("actWhen addressed: a reply to EDDI's own mail is addressed even with EDDI only in Cc")
+            void replyToEddiAddressed() throws Exception {
+                existingConversation();
+                EmailTestMail mail = EmailTestMail.mail().to("carol@supplier.com").header("Cc: invoices@contoso.com")
+                        .header("In-Reply-To: " + REPLY_ID);
+
+                processor.process(context(Map.of("mode", "conversation", "smtpHost", "smtp.contoso.com", "actWhen", "addressed")), mail.polled(1),
+                        Instant.now());
+
+                assertEquals(List.of("conv-A"), sayConversations);
+                assertEquals(Map.of("addressed", true, "why", "reply_to_eddi"), mailContext(0).get("addressing"));
+            }
         }
     }
 
