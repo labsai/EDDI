@@ -1,0 +1,64 @@
+{
+  "$schema": "https://fundingjson.org/schema/v1.1.0.json",
+  "version": "v1.1.0",
+  "entity": {
+    "type": "organisation",
+    "role": "owner",
+    "name": "EDDI Solutions",
+    "email": "gregor.jarisch@eddi.solutions",
+    "description": "EDDI Solutions builds and maintains EDDI, the open-source AI agent management system. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
+    "webpageUrl": {
+      "url": "https://eddi.solutions",
+      "wellKnown": "https://eddi.solutions/.well-known/funding-manifest-urls"
+    }
+  },
+  "projects": [
+    {
+      "guid": "eddi",
+      "name": "EDDI",
+      "description": "EDDI (Enhanced Dialog Driven Interface) is the open-source AI agent management system: a server you run between your users, your LLMs and your business systems. Agents are versioned JSON configurations executed by a Java/Quarkus engine across 19 model providers, with persistent memory, RAG, group conversations, human-in-the-loop approvals, an MCP server and client, a secrets vault, an audit ledger and GDPR tooling. It runs on MongoDB or PostgreSQL and ships with a Manager, a Workforce app and a Chat UI.",
+      "webpageUrl": {
+        "url": "https://eddi.technology",
+        "wellKnown": "https://eddi.technology/.well-known/funding-manifest-urls"
+      },
+      "repositoryUrl": {
+        "url": "https://github.com/labsai/EDDI"
+      },
+      "licenses": ["spdx:Apache-2.0"],
+      "tags": ["ai", "llm", "chatbot", "conversational-ai", "agents", "orchestration", "agent-management", "java", "mcp", "rag"]
+    }
+  ],
+  "funding": {
+    "channels": [
+      {
+        "guid": "bank-transfer",
+        "type": "bank",
+        "address": "",
+        "description": "Bank transfer (SEPA or international). Write to gregor.jarisch@eddi.solutions for account details."
+      }
+    ],
+    "plans": [
+      {
+        "guid": "one-time",
+        "status": "active",
+        "name": "One-time donation",
+        "description": "A one-time contribution of any amount towards EDDI's development and maintenance.",
+        "amount": 0,
+        "currency": "EUR",
+        "frequency": "one-time",
+        "channels": ["bank-transfer"]
+      },
+      {
+        "guid": "monthly-sponsor",
+        "status": "active",
+        "name": "Monthly sponsorship",
+        "description": "Recurring support of any amount for ongoing maintenance, security fixes and releases.",
+        "amount": 0,
+        "currency": "EUR",
+        "frequency": "monthly",
+        "channels": ["bank-transfer"]
+      }
+    ],
+    "history": []
+  }
+}
