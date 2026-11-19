@@ -6,7 +6,7 @@
     "role": "owner",
     "name": "EDDI Solutions",
     "email": "gregor.jarisch@eddi.solutions",
-    "description": "EDDI Solutions builds and maintains EDDI, an open-source, config-driven middleware for orchestrating conversational AI agents. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
+    "description": "EDDI Solutions builds and maintains EDDI, the open-source AI agent management system. Funding pays for maintainer time on security hardening, compliance features, documentation and long-term maintenance of the open-source project.",
     "webpageUrl": {
       "url": "https://eddi.solutions",
       "wellKnown": "https://eddi.solutions/.well-known/funding-manifest-urls"
@@ -16,7 +16,7 @@
     {
       "guid": "eddi",
       "name": "EDDI",
-      "description": "EDDI (Enhanced Dialog Driven Interface) is an open-source multi-agent orchestration middleware for conversational AI. Agent behaviour is defined in versioned JSON configurations and executed by a Java/Quarkus engine: a lifecycle pipeline of rules, API calls and LLM tasks across 19 model providers, with persistent memory, RAG, group conversations, human-in-the-loop approvals, an MCP server and client, a secrets vault, an audit ledger and GDPR tooling. It runs on MongoDB or PostgreSQL and ships with a web Manager and Chat UI.",
+      "description": "EDDI (Enhanced Dialog Driven Interface) is the open-source AI agent management system: a server you run between your users, your LLMs and your business systems. Agents are versioned JSON configurations executed by a Java/Quarkus engine across 19 model providers, with persistent memory, RAG, group conversations, human-in-the-loop approvals, an MCP server and client, a secrets vault, an audit ledger and GDPR tooling. It runs on MongoDB or PostgreSQL and ships with a Manager, a Workforce app and a Chat UI.",
       "webpageUrl": {
         "url": "https://eddi.technology",
         "wellKnown": "https://eddi.technology/.well-known/funding-manifest-urls"
@@ -25,7 +25,7 @@
         "url": "https://github.com/labsai/EDDI"
       },
       "licenses": ["spdx:Apache-2.0"],
-      "tags": ["ai", "llm", "chatbot", "conversational-ai", "agents", "middleware", "orchestration", "java", "mcp", "rag"]
+      "tags": ["ai", "llm", "chatbot", "conversational-ai", "agents", "orchestration", "agent-management", "java", "mcp", "rag"]
     }
   ],
   "funding": {
