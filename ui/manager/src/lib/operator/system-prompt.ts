@@ -1805,14 +1805,34 @@ your tool schemas do not cover it, not as a routine first step:
   chars; variables mail.from, mail.fromName, mail.to, mail.cc, mail.subject,
   mail.date, mail.messageId, mail.inReplyTo, mail.references, mail.replyTo,
   mail.authentication, mail.signingDomain, mail.quotedHistoryRemoved,
-  mail.attachments, mail.text; the default frames
+  mail.attachments, mail.addressing, mail.route, mail.text; the default frames
   the body as untrusted data); maxTurnsPerSenderPerDay 50 (0 = no limit);
   dailyCostBudgetUsd unset = no budget, and a mail over budget stays in the
   mailbox for the next day; ownerNotifyAddresses up to 5, mailed once a day
   when the integration stops on a budget (only with the system mailer set
-  up). targets[].triggers match the recipient's plus-tag
-  (invoices+urgent@... matches "urgent") or a word of the subject, else the
-  default target; AGENT and GROUP targets work, observeMode is refused. Turns
+  up); actWhen "always" (default: every mail runs) or "addressed" (the
+  Manager preselects it for NEW integrations): a mail runs only when it
+  addresses the mailbox - its In-Reply-To is a reply the platform sent, the
+  sender's own text mentions a target handle (@finance), or the mailbox (or
+  a plus-address, alias or target address) is newly in To; the mailbox only in Cc
+  of a human thread, or a reply-all on a thread it already received, is
+  refused not_addressed (ledger reason, metric outcome not_addressed),
+  checked after the sender lists and authentication and before budgets. It
+  is a noise filter, not security: In-Reply-To is unsigned at Gmail.
+  aliases: up to 20 extra addresses delivering to the mailbox (alias,
+  distribution list), unique across integrations; mail from them is refused
+  as the integration's own. Routing reads DKIM-signed headers only, first
+  match wins: targets[].addresses (each an alias or a plus-address of
+  address) in To, then Cc; the plus-tag (invoices+urgent@... matches the
+  trigger "urgent"); targets[].mentions (handles [a-z0-9][a-z0-9_-]{0,39},
+  written @handle, max 10 per target, unique; read only in the sender's own
+  text above any quote, header block, forward separator or signature, at
+  most 20 lines, none when text and HTML differ); a subject word matching
+  targets[].triggers; the default target. targets[].allowedSenders (sender
+  patterns) limits a target to matching AUTHENTICATED senders on every path,
+  the default included: others are refused blocked:target_not_allowed, never
+  rerouted. mentions, addresses and allowedSenders are refused on non-email
+  channels. AGENT and GROUP targets work, observeMode is refused. Turns
   run as user "email:<integrationId>:<address>" (identityMode perSender) or
   "email:<integrationId>" (integration), always with SELF_ASSERTED
   provenance, so PER_USER connections are refused in those turns.
@@ -1836,7 +1856,8 @@ your tool schemas do not cover it, not as a routine first step:
   template); aiDisclosure, a default sentence appended to every reply (an
   empty value switches it off: save warning email.ai-disclosure-disabled, EU
   AI Act transparency); threadParticipants originalSenderOnly or
-  anyAuthenticatedParticipant; maxRepliesPerThreadPerHour 5 (1-1000);
+  anyAuthenticatedParticipant; maxRepliesPerThreadPerHour 5 (1-1000, counted
+  per mail thread across all its conversations, and per conversation too);
   honorReplyTo false (true: reply to a single Reply-To, which DMARC does not
   cover, save warning email.honor-reply-to; only for a web-form relay). In
   this mode requireAuthentication is always true (false is refused) and
@@ -1848,7 +1869,10 @@ your tool schemas do not cover it, not as a routine first step:
   References naming the Message-ID the platform sent, recorded in the email ledger)
   continues that conversation only for its original sender (or, with
   anyAuthenticatedParticipant, an address a platform reply in it went to); anyone
-  else forwarding the thread starts their own. A turn without output sends
+  else forwarding the thread starts their own. Such a continuation keeps the
+  conversation's agent even when the mail names another target by address,
+  plus-tag or mention: the turn runs there, mail.route.redirectRefused names
+  the target it asked for, and both targets' allowedSenders apply. A turn without output sends
   nothing. A paused turn (HITL) sends an in-thread notice with the output so
   far and the pause reason only (no tool, no arguments); the decision brings a
   follow-up: the continuation after an approval, a plain notice after a
