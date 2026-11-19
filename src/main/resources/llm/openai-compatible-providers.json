@@ -38,7 +38,7 @@
         {"id": "cn", "baseUrl": "https://api.moonshot.cn/v1"}
       ],
       "defaultModel": "kimi-k3",
-      "modelSuggestions": ["kimi-k3", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
+      "modelSuggestions": ["kimi-k3.1-pro", "kimi-k3.1-pro-highspeed", "kimi-k3", "kimi-k2.6", "kimi-k2.7-code", "kimi-k2.7-code-highspeed"],
       "apiKeyUrl": "https://platform.kimi.ai/console/api-keys",
       "apiKeyPlaceholder": "sk-...",
       "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
@@ -55,7 +55,7 @@
         {"id": "us", "baseUrl": "https://dashscope-us.aliyuncs.com/compatible-mode/v1"}
       ],
       "defaultModel": "qwen3.7-plus",
-      "modelSuggestions": ["qwen3.7-plus", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-flash"],
+      "modelSuggestions": ["qwen3.7-plus", "qwen4-max", "qwen3.8-max", "qwen3.8-flash", "qwen3.7-flash"],
       "apiKeyUrl": "https://modelstudio.console.alibabacloud.com",
       "apiKeyPlaceholder": "sk-...",
       "parameterDefaults": {},
@@ -87,7 +87,7 @@
         {"id": "cn", "baseUrl": "https://api.minimax.cn/v1"}
       ],
       "defaultModel": "MiniMax-M3",
-      "modelSuggestions": ["MiniMax-M3", "MiniMax-M3.1-Flash-Preview"],
+      "modelSuggestions": ["MiniMax-M3", "MiniMax-M3.1-Flash"],
       "apiKeyUrl": "https://platform.minimax.io",
       "apiKeyPlaceholder": "...",
       "parameterDefaults": {"returnThinking": "true", "sendThinking": "true"},
@@ -100,7 +100,7 @@
       "defaultBaseUrl": "https://openrouter.ai/api/v1",
       "regions": [],
       "defaultModel": "openrouter/auto",
-      "modelSuggestions": ["openrouter/auto", "anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5", "openai/gpt-6.1-sol", "google/gemini-4-argon", "google/gemini-3.8-flash", "deepseek/deepseek-v4-pro", "x-ai/grok-4.7"],
+      "modelSuggestions": ["openrouter/auto", "anthropic/claude-fable-5.2", "anthropic/claude-opus-5.5", "anthropic/claude-sonnet-5.5", "openai/gpt-6.2-sol", "openai/gpt-6.1-sol", "google/gemini-4-neon", "google/gemini-4-argon", "google/gemini-3.8-flash", "deepseek/deepseek-v4-pro", "x-ai/grok-4.7"],
       "apiKeyUrl": "https://openrouter.ai/keys",
       "apiKeyPlaceholder": "sk-or-...",
       "parameterDefaults": {},

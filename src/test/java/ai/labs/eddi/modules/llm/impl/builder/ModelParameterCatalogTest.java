@@ -391,10 +391,10 @@ class ModelParameterCatalogTest {
                 // MiniMax
                 arguments("minimax", "MiniMax-M2.7", "presencePenalty", "", i),
                 arguments("minimax", "MiniMax-M3", "logitBias", "", i),
-                arguments("minimax", "MiniMax-M3.1-Flash-Preview", "reasoningEffort", "reasoningEffort=none", r),
-                arguments("minimax", "MiniMax-M3.1-Flash-Preview", "reasoningEffort", "reasoningEffort=high", null),
+                arguments("minimax", "MiniMax-M3.1-Flash", "reasoningEffort", "reasoningEffort=none", r),
+                arguments("minimax", "MiniMax-M3.1-Flash", "reasoningEffort", "reasoningEffort=high", null),
                 arguments("minimax", "MiniMax-M3", "reasoningEffort", "reasoningEffort=none", null),
-                arguments("minimax", "MiniMax-M3.1-Flash-Preview", "thinkingType", "thinkingType=disabled", r),
+                arguments("minimax", "MiniMax-M3.1-Flash", "thinkingType", "thinkingType=disabled", r),
                 arguments("minimax", "MiniMax-M2.7-highspeed", "thinkingType", "thinkingType=disabled", i),
                 arguments("minimax", "MiniMax-M3", "thinkingType", "thinkingType=disabled", null),
                 // OpenRouter

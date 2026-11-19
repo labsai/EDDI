@@ -6,6 +6,50 @@
   "entries": [
     {
       "provider": "anthropic",
+      "model": "claude-mythos-5-2*",
+      "inputPricePer1M": 8,
+      "outputPricePer1M": 40,
+      "cacheReadPricePer1M": 0.2,
+      "cacheWritePricePer1M": 10,
+      "asOf": "2026-11-19",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "Mythos is limited-availability; cache rates assumed equal to the matching Fable generation"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5-1*",
+      "inputPricePer1M": 10,
+      "outputPricePer1M": 50,
+      "cacheReadPricePer1M": 0.25,
+      "cacheWritePricePer1M": 12.5,
+      "asOf": "2026-11-19",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "Mythos is limited-availability; cache rates assumed equal to the matching Fable generation"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-mythos-5*",
+      "inputPricePer1M": 10,
+      "outputPricePer1M": 50,
+      "cacheReadPricePer1M": 1,
+      "cacheWritePricePer1M": 12.5,
+      "asOf": "2026-11-19",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "Mythos is limited-availability; cache rates assumed equal to the matching Fable generation"
+    },
+    {
+      "provider": "anthropic",
+      "model": "claude-fable-5-2*",
+      "inputPricePer1M": 8,
+      "outputPricePer1M": 40,
+      "cacheReadPricePer1M": 0.2,
+      "cacheWritePricePer1M": 10,
+      "asOf": "2026-11-19",
+      "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+      "note": "cache writes at the 5-minute rate; set the 1-hour rate if you cache for an hour"
+    },
+    {
+      "provider": "anthropic",
       "model": "claude-fable-5-1*",
       "inputPricePer1M": 10,
       "outputPricePer1M": 50,

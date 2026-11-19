@@ -14,7 +14,7 @@
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
               "effect": "rejected",
               "note": "This reasoning model rejects sampling settings such as temperature and topP."
             },
@@ -55,7 +55,7 @@
           "max": 1,
           "rules": [
             {
-              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
               "effect": "rejected",
               "note": "This reasoning model rejects sampling settings such as temperature and topP."
             },
@@ -231,7 +231,7 @@
               "note": "This model has no reasoning effort setting."
             },
             {
-              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
+              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
               "effect": "rejected",
               "note": "This model does not support reasoningEffort none.",
               "when": {
@@ -441,7 +441,7 @@
           "default": 1,
           "rules": [
             {
-              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model accepts only the default temperature of 1.",
               "unless": {
@@ -482,7 +482,7 @@
           "max": 1,
           "rules": [
             {
-              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model rejects temperature and topP sent together.",
               "when": {
@@ -490,7 +490,7 @@
               }
             },
             {
-              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model accepts only the default topP of 0.99.",
               "unless": {
@@ -520,7 +520,7 @@
           "min": 0,
           "rules": [
             {
-              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model rejects topK."
             },
@@ -572,7 +572,7 @@
           ],
           "rules": [
             {
-              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-5(-[12])?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "Thinking mode enabled (with a fixed budget) is not supported on this model; use adaptive.",
               "when": {
@@ -594,7 +594,7 @@
               }
             },
             {
-              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-5-5|sonnet-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-5-5|sonnet-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This model always thinks; disabled is not accepted.",
               "when": {
@@ -669,7 +669,7 @@
           "min": 1024,
           "rules": [
             {
-              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-[12])?|mythos-5(-[12])?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "A fixed thinking budget is not supported on this model; use effort."
             }
@@ -963,7 +963,8 @@
             "minimal",
             "low",
             "medium",
-            "high"
+            "high",
+            "xhigh"
           ],
           "rules": [
             {
@@ -1325,7 +1326,7 @@
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.[12])",
               "effect": "rejected",
               "note": "Azure reasoning models reject frequencyPenalty."
             }
@@ -1342,7 +1343,7 @@
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.[12])",
               "effect": "rejected",
               "note": "Azure reasoning models reject presencePenalty."
             }
@@ -2986,7 +2987,7 @@
           "type": "enum",
           "group": "reasoning",
           "label": "Reasoning effort",
-          "description": "How much MiniMax-M3.1-Flash-Preview thinks.",
+          "description": "How much MiniMax-M3.1-Flash thinks.",
           "enum": [
             "low",
             "medium",
@@ -2996,9 +2997,9 @@
           ],
           "rules": [
             {
-              "models": "^MiniMax-M3\\.1-Flash-Preview$",
+              "models": "^MiniMax-M3\\.1-Flash(-Preview)?$",
               "effect": "rejected",
-              "note": "MiniMax-M3.1-Flash-Preview rejects reasoningEffort none.",
+              "note": "MiniMax-M3.1-Flash rejects reasoningEffort none.",
               "when": {
                 "key": "reasoningEffort",
                 "values": [
@@ -3047,9 +3048,9 @@
           "body": true,
           "rules": [
             {
-              "models": "^MiniMax-M3\\.1-Flash-Preview$",
+              "models": "^MiniMax-M3\\.1-Flash(-Preview)?$",
               "effect": "rejected",
-              "note": "MiniMax-M3.1-Flash-Preview always thinks.",
+              "note": "MiniMax-M3.1-Flash always thinks.",
               "when": {
                 "key": "thinkingType",
                 "values": [
