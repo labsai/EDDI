@@ -22,7 +22,7 @@ changelog, Mistral models, Moonshot models page, xAI release notes).
   (fixed temperature/topP, no topK, adaptive thinking only); `gpt-6.2*` rejects
   sampling parameters unconditionally and has no `none` effort; Azure
   `gpt-6.2*` rejects the penalty parameters; Gemini `thinkingLevel` accepts
-  `xhigh` (Gemini 4 Neon/Hydrogen).
+  `xhigh`, which a rule restricts to Gemini 4 Neon/Hydrogen (other models reject it).
 - **Reference prices:** `claude-fable-5-2*` at $8/$40 (it would otherwise match
   the $10/$50 `claude-fable-5*` fallback). GPT-6.2 and Gemini 4 prices are left
   unset (`unpricedPolicy: ALLOW`) until published figures are confirmed.
@@ -41,4 +41,6 @@ confirmable from docs: the `*-latest` Mistral aliases (the model pages hide an a
 **Not done / open:** `gpt-6.2-*` `reasoningEffort` and `verbosity` support was
 not confirmed from the docs; Gemini 4 sampling-parameter behaviour is not
 documented, so the existing "3.6 and newer ignore temperature" rule is
-unchanged. DeepSeek, Qwen, GLM and MiniMax ids were not re-verified.
+unchanged. The DeepSeek, Qwen, GLM and MiniMax ids were re-checked against the vendors' model lists
+(see the second pass above); what remains unconfirmed is only the list under "Not confirmable from docs". Their
+*parameter rules* were not re-verified against the APIs.

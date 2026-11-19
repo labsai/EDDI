@@ -987,6 +987,17 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
                   "minimal"
                 ]
               }
+            },
+            {
+              "models": "^(models/)?gemini-(?!4-(neon|hydrogen))",
+              "effect": "rejected",
+              "note": "Thinking level xhigh exists only on Gemini 4 Neon and Hydrogen.",
+              "when": {
+                "key": "thinkingLevel",
+                "values": [
+                  "xhigh"
+                ]
+              }
             }
           ],
           "source": "https://ai.google.dev/gemini-api/docs/generate-content/thinking"
