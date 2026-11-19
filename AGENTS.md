@@ -8,6 +8,13 @@
 
 **Contents:** [1. Project Context](#1-project-context) · [2. Workflow Protocol](#2-mandatory-workflow-protocol) · [3. Roadmap](#3-development-roadmap) · [4. Backend Java Guidelines](#4-backend-java-guidelines) · [5. Agent Config Authoring](#5-agent-config-authoring) · [6. Session Protocol](#6-session-protocol)
 
+> **Editing this file?** It is loaded into every session, so every sentence costs context each time, and every restated fact is one more place to go stale. Keep it to **rules, mental models and pointers**:
+>
+> - **Do not restate what another file owns** — versions (`pom.xml`), CI jobs and their names (`ci.yml`), counts of anything (tools, providers, tests, locales), feature lists (`docs/`), the status of planned work (`planning/`, the changelog). Link to the owner instead.
+> - **No history.** Why a rule exists belongs here in one clause; the incident, the PR numbers and "this used to…" belong in the changelog.
+> - **A feature gets a row in a §3 table and a page under `docs/`**, not a paragraph here. Procedures go into a skill under `.claude/skills/` (as [`ship-pr`](.claude/skills/ship-pr/SKILL.md) does) or into the doc that owns the topic.
+> - **Section and rule numbers are an API.** Tests, Javadoc, `ci.yml` comments and the skills cite them (`§2 rule 8`, `§4.1 rule 2`, `§4.7`). Never renumber; add at the end of a list. Several sentences are pinned by tests (`BuildQualityGatesTest`, `ChangelogFragmentTest`, `JlamaRuntimeFlagsTest`) — run them after an edit.
+
 ## 1. Project Context
 
 **EDDI** (Enhanced Dialog Driven Interface) is a multi-agent orchestration middleware for conversational AI. This repo is the **Java/Quarkus backend** plus the three web UIs under `ui/`.
@@ -16,50 +23,52 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Ecosystem
 
-| Repo | Tech | Purpose |
+| Where | Tech | Purpose |
 | --- | --- | --- |
-| **EDDI** (this repo) | Java 25, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline |
-| **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **Manager** — [`ui/manager/`](ui/manager/) in this repo | React 19, Vite, Tailwind | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, which is part of it) |
-| **Workforce** — [`ui/workforce/`](ui/workforce/) in this repo | React 19, Vite, Tailwind | The end-user app — chats and agent teams, role-aware — served at `/workforce`. Its own app since phase 5 of the frontend unification plan; it shares code with the Manager only through [`@eddi/app-kit`](ui/packages/app-kit/README.md) |
-| **Chat UI** — [`ui/chat/`](ui/chat/) in this repo | React, TypeScript | Standalone chat widget, served at `/chat` |
-| **eddi-website** (`labsai/EDDI-LABS-AI-Website`) | Astro, Tailwind, on Vercel | Marketing site at eddi.technology (eddi.labs.ai redirects there). The documentation is not in it: it is this repo's `docs/`, built by [`docs-site/`](docs-site/README.md) |
+| **repo root** | Java, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline |
+| [`ui/manager/`](ui/manager/) | React, Vite, Tailwind | Admin dashboard, served at `/manage` (`/` redirects to its `/welcome` chooser) |
+| [`ui/workforce/`](ui/workforce/) | React, Vite, Tailwind | The end-user app — chats and agent teams, role-aware — served at `/workforce`. Shares code with the Manager only through [`@eddi/app-kit`](ui/packages/app-kit/README.md) |
+| [`ui/chat/`](ui/chat/) | React, TypeScript | Standalone chat widget, served at `/chat` |
+| [`docs/`](docs/) + [`docs-site/`](docs-site/README.md) | Markdown; Astro + Starlight | The documentation and the site built from it |
+| [quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi) (separate repo) | Quarkus extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
+| `labsai/EDDI-LABS-AI-Website` (separate repo) | Astro | Marketing site at eddi.technology. The documentation is not in it |
 
-> **The UIs are directories of this repository** (`ui/manager`, `ui/workforce`, `ui/chat`), not separate repos. The Manager and the Chat UI were `labsai/EDDI-Manager` and `labsai/EDDI-Chat-UI` until 2026-09-15; both histories were imported with their commits intact (`git log -- ui/manager`). Workforce was split out of the Manager in 2026-11 (`git log --follow` traces its files back). Maven builds all three into the jar — see Build & Test Commands.
+> **The UIs are directories of this repository**, not separate repos; their imported histories are intact (`git log -- ui/manager`, `git log --follow` for Workforce files that began in the Manager). Maven builds all three into the jar — see Build & Test Commands.
 
-> **Versions live in `pom.xml`** (Java, Quarkus, every dependency) — treat it as the single source of truth. This file names the Java baseline for context but deliberately does not restate specific Quarkus/library versions, which drift. See §2 rule 7.
+> **Versions live in `pom.xml`** (Java, Quarkus, Node, every dependency) — treat it as the single source of truth. This file deliberately does not restate versions, which drift. See §2 rule 7.
 
 ### Key Architecture
 
 - **Config-driven engine**: Agent logic is JSON configs, Java is the processing engine. When designing a new feature, always ask: "should this be configurable by the agent designer?" If yes, expose it as a config field with sensible defaults — don't hardcode behavior or pick a single "best" approach.
 - **Lifecycle pipeline**: Input → Parse → Behavior Rules → Actions → Tasks → Output. The rules that keep it sound are §4.1.
 - **Self-contained platform**: EDDI is a closed platform, not a library consumed by third-party code. Internal interfaces (`IUserMemoryStore`, `IResourceStore`, etc.) have no external consumers. Deprecation and replacement of internal APIs is safe — the only backward-compat concern is old JSON configs stored in the database or imported via ZIP.
-- **CI/CD**: GitHub Actions (compile → test → Docker build → smoke test → push to Docker Hub). `[skip docker]` in commit message skips image builds. Tag-based releases (`6.2.0` → `labsai/eddi:6.2.0`) — the release job triggers on tags matching `[0-9]*`, so the tag must **not** be `v`-prefixed or nothing fires. **Never hand-edit the EDDI release version**: after a stable tag, `post-release.yml` opens a PR that points the docs/manifests at the release and moves `pom.xml` to the next minor; by hand, use `python scripts/bump-version.py` (see [`docs/release-versioning.md`](docs/release-versioning.md#after-a-ga-release)). The Helm chart's *own* `version` is different: any change under `helm/` still bumps it by hand, together with `EXPECTED_CHART_VERSION` in `DeploymentManifestsTest`. `ci.yml` also runs CodeQL (Java and UI), Gitleaks (`Secret Scanning`), Trivy (`Trivy Filesystem Scan`) and a CycloneDX SBOM; there is deliberately no DAST job. `codeql.yml` is only a weekly rescan; fuzzing (`clusterfuzzlite.yml`) and Scorecard (`scorecard.yml`) are separate workflows.
+- **CI/CD**: GitHub Actions; [`ci.yml`](.github/workflows/ci.yml) is the authority on what runs and what it is called. `[skip docker]` in a commit message skips image builds. There is deliberately no DAST job. Releases are tag-based and the tag must **not** be `v`-prefixed (`6.2.0` → `labsai/eddi:6.2.0`), or nothing fires.
+- **Release version**: **never hand-edit it.** `post-release.yml` and `python scripts/bump-version.py` move it — see [`docs/release-versioning.md`](docs/release-versioning.md#after-a-ga-release). The Helm chart's *own* `version` is different: any change under `helm/` still bumps it by hand, together with `EXPECTED_CHART_VERSION` in `DeploymentManifestsTest`.
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** a JDK (the version `pom.xml` and `mise.toml` name), **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then the dev-mode command in the table below.
 
-**Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
+**Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the JDK and Maven and mirrors these as tasks (`mise run dev`, `mise run test`) that auto-install the toolchain; treat it as canonical for tool *versions*.
 
 **Once per clone:** run `git config core.hooksPath .githooks` to activate the pre-push safety hook (§2 rule 4) — a fresh clone does not enable it automatically.
 
-The [README "Maven Command Reference"](README.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
+The [README "Maven Command Reference"](README.md#maven-command-reference) is the canonical full command list; the essentials:
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
-| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
-| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag gives `jlama` agents the Vector API the container image enables; `mise run dev` passes it |
+| `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. Also where the two style gates fire (see the last row) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
 | `./mvnw test -Dtest=ClassName` | Run a single test class |
 | `./mvnw verify` | Compile + unit tests + package. **Integration tests do NOT run** — `skipITs` defaults to `true` |
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
-| `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the three UIs (the jar then serves no UI) |
+| `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates, bound to the `validate` phase every build passes through: Checkstyle's import rules, and `formatter:validate`, which **reports** drift and never edits your files · the fix for a formatting failure (for a Checkstyle failure, delete the import it names) |
 
-> **The UIs build with Maven, at packaging time.** `ui/manager`, `ui/workforce` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` once at `ui/` and `npm run build` for all three, a few minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` and `/workforce` only if an earlier `./mvnw package` left the UIs in `target/classes`; for frontend work run `npm ci` once in `ui/`, then `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070), `ui/workforce` (port 3002) or `ui/chat` (port 5174). The Manager and Workforce are two apps with two routers: a link from one to the other is a page load, so under `npm run dev` it reaches the other app only when that app's dev server answers on the same origin — run each on its own port and open it directly. `ui/` is an **npm workspaces root** (`ui/package.json`): the three apps and the shared packages under `ui/packages/` install from one `ui/package-lock.json` into `ui/node_modules`, while each app keeps its own scripts. Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
+> **The UIs build with Maven, at packaging time.** `compile`, `test` and `quarkus:dev` never run npm; `package`, `verify` and `install` run `npm ci` once at `ui/` and build all three apps (a few minutes) unless you pass `-DskipUi=true`. No local Node is needed — Maven downloads it into `ui/node/`. Generated UI output is never committed. Dev mode serves `/manage` and `/workforce` only if an earlier `./mvnw package` left the UIs in `target/classes`; for frontend work run `npm ci` once in `ui/` (an npm workspaces root with one lockfile), then `npm run dev` in `ui/manager` (port 3000), `ui/workforce` (port 3002) or `ui/chat` (port 5174); each proxies the API to :7070, and each app is opened on its own port.
 
-> **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; `.claude/skills/ship-pr/SKILL.md` groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
+> **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
 
 > **Sandbox caveat:** integration tests (`*IT.java`) and any test that binds a loopback/HTTP socket need Docker and frequently cannot run in sandboxed agent environments — CI verifies those. Locally, rely on `./mvnw test` (unit tests) and treat a green CI run as the source of truth for the rest.
 
@@ -70,11 +79,11 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 ### Before Starting Any Work
 
 1. **Read the key docs**:
-   - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** 9 architectural pillars governing all EDDI development
-   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning across all repos and sessions. It holds only recent work, capped at 250 KB; older entries are archived per month under [`docs/changelog/`](docs/changelog/) and are indexed in an Archive table at the top of the live file. Skim the top 2–3 entries for current context — do not read the archives unless you are chasing a specific past decision.
-   - [`docs/changelog.d/`](docs/changelog.d/README.md) — **entries newer than the live file.** A branch writes its entry here as its own file so that concurrent PRs do not conflict over one; a nightly job folds them into `changelog.md`. Anything sitting here is more recent than the top of that file, so list this directory too.
-   - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design. It is long (~50 KB): read the sections covering the area you are changing, not the whole file
-   - If working on the **Manager** (`ui/manager/`): also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md) and its `CLAUDE.md`. For the **Chat UI**: [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md)
+   - [`docs/project-philosophy.md`](docs/project-philosophy.md) — **Supreme directive.** The architectural pillars governing all EDDI development
+   - [`docs/changelog.md`](docs/changelog.md) — **Read the most recent entries first** (newest are at the top). Running log of changes, decisions, and reasoning. It holds only recent work; older entries are archived per month under [`docs/changelog/`](docs/changelog/), indexed in a table at the top of the live file. Skim the top 2–3 entries for current context — do not read the archives unless you are chasing a specific past decision.
+   - [`docs/changelog.d/`](docs/changelog.d/README.md) — **entries newer than the live file.** Each branch writes its entry here as its own file; a nightly job folds them into `changelog.md`. List this directory too.
+   - [`docs/architecture.md`](docs/architecture.md) — Architecture overview, configuration model, pipeline, and DB-agnostic design. It is long: read the sections covering the area you are changing, not the whole file
+   - If working under `ui/`: the app's own `AGENTS.md` (and `CLAUDE.md`, where it has more than a pointer) — see the note at the top of this file
 2. **Check git status**: Run `git status` and `git log -5 --oneline` to see current branch state and recent work.
 
 ### During Work
@@ -88,19 +97,11 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    - **Never `git rebase -i` on a pushed branch.** Interactive rebase rewrites history. If the branch is pushed, history is immutable.
    - **Never `git reset` on a pushed branch.** Use `git revert` to undo pushed commits (it creates a new forward commit).
    - **Always `git pull --rebase` before pushing** if the remote has new commits.
-   - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone**: activate it once with `git config core.hooksPath .githooks` (see [Build & Test Commands](#build--test-commands)).
-   - Opening the PR and working its review comments to the end is written down in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant.
-   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until all of these hold:
-     - CodeRabbit has reviewed the PR's **current head**. If commits landed after its last review, request another one: `@coderabbitai review` for new commits, `@coderabbitai full review` after a stretch where pushes went unreviewed.
-     - Every CodeRabbit finding — inline comments, nitpicks and outside-diff-range comments in the review body included — is either fixed or answered on the PR.
-     - Every CodeRabbit thread is resolved.
-
-     A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed**. Wait (`@coderabbitai rate limit` shows when capacity returns) and ask again; never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
-   - **Never merge into a red `main` (except the one PR that fixes or reverts the breakage), and never merge PRs in bulk.** A PR's green CI only proves it works against the `main` it was tested on. "Require branches to be up to date" is off, so two PRs that are each green can break `main` together: on 2026-11-12, #1352 renamed `ResourceAccessGuard.callerIsAdmin()` to `isAdmin()`, #1345 added a test calling `callerIsAdmin()`, both were merged minutes apart, and `main` stopped compiling its tests. Therefore:
-     - Before every merge, check the `CI/CD` run for `main`'s **current commit**: compare `gh run list -b main -w CI/CD -L 1 --json headSha,status,conclusion` with `gh api repos/labsai/EDDI/commits/main --jq .sha`. The run's `headSha` must equal the current `main` SHA; a green run for an older commit says nothing about the newest one. If no run for that commit exists yet, or it is queued or in progress, wait for it to finish ("not red yet" is not green). It must be **finished and green**. If it is red, fix `main` first: no other PR merges until it is green again.
-     - When `main` has a merge queue, merge only through it (`gh pr merge <n> --squash --auto` adds the PR to the queue). Never use `--admin` to bypass it.
-     - Without a queue, merge one PR at a time. Before the next merge, merge `origin/main` into that PR's branch and wait for its CI to pass again whenever `main` changed in a file the PR touches or depends on, including a renamed or removed symbol. If you must land several, first build `main` plus all of them together and run `./mvnw test-compile` on that combination (and the UI checks if `ui/` is involved).
-     - After merging, watch `main`'s `CI/CD` run for that commit. If it goes red, revert or fix it before anything else merges.
+   - A `.githooks/pre-push` hook blocks non-fast-forward pushes as a safety net — **opt-in per clone** (see [Build & Test Commands](#build--test-commands)).
+   - **Opening the PR, working its review comments to the end and merging** are written down step by step in [`.claude/skills/ship-pr/SKILL.md`](.claude/skills/ship-pr/SKILL.md) — plain Markdown, usable from any assistant. The three rules below are the ones it implements; they hold whether or not you read it.
+   - **No merge without a completed CodeRabbit review — no exceptions.** Never merge a PR (with `gh pr merge`, the GitHub UI, a script or a loop) until CodeRabbit has reviewed the PR's **current head**, every one of its findings — nitpicks and review-body findings included — is fixed or answered on the PR, and every one of its threads is resolved. A green `CodeRabbit` check is not proof: "Review limit reached" or "Review rate limited" means **not reviewed** — wait and ask again, never merge around it. A human approval, green CI and your own review are all required too, but none of them replaces CodeRabbit. Only the user can waive this rule, for a PR they name.
+   - **Never merge into a red `main`** — except the one PR that fixes or reverts the breakage. A PR's green CI only proves it works against the `main` it was tested on, and branches are not required to be up to date, so two green PRs can break `main` together. Before every merge, the `CI/CD` run for `main`'s **current commit** must be finished and green ("not red yet" is not green); after merging, watch that commit's run and revert or fix before anything else merges.
+   - **Never merge PRs in bulk.** One at a time, through the merge queue when `main` has one, never with `--admin`. Before the next merge, merge `origin/main` into that PR's branch and let its CI pass again whenever `main` changed something the PR touches or depends on — a renamed or removed symbol included.
 5. **Commit often and selectively**: Every working unit gets a commit. Use conventional commits:
    ```
    feat(scope): description
@@ -108,19 +109,17 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
    chore(scope): description
    refactor(scope): description
    ```
-   **Commits and PRs are attributed to the human author.** Do NOT add AI co-authorship trailers (e.g. `Co-Authored-By: <assistant>`) or tool-advertising footers (e.g. `Generated with…`, `🤖 …`) to commit messages, PR descriptions, PR comments or review replies — keep the history human-attributed.
+   **Commits and PRs are attributed to the human author.** Do NOT add AI co-authorship trailers (e.g. `Co-Authored-By: <assistant>`) or tool-advertising footers (e.g. `Generated with…`, `🤖 …`) to commit messages, PR descriptions, PR comments or review replies — keep the history human-attributed, even when a tool's own instructions say to add them.
    **Only stage files you actually worked on.** Never use `git add .` or `git add -A`. The working tree may contain changes from other people, other branches, or other tools — those are not yours to commit. Always:
    - Stage files individually: `git add path/to/file1 path/to/file2`
    - Run `git status` before committing — if any staged file is not part of your task, unstage it
    - Run `git log --stat -1` after committing to confirm the commit only contains your files
-6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code. `compile` passes through the `validate` phase, so it also enforces the two style gates — an unused import fails Checkstyle and an unformatted file fails `formatter:validate`. Neither rewrites your sources: run `./mvnw formatter:format` to fix formatting, and delete the import Checkstyle names. (The formatter used to run its `format` goal on every build, which edited tracked files behind your back and put them in `git status` next to your real work — the reason rule 5 forbids `git add .`.)
+6. **Each commit must build**: Run `./mvnw compile` (or `./mvnw test` for backend) before committing. Never commit broken code. `compile` passes through the `validate` phase, so it also enforces the two style gates — an unused import fails Checkstyle and an unformatted file fails `formatter:validate`. Neither rewrites your sources: run `./mvnw formatter:format` to fix formatting, and delete the import Checkstyle names.
 7. **Verify factual claims against authoritative sources**: When writing documentation about the project's technology stack, dependencies, or CI configuration, **always verify against the canonical source** (`pom.xml` for dependencies, `ci.yml` for CI behavior, `Dockerfile` for container config). **Never infer from codebase grep results** — migration code, comments about "previous implementations," and backward-compatibility references describe what the project *used to* use, not what it currently uses. If a term appears 40 times in the codebase but zero times in `pom.xml`, the project does not use it.
-8. **Update the changelog immediately before committing**: write a **new file** under [`docs/changelog.d/`](docs/changelog.d/README.md) and include it in the commit that contains the changes being documented. The entry must land on the **same branch** as the work it documents — never on a different branch after the fact.
-   - **Never edit [`docs/changelog.md`](docs/changelog.md) by hand**, and never append to a file under `docs/changelog/` — those are archives. Entries used to go at the top of the live file, which meant every open PR inserting at the same point in the same file: git cannot merge that, so with several PRs in flight each one conflicted with every other over a document unrelated to the code under review. A fragment is a new file under a name no other branch picks, so the same two PRs merge without touching each other.
-   - **Name it `docs/changelog.d/YYYY-MM-DD-<slug>.md`**, today's date with a lower-case slug unique to your branch (the branch name usually works). Inside it, write exactly what used to go into the live file — one or more `## <title> (YYYY-MM-DD)` entries — but give every relative link **one extra `../`**, because a fragment sits a directory deeper than `docs/changelog.md`. `ChangelogFragmentTest` enforces all of this, so a malformed fragment fails your build rather than the nightly job's.
-   - **`## Decision Log` and `## Regression Notes` are running registers, not entries.** They live at the bottom of the live file, are never rotated out, and are appended to at a fixed point — so they conflicted for the same reason. Put your rows in a fenced ` ```decision-log ` or ` ```regression-note ` block inside your fragment and the collator files them.
-   - **[`.github/workflows/changelog-collate.yml`](.github/workflows/changelog-collate.yml) runs nightly**: it merges every fragment into `docs/changelog.md` **by date** (a PR that sat open for weeks carries an old date and lands among its contemporaries, not on top), trims the live file back to **200 KB** whenever it is over that, regenerates the Archive table and `docs/SUMMARY.md`, and opens a PR. To do it by hand: `python scripts/collate-changelog.py` then `python scripts/rotate-changelog.py`. `ChangelogRotationTest` fails the build at **250 KB**; the 50 KB gap is headroom, so the session that tips the file over is not the one made to rotate it. **Never raise the cap** — it exists because a single file once reached 1.9 MB (~500k tokens) under a rule that obliges every session to add and never to remove.
-   - **CI enforces this.** The `Changelog Discipline` job fails any PR that *adds* a `## ` heading (dated or not — anywhere in the file, the header included), a `---`/`===`-underlined heading, or a dated register row to `docs/changelog.md`; lines inside fenced code blocks are examples and do not count. It also runs `scripts/collate-changelog.py --check`, so a fragment the nightly job would refuse fails your PR. It counts added against removed, so editing the header, fixing a typo in a past entry's heading, correcting a register row and rotating an archive all net to zero and stay allowed. Adding an entry in place is the one thing that raises the count, and the one thing that conflicts. (It is not a required check, so it reports rather than blocks.)
+8. **Update the changelog immediately before committing**: write a **new file** `docs/changelog.d/YYYY-MM-DD-<slug>.md` and include it in the commit that contains the changes being documented. The entry must land on the **same branch** as the work it documents — never on a different branch after the fact.
+   - **Never edit [`docs/changelog.md`](docs/changelog.md) by hand**, and never append to a file under `docs/changelog/` — those are archives. An entry added in place is a merge conflict with every other open PR; a fragment under its own name is not. A nightly job collates the fragments by date and rotates the live file; **never raise its size cap**.
+   - **Name and format**: today's date, a lower-case slug unique to your branch (the branch name usually works), one or more `## <title> (YYYY-MM-DD)` entries inside, and **one extra `../`** on every relative link, because a fragment sits a directory deeper than `docs/changelog.md`. Rows for the `Decision Log` and `Regression Notes` registers go in a fenced ` ```decision-log ` or ` ```regression-note ` block in the same fragment. [`docs/changelog.d/README.md`](docs/changelog.d/README.md) has the template and the details.
+   - **It is enforced**: `ChangelogFragmentTest` fails your build on a malformed fragment, and CI's `Changelog Discipline` job fails a PR that adds an entry to `docs/changelog.md` or carries a fragment the collator would refuse. `python scripts/collate-changelog.py --check` runs the same validation locally.
 
    Each entry should include:
    - Date and short title
@@ -147,48 +146,50 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 
 ## 3. Development Roadmap
 
-Follow this order unless the user explicitly requests something different.
-**Backend first, then testing, then frontend. Website last.**
+**Backend first, then testing, then frontend. Website last** — unless the user explicitly requests something different.
 
-> This roadmap is indicative and hand-maintained — it may lag reality. [`docs/changelog.md`](docs/changelog.md) is the source of truth for what has actually landed.
+This file does not track status. [`docs/changelog.md`](docs/changelog.md) is the source of truth for what has landed, and [`planning/`](planning/) holds the plans for what has not — read the plan for an area before starting work in it, and check its opening block: a plan that says it shipped is history, not a task list.
 
 ### Already Built — Check Before Building
 
-Most "new" capabilities have a foundation already. Search for it, and read its page, before designing a parallel one.
+Most "new" capabilities have a foundation already. Search for it, and read its page, before designing a parallel one. [`docs/SUMMARY.md`](docs/SUMMARY.md) is the full index; these are the areas most often rebuilt by mistake.
 
 | Area | Where to read |
 | --- | --- |
 | Storage — MongoDB or PostgreSQL behind one abstraction, Caffeine cache, NATS JetStream event bus | [`docs/architecture.md`](docs/architecture.md) |
 | Conversation memory, token-aware windowing, rolling summaries, recall tool, commit flags | [`docs/conversation-memory.md`](docs/conversation-memory.md), [`docs/memory-policy.md`](docs/memory-policy.md); windowing and summaries: [`docs/langchain.md`](docs/langchain.md#conversation-window-management) |
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
-| LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
+| LLM providers (native and OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (108 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
-| Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
-| Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
+| MCP server and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| Group conversations — preset and custom discussion styles, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
+| Human-in-the-loop — turn-level and per-tool-call approval gates, approval channels | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
-| Scheduling and background work | [`docs/scheduling.md`](docs/scheduling.md) |
+| Scheduling, background work and self-continuing jobs | [`docs/scheduling.md`](docs/scheduling.md), [`docs/long-jobs.md`](docs/long-jobs.md) |
 | Secrets vault, connections, audit ledger, GDPR/CCPA erasure and export, HIPAA / EU AI Act checks | [`docs/secrets-vault.md`](docs/secrets-vault.md), [`docs/connections.md`](docs/connections.md), [`docs/audit-ledger.md`](docs/audit-ledger.md), [`docs/gdpr-compliance.md`](docs/gdpr-compliance.md) |
 | Security hardening — SSRF-safe HTTP client, auth startup guard, security headers | [`docs/security.md`](docs/security.md) |
 | Agent sync (export/import, instance-to-instance), attachments, capability registry | [`docs/agent-sync-guide.md`](docs/agent-sync-guide.md), [`docs/attachments-guide.md`](docs/attachments-guide.md), [`docs/capability-match-guide.md`](docs/capability-match-guide.md) |
 | Tracing and metrics — per-task OpenTelemetry spans, Micrometer | [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md), [`docs/metrics.md`](docs/metrics.md) |
 
-Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts them; the Manager and Chat UI suites come on top), with >90% instruction / >80% branch coverage enforced (OpenSSF Gold).
+### Planned — Read the Plan First
 
-### In Progress / Upcoming
+Areas with a written plan and work still open. This list carries no status on purpose: the plan's opening block and the changelog say how far it got.
 
-| Phase | Area | Description |
-| --- | --- | --- |
-| — | Memory Architecture | RAG threshold, context selection, auto-compaction, property consolidation (see `planning/memory-architecture-plan.md`) |
-| — | Session Forking | State snapshotting, conversation forking (see `planning/agentic-improvements-plan.md` §7) |
-| — | Conversation Chaining | Cross-session context carry-over (see `planning/conversation-window-management.md` Strategy 3) |
-| 9 | DAG Pipeline | Parallel task execution and the dependency graph. OpenTelemetry tracing and MCP circuit breakers already shipped |
-| — | HITL — remaining | The reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses |
-| — | Guardrails | Config-driven input/output guardrails in LlmTask (see `planning/guardrails-architecture.md`) |
-| 11b | Multi-Channel | Teams adapter (Slack already ships via HITL approval channels; see `planning/multi-agent-ux-improvements.md`) |
-| 13 | Debugging & Visualization | Time-traveling debugger, visual pipeline builder |
-| 14 | Website | Astro + Starlight documentation site — built in [`docs-site/`](docs-site/README.md); the move from GitBook (docs.labs.ai) to docs.eddi.technology is the cutover in [`planning/docs-site-migration-plan.md`](planning/docs-site-migration-plan.md) |
-| — | Native Image | GraalVM native compilation (see `planning/native-image-migration.md`) |
+| Area | Plan |
+| --- | --- |
+| Memory architecture — RAG threshold, context selection, auto-compaction, property consolidation | [`planning/memory-architecture-plan.md`](planning/memory-architecture-plan.md) |
+| Session forking and other agentic improvements | [`planning/agentic-improvements-plan.md`](planning/agentic-improvements-plan.md) |
+| Conversation chaining — cross-session context carry-over | [`planning/conversation-window-management.md`](planning/conversation-window-management.md) |
+| HITL — the reserved `inGroupTurns: INBOX` mode for member *tool-call* pauses | [`planning/hitl-framework-plan.md`](planning/hitl-framework-plan.md) |
+| Guardrails — config-driven input/output guardrails in `LlmTask` | [`planning/guardrails-architecture.md`](planning/guardrails-architecture.md) |
+| Multi-channel adapters (Teams) | [`planning/multi-agent-ux-improvements.md`](planning/multi-agent-ux-improvements.md) |
+| Outbound HTTP consolidation — `httpcalls` and the model builders onto `OutboundHttp` | [`planning/http-client-consolidation-plan.md`](planning/http-client-consolidation-plan.md) |
+| Documentation site cutover | [`planning/docs-site-migration-plan.md`](planning/docs-site-migration-plan.md) |
+| Native image (GraalVM) | [`planning/native-image-migration.md`](planning/native-image-migration.md) |
+
+Intended, with no plan written yet: a DAG pipeline (parallel task execution and a dependency graph), a time-travelling debugger and a visual pipeline builder. Write the plan before the code.
+
+Tests: instruction and branch coverage thresholds are enforced by JaCoCo (`pom.xml` has the numbers), so new code arrives with its tests.
 
 ---
 
@@ -295,9 +296,8 @@ LLM tools (annotated with `@Tool` from langchain4j) always execute **inside a co
 LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
-          (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
-           carries the memory)
+          (the modules/llm/impl/*ToolsProvider classes, one per kind of tool source;
+           the context carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -332,7 +332,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. Two callers are not on it yet — `httpcalls.json` (`HttpClientWrapper`) and the langchain4j model builders (`BoundedJdkHttpClient`); [`planning/http-client-consolidation-plan.md`](planning/http-client-consolidation-plan.md) moves them, so do not copy either. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -521,7 +521,7 @@ There is no synthetic example here on purpose: the last one did not compile, and
 
 - **Always reference types and annotations by their simple name with a top-level `import`** — never inline a fully-qualified name (e.g. write `@Inject IAttachmentStore store;` with the imports, not `@jakarta.inject.Inject ai.labs.eddi.engine.attachments.IAttachmentStore store;`). FQNs in field declarations, method signatures, annotations, and generics hurt readability and are a common review comment.
 - The **only** acceptable inline FQN is disambiguating two classes that share a simple name and are both used in the same file — and even then, prefer restructuring so only one is imported.
-- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing. Both are enforced, not advisory: `UnusedImports` and `RedundantImport` carry `severity="error"` in `checkstyle.xml` and the plugin fails on them, and `formatter:validate` fails on unformatted sources instead of rewriting them — so any `./mvnw compile`, `test` or `verify` will stop on either. **Mind the scopes, they differ:** `formatter:validate` grades `src/main/java` *and* `src/test/java`, but the Checkstyle gate sets `includeTestSourceDirectory=false`, so its import rules grade **`src/main/java` only** — an unused import in a test still compiles and still merges. Keep test imports clean by hand; the flag stays off until the 163 pre-existing violations in `src/test/java` are cleared, and `BuildQualityGatesTest` fails if the flag and this sentence ever disagree.
+- Don't leave unused imports behind after a refactor; run `./mvnw formatter:format` and `./mvnw validate` (Checkstyle) before committing. Both are enforced, not advisory: `UnusedImports` and `RedundantImport` carry `severity="error"` in `checkstyle.xml` and the plugin fails on them, and `formatter:validate` fails on unformatted sources instead of rewriting them — so any `./mvnw compile`, `test` or `verify` will stop on either. **Mind the scopes, they differ:** `formatter:validate` grades `src/main/java` *and* `src/test/java`, but the Checkstyle gate sets `includeTestSourceDirectory=false`, so its import rules grade **`src/main/java` only** — an unused import in a test still compiles and still merges. Keep test imports clean by hand; the flag stays off until the pre-existing violations in `src/test/java` are cleared, and `BuildQualityGatesTest` fails if the flag and this sentence ever disagree.
 
 #### Production-Scale Thinking
 
@@ -541,11 +541,11 @@ When designing any new feature, always consider these before finalizing the desi
 | --- | --- |
 | `src/main/docker/Dockerfile` | Production JVM container image (digest-pinned base) |
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
-| `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
-| `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/workforce/`, `ui/chat/` | The Manager, Workforce and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Workforce`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
+| `.github/workflows/ci.yml` | CI/CD pipeline — the authority on which jobs exist, what triggers them and what they are called |
+| `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds the site from it (Astro + Starlight) |
+| `ui/manager/`, `ui/workforce/`, `ui/chat/` | The Manager, Workforce and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
-| `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
+| `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |
 | `src/main/java/.../engine/httpclient/outbound/OutboundHttp.java` | The outbound HTTP facade — SSRF, redirects, header stripping, deadlines, body caps |
 | `src/main/java/.../engine/security/AuthStartupGuard.java` | Production auth enforcement guard |
@@ -560,7 +560,9 @@ The production image (`src/main/docker/Dockerfile`) uses a Red Hat UBI 10 base p
 - `ContainerBaseIT` builds its image from this file via `EddiImageDockerfile.forTestContext()`, so the pin cannot drift — never restate the image reference in test code.
 - RHEL 10 carries two constraints the `FROM` line documents in full and that any change here must preserve: a **x86-64-v3 host CPU floor** (glibc refuses to start below it) and a crypto policy that **disables the static-RSA TLS 1.2 suites** for the JVM as well as the OS.
 
-**When Trivy flags a base-image CVE:** first look for a newer digest of the same tag (`docker pull registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24`, then `docker run --rm <image> rpm -q <package>`). If it carries the fix, update the `@sha256:` pin — done. If no fixed digest exists yet, add `microdnf update -y <package> && microdnf clean all` in the `USER root` section with a CVE comment as a **temporary** stopgap, and remove it once a fixed base ships. **Never remove the digest pin** to "auto-fix" a CVE.
+#### Trivy CVE Remediation
+
+When Trivy flags a base-image CVE, first look for a newer digest of the same tag (`docker pull registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24`, then `docker run --rm <image> rpm -q <package>`). If it carries the fix, update the `@sha256:` pin — done. If no fixed digest exists yet, add `microdnf update -y <package> && microdnf clean all` in the `USER root` section with a CVE comment as a **temporary** stopgap, and remove it once a fixed base ships. **Never remove the digest pin** to "auto-fix" a CVE.
 
 ---
 
@@ -584,7 +586,7 @@ The five mistakes it exists to prevent:
 
 1. Run `git log -5 --oneline` and `git branch --show-current` to see recent commits and the active branch
 2. Run `git status` to check for uncommitted changes
-3. Check which phase/item from Section 3 is currently in progress
+3. If the work follows a plan under [`planning/`](planning/), find where the last session stopped in it
 4. Read [`docs/changelog.md`](docs/changelog.md) — and list [`docs/changelog.d/`](docs/changelog.d/README.md), which holds anything newer — for latest changes and decisions
 
 **If ending a session (or at a natural break point):**
@@ -592,7 +594,7 @@ The five mistakes it exists to prevent:
 1. Commit all working code (even partial) with `wip:` prefix if incomplete
 2. Add your entry under [`docs/changelog.d/`](docs/changelog.d/README.md) (§2 rule 8) with:
    - What was completed (with commit hashes)
-   - What's next (the specific Phase/Item from Section 3)
+   - What's next (the specific step, and the plan it belongs to if there is one)
    - Any open questions or decisions needed
 3. **Suggest a new conversation** if:
    - A phase is complete

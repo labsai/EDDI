@@ -1,9 +1,9 @@
 ---
-description: EDDI Backend — AI Agent Instructions. Complete project context, architecture, and coding guidelines.
+description: EDDI — AI Agent Instructions. Complete project context, architecture, and coding guidelines.
 globs:
 alwaysApply: true
 ---
 
 Read and follow all instructions in the repository root file AGENTS.md.
 
-When working under `ui/manager/` also follow `ui/manager/AGENTS.md` and `ui/manager/CLAUDE.md`; under `ui/chat/`, `ui/chat/AGENTS.md`.
+When working under `ui/`, also follow the `AGENTS.md` of the app you are in (`ui/manager/`, `ui/workforce/`, `ui/chat/`) and its `CLAUDE.md` where one exists.
