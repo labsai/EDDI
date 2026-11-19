@@ -259,6 +259,65 @@ class EmailChannelSettingsTest {
         }
     }
 
+    @Nested
+    @DisplayName("actWhen and aliases (email v2 plan §7.1)")
+    class Addressing {
+
+        @Test
+        @DisplayName("defaults: actWhen always (upgrades unchanged), no aliases; both are common keys")
+        void defaults() {
+            var settings = EmailChannelSettings.from(minimal());
+            assertEquals(EmailChannelSettings.ActWhen.ALWAYS, settings.actWhen());
+            assertEquals(List.of(), settings.aliases());
+            Map<String, String> conversation = with("mode", "conversation");
+            conversation.put("smtpHost", "smtp.office365.com");
+            conversation.put("actWhen", "addressed");
+            conversation.put("aliases", "ap@contoso.com");
+            assertEquals(List.of(), EmailChannelSettings.validate(conversation), "valid in conversation mode too");
+            assertEquals(List.of(), EmailChannelSettings.validate(with("actWhen", "Addressed")));
+            assertEquals(EmailChannelSettings.ActWhen.ADDRESSED, EmailChannelSettings.from(with("actWhen", "addressed")).actWhen());
+        }
+
+        @Test
+        @DisplayName("an unknown actWhen is refused, and reads as the quieter 'addressed' if it is stored anyway")
+        void unknownActWhen() {
+            assertTrue(refused(with("actWhen", "sometimes"), "Unknown platformConfig.actWhen 'sometimes'"));
+            assertEquals(EmailChannelSettings.ActWhen.ADDRESSED, EmailChannelSettings.from(with("actWhen", "sometimes")).actWhen());
+        }
+
+        @Test
+        @DisplayName("aliases are normalised plain addresses, at most 20, never the address itself")
+        void aliases() {
+            var settings = EmailChannelSettings.from(with("aliases", " AP@Contoso.com, finance-list@contoso.com, ap@contoso.com"));
+            assertEquals(List.of("ap@contoso.com", "finance-list@contoso.com"), settings.aliases());
+            assertTrue(settings.isOwnAddress("ap@contoso.com"));
+            assertTrue(settings.isOwnAddress("invoices@contoso.com"));
+            assertFalse(settings.isOwnAddress("invoices+x@contoso.com"), "a plus-address is received, not sent from");
+            assertTrue(settings.receivesAs("invoices+x@contoso.com"));
+            assertFalse(settings.receivesAs("sales@contoso.com"));
+
+            assertTrue(refused(with("aliases", "not an address"), "aliases entry 1 is not a plain email address"));
+            assertTrue(refused(with("aliases", "invoices@contoso.com"), "is platformConfig.address itself"));
+            StringBuilder many = new StringBuilder();
+            for (int i = 0; i <= EmailChannelSettings.MAX_ALIASES; i++) {
+                many.append("a").append(i).append("@contoso.com,");
+            }
+            assertTrue(refused(with("aliases", many.toString()), "at most 20"));
+        }
+
+        @Test
+        @DisplayName("plus-addresses: same mailbox and domain, a non-empty tag")
+        void plusAddresses() {
+            assertTrue(EmailChannelSettings.isPlusAddressOf("invoices+urgent@contoso.com", "invoices@contoso.com"));
+            assertTrue(EmailChannelSettings.isPlusAddressOf("Invoices+Urgent@Contoso.com", "invoices@contoso.com"));
+            assertFalse(EmailChannelSettings.isPlusAddressOf("invoices+@contoso.com", "invoices@contoso.com"));
+            assertFalse(EmailChannelSettings.isPlusAddressOf("invoices+urgent@other.com", "invoices@contoso.com"));
+            assertFalse(EmailChannelSettings.isPlusAddressOf("sales+invoices@contoso.com", "invoices@contoso.com"));
+            assertFalse(EmailChannelSettings.isPlusAddressOf(null, "invoices@contoso.com"));
+            assertFalse(EmailChannelSettings.isPlusAddressOf("invoices+x@contoso.com", null));
+        }
+    }
+
     @Test
     @DisplayName("the open-trigger warning: no allowlist and no authentication requirement")
     void openTriggerWarning() {

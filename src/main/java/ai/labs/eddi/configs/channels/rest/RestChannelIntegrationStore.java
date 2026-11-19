@@ -19,6 +19,8 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.engine.mail.AddressNormalizer;
+import ai.labs.eddi.engine.mail.MentionExtractor;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -37,6 +39,7 @@ import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -570,6 +573,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         // No duplicate target names or trigger keywords across targets
         Set<String> usedNames = new HashSet<>();
         Set<String> allTriggers = new HashSet<>();
+        Set<String> usedMentions = new HashSet<>();
+        Set<String> usedAddresses = new HashSet<>();
+        EmailChannelSettings emailSettings = email ? EmailChannelSettings.from(config.getPlatformConfig()) : null;
         for (ChannelTarget target : targets) {
             if (target.getName() == null || target.getName().isBlank()) {
                 throw new BadRequestException("Every target must have a name.");
@@ -678,6 +684,94 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     }
                 }
             }
+            if (email) {
+                validateEmailTargetRules(target, emailSettings, usedMentions, usedAddresses);
+            } else if (hasAny(target.getMentions()) || hasAny(target.getAddresses()) || hasAny(target.getAllowedSenders())) {
+                // Mode-specific keys are refused the same way: a rule that never applies
+                // would read as if it did something.
+                throw new BadRequestException(
+                        "Target '" + target.getName() + "': mentions, addresses and allowedSenders are only supported for email "
+                                + "integrations.");
+            }
+        }
+    }
+
+    private static boolean hasAny(List<String> values) {
+        return values != null && !values.isEmpty();
+    }
+
+    /** Most mentions one email target may have. */
+    static final int MAX_MENTIONS_PER_TARGET = 10;
+    /** Most addresses or allowed-sender patterns one email target may have. */
+    static final int MAX_TARGET_LIST_ENTRIES = EmailChannelSettings.MAX_LIST_ENTRIES;
+
+    /**
+     * An email target's {@code mentions}, {@code addresses} and
+     * {@code allowedSenders} (email v2 plan §7.1). Normalised in place (handles
+     * lower-cased, addresses normalised) so what is stored is what is matched.
+     */
+    private static void validateEmailTargetRules(ChannelTarget target, EmailChannelSettings settings, Set<String> usedMentions,
+                                                 Set<String> usedAddresses) {
+        String name = target.getName();
+        if (target.getMentions() != null) {
+            List<String> mentions = target.getMentions();
+            if (mentions.size() > MAX_MENTIONS_PER_TARGET) {
+                throw new BadRequestException("Target '" + name + "': at most " + MAX_MENTIONS_PER_TARGET + " mentions.");
+            }
+            List<String> normalized = new ArrayList<>();
+            for (String mention : mentions) {
+                String handle = mention == null ? null : MentionExtractor.normalizeHandle(mention);
+                if (handle == null) {
+                    throw new BadRequestException("Target '" + name + "': mention '" + mention + "' must be 1-40 letters, digits, '_' or '-', "
+                            + "starting with a letter or digit, written without the '@'.");
+                }
+                if (!usedMentions.add(handle)) {
+                    throw new BadRequestException(
+                            "Duplicate mention: '" + handle + "'. Each mention must be unique across all targets.");
+                }
+                normalized.add(handle);
+            }
+            target.setMentions(normalized);
+        }
+        if (target.getAddresses() != null) {
+            List<String> addresses = target.getAddresses();
+            if (addresses.size() > MAX_TARGET_LIST_ENTRIES) {
+                throw new BadRequestException("Target '" + name + "': at most " + MAX_TARGET_LIST_ENTRIES + " addresses.");
+            }
+            List<String> normalized = new ArrayList<>();
+            for (String address : addresses) {
+                String value = address == null ? null : AddressNormalizer.tryNormalize(address).orElse(null);
+                if (value == null) {
+                    throw new BadRequestException("Target '" + name + "': address '" + address + "' is not a plain email address.");
+                }
+                // The mailbox has to receive it, or the rule could never match — and an
+                // address it does not receive is a typo or a misunderstanding either way.
+                if (!settings.aliases().contains(value) && !EmailChannelSettings.isPlusAddressOf(value, settings.address())) {
+                    throw new BadRequestException("Target '" + name + "': address '" + value + "' must be listed in platformConfig.aliases "
+                            + "or be a plus-address of platformConfig.address, so the mailbox receives it.");
+                }
+                if (!usedAddresses.add(value)) {
+                    throw new BadRequestException(
+                            "Duplicate target address: '" + value + "'. Each address may address one target only.");
+                }
+                normalized.add(value);
+            }
+            target.setAddresses(normalized);
+        }
+        if (target.getAllowedSenders() != null) {
+            List<String> senders = target.getAllowedSenders();
+            if (senders.size() > MAX_TARGET_LIST_ENTRIES) {
+                throw new BadRequestException("Target '" + name + "': at most " + MAX_TARGET_LIST_ENTRIES + " allowedSenders.");
+            }
+            List<String> trimmed = new ArrayList<>();
+            for (String sender : senders) {
+                if (!EmailChannelSettings.SenderPatternSyntax.isValid(sender)) {
+                    throw new BadRequestException("Target '" + name + "': allowedSenders entry '" + sender
+                            + "' must be 'user@domain', '*@domain' or '*@*.domain'.");
+                }
+                trimmed.add(sender.trim());
+            }
+            target.setAllowedSenders(trimmed);
         }
     }
 

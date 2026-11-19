@@ -134,14 +134,15 @@ public class EmailIntegrationDirectory {
     }
 
     /**
-     * The addresses of every email integration but {@code exceptId}, from the
-     * cache.
+     * The addresses and aliases of every email integration but {@code exceptId},
+     * from the cache: mail from any of them is another integration's own.
      */
     public Set<String> otherAddresses(String exceptId) {
         Set<String> addresses = new HashSet<>();
         for (EmailIntegration integration : all()) {
             if (!integration.id().equals(exceptId) && integration.settings().address() != null) {
                 addresses.add(integration.settings().address());
+                addresses.addAll(integration.settings().aliases());
             }
         }
         return addresses;

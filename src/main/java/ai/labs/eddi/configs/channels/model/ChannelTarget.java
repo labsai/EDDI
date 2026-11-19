@@ -35,6 +35,9 @@ public class ChannelTarget {
     private String targetId;
     private boolean observeMode;
     private ObserveConfig observeConfig;
+    private List<String> mentions;
+    private List<String> addresses;
+    private List<String> allowedSenders;
 
     public ChannelTarget() {
         this.triggers = new ArrayList<>();
@@ -113,5 +116,53 @@ public class ChannelTarget {
 
     public void setObserveConfig(ObserveConfig observeConfig) {
         this.observeConfig = observeConfig;
+    }
+
+    /**
+     * Email only: handles that address this target in the sender's own text, as
+     * {@code @handle} ({@code [a-z0-9][a-z0-9_-]{0,39}}, case-insensitive, unique
+     * across the integration's targets, at most 10). Unlike {@link #getTriggers()}
+     * they never match a subject word. Null (absent) for every other channel type.
+     *
+     * @since 6.8.0
+     */
+    public List<String> getMentions() {
+        return mentions != null ? new ArrayList<>(mentions) : null;
+    }
+
+    public void setMentions(List<String> mentions) {
+        this.mentions = mentions;
+    }
+
+    /**
+     * Email only: full addresses (an alias or distribution list delivering to the
+     * mailbox) whose presence in {@code To} or {@code Cc} addresses this target.
+     * Each must be one of the integration's {@code aliases} or a plus-address of
+     * its {@code address}, so the mailbox actually receives it.
+     *
+     * @since 6.8.0
+     */
+    public List<String> getAddresses() {
+        return addresses != null ? new ArrayList<>(addresses) : null;
+    }
+
+    public void setAddresses(List<String> addresses) {
+        this.addresses = addresses;
+    }
+
+    /**
+     * Email only: sender patterns ({@code user@domain}, {@code *@domain},
+     * {@code *@*.domain}). When not empty, only an authenticated sender matching
+     * one may reach this target, by any routing path, the default included — and a
+     * mail that may not is refused, never rerouted.
+     *
+     * @since 6.8.0
+     */
+    public List<String> getAllowedSenders() {
+        return allowedSenders != null ? new ArrayList<>(allowedSenders) : null;
+    }
+
+    public void setAllowedSenders(List<String> allowedSenders) {
+        this.allowedSenders = allowedSenders;
     }
 }

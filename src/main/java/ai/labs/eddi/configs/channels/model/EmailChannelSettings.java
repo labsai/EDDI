@@ -70,7 +70,9 @@ public record EmailChannelSettings(
         String aiDisclosure,
         ThreadParticipants threadParticipants,
         int maxRepliesPerThreadPerHour,
-        boolean honorReplyTo) {
+        boolean honorReplyTo,
+        ActWhen actWhen,
+        List<String> aliases) {
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "email";
@@ -105,12 +107,14 @@ public record EmailChannelSettings(
     public static final String KEY_THREAD_PARTICIPANTS = "threadParticipants";
     public static final String KEY_MAX_REPLIES_PER_THREAD_PER_HOUR = "maxRepliesPerThreadPerHour";
     public static final String KEY_HONOR_REPLY_TO = "honorReplyTo";
+    public static final String KEY_ACT_WHEN = "actWhen";
+    public static final String KEY_ALIASES = "aliases";
 
     /** Every key both modes read. */
     public static final Set<String> COMMON_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
             KEY_PROCESSED_ACTION, KEY_POLL_SECONDS, KEY_REQUIRE_AUTHENTICATION, KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST, KEY_IDENTITY_MODE,
             KEY_ATTACHMENTS, KEY_ATTACHMENT_MIME_TYPES, KEY_MAX_MESSAGE_BYTES, KEY_STRIP_QUOTED_HISTORY, KEY_INPUT_TEMPLATE,
-            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES);
+            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES, KEY_ACT_WHEN, KEY_ALIASES);
 
     /**
      * Keys only trigger mode reads: a conversation always threads, so
@@ -165,6 +169,8 @@ public record EmailChannelSettings(
     public static final int MAX_FOLDER_LENGTH = 200;
     public static final int MAX_LIST_ENTRIES = 200;
     public static final int MAX_OWNER_NOTIFY_ADDRESSES = 5;
+    /** Extra addresses that count as the integration's own, at most. */
+    public static final int MAX_ALIASES = 20;
     public static final BigDecimal MAX_DAILY_COST_BUDGET_USD = new BigDecimal("1000000");
 
     /**
@@ -236,6 +242,44 @@ public record EmailChannelSettings(
                 return ORIGINAL_SENDER_ONLY;
             }
             for (ThreadParticipants mode : values()) {
+                if (mode.id.equalsIgnoreCase(value.trim())) {
+                    return mode;
+                }
+            }
+            return null;
+        }
+    }
+
+    /**
+     * When a mail runs a turn (email v2 plan §7.1). Addressing is a noise filter,
+     * not a security boundary: who may make an agent act at all is decided by
+     * authentication, the sender lists and a target's {@code allowedSenders}.
+     */
+    public enum ActWhen {
+        /** Every mail that passes the guards runs a turn (the default). */
+        ALWAYS("always"),
+        /**
+         * Only mail that addresses the integration: a reply to its own mail, a mention
+         * of a target, or its address newly in {@code To}. Anything else is refused
+         * {@code not_addressed}.
+         */
+        ADDRESSED("addressed");
+
+        private final String id;
+
+        ActWhen(String id) {
+            this.id = id;
+        }
+
+        public String id() {
+            return id;
+        }
+
+        public static ActWhen fromId(String value) {
+            if (value == null || value.isBlank()) {
+                return ALWAYS;
+            }
+            for (ActWhen mode : values()) {
                 if (mode.id.equalsIgnoreCase(value.trim())) {
                     return mode;
                 }
@@ -387,7 +431,64 @@ public record EmailChannelSettings(
                 replyTemplate == null || replyTemplate.isBlank() ? DEFAULT_REPLY_TEMPLATE : replyTemplate, disclosure,
                 ThreadParticipants.fromId(pc.get(KEY_THREAD_PARTICIPANTS)),
                 (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
-                bool(pc.get(KEY_HONOR_REPLY_TO), false));
+                bool(pc.get(KEY_HONOR_REPLY_TO), false), actWhenOrDefault(pc.get(KEY_ACT_WHEN)),
+                normalizedAddresses(list(pc.get(KEY_ALIASES)), normalizedAddress));
+    }
+
+    /**
+     * An unknown value reads as {@code addressed}, the quieter mode: validate()
+     * refuses it at save time, so only a document written around the validation
+     * gets here, and it must not make the mailbox louder than its author meant.
+     */
+    private static ActWhen actWhenOrDefault(String value) {
+        ActWhen parsed = ActWhen.fromId(value);
+        return parsed == null ? ActWhen.ADDRESSED : parsed;
+    }
+
+    /**
+     * The entries that parse as addresses, normalised, without {@code address}
+     * itself, duplicates removed, order kept.
+     */
+    private static List<String> normalizedAddresses(List<String> entries, String address) {
+        Set<String> normalized = new LinkedHashSet<>();
+        for (String entry : entries) {
+            AddressNormalizer.tryNormalize(entry).filter(a -> !a.equals(address)).ifPresent(normalized::add);
+        }
+        return List.copyOf(normalized);
+    }
+
+    /**
+     * Whether {@code normalizedAddress} is {@code address} or one of
+     * {@code aliases}: mail from it is the integration's own.
+     */
+    public boolean isOwnAddress(String normalizedAddress) {
+        return normalizedAddress != null && (normalizedAddress.equals(address) || aliases.contains(normalizedAddress));
+    }
+
+    /**
+     * Whether {@code normalizedAddress} reaches this mailbox as its own: the
+     * {@code address}, a plus-address of it, or an alias.
+     */
+    public boolean receivesAs(String normalizedAddress) {
+        return isOwnAddress(normalizedAddress) || isPlusAddressOf(normalizedAddress, address);
+    }
+
+    /**
+     * Whether {@code candidate} is {@code base} with a non-empty plus-tag:
+     * {@code invoices+urgent@contoso.com} of {@code invoices@contoso.com}.
+     */
+    public static boolean isPlusAddressOf(String candidate, String base) {
+        if (candidate == null || base == null) {
+            return false;
+        }
+        int at = base.lastIndexOf('@');
+        int candidateAt = candidate.lastIndexOf('@');
+        if (at <= 0 || candidateAt <= 0 || !candidate.substring(candidateAt).equalsIgnoreCase(base.substring(at))) {
+            return false;
+        }
+        String local = base.substring(0, at).toLowerCase(Locale.ROOT);
+        String candidateLocal = candidate.substring(0, candidateAt).toLowerCase(Locale.ROOT);
+        return candidateLocal.startsWith(local + "+") && candidateLocal.length() > local.length() + 1;
     }
 
     /**
@@ -531,6 +632,23 @@ public record EmailChannelSettings(
                 }
             } catch (NumberFormatException e) {
                 errors.add("platformConfig.dailyCostBudgetUsd must be a decimal number of US dollars, e.g. 20 or 2.50.");
+            }
+        }
+        String actWhen = pc.get(KEY_ACT_WHEN);
+        if (ActWhen.fromId(actWhen) == null) {
+            errors.add("Unknown platformConfig.actWhen '" + actWhen + "'. Supported: always, addressed.");
+        }
+        List<String> aliases = list(pc.get(KEY_ALIASES));
+        if (aliases.size() > MAX_ALIASES) {
+            errors.add("platformConfig.aliases holds at most " + MAX_ALIASES + " addresses.");
+        }
+        String ownAddress = address == null ? null : AddressNormalizer.tryNormalize(address).orElse(null);
+        for (int i = 0; i < aliases.size(); i++) {
+            var alias = AddressNormalizer.tryNormalize(aliases.get(i));
+            if (alias.isEmpty()) {
+                errors.add("platformConfig.aliases entry " + (i + 1) + " is not a plain email address.");
+            } else if (alias.get().equals(ownAddress)) {
+                errors.add("platformConfig.aliases entry " + (i + 1) + " is platformConfig.address itself; list only additional addresses.");
             }
         }
         List<String> owners = list(pc.get(KEY_OWNER_NOTIFY_ADDRESSES));

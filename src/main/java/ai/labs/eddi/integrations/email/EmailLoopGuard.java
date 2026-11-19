@@ -9,6 +9,7 @@ import ai.labs.eddi.engine.mail.InboundMail;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
@@ -22,8 +23,9 @@ import java.util.Set;
  * {@code Auto-Submitted}, {@code X-Autoreply}, {@code X-Autorespond},
  * {@code Precedence}, {@code List-Id}, {@code List-Unsubscribe}, null or daemon
  * return paths, delivery reports.</li>
- * <li>Mail from the integration's own address, or from the address of another
- * email integration of this deployment (two agents mailing each other).</li>
+ * <li>Mail from the integration's own address or one of its aliases, or from
+ * the address of another email integration of this deployment (two agents
+ * mailing each other).</li>
  * <li>Mail whose own Message-ID has the shape EDDI mints
  * ({@code <eddi.<uuid>@…>}) — something an EDDI deployment sent.</li>
  * <li>Mail whose {@code In-Reply-To} or {@code References} names a message the
@@ -48,12 +50,22 @@ public final class EmailLoopGuard {
      */
     public static Optional<String> check(InboundMail mail, String integrationId, String ownAddress, Set<String> otherIntegrationAddresses,
                                          IEmailMessageLedger ledger) {
+        return check(mail, integrationId, ownAddress == null ? Set.of() : Set.of(ownAddress), otherIntegrationAddresses, ledger);
+    }
+
+    /**
+     * As {@link #check(InboundMail, String, String, Set, IEmailMessageLedger)},
+     * with every address that is the integration's own: its {@code address} and its
+     * {@code aliases} (normalised).
+     */
+    public static Optional<String> check(InboundMail mail, String integrationId, Collection<String> ownAddresses,
+                                         Set<String> otherIntegrationAddresses, IEmailMessageLedger ledger) {
         AutoReplyDetector.Verdict verdict = AutoReplyDetector.detect(mail);
         if (verdict.automated()) {
             return Optional.of("loop:" + verdict.reason().name().toLowerCase(Locale.ROOT));
         }
         String from = mail.fromAddress() == null ? null : mail.fromAddress().toLowerCase(Locale.ROOT);
-        if (from != null && from.equals(ownAddress)) {
+        if (from != null && ownAddresses != null && ownAddresses.contains(from)) {
             return Optional.of("loop:own_address");
         }
         if (from != null && otherIntegrationAddresses != null && otherIntegrationAddresses.contains(from)) {
