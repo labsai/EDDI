@@ -225,13 +225,13 @@ create `IGuardrail` or a `Verdict` enum with a `PASS` member; persisted actions 
 EDDI-owned and neutral (`block | redact | reprompt | warn`, `:261`).
 
 **C9 — Tenant scoping follows the existing plan, not a bespoke one.**
-[`multi-tenancy-plan.md`](multi-tenancy-plan.md) is Planning status with only
-Phase 5 landed. Its Phase 1 design is a `@RequestScoped TenantContext` +
-`TenantResolverFilter` that **fails closed with 403** on a missing claim (`:213`),
-consumed by `@ApplicationScoped` stores via `Provider<TenantContext>` (`:306-311`),
-and inside the pipeline read from a `ConversationProperty` rather than the request
-scope (`:381`). New stores add a `tenantId` field defaulting to `"default"` and a
-compound `(tenantId, _id)` index (`:257`).
+[`multi-tenancy-plan.md`](multi-tenancy-plan.md) was rewritten on 2026-11-19. The
+customer boundary is an **org** (`OrgId`), carried by a `ScopedValue`-based
+`OrgContext` (§4), not a request-scoped bean, and every durable work-starter stores
+its `orgId` (§3 principle 5). Direct stores take an explicit `OrgId` parameter, and
+Postgres SQL runs through `OrgJdbc` (§5.3). New stores add an `orgId` field / `org_id`
+column stamped by the store, with `orgId` leading in their indexes (§5.5), and register
+in that plan's Appendix B. The vault/variables "tenant" stays a namespace inside an org (§1).
 
 **C10 — Golden Rule 1.** Provider behavior is JSON configuration; Java is the
 engine (`AGENTS.md:181`). No provider may be hardcoded. Conversely,
@@ -429,7 +429,7 @@ That distinction drives one integration decision per path:
 `ConnectionResolver` is `@ApplicationScoped`, injects `Provider<TenantContext>`
 (C9) and reads the principal from `CallerIdentityContext` where available. In the
 pipeline, where request scope may be absent, the principal comes from conversation
-memory — the same rule `multi-tenancy-plan.md:381` sets for `tenantId`.
+memory — the same rule `multi-tenancy-plan.md` §3 principle 5 sets for `orgId`.
 
 **Fail-closed rules**, mirroring `CallerIdentityResolver`:
 
@@ -901,7 +901,7 @@ If built, the shape is constrained:
 ## 8. Phases
 
 Each phase must build cleanly, compile, and pass tests before the next begins
-(`multi-tenancy-plan.md:176`). Phases 0-2 are independently shippable and worth
+(`multi-tenancy-plan.md` §11). Phases 0-2 are independently shippable and worth
 doing even if the connector work never starts.
 
 ### Phase 0 — Close the exposure gap (~2-3 days) · P0
@@ -1173,9 +1173,9 @@ class or the run silently passes with zero tests.
    This needs a decision before Phase 5 and may add a `groupBinding` field.
 2. **How many providers ship natively in Phase 5** before Option D (§4) takes over
    the long tail. A buy/build call, not a technical one.
-3. **Row-level tenant filtering vs database-per-tenant** — inherited unresolved
-   from `multi-tenancy-plan.md:509`. The grant store's index design follows whatever
-   that resolves to.
+3. **Row-level tenant filtering vs database-per-tenant** — resolved in
+   `multi-tenancy-plan.md` §5.5: pooled rows with `orgId` leading in indexes, and
+   database-per-org only for the dedicated tier. The grant store's index design follows that.
 4. **Should connection-backed writes require HITL approval by default?** Argument
    for: a per-user OAuth token plus an LLM plus a write tool is the configuration
    most likely to cause real damage. Argument against: it makes every connector feel
