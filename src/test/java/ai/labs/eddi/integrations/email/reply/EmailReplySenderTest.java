@@ -20,6 +20,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier;
+import ai.labs.eddi.integrations.email.EmailThreads;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
@@ -325,6 +326,34 @@ class EmailReplySenderTest {
                     replies().stream().filter(r -> r.state() == State.SUPPRESSED).findFirst().orElseThrow().lastError());
             verify(ownerNotifier).notifyOnce(eq(INTEGRATION), any(), any(), eq(EmailOwnerNotifier.Reason.THREAD_THROTTLED), any());
         }
+
+        @Test
+        @DisplayName("maxRepliesPerThreadPerHour counts the thread, not the conversation: three senders in one thread share the cap")
+        void threadBudgetAcrossConversations() {
+            integration(Map.of("maxRepliesPerThreadPerHour", "2"));
+            var settings = settings(Map.of("maxRepliesPerThreadPerHour", "2"));
+            List<String> senders = List.of(SENDER, "bob@supplier.com", "carol@supplier.com");
+            for (int i = 0; i < senders.size(); i++) {
+                String conversation = "conv-thread-" + i;
+                String messageId = "<t" + i + "@supplier.com>";
+                LedgerEntry inbound = new LedgerEntry("in-t" + i, INTEGRATION, Kind.TRIGGER, Direction.IN, messageId, conversation,
+                        "imap:INBOX:1:" + i,
+                        "in:t" + i, senders.get(i), State.TURN_SUBMITTED, 1, null, null, null, null, NOW.minusSeconds(60), NOW,
+                        NOW.plus(Duration.ofDays(30)));
+                ledger.put(inbound);
+                // Every mail names the same thread root in References.
+                var snapshot = snapshot(ConversationState.READY, EmailUserIdentity.perSender(INTEGRATION, senders.get(i)),
+                        output("answer " + i, mail(messageId, senders.get(i))));
+                sender.onTurnCompleted(INTEGRATION, settings, inbound, conversation, snapshot, NOW.plusSeconds(i));
+            }
+
+            assertEquals(2, transport.recipients.size(), "one conversation each, but one thread: the cap is the thread's");
+            LedgerEntry held = replies().stream().filter(r -> r.state() == State.SUPPRESSED).findFirst().orElseThrow();
+            assertEquals(EmailReplySender.THREAD_BUDGET, held.lastError());
+            assertEquals("conv-thread-2", held.conversationId());
+            String key = EmailThreads.threadKey(INTEGRATION, "<root@supplier.com>");
+            assertTrue(replies().stream().allMatch(r -> key.equals(r.threadKey())), "every reply row carries the thread key");
+        }
     }
 
     @Nested
@@ -602,8 +631,11 @@ class EmailReplySenderTest {
             for (int i = 0; i <= EmailReplySender.MAX_CACHED_GROUP_REPLIES; i++) {
                 transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
                 String messageId = "<g" + i + "@supplier.com>";
-                rows.add(sender.onGroupCompleted(INTEGRATION, settings(), inbound("in-g" + i, messageId, SENDER, State.DONE), "gc-" + i, user,
-                        mail(messageId, SENDER), "The panel recommends B.", NOW).orElseThrow().id());
+                // Each its own thread: maxRepliesPerThreadPerHour counts per thread.
+                Map<String, Object> mail = mail(messageId, SENDER);
+                mail.put("references", List.of(messageId));
+                rows.add(sender.onGroupCompleted(INTEGRATION, settings(), inbound("in-g" + i, messageId, SENDER, State.DONE), "gc-" + i, user, mail,
+                        "The panel recommends B.", NOW).orElseThrow().id());
             }
 
             long held = rows.stream().filter(sender::holdsGroupReply).count();

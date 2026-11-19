@@ -25,6 +25,7 @@ import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailMetrics;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier;
+import ai.labs.eddi.integrations.email.EmailThreads;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
@@ -92,7 +93,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <b>Who it goes to</b> is {@link EmailReplyRecipients}' decision alone, on
  * every attempt. <b>Never</b> to a suppressed address (checked when the row is
  * written and before every attempt), and at most
- * {@code maxRepliesPerThreadPerHour} rows per conversation per hour (counted
+ * {@code maxRepliesPerThreadPerHour} rows per mail thread per hour (counted
  * from the ledger, cluster-wide). A reply over either limit is recorded
  * {@code SUPPRESSED}, never sent.
  * <p>
@@ -430,6 +431,26 @@ public class EmailReplySender {
      * Writes the reply row unless one exists for this (conversation, kind,
      * discriminator), and starts its first attempt.
      */
+    /**
+     * Whether {@code maxRepliesPerThreadPerHour} is reached (email v2 plan §7.7):
+     * the replies of the mail thread, across every conversation in it — a thread
+     * with several allowed senders has one conversation each, and counting per
+     * conversation let it get that many times the cap. The conversation's own count
+     * still applies as well: the thread key comes from {@code References}, which a
+     * sender can change, so it may only ever make the cap stricter.
+     */
+    private boolean threadBudgetSpent(Request request, EmailChannelSettings settings, String threadKey, Instant now) {
+        int cap = settings.maxRepliesPerThreadPerHour();
+        if (cap <= 0) {
+            return false;
+        }
+        Instant since = now.minus(Duration.ofHours(1));
+        if (threadKey != null && ledger.countByThreadSince(request.integrationId(), threadKey, Kind.REPLY, since) >= cap) {
+            return true;
+        }
+        return request.conversationId() != null && ledger.countByConversationSince(request.conversationId(), Kind.REPLY, since) >= cap;
+    }
+
     Optional<LedgerEntry> enqueue(Request request, Instant now) {
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
                 request.stepMail(), request.userId());
@@ -447,21 +468,20 @@ public class EmailReplySender {
         String recipient = decision.recipient();
         String messageId = MessageIds.generate(IEmailSuppressionStore.domainOf(settings.address()));
         String sourceRef = sourceRef(request.inbound().id(), request.kind(), request.discriminator());
+        String threadKey = EmailThreads.threadKey(request.integrationId(), EmailThreads.threadRoot(request.stepMail()));
         String refusal = null;
         String outcome = null;
         if (suppressions.isSuppressed(request.integrationId(), recipient)) {
             refusal = SUPPRESSED_RECIPIENT;
             outcome = "suppressed";
-        } else if (settings.maxRepliesPerThreadPerHour() > 0 && request.conversationId() != null
-                && ledger.countByConversationSince(request.conversationId(), Kind.REPLY, now.minus(Duration.ofHours(1))) >= settings
-                        .maxRepliesPerThreadPerHour()) {
+        } else if (threadBudgetSpent(request, settings, threadKey, now)) {
             refusal = THREAD_BUDGET;
             outcome = "throttled";
         }
         if (refusal != null) {
             LedgerEntry suppressed = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT, messageId,
                     request.conversationId(), sourceRef, key, recipient, State.SUPPRESSED, 0, null, null, null, refusal, now, now,
-                    now.plus(retention));
+                    now.plus(retention), threadKey);
             if (ledger.insertIfAbsent(suppressed)) {
                 metrics.reply(outcome);
                 LOGGER.infof("Email integration %s: %s for conversation %s not sent: %s", sanitize(request.integrationId()), request.kind().id(),
@@ -480,7 +500,7 @@ public class EmailReplySender {
         } catch (IllegalArgumentException | IllegalStateException e) {
             LedgerEntry failed = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT, messageId,
                     request.conversationId(), sourceRef, key, recipient, State.FAILED, 0, null, null, null, "RENDER: " + truncate(e.getMessage()),
-                    now, now, now.plus(retention));
+                    now, now, now.plus(retention), threadKey);
             if (ledger.insertIfAbsent(failed)) {
                 metrics.reply("failed");
                 audit(failed, "failed", null, failed.lastError());
@@ -490,7 +510,7 @@ public class EmailReplySender {
         }
         LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), request.integrationId(), Kind.REPLY, Direction.OUT, messageId,
                 request.conversationId(), sourceRef, key, recipient, State.PENDING, 1, now.plus(LEASE), UUID.randomUUID().toString(), null, null,
-                now, now, now.plus(retention));
+                now, now, now.plus(retention), threadKey);
         if (!ledger.insertIfAbsent(row)) {
             return Optional.empty();
         }

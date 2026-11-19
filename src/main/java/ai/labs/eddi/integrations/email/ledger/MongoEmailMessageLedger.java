@@ -65,6 +65,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_CREATED = "createdAt";
     static final String F_UPDATED = "updatedAt";
     static final String F_EXPIRES = "expiresAt";
+    static final String F_THREAD = "threadKey";
 
     private final MongoCollection<Document> rows;
 
@@ -84,6 +85,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_inbound_sender"));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(F_KIND), Indexes.ascending(F_CREATED)),
                 new IndexOptions().name("idx_email_ledger_conversation"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_THREAD), Indexes.ascending(F_KIND),
+                Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_thread"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
@@ -247,6 +250,15 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public long countByThreadSince(String integrationId, String threadKey, Kind kind, Instant since) {
+        if (threadKey == null) {
+            return 0;
+        }
+        return rows.countDocuments(Filters.and(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_THREAD, threadKey),
+                Filters.eq(F_KIND, kind.name()), Filters.gte(F_CREATED, Date.from(since)), Filters.ne(F_STATE, State.SUPPRESSED.name())));
+    }
+
+    @Override
     public List<LedgerEntry> findByRecipient(String recipient) {
         List<LedgerEntry> result = new ArrayList<>();
         for (Document document : rows.find(Filters.eq(F_RECIPIENT, recipient))) {
@@ -267,7 +279,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_STATE, entry.state().name()).append(F_ATTEMPTS, entry.attempts()).append(F_NEXT, date(entry.nextAttemptAt()))
                 .append(F_CLAIM, entry.claimToken()).append(F_PROVIDER, IEmailMessageLedger.cap(entry.providerId(), MAX_PROVIDER_ID))
                 .append(F_ERROR, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR))
-                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()));
+                .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()))
+                .append(F_THREAD, entry.threadKey());
     }
 
     static LedgerEntry toEntry(Document document) {
@@ -277,7 +290,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 document.getString(F_SOURCE), document.getString(F_IDEMPOTENCY), document.getString(F_RECIPIENT),
                 State.valueOf(document.getString(F_STATE)), attempts == null ? 0 : attempts, instant(document.getDate(F_NEXT)),
                 document.getString(F_CLAIM), document.getString(F_PROVIDER), document.getString(F_ERROR), instant(document.getDate(F_CREATED)),
-                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)));
+                instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)), document.getString(F_THREAD));
     }
 
     private static Date date(Instant instant) {
