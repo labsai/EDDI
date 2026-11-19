@@ -7395,7 +7395,17 @@
       "fromNameInvalid": "발신자 이름은 줄바꿈 없이 최대 {{max}}자까지 가능합니다.",
       "replyTemplateTooLong": "답장 템플릿은 최대 {{max}}자까지 가능합니다.",
       "aiDisclosureTooLong": "AI 고지는 최대 {{max}}자까지 가능합니다.",
-      "maxRepliesPerThreadPerHour": "답장 한도는 1에서 1000 사이의 정수여야 합니다."
+      "maxRepliesPerThreadPerHour": "답장 한도는 1에서 1000 사이의 정수여야 합니다.",
+      "aliasesTooMany": "별칭은 최대 {{max}}개까지 입력하세요.",
+      "aliasesInvalid": "각 별칭은 올바른 이메일 주소여야 합니다.",
+      "aliasIsAddress": "메일함 주소 자체는 별칭이 아닙니다. 추가 주소만 입력하세요.",
+      "mentionInvalid": "멘션은 문자, 숫자, _, - 1~40자로 문자나 숫자로 시작하며 @ 없이 입력합니다.",
+      "mentionsTooMany": "대상 하나에 멘션은 최대 {{max}}개까지입니다.",
+      "mentionDuplicate": "각 멘션은 하나의 대상만 가리킬 수 있습니다.",
+      "targetAddressInvalid": "각 대상 주소는 올바른 이메일 주소여야 합니다.",
+      "targetAddressNotReceived": "메일함이 받을 수 있도록 대상 주소는 별칭 중 하나이거나 메일함 주소의 플러스 주소여야 합니다.",
+      "targetAddressDuplicate": "각 대상 주소는 하나의 대상만 가리킬 수 있습니다.",
+      "targetAllowedSendersInvalid": "대상의 각 허용 발신자는 user@domain, *@domain 또는 *@*.domain이어야 합니다."
     },
     "warning": {
       "openTrigger": "저장했지만 인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 인증되지 않은 메일도 처리됩니다.",
@@ -7434,7 +7444,20 @@
     "replyTemplate": "답장 템플릿",
     "replyTemplateHint": "에이전트의 답변을 감쌉니다. 답변은 텍스트로 삽입되며 템플릿으로 실행되지 않습니다. 변수:",
     "noteDkim": "답장에는 메일함 도메인에 대해 발신 메일에 DKIM 서명을 하는 메일 서버와 해당 도메인의 DMARC 레코드가 필요합니다. {{productName}}은(는) 서명하지 않습니다. 이것이 없으면 답장이 스팸으로 분류되거나 거부됩니다. Exchange Online과 대부분의 호스팅 업체는 도메인에 DKIM을 활성화하면 제출된 메일에 서명합니다.",
-    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "addressingSection": "수신 지정",
+    "actWhen": "처리 대상",
+    "actWhenAddressed": "{{productName}}을(를) 수신자로 지정한 메일만",
+    "actWhenAlways": "모든 메일",
+    "actWhenHint": "수신 지정: {{productName}}이(가) 보낸 메일에 대한 답장, 발신자 본인의 본문에서 대상을 멘션(@finance), 또는 메일함이 새로 받는 사람(To)에 추가된 경우입니다. 그 밖의 메일(다른 사람의 스레드에서 메일함이 참조(Cc)에만 있는 경우 등)은 수신 지정 아님으로 기록되고 아무것도 실행되지 않습니다. 이는 노이즈 필터이며, 누가 에이전트를 실행할 수 있는지는 여전히 발신자 설정이 결정합니다.",
+    "aliases": "별칭",
+    "aliasesHint": "이 메일함으로 배달되는 다른 주소(별칭, 배포 목록)를 쉼표로 구분해 최대 20개까지 입력합니다. 메일함 자체의 주소로 취급되어, 이 주소로 온 메일은 수신 지정이 되고 이 주소에서 온 메일은 무시됩니다.",
+    "targetMentions": "멘션",
+    "targetMentionsHint": "발신자 본인의 본문에 @finance라고 쓰면 메일이 여기로 전달됩니다. 인용된 이전 내용, 전달된 메일, 서명 안의 멘션은 해당되지 않습니다. 대상당 최대 10개, 대상 간에 고유해야 합니다.",
+    "targetAddresses": "주소",
+    "targetAddressesHint": "받는 사람(To) 또는 참조(Cc)에 이 주소 중 하나가 있는 메일은 가장 먼저 여기로 전달됩니다. 각 주소는 통합의 별칭이거나 메일함의 플러스 주소(invoices+finance@…)여야 합니다.",
+    "targetAllowedSenders": "이 대상에 허용된 발신자",
+    "targetAllowedSendersHint": "설정하면 메일이 어떻게 전달되었든, 이 중 하나와 일치하는 인증된 발신자만 이 대상에 도달합니다. 그 밖의 발신자는 거부되며, 대신 기본 대상으로 보내지지 않습니다."
   },
   "feedback": {
     "title": "피드백",

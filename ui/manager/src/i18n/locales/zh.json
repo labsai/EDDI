@@ -7395,7 +7395,17 @@
       "fromNameInvalid": "发件人名称最多 {{max}} 个字符，且不能包含换行。",
       "replyTemplateTooLong": "回复模板最多 {{max}} 个字符。",
       "aiDisclosureTooLong": "AI 声明最多 {{max}} 个字符。",
-      "maxRepliesPerThreadPerHour": "回复上限必须是 1 到 1000 之间的整数。"
+      "maxRepliesPerThreadPerHour": "回复上限必须是 1 到 1000 之间的整数。",
+      "aliasesTooMany": "最多填写 {{max}} 个别名。",
+      "aliasesInvalid": "每个别名都必须是有效的电子邮件地址。",
+      "aliasIsAddress": "邮箱地址本身不是别名；只填写其他地址。",
+      "mentionInvalid": "提及由 1–40 个字母、数字、_ 或 - 组成，以字母或数字开头，不带 @。",
+      "mentionsTooMany": "每个目标最多可有 {{max}} 个提及。",
+      "mentionDuplicate": "每个提及只能对应一个目标。",
+      "targetAddressInvalid": "每个目标地址都必须是有效的电子邮件地址。",
+      "targetAddressNotReceived": "目标地址必须是某个别名或邮箱地址的加号地址，这样邮箱才能收到。",
+      "targetAddressDuplicate": "每个目标地址只能对应一个目标。",
+      "targetAllowedSendersInvalid": "目标的每个允许发件人必须是 user@domain、*@domain 或 *@*.domain。"
     },
     "warning": {
       "openTrigger": "已保存，但互联网上的任何人都能让此智能体运行：没有发件人允许列表，且未经验证的邮件也会被处理。",
@@ -7434,7 +7444,20 @@
     "replyTemplate": "回复模板",
     "replyTemplateHint": "包裹智能体的回答；回答作为文本插入，绝不会作为模板执行。变量：",
     "noteDkim": "回复需要一台为邮箱所在域使用 DKIM 签名外发邮件的邮件服务器，以及该域的 DMARC 记录——{{productName}} 不签名。缺少它们，回复会进入垃圾邮件或被拒收。为该域启用 DKIM 后，Exchange Online 和大多数托管商都会对提交的邮件签名。",
-    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "addressingSection": "寻址",
+    "actWhen": "处理范围",
+    "actWhenAddressed": "仅处理发给 {{productName}} 的邮件",
+    "actWhenAlways": "所有邮件",
+    "actWhenHint": "已寻址：回复 {{productName}} 发出的邮件、发件人本人正文中提及某个目标（@finance），或邮箱新近出现在“收件人”中。其他情况（例如邮箱只在别人会话的“抄送”中）会被记录为未寻址，不执行任何操作。这只是噪音过滤：谁能让代理执行操作，仍由发件人设置决定。",
+    "aliases": "别名",
+    "aliasesHint": "投递到此邮箱的其他地址（别名、通讯组），用逗号分隔，最多 20 个。它们视为邮箱自身的地址：发往它们的邮件即为寻址此邮箱，来自它们的邮件会被忽略。",
+    "targetMentions": "提及",
+    "targetMentionsHint": "在发件人本人正文中写 @finance 会把邮件路由到这里——引用的历史、转发的邮件或签名中的提及不算。每个目标最多 10 个，在所有目标中唯一。",
+    "targetAddresses": "地址",
+    "targetAddressesHint": "“收件人”或“抄送”中含有其中某个地址的邮件会优先路由到这里。每个地址必须是此集成的别名，或其邮箱的加号地址（invoices+finance@…）。",
+    "targetAllowedSenders": "此目标允许的发件人",
+    "targetAllowedSendersHint": "设置后，无论邮件如何路由，只有与其中之一匹配的已认证发件人才能到达此目标。其他人会被拒绝，绝不会改为发送到默认目标。"
   },
   "feedback": {
     "title": "反馈",

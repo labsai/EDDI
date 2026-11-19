@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 import {
   EMAIL_FIXED_KEYS,
+  EMAIL_MAX_ALIASES,
   aiDisclosureEnabled,
   emailConfigProblems,
   emailMode,
+  emailTargetProblems,
   initialEmailPlatformConfig,
   isOpenTrigger,
+  isPlusAddressOf,
   isSenderPattern,
   withEmailFixedKeys,
+  withoutEmailTargetRules,
 } from "@/lib/email-channel";
 
 const VALID = {
@@ -90,7 +94,7 @@ describe("email channel rules", () => {
   });
 
   it("always writes the transport and a mode, trigger unless conversation is chosen", () => {
-    expect(initialEmailPlatformConfig()).toEqual({ mode: "trigger", transport: "imap" });
+    expect(initialEmailPlatformConfig()).toEqual({ mode: "trigger", actWhen: "addressed", transport: "imap" });
     expect(withEmailFixedKeys({ ...VALID, transport: "graph" })).toEqual({ ...VALID, mode: "trigger", ...EMAIL_FIXED_KEYS });
     expect(withEmailFixedKeys({ ...VALID, mode: "whatever" }).mode).toBe("trigger");
     expect(withEmailFixedKeys({ ...VALID, mode: "conversation", smtpHost: "smtp.example.com" }).mode).toBe("conversation");
@@ -152,5 +156,51 @@ describe("email conversation mode rules", () => {
     expect(saved.mode).toBe("conversation");
     expect(saved.smtpHost).toBe("smtp.example.com");
     expect(saved.honorReplyTo).toBe("true");
+  });
+});
+
+describe("email addressing rules", () => {
+  it("checks the aliases: plain addresses, at most 20, never the mailbox itself", () => {
+    expect(emailConfigProblems({ ...VALID, aliases: "ap@example.com, list@example.com" })).toEqual([]);
+    expect(emailConfigProblems({ ...VALID, aliases: "not an address" })).toEqual(["aliasesInvalid"]);
+    expect(emailConfigProblems({ ...VALID, aliases: "Invoices@Example.com" })).toEqual(["aliasIsAddress"]);
+    const many = Array.from({ length: EMAIL_MAX_ALIASES + 1 }, (_, i) => `a${i}@example.com`).join(",");
+    expect(emailConfigProblems({ ...VALID, aliases: many })).toEqual(["aliasesTooMany"]);
+  });
+
+  it("recognises plus-addresses of the mailbox only", () => {
+    expect(isPlusAddressOf("invoices+urgent@example.com", "invoices@example.com")).toBe(true);
+    expect(isPlusAddressOf("Invoices+Urgent@EXAMPLE.com", "invoices@example.com")).toBe(true);
+    expect(isPlusAddressOf("invoices+@example.com", "invoices@example.com")).toBe(false);
+    expect(isPlusAddressOf("sales+invoices@example.com", "invoices@example.com")).toBe(false);
+    expect(isPlusAddressOf("invoices+x@other.com", "invoices@example.com")).toBe(false);
+  });
+
+  it("checks the targets' mentions, addresses and allowed senders as the backend does", () => {
+    const pc = { ...VALID, aliases: "finance-agent@example.com" };
+    expect(
+      emailTargetProblems(
+        [
+          { mentions: ["Finance", "ap-team"], addresses: ["finance-agent@example.com"], allowedSenders: ["*@supplier.com"] },
+          { mentions: ["legal"], addresses: ["invoices+legal@example.com"] },
+        ],
+        pc,
+      ),
+    ).toEqual([]);
+    expect(emailTargetProblems([{ mentions: ["@finance"] }], pc)).toEqual(["mentionInvalid"]);
+    expect(emailTargetProblems([{ mentions: ["finance"] }, { mentions: ["FINANCE"] }], pc)).toEqual(["mentionDuplicate"]);
+    expect(emailTargetProblems([{ mentions: Array.from({ length: 11 }, (_, i) => `m${i}`) }], pc)).toEqual(["mentionsTooMany"]);
+    expect(emailTargetProblems([{ addresses: ["finance@example.com"] }], pc)).toEqual(["targetAddressNotReceived"]);
+    expect(emailTargetProblems([{ addresses: ["finance"] }], pc)).toEqual(["targetAddressInvalid"]);
+    expect(emailTargetProblems([{ addresses: ["finance-agent@example.com"] }, { addresses: ["Finance-Agent@example.com"] }], pc)).toEqual([
+      "targetAddressDuplicate",
+    ]);
+    expect(emailTargetProblems([{ allowedSenders: ["supplier.com"] }], pc)).toEqual(["targetAllowedSendersInvalid"]);
+  });
+
+  it("strips the email-only target fields for any other channel type", () => {
+    const target = { name: "a", mentions: ["x"], addresses: ["y@example.com"], allowedSenders: ["*@example.com"] };
+    expect(withoutEmailTargetRules(target)).toEqual({ name: "a" });
+    expect(target.mentions).toEqual(["x"]);
   });
 });

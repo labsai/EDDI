@@ -7395,7 +7395,17 @@
       "fromNameInvalid": "The sender name may be at most {{max}} characters, without line breaks.",
       "replyTemplateTooLong": "The reply template may be at most {{max}} characters.",
       "aiDisclosureTooLong": "The AI disclosure may be at most {{max}} characters.",
-      "maxRepliesPerThreadPerHour": "The reply limit must be a whole number from 1 to 1000."
+      "maxRepliesPerThreadPerHour": "The reply limit must be a whole number from 1 to 1000.",
+      "aliasesTooMany": "Name at most {{max}} aliases.",
+      "aliasesInvalid": "Each alias must be a valid email address.",
+      "aliasIsAddress": "The mailbox address itself is not an alias; list only additional addresses.",
+      "mentionInvalid": "A mention is 1–40 letters, digits, _ or -, starting with a letter or digit, written without the @.",
+      "mentionsTooMany": "A target can have at most {{max}} mentions.",
+      "mentionDuplicate": "Each mention can address one target only.",
+      "targetAddressInvalid": "Each target address must be a valid email address.",
+      "targetAddressNotReceived": "A target address must be one of the aliases or a plus-address of the mailbox address, so the mailbox receives it.",
+      "targetAddressDuplicate": "Each target address can address one target only.",
+      "targetAllowedSendersInvalid": "Each allowed sender of a target must be user@domain, *@domain or *@*.domain."
     },
     "warning": {
       "openTrigger": "Saved, but anyone on the internet can make this agent run: there is no sender allowlist and unauthenticated mail is processed.",
@@ -7434,7 +7444,20 @@
     "replyTemplate": "Reply template",
     "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
     "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
-    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "addressingSection": "Addressing",
+    "actWhen": "Act on",
+    "actWhenAddressed": "Only mail that addresses {{productName}}",
+    "actWhenAlways": "Every mail",
+    "actWhenHint": "Addressed: a reply to a mail {{productName}} sent, a mention of a target (@finance) in the sender's own text, or the mailbox newly in To. Anything else — the mailbox only in Cc of someone's thread — is recorded as not addressed and runs nothing. A noise filter: who may make an agent act is still decided by the sender settings.",
+    "aliases": "Aliases",
+    "aliasesHint": "Other addresses that deliver to this mailbox (an alias, a distribution list), comma-separated, at most 20. They count as the mailbox's own: mail to them addresses it, mail from them is ignored.",
+    "targetMentions": "Mentions",
+    "targetMentionsHint": "Writing @finance in the sender's own text routes the mail here — never in quoted history, a forwarded mail or a signature. Up to 10 per target, unique across targets.",
+    "targetAddresses": "Addresses",
+    "targetAddressesHint": "Mail to one of these in To or Cc routes here first. Each must be an alias of the integration or a plus-address of its mailbox (invoices+finance@…).",
+    "targetAllowedSenders": "Allowed senders for this target",
+    "targetAllowedSendersHint": "When set, only authenticated senders matching one of these reach this target, however the mail was routed. Anyone else is refused, never sent to the default target instead."
   },
   "feedback": {
     "title": "Feedback",

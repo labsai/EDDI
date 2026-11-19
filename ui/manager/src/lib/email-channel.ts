@@ -59,6 +59,10 @@ export function aiDisclosureEnabled(pc: Record<string, string>): boolean {
 }
 
 export const EMAIL_PORTS = ["993", "143"] as const;
+/** `always`: every mail runs; `addressed`: only mail that addresses the integration. */
+export const EMAIL_ACT_WHEN = ["always", "addressed"] as const;
+export const EMAIL_MAX_ALIASES = 20;
+export const EMAIL_MAX_MENTIONS_PER_TARGET = 10;
 export const EMAIL_IDENTITY_MODES = ["perSender", "integration"] as const;
 export const EMAIL_ATTACHMENT_MODES = ["drop", "metadata", "store"] as const;
 
@@ -79,6 +83,7 @@ export const EMAIL_DEFAULTS = {
   threadParticipants: "originalSenderOnly",
   maxRepliesPerThreadPerHour: "5",
   honorReplyTo: "false",
+  actWhen: "always",
 } as const;
 
 export const EMAIL_DEFAULT_INPUT_TEMPLATE =
@@ -99,15 +104,22 @@ export const EMAIL_TEMPLATE_VARIABLES = [
   "mail.signingDomain",
   "mail.quotedHistoryRemoved",
   "mail.attachments",
+  "mail.addressing",
+  "mail.route",
   "mail.text",
 ] as const;
 
 export const EMAIL_MAX_TEMPLATE_CHARS = 4000;
 export const EMAIL_MAX_OWNER_ADDRESSES = 5;
 
-/** A fresh email platformConfig: trigger mode and the fixed keys, every other key at its backend default. */
+/**
+ * A fresh email platformConfig: trigger mode, the fixed keys and `actWhen:
+ * addressed` — a new mailbox stays quiet on threads it is only copied on. The
+ * backend default stays `always`, so an existing integration never changes;
+ * every other key is at its backend default.
+ */
 export function initialEmailPlatformConfig(): Record<string, string> {
-  return { mode: "trigger", ...EMAIL_FIXED_KEYS };
+  return { mode: "trigger", actWhen: "addressed", ...EMAIL_FIXED_KEYS };
 }
 
 /**
@@ -190,7 +202,17 @@ export type EmailProblem =
   | "fromNameInvalid"
   | "replyTemplateTooLong"
   | "aiDisclosureTooLong"
-  | "maxRepliesPerThreadPerHour";
+  | "maxRepliesPerThreadPerHour"
+  | "aliasesTooMany"
+  | "aliasesInvalid"
+  | "aliasIsAddress"
+  | "mentionInvalid"
+  | "mentionsTooMany"
+  | "mentionDuplicate"
+  | "targetAddressInvalid"
+  | "targetAddressNotReceived"
+  | "targetAddressDuplicate"
+  | "targetAllowedSendersInvalid";
 
 export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] {
   const problems: EmailProblem[] = [];
@@ -229,12 +251,82 @@ export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] 
   const budget = (pc.dailyCostBudgetUsd ?? "").trim();
   if (budget !== "" && !(/^\d+(\.\d+)?$/.test(budget) && Number(budget) > 0)) problems.push("dailyCostBudgetUsd");
 
+  const aliases = splitList(pc.aliases);
+  if (aliases.length > EMAIL_MAX_ALIASES) problems.push("aliasesTooMany");
+  else if (!aliases.every((a) => EMAIL_RE.test(a))) problems.push("aliasesInvalid");
+  else if (address && aliases.some((a) => a.toLowerCase() === address.toLowerCase())) problems.push("aliasIsAddress");
+
   const owners = splitList(pc.ownerNotifyAddresses);
   if (owners.length > EMAIL_MAX_OWNER_ADDRESSES) problems.push("ownerNotifyTooMany");
   else if (!owners.every((a) => EMAIL_RE.test(a))) problems.push("ownerNotifyInvalid");
 
   if (emailMode(pc) === "conversation") problems.push(...conversationProblems(pc));
   return problems;
+}
+
+const MENTION_RE = /^[a-z0-9][a-z0-9_-]{0,39}$/;
+
+/** A mention handle as stored: trimmed and lower-cased, without the `@`. */
+export function normalizeMention(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+/** Whether `value` is a plus-address of `base`: `invoices+urgent@x.com` of `invoices@x.com`. */
+export function isPlusAddressOf(value: string, base: string): boolean {
+  const at = base.lastIndexOf("@");
+  const valueAt = value.lastIndexOf("@");
+  if (at <= 0 || valueAt <= 0) return false;
+  if (value.slice(valueAt).toLowerCase() !== base.slice(at).toLowerCase()) return false;
+  const local = base.slice(0, at).toLowerCase();
+  const valueLocal = value.slice(0, valueAt).toLowerCase();
+  return valueLocal.startsWith(`${local}+`) && valueLocal.length > local.length + 1;
+}
+
+/** The email-only rule fields of a target. */
+export const EMAIL_TARGET_RULE_FIELDS = ["mentions", "addresses", "allowedSenders"] as const;
+
+/**
+ * The problems of the targets' email rules (`mentions`, `addresses`,
+ * `allowedSenders`) against the integration's `address` and `aliases` — the
+ * backend's save-time rules, so the user hears before the round trip.
+ */
+export function emailTargetProblems(
+  targets: readonly { mentions?: string[]; addresses?: string[]; allowedSenders?: string[] }[],
+  pc: Record<string, string>,
+): EmailProblem[] {
+  const problems: EmailProblem[] = [];
+  const address = (pc.address ?? "").trim();
+  const aliases = new Set(splitList(pc.aliases).map((a) => a.toLowerCase()));
+  const mentions = new Set<string>();
+  const addresses = new Set<string>();
+  for (const target of targets) {
+    const handles = (target.mentions ?? []).map(normalizeMention);
+    if (handles.length > EMAIL_MAX_MENTIONS_PER_TARGET) problems.push("mentionsTooMany");
+    for (const handle of handles) {
+      if (!MENTION_RE.test(handle)) problems.push("mentionInvalid");
+      else if (mentions.has(handle)) problems.push("mentionDuplicate");
+      mentions.add(handle);
+    }
+    for (const raw of target.addresses ?? []) {
+      const value = raw.trim().toLowerCase();
+      if (!EMAIL_RE.test(value)) problems.push("targetAddressInvalid");
+      else if (!aliases.has(value) && !isPlusAddressOf(value, address)) problems.push("targetAddressNotReceived");
+      else if (addresses.has(value)) problems.push("targetAddressDuplicate");
+      addresses.add(value);
+    }
+    if (!(target.allowedSenders ?? []).every((s) => isSenderPattern(s.trim()))) problems.push("targetAllowedSendersInvalid");
+  }
+  return [...new Set(problems)];
+}
+
+/**
+ * `target` without its email-only fields — what a save of any other channel
+ * type sends, since the backend refuses them there.
+ */
+export function withoutEmailTargetRules<T extends { mentions?: string[]; addresses?: string[]; allowedSenders?: string[] }>(target: T): T {
+  const next = { ...target };
+  for (const field of EMAIL_TARGET_RULE_FIELDS) delete next[field];
+  return next;
 }
 
 // eslint-disable-next-line no-control-regex -- control characters are exactly what a header value may not hold

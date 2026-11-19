@@ -7466,7 +7466,17 @@
       "fromNameInvalid": "Le nom de l'expéditeur peut contenir au plus {{max}} caractères, sans saut de ligne.",
       "replyTemplateTooLong": "Le modèle de réponse peut contenir au plus {{max}} caractères.",
       "aiDisclosureTooLong": "La mention d'IA peut contenir au plus {{max}} caractères.",
-      "maxRepliesPerThreadPerHour": "La limite de réponses doit être un nombre entier de 1 à 1000."
+      "maxRepliesPerThreadPerHour": "La limite de réponses doit être un nombre entier de 1 à 1000.",
+      "aliasesTooMany": "Indiquez au plus {{max}} alias.",
+      "aliasesInvalid": "Chaque alias doit être une adresse e-mail valide.",
+      "aliasIsAddress": "L'adresse de la boîte n'est pas un alias ; indiquez seulement des adresses supplémentaires.",
+      "mentionInvalid": "Une mention compte 1 à 40 lettres, chiffres, _ ou -, commence par une lettre ou un chiffre et s'écrit sans le @.",
+      "mentionsTooMany": "Une cible peut avoir au plus {{max}} mentions.",
+      "mentionDuplicate": "Chaque mention ne peut adresser qu'une seule cible.",
+      "targetAddressInvalid": "Chaque adresse de cible doit être une adresse e-mail valide.",
+      "targetAddressNotReceived": "Une adresse de cible doit être l'un des alias ou une adresse plus de la boîte, pour que la boîte la reçoive.",
+      "targetAddressDuplicate": "Chaque adresse de cible ne peut adresser qu'une seule cible.",
+      "targetAllowedSendersInvalid": "Chaque expéditeur autorisé d'une cible doit être user@domain, *@domain ou *@*.domain."
     },
     "warning": {
       "openTrigger": "Enregistré, mais n'importe qui sur Internet peut faire agir cet agent : il n'y a pas de liste d'expéditeurs autorisés et les e-mails non authentifiés sont traités.",
@@ -7505,7 +7515,20 @@
     "replyTemplate": "Modèle de réponse",
     "replyTemplateHint": "Encadre la réponse de l'agent, insérée comme texte et jamais exécutée comme modèle. Variables :",
     "noteDkim": "Les réponses nécessitent un serveur de messagerie qui signe le courrier sortant avec DKIM pour le domaine de la boîte, et un enregistrement DMARC pour ce domaine — {{productName}} ne signe pas. Sans eux, les réponses finissent en spam ou sont rejetées. Exchange Online et la plupart des hébergeurs signent le courrier soumis dès que DKIM est activé pour le domaine.",
-    "noteBounces": "Une réponse en échec définitif place l'adresse sur la liste de suppression de cette intégration, et {{productName}} ne lui envoie plus rien tant qu'un administrateur ne l'a pas effacée (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Une réponse en échec définitif place l'adresse sur la liste de suppression de cette intégration, et {{productName}} ne lui envoie plus rien tant qu'un administrateur ne l'a pas effacée (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "addressingSection": "Adressage",
+    "actWhen": "Agir sur",
+    "actWhenAddressed": "Uniquement les e-mails adressés à {{productName}}",
+    "actWhenAlways": "Tous les e-mails",
+    "actWhenHint": "Adressé : une réponse à un e-mail envoyé par {{productName}}, une mention d'une cible (@finance) dans le texte propre de l'expéditeur, ou la boîte nouvellement ajoutée en À. Tout le reste — la boîte seulement en Cc du fil de quelqu'un — est enregistré comme non adressé et ne déclenche rien. Un filtre anti-bruit : qui peut faire agir un agent reste décidé par les réglages des expéditeurs.",
+    "aliases": "Alias",
+    "aliasesHint": "Autres adresses qui livrent dans cette boîte (un alias, une liste de diffusion), séparées par des virgules, 20 au plus. Elles comptent comme celles de la boîte : un e-mail qui leur est envoyé l'adresse, un e-mail venant d'elles est ignoré.",
+    "targetMentions": "Mentions",
+    "targetMentionsHint": "Écrire @finance dans le texte propre de l'expéditeur achemine l'e-mail ici — jamais dans l'historique cité, un e-mail transféré ou une signature. Jusqu'à 10 par cible, uniques entre les cibles.",
+    "targetAddresses": "Adresses",
+    "targetAddressesHint": "Un e-mail à l'une de ces adresses en À ou Cc est acheminé ici en premier. Chacune doit être un alias de l'intégration ou une adresse plus de sa boîte (invoices+finance@…).",
+    "targetAllowedSenders": "Expéditeurs autorisés pour cette cible",
+    "targetAllowedSendersHint": "Si défini, seuls les expéditeurs authentifiés correspondant à l'un de ces motifs atteignent cette cible, quel que soit l'acheminement de l'e-mail. Les autres sont refusés, jamais envoyés à la cible par défaut à la place."
   },
   "feedback": {
     "title": "Avis",

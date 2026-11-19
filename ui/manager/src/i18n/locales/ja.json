@@ -7395,7 +7395,17 @@
       "fromNameInvalid": "送信者名は改行を含まず、最大 {{max}} 文字までです。",
       "replyTemplateTooLong": "返信テンプレートは最大 {{max}} 文字までです。",
       "aiDisclosureTooLong": "AI の開示文は最大 {{max}} 文字までです。",
-      "maxRepliesPerThreadPerHour": "返信の上限は 1 から 1000 までの整数である必要があります。"
+      "maxRepliesPerThreadPerHour": "返信の上限は 1 から 1000 までの整数である必要があります。",
+      "aliasesTooMany": "エイリアスは最大 {{max}} 件までです。",
+      "aliasesInvalid": "各エイリアスは有効なメールアドレスである必要があります。",
+      "aliasIsAddress": "メールボックスのアドレス自体はエイリアスではありません。追加のアドレスのみを指定してください。",
+      "mentionInvalid": "メンションは 1～40 文字の英字・数字・_・- で、英字か数字で始め、@ を付けずに書きます。",
+      "mentionsTooMany": "1 つのターゲットのメンションは最大 {{max}} 件です。",
+      "mentionDuplicate": "各メンションが指せるターゲットは 1 つだけです。",
+      "targetAddressInvalid": "各ターゲットアドレスは有効なメールアドレスである必要があります。",
+      "targetAddressNotReceived": "ターゲットアドレスは、メールボックスが受信できるよう、エイリアスのいずれかかメールボックスアドレスのプラスアドレスである必要があります。",
+      "targetAddressDuplicate": "各ターゲットアドレスが指せるターゲットは 1 つだけです。",
+      "targetAllowedSendersInvalid": "ターゲットの各許可送信者は user@domain、*@domain、*@*.domain のいずれかである必要があります。"
     },
     "warning": {
       "openTrigger": "保存しましたが、インターネット上の誰でもこのエージェントを実行させられます。送信者の許可リストがなく、認証されていないメールも処理されます。",
@@ -7434,7 +7444,20 @@
     "replyTemplate": "返信テンプレート",
     "replyTemplateHint": "エージェントの回答を包みます。回答はテキストとして挿入され、テンプレートとして実行されることはありません。変数：",
     "noteDkim": "返信には、メールボックスのドメインについて送信メールに DKIM 署名するメールサーバーと、そのドメインの DMARC レコードが必要です。{{productName}} は署名しません。これらがないと返信は迷惑メールになるか拒否されます。Exchange Online と多くのホスティング事業者は、ドメインで DKIM を有効にすると送信されたメールに署名します。",
-    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "addressingSection": "宛先指定",
+    "actWhen": "処理対象",
+    "actWhenAddressed": "{{productName}} 宛てのメールのみ",
+    "actWhenAlways": "すべてのメール",
+    "actWhenHint": "宛先指定とは、{{productName}} が送信したメールへの返信、送信者自身の本文でのターゲットへのメンション（@finance）、または新たに To に追加されたメールボックスです。それ以外（他人のスレッドで Cc に入っているだけなど）は「宛先指定なし」として記録され、何も実行されません。これはノイズフィルターであり、誰がエージェントを動かせるかは引き続き送信者の設定で決まります。",
+    "aliases": "エイリアス",
+    "aliasesHint": "このメールボックスに配信される他のアドレス（エイリアス、配布リスト）。カンマ区切りで最大 20 件。メールボックス自身のアドレスとして扱われ、これら宛てのメールは宛先指定となり、これらからのメールは無視されます。",
+    "targetMentions": "メンション",
+    "targetMentionsHint": "送信者自身の本文に @finance と書くとメールはここに振り分けられます（引用履歴、転送メール、署名内は対象外）。ターゲットごとに最大 10 件、ターゲット間で一意。",
+    "targetAddresses": "アドレス",
+    "targetAddressesHint": "To または Cc にこれらのいずれかが含まれるメールは、まずここに振り分けられます。各アドレスは連携のエイリアスか、そのメールボックスのプラスアドレス（invoices+finance@…）である必要があります。",
+    "targetAllowedSenders": "このターゲットに許可する送信者",
+    "targetAllowedSendersHint": "設定すると、メールの振り分け方法にかかわらず、いずれかに一致する認証済み送信者だけがこのターゲットに届きます。それ以外は拒否され、代わりに既定のターゲットへ送られることはありません。"
   },
   "feedback": {
     "title": "フィードバック",

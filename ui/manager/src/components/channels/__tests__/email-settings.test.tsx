@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
 import { screen, fireEvent } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { EmailPlatformFields, EmailSecurityNotes, EmailTargetRules, type EmailTargetRuleValues } from "@/components/channels/email-settings";
 import { EMAIL_DEFAULT_INPUT_TEMPLATE } from "@/lib/email-channel";
 
 /** The form wired to real state, so a sequence of edits accumulates. */
@@ -185,5 +185,63 @@ describe("EmailSecurityNotes", () => {
     renderWithProviders(<EmailSecurityNotes conversation />);
     expect(screen.getByTestId("email-dkim-note").textContent).toContain("DKIM");
     expect(screen.getByTestId("email-bounce-note").textContent).toContain("email-suppressions/clear");
+  });
+});
+
+describe("EmailPlatformFields — addressing", () => {
+  it("shows the backend default actWhen, writes a choice, and checks the aliases", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<Harness initial={{ address: "invoices@example.com" }} onChange={onChange} />);
+
+    expect(screen.getByTestId("email-act-when")).toHaveValue("always");
+    await user.selectOptions(screen.getByTestId("email-act-when"), "addressed");
+    expect(onChange).toHaveBeenLastCalledWith({ address: "invoices@example.com", actWhen: "addressed" });
+
+    await user.type(screen.getByTestId("email-aliases"), "invoices@example.com");
+    expect(screen.getByTestId("email-problem-aliasIsAddress")).toBeInTheDocument();
+    await user.clear(screen.getByTestId("email-aliases"));
+    await user.type(screen.getByTestId("email-aliases"), "ap@example.com");
+    expect(screen.queryByTestId("email-problem-aliasIsAddress")).toBeNull();
+    expect(onChange).toHaveBeenLastCalledWith({ address: "invoices@example.com", actWhen: "addressed", aliases: "ap@example.com" });
+  });
+});
+
+describe("EmailTargetRules", () => {
+  function RulesHarness({ onChange }: { onChange: (rules: EmailTargetRuleValues) => void }) {
+    const [rules, setRules] = useState<EmailTargetRuleValues>({ mentions: ["finance"] });
+    return (
+      <EmailTargetRules
+        target={rules}
+        index={0}
+        onChange={(next) => {
+          setRules(next);
+          onChange(next);
+        }}
+      />
+    );
+  }
+
+  it("edits the three lists as comma-separated text, keeps what is typed, drops an emptied key and the @ of a handle", async () => {
+    const user = userEvent.setup();
+    const onChange = vi.fn();
+    renderWithProviders(<RulesHarness onChange={onChange} />);
+
+    const mentions = screen.getByTestId("email-target-mentions-0");
+    expect(mentions).toHaveValue("finance");
+    await user.type(mentions, ", @ap-team");
+    expect(mentions).toHaveValue("finance, @ap-team");
+    expect(onChange).toHaveBeenLastCalledWith({ mentions: ["finance", "ap-team"] });
+
+    await user.type(screen.getByTestId("email-target-addresses-0"), "invoices+finance@example.com");
+    await user.type(screen.getByTestId("email-target-allowed-senders-0"), "*@supplier.com");
+    expect(onChange).toHaveBeenLastCalledWith({
+      mentions: ["finance", "ap-team"],
+      addresses: ["invoices+finance@example.com"],
+      allowedSenders: ["*@supplier.com"],
+    });
+
+    await user.clear(mentions);
+    expect(onChange).toHaveBeenLastCalledWith({ addresses: ["invoices+finance@example.com"], allowedSenders: ["*@supplier.com"] });
   });
 });

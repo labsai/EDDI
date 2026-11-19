@@ -7395,7 +7395,17 @@
       "fromNameInvalid": "Der Absendername darf höchstens {{max}} Zeichen lang sein, ohne Zeilenumbrüche.",
       "replyTemplateTooLong": "Die Antwortvorlage darf höchstens {{max}} Zeichen lang sein.",
       "aiDisclosureTooLong": "Der KI-Hinweis darf höchstens {{max}} Zeichen lang sein.",
-      "maxRepliesPerThreadPerHour": "Das Antwortlimit muss eine ganze Zahl von 1 bis 1000 sein."
+      "maxRepliesPerThreadPerHour": "Das Antwortlimit muss eine ganze Zahl von 1 bis 1000 sein.",
+      "aliasesTooMany": "Höchstens {{max}} Aliase angeben.",
+      "aliasesInvalid": "Jeder Alias muss eine gültige E-Mail-Adresse sein.",
+      "aliasIsAddress": "Die Postfachadresse selbst ist kein Alias; nur zusätzliche Adressen angeben.",
+      "mentionInvalid": "Eine Erwähnung besteht aus 1–40 Buchstaben, Ziffern, _ oder -, beginnt mit einem Buchstaben oder einer Ziffer und wird ohne @ geschrieben.",
+      "mentionsTooMany": "Ein Ziel kann höchstens {{max}} Erwähnungen haben.",
+      "mentionDuplicate": "Jede Erwähnung kann nur ein Ziel adressieren.",
+      "targetAddressInvalid": "Jede Zieladresse muss eine gültige E-Mail-Adresse sein.",
+      "targetAddressNotReceived": "Eine Zieladresse muss einer der Aliase oder eine Plus-Adresse der Postfachadresse sein, damit das Postfach sie empfängt.",
+      "targetAddressDuplicate": "Jede Zieladresse kann nur ein Ziel adressieren.",
+      "targetAllowedSendersInvalid": "Jeder erlaubte Absender eines Ziels muss user@domain, *@domain oder *@*.domain sein."
     },
     "warning": {
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
@@ -7434,7 +7444,20 @@
     "replyTemplate": "Antwortvorlage",
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
-    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "addressingSection": "Adressierung",
+    "actWhen": "Reagieren auf",
+    "actWhenAddressed": "Nur E-Mails, die {{productName}} adressieren",
+    "actWhenAlways": "Jede E-Mail",
+    "actWhenHint": "Adressiert: eine Antwort auf eine E-Mail von {{productName}}, eine Erwähnung eines Ziels (@finance) im eigenen Text des Absenders oder das Postfach neu in An. Alles andere — das Postfach nur in Cc eines fremden Threads — wird als nicht adressiert vermerkt und löst nichts aus. Ein Rauschfilter: Wer einen Agenten auslösen darf, entscheiden weiterhin die Absender-Einstellungen.",
+    "aliases": "Aliase",
+    "aliasesHint": "Weitere Adressen, die in dieses Postfach zustellen (ein Alias, ein Verteiler), kommagetrennt, höchstens 20. Sie gelten als eigene Adressen des Postfachs: E-Mails an sie adressieren es, E-Mails von ihnen werden ignoriert.",
+    "targetMentions": "Erwähnungen",
+    "targetMentionsHint": "@finance im eigenen Text des Absenders leitet die E-Mail hierher — nie in zitiertem Verlauf, einer weitergeleiteten E-Mail oder einer Signatur. Bis zu 10 je Ziel, eindeutig über alle Ziele.",
+    "targetAddresses": "Adressen",
+    "targetAddressesHint": "E-Mails an eine dieser Adressen in An oder Cc gehen zuerst hierher. Jede muss ein Alias der Integration oder eine Plus-Adresse ihres Postfachs sein (invoices+finance@…).",
+    "targetAllowedSenders": "Erlaubte Absender für dieses Ziel",
+    "targetAllowedSendersHint": "Wenn gesetzt, erreichen nur authentifizierte Absender, die einem dieser Muster entsprechen, dieses Ziel — gleich, wie die E-Mail geleitet wurde. Alle anderen werden abgewiesen, nie stattdessen an das Standardziel geleitet."
   },
   "feedback": {
     "title": "Feedback",

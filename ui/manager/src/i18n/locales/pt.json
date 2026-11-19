@@ -7466,7 +7466,17 @@
       "fromNameInvalid": "O nome do remetente pode ter no máximo {{max}} caracteres, sem quebras de linha.",
       "replyTemplateTooLong": "O modelo de resposta pode ter no máximo {{max}} caracteres.",
       "aiDisclosureTooLong": "O aviso de IA pode ter no máximo {{max}} caracteres.",
-      "maxRepliesPerThreadPerHour": "O limite de respostas deve ser um número inteiro de 1 a 1000."
+      "maxRepliesPerThreadPerHour": "O limite de respostas deve ser um número inteiro de 1 a 1000.",
+      "aliasesTooMany": "Indique no máximo {{max}} aliases.",
+      "aliasesInvalid": "Cada alias deve ser um endereço de e-mail válido.",
+      "aliasIsAddress": "O próprio endereço da caixa não é um alias; indique apenas endereços adicionais.",
+      "mentionInvalid": "Uma menção tem 1–40 letras, dígitos, _ ou -, começa com letra ou dígito e é escrita sem o @.",
+      "mentionsTooMany": "Um destino pode ter no máximo {{max}} menções.",
+      "mentionDuplicate": "Cada menção só pode endereçar um destino.",
+      "targetAddressInvalid": "Cada endereço de destino deve ser um endereço de e-mail válido.",
+      "targetAddressNotReceived": "Um endereço de destino deve ser um dos aliases ou um endereço com + da caixa, para que a caixa o receba.",
+      "targetAddressDuplicate": "Cada endereço de destino só pode endereçar um destino.",
+      "targetAllowedSendersInvalid": "Cada remetente permitido de um destino deve ser user@domain, *@domain ou *@*.domain."
     },
     "warning": {
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
@@ -7505,7 +7515,20 @@
     "replyTemplate": "Modelo de resposta",
     "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
     "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o {{productName}} não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
-    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "addressingSection": "Endereçamento",
+    "actWhen": "Agir sobre",
+    "actWhenAddressed": "Apenas e-mails dirigidos ao {{productName}}",
+    "actWhenAlways": "Todos os e-mails",
+    "actWhenHint": "Dirigido: uma resposta a um e-mail enviado pelo {{productName}}, uma menção a um destino (@finance) no texto do próprio remetente, ou a caixa adicionada agora em Para. Todo o resto — a caixa apenas em Cc na conversa de outra pessoa — é registrado como não dirigido e não executa nada. É um filtro de ruído: quem pode fazer um agente agir continua definido pelas configurações de remetentes.",
+    "aliases": "Aliases",
+    "aliasesHint": "Outros endereços que entregam nesta caixa (um alias, uma lista de distribuição), separados por vírgulas, no máximo 20. Contam como da própria caixa: e-mail para eles a endereça, e-mail deles é ignorado.",
+    "targetMentions": "Menções",
+    "targetMentionsHint": "Escrever @finance no texto do próprio remetente encaminha o e-mail para cá — nunca no histórico citado, num e-mail encaminhado ou numa assinatura. Até 10 por destino, únicas entre destinos.",
+    "targetAddresses": "Endereços",
+    "targetAddressesHint": "E-mail para um destes em Para ou Cc vem para cá primeiro. Cada um deve ser um alias da integração ou um endereço com + da sua caixa (invoices+finance@…).",
+    "targetAllowedSenders": "Remetentes permitidos para este destino",
+    "targetAllowedSendersHint": "Quando definido, apenas remetentes autenticados que correspondam a um destes chegam a este destino, seja qual for o encaminhamento. Os outros são recusados, nunca enviados ao destino padrão em seu lugar."
   },
   "feedback": {
     "title": "Avaliações",

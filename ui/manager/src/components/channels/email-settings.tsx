@@ -1,9 +1,10 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { useConnectionDescriptors } from "@/hooks/use-connections";
 import {
+  EMAIL_ACT_WHEN,
   EMAIL_ATTACHMENT_MODES,
   EMAIL_DEFAULTS,
   EMAIL_DEFAULT_AI_DISCLOSURE,
@@ -20,6 +21,7 @@ import {
   emailConfigProblems,
   emailMode,
   isOpenTrigger,
+  splitList,
   withEmailFixedKeys,
   type EmailProblem,
 } from "@/lib/email-channel";
@@ -283,6 +285,54 @@ export function EmailPlatformFields({
             </span>
           </label>
           )}
+        </div>
+      </div>
+
+      {/* When a mail runs at all */}
+      <div className="space-y-3 border-t border-border/50 pt-3" data-testid="email-addressing-section">
+        <p className="text-xs font-semibold text-muted-foreground">{t("emailChannel.addressingSection", "Addressing")}</p>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-act-when`} className={labelClass}>{t("emailChannel.actWhen", "Act on")}</label>
+            <select
+              id={`${uid}-act-when`}
+              data-testid="email-act-when"
+              className={selectClass}
+              value={pc.actWhen || EMAIL_DEFAULTS.actWhen}
+              onChange={(e) => set("actWhen", e.target.value)}
+            >
+              {EMAIL_ACT_WHEN.map((m) => (
+                <option key={m} value={m}>
+                  {m === "addressed"
+                    ? t("emailChannel.actWhenAddressed", "Only mail that addresses {{productName}}")
+                    : t("emailChannel.actWhenAlways", "Every mail")}
+                </option>
+              ))}
+            </select>
+            <p className={hintClass}>
+              {t(
+                "emailChannel.actWhenHint",
+                "Addressed: a reply to a mail {{productName}} sent, a mention of a target (@finance) in the sender's own text, or the mailbox newly in To. Anything else — the mailbox only in Cc of someone's thread — is recorded as not addressed and runs nothing. A noise filter: who may make an agent act is still decided by the sender settings.",
+              )}
+            </p>
+          </div>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-aliases`} className={labelClass}>{t("emailChannel.aliases", "Aliases")}</label>
+            <Input
+              id={`${uid}-aliases`}
+              data-testid="email-aliases"
+              value={pc.aliases ?? ""}
+              onChange={(e) => set("aliases", e.target.value)}
+              placeholder="ap@example.com, finance-list@example.com"
+            />
+            <p className={hintClass}>
+              {t(
+                "emailChannel.aliasesHint",
+                "Other addresses that deliver to this mailbox (an alias, a distribution list), comma-separated, at most 20. They count as the mailbox's own: mail to them addresses it, mail from them is ignored.",
+              )}
+            </p>
+            {problemFor("aliasesTooMany", "aliasesInvalid", "aliasIsAddress")}
+          </div>
         </div>
       </div>
 
@@ -563,6 +613,104 @@ export function EmailSecurityNotes({ conversation = false }: { conversation?: bo
         <ShieldCheck className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" aria-hidden="true" />
         <span>{t("emailChannel.noteToolApprovals", "Mail content is untrusted input. If the target agent has tools that change things, require approval for them (hitlConfig.toolApprovals).")}</span>
       </p>
+    </div>
+  );
+}
+
+/** The rule fields of an email target, as the target editor holds them. */
+export interface EmailTargetRuleValues {
+  mentions?: string[];
+  addresses?: string[];
+  allowedSenders?: string[];
+}
+
+/**
+ * The email-only rules of one target (email v2 plan §7.1): the handles that
+ * mention it, the aliases or plus-addresses that address it, and the senders
+ * allowed to reach it. Each is a comma-separated list; an emptied field removes
+ * the key. The backend normalises and validates them again.
+ */
+export function EmailTargetRules({
+  target,
+  index,
+  onChange,
+}: {
+  target: EmailTargetRuleValues;
+  index: number;
+  onChange: (rules: EmailTargetRuleValues) => void;
+}) {
+  const { t } = useTranslation();
+  const uid = useId();
+  // The text as typed: re-joining the parsed list on every keystroke would eat
+  // the comma the user is about to follow with the next entry.
+  const [text, setText] = useState(() => ({
+    mentions: (target.mentions ?? []).join(", "),
+    addresses: (target.addresses ?? []).join(", "),
+    allowedSenders: (target.allowedSenders ?? []).join(", "),
+  }));
+  const update = (field: keyof EmailTargetRuleValues, value: string) => {
+    setText((prev) => ({ ...prev, [field]: value }));
+    // A handle is stored without its "@"; people type it with one.
+    const entries = splitList(field === "mentions" ? value.replace(/(^|[\s,])@/g, "$1") : value);
+    const next: EmailTargetRuleValues = { ...target };
+    if (entries.length === 0) delete next[field];
+    else next[field] = entries;
+    onChange(next);
+  };
+
+  return (
+    <div className="space-y-3" data-testid={`email-target-rules-${index}`}>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-mentions`} className={labelClass}>{t("emailChannel.targetMentions", "Mentions")}</label>
+        <Input
+          id={`${uid}-mentions`}
+          data-testid={`email-target-mentions-${index}`}
+          className="h-8 text-sm"
+          value={text.mentions}
+          onChange={(e) => update("mentions", e.target.value)}
+          placeholder="finance, ap-team"
+        />
+        <p className={hintClass}>
+          {t(
+            "emailChannel.targetMentionsHint",
+            "Writing @finance in the sender's own text routes the mail here — never in quoted history, a forwarded mail or a signature. Up to 10 per target, unique across targets.",
+          )}
+        </p>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-addresses`} className={labelClass}>{t("emailChannel.targetAddresses", "Addresses")}</label>
+        <Input
+          id={`${uid}-addresses`}
+          data-testid={`email-target-addresses-${index}`}
+          className="h-8 text-sm"
+          value={text.addresses}
+          onChange={(e) => update("addresses", e.target.value)}
+          placeholder="finance-agent@example.com"
+        />
+        <p className={hintClass}>
+          {t(
+            "emailChannel.targetAddressesHint",
+            "Mail to one of these in To or Cc routes here first. Each must be an alias of the integration or a plus-address of its mailbox (invoices+finance@…).",
+          )}
+        </p>
+      </div>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-allowed`} className={labelClass}>{t("emailChannel.targetAllowedSenders", "Allowed senders for this target")}</label>
+        <Input
+          id={`${uid}-allowed`}
+          data-testid={`email-target-allowed-senders-${index}`}
+          className="h-8 text-sm"
+          value={text.allowedSenders}
+          onChange={(e) => update("allowedSenders", e.target.value)}
+          placeholder="*@example.com"
+        />
+        <p className={hintClass}>
+          {t(
+            "emailChannel.targetAllowedSendersHint",
+            "When set, only authenticated senders matching one of these reach this target, however the mail was routed. Anyone else is refused, never sent to the default target instead.",
+          )}
+        </p>
+      </div>
     </div>
   );
 }

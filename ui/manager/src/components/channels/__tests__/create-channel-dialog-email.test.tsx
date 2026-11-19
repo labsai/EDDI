@@ -52,6 +52,7 @@ describe("CreateChannelDialog — email", () => {
     expect(body?.channelType).toBe("email");
     expect(body?.platformConfig).toEqual({
       mode: "trigger",
+      actWhen: "addressed",
       transport: "imap",
       connection: "exchange-mailbox",
       host: "outlook.office365.com",
