@@ -207,10 +207,13 @@ public class AttachmentShareService {
                 }
             }
             if (matches.size() > 1) {
-                String candidates = matches.stream().map(i -> String.valueOf(i + 1)).collect(Collectors.joining(", "));
+                // A number is only an alias when no file is itself named that: a bare
+                // "2" selects the file called "2" first, so it is never offered then.
+                String candidates = matches.stream().map(i -> String.valueOf(i + 1)).filter(n -> !displayNames.contains(n))
+                        .collect(Collectors.joining(", "));
                 countRefusal(Refusal.AMBIGUOUS);
-                refused.add(new ShareResult.Refused(requested,
-                        "ambiguous: " + matches.size() + " files have this name; name one by its number (" + candidates + ")"));
+                refused.add(new ShareResult.Refused(requested, "ambiguous: " + matches.size() + " files have this name"
+                        + (candidates.isEmpty() ? "; rename one of them to tell them apart" : "; name one by its number (" + candidates + ")")));
                 continue;
             }
             Integer index = matches.isEmpty() ? listingNumber(parsed.name(), displayNames.size()) : matches.get(0);

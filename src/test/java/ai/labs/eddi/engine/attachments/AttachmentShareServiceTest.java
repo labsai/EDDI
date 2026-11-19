@@ -156,6 +156,22 @@ class AttachmentShareServiceTest {
         }
 
         @Test
+        void ambiguousName_neverSuggestsANumberThatIsAlsoAFileName() {
+            var s = new InMemoryAttachmentStore().put(REF_PDF, "report.pdf", "application/pdf", 1, SOURCE).put(REF_PNG, "2", "image/png", 1,
+                    SOURCE).put(REF_TXT, "report.pdf", "application/pdf", 2, SOURCE);
+            var l = ConversationListing.of(SOURCE, s, Set.of(), List.of());
+
+            var r = service.resolveNames(l, List.of("report.pdf"));
+
+            String reason = r.refused().get(0).reason();
+            assertTrue(reason.startsWith("ambiguous"), reason);
+            assertFalse(reason.contains("2,") || reason.contains("(2"), reason);
+            assertTrue(reason.contains("3"), reason);
+            // and the bare number really does select the file with that name
+            assertEquals(1, service.resolveNames(l, List.of("2")).resolved().size());
+        }
+
+        @Test
         void partSuffix_isRefused() {
             var r = service.resolveNames(listing, List.of("report.pdf#u3", "report.pdf#p1-2"));
             assertTrue(r.resolved().isEmpty());
