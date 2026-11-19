@@ -679,7 +679,7 @@ export function SecretsPage() {
                           aria-label={t("secrets.editGrantKey", { key: s.keyName, defaultValue: `Edit access for ${s.keyName}` })}
                         >
                           <ShieldCheck className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span className="max-2xl:sr-only">{t("secrets.access", "Access")}</span>
+                          {t("secrets.access", "Access")}
                         </button>
                         <button
                           onClick={() => openRotate(s)}
@@ -689,7 +689,7 @@ export function SecretsPage() {
                           aria-label={t("secrets.rotateKey", { key: s.keyName, defaultValue: `Rotate ${s.keyName}` })}
                         >
                           <RefreshCw className="h-3.5 w-3.5" aria-hidden="true" />
-                          <span className="max-2xl:sr-only">{t("secrets.rotate", "Rotate")}</span>
+                          {t("secrets.rotate", "Rotate")}
                         </button>
                         <button
                           onClick={() => setDeleteTarget(s)}
@@ -705,7 +705,7 @@ export function SecretsPage() {
                             className="h-3.5 w-3.5"
                             aria-hidden="true"
                           />
-                          <span className="max-2xl:sr-only">{t("common.delete", "Delete")}</span>
+                          {t("common.delete", "Delete")}
                         </button>
                       </RowActions>
                     </td>
