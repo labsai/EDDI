@@ -66,9 +66,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * (R2 step 2). Extracted from {@code AgentOrchestrator} as a pure move — no
  * behavior change; {@code AgentOrchestrator.discoverHttpCallTools} is kept as a
  * declared delegator (adapting {@link ToolContribution} back to the legacy
- * {@code HttpCallToolsResult} shape) since {@code buildToolSetup}'s merge flow
- * is not yet rewired to iterate {@link ToolSourceProvider}s — that is a
- * separate, later step.
+ * {@code HttpCallToolsResult} shape) for the tests that call it by that name;
+ * {@code buildToolSetup} itself assembles this provider through
+ * {@code ToolSourceRegistry} like every other {@link ToolSourceProvider}.
+ * Skipped when the task sets {@code enableHttpCallTools} to {@code false} (null
+ * counts as enabled).
  * <p>
  * Lives in {@code ai.labs.eddi.modules.llm.impl} — the same package as
  * {@code AgentOrchestrator} — rather than a new subpackage, deliberately unlike

@@ -436,6 +436,11 @@ public class AgentFactory implements IAgentFactory {
         agentEnvironment.remove(new AgentId(agentId, version));
     }
 
+    @Override
+    public void invalidateAgentCaches(String agentId) {
+        invalidateConfigurationCache(agentId);
+    }
+
     private void invalidateConfigurationCache(String agentId) {
         if (agentConfigurationCache != null) {
             agentConfigurationCache.invalidate(agentId);

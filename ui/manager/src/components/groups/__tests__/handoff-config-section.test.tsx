@@ -1,9 +1,9 @@
 import { describe, it, expect, vi } from "vitest";
 import { fireEvent, screen } from "@testing-library/react";
 import { useState } from "react";
-import { renderWithProviders } from "@/test/test-utils";
-import { HandoffConfigSection } from "@/components/groups/handoff-config-section";
-import { handoffProblems, type GroupHandoffConfig } from "@/lib/api/team-handoffs";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { HandoffConfigSection } from "@eddi/app-kit/components/groups/handoff-config-section";
+import { handoffProblems, type GroupHandoffConfig } from "@eddi/app-kit/lib/api/team-handoffs";
 
 /** Controlled harness: the section is a pure view of `value`. */
 function Harness({ initial, spy }: { initial: GroupHandoffConfig | null; spy: (next: GroupHandoffConfig | null) => void }) {

@@ -35,8 +35,8 @@ Two attacks follow from that:
 | Vault value checksums (dedup / match without decrypting) | `HmacSHA256` keyed with a random per-deployment key, over tenant id and value. Legacy rows hold a bare `SHA-256`. | `secrets/crypto/VaultChecksum` | ✅ |
 | Audit ledger entry integrity | `HmacSHA256` over a versioned canonical form of each entry. The key is configured (`eddi.audit.hmac-key`) or derived from the vault master key with `PBKDF2WithHmacSHA256` and then pinned in the vault (see [Audit Ledger](audit-ledger.md)). | `engine/audit/AuditHmac`, `AuditKeyring` | ✅ Quantum-safe, but symmetric: only a key holder can verify, not a third party |
 | Audit ledger keyed pseudonyms for erased users | `HmacSHA256` | `engine/audit/AuditHmac` | ✅ |
-| Agent identity and signed inter-agent envelopes | **Ed25519** | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
-| Agent signature on audit entries | **Ed25519**, over the entry's HMAC | `engine/audit/AuditLedgerService` (via `AgentSigningService`) | ❌ Classical signature |
+| Agent identity and signed inter-agent envelopes | **Ed25519** (an agent's signing key pair comes from `KeyPairGenerator` `Ed25519` when an admin asks for one with `POST /agentstore/agents/{id}/signing-keys`; the private half goes straight to the secrets vault, only the public half is stored on the agent) | `configs/agents/AgentSigningService`, `configs/agents/crypto/SignedEnvelope`, `engine/internal/groups/GroupSigningGuard` | ❌ Classical signature |
+| Agent signature on audit entries | **Ed25519**, over `eddi-audit-entry:` and the entry's HMAC, stored as `v<keyVersion>:<signature>` and checked by `/auditstore/verify` against the key the entry's agent version signs with, as long as the agent has not revoked it; a plain signature written by 6.7.0 or earlier is checked over the bare HMAC against the legacy `identity.publicKey` | `engine/audit/AuditAgentSigner` (via `AgentSigningService`) | ❌ Classical signature |
 | Slack request verification | `HmacSHA256` (scheme defined by Slack) | `integrations/slack/SlackSignatureVerifier` | ✅ |
 | Signed webhook channel: inbound request verification | `HmacSHA256` (`X-Eddi-Signature` or a provider's scheme) | `integrations/webhook/WebhookSignatureVerifier` (via `integrations/channels/HmacSignatures`) | ✅ |
 | Alert webhook delivery: signature on outbound alerts | `HmacSHA256` over timestamp and body | `engine/alerts/AlertSenders` (via `integrations/channels/HmacSignatures`) | ✅ |
@@ -79,10 +79,9 @@ Until EDDI runs on a JDK whose JSSE offers a hybrid group:
 EDDI's post-quantum work is aimed at these outcomes:
 
 1. **A maintained inventory.** This page, together with `CryptoInventoryTest`.
-2. **Agent signatures that can actually be verified.** Agent signatures on audit entries will record which key version produced them, protect that version against tampering, and be checked by the audit verification endpoints.
-3. **Crypto-agile agent signing.** Agent keys will be able to use ML-DSA-65 or a hybrid of Ed25519 and ML-DSA-65. A per-agent *minimum algorithm* policy will reject signatures from weaker keys, so that an attacker who can forge Ed25519 cannot downgrade a migrated agent. Ed25519 stays the default.
-4. **Audit evidence that third parties can verify.** Optional checkpoints will sign a Merkle root of publicly recomputable digests of the entries with a post-quantum key. An auditor can then check the ledger offline with a public key pinned out of band, which the symmetric HMAC alone does not allow.
-5. **TLS visibility.** EDDI will log at startup whether hybrid post-quantum key exchange is available, and the documentation will give verified guidance for inbound TLS.
+2. **Crypto-agile agent signing.** Agent keys will be able to use ML-DSA-65 or a hybrid of Ed25519 and ML-DSA-65. A per-agent *minimum algorithm* policy will reject signatures from weaker keys, so that an attacker who can forge Ed25519 cannot downgrade a migrated agent. Ed25519 stays the default.
+3. **Audit evidence that third parties can verify.** Optional checkpoints will sign a Merkle root of publicly recomputable digests of the entries with a post-quantum key. An auditor can then check the ledger offline with a public key pinned out of band, which the symmetric HMAC alone does not allow.
+4. **TLS visibility.** EDDI will log at startup whether hybrid post-quantum key exchange is available, and the documentation will give verified guidance for inbound TLS.
 
 The ledger's HMAC canonical forms are frozen and will not change as part of this work. Existing configurations and stored data will keep verifying exactly as before.
 

@@ -119,4 +119,24 @@ class AgentTest {
 
         assertSame(policy, memory.getMemoryPolicy());
     }
+
+    /**
+     * Whether the agent requires peer verification rides on the memory of every
+     * turn, the CONVERSATION_START turn included, where user memories are loaded.
+     */
+    @Test
+    void everyTurnCarriesWhetherTheAgentRequiresPeerVerification() throws Exception {
+        agent.setPeerVerificationRequired(true);
+
+        IConversation started = agent.startConversation("user-1", new HashMap<>(), mock(IPropertiesHandler.class),
+                mock(IConversation.IConversationOutputRenderer.class));
+        var memory = new ConversationMemory("conv-1", "agent-1", 3, "user-1");
+        agent.continueConversation(memory, mock(IPropertiesHandler.class), mock(IConversation.IConversationOutputRenderer.class));
+
+        assertTrue(started.getConversationMemory().isPeerVerificationRequired());
+        assertTrue(memory.isPeerVerificationRequired());
+        agent.setPeerVerificationRequired(false);
+        agent.continueConversation(memory, mock(IPropertiesHandler.class), mock(IConversation.IConversationOutputRenderer.class));
+        assertFalse(memory.isPeerVerificationRequired(), "a version that does not verify clears it");
+    }
 }

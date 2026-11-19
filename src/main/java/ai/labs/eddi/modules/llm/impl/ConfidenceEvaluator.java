@@ -35,9 +35,9 @@ import java.util.regex.Pattern;
  * real JSON parser first, regex as fallback). Falls back to heuristic if no
  * wrapper is found.</li>
  * <li><b>heuristic</b> — analyzes response text for hedging phrases, emptiness,
- * length. Phrases and thresholds are configurable via {@link HeuristicConfig};
- * when no configured phrase matches, language-agnostic signals (length +
- * JSON-structure) are used instead of a flat score.</li>
+ * length. Phrases, scores and the short-length threshold are configurable via
+ * {@link HeuristicConfig}; a response that is not short and matches no
+ * configured phrase keeps the default score (0.8 unless overridden).</li>
  * <li><b>judge_model</b> — uses a separate cheap model call to rate the
  * probability that the answer fully and correctly addresses the user's request
  * (see {@link JudgeRequest}).</li>
@@ -50,8 +50,9 @@ class ConfidenceEvaluator {
 
     /**
      * The judge runs inside the cascade step's timeout and has a heuristic to fall
-     * back on, so it gets a short policy: one retry, a sub-second backoff, and no
-     * provider-requested wait above two seconds (it gives up instead of sleeping).
+     * back on, so it gets a short policy: one retry, a backoff of at most one
+     * second, and no provider-requested wait above two seconds (it gives up instead
+     * of sleeping).
      */
     private static final RetryConfiguration JUDGE_RETRY = judgeRetry();
 
@@ -242,7 +243,8 @@ class ConfidenceEvaluator {
     /**
      * Analyze response text heuristically for confidence signals. Phrases and
      * thresholds come from {@code heuristicConfig} when provided (English defaults
-     * otherwise). When no phrase matches, language-agnostic signals are used.
+     * otherwise). A response that is not short and matches no phrase keeps the
+     * default score.
      */
     static EvaluationResult evaluateHeuristic(String response, HeuristicConfig heuristicConfig) {
         if (response == null || response.isBlank()) {
@@ -284,7 +286,7 @@ class ConfidenceEvaluator {
             }
         }
 
-        // No configured phrase matched → language-agnostic fallback. Without
+        // No configured phrase matched → default score. Without
         // language-specific signals we cannot tell hedging from confidence, so a
         // non-short response keeps the default score (very short responses were
         // already scored above). Deployments localize the phrase lists via

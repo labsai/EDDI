@@ -18,10 +18,11 @@ import jakarta.enterprise.context.ApplicationScoped;
 import java.util.Set;
 
 /**
- * {@code json-object} — output only. Flags an answer that is not a single JSON
- * object (a surrounding Markdown code fence is tolerated). It checks the shape
- * "is a JSON object" and nothing else — for a schema, use the task's
- * {@code responseSchema} with {@code responseValidation.onSchemaMismatch}.
+ * {@code json-object} — output and tool-call arguments. Flags an answer that is
+ * not a single JSON object (a surrounding Markdown code fence is tolerated). It
+ * checks the shape "is a JSON object" and nothing else — for a schema, use the
+ * task's {@code responseSchema} with
+ * {@code responseValidation.onSchemaMismatch}.
  * <p>
  * Usually paired with {@code reprompt}: the model is told to answer with a
  * single valid JSON object.

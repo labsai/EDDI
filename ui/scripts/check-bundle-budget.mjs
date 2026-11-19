@@ -17,6 +17,10 @@
  * summed. A dynamic `import()` is not in the shell, so it is not counted —
  * which is the point: code that moves behind one leaves the number.
  *
+ * An app may also list `scripts`: standalone files a host page loads by
+ * themselves (the chat embed launcher, `/chat/embed.js`). Each is measured as
+ * its own gzip size against its own budget.
+ *
  * Files the backend renders at request time (`/manage/__auth_config__.js`,
  * `/chat/__config__.js` and everything under `/branding/`, the deployment's
  * brand) are not in `dist/` and are skipped by name. Any OTHER reference that is not in `dist/` fails the check:
@@ -96,6 +100,18 @@ export function measurePage(dist, page, stripPrefix = "") {
   };
 }
 
+/**
+ * Measure one standalone script — an entry of an app's `scripts`, such as the
+ * chat embed launcher, which a host page loads by itself and which loads
+ * nothing else up front.
+ */
+export function measureScript(dist, script) {
+  const file = join(dist, script);
+  if (!existsSync(file)) throw new Error(`${file} does not exist — run \`npm run build\` first`);
+  const entry = { ref: script, raw: readFileSync(file).length, gzip: gzipSize(file) };
+  return { page: script, files: [entry], raw: entry.raw, gzip: entry.gzip };
+}
+
 function main() {
   const args = process.argv.slice(2);
   const app = args.find((a) => !a.startsWith("--"));
@@ -106,11 +122,20 @@ function main() {
     process.exit(2);
   }
   const dist = resolve(UI_ROOT, config.dist);
-  const results = Object.entries(config.pages).map(([page, budget]) => ({
-    ...measurePage(dist, page, config.stripPrefix),
-    budgetKb: budget.budgetKb,
-    baselineKb: budget.baselineKb,
-  }));
+  const results = [
+    ...Object.entries(config.pages ?? {}).map(([page, budget]) => ({
+      ...measurePage(dist, page, config.stripPrefix),
+      budgetKb: budget.budgetKb,
+      baselineKb: budget.baselineKb,
+    })),
+    // A standalone script a host page loads on its own (the chat embed launcher):
+    // the file is the whole download.
+    ...Object.entries(config.scripts ?? {}).map(([script, budget]) => ({
+      ...measureScript(dist, script),
+      budgetKb: budget.budgetKb,
+      baselineKb: budget.baselineKb,
+    })),
+  ];
 
   if (args.includes("--json")) {
     console.log(JSON.stringify(results, null, 2));

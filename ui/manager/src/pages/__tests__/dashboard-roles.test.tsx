@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
-import { renderWithProviders } from "@/test/test-utils";
-import { server } from "@/test/mocks/server";
-import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@/components/auth/auth-context";
+import { renderWithProviders } from "@eddi/app-kit/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { AuthContext, GUEST_CONTEXT, type AuthContextValue } from "@eddi/app-kit/components/auth/auth-context";
 import { DashboardPage } from "@/pages/dashboard";
 import { Sidebar } from "@/components/layout/sidebar";
 

@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from "vitest";
 import { screen, fireEvent } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { ChatActivity } from "../chat-activity";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
 
 describe("ChatActivity", () => {
   const mockWriteText = vi.fn();

@@ -68,6 +68,27 @@ public class AgentConfiguration {
     private String description;
 
     /**
+     * Whether this agent appears in the end-user catalog
+     * ({@code GET /catalog/agents}) that Workforce and other end-user apps list for
+     * the people allowed to use it.
+     * <p>
+     * <strong>Opt-in, default {@code false}</strong>: upgrading a deployment lists
+     * nothing, so the Platform Operator, test agents and internal helpers are never
+     * shown to every signed-in user by accident. Listing only decides what is
+     * <em>offered</em> — whether a caller may actually talk to the agent is still
+     * the USE check, and an unlisted agent stays reachable by anyone who has its id
+     * and may use it. With workspaces enforced, {@code published} and
+     * {@code internal} visibility count as listed too.
+     * <p>
+     * The catalog reads this flag from the <em>deployed</em> version of the agent,
+     * not from the latest stored one: listing or unlisting takes effect only once
+     * the version carrying the change is deployed.
+     *
+     * @since 6.7.0
+     */
+    private Boolean listed = false;
+
+    /**
      * Which versions of this agent a running conversation may move between. Two
      * versions with the same generation are compatible, and a conversation follows
      * the newest deployed version of its generation from its next turn; a different
@@ -86,8 +107,9 @@ public class AgentConfiguration {
     private Integer compatibilityGeneration;
 
     /**
-     * Cryptographic identity for inter-agent trust. Auto-generated on agent
-     * creation. The public key is stored here; the private key is in SecretsVault.
+     * Cryptographic identity for inter-agent trust. Empty until an admin generates
+     * a signing key with {@code POST /agentstore/agents/{id}/signing-keys}, which
+     * adds the public key here and stores the private key in the Secrets Vault.
      *
      * @since 6.0.0
      */
@@ -182,6 +204,14 @@ public class AgentConfiguration {
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public Boolean getListed() {
+        return listed;
+    }
+
+    public void setListed(Boolean listed) {
+        this.listed = listed;
     }
 
     public Integer getCompatibilityGeneration() {
@@ -810,8 +840,52 @@ public class AgentConfiguration {
         }
 
         /**
-         * Get the key for a specific version. Falls back to {@code publicKey} if no
-         * versioned keys exist.
+         * The key version this agent signs with: the highest one in {@link #keys}
+         * between 1 and {@link AgentPublicKey#MAX_VERSION}, revoked or not, or 0 — the
+         * legacy {@code publicKey} — when there is none. A revoked newest key is not
+         * skipped: the agent then cannot sign until a new key is generated, rather than
+         * falling back to an older one. The next generated key takes this plus one. Not
+         * a getter, so it stays out of the stored JSON.
+         */
+        public int signingKeyVersion() {
+            if (keys == null || keys.isEmpty()) {
+                return 0;
+            }
+            return keys.stream().mapToInt(AgentPublicKey::version).filter(v -> v >= 1 && v <= AgentPublicKey.MAX_VERSION).max().orElse(0);
+        }
+
+        /**
+         * The entry of {@link #signingKeyVersion()}, or {@code null} when the agent
+         * would sign with the legacy {@code publicKey}. When that version is declared
+         * more than once and any of its entries is revoked, the revoked one is
+         * returned, whatever the order: the version is revoked, as
+         * {@code GroupSigningGuard} treats it when it refuses to sign. Not a getter, so
+         * it stays out of the stored JSON.
+         */
+        public AgentPublicKey signingKey() {
+            int version = signingKeyVersion();
+            if (version == 0) {
+                return null;
+            }
+            AgentPublicKey first = null;
+            for (AgentPublicKey key : keys) {
+                if (key.version() != version) {
+                    continue;
+                }
+                if (key.revoked()) {
+                    return key;
+                }
+                if (first == null) {
+                    first = key;
+                }
+            }
+            return first;
+        }
+
+        /**
+         * Get the key for a specific version. Version {@code 0} ("signed before key
+         * versioning existed") falls back to {@code publicKey} when no versioned key
+         * matches; any other version without a matching key yields {@code null}.
          *
          * @param version
          *            the key version to find
@@ -1304,7 +1378,10 @@ public class AgentConfiguration {
          * maintain the user's whole memory set across agents — the cross-agent
          * consolidation {@link #isPreserveAgentProvenance()}{@code =false} describes.
          * Entries without a {@code sourceAgentId} (legacy/migrated rows) are only in
-         * scope in this mode, since no agent owns them.
+         * scope in this mode, since no agent owns them. An entry merged from several
+         * agents' entries is this agent's own model text and is written as this
+         * agent's, so another agent that requires peer verification does not read it as
+         * its own or the user's.
          *
          * @since 6.1.0
          */
@@ -1692,15 +1769,15 @@ public class AgentConfiguration {
      * A checkpoint captures the conversation PROPERTIES only; rolling one back does
      * not restore steps, outputs or external side-effects (see
      * {@code MemorySnapshotService#rollbackToCheckpoint}). Checkpointing itself is
-     * performed unconditionally by {@code AgentOrchestrator} before every tool call
-     * — {@link AutoSnapshot#isEnabled()} and {@link AutoSnapshot#getTriggerOn()}
-     * are NOT consulted yet, and {@link #getMaxCheckpointsPerConversation()} is
-     * honoured only where a caller passes it to
-     * {@code MemorySnapshotService#createCheckpoint(..., int)}. No production
-     * caller does: {@code AgentOrchestrator} uses the 3-arg overload because
-     * {@code SessionManagement} has no slot on {@code IConversationMemory} (unlike
-     * {@link UserMemoryConfig} and {@link MemoryPolicy}), so auto-checkpointing
-     * always prunes to the service default of 10.
+     * performed unconditionally by the tool loop ({@code ToolLoopRunner}) before
+     * every tool call — {@link AutoSnapshot#isEnabled()} and
+     * {@link AutoSnapshot#getTriggerOn()} are NOT consulted yet, and
+     * {@link #getMaxCheckpointsPerConversation()} is honoured only where a caller
+     * passes it to {@code MemorySnapshotService#createCheckpoint(..., int)}. No
+     * production caller does: {@code ToolLoopRunner} uses the 3-arg overload
+     * because {@code SessionManagement} has no slot on {@code IConversationMemory}
+     * (unlike {@link UserMemoryConfig} and {@link MemoryPolicy}), so
+     * auto-checkpointing always prunes to the service default of 10.
      *
      * @since 6.0.0
      */
@@ -1725,8 +1802,8 @@ public class AgentConfiguration {
         }
 
         /**
-         * Auto-snapshot configuration. When enabled, checkpoints are created
-         * automatically before state-changing tool executions.
+         * Auto-snapshot configuration. Intended to create checkpoints only before
+         * state-changing tool executions when enabled.
          * <p>
          * <strong>Reserved — not yet honoured by the engine.</strong>
          * Auto-checkpointing currently runs before every tool call regardless of these

@@ -8,7 +8,6 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
-import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.gdpr.UserErasureParticipant;
 import ai.labs.eddi.secrets.sanitize.SecretRedactionFilter;
@@ -62,8 +61,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ol>
  * <li>{@link SecretRedactionFilter} — scrubs potential secrets from string
  * values</li>
- * <li>{@link AuditHmac} — computes HMAC-SHA256 integrity hash using the vault
- * master key</li>
+ * <li>{@link AuditHmac} — computes the HMAC-SHA256 integrity hash with the
+ * signing key from {@link AuditKeyring} (none when signing is disabled)</li>
+ * <li>{@link AuditAgentSigner} — the agent's own Ed25519 signature over that
+ * HMAC, when the agent version that produced the entry signs</li>
  * </ol>
  *
  * @author ginccc
@@ -178,7 +179,7 @@ public class AuditLedgerService implements UserErasureParticipant {
     private final String deadLetterPath;
     private final boolean agentSigningEnabled;
     private final String defaultTenantId;
-    private final AgentSigningService agentSigningService;
+    private final AuditAgentSigner agentSigner;
     private final ObjectMapper objectMapper;
 
     /** Target shape for {@link #normalizePayloadsForStorage}. */
@@ -256,9 +257,9 @@ public class AuditLedgerService implements UserErasureParticipant {
             @ConfigProperty(name = "eddi.audit.verify.recover-legacy-max-rows", defaultValue = "500") int recoverLegacyMaxRows,
             @ConfigProperty(name = "eddi.audit.erasure-mode", defaultValue = ERASURE_MODE_REDACT) String erasureMode,
             MeterRegistry meterRegistry, IAuditClusterSupport clusterSupport,
-            AgentSigningService agentSigningService, ObjectMapper objectMapper, AuditKeyring keyring) {
+            AuditAgentSigner agentSigner, ObjectMapper objectMapper, AuditKeyring keyring) {
         this(auditStore, enabled, flushIntervalSeconds, masterKeyConfig, deadLetterPath, agentSigningEnabled, defaultTenantId, maxQueueSize,
-                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, clusterSupport, agentSigningService, objectMapper);
+                recoverLegacyTimestamps, recoverLegacyMaxRows, meterRegistry, clusterSupport, agentSigner, objectMapper);
         this.keyring = keyring;
         setErasureMode(erasureMode);
     }
@@ -277,7 +278,7 @@ public class AuditLedgerService implements UserErasureParticipant {
             boolean recoverLegacyTimestamps,
             int recoverLegacyMaxRows,
             MeterRegistry meterRegistry, IAuditClusterSupport clusterSupport,
-            AgentSigningService agentSigningService, ObjectMapper objectMapper) {
+            AuditAgentSigner agentSigner, ObjectMapper objectMapper) {
         this.recoverLegacyTimestamps = recoverLegacyTimestamps;
         this.recoverLegacyMaxRows = recoverLegacyMaxRows;
         this.auditStore = auditStore;
@@ -305,7 +306,7 @@ public class AuditLedgerService implements UserErasureParticipant {
         final int capacity = this.maxQueueSize;
         Gauge.builder("eddi_audit_queue_capacity", () -> capacity).register(meterRegistry);
         this.clusterSupport = clusterSupport;
-        this.agentSigningService = agentSigningService;
+        this.agentSigner = agentSigner;
         this.objectMapper = objectMapper;
     }
 
@@ -612,10 +613,8 @@ public class AuditLedgerService implements UserErasureParticipant {
                 signed = scrubbed;
             }
 
-            // Sign with agent's Ed25519 key if signing is enabled
-            if (agentSigningEnabled && agentSigningService != null && signed.agentId() != null) {
-                signed = applyAgentSignature(signed);
-            }
+            // The agent's own Ed25519 signature, over the HMAC just computed.
+            signed = signAsAgent(signed);
 
             queue.offer(signed);
             queued = true;
@@ -1348,17 +1347,18 @@ public class AuditLedgerService implements UserErasureParticipant {
 
     /**
      * Whether entries are being written with an HMAC integrity signature. False
-     * when no vault master key is configured — the ledger is then a plain log, not
-     * evidence.
+     * when neither a vault master key nor {@code eddi.audit.hmac-key} is configured
+     * — the ledger is then a plain log, not evidence.
      */
     public boolean isSigningEnabled() {
         return keyring != null && keyring.signingKey() != null;
     }
 
     /**
-     * Re-check a stored entry's HMAC against the deployment's signing key.
+     * Re-check a stored entry's HMAC against the deployment's verification keys
+     * (the signing key and every retired or pinned key, see {@link AuditKeyring}).
      * <p>
-     * This is the only place the key is used for verification; it is deliberately
+     * This is the only place the keys are used for verification; it is deliberately
      * kept inside the service so no caller has to hold key material. Backs the
      * admin verification endpoint — without it {@link AuditHmac#verifyHmac} had no
      * production caller at all, and the ledger shipped with tamper detection that
@@ -1374,7 +1374,17 @@ public class AuditLedgerService implements UserErasureParticipant {
 
     /**
      * Re-check a stored entry, spending legacy-recovery searches from a budget the
-     * caller's whole sweep shares.
+     * caller's whole sweep shares. An entry whose HMAC verifies is also checked for
+     * its agent signature (see {@link AuditAgentSigner}): a signature that does not
+     * verify is {@link AuditVerificationStatus#AGENT_SIGNATURE_INVALID}; one that
+     * is missing where its agent version would have signed, was made with a key
+     * revoked since, or cannot be checked (its agent was deleted permanently, or no
+     * legacy key is declared for a signature in the form 6.7.0 and earlier wrote)
+     * is {@link AuditVerificationStatus#AGENT_SIGNATURE_MISSING},
+     * {@link AuditVerificationStatus#AGENT_KEY_REVOKED} or
+     * {@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}. An unsigned entry is
+     * only looked at while {@code eddi.audit.agent-signing-enabled} is on: with it
+     * off, no entry is expected to carry a signature.
      *
      * @param entry
      *            a stored entry, as read back from {@link IAuditStore}
@@ -1383,6 +1393,39 @@ public class AuditLedgerService implements UserErasureParticipant {
      * @return the verification outcome for that entry
      */
     public AuditVerificationStatus verifyEntry(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
+        return withAgentSignature(entry, verifyHmac(entry, recoveryBudget));
+    }
+
+    /**
+     * {@code hmacStatus} refined by the entry's agent signature, the second half of
+     * {@link #verifyEntry}.
+     *
+     * @throws IllegalStateException
+     *             if the agent store could not be read
+     */
+    private AuditVerificationStatus withAgentSignature(AuditEntry entry, AuditVerificationStatus hmacStatus) {
+        boolean hmacVerified = hmacStatus == AuditVerificationStatus.VALID || hmacStatus == AuditVerificationStatus.VALID_RECOVERED;
+        if (!hmacVerified || agentSigner == null || entry.agentSignature() == null && !agentSigningEnabled) {
+            return hmacStatus;
+        }
+        // The agent signature covers the HMAC, so it is only worth checking on an entry
+        // whose HMAC verified — and on one that did, a bad signature is the finding.
+        return switch (agentSigner.verify(entry)) {
+            case NOT_SIGNED, VALID -> hmacStatus;
+            case INVALID -> AuditVerificationStatus.AGENT_SIGNATURE_INVALID;
+            case MISSING -> AuditVerificationStatus.AGENT_SIGNATURE_MISSING;
+            case KEY_REVOKED -> AuditVerificationStatus.AGENT_KEY_REVOKED;
+            case KEY_UNAVAILABLE -> AuditVerificationStatus.AGENT_KEY_UNAVAILABLE;
+        };
+    }
+
+    /**
+     * The HMAC half of {@link #verifyEntry}. A GDPR erasure decides with it whether
+     * a row may be re-signed: that question is whether the content is intact, which
+     * only the HMAC answers. The reseal then decides about the agent signature
+     * itself (see {@link #reseal}).
+     */
+    private AuditVerificationStatus verifyHmac(AuditEntry entry, AuditRecoveryBudget recoveryBudget) {
         if (entry == null) {
             return AuditVerificationStatus.INVALID;
         }
@@ -1644,7 +1687,7 @@ public class AuditLedgerService implements UserErasureParticipant {
         // A queued entry was signed by this node, but it is still verified like a
         // stored row before it is re-signed, and the marker records the verdict that
         // was actually observed — never VALID on trust.
-        AuditVerificationStatus before = entry.hmac() != null ? verifyEntry(entry) : null;
+        AuditVerificationStatus before = entry.hmac() != null ? verifyHmac(entry, newRecoveryBudget()) : null;
         AuditEntry redacted = rewritten.withPayload(redactionMarker(entry.hmac(), before), null, null, null);
         boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
         DrainCounts counts = drainCountsFor(userId);
@@ -1817,11 +1860,21 @@ public class AuditLedgerService implements UserErasureParticipant {
                         stayInFilter++;
                         continue;
                     }
-                    AuditVerificationStatus before = verifyEntry(entry, budget);
+                    AuditVerificationStatus before = verifyHmac(entry, budget);
                     boolean verified = before == AuditVerificationStatus.VALID || before == AuditVerificationStatus.VALID_RECOVERED;
                     AuditEntry rewritten = entry.withUserId(target).withPayload(redactionMarker(entry.hmac(), before), null, null, null);
                     if (verified && isSigningEnabled()) {
-                        rewritten = reseal(rewritten);
+                        try {
+                            rewritten = reseal(rewritten);
+                        } catch (RuntimeException e) {
+                            // Agent verification hit a store failure: leave the row untouched
+                            // (count it failed) rather than rewrite it without its signature.
+                            LOGGER.errorv("[GDPR] Could not verify the agent signature of audit entry {0}, left unredacted: {1}",
+                                    sanitize(entry.id()), sanitize(e.getMessage()));
+                            failed++;
+                            stayInFilter++;
+                            continue;
+                        }
                     }
                     boolean replaced;
                     try {
@@ -1927,17 +1980,38 @@ public class AuditLedgerService implements UserErasureParticipant {
         return signingKey != null ? AuditHmac.keyedPseudonymFor(userId, signingKey.pseudonymKey()) : AuditHmac.pseudonymFor(userId);
     }
 
-    /** Re-sign an entry this service vouches for, with the current key. */
+    /**
+     * Re-sign an entry whose HMAC this service verified, with the current key. The
+     * agent signs the new HMAC afresh, unless the entry's agent signature is itself
+     * the finding: one that does not verify, or none where its agent version signs
+     * — a row forged by someone holding the HMAC key. A fresh signature would have
+     * the agent vouch for a row it never signed, and remove the only trace of the
+     * forgery; kept as it is, the entry reports the same verdict over its new HMAC.
+     * Nor does it sign a row whose old signature nothing could check
+     * ({@link AuditVerificationStatus#AGENT_KEY_UNAVAILABLE}): any Base64 in the
+     * plain form 6.7.0 and earlier wrote would otherwise become a genuine
+     * signature.
+     */
     private AuditEntry reseal(AuditEntry entry) {
         AuditHmac.SigningKey signingKey = keyring != null ? keyring.signingKey() : null;
         if (signingKey == null) {
             return entry;
         }
-        AuditEntry resealed = entry.withHmac(AuditHmac.computeHmac(entry, signingKey)).withAgentSignature(null);
-        if (agentSigningEnabled && agentSigningService != null && resealed.agentId() != null) {
-            resealed = applyAgentSignature(resealed);
-        }
-        return resealed;
+        AuditEntry resealed = entry.withHmac(AuditHmac.computeHmac(entry, signingKey));
+        // A store failure while checking the old signature propagates: the signature
+        // may
+        // be the finding, it covers the old HMAC and cannot be restored onto the new
+        // one, so rewriting the row without it would erase that evidence for a
+        // transient
+        // outage. The row stays as it was and the erasure can be retried.
+        AuditVerificationStatus agentStatus = withAgentSignature(entry, AuditVerificationStatus.VALID);
+        return switch (agentStatus) {
+            case AGENT_SIGNATURE_INVALID, AGENT_SIGNATURE_MISSING -> resealed;
+            // Nothing could check the old signature, so nothing shows the agent vouched
+            // for the row: it is dropped, being over the old HMAC, and not made afresh.
+            case AGENT_KEY_UNAVAILABLE -> resealed.withAgentSignature(null);
+            default -> signAsAgent(resealed.withAgentSignature(null));
+        };
     }
 
     /**
@@ -1971,23 +2045,13 @@ public class AuditLedgerService implements UserErasureParticipant {
     }
 
     /**
-     * Apply the agent's Ed25519 signature to the entry. Signs the HMAC if available
-     * (covers full entry integrity), otherwise signs the entry ID. Gracefully
-     * returns the original entry if no signing key exists.
+     * The entry with its agent's signature when
+     * {@code eddi.audit.agent-signing-enabled} is on and the agent version that
+     * produced it signs; see {@link AuditAgentSigner}. Null only for a service
+     * built without CDI.
      */
-    private AuditEntry applyAgentSignature(AuditEntry entry) {
-        try {
-            String payload = entry.hmac() != null ? entry.hmac() : entry.id();
-            // Runs on the turn's thread for every entry. An agent without a key — almost
-            // every agent — is answered from memory, not with a vault read per entry.
-            String signature = agentSigningService.signIfKeyPresent(defaultTenantId, entry.agentId(), payload);
-            return signature != null ? entry.withAgentSignature(signature) : entry;
-        } catch (AgentSigningService.AgentSigningException e) {
-            // A key that exists but could not be used, or a vault that could not answer.
-            // Log at debug level to avoid noise.
-            LOGGER.debugv("Agent signing skipped for agent '{0}': {1}", sanitize(entry.agentId()), sanitize(e.getMessage()));
-            return entry;
-        }
+    private AuditEntry signAsAgent(AuditEntry entry) {
+        return agentSigningEnabled && agentSigner != null ? agentSigner.sign(defaultTenantId, entry) : entry;
     }
 
     /**

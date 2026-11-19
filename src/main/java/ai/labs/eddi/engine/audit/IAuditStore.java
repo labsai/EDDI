@@ -130,15 +130,18 @@ public interface IAuditStore {
     // === GDPR ===
 
     /**
-     * Pseudonymize all audit entries for a user (GDPR Art. 17). This is the sole
-     * permitted mutation on the otherwise immutable ledger, justified by GDPR Art.
-     * 17(3)(e) — legal obligation to retain records while removing personally
-     * identifiable information.
+     * Pseudonymize all audit entries for a user (GDPR Art. 17). This is the first
+     * of the two permitted mutations on the otherwise immutable ledger (the other
+     * is {@link #redactEntry}), justified by GDPR Art. 17(3)(e) — legal obligation
+     * to retain records while removing personally identifiable information.
      *
      * @param userId
      *            the original user identifier
      * @param pseudonym
-     *            the pseudonymized replacement (SHA-256 hash)
+     *            the pseudonymized replacement for rows that are not covered by a
+     *            keyed pseudonym (the unkeyed SHA-256 form or the ledger's own);
+     *            stores that know the audit keys write each v5 row's keyed
+     *            pseudonym instead
      * @return number of entries pseudonymized
      */
     long pseudonymizeByUserId(String userId, String pseudonym);

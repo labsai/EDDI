@@ -1,17 +1,16 @@
 import { useState, useRef, useEffect } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink, sanitizeAgentHtml } from "@/lib/markdown-safe";
+import { sanitizeAgentHtml } from "@/lib/markdown-safe";
 import { ChevronDown, ChevronUp, ClipboardList, CheckCircle2, Fingerprint } from "lucide-react";
-import { cn, hashColor, getInitials } from "@/lib/utils";
-import { Badge } from "@/components/ui/badge";
-import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@/lib/api/groups";
-import { entryTypeInfo, hasEnvelopeData } from "@/lib/api/groups";
-import { truncateContent, safeFormatDate } from "./group-utils";
-import { isStructuredBody, readEntryBody } from "@/lib/group-entry-body";
-import { StructuredEntryBody } from "./structured-entry-body";
-import { humanizeToolName } from "@/lib/tool-labels";
+import { cn, hashColor, getInitials } from "@eddi/app-kit/lib/utils";
+import { Badge } from "@eddi/ui";
+import type { TranscriptEntry, TranscriptEntryType, DiscussionStyle, TaskDefinition } from "@eddi/app-kit/lib/api/groups";
+import { entryTypeInfo, hasEnvelopeData } from "@eddi/app-kit/lib/api/groups";
+import { truncateContent, safeFormatDate } from "@eddi/conversation/team";
+import { isStructuredBody, readEntryBody } from "@eddi/conversation/team";
+import { StructuredEntryBody } from "@eddi/conversation/team";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import { humanizeToolName } from "@eddi/app-kit/lib/tool-labels";
 
 /** Style-aware badge colors for different discussion roles */
 const STYLE_BADGE_OVERRIDES: Partial<Record<DiscussionStyle, Partial<Record<TranscriptEntryType, "default" | "secondary" | "success" | "warning" | "destructive" | "outline">>>> = {
@@ -263,9 +262,9 @@ export function AgentResponseCard({ entry, isSpeaking, toolName, allowHtml, disc
                   {/* Deliberately NO rehypeRaw: agent output is attacker-influenceable
                       (prompt injection). Raw HTML must stay escaped. The opt-in
                       HTML path above uses DOMPurify for explicit sanitization. */}
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                  <ConversationMarkdown escapeRawHtml>
                     {truncateContent(parsedContent, t("groups.contentTruncated", "[Content truncated]"))}
-                  </ReactMarkdown>
+                  </ConversationMarkdown>
                 </div>
               )}
               {/* Fade-out gradient when collapsed — bg matches card context */}

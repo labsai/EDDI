@@ -42,6 +42,7 @@ public class Agent implements IAgent {
     private Double maxCostPerConversationUsd;
     private ContinuationPolicy continuationPolicy = ContinuationPolicy.OFF;
     private boolean memoryToolsEnabled;
+    private boolean peerVerificationRequired;
     private AgentConfiguration.MemoryPolicy memoryPolicy;
     private ToolApprovalsConfig toolApprovalsConfig;
     private Integer compatibilityGeneration;
@@ -77,6 +78,8 @@ public class Agent implements IAgent {
         conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
         // Same carrier: a CONVERSATION_START turn may ask to continue itself.
         conversationMemory.setContinuationPolicy(continuationPolicy);
+        // Same carrier: init() loads the user memories this agent may be shown.
+        conversationMemory.setPeerVerificationRequired(peerVerificationRequired);
         // Which versions the conversation may follow. Null on a version stored before
         // generations existed: the conversation then stays on this version.
         conversationMemory.setCompatibilityGeneration(compatibilityGeneration);
@@ -109,6 +112,7 @@ public class Agent implements IAgent {
         // memory may carry from a version that had one).
         conversationMemory.setConversationCostCeilingUsd(maxCostPerConversationUsd);
         conversationMemory.setContinuationPolicy(continuationPolicy);
+        conversationMemory.setPeerVerificationRequired(peerVerificationRequired);
         return new Conversation(executableWorkflows, conversationMemory, propertiesHandler, outputProvider);
     }
 
@@ -189,6 +193,15 @@ public class Agent implements IAgent {
 
     public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
         this.memoryToolsEnabled = memoryToolsEnabled;
+    }
+
+    @Override
+    public boolean isPeerVerificationRequired() {
+        return peerVerificationRequired;
+    }
+
+    public void setPeerVerificationRequired(boolean peerVerificationRequired) {
+        this.peerVerificationRequired = peerVerificationRequired;
     }
 
     public void setToolApprovalsConfig(ToolApprovalsConfig toolApprovalsConfig) {

@@ -21,6 +21,7 @@ import ai.labs.eddi.engine.hitl.oversight.AgentCallMarker;
 import ai.labs.eddi.engine.httpclient.IHttpClient;
 import ai.labs.eddi.engine.httpclient.IRequest;
 import ai.labs.eddi.engine.httpclient.IResponse;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -757,6 +758,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
         // Built here, in order, on the turn's thread — see the method comment.
         List<Callable<ForEachItemResult>> work = new ArrayList<>(elements.size());
+        // The first configuration refusal behind an item whose request was not built:
+        // a "fail" step carries it, so a conversation start answers 422, not 500.
+        Exception itemRefusal = null;
         for (ForEachItems.Element element : elements) {
             Map<String, Object> itemData = new LinkedHashMap<>(templateDataObjects);
             itemData.put(iterationName, element.value());
@@ -773,6 +777,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 // that does not render): nothing of it is sent, and the others still are.
                 String reason = "request not built: " + ForEachItems.describe(e, Set.of(), MAX_ITEM_ERROR_CHARS);
                 LOGGER.warnf("forEach of http call '%s': item %d — %s", LogSanitizer.sanitize(callName), element.index(), reason);
+                if (itemRefusal == null && AgentConfigurationRefusal.find(e) instanceof Exception refusal) {
+                    itemRefusal = refusal;
+                }
                 work.add(() -> ForEachItemResult.notSent(element.index(), reason));
                 continue;
             }
@@ -848,7 +855,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // After the results are stored: the work that succeeded (and was paid
             // for) stays readable; only the step reports failure.
             throw new LifecycleException("http call '" + LogSanitizer.sanitize(callName) + "': " + failureSummary
-                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'");
+                    + " and forEach.onItemFailure is '" + LogSanitizer.sanitize(forEach.getOnItemFailure()) + "'", itemRefusal);
         }
 
         Set<String> vaulted = prePostUtils.runPostResponse(memory, call.getPostResponse(), templateDataObjects, stepCode, false);
@@ -1380,13 +1387,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
     }
 
     /**
-     * Cut an over-long response body down to the configured cap before it is
-     * written to conversation memory. The cap is a byte budget applied to the
-     * character count, which is a conservative approximation for multi-byte
-     * content.
-     */
-    // Package-private for unit testing.
-    /**
      * An application/json success body, redacted and capped.
      * <p>
      * The whole body is parsed and scrubbed as a tree FIRST — from the unredacted
@@ -1424,6 +1424,13 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
     }
 
+    /**
+     * Cut an over-long response body down to the configured cap before it is
+     * written to conversation memory. The cap is a byte budget applied to the
+     * character count, which is a conservative approximation for multi-byte
+     * content.
+     */
+    // Package-private for unit testing.
     static String truncateResponseBody(String responseBody, int maxResponseSize, String callName) {
         if (responseBody == null || responseBody.length() <= maxResponseSize) {
             return responseBody;
@@ -1523,6 +1530,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
     record BuiltRequest(IRequest request, Set<String> connectionOwnedHeaders, Set<String> resolvedSecrets) {
     }
 
+    private static String stringOf(Object value) {
+        return value == null ? null : value.toString();
+    }
+
     /**
      * Build the request, making sure no failure on the way carries a plaintext the
      * build already substituted.
@@ -1533,10 +1544,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * through "Illegal character in path at index 42: https://…/&lt;secret&gt;/…".
      * The same holds for any other exception whose message quotes the request.
      */
-    private static String stringOf(Object value) {
-        return value == null ? null : value.toString();
-    }
-
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
@@ -1552,6 +1559,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
                         stringOf(outgoing.get(IRequest.KEY_BODY)));
             }
             return built;
+        } catch (SecretResolver.MisconfiguredVaultReferenceException e) {
+            // Shown to the caller of a refused conversation start: say which call it is.
+            // Built from reference names only, so there is no plaintext to redact.
+            throw new SecretResolver.MisconfiguredVaultReferenceException("API call '" + call.getName() + "': " + e.getMessage(), e);
         } catch (RuntimeException | ITemplatingEngine.TemplateEngineException e) {
             // A template failure after an earlier part of the request resolved a secret
             // is checked, and would otherwise reach the caller's log before these
@@ -1584,8 +1595,23 @@ public class ApiCallExecutor implements IApiCallExecutor {
             return null;
         }
         String redacted = RequestRedactor.redactResolvedSecrets(String.valueOf(failure.getMessage()), secrets);
-        return new IllegalArgumentException(failure.getClass().getSimpleName() + ": " + redacted
-                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)");
+        String message = failure.getClass().getSimpleName() + ": " + redacted
+                + " (a resolved secret was removed from this message; the original exception is not kept because it quotes it)";
+        // The cause chain is dropped, so a configuration refusal in it must be
+        // re-marked on the copy or a conversation start would answer 500, not 422.
+        return AgentConfigurationRefusal.find(failure) != null ? new RedactedRefusalException(message) : new IllegalArgumentException(message);
+    }
+
+    /**
+     * The secret-free copy of an exception that carried an
+     * {@link AgentConfigurationRefusal}: same marker, no cause, redacted message.
+     */
+    static final class RedactedRefusalException extends IllegalArgumentException implements AgentConfigurationRefusal {
+        private static final long serialVersionUID = 1L;
+
+        RedactedRefusalException(String message) {
+            super(message);
+        }
     }
 
     /**
@@ -1691,17 +1717,27 @@ public class ApiCallExecutor implements IApiCallExecutor {
         return redacted;
     }
 
+    /**
+     * The request URL before templating: an absolute {@code http...} path as is,
+     * otherwise the path joined to {@code targetServerUrl} with one slash. Shared
+     * with the save-time reference check of approved-result actions, so both read
+     * the same URL.
+     */
+    public static String targetDestination(String targetServerUrl, String rawPath) {
+        String path = rawPath == null ? "" : rawPath.trim();
+        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
+            path = SLASH_CHAR + path;
+        }
+        return path.startsWith("http") ? path : (targetServerUrl == null ? "" : targetServerUrl) + path;
+    }
+
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext,
                                       ResolvedSecrets resolvedSecrets)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
-        String path = requestConfig.getPath().trim();
-        if (!path.startsWith(SLASH_CHAR) && !path.isEmpty() && !path.startsWith("http")) {
-            path = SLASH_CHAR + path;
-        }
-        var targetDestination = !path.startsWith("http") ? targetServerUrl + path : path;
+        var targetDestination = targetDestination(targetServerUrl, requestConfig.getPath().trim());
         rejectTemplatedAuthority(targetDestination);
         // The only host a ${context:…} header may go to: the configuration's own
         // target, with deployment-wide variables (never conversation data) applied.
@@ -2060,9 +2096,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         resolved.append(value, copied, value.length());
         if (unresolved != null) {
-            throw new IllegalArgumentException(location + " references " + unresolved
-                    + ", which could not be resolved — the secret does not exist, the vault failed, or the vault is not configured"
-                    + " (EDDI_VAULT_MASTER_KEY). Refusing to send the unresolved reference.");
+            // Diagnosed only now, on the failure path: it names the tenant looked up and
+            // tells a configuration error (answered 422 at conversation start) from a
+            // vault outage (still a 500).
+            throw SecretResolver.unresolvedReferenceFailure(location, unresolved,
+                    secretResolver.diagnoseUnresolved(SecretReference.parse(unresolved)));
         }
         return resolved.toString();
     }
@@ -2156,6 +2194,9 @@ public class ApiCallExecutor implements IApiCallExecutor {
                 + "plain header, or give it a name the connection does not claim.");
     }
 
+    /** What a substituted value may keep when it lands in a URL's host:port. */
+    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
+
     /**
      * Bytes that may appear un-encoded in a substituted path value: RFC 3986
      * "unreserved", minus {@code .} — everything else is percent-encoded, including
@@ -2168,9 +2209,6 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * server then decodes it back to the literal value. Identifiers like
      * {@code 6.2.0} round-trip unchanged.
      */
-    /** What a substituted value may keep when it lands in a URL's host:port. */
-    private static final String HOST_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.:";
-
     private static final String PATH_SEGMENT_UNRESERVED = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_~";
 
     /**
@@ -2503,7 +2541,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     /**
      * Depth ceiling for {@link #pathSafeView}'s recursion — see its javadoc for why
-     * the bound exists and why exceeding it passes the value through.
+     * the bound exists and why a map or list past it is replaced by an empty one.
      */
     static final int MAX_PATH_VIEW_DEPTH = 10;
 

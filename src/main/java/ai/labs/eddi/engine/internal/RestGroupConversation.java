@@ -449,14 +449,15 @@ public class RestGroupConversation implements IRestGroupConversation {
     }
 
     @Override
-    public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
+    public List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit, Boolean mine) {
         try {
             // Owned conversations only, unless admin — and restricted IN THE QUERY, so
             // index/limit page through the caller's own conversations. Filtering the
             // fetched page afterwards gave a non-admin short or empty pages while their
             // conversations sat further back (the Workforce history's missing rows).
+            // mine=true applies the same restriction to an admin (the Workforce sidebar).
             if (ownershipValidator.isAuthEnabled() && identity != null && !identity.isAnonymous()
-                    && !identity.hasRole("eddi-admin")) {
+                    && (Boolean.TRUE.equals(mine) || !identity.hasRole("eddi-admin"))) {
                 // A nameless principal owns nothing — an empty list, not an NPE.
                 String callerId = OwnershipValidator.principalName(identity);
                 if (callerId == null) {
@@ -1137,7 +1138,8 @@ public class RestGroupConversation implements IRestGroupConversation {
      * "we recorded an empty answer" rather than "there was nobody to record". The
      * audit writer already renders a null decider as {@code "unknown"}, so this
      * routes the unauthenticated case onto that same, honest value. The
-     * client-supplied value is still discarded either way.
+     * client-supplied value is still discarded either way. The decision's channel
+     * is likewise set server-side, from the {@code X-EDDI-Client} header.
      */
     private void setDecidedByFromIdentity(GroupApprovalRequest request) {
         if (request.getDecision() == null) {

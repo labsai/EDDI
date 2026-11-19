@@ -1,11 +1,11 @@
 import { useCallback, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { getErrorMessage } from "@/lib/api-client";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { getUpdateCheckSettings, setUpdateCheckEnabled } from "@/lib/api/update-check-settings";
 import { getEddiVersion, UNKNOWN_VERSION } from "@/lib/api/system";
-import { isUpdateUiVisible } from "@/lib/brand";
-import { useBrand } from "@/hooks/use-brand";
+import { isUpdateUiVisible } from "@eddi/app-kit/lib/brand";
+import { useBrand } from "@eddi/app-kit/hooks/use-brand";
 import {
   dockerImageFor,
   fetchLatestEddiRelease,

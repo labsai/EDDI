@@ -80,8 +80,14 @@ import static ai.labs.eddi.configs.descriptors.ResourceUtilities.createDocumentD
  * agent. For each selected resource in the preview, writes the source content
  * into the target's existing resource (creating a new version).
  * <p>
- * The target agent's URI structure stays unchanged — only content is updated
- * and version numbers incremented.
+ * Matched resources are written as new versions of the target's own resources
+ * and the agent is re-pointed at them. Beyond that, a run can create resources
+ * and whole workflows the target lacks, take off the workflows the source no
+ * longer has, reorder workflows, and adopt the source agent's own settings
+ * (except {@code signInterAgentMessages}, which stays off when the target's own
+ * key cannot sign); a resource the target changed locally since the last sync
+ * (CONFLICT) is only overwritten when it is named in the selection. Nothing is
+ * written when the source changes nothing.
  * <p>
  * Adding an extension type takes two edits: register the resource authority in
  * {@link WorkflowExtensions} (file extension + remote REST path) and add its
@@ -433,6 +439,8 @@ public class UpgradeExecutor {
         private Boolean compatible;
         private Integer compatibilityGeneration;
         private final List<ResourceFailure> failures = new ArrayList<>();
+        /** See {@link UpgradeResult#warnings()}. */
+        private final List<String> warnings = new ArrayList<>();
         /**
          * Target resource id -> the version this run's own update produced. A resource
          * two target workflows share is written once per workflow, and the second write
@@ -454,7 +462,8 @@ public class UpgradeExecutor {
 
         UpgradeResult toResult(URI agentUri, boolean agentUpdated) {
             return new UpgradeResult(agentUri, agentUpdated, updated, created, skipped, List.copyOf(failures),
-                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null);
+                    agentUpdated ? compatible : null, agentUpdated ? compatibilityGeneration : null,
+                    agentUpdated ? warnings : List.of());
         }
     }
 
@@ -1716,6 +1725,7 @@ public class UpgradeExecutor {
                 // StructuralMatcher.adoptableAgentJson.
                 adopted.setIdentity(current.getIdentity());
                 adopted.setWorkflows(originalWorkflows);
+                signOnlyIfTargetCan(agentId, adopted, outcome);
                 String adoptedJson = jsonSerialization.serialize(adopted);
                 settingsChanged = adoptedJson == null || !adoptedJson.equals(jsonSerialization.serialize(current));
             }
@@ -1726,6 +1736,11 @@ public class UpgradeExecutor {
                 return null;
             }
             AgentConfiguration agentConfig = settingsChanged ? adopted : current;
+            if (!settingsChanged) {
+                // The target's own flag: written back unchanged, it would be refused all
+                // the same, and with it every workflow change this run made.
+                signOnlyIfTargetCan(agentId, agentConfig, outcome);
+            }
             agentConfig.setWorkflows(workflows);
 
             // Update the agent
@@ -1754,6 +1769,29 @@ public class UpgradeExecutor {
             LOGGER.errorf(e, "Failed to update agent config %s", LogSanitizer.sanitize(agentId));
             throw new RuntimeException("Agent config update failed: " + e.getMessage(), e);
         }
+    }
+
+    /**
+     * Turns {@code signInterAgentMessages} off in {@code config}, and says so in
+     * the result's warnings, when the target agent cannot sign. A sync never
+     * replaces the target's identity — its private keys are this instance's — so
+     * the source's "sign" is only honoured where the target's own newest key is
+     * usable; otherwise the agent save would be refused, and with it every workflow
+     * change this run wrote.
+     */
+    private void signOnlyIfTargetCan(String agentId, AgentConfiguration config, Outcome outcome) {
+        var security = config.getSecurity();
+        if (security == null || !security.isSignInterAgentMessages()) {
+            return;
+        }
+        String problem = agentStore.signingKeyProblem(agentId);
+        if (problem == null) {
+            return;
+        }
+        security.setSignInterAgentMessages(false);
+        String warning = "Agent " + agentId + ": signInterAgentMessages was turned off: " + problem;
+        outcome.warnings.add(warning);
+        LOGGER.warnf("Sync: %s", LogSanitizer.sanitize(warning));
     }
 
     /**

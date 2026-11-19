@@ -25,7 +25,8 @@ import java.util.concurrent.CopyOnWriteArrayList;
 
 /**
  * Transcript record for a group conversation. Persisted with a single-version
- * model via {@code AbstractResourceStore} (DB-agnostic).
+ * model by {@code GroupConversationStore}, directly on {@code IResourceStorage}
+ * (DB-agnostic: MongoDB or PostgreSQL).
  *
  * @author ginccc
  */
@@ -121,7 +122,7 @@ public class GroupConversation {
      * Maps agentId → displayName for all group members. Populated at discussion
      * start.
      */
-    // ConcurrentHashMap for the same reason the three lists above are
+    // ConcurrentHashMap for the same reason the three lists below are
     // copy-on-write: Jackson walks this map unguarded on every persist, and
     // RecruitAgentTool now writes it from a member-turn thread. A plain
     // LinkedHashMap here re-opens the ConcurrentModificationException that
@@ -160,10 +161,10 @@ public class GroupConversation {
     /**
      * Typed outcome of the discussion (Wave 0, F3) — verdict, vote, agreement or
      * award. {@code null} until a decision-producing feature (I3 verdicts, I11
-     * agreements, I14 votes, I18 awards) sets it; none of those exist yet, so this
-     * is {@code null} for every discussion today. {@link #synthesizedAnswer} is
-     * always prose; {@code decision} is the structured form of a conclusion when
-     * one of those features ran.
+     * agreements, I14 votes, I18 awards) sets it, so it stays {@code null} for a
+     * discussion where none of those ran. {@link #synthesizedAnswer} is always
+     * prose; {@code decision} is the structured form of a conclusion when one of
+     * those features ran.
      */
     private DecisionRecord decision;
     /**
@@ -703,10 +704,13 @@ public class GroupConversation {
      *            epoch milliseconds when the envelope was signed (null if unsigned)
      * @param signatureKeyVersion
      *            version of the signing key used (null if unsigned)
+     * @param signatureRound
+     *            the discussion round ({@link GroupConversation#getRound()}) the
+     *            signature binds the entry to (null if unsigned)
      */
     public record TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
             TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature,
-            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion) {
+            String signatureNonce, Long signatureTimestampMs, Integer signatureKeyVersion, Integer signatureRound) {
 
         /**
          * Backward-compatible constructor without any signature fields.
@@ -714,7 +718,7 @@ public class GroupConversation {
         public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
                 TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId) {
             this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
-                    type, timestamp, errorReason, targetAgentId, null, null, null, null);
+                    type, timestamp, errorReason, targetAgentId, null, null, null, null, null);
         }
 
         /**
@@ -723,7 +727,7 @@ public class GroupConversation {
         public TranscriptEntry(String speakerAgentId, String speakerDisplayName, String content, int phaseIndex, String phaseName,
                 TranscriptEntryType type, Instant timestamp, String errorReason, String targetAgentId, String signature) {
             this(speakerAgentId, speakerDisplayName, content, phaseIndex, phaseName,
-                    type, timestamp, errorReason, targetAgentId, signature, null, null, null);
+                    type, timestamp, errorReason, targetAgentId, signature, null, null, null, null);
         }
 
         /**
@@ -994,7 +998,8 @@ public class GroupConversation {
      * @param terms
      *            the proposal's terms — a String in v1, deliberately untyped
      * @param status
-     *            OPEN, SUPERSEDED (the proposer made a newer proposal) or REJECTED
+     *            OPEN or SUPERSEDED (the proposer made a newer proposal or accepted
+     *            another one); no code path sets any other status
      * @param acceptedBy
      *            agent ids that accepted these terms
      * @param acceptanceEntryIndices
@@ -1051,12 +1056,12 @@ public class GroupConversation {
 
     /**
      * Typed outcome of a discussion, or of one decision-producing phase within it
-     * (Wave 0, F3). Today the only conclusion a discussion produces is
+     * (Wave 0, F3). The conclusion every discussion produces is
      * {@link #synthesizedAnswer}, which is always prose — callers that want to
      * branch on a winner, a tally, or a vote count have to parse it. This is the
      * structured alternative, populated by whichever decision-producing feature ran
      * (I3 verdicts, I11 agreements, I14 votes, I18 awards); {@code null} until one
-     * of those exists.
+     * of those has run.
      * <p>
      * A parse failure in the producing feature's own judgment/tally step must never
      * fail the discussion — the convention each of those features follows is to
@@ -1105,8 +1110,8 @@ public class GroupConversation {
          * Deliberately NOT {@link #FAILED}. A rejection is a recorded human decision
          * and the product's whole selling point; rendering it as "Failed" told the
          * operator the system had broken when in fact it had done exactly what it was
-         * asked. Terminal, closeable, and treated as FAILED is everywhere that asks
-         * "may this still run?" — the difference is what it MEANS, not what it permits.
+         * asked. Terminal, closeable, and treated as FAILED everywhere that asks "may
+         * this still run?" — the difference is what it MEANS, not what it permits.
          * <p>
          * Documents written before this state existed carry {@link #FAILED} for a
          * rejection and are left alone: nothing in them distinguishes the two, so a
@@ -1435,8 +1440,8 @@ public class GroupConversation {
     }
 
     /**
-     * Records a teardown and drops the agent from every live tracking list, as one
-     * atomic operation.
+     * Records a teardown and drops the agent from {@link #createdAgentIds} and
+     * {@link #retainedAgentIds}, as one atomic operation.
      * <p>
      * The tombstone is written first AND under {@link #dynamicTrackingMutex}, so a
      * concurrent merge cannot interleave between the check it makes and the add it

@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation, Link } from "react-router-dom";
 import { Sparkles, X, Loader2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import { OperatorChat } from "@/components/operator/operator-chat";
 import { useOperatorConfig, useOperatorTrust, useOperatorUpgradeAssessment } from "@/hooks/use-operator";
 import { OperatorUntrusted } from "@/components/operator/operator-untrusted";
@@ -10,9 +10,9 @@ import { OperatorUpgradeHint } from "@/components/operator/operator-upgrade";
 import { useOperatorChat } from "@/hooks/use-operator-chat";
 import { useOperatorDrawerStore } from "@/hooks/use-operator-drawer";
 import { useCurrentScreenContext, toContextPayload } from "@/hooks/use-current-screen-context";
-import { useApprovalStatus, usePendingApprovals } from "@/hooks/use-hitl";
-import { useAuth } from "@/hooks/use-auth";
-import { cn } from "@/lib/utils";
+import { useApprovalStatus, usePendingApprovals } from "@eddi/app-kit/hooks/use-hitl";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /**
  * Header launcher for the Platform Operator, rendered inside `TopBar` (Manager)

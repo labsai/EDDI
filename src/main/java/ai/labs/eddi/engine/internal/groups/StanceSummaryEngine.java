@@ -143,9 +143,10 @@ public final class StanceSummaryEngine {
      *            out of budget mid-phase
      * @param summarizationService
      *            may be {@code null} (not available), which also means extraction
-     * @return one result per member whose stance changed, in stable member order,
-     *         for the caller to emit as {@code stance_updated} events. Never
-     *         {@code null}
+     * @return one result per member whose stance text changed or whose summary cost
+     *         money, in stable member order, for the caller to emit as
+     *         {@code stance_updated} (see {@link StanceResult#textChanged()}) and
+     *         {@code cost_updated} events. Never {@code null}
      */
     public static List<StanceResult> updateStances(GroupConversation gc, StanceSummaryConfig config,
                                                    ProtocolConfig protocol, SummarizationService summarizationService) {
