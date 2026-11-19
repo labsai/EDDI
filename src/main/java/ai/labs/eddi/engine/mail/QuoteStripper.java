@@ -281,6 +281,18 @@ public final class QuoteStripper {
         return false;
     }
 
+    /**
+     * Whether a stripped line opens quoted or forwarded history by the patterns the
+     * stripper knows: an "Original Message" separator, a forward separator, an
+     * underscore rule or an Outlook {@code From:} label. For
+     * {@link MentionExtractor}, which stops at any of them; the stripper itself
+     * needs the whole block to cut.
+     */
+    static boolean opensHistory(String strippedLine) {
+        return ORIGINAL_MESSAGE.matcher(strippedLine).matches() || FORWARD_SEPARATOR.matcher(strippedLine).matches()
+                || UNDERSCORE_RULE.matcher(strippedLine).matches() || FROM_LABEL.matcher(strippedLine).matches();
+    }
+
     private static boolean isQuoted(String line) {
         return line.stripLeading().startsWith(">");
     }
