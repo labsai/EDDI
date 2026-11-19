@@ -373,3 +373,18 @@ DNS lookups made by this check now give up after `eddi.security.ssrf-protection.
 count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
 refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
 See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).
+
+### Email: `maxRepliesPerThreadPerHour` counts the mail thread
+
+In email conversation mode, `maxRepliesPerThreadPerHour` used to count the replies of one *conversation*. A thread
+with several allowed senders has one conversation per sender, so it could get that many times the cap. It now counts
+the replies of the mail *thread* (its first `References` id, else `In-Reply-To`, else the mail itself) across all of
+its conversations, and a conversation's own count still applies as well. The cap can only get stricter: a busy
+thread with several participants may now get fewer replies per hour than before. Replies written before the upgrade
+carry no thread key and do not count, so the first hour after the upgrade allows at most one extra round. Nothing to
+migrate: PostgreSQL adds the `thread_key` column and its index on start, MongoDB the index. See
+[Email Integration](email-integration.md#delivery-retries-limits).
+
+Everything else of the email addressing release is opt-in: `actWhen` defaults to `always` (every mail runs, as
+before), and the new per-target `mentions`, `addresses` and `allowedSenders` do nothing until set. The Manager
+preselects `actWhen: addressed` for **new** email integrations only.

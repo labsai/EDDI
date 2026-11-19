@@ -166,7 +166,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `connection` | — (required) | Name of the connection (or `${connection:name}`) |
 | `host` | — (required) | IMAP server, e.g. `outlook.office365.com` |
 | `port` | `993` | `993` (TLS) or `143` (STARTTLS, required — never a plaintext login) |
-| `address` | — (required) | The mailbox address. Unique per deployment. Mail **from** it is always refused |
+| `address` | — (required) | The mailbox address. Unique per deployment. Mail **from** it (or one of its `aliases`) is always refused |
 | `folder` | `INBOX` | The one folder that is polled. Poll the folder that comes *after* the server's spam filtering |
 | `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there**. `label:<name>` is reserved for transports with labels (the Gmail API) and is refused for `imap`, which has none |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
@@ -183,13 +183,105 @@ conversation integration, which always keeps a thread in one conversation.
 | `maxTurnsPerSenderPerDay` | `50` | Turns one sender address may start per UTC day; over it, the sender's further mail waits for the next day. `0` = no limit |
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
 | `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
+| `actWhen` | `always` | `always`: every mail that passes the guards runs a turn. `addressed`: only a mail that [addresses EDDI](#addressing-eddi) does; anything else is refused `not_addressed`. The Manager preselects `addressed` for new integrations; existing ones keep `always` |
+| `aliases` | *(empty)* | Up to 20 more addresses that deliver to this mailbox (an alias, a distribution list), comma-separated. They count as the integration's own: mail **from** them is refused like mail from `address`, mail **to** them [addresses EDDI](#addressing-eddi), and a target's `addresses` may name them. Each address belongs to one integration |
 
-Targets: a target's `triggers` match the **plus-tag** of the address a mail was sent to (`invoices+urgent@contoso.com`
-→ `urgent`) or a **word of the subject** (letters and digits, case-insensitive). Plus-tags win over subject words, and
-nothing matching means the default target. `observeMode` targets are refused. A `GROUP` target starts a group
-discussion with the rendered input as its question (no attachments). For an authenticated mail only what its DKIM
-signature covers routes: an unsigned `Subject` routes nothing, and only the signed `To`/`Cc` instances carry a
-plus-tag ([Identity](#identity)).
+**Targets.** Besides `name`, `type`, `targetId` and `triggers`, an email target takes three optional lists — all
+email-only, refused on any other channel type:
+
+| Field | Meaning |
+|---|---|
+| `triggers` | Words matched against the **plus-tag** of the mailbox address (`invoices+urgent@contoso.com` → `urgent`) and against **words of the subject** (letters and digits, case-insensitive) |
+| `mentions` | Handles that address this target when written as `@handle` in the sender's own text ([Mentions](#mentions)): `[a-z0-9][a-z0-9_-]{0,39}`, without the `@`, case-insensitive, at most 10 per target, unique across the integration's targets. Unlike `triggers` they never match a subject word |
+| `addresses` | Full addresses that address this target in `To` or `Cc`, e.g. `finance-agent@contoso.com`. Each must be in `aliases` or be a plus-address of `address` — otherwise the mailbox never receives it — and may address one target only |
+| `allowedSenders` | Sender patterns (the `senderAllowlist` syntax). When set, only an **authenticated** sender matching one may reach this target, by any path, the default included ([Per-target senders](#per-target-senders)) |
+
+`observeMode` targets are refused. A `GROUP` target starts a group discussion with the rendered input as its question
+(no attachments). Which target a mail goes to is the [routing order](#routing-order).
+
+## Addressing EDDI
+
+A mailbox that people Cc on their own threads, or that sits on a distribution list, receives far more mail than it is
+asked to act on. With `actWhen: addressed` a mail runs a turn only when it **addresses** the integration — when any
+of these holds:
+
+1. **A reply to EDDI**: its `In-Reply-To` (that header only, not `References`) is the Message-ID of a reply this
+   integration sent.
+2. **A mention**: the sender's own text mentions one of the targets' `mentions` ([Mentions](#mentions)).
+3. **EDDI in `To`, newly**: the mailbox address, a plus-address of it, an alias or a target address is in **`To`**
+   (not `Cc`), and the mail either starts a thread (no `In-Reply-To`) or answers a mail that never reached this
+   integration — EDDI was just added.
+
+Anything else is refused `not_addressed`: recorded in the ledger with that reason, counted
+(`eddi_email_inbound_total{outcome="not_addressed"}`), audited like every refusal, and never answered. The check comes
+after the loop guard, the sender lists, authentication and replay detection — so their reasons win — and **before**
+the budgets: a mail EDDI was not asked into never uses up the sender's daily turns.
+
+**Reply-all.** Outlook keeps every `To` recipient in `To` on a reply-all, Gmail moves them to `Cc`. Either way, a
+human-to-human reply-all on a thread EDDI already received is **not** addressed by rule 3 — its parent reached EDDI —
+unless it mentions a target or answers EDDI's own mail. Rule 3 reads the ledger, whose rows expire after
+`eddi.email.ledger-retention` (30 days): a reply-all to a parent older than that looks new and counts as addressed.
+
+**A noise filter, not a security boundary.** Rules 1 and 3 read `In-Reply-To`, which Gmail does not sign, so an
+authenticated, allowed sender can make a mail look addressed. That is acceptable, because who may make an agent act
+at all is decided elsewhere — authentication, `senderAllowlist`/`senderBlocklist` and a target's `allowedSenders`.
+`actWhen` only keeps EDDI quiet on threads it was not asked into. Addressing reads the **signed** headers only
+([Identity](#identity)): a `To` instance the DKIM signature does not cover is not there, so it never makes a mail
+addressed — and a provider that does not sign `To` cannot address EDDI by rule 3 at all; its senders use a mention or
+reply to EDDI's mail.
+
+The agent sees the verdict as `mail.addressing` — `{addressed, why}`, `why` one of `reply_to_eddi`, `mention`,
+`to_new`, `to_thread_start`, `none` (with `actWhen: always` a mail that is not addressed still runs, with
+`addressed: false`).
+
+## Mentions
+
+`@finance` in a mail addresses the target whose `mentions` contain `finance` — the way people address a colleague
+in chat. Mentions are read strictly, because a mention read out of someone else's quoted words would route their
+mail to an agent nobody asked:
+
+- Only the **head** of the mail counts: from the top down to the first line that starts quoted history or someone
+  else's text — a `>` line, an attribution (`On … wrote:`, `Am … schrieb:`, and the French, Spanish, Italian and
+  Dutch forms), an Outlook header block (`From:`/`Von:`/`De:`… or any label followed by an address or a time), an
+  "Original Message" or forward separator, an underscore rule, or a signature delimiter (`-- `) — and at most 20
+  non-blank lines or 2,000 characters.
+- A forward is fine: the forwarder's own text above the forwarded message is the head.
+- The token is `@` at the start of a line or after a space, `(` or `[` (an Outlook mention in an HTML-only mail
+  becomes `[@Name](mailto:…)`), then the handle, ending at anything that is not a letter, digit, `_` or `-`.
+  `bob@finance.com`, `@finance.com` and URLs never match. Handles no target uses are ignored — they may be people.
+- When the plain-text and HTML parts of a mail say different things (`mail.anomalies` holds
+  `alternatives_diverge`), no mention counts at all.
+
+A missed mention costs the sender a re-send; a false one would route their mail elsewhere, so when in doubt the
+extractor stops early. It never changes the text the agent reads. The Workforce chat composer also uses `@` to pick an
+agent, but there it hands the message over as a **new** conversation; in a mail, a mention inside a running EDDI
+conversation does not move the conversation ([Threads in conversation mode](#threads-in-conversation-mode)).
+
+## Routing order
+
+Which target a mail goes to, first match wins:
+
+1. A target whose `addresses` contain a **`To`** recipient (in header order), then a **`Cc`** recipient.
+2. The **plus-tag** of the mailbox address (`To` before `Cc`) matched against `triggers`. A tag on some other
+   recipient routes nothing.
+3. A **mention**, in the order the mentions appear.
+4. A **word of the subject** matched against `triggers`.
+5. The default target.
+
+Where several targets match the same rule, the first in configuration order wins. Only signed headers route: for an
+authenticated mail an unsigned `Subject` is no subject and only the signed `To`/`Cc` instances count, so nobody
+holding a genuine signed mail can add a recipient or a subject word to steer it ([Identity](#identity)). The agent
+sees the decision as `mail.route`: `target` (its name), `source` (`address_to`, `address_cc`, `plus_tag`, `mention`,
+`subject` or `default`) and `alsoAddressed` — the other targets the mail named by address, plus-tag or mention.
+
+## Per-target senders
+
+A subject word, a plus-tag or a mention lets any sender who may write to the mailbox at all reach any target. To keep
+a target for some senders only, give it `allowedSenders`. Then a mail routed to it — by any rule, the default
+included — runs only when its sender is **authenticated** and matches one of the patterns; otherwise it is refused
+`blocked:target_not_allowed`. There is **no fallback** to the default target: that would turn a refusal into a
+silent reroute. The patterns apply on top of the integration's `senderAllowlist`, never instead of it. A mail that
+continues a conversation must also pass the `allowedSenders` of the conversation's own target.
 
 ## What the agent sees
 
@@ -220,6 +312,8 @@ The context key **`mail`** holds what the mail says about itself — every field
 | `quotedHistoryRemoved` | Whether `stripQuotedHistory` removed anything |
 | `anomalies` | Parser findings, e.g. `alternatives_diverge` (the plain-text and HTML parts say different things — the agent reads the plain text) |
 | `attachments` | One entry per attachment: `filename`, `contentType`, `size`, `inline`, and `attachmentId` when stored or `skipped` (`executable`, `type_not_allowed`, `too_large`, `too_many`, …) when not |
+| `addressing` | EDDI's verdict, not the mail's claim: `addressed` and `why` ([Addressing EDDI](#addressing-eddi)) |
+| `route` | `target`, `source`, `alsoAddressed` ([Routing order](#routing-order)), and `redirectRefused` — the target a mail named while it continued another agent's conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
 
 `mail.text` is available to the template but not repeated in the context. Stored attachments also reach the turn as
 `attachment_<n>` context entries (`storageRef`), so the [multimodal pipeline](attachments-guide.md) hands them to a
@@ -261,9 +355,10 @@ refused as a duplicate, even under a new Message-ID when the Message-ID is unsig
 What remains (details in [security.md](security.md#mail-sender-authentication--dkim-and-dmarc)): a single-part mail from
 a signer that does not sign `Content-Type`, whose body begins at its first byte with text the attacker had the sender
 quote, can be re-labelled as a multipart with that text's boundary; the charset of an unsigned single-part type and an
-unsigned transfer encoding can be changed (the signed bytes are re-decoded, nothing is added); and the mailbox's own
-address is not required in the signed `To`/`Cc` — there is no `requireAddressed` setting, because distribution lists,
-aliases and BCC deliver mail that does not name it.
+unsigned transfer encoding can be changed (the signed bytes are re-decoded, nothing is added); and with
+`actWhen: always` (the default) the mailbox's own address is not required in the signed `To`/`Cc`, because
+distribution lists, aliases and BCC deliver mail that does not name it. `actWhen: addressed`
+([Addressing EDDI](#addressing-eddi)) is a noise filter on top, not a replacement for authentication.
 
 ## Threads
 
@@ -288,12 +383,17 @@ waiting for an approval waits in the mailbox and is retried.
    from the integration's own address or from another email integration's, mail EDDI itself sent, and replies to mail
    EDDI sent from another integration or the system mailer. Then the blocklist, the allowlist and
    `requireAuthentication`. Every refusal is recorded with its reason and counted — **none is ever answered**.
-4. **Budgets** ([below](#budgets-and-quotas)).
-5. **The claim**: the row moves from `RECEIVED` to `CLAIMED` by a conditional update. Nothing has left EDDI yet.
+4. **Addressed?** With `actWhen: addressed`, a mail that does not [address EDDI](#addressing-eddi) is refused
+   `not_addressed`.
+5. **Route** ([Routing order](#routing-order)) and the target's `allowedSenders`
+   ([Per-target senders](#per-target-senders)): no target is `unroutable`, a sender the target does not allow is
+   `blocked:target_not_allowed`.
+6. **Budgets** ([below](#budgets-and-quotas)).
+7. **The claim**: the row moves from `RECEIVED` to `CLAIMED` by a conditional update. Nothing has left EDDI yet.
    Immediately before the first side effect — starting the conversation (its `CONVERSATION_START` turn may call tools),
    a group discussion, or the turn — it moves to `TURN_SUBMITTED`, the point of no return. A mail is marked (keyword,
    move) only once its row is past that point or refused, never before.
-6. The **turn** is queued, not awaited, so the poll moves on. A new conversation's `CONVERSATION_START` turn runs
+8. The **turn** is queued, not awaited, so the poll moves on. A new conversation's `CONVERSATION_START` turn runs
    inline — keep email agents' start rules light. When the turn completes, the row becomes `DONE` and its cost counts
    against the day.
 
@@ -392,7 +492,8 @@ inbound sweep re-creates it.
 
 ### Metrics
 
-`eddi_email_inbound_total{integration,transport,mode,outcome}` (`mode` is `trigger` or `conversation`; `outcome=bounce`
+`eddi_email_inbound_total{integration,transport,mode,outcome}` (`mode` is `trigger` or `conversation`; `outcome=not_addressed`
+for a mail `actWhen: addressed` refused, `outcome=bounce`
 for a delivery report that applied to a reply), `eddi_email_poll_duration_seconds{…,outcome}`,
 `eddi_email_poll_cursor_resets_total`, `eddi_email_ledger_stranded_recovered_total{outcome}` (`requeued`, `lost`, `done`,
 `failed`, `awaiting_human`, `resubmitted`, `reply_rebuilt`), plus the deployment-wide `eddi_email_auth_total{result}`, `eddi_email_poll_marked_total{result}`, `eddi_email_dns_lookups_total` and the `eddi_email_ledger_pending` gauge (see [metrics.md](metrics.md) for the full list).
@@ -460,7 +561,7 @@ Integrations row.
 | `replyTemplate` | `{output}` | Wraps the agent's answer: Qute, with `{output}` and the answered mail's `{mail.subject}`, `{mail.from}`, `{mail.fromName}`, `{mail.date}`. The answer and the subject are data — a `{…}` the model writes is printed, never evaluated. At most 4000 characters |
 | `aiDisclosure` | `This reply was written by an AI assistant.` | Appended after a blank line to every reply. **An empty value switches it off**, and the save warns (`email.ai-disclosure-disabled`): transparency rules such as Art. 50 of the EU AI Act ([eu-ai-act-compliance.md](eu-ai-act-compliance.md)) expect people to know they are talking to an AI. At most 500 characters |
 | `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |
-| `maxRepliesPerThreadPerHour` | `5` | At most this many replies per conversation per hour, counted cluster-wide from the ledger (1 – 1000) |
+| `maxRepliesPerThreadPerHour` | `5` | At most this many replies per mail thread per hour, across all of its conversations (several senders in one thread share it), counted cluster-wide from the ledger (1 – 1000) |
 | `honorReplyTo` | `false` | `true`: reply to the mail's `Reply-To` when it names exactly one valid address. **Only for a web-form relay** that sends on behalf of its visitors; the save warns (`email.honor-reply-to`) |
 
 ### Who gets a reply
@@ -500,6 +601,14 @@ conversation only when its authenticated sender is the one who started it, or, w
 `honorReplyTo` case). Anyone else falls back to the thread key, which holds their own address, and starts their own
 conversation. A mail for a conversation that is busy or waiting for an approval waits in the mailbox.
 
+**The conversation keeps its agent.** A reply in a thread EDDI answered continues that conversation even when the
+mail names another target — by address, plus-tag or mention (`@legal can you check?` in a reply to the finance
+agent). The turn runs in the owner's conversation, and `mail.route.redirectRefused` names the target it asked for
+(logged at INFO), so the agent can tell the sender to write to that target in a new mail. A subject word or the default
+never counts as asking. The `allowedSenders` of the conversation's own target apply as well as those of the routed
+one. In trigger mode with `correlateThreads`, the thread key includes the routed agent, so a mail routed to another
+target starts that agent's own conversation instead.
+
 ### Delivery, retries, limits
 
 Each reply is an outbound `REPLY` row in the [message ledger](#the-message-ledger), keyed by conversation, the step it
@@ -509,8 +618,9 @@ accepted a reply but before the row was marked `SENT` leaves a claim whose lease
 reply again, under the same Message-ID. The first attempt starts as soon as the turn ends; a failure that may be transient is
 retried with backoff until `eddi.email.outbound.max-attempts`; a permanent refusal (5xx) or the last attempt ends the
 row `FAILED`, and the owners get the once-a-day `reply_failed` notice. The ledger holds no body: a retry re-reads the
-conversation and re-renders the reply under the Message-ID the row was given. A conversation over
-`maxRepliesPerThreadPerHour` gets no further reply that hour — the row is `SUPPRESSED` (`THREAD_BUDGET`) and the owners
+conversation and re-renders the reply under the Message-ID the row was given. A mail thread over
+`maxRepliesPerThreadPerHour` — counted over all of its conversations, and each conversation on its own as well — gets
+no further reply that hour — the row is `SUPPRESSED` (`THREAD_BUDGET`) and the owners
 hear once a day (`thread_throttled`) — usually a mail loop the loop guard did not catch. Auto-replies to a reply are
 dropped by the loop guard like any automated mail.
 

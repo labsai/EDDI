@@ -798,7 +798,7 @@ record lookups than `eddi.email.dns.max-lookups-per-message` allows, and the loo
 **Email channel** ([email-integration.md](email-integration.md#metrics)):
 
 ```text
-eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger|conversation), outcome (processed|duplicate|unauthenticated|blocked|loop|bounce|throttled|budget|too_large|parse_error|deferred|unroutable|failed)
+eddi_email_inbound_total                    # Inbound mail by outcome; tags: integration, transport (imap), mode (trigger|conversation), outcome (processed|duplicate|unauthenticated|blocked|loop|bounce|throttled|budget|too_large|parse_error|deferred|unroutable|not_addressed|failed)
 eddi_email_poll_duration_seconds            # One mailbox poll (timer); tags: integration, transport, mode, outcome (ok|error)
 eddi_email_poll_cursor_resets_total         # UIDVALIDITY changes that restarted a folder scan; tags: integration, transport, mode
 eddi_email_poll_marked_total                # Processed mail marked in the mailbox; tags: integration, transport, mode, result (flagged|moved|flagged_not_moved|nothing)
