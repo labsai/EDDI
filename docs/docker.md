@@ -99,6 +99,69 @@ Credentials → Set password). `install.sh --with-auth` does it for `eddi` and
 prints a one-time password; add `--demo-users` for the other two. They used to
 ship as `eddi`/`eddi`, `viewer`/`viewer` and `user`/`user`.
 
+### Compose files and overlays
+
+Run from a checkout of the repository (or a directory holding the compose files):
+
+```bash
+# Default (EDDI + MongoDB)
+docker compose up
+
+# PostgreSQL instead of MongoDB — a complete stack, so it is NOT layered on
+# docker-compose.yml (an overlay cannot un-declare the base's mongodb service).
+# The database password has no default. Generate it ONCE into .env, which
+# compose reads on every run: PostgreSQL keeps the first password in its
+# volume, so a new one on a later run is a password the database rejects
+# (install.sh --db=postgres writes it into .env for you).
+# .env holds secrets, so only you may read it: it is created under umask 077,
+# an existing one is tightened, and nothing is written unless both succeeded.
+# The leading \n keeps the entry on its own line when the file's last line has
+# no newline.
+(umask 077 && touch .env) && chmod 600 .env && {
+  grep -q '^POSTGRES_PASSWORD=' .env || printf '\nPOSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 24)" >> .env
+}
+docker compose -f docker-compose.postgres-only.yml up
+
+# With Keycloak authentication. No realm account ships a password (see the
+# header of docker-compose.auth.yml, or let install.sh --with-auth set one)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml up
+
+# With Prometheus + Grafana monitoring
+docker compose -f docker-compose.yml -f docker-compose.monitoring.yml up
+
+# With a local LLM — Ollama on the same Docker network, reachable as
+# http://ollama:11434 (no host.docker.internal needed)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml up -d
+
+# The same local LLM, on the host's NVIDIA GPUs — layered on the Ollama overlay
+# above, never instead of it (all it adds is `gpus: all`)
+docker compose -f docker-compose.yml -f docker-compose.ollama.yml \
+  -f docker-compose.ollama-nvidia.yml up -d
+
+# Auth + monitoring + NATS together (overlays stack in any combination)
+docker compose -f docker-compose.yml -f docker-compose.auth.yml \
+  -f docker-compose.monitoring.yml -f docker-compose.nats.yml up
+
+# A cluster: three EDDI replicas behind a round-robin load balancer, a
+# three-node NATS JetStream cluster and MongoDB — a whole stack, run on its own.
+# Its three secrets are generated ONCE into .env, for the same reason as above:
+# the MongoDB volume keeps its first password, and the vault's contents can only
+# be decrypted with the master key they were encrypted under.
+# -hex, not -base64: MONGO_PASSWORD goes into the MongoDB connection string as
+# written, and base64's `/` and `+` change the meaning of a URI.
+(umask 077 && touch .env) && chmod 600 .env &&
+  for key in EDDI_VAULT_MASTER_KEY MONGO_PASSWORD NATS_PASSWORD; do
+    grep -q "^${key}=" .env || printf '\n%s=%s\n' "$key" "$(openssl rand -hex 24)" >> .env
+  done
+docker compose -f docker-compose.cluster.yml up -d
+```
+
+Available compose overlays: `docker-compose.auth.yml` (Keycloak), `docker-compose.monitoring.yml` (Prometheus+Grafana), `docker-compose.nats.yml` (cluster mode with one replica and one NATS server), `docker-compose.ollama.yml` (local LLM; add `docker-compose.ollama-nvidia.yml` on top for NVIDIA GPU access), `docker-compose.chroma.yml` (vector store), `docker-compose.mcp-sidecar.yml` (reach a stdio-only MCP server through a bridge sidecar — read the [MCP Client](mcp-client.md#stdio-servers-via-a-bridge-sidecar) guide first), `docker-compose.local.yml` (build from source). `docker-compose.postgres-only.yml` is a complete standalone stack rather than an overlay — use it on its own, not with `-f docker-compose.yml`; so is `docker-compose.openwebui.yml`, a runnable [Open WebUI](open-webui-integration.md) demo of the OpenAI-compatible API, and `docker-compose.cluster.yml`, the multi-replica stack above (see [Clustering](clustering.md)).
+
+The Ollama overlay pulls `llama3.2:3b` on first start and keeps models in a named volume; override with `OLLAMA_PULL_MODEL=qwen3:4b`, or set it empty (`OLLAMA_PULL_MODEL=`) to skip the pull. It also sets `EDDI_OLLAMA_DEFAULT_BASE_URL`, so the agent wizard and the setup API pre-fill a base URL that resolves from inside the container — the one thing that trips up every first local-LLM agent, because `localhost` there is the container, not the host.
+
+`docker-compose.ollama-nvidia.yml` adds GPU access to that Ollama and needs two things of the host, neither of which it degrades gracefully without: **Docker Compose 2.30.0 or newer**, which is where the `gpus` service attribute was introduced — older versions fail on it, so check `docker compose version` — and the **NVIDIA Container Toolkit** configured as a Docker runtime. `gpus: all` is a device *request*: with no GPU driver registered, the daemon cannot satisfy it and the container fails to start (`could not select device driver "" with capabilities: [[gpu]]`) rather than quietly falling back to the CPU. If you want Ollama on the CPU, leave this overlay off.
+
 ### Manual Docker Setup
 
 Create a network and start MongoDB on it (the same `mongo:7.0.43` image `docker-compose.yml` pins). EDDI's default connection string points at a host named `mongodb`, so the container name matters:
