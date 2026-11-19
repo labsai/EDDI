@@ -1,4 +1,5 @@
 import { useTranslation } from "react-i18next";
+import { RowActions } from "@eddi/app-kit/components/ui/row-actions";
 import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import { Check, ExternalLink, RefreshCw } from "lucide-react";
@@ -158,8 +159,8 @@ export function AlertEventsTable({ events, selected, onSelectedChange }: AlertEv
                     </ul>
                   )}
                 </td>
-                <td className="px-4 py-3">
-                  <div className="flex justify-end gap-1">
+                <td className="px-4 py-3 w-px whitespace-nowrap">
+                  <RowActions className="flex-nowrap">
                     {event.conversationId && (
                       <Button asChild size="sm" variant="ghost">
                         <Link to={`/manage/conversationview/${encodeURIComponent(event.conversationId)}`} data-testid={`alert-open-conversation-${event.id}`}>
@@ -180,7 +181,7 @@ export function AlertEventsTable({ events, selected, onSelectedChange }: AlertEv
                         {t("alerts.acknowledge", "Acknowledge")}
                       </Button>
                     )}
-                  </div>
+                  </RowActions>
                 </td>
               </tr>
             );

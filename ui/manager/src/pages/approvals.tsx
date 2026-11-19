@@ -21,6 +21,7 @@ import { toast } from "sonner";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { RowActions, RowActionsGroup } from "@eddi/app-kit/components/ui/row-actions";
 import { Button } from "@eddi/ui";
 import { ApprovalCard } from "@/components/hitl/approval-card";
 import { RequestPreview } from "@/components/operator/request-preview";
@@ -244,7 +245,7 @@ function ApprovalQueueRow({
             </Link>
           )}
         </td>
-        <td className="px-4 py-3 text-muted-foreground max-w-xs truncate max-md:block max-md:max-w-none max-md:whitespace-normal max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pauseReason", "Reason")}>
+        <td className="px-4 py-3 text-muted-foreground max-w-[15rem] truncate max-md:block max-md:max-w-none max-md:whitespace-normal max-md:px-0 max-md:py-0.5 max-md:before:me-2 max-md:before:text-[10px] max-md:before:font-semibold max-md:before:uppercase max-md:before:text-muted-foreground max-md:before:content-[attr(data-label)]" data-label={t("hitl.pauseReason", "Reason")}>
           {item.pauseType === "TOOL_CALL" && (
             <span
               className="me-1.5 inline-flex items-center gap-1 rounded-full bg-warn-500/10 px-2 py-0.5 text-[10px] font-medium text-warn-600"
@@ -309,138 +310,94 @@ function ApprovalQueueRow({
             {timeoutPolicyLabel(t, item.timeoutPolicy) || "—"}
           </span>
         </td>
-        <td className="px-4 py-3 max-md:block max-md:px-0 max-md:pt-2">
-          <div className="flex flex-wrap items-center justify-end gap-1 max-md:justify-start">
-            {isToolCall && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setExpanded((v) => !v)}
-                  aria-expanded={expanded}
-                  className="gap-1 bg-warning/10 text-warning hover:bg-warning/20"
-                  data-testid={`review-${item.conversationId}`}
-                >
-                  {expanded ? t("common.close", "Close") : t("hitl.review", "Review")}
-                  <ChevronDown
-                    className={cn("transition-transform", expanded && "rotate-180")}
-                    aria-hidden="true"
-                  />
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "CANCEL")}
-                  disabled={busy}
-                  data-testid={`cancel-${item.conversationId}`}
-                >
-                  {t("hitl.cancel", "Cancel")}
-                </Button>
-              </>
-            )}
-            {!item.groupId && item.pauseType !== "TOOL_CALL" && !isHumanTurn && (
-              <>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "APPROVED")}
-                  disabled={busy}
-                  data-testid={`approve-${item.conversationId}`}
-                >
-                  {t("hitl.approve", "Approve")}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "REJECTED")}
-                  disabled={busy}
-                  data-testid={`reject-${item.conversationId}`}
-                >
-                  {t("hitl.reject", "Reject")}
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "CANCEL")}
-                  disabled={busy}
-                  data-testid={`cancel-${item.conversationId}`}
-                >
-                  {t("hitl.cancel", "Cancel")}
-                </Button>
-              </>
+        <td className="w-px whitespace-nowrap px-4 py-3 max-md:block max-md:w-auto max-md:whitespace-normal max-md:px-0 max-md:pt-2">
+          {/* One layout for every row type: the secondary group (Review / View)
+              always comes first, the decisions always last, so the buttons line
+              up from row to row. The cell is `w-px nowrap` so the table gives
+              the column its natural width instead of squeezing it. */}
+          <RowActions className="xl:flex-nowrap max-md:justify-start">
+            {(isToolCall || isGroupDecision || item.groupId) && (
+              <RowActionsGroup>
+                {(isToolCall || isGroupDecision) && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setExpanded((v) => !v)}
+                    aria-expanded={expanded}
+                    className="gap-1 bg-warning/10 text-warning hover:bg-warning/20"
+                    data-testid={`review-${item.conversationId}`}
+                  >
+                    {expanded ? t("common.close", "Close") : t("hitl.review", "Review")}
+                    <ChevronDown
+                      className={cn("transition-transform", expanded && "rotate-180")}
+                      aria-hidden="true"
+                    />
+                  </Button>
+                )}
+                {item.groupId &&
+                  (groupHref ? (
+                    <Button variant="outline" size="sm" asChild>
+                      <Link to={groupHref} data-testid={`view-${item.conversationId}`}>
+                        {t("common.view", "View")}
+                      </Link>
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled
+                      aria-disabled="true"
+                      title={t(
+                        "hitl.groupLinkUnavailable",
+                        "This group could not be located, so there is no safe link to it.",
+                      )}
+                      data-testid={`view-pending-${item.conversationId}`}
+                    >
+                      {t("common.view", "View")}
+                    </Button>
+                  ))}
+              </RowActionsGroup>
             )}
             {/* A group phase pause needs nothing but a verdict, so it is
                 decided here like a 1:1 pause. A HUMAN_TURN is not a decision —
                 a member owes the discussion their contribution — so it keeps
-                the link only, and the link now opens that discussion. */}
-            {isGroupDecision && (
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setExpanded((v) => !v)}
-                  aria-expanded={expanded}
-                  className="gap-1 bg-warning/10 text-warning hover:bg-warning/20"
-                  data-testid={`review-${item.conversationId}`}
-                >
-                  {expanded ? t("common.close", "Close") : t("hitl.review", "Review")}
-                  <ChevronDown
-                    className={cn("transition-transform", expanded && "rotate-180")}
-                    aria-hidden="true"
-                  />
-                </Button>
-                <Button
-                  variant="primary"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "APPROVED")}
-                  disabled={groupDecisionPending}
-                  data-testid={`approve-${item.conversationId}`}
-                >
-                  {t("hitl.approve", "Approve")}
-                </Button>
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  onClick={() => onRequestConfirm(item, "REJECTED")}
-                  disabled={groupDecisionPending}
-                  data-testid={`reject-${item.conversationId}`}
-                >
-                  {t("hitl.reject", "Reject")}
-                </Button>
+                the link only, and the link opens that discussion. */}
+            {(isToolCall || isGroupDecision || (!item.groupId && !isHumanTurn)) && (
+              <RowActionsGroup>
+                {!isToolCall && (
+                  <>
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => onRequestConfirm(item, "APPROVED")}
+                      disabled={isGroupDecision ? groupDecisionPending : busy}
+                      data-testid={`approve-${item.conversationId}`}
+                    >
+                      {t("hitl.approve", "Approve")}
+                    </Button>
+                    <Button
+                      variant="destructive"
+                      size="sm"
+                      onClick={() => onRequestConfirm(item, "REJECTED")}
+                      disabled={isGroupDecision ? groupDecisionPending : busy}
+                      data-testid={`reject-${item.conversationId}`}
+                    >
+                      {t("hitl.reject", "Reject")}
+                    </Button>
+                  </>
+                )}
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => onRequestConfirm(item, "CANCEL")}
-                  disabled={groupDecisionPending}
+                  disabled={isGroupDecision ? groupDecisionPending : busy}
                   data-testid={`cancel-${item.conversationId}`}
                 >
                   {t("hitl.cancel", "Cancel")}
                 </Button>
-              </>
+              </RowActionsGroup>
             )}
-            {item.groupId &&
-              (groupHref ? (
-                <Link
-                  to={groupHref}
-                  className="rounded-md border border-border px-2.5 py-1 text-xs text-primary hover:bg-muted transition-colors"
-                  data-testid={`view-${item.conversationId}`}
-                >
-                  {t("common.view", "View")}
-                </Link>
-              ) : (
-                <span
-                  className="rounded-md border border-border px-2.5 py-1 text-xs text-muted-foreground opacity-50"
-                  aria-disabled="true"
-                  title={t(
-                    "hitl.groupLinkUnavailable",
-                    "This group could not be located, so there is no safe link to it.",
-                  )}
-                  data-testid={`view-pending-${item.conversationId}`}
-                >
-                  {t("common.view", "View")}
-                </span>
-              ))}
-          </div>
+          </RowActions>
         </td>
       </tr>
       {isGroupDecision && expanded && (
