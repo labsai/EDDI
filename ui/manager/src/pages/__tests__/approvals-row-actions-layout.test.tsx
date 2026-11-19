@@ -73,12 +73,12 @@ describe("ApprovalsPage — action cell layout", () => {
     // Conversation row: just the decisions.
     expect(groups(solo)).toHaveLength(1);
     // Group row: [Review, View] then the very same decisions.
-    const [secondary, decisions] = groups(group);
+    const [secondary, decisions] = groups(group) as [Element, Element];
     expect(secondary.querySelector('[data-testid="review-gc-1"]')).not.toBeNull();
     expect(secondary.querySelector('[data-testid^="view-"]')).not.toBeNull();
     const ids = (el: Element) => Array.from(el.querySelectorAll("button")).map((b) => b.dataset.testid?.split("-")[0]);
     expect(ids(decisions)).toEqual(["approve", "reject", "cancel"]);
-    expect(ids(groups(solo)[0])).toEqual(["approve", "reject", "cancel"]);
+    expect(ids(groups(solo)[0]!)).toEqual(["approve", "reject", "cancel"]);
     // Every action is the same small button, never a bare link styled by hand.
     await waitFor(() => {
       for (const el of group.querySelectorAll("button, a")) expect(el.className).toContain("h-8");
