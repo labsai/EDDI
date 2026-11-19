@@ -98,6 +98,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>Loop guard, blocklist (the integration's own address always), allowlist,
  * then {@code requireAuthentication}: refusals are recorded ({@code REFUSED}
  * with the reason), counted, and never answered.</li>
+ * <li>Addressing (email v2 plan §7): with {@code actWhen: addressed} a mail
+ * that does not address the integration is refused {@code not_addressed}. Then
+ * the route ({@link EmailTargetRouting}) and the target's
+ * {@code allowedSenders}. Both read the signed view only.</li>
  * <li>Budgets: the integration's daily cost budget, the per-sender daily turns,
  * tenant quotas. Over a limit the mail stays in the mailbox for later and the
  * owners hear about it once a day ({@link EmailOwnerNotifier}).</li>
@@ -495,7 +499,7 @@ public class EmailInboundProcessor {
         }
         int attempt = row.attempts() + 1;
         String input = renderInput(settings.inputTemplate(), mailData(parsed, List.of(), true, addressed));
-        // 11. The point of no return, immediately before the first side effect (a
+        // 14. The point of no return, immediately before the first side effect (a
         // conversation's CONVERSATION_START turn, a group discussion, the turn). From
         // here on the mail runs at most once.
         if (!ledger.transition(row.id(), State.CLAIMED, State.TURN_SUBMITTED, null, deadline, null, false, now)) {
