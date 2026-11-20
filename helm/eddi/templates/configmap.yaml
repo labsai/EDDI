@@ -368,6 +368,44 @@ data:
   {{- end }}
   EDDI_SECURITY_UNAUTHENTICATED_ALLOWED_HOSTS: {{ join "," $allowedHosts | quote }}
   {{- end }}
+  {{- /*
+    Plain-HTTP guard. An Ingress with OIDC on carries bearer tokens (and secret
+    values, vault master keys) in cleartext unless something terminates TLS. The
+    chart renders tls from ingress.tls only, so an empty list means http; refuse it
+    unless the operator acknowledges TLS lives elsewhere (ingress.allowPlainHttp).
+  */}}
+  {{- /*
+    A Go template treats ANY non-empty string as true, so allowPlainHttp: "false"
+    would switch the refusal below off. Only a real boolean (or an unset value) is
+    accepted.
+  */}}
+  {{- if and (not (kindIs "invalid" .Values.ingress.allowPlainHttp)) (not (kindIs "bool" .Values.ingress.allowPlainHttp)) }}
+  {{- fail (printf "ingress.allowPlainHttp must be the boolean true or false, not %q: use --set, not --set-string, and no quotes in a values file. A non-empty string is truthy in a Go template and would switch the plain-HTTP guard off." (toString (default "" .Values.ingress.allowPlainHttp))) }}
+  {{- end }}
+  {{- if and .Values.ingress.enabled .Values.eddi.oidc.enabled (not .Values.ingress.tls) (not .Values.ingress.allowPlainHttp) }}
+  {{- fail "ingress.enabled=true with eddi.oidc.enabled=true and no ingress.tls would serve bearer tokens, secret values and vault master keys over plain HTTP. Add a tls entry (ingress.tls=[{secretName: eddi-tls, hosts: [eddi.example.com]}]), or — if TLS is terminated in front of the Ingress (a cloud load balancer, a service mesh) or the network is trusted — acknowledge it explicitly with --set ingress.allowPlainHttp=true." }}
+  {{- end }}
+  {{- /*
+    SSRF protection for httpcalls and A2A peer fetch. EDDI's own default is off
+    (internal APIs in self-hosted installs); the chart turns it on whenever the
+    install is reachable by others (OIDC on or an Ingress), unless the operator
+    chose explicitly. allowedHosts keeps the Platform Operator's self-call
+    (127.0.0.1:7070) and the reference agent (localhost:7070) working. As with the flags above, kindIs "bool" is what lets
+    an explicit false survive.
+  */}}
+  {{- $ssrf := .Values.eddi.security.ssrfProtection | default dict }}
+  {{- $ssrfOn := or .Values.eddi.oidc.enabled .Values.ingress.enabled }}
+  {{- if not (or (kindIs "invalid" $ssrf.enabled) (kindIs "bool" $ssrf.enabled) (has (lower (toString (default "" $ssrf.enabled))) (list "" "true" "false"))) }}
+  {{- fail (printf "eddi.security.ssrfProtection.enabled must be true, false or empty (follow the install), not %q." (toString (default "" $ssrf.enabled))) }}
+  {{- end }}
+  {{- if kindIs "bool" $ssrf.enabled }}{{ $ssrfOn = $ssrf.enabled }}
+  {{- else if $ssrf.enabled }}{{ $ssrfOn = eq (lower (toString (default "" $ssrf.enabled))) "true" }}{{ end }}
+  EDDI_SECURITY_SSRF_PROTECTION_ENABLED: {{ $ssrfOn | quote }}
+  {{- $ssrfHosts := $ssrf.allowedHosts | default list }}
+  {{- if kindIs "slice" $ssrfHosts }}{{ $ssrfHosts = join "," $ssrfHosts }}{{ end }}
+  {{- if $ssrfHosts }}
+  EDDI_SECURITY_SSRF_PROTECTION_ALLOWED_HOSTS: {{ $ssrfHosts | quote }}
+  {{- end }}
   {{- if .Values.eddi.oidc.enabled }}
   {{- if .Values.keycloak.enabled }}
   QUARKUS_OIDC_AUTH_SERVER_URL: "http://{{ include "eddi.fullname" . }}-keycloak:8080/realms/eddi"

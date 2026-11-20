@@ -1,0 +1,34 @@
+# NetworkPolicy — admit the Ingress controller to the EDDI pod.
+#
+# The base's eddi-ingress policy admits only pods of EDDI's own namespace, so an
+# Ingress served by a controller in another namespace would be cut off. This adds
+# that controller, selected by the API-server-set kubernetes.io/metadata.name
+# label (a pod label alone can be forged by anyone who can create a pod). Change
+# both values to match your controller; kustomize's namespace transformer does
+# not rewrite them. Inert where the CNI does not enforce NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: eddi-ingress-controller
+  labels:
+    app.kubernetes.io/name: eddi
+    app.kubernetes.io/component: server
+    app.kubernetes.io/part-of: eddi
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: eddi
+      app.kubernetes.io/component: server
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: ingress-nginx
+          podSelector:
+            matchLabels:
+              app.kubernetes.io/name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 7070

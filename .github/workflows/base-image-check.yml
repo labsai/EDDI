@@ -85,11 +85,15 @@ jobs:
 
       - name: Fetch remote digest
         id: remote
+        # Passed through env, never spliced into the script: the values come from the
+        # Dockerfile's FROM line and from registry answers, and a ${{ }} expression
+        # is pasted into the shell source before bash parses it.
+        env:
+          IMAGE: ${{ steps.parse.outputs.image }}
+          TAG: ${{ steps.parse.outputs.tag }}
+          PINNED: ${{ steps.parse.outputs.digest }}
         run: |
           set -eo pipefail
-          IMAGE="${{ steps.parse.outputs.image }}"
-          TAG="${{ steps.parse.outputs.tag }}"
-          PINNED="${{ steps.parse.outputs.digest }}"
 
           # skopeo inspect --raw returns the exact manifest bytes from the registry.
           # SHA256 of those bytes is the content-addressable digest per OCI spec.
@@ -119,9 +123,10 @@ jobs:
 
       - name: Check for newer tag
         id: newer
+        env:
+          IMAGE: ${{ steps.parse.outputs.image }}
+          TAG: ${{ steps.parse.outputs.tag }}
         run: |
-          IMAGE="${{ steps.parse.outputs.image }}"
-          TAG="${{ steps.parse.outputs.tag }}"
 
           MAJOR=$(echo "$TAG" | cut -d. -f1)
           MINOR=$(echo "$TAG" | cut -d. -f2)
@@ -147,13 +152,14 @@ jobs:
 
       - name: Check for newer UBI major
         id: ubi
+        env:
+          IMAGE: ${{ steps.parse.outputs.image }}
+          TAG: ${{ steps.parse.outputs.tag }}
         run: |
           # The tag scan above only walks minor versions WITHIN the pinned
           # repository, so it can never surface a new UBI major — the ubi10
           # image existed for months while this job reported ubi9 current.
           # Probe the next two majors of the same image family as well.
-          IMAGE="${{ steps.parse.outputs.image }}"
-          TAG="${{ steps.parse.outputs.tag }}"
 
           echo "### 🔍 UBI Major Check" >> "$GITHUB_STEP_SUMMARY"
 
@@ -210,12 +216,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.BASE_IMAGE_BOT_TOKEN || secrets.CHANGELOG_BOT_TOKEN || secrets.GITHUB_TOKEN }}
           HAVE_BOT_TOKEN: ${{ secrets.BASE_IMAGE_BOT_TOKEN != '' || secrets.CHANGELOG_BOT_TOKEN != '' }}
+          IMAGE: ${{ steps.parse.outputs.image }}
+          TAG: ${{ steps.parse.outputs.tag }}
+          OLD_DIGEST: ${{ steps.parse.outputs.digest }}
+          NEW_DIGEST: ${{ steps.remote.outputs.digest }}
         run: |
           set -eo pipefail
-          IMAGE="${{ steps.parse.outputs.image }}"
-          TAG="${{ steps.parse.outputs.tag }}"
-          OLD_DIGEST="${{ steps.parse.outputs.digest }}"
-          NEW_DIGEST="${{ steps.remote.outputs.digest }}"
           BRANCH="chore/update-base-image-digest"
 
           if [ "$HAVE_BOT_TOKEN" = "true" ]; then
@@ -402,10 +408,10 @@ jobs:
         if: steps.newer.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.parse.outputs.image }}
+          TAG: ${{ steps.parse.outputs.tag }}
+          NEXT: ${{ steps.newer.outputs.tag }}
         run: |
-          IMAGE="${{ steps.parse.outputs.image }}"
-          TAG="${{ steps.parse.outputs.tag }}"
-          NEXT="${{ steps.newer.outputs.tag }}"
           TITLE="chore(docker): newer base image tag ${NEXT} available"
 
           # Don't create duplicate issues (exact title match — gh search is fuzzy)
@@ -439,10 +445,10 @@ jobs:
         if: steps.ubi.outputs.exists == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMAGE: ${{ steps.parse.outputs.image }}
+          NEXT_IMAGE: ${{ steps.ubi.outputs.image }}
+          NEXT_TAG: ${{ steps.ubi.outputs.tag }}
         run: |
-          IMAGE="${{ steps.parse.outputs.image }}"
-          NEXT_IMAGE="${{ steps.ubi.outputs.image }}"
-          NEXT_TAG="${{ steps.ubi.outputs.tag }}"
           TITLE="chore(docker): newer UBI major ${NEXT_IMAGE} available"
 
           # Don't create duplicate issues (exact title match — gh search is fuzzy)
@@ -480,12 +486,17 @@ jobs:
 
       - name: Summary
         if: always()
+        env:
+          OUTCOME: ${{ steps.pr.outputs.outcome }}
+          NEWER_EXISTS: ${{ steps.newer.outputs.exists }}
+          NEWER_TAG: ${{ steps.newer.outputs.tag }}
+          UBI_EXISTS: ${{ steps.ubi.outputs.exists }}
+          UBI_IMAGE: ${{ steps.ubi.outputs.image }}
         run: |
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "---" >> "$GITHUB_STEP_SUMMARY"
           echo "### 📋 Result" >> "$GITHUB_STEP_SUMMARY"
 
-          OUTCOME="${{ steps.pr.outputs.outcome }}"
           case "$OUTCOME" in
             created)    echo "- 🔄 Digest changed — PR created" >> "$GITHUB_STEP_SUMMARY" ;;
             updated)    echo "- 🔄 Digest changed — existing PR updated" >> "$GITHUB_STEP_SUMMARY" ;;
@@ -495,6 +506,6 @@ jobs:
             *)          echo "- ✅ Digest current — no action needed" >> "$GITHUB_STEP_SUMMARY" ;;
           esac
 
-          [ "${{ steps.newer.outputs.exists }}" = "true" ] && echo "- ⬆️ Newer tag \`${{ steps.newer.outputs.tag }}\` detected" >> "$GITHUB_STEP_SUMMARY"
-          [ "${{ steps.ubi.outputs.exists }}" = "true" ] && echo "- ⬆️ Newer UBI major \`${{ steps.ubi.outputs.image }}\` detected" >> "$GITHUB_STEP_SUMMARY"
+          [ "$NEWER_EXISTS" = "true" ] && echo "- ⬆️ Newer tag \`${NEWER_TAG}\` detected" >> "$GITHUB_STEP_SUMMARY"
+          [ "$UBI_EXISTS" = "true" ] && echo "- ⬆️ Newer UBI major \`${UBI_IMAGE}\` detected" >> "$GITHUB_STEP_SUMMARY"
           echo "- 🔍 Trivy scan completed" >> "$GITHUB_STEP_SUMMARY"

@@ -169,6 +169,33 @@ eddi:
     allowUnauthenticatedMcp: ""
     allowUnauthenticatedSecretStore: ""
 
+    # SSRF protection for agent-configured outbound calls (httpcalls, A2A peer
+    # fetch): with it on, a target that is loopback, private, link-local or a
+    # cloud-metadata address is refused, and redirects are not followed. EDDI's
+    # own default is OFF so a self-hosted install can call internal APIs, but an
+    # agent config or a templated host is then a way into the pod network and the
+    # node's metadata service, so the chart turns it ON as soon as the install is
+    # reachable by anyone else:
+    #   enabled: ""   follows the deployment — true when eddi.oidc.enabled or
+    #                 ingress.enabled, false otherwise. Set true/false to override.
+    # With it on, an httpcall to an in-cluster Service (http://my-api.ns.svc) is
+    # refused unless its host is listed in allowedHosts; set enabled=false only if
+    # every agent author is as trusted as the operator.
+    #   allowedHosts: internal hosts that stay reachable — host or host:port,
+    #                 exact, case-insensitive, no wildcards (a list or one
+    #                 comma-separated string). The cloud-metadata check still
+    #                 applies to them. The default keeps the Platform Operator's
+    #                 calls to EDDI's own API (127.0.0.1:7070, inside the pod) and the
+    #                 shipped rule-based reference agent, whose httpcalls target
+    #                 http://localhost:7070 — entries match the URL's host text
+    #                 exactly, so 127.0.0.1 does not admit localhost;
+    #                 replace it only if you list that entry yourself.
+    ssrfProtection:
+      enabled: ""
+      allowedHosts:
+        - "127.0.0.1:7070"
+        - "localhost:7070"
+
   # OIDC / Keycloak authentication
   oidc:
     enabled: false
@@ -663,6 +690,11 @@ ingress:
       paths:
         - path: /
           pathType: Prefix
+  # With eddi.oidc.enabled=true the Ingress carries bearer tokens, secret values
+  # and vault master keys, so the chart refuses to render it without a tls entry
+  # unless allowPlainHttp=true acknowledges that TLS is terminated in front of the
+  # Ingress (a cloud load balancer, a service mesh) or the network is trusted.
+  allowPlainHttp: false
   tls: []
   #  - secretName: eddi-tls
   #    hosts:

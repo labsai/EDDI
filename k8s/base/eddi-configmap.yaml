@@ -35,6 +35,11 @@ data:
   # inheriting it must not be enough to expose agent CRUD or vault writes.
   # Set all three to "false" and QUARKUS_OIDC_TENANT_ENABLED to "true" for anything
   # reachable from outside the cluster.
+  #
+  # While they are "true", EDDI is an unauthenticated administrator endpoint for
+  # every workload its NetworkPolicy admits (eddi-networkpolicy.yaml: every pod in
+  # this namespace). NetworkPolicy only takes effect on a cluster whose CNI
+  # enforces it; on one that does not, every pod in the cluster can reach EDDI.
   EDDI_SECURITY_ALLOW_UNAUTHENTICATED: "true"
   EDDI_MCP_ALLOW_UNAUTHENTICATED: "true"
   EDDI_SECRETSTORE_ALLOW_UNAUTHENTICATED: "true"
