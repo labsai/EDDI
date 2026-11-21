@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.modules.rules.impl.RuleEvaluationFailedException;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
@@ -141,6 +142,34 @@ class RestAgentEngineConfigurationRefusalTest {
     void otherFailureStays500() throws Exception {
         when(conversationService.startConversation(any(), anyString(), any(), any()))
                 .thenThrow(startTurnFailure(new IllegalArgumentException("Cannot resolve hostname: api.example")));
+
+        assertThrows(InternalServerErrorException.class, this::start);
+    }
+
+    @Test
+    @DisplayName("a failing rule set on the start turn (a dependency cycle): 422 agent_start_failed with fixed text, no driver text")
+    void ruleSetFailureIs422AgentStartFailed() throws Exception {
+        var cycle = new RuleEvaluationFailedException("Error while evaluating behavior rules!",
+                new IllegalStateException("reached infinite  loop: -> A -> B -> A jdbc:postgresql://secret-host/db"));
+        when(conversationService.startConversation(any(), anyString(), any(), any())).thenThrow(startTurnFailure(cycle));
+
+        Response response = start();
+
+        assertEquals(422, response.getStatus());
+        assertEquals(MediaType.APPLICATION_JSON_TYPE, response.getMediaType());
+        @SuppressWarnings("unchecked")
+        var body = (Map<String, Object>) response.getEntity();
+        assertEquals(RestAgentEngine.AGENT_START_FAILED, body.get("error"));
+        assertEquals(false, body.get("retryable"));
+        String message = (String) body.get("message");
+        assertFalse(message.contains("jdbc") || message.contains("infinite"), message);
+    }
+
+    @Test
+    @DisplayName("an interrupted or infrastructure failure of the start turn is not agent_start_failed")
+    void infrastructureFailureStays500() throws Exception {
+        when(conversationService.startConversation(any(), anyString(), any(), any()))
+                .thenThrow(new ResourceStoreException("db down", new LifecycleException("Failed to load user properties")));
 
         assertThrows(InternalServerErrorException.class, this::start);
     }

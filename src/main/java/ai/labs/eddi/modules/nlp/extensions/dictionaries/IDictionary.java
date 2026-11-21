@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.nlp.extensions.dictionaries;
 
 import ai.labs.eddi.engine.lifecycle.exceptions.IllegalExtensionConfigurationException;
 import ai.labs.eddi.modules.nlp.expressions.Expressions;
+import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits.ExpressionLimitExceededException;
 
 import java.util.Collections;
 import java.util.List;
@@ -42,6 +43,29 @@ public interface IDictionary {
      */
     static boolean appliesToLanguage(String dictionaryLanguageCode, String userLanguage) {
         return isNullOrEmpty(dictionaryLanguageCode) || dictionaryLanguageCode.equals(userLanguage);
+    }
+
+    /**
+     * {@code dictionary.lookupTerm(term)}, or {@link #NO_WORDS_FOUND} when the
+     * dictionary fails because {@code term} is longer than the expression limit.
+     * <p>
+     * A dictionary that turns the token itself into an expression — an e-mail
+     * address, a number — cannot do that for a token over
+     * {@code eddi.expressions.max-length}, and the parser refuses with an
+     * {@link ExpressionLimitExceededException}. That is a property of the token,
+     * not a failure of the turn: the dictionary contributes nothing for it, and the
+     * token is read by the other dictionaries or as unknown, like any word no
+     * dictionary knows. Every path that consults a dictionary with user text goes
+     * through here, so a dictionary added later is covered without catching the
+     * exception itself. Static for the same reason as
+     * {@link #appliesToLanguage(String, String)}.
+     */
+    static List<IFoundWord> lookupWithinLimits(IDictionary dictionary, String term) {
+        try {
+            return dictionary.lookupTerm(term);
+        } catch (ExpressionLimitExceededException e) {
+            return NO_WORDS_FOUND;
+        }
     }
 
     default List<IWord> getWords() {

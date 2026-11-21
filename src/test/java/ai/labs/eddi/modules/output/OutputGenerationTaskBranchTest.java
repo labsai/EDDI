@@ -346,4 +346,21 @@ class OutputGenerationTaskBranchTest {
         outputValue.setValueAlternatives(List.of(new TextOutputItem(text, 0)));
         return outputValue;
     }
+
+    @Test
+    @DisplayName("a language mismatch asks for a log once per configuration, and a match does not")
+    void languageMismatchIsLogged() {
+        MemoryContext ctx = TestMemoryFactory.createWithActions(List.of("greet"));
+        ctx.conversationProperties().put("lang", new Property("lang", "de", Property.Scope.longTerm));
+        IOutputGeneration outputGen = mock(IOutputGeneration.class);
+        when(outputGen.getLanguage()).thenReturn("en");
+
+        task.execute(ctx.memory(), outputGen);
+        verify(outputGen).claimLanguageMismatchLog();
+
+        IOutputGeneration matching = mock(IOutputGeneration.class);
+        when(matching.getLanguage()).thenReturn("de");
+        task.execute(ctx.memory(), matching);
+        verify(matching, never()).claimLanguageMismatchLog();
+    }
 }

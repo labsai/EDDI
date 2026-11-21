@@ -22,8 +22,11 @@ public class CharacterUtilities {
     }
 
     /**
-     * True when every character is a digit — and therefore false for null and for
-     * the empty string, which contain no digits at all.
+     * True when every character is a decimal digit of any script (ASCII, fullwidth,
+     * Arabic-Indic, Devanagari, Thai, …) — and therefore false for null and for the
+     * empty string, which contain no digits at all. The number parsers downstream
+     * read ASCII, so a caller that builds an expression or a value from such a text
+     * converts it with {@link #toAsciiDigits(String)} first.
      * <p>
      * The empty string is explicitly not an integer, so callers need not guard it
      * themselves.
@@ -32,14 +35,45 @@ public class CharacterUtilities {
         if (lookup == null || lookup.isEmpty()) {
             return false;
         }
-        for (int i = 0; i < lookup.length(); i++)
-            if (!Character.isDigit(lookup.charAt(i))) {
+        for (int i = 0; i < lookup.length(); i += Character.charCount(lookup.codePointAt(i))) {
+            if (!Character.isDigit(lookup.codePointAt(i))) {
                 return false;
             }
+        }
 
         return true;
     }
 
+    /**
+     * The text with every decimal digit of another script replaced by its ASCII
+     * digit ({@code ١٢} becomes {@code 12}); everything else, and a text that has
+     * no such digit, is returned as it is.
+     */
+    public static String toAsciiDigits(String text) {
+        if (text == null) {
+            return null;
+        }
+        StringBuilder converted = null;
+        for (int i = 0; i < text.length();) {
+            int codePoint = text.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (codePoint > '9' && Character.isDigit(codePoint)) {
+                if (converted == null) {
+                    converted = new StringBuilder(text.length()).append(text, 0, i);
+                }
+                converted.append((char) ('0' + Character.digit(codePoint, 10)));
+            } else if (converted != null) {
+                converted.appendCodePoint(codePoint);
+            }
+            i += width;
+        }
+        return converted == null ? text : converted.toString();
+    }
+
+    /**
+     * True for decimal digits (of any script) with at most one decimal separator
+     * ({@code .} or {@code ,}) that is not the last character.
+     */
     public static boolean isNumber(String lookup, boolean mustContainComma) {
         if (isNullOrEmpty(lookup)) {
             return false;
@@ -50,14 +84,17 @@ public class CharacterUtilities {
         }
 
         boolean firstComma = true;
-        for (int i = 0; i < lookup.length(); i++) {
-            if (!Character.isDigit(lookup.charAt(i))) {
-                if ((lookup.charAt(i) == '.' || lookup.charAt(i) == ',') && i + 1 != lookup.length() && firstComma) {
+        for (int i = 0; i < lookup.length();) {
+            int codePoint = lookup.codePointAt(i);
+            int width = Character.charCount(codePoint);
+            if (!Character.isDigit(codePoint)) {
+                if ((codePoint == '.' || codePoint == ',') && i + width != lookup.length() && firstComma) {
                     firstComma = false;
                 } else {
                     return false;
                 }
             }
+            i += width;
         }
 
         return true;

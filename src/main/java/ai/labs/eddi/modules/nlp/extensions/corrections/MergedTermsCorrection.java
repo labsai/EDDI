@@ -88,7 +88,7 @@ public class MergedTermsCorrection implements ICorrection {
             if (!IDictionary.appliesToLanguage(dictionary.getLanguageCode(), userLanguage)) {
                 continue;
             }
-            List<IDictionary.IFoundWord> result = dictionary.lookupTerm(part);
+            List<IDictionary.IFoundWord> result = IDictionary.lookupWithinLimits(dictionary, part);
             if (result.size() > 0) {
                 return result;
             }

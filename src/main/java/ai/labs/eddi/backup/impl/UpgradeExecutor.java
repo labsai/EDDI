@@ -32,6 +32,7 @@ import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.IOutputStore;
 import ai.labs.eddi.configs.output.IRestOutputStore;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
@@ -982,7 +983,7 @@ public class UpgradeExecutor {
             // it would replace a credential with the marker. Recorded as this resource
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
-            IResourceId created = store.create(content);
+            IResourceId created = LenientConfigWrite.call(() -> store.create(content));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1042,7 +1043,7 @@ public class UpgradeExecutor {
             case "behavior" -> new ExtensionStoreOps<>(
                     RuleSetConfiguration.class,
                     IRuleSetStore.class,
-                    (id, version, config) -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config),
+                    (id, version, config) -> LenientConfigWrite.call(() -> getStore(IRestRuleSetStore.class).updateRuleSet(id, version, config)),
                     IRestRuleSetStore.resourceURI,
                     IRestRuleSetStore.versionQueryParam);
             case "httpcalls" -> new ExtensionStoreOps<>(
@@ -1066,7 +1067,7 @@ public class UpgradeExecutor {
             case "output" -> new ExtensionStoreOps<>(
                     OutputConfigurationSet.class,
                     IOutputStore.class,
-                    (id, version, config) -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config),
+                    (id, version, config) -> LenientConfigWrite.call(() -> getStore(IRestOutputStore.class).updateOutputSet(id, version, config)),
                     IRestOutputStore.resourceURI,
                     IRestOutputStore.versionQueryParam);
             case "mcpcalls" -> new ExtensionStoreOps<>(

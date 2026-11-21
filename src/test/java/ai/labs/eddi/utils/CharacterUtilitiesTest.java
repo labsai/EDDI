@@ -164,4 +164,18 @@ class CharacterUtilitiesTest {
     void isStringInteger_null_returnsFalse() {
         assertFalse(CharacterUtilities.isStringInteger(null));
     }
+
+    @Test
+    void isStringInteger_digitsOfOtherScripts_areIntegersAndConvertToAscii() {
+        // fullwidth, Arabic-Indic, Devanagari, Thai
+        for (String digits : new String[]{"\uFF11\uFF12", "\u0661\u0662", "\u0967\u0968", "\u0E51\u0E52"}) {
+            assertTrue(CharacterUtilities.isStringInteger(digits), digits);
+            assertTrue(CharacterUtilities.isNumber(digits, false), digits);
+            assertEquals("12", CharacterUtilities.toAsciiDigits(digits), digits);
+        }
+        assertEquals("1.5", CharacterUtilities.toAsciiDigits("\u0661.\u0665"));
+        assertEquals("abc", CharacterUtilities.toAsciiDigits("abc"));
+        assertNull(CharacterUtilities.toAsciiDigits(null));
+        assertFalse(CharacterUtilities.isStringInteger("\u00B2"), "superscript two is not a decimal digit");
+    }
 }

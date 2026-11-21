@@ -15,6 +15,15 @@ public interface IExpressionProvider {
 
     Expressions parseExpressions(String expressions);
 
+    /**
+     * The longest expression string this provider reads back; {@code 0} when it
+     * does not bound the length. A caller that builds an expression string from
+     * user text keeps it below this.
+     */
+    default int maxExpressionLength() {
+        return 0;
+    }
+
     Expression parseExpression(String expression);
 
     void extractAllValues(Expression exp, List<Value> ret);

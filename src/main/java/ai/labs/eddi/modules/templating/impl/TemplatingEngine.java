@@ -75,7 +75,19 @@ public class TemplatingEngine implements ITemplatingEngine {
     private final Cache<String, Template> compiledTemplates = Caffeine.newBuilder().maximumSize(1000)
             .expireAfterAccess(Duration.ofMinutes(30)).build();
 
+    /**
+     * Compiled templates of {@link #notationSafeEngine}; a template compiled by one
+     * engine must not be rendered by the other, so the two caches are separate.
+     */
+    private final Cache<String, Template> compiledNotationSafeTemplates = Caffeine.newBuilder().maximumSize(1000)
+            .expireAfterAccess(Duration.ofMinutes(30)).build();
+
     private final Engine engine;
+    /**
+     * Same as {@link #engine}, plus a result mapper that strips expression notation
+     * from every substituted value.
+     */
+    private final Engine notationSafeEngine;
     private final Settings settings;
 
     /**
@@ -108,6 +120,7 @@ public class TemplatingEngine implements ITemplatingEngine {
     public TemplatingEngine(Engine source, Settings settings) {
         this.settings = settings;
         this.engine = RuntimeTemplateEngineFactory.build(source, settings);
+        this.notationSafeEngine = RuntimeTemplateEngineFactory.buildNotationSafe(source, settings);
     }
 
     @Override
@@ -118,12 +131,23 @@ public class TemplatingEngine implements ITemplatingEngine {
     @Override
     public String processTemplate(String template, Map<String, Object> dynamicAttributesMap, TemplateMode templateMode)
             throws TemplateEngineException {
+        return render(engine, compiledTemplates, template, dynamicAttributesMap, templateMode);
+    }
+
+    @Override
+    public String processExpressionsTemplate(String template, Map<String, Object> dynamicAttributesMap) throws TemplateEngineException {
+        return render(notationSafeEngine, compiledNotationSafeTemplates, template, dynamicAttributesMap, TemplateMode.TEXT);
+    }
+
+    private String render(Engine renderEngine, Cache<String, Template> cache, String template, Map<String, Object> dynamicAttributesMap,
+                          TemplateMode templateMode)
+            throws TemplateEngineException {
         try {
             if (template == null || template.isEmpty()) {
                 return template;
             }
             if (containsTemplatingControlCharacters(template)) {
-                var parsed = compiledTemplates.get(template, engine::parse);
+                var parsed = cache.get(template, renderEngine::parse);
                 var instance = parsed.instance();
                 var escapedAttributes = escapeAttributes(dynamicAttributesMap, templateMode);
                 if (escapedAttributes != null) {

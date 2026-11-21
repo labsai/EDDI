@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.hitl.context.ApprovalContextViews;
 import ai.labs.eddi.engine.hitl.tools.IHitlToolJournalStore;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.lifecycle.exceptions.AgentConfigurationRefusal;
+import ai.labs.eddi.engine.lifecycle.exceptions.AgentStartFailure;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
@@ -231,6 +232,9 @@ public class RestAgentEngine implements IRestAgentEngine {
             if (refusal != null) {
                 return configurationRefused(agentId, refusal);
             }
+            if (AgentStartFailure.find(e) != null) {
+                return startTurnFailed(agentId, e);
+            }
             LOGGER.error(e.getLocalizedMessage(), e);
             throw new InternalServerErrorException("Failed to start conversation");
         } catch (RuntimeException e) {
@@ -280,6 +284,26 @@ public class RestAgentEngine implements IRestAgentEngine {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("error", AGENT_MISCONFIGURED);
         body.put("message", message);
+        body.put("retryable", false);
+        return Response.status(UNPROCESSABLE_CONTENT).type(MediaType.APPLICATION_JSON).entity(body).build();
+    }
+
+    /** The {@code error} code of a conversation start whose start turn failed. */
+    static final String AGENT_START_FAILED = "agent_start_failed";
+
+    /**
+     * {@code 422} for a conversation start whose start turn failed for a reason
+     * that is that is not a configuration refusal ({@link AgentStartFailure}). Same
+     * flat envelope as {@code agent_misconfigured}, and as there no conversation
+     * was created. The message is fixed text: the cause (which may carry driver or
+     * exception text) goes to the server log only.
+     */
+    static Response startTurnFailed(String agentId, Throwable failure) {
+        LOGGER.errorf(failure, "The start turn of a conversation with agent %s failed", sanitize(agentId));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("error", AGENT_START_FAILED);
+        body.put("message", "A task of the agent failed while it was starting the conversation, so no conversation was created. "
+                + "The cause is in the server log; repeating the request fails the same way until the agent's configuration changes.");
         body.put("retryable", false);
         return Response.status(UNPROCESSABLE_CONTENT).type(MediaType.APPLICATION_JSON).entity(body).build();
     }

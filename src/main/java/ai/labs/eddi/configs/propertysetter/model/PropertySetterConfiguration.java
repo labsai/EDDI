@@ -14,7 +14,25 @@ import java.util.Objects;
 public class PropertySetterConfiguration {
     private List<SetOnActions> setOnActions = new LinkedList<>();
 
+    /**
+     * Whether the property step also honours a {@code properties*} context entry of
+     * type {@code expressions} that a <em>client</em> sent with its input (for
+     * example {@code property(role(admin), longTerm)}). Such an entry is applied
+     * after {@code setOnActions} and overrides what they computed, so it is off by
+     * default: only an entry the engine wrote itself is honoured. Turn it on only
+     * when every caller of the agent is trusted to set conversation properties.
+     */
+    private boolean acceptClientProperties = false;
+
     public PropertySetterConfiguration() {
+    }
+
+    public boolean isAcceptClientProperties() {
+        return acceptClientProperties;
+    }
+
+    public void setAcceptClientProperties(boolean acceptClientProperties) {
+        this.acceptClientProperties = acceptClientProperties;
     }
 
     public List<SetOnActions> getSetOnActions() {

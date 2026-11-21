@@ -10,8 +10,12 @@ import ai.labs.eddi.modules.nlp.expressions.Expression;
  * @author ginccc
  */
 public class AnyValue extends Expression {
+    /**
+     * The name that makes an expression the wildcard: it equals every expression.
+     */
+    public static final String NAME = "*";
 
     public AnyValue() {
-        this.expressionName = "*";
+        this.expressionName = NAME;
     }
 }

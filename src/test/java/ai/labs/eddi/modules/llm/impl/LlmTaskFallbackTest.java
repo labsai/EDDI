@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.templating.impl.TemplatingEngine;
+import io.quarkus.qute.Engine;
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
@@ -437,6 +439,28 @@ class LlmTaskFallbackTest {
             var expected = List.of(new QuickReply("Try again", "retry_last", true));
             verify(currentStep).addConversationOutputList(eq("quickReplies"), eq(expected));
             verify(dataFactory).createData(eq("quickReplies:llm:fallback:taskA"), eq(expected));
+        }
+
+        @Test
+        @DisplayName("data cannot add expression notation to a fallback quick reply's expressions; the value keeps it")
+        void quickReplyExpressionsAreNotationSafe() throws Exception {
+            liveModelReplies(Step.status(500));
+            templateData.put("properties", Map.of("item", "x), intent(admin"));
+            var realEngine = new TemplatingEngine(
+                    Engine.builder().addDefaults().strictRendering(false).build());
+            lenient().when(templatingEngine.processTemplate(anyString(), any()))
+                    .thenAnswer(inv -> realEngine.processTemplate(inv.getArgument(0), inv.getArgument(1)));
+            lenient().when(templatingEngine.processExpressionsTemplate(anyString(), any()))
+                    .thenAnswer(inv -> realEngine.processExpressionsTemplate(inv.getArgument(0), inv.getArgument(1)));
+            var task = withOnError(task(false), "fallback");
+            var v = validation("Sorry", null);
+            v.setFallbackQuickReplies(List.of(new QuickReply("Pick {properties.item}", "choose({properties.item})", false)));
+            task.setResponseValidation(v);
+
+            run(task);
+
+            var expected = List.of(new QuickReply("Pick x), intent(admin", "choose(x intentadmin)", false));
+            verify(currentStep).addConversationOutputList(eq("quickReplies"), eq(expected));
         }
 
         @Test

@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.output.mongo;
 
 import ai.labs.eddi.configs.output.IOutputStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.output.model.OutputConfiguration;
 import ai.labs.eddi.configs.output.model.OutputConfigurationSet;
 import ai.labs.eddi.datastore.AbstractResourceStore;
@@ -18,7 +19,9 @@ import jakarta.inject.Inject;
 import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
+import org.jboss.logging.Logger;
 
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static ai.labs.eddi.utils.RuntimeUtilities.*;
 
 /**
@@ -27,6 +30,7 @@ import static ai.labs.eddi.utils.RuntimeUtilities.*;
 @ApplicationScoped
 public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> implements IOutputStore {
 
+    private static final Logger LOGGER = Logger.getLogger(OutputStore.class);
     private static final OutputComparator OUTPUT_COMPARATOR = new OutputComparator();
 
     @Inject
@@ -37,6 +41,7 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> i
     @Override
     public IResourceStore.IResourceId create(OutputConfigurationSet outputConfigurationSet) throws IResourceStore.ResourceStoreException {
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        requireValidTimesOccurred(outputConfigurationSet);
         return super.create(outputConfigurationSet);
     }
 
@@ -46,7 +51,34 @@ public class OutputStore extends AbstractResourceStore<OutputConfigurationSet> i
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
 
         checkCollectionNoNullElements(outputConfigurationSet.getOutputSet(), "outputSets");
+        requireValidTimesOccurred(outputConfigurationSet);
         return super.update(id, version, outputConfigurationSet);
+    }
+
+    /**
+     * {@code timesOccurred} counts from 0 (the first time an action occurred); -1
+     * is accepted as the lowest. A smaller value can never be selected — the output
+     * generation used to loop forever on an action whose entries were all below -1
+     * — so it is refused on save, naming the entry.
+     */
+    private static void requireValidTimesOccurred(OutputConfigurationSet outputConfigurationSet) {
+        var outputSet = outputConfigurationSet.getOutputSet();
+        if (outputSet == null) {
+            return;
+        }
+        for (int i = 0; i < outputSet.size(); i++) {
+            var entry = outputSet.get(i);
+            if (entry != null && entry.getTimesOccurred() < -1) {
+                String problem = "Invalid output set: outputSet[" + i + "] (action '" + entry.getAction() + "') has timesOccurred "
+                        + entry.getTimesOccurred() + "; it must not be below -1 (0 is the first time the action occurs).";
+                if (!LenientConfigWrite.isActive()) {
+                    throw new IllegalArgumentException(problem);
+                }
+                // An import, sync or copy: the entry can never be selected, but the
+                // document is accepted as it was written.
+                LOGGER.warn("output set import, sync or copy: " + sanitize(problem));
+            }
+        }
     }
 
     @Override

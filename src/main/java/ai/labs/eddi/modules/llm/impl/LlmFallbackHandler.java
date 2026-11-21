@@ -200,7 +200,8 @@ final class LlmFallbackHandler {
             if (quickReply == null) {
                 continue;
             }
-            rendered.add(new QuickReply(renderOrKeep(quickReply.getValue(), templateData), renderOrKeep(quickReply.getExpressions(), templateData),
+            rendered.add(new QuickReply(renderOrKeep(quickReply.getValue(), templateData),
+                    renderExpressionsOrKeep(quickReply.getExpressions(), templateData),
                     quickReply.getIsDefault()));
         }
         if (rendered.isEmpty()) {
@@ -215,6 +216,22 @@ final class LlmFallbackHandler {
         data.setVerbatim(true);
         step.storeData(data);
         step.addConversationOutputList(MemoryKeys.QUICK_REPLIES_PREFIX, rendered);
+    }
+
+    /**
+     * The {@code expressions} field becomes a trusted dictionary phrase on the next
+     * turn: the engine strips expression notation from the values it substitutes.
+     */
+    private String renderExpressionsOrKeep(String template, Map<String, Object> templateData) {
+        if (isNullOrEmpty(template)) {
+            return template;
+        }
+        try {
+            String rendered = templatingEngine.processExpressionsTemplate(template, templateData);
+            return rendered != null ? rendered : template;
+        } catch (Exception e) {
+            return template;
+        }
     }
 
     private String renderOrKeep(String template, Map<String, Object> templateData) {
