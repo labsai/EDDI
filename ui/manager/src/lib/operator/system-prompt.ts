@@ -754,7 +754,18 @@ const BODY_KNOWLEDGE_BASES_RUNS = `- To answer "did the documents actually land?
   that source's run history: the knowledge base id, the source's \`id\` (or its
   \`name\` when it has no id) and the knowledge base VERSION are all required.
   Each run reports documents seen, ingested, unchanged, failed and removed,
-  segments stored, cost and any error. No runs means it was never run.`;
+  segments stored, cost and any error. No runs means it was never run.
+- A run with \`stopReason: THROTTLED\` was paused by the embedding provider's
+  rate limit or daily quota: it is not a failure, nothing was deleted, and its
+  \`documentsThrottled\` documents were left for a later run (they are not in
+  \`documentsFailed\`). \`resumeAfter\` is when the provider takes calls again —
+  for Gemini's daily quota, midnight Pacific time. Until then the source's
+  scheduled runs are held back without listing the source or calling the
+  provider; "Run now" is not held back, but runs into the same limit. When you
+  give the resume time, include its date unless it is today. A run that
+  FAILED with an error about the provider account's quota or billing
+  (\`insufficient_quota\`) is not a throttle: waiting will not help, the
+  account's plan or billing has to be fixed.`;
 
 const BODY_KNOWLEDGE_BASES_FILES = `- For a source of type \`upload\`, you can also list the files it holds.`;
 

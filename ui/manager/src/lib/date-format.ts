@@ -53,6 +53,27 @@ export function formatDateTimeWithZone(ts: Ts, withZone = true): string {
   }
 }
 
+/**
+ * A time that is coming up, said as briefly as is still unambiguous: the time
+ * alone when it falls today (`14:32`), with the date when it does not
+ * (`Nov 22, 09:00`). A provider's daily quota resets at a midnight that is
+ * usually tomorrow, and "from 09:00" read on the evening before means the
+ * wrong morning.
+ */
+export function formatUpcomingTime(ts: Ts, now: Ts = Date.now()): string {
+  const d = toDate(ts);
+  if (!d) return "—";
+  const today = toDate(now) ?? new Date();
+  const sameDay =
+    d.getFullYear() === today.getFullYear() &&
+    d.getMonth() === today.getMonth() &&
+    d.getDate() === today.getDate();
+  const time: Intl.DateTimeFormatOptions = { hour: "2-digit", minute: "2-digit" };
+  return sameDay
+    ? d.toLocaleTimeString([], time)
+    : d.toLocaleString([], { month: "short", day: "numeric", ...time });
+}
+
 // ─── Wall-clock <-> instant in a named IANA zone ────────────────────────────
 
 function zoneParts(ms: number, timeZone: string): Record<string, number> {

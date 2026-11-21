@@ -5,6 +5,7 @@ import { http, HttpResponse } from "msw";
 import { createTestQueryClient, renderPage } from "@eddi/app-kit/test/test-utils";
 import { server } from "@eddi/app-kit/test/mocks/server";
 import { ResourceDetailPage } from "@/pages/resource-detail";
+import { formatUpcomingTime } from "@/lib/date-format";
 
 /**
  * What the Manager shows about ingestion while and after it runs: live progress,
@@ -128,7 +129,10 @@ describe("RAG ingestion — while and after a run", () => {
     expect(row).not.toHaveTextContent("failed");
 
     await user.click(screen.getByTestId("ingestion-source-0-run-run-3-toggle"));
-    const time = new Date(resumeAfter).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    // Not today, so the date is part of it: a resume tomorrow morning must not read
+    // as this morning.
+    const time = formatUpcomingTime(resumeAfter);
+    expect(time).not.toBe(new Date(resumeAfter).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
     const stopReason = screen.getByTestId("ingestion-source-0-run-run-3-stop-reason");
     expect(stopReason).toHaveTextContent("Paused by the provider's rate limit");
     expect(stopReason).toHaveTextContent(time);

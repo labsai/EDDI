@@ -15,6 +15,7 @@ import { cn, formatUsd } from "@eddi/app-kit/lib/utils";
 import { Badge } from "@eddi/ui";
 import { Button } from "@eddi/ui";
 import type { IngestionRun } from "@/lib/api/ingestion-sources";
+import { formatUpcomingTime } from "@/lib/date-format";
 
 /** How many runs the history shows before "Show more". */
 const COLLAPSED_RUNS = 5;
@@ -370,15 +371,15 @@ function stopReasonText(t: TFunction, reason: string, resumeAfter?: string | nul
         "Stopped early — cancelled, superseded, or its chunk budget was reached",
       );
     case "THROTTLED": {
-      // No automatic resume: the next run is the source's schedule, or a manual one.
+      // No automatic resume: the next run is the source's schedule, which waits for
+      // this time, or a manual one. The date is shown when it is not today: a daily
+      // quota usually comes back tomorrow.
       const resume = resumeAfter ? Date.parse(resumeAfter) : NaN;
       return Number.isFinite(resume)
         ? t(
             "ragEditor.runs.stopThrottledUntil",
             "Paused by the provider's rate limit — it takes requests again from {{time}}. The next run picks up the rest; nothing was treated as failed or deleted",
-            {
-              time: new Date(resume).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-            },
+            { time: formatUpcomingTime(resume) },
           )
         : t(
             "ragEditor.runs.stopThrottled",
