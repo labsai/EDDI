@@ -371,29 +371,15 @@ public class EmailInboundProcessor {
             return refuse(ctx, row, "not_addressed", EmailMetrics.NOT_ADDRESSED, now);
         }
 
-        // 8. Route, and whether this sender may reach the target at all. A refusal
-        // here is final: no fallback to the default target, which would turn it into
-        // a silent reroute.
+        // 8. Route. Whether this sender may reach the target is decided in step 12,
+        // once it is known whether the mail continues a conversation: a new
+        // conversation needs the routed target's admission, a continuation its owner
+        // agent's. A refusal there is final: no fallback to the default target, which
+        // would turn it into a silent reroute.
         RouteDecision route = EmailTargetRouting.route(ctx.integration(), settings.address(), parsed, mentions);
         ChannelTarget target = route.target();
         if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
             return refuse(ctx, row, "unroutable", EmailMetrics.UNROUTABLE, now);
-        }
-        if (!mayReach(target, sender, authenticated)) {
-            return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
-        }
-
-        // 9. Budgets. Over one, the mail waits in the mailbox; no sender hears
-        // anything.
-        if (dailyBudgetExhausted(id, settings, now)) {
-            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.BUDGET, now);
-            defer(ctx, row, now.plus(RETRY_BUDGET), "budget", EmailMetrics.BUDGET, now);
-            return Disposition.STOP;
-        }
-        if (settings.maxTurnsPerSenderPerDay() > 0
-                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= settings.maxTurnsPerSenderPerDay()) {
-            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.THROTTLED, now);
-            return defer(ctx, row, startOfUtcDay(now).plus(Duration.ofDays(1)), "throttled", EmailMetrics.THROTTLED, now);
         }
 
         // 10. Identity.
@@ -468,13 +454,21 @@ public class EmailInboundProcessor {
             }
         }
 
-        // 12. An existing conversation keeps its agent (email v2 plan §7.5). Its
-        // target's allowedSenders apply as well as the routed target's, and a mail
+        // 12. Whether this sender may reach the agent the mail runs with. A new
+        // conversation needs the routed target's allowedSenders. An existing one keeps
+        // its agent (email v2 plan §7.5) and needs only that agent's: the mail runs in
+        // the owner's conversation, so the routed target (often the default one, since
+        // EDDI's replies leave from the integration's address) guards nothing. A mail
         // that explicitly named another target runs here with that recorded as
         // mail.route.redirectRefused.
         Map<String, Object> routeData = route.toMap();
-        if (existingConversation != null) {
-            Owner owner = ownerOf(existingConversation);
+        Owner owner = null;
+        if (existingConversation == null) {
+            if (!mayReach(target, sender, authenticated)) {
+                return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
+            }
+        } else {
+            owner = ownerOf(existingConversation);
             // Without the owner's agent its allowedSenders cannot be checked: when any
             // target restricts its senders, the mail waits rather than skip the check.
             if (owner.unreadable() || (owner.agentId() == null && anyTargetRestrictsSenders(ctx.integration()))) {
@@ -490,6 +484,19 @@ public class EmailInboundProcessor {
             }
         }
         Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData);
+
+        // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
+        // no sender hears anything.
+        if (dailyBudgetExhausted(id, settings, now)) {
+            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.BUDGET, now);
+            defer(ctx, row, now.plus(RETRY_BUDGET), "budget", EmailMetrics.BUDGET, now);
+            return Disposition.STOP;
+        }
+        if (settings.maxTurnsPerSenderPerDay() > 0
+                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= settings.maxTurnsPerSenderPerDay()) {
+            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.THROTTLED, now);
+            return defer(ctx, row, startOfUtcDay(now).plus(Duration.ofDays(1)), "throttled", EmailMetrics.THROTTLED, now);
+        }
 
         // 13. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
@@ -519,11 +526,9 @@ public class EmailInboundProcessor {
                 return Disposition.SETTLED;
             }
             String conversationId = existingConversation;
-            double costBefore = 0.0;
+            double costBefore = owner != null ? owner.cost() : 0.0;
             if (conversationId == null) {
                 conversationId = startConversation(target.getTargetId(), userId, id, intent);
-            } else {
-                costBefore = conversationCost(conversationId);
             }
             ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, conversationId, deadline, null, false, now);
             List<Map<String, Object>> attachmentData = new ArrayList<>();
@@ -959,37 +964,36 @@ public class EmailInboundProcessor {
     }
 
     /**
-     * Whether the sender may reach the conversation's owner agent {@code agentId}:
-     * through {@code preferred} when it is that agent's target, else through any
-     * addressable agent target of the integration that is that agent's. Several
-     * targets can name one agent with different {@code allowedSenders}, and which
-     * of them started the conversation is not recorded, so the sender passes when
-     * one of them admits it — they could reach the agent through that target
-     * directly. True when no target is that agent's (the conversation outlived its
-     * target) or the owner is unknown.
+     * Whether the sender may reach the conversation's owner agent {@code agentId}
+     * through any addressable agent target of the integration that is that agent's.
+     * Several targets can name one agent with different {@code allowedSenders}, and
+     * which of them started the conversation is not recorded, so the sender passes
+     * when one of them admits it: they could reach the agent through that target
+     * directly. The target the mail was routed to does not decide it, even when it
+     * is one of the agent's (a plain reply routes to the default target). Only when
+     * no target is that agent's any more (the conversation outlived its target)
+     * does {@code routed} decide, as it would for a new conversation. True when the
+     * owner is unknown (the caller defers instead when any target restricts its
+     * senders).
      */
-    static boolean ownerAdmits(ChannelIntegrationConfiguration integration, String agentId, ChannelTarget preferred, String sender,
+    static boolean ownerAdmits(ChannelIntegrationConfiguration integration, String agentId, ChannelTarget routed, String sender,
                                boolean authenticated) {
         if (agentId == null) {
             return true;
         }
-        if (preferred != null && agentId.equals(preferred.getTargetId())) {
-            return mayReach(preferred, sender, authenticated);
-        }
-        if (integration == null || integration.getTargets() == null) {
-            return true;
-        }
         boolean any = false;
-        for (ChannelTarget candidate : integration.getTargets()) {
-            if (candidate != null && !candidate.isObserveMode() && candidate.getType() != ChannelTarget.TargetType.GROUP
-                    && agentId.equals(candidate.getTargetId())) {
-                if (mayReach(candidate, sender, authenticated)) {
-                    return true;
+        if (integration != null && integration.getTargets() != null) {
+            for (ChannelTarget candidate : integration.getTargets()) {
+                if (candidate != null && !candidate.isObserveMode() && candidate.getType() != ChannelTarget.TargetType.GROUP
+                        && agentId.equals(candidate.getTargetId())) {
+                    if (mayReach(candidate, sender, authenticated)) {
+                        return true;
+                    }
+                    any = true;
                 }
-                any = true;
             }
         }
-        return !any;
+        return !any && (routed == null || mayReach(routed, sender, authenticated));
     }
 
     static String verdictId(MailAuthentication authentication) {
@@ -1136,15 +1140,6 @@ public class EmailInboundProcessor {
             return null;
         } catch (RuntimeException e) {
             return ConversationState.IN_PROGRESS;
-        }
-    }
-
-    private double conversationCost(String conversationId) {
-        try {
-            var snapshot = conversationService.readConversation(conversationId, false, true, List.of());
-            return snapshot != null && snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0;
-        } catch (Exception e) {
-            return 0.0;
         }
     }
 

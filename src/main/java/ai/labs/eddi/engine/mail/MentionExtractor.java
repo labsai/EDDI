@@ -188,11 +188,13 @@ public final class MentionExtractor {
     }
 
     /**
-     * What may stand right before the {@code @}: whitespace, or the bracket an
-     * HTML-only mail's converted mention starts with ({@code [@Name](mailto:…)}).
+     * What may stand right before the {@code @}: whitespace, including the no-break
+     * spaces {@link Character#isWhitespace} leaves out (an HTML {@code &nbsp;}
+     * converts to U+00A0), or the bracket an HTML-only mail's converted mention
+     * starts with ({@code [@Name](mailto:…)}).
      */
     private static boolean opensMention(char c) {
-        return Character.isWhitespace(c) || c == '(' || c == '[';
+        return Character.isWhitespace(c) || Character.isSpaceChar(c) || c == '(' || c == '[';
     }
 
     /**

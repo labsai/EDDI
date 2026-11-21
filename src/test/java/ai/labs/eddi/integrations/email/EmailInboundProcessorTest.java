@@ -1031,18 +1031,50 @@ class EmailInboundProcessorTest {
             }
 
             @Test
-            @DisplayName("with two targets for the owner agent, the continuation runs when either admits the sender")
+            @DisplayName("with two targets for the owner agent, a plain reply runs when either admits the sender, even if the routed one does not")
             void ownerAnyTargetAdmits() throws Exception {
                 existingConversation();
                 var first = target("first", AGENT);
                 first.setAllowedSenders(List.of("boss@supplier.com"));
                 var second = target("second", AGENT);
                 second.setAllowedSenders(List.of("alice@supplier.com"));
-                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal please");
+                // No mention: the reply goes to the integration's address and routes to the
+                // default target, "first", which does not admit alice.
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("thanks");
 
                 assertEquals(Disposition.SETTLED, processor.process(conversationContext(first, second, legal), mail.polled(1), Instant.now()));
 
                 assertEquals(List.of("conv-A"), sayConversations);
+            }
+
+            @Test
+            @DisplayName("a partner admitted only by the owner's alias target can continue a conversation the default target would refuse")
+            void aliasTargetPartnerContinues() throws Exception {
+                existingConversation();
+                var intake = target("intake", LEGAL);
+                intake.setAllowedSenders(List.of("boss@supplier.com"));
+                var partners = target("partners", AGENT);
+                partners.setAddresses(List.of("orders+partners@contoso.com"));
+                partners.setAllowedSenders(List.of("*@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("thanks, that works");
+
+                assertEquals(Disposition.SETTLED, processor.process(conversationContext(intake, partners), mail.polled(1), Instant.now()));
+
+                assertEquals(List.of("conv-A"), sayConversations);
+            }
+
+            @Test
+            @DisplayName("a conversation that outlived its agent's target is judged by the routed target, as a new one would be")
+            void orphanedOwnerUsesRoutedTarget() throws Exception {
+                existingConversation();
+                var intake = target("intake", LEGAL);
+                intake.setAllowedSenders(List.of("boss@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("thanks");
+
+                processor.process(conversationContext(intake), mail.polled(1), Instant.now());
+
+                assertEquals("blocked:target_not_allowed", row(mail).lastError());
+                assertEquals(List.of(), sayConversations);
             }
 
             @Test

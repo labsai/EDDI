@@ -428,10 +428,6 @@ public class EmailReplySender {
     // --- Writing and sending -------------------------------------------------
 
     /**
-     * Writes the reply row unless one exists for this (conversation, mail, kind,
-     * discriminator), and starts its first attempt.
-     */
-    /**
      * Whether {@code maxRepliesPerThreadPerHour} is reached (email v2 plan §7.7):
      * the replies of the mail thread, across every conversation in it — a thread
      * with several allowed senders has one conversation each, and counting per
@@ -451,6 +447,10 @@ public class EmailReplySender {
         return request.conversationId() != null && ledger.countByConversationSince(request.conversationId(), Kind.REPLY, since) >= cap;
     }
 
+    /**
+     * Writes the reply row unless one exists for this (conversation, mail, kind,
+     * discriminator), and starts its first attempt.
+     */
     Optional<LedgerEntry> enqueue(Request request, Instant now) {
         EmailReplyRecipients.Decision decision = EmailReplyRecipients.decide(request.integrationId(), request.settings(), request.inbound(),
                 request.stepMail(), request.userId());

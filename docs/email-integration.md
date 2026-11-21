@@ -184,7 +184,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `dailyCostBudgetUsd` | *(none)* | The integration's spend per UTC day (priced LLM and tool cost of its turns, on top of the tenant's `maxMonthlyCostUsd`). When reached, polling pauses until the next UTC day |
 | `ownerNotifyAddresses` | *(empty)* | Up to 5 addresses told once a day when the integration stops on a limit ([Budgets](#budgets-and-quotas)) or a mail was lost to a crash |
 | `actWhen` | `always` | `always`: every mail that passes the guards runs a turn. `addressed`: only a mail that [addresses EDDI](#addressing-eddi) does; anything else is refused `not_addressed`. The Manager preselects `addressed` for new integrations; existing ones keep `always` |
-| `aliases` | *(empty)* | Up to 20 more addresses that deliver to this mailbox (an alias, a distribution list), comma-separated. They count as the integration's own: mail **from** them is refused like mail from `address`, mail **to** them [addresses EDDI](#addressing-eddi), and a target's `addresses` may name them. Each address belongs to one integration |
+| `aliases` | *(empty)* | Up to 20 more addresses that deliver to this mailbox, comma-separated. They count as the integration's own: mail **from** them is refused like mail from `address`, mail **to** them [addresses EDDI](#addressing-eddi), a target's `addresses` may name them, and a reply never goes to one (or to a plus-address of one) even when `honorReplyTo` points there. Each address belongs to one integration. Only aliases that forward mail unchanged work, and distribution lists that add no list headers (an Exchange distribution group, for example). A mailing list such as Google Groups or Mailman adds `List-Id`, `List-Unsubscribe` or `Precedence: list`, and that mail is refused as a loop (`loop:*`) before addressing is looked at |
 
 **Targets.** Besides `name`, `type`, `targetId` and `triggers`, an email target takes three optional lists — all
 email-only, refused on any other channel type:
@@ -194,7 +194,7 @@ email-only, refused on any other channel type:
 | `triggers` | Words matched against the **plus-tag** of the mailbox address (`invoices+urgent@contoso.com` → `urgent`) and against **words of the subject** (letters and digits, case-insensitive) |
 | `mentions` | Handles that address this target when written as `@handle` in the sender's own text ([Mentions](#mentions)): `[a-z0-9][a-z0-9_-]{0,39}`, without the `@`, case-insensitive, at most 10 per target, unique across the integration's targets. Unlike `triggers` they never match a subject word |
 | `addresses` | Full addresses that address this target in `To` or `Cc`, e.g. `finance-agent@contoso.com`. Each must be in `aliases` or be a plus-address of `address` — otherwise the mailbox never receives it — and may address one target only |
-| `allowedSenders` | Sender patterns (the `senderAllowlist` syntax). When set, only an **authenticated** sender matching one may reach this target, by any path, the default included ([Per-target senders](#per-target-senders)) |
+| `allowedSenders` | Sender patterns (the `senderAllowlist` syntax). When set, only an **authenticated** sender matching one may start a conversation with this target, by any path, the default included ([Per-target senders](#per-target-senders)) |
 
 `observeMode` targets are refused. A `GROUP` target starts a group discussion with the rendered input as its question
 (no attachments). Which target a mail goes to is the [routing order](#routing-order).
@@ -281,8 +281,14 @@ A subject word, a plus-tag or a mention lets any sender who may write to the mai
 a target for some senders only, give it `allowedSenders`. Then a mail routed to it — by any rule, the default
 included — runs only when its sender is **authenticated** and matches one of the patterns; otherwise it is refused
 `blocked:target_not_allowed`. There is **no fallback** to the default target: that would turn a refusal into a
-silent reroute. The patterns apply on top of the integration's `senderAllowlist`, never instead of it. A mail that
-continues a conversation must also pass the `allowedSenders` of the conversation's own target.
+silent reroute. The patterns apply on top of the integration's `senderAllowlist`, never instead of it.
+
+A mail that **continues** a conversation runs in that conversation, with its agent, whatever the route says. So the
+routed target does not decide; the conversation's agent does. The sender passes when any target of that agent admits
+it, because which of the agent's targets started the conversation is not recorded. A plain reply to EDDI goes to the
+integration's `address` and routes to the default target, and judging it by that target would lock out a partner who
+reached the agent through its own target. When no target names the agent any more, the routed target decides, as it
+would for a new conversation.
 
 ## What the agent sees
 
@@ -386,8 +392,9 @@ waiting for an approval waits in the mailbox and is retried.
    `requireAuthentication`. Every refusal is recorded with its reason and counted — **none is ever answered**.
 4. **Addressed?** With `actWhen: addressed`, a mail that does not [address EDDI](#addressing-eddi) is refused
    `not_addressed`.
-5. **Route** ([Routing order](#routing-order)) and the target's `allowedSenders`
-   ([Per-target senders](#per-target-senders)): no target is `unroutable`, a sender the target does not allow is
+5. **Route** ([Routing order](#routing-order)) and the `allowedSenders`
+   ([Per-target senders](#per-target-senders)) of the routed target, or of the agent's targets for a mail that
+   continues a conversation: no target is `unroutable`, a sender that is not allowed is
    `blocked:target_not_allowed`.
 6. **Budgets** ([below](#budgets-and-quotas)).
 7. **The claim**: the row moves from `RECEIVED` to `CLAIMED` by a conditional update. Nothing has left EDDI yet.

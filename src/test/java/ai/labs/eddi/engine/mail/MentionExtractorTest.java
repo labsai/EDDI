@@ -205,6 +205,45 @@ class MentionExtractorTest {
         }
 
         @Test
+        @DisplayName("a no-break space before the @ opens a mention, in text and in HTML-only mail (&nbsp;)")
+        void noBreakSpace() throws Exception {
+            assertEquals(List.of("finance"), handles("Hi" + (char) 0xA0 + "@finance please"));
+            assertEquals(List.of("finance"), handles("Hi" + (char) 0x202F + "@finance please"));
+            InboundMail html = MailFixtures.parser().parse(MailFixtures.message("""
+                    From: alice@supplier.com
+                    To: orders@contoso.com
+                    Subject: booking
+                    Message-ID: <nbsp-1@supplier.com>
+                    MIME-Version: 1.0
+                    Content-Type: text/html; charset=utf-8
+
+                    <html><body><p>Hi&nbsp;@finance please book this.</p></body></html>
+                    """), MailLimits.defaults(), true);
+            assertEquals(List.of("finance"),
+                    MentionExtractor.extract(html.text(), html.anomalies(), KNOWN).stream().map(MentionHit::handle).toList());
+        }
+
+        @Test
+        @DisplayName("HTML-only Gmail reply with a Polish attribution line: the quoted mention does not count")
+        void htmlOnlyUnknownAttribution() throws Exception {
+            InboundMail html = MailFixtures.parser()
+                    .parse(MailFixtures.message(
+                            """
+                                    From: alice@supplier.com
+                                    To: orders@contoso.com
+                                    Subject: Re: faktura
+                                    Message-ID: <pl-1@supplier.com>
+                                    MIME-Version: 1.0
+                                    Content-Type: text/html; charset=utf-8
+
+                                    <html><body><div dir="ltr">@legal proszę sprawdzić.</div><br><div class="gmail_quote"><div dir="ltr" class="gmail_attr">W dniu wt., 17 lis 2026 o 10:15 Bob &lt;bob@x.com&gt; napisał(a):<br></div><blockquote class="gmail_quote" style="margin:0px 0px 0px 0.8ex"><div>@finance proszę zapłacić</div></blockquote></div></body></html>
+                                    """),
+                            MailLimits.defaults(), true);
+            assertEquals(List.of("legal"), MentionExtractor.extract(html.text(), html.anomalies(), KNOWN).stream().map(MentionHit::handle).toList(),
+                    html.text());
+        }
+
+        @Test
         @DisplayName("a huge mail is read only as far as the head region: linear and bounded")
         void hugeInput() {
             String huge = "From: ".repeat(200_000) + "\n" + "@ ".repeat(500_000);
