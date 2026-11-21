@@ -49,7 +49,7 @@ class ChatModelRegistryAllowedHostsTest {
     @BeforeEach
     void setUp() {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-        builders.put("openai", () -> new ILanguageModelBuilder() {
+        builders.put("openai", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 return new ChatModel() {
@@ -120,7 +120,7 @@ class ChatModelRegistryAllowedHostsTest {
     }
 
     @Test
-    @DisplayName("without an endpoint parameter the provider's own default is used, which an editor cannot choose — nothing to check")
+    @DisplayName("without an endpoint parameter, a builder that names no default endpoint has nothing to check")
     void noEndpointNothingToCheck() throws Exception {
         assertNotNull(registry.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}")));
 
@@ -150,7 +150,7 @@ class ChatModelRegistryAllowedHostsTest {
     @DisplayName("a builder whose default an editor can steer (a region) is checked against that default")
     void steerableDefaultEndpointIsChecked() throws Exception {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-        builders.put("regional", () -> new ILanguageModelBuilder() {
+        builders.put("regional", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 return new ChatModel() {
@@ -183,7 +183,7 @@ class ChatModelRegistryAllowedHostsTest {
     @DisplayName("an endpoint key the builder does not read does not stand in for the default it does use")
     void unusedEndpointKeyDoesNotSkipTheDefault() throws Exception {
         Map<String, Provider<ILanguageModelBuilder>> builders = new HashMap<>();
-        builders.put("regional", () -> new ILanguageModelBuilder() {
+        builders.put("regional", () -> new ApiKeyLanguageModelBuilder() {
             @Override
             public ChatModel build(Map<String, String> parameters) {
                 return new ChatModel() {

@@ -10,6 +10,8 @@ import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.ResolvedCredentials;
+import ai.labs.eddi.secrets.SecretCapture;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.EndpointParameters;
@@ -32,8 +34,10 @@ import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
@@ -92,6 +96,54 @@ public class EmbeddingModelFactory {
      */
     @Inject
     VaultHostAllowlist vaultHostAllowlist;
+
+    /**
+     * Where each provider that reads {@code baseUrl} sends a request when it is not
+     * set: langchain4j's defaults, and EDDI's own for Ollama (see
+     * {@link #buildOllama}).
+     */
+    static final Map<String, String> DEFAULT_BASE_URLS = Map.of(
+            "openai", "https://api.openai.com/v1",
+            "mistral", "https://api.mistral.ai/v1",
+            "cohere", "https://api.cohere.ai/v1/",
+            "gemini", "https://generativelanguage.googleapis.com/v1beta",
+            "ollama", "http://localhost:11434");
+
+    /** The Bedrock and Vertex region when none is configured, as built below. */
+    static final String DEFAULT_BEDROCK_REGION = "us-east-1";
+    static final String DEFAULT_VERTEX_LOCATION = "us-central1";
+
+    /**
+     * The endpoint {@code provider} uses when the configuration names none of its
+     * own endpoint key, or {@code null} when it has no default (Azure requires an
+     * {@code endpoint}).
+     */
+    static String defaultEndpoint(String provider, Map<String, String> params) {
+        return switch (provider) {
+            case "openai", "mistral", "cohere", "gemini", "ollama" -> isBlank(params.get("baseUrl")) ? DEFAULT_BASE_URLS.get(provider) : null;
+            case "bedrock" -> "https://bedrock-runtime." + valueOr(params.get("region"), DEFAULT_BEDROCK_REGION) + ".amazonaws.com";
+            case "vertex" -> isBlank(params.get("endpoint"))
+                    ? "https://" + valueOr(params.get("location"), DEFAULT_VERTEX_LOCATION) + "-aiplatform.googleapis.com"
+                    : null;
+            default -> null;
+        };
+    }
+
+    private static String valueOr(String value, String fallback) {
+        return isBlank(value) ? fallback : value.trim();
+    }
+
+    /**
+     * Where the credentials handed to a client are recorded for by-value error
+     * scrubbing. Field-injected; null in tests built with {@code new}.
+     */
+    @Inject
+    ResolvedCredentials resolvedCredentials;
+
+    /** See {@link #resolvedCredentials}; for a factory built with {@code new}. */
+    public void useResolvedCredentials(ResolvedCredentials resolvedCredentials) {
+        this.resolvedCredentials = resolvedCredentials;
+    }
 
     @Inject
     public EmbeddingModelFactory(GlobalVariableResolver globalVariableResolver, SecretResolver secretResolver,
@@ -188,12 +240,20 @@ public class EmbeddingModelFactory {
         // Checked BEFORE vault references are resolved: the conflict message quotes
         // the model values, and an editor must not be able to read a secret's
         // plaintext back by putting its reference into 'model' (RAG search and
-        // ingestion status return this message to the caller).
+        // ingestion status return this message to the caller). For the same reason
+        // findProblem refuses a vault reference in any parameter but the provider's
+        // credential (apiKey) — after variable expansion, so a ${vars:} holding one
+        // is caught: resolved into 'model' it comes back in the provider's own
+        // "model does not exist" error.
         String problem = EmbeddingParameters.findProblem(provider, params);
         if (problem != null) {
             throw new IllegalArgumentException(problem);
         }
-        params = SecretResolver.requireResolved(secretResolver.resolveSecrets(params), "embedding model '" + provider + "'");
+        // Each secret captured as substituted (SecretCapture), so a failure echoing it
+        // after a rotation is still scrubbed of exactly what this client holds.
+        List<String> captured = new ArrayList<>();
+        params = SecretResolver.requireResolved(SecretCapture.resolve(secretResolver, params, captured, Set.of()),
+                "embedding model '" + provider + "'");
         Set<String> unrecognised = EmbeddingParameters.unrecognised(provider, params);
         if (!unrecognised.isEmpty()) {
             LOGGER.warnf("Embedding provider %s ignores embeddingParameters %s (supported: %s)", provider,
@@ -212,21 +272,34 @@ public class EmbeddingModelFactory {
             case "vertex" -> buildVertex(params);
             default -> throw new IllegalArgumentException("Unsupported embedding provider: " + provider + ". " + SUPPORTED_PROVIDERS_HINT);
         };
-
+        EmbeddingModel returned;
         if (pinsNonRetrievalTaskType(provider, params)) {
             LOGGER.infof("Embedding provider %s pins taskType=%s; leaving the %s role unset so the configured task type stands",
                     provider, params.get("taskType"), inputType);
-            return model;
+            returned = model;
+        } else {
+            returned = InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
         }
-        return InputTypedEmbeddingModel.wrapIfSupported(model, inputType);
+        // What the client holds, for a caller that holds it to pin to its failure
+        // (ResolvedCredentials#heldBy): a failure after a rotation echoes this value.
+        // Recorded against the object callers receive — a Gemini or Cohere model comes
+        // back wrapped — and against the provider model inside it.
+        if (resolvedCredentials != null) {
+            resolvedCredentials.record(model, captured);
+            if (returned != model) {
+                resolvedCredentials.record(returned, captured);
+            }
+        }
+        return returned;
     }
 
     /**
      * Refuses the build when a referenced secret's {@code allowedHosts} does not
      * name the configured endpoint, before any reference is resolved. A
      * configuration with no endpoint parameter ({@link EndpointParameters}) uses
-     * the provider's own endpoint, which an editor cannot choose, so there is
-     * nothing to check — as in {@link ChatModelRegistry}.
+     * the provider's own endpoint ({@link #defaultEndpoint}), which is checked too:
+     * the editor chooses the provider, so a key restricted to one vendor must not
+     * reach another vendor's fixed host — as in {@link ChatModelRegistry}.
      *
      * @param params
      *            the embedding parameters with global variables resolved and vault
@@ -244,6 +317,12 @@ public class EmbeddingModelFactory {
             if (EndpointParameters.isEndpointKey(parameter.getKey()) && !isBlank(endpoint)) {
                 vaultHostAllowlist.requireAllowed(params, endpoint.trim(), "embedding model '" + provider + "'");
             }
+        }
+        // And the provider's own default, which the editor chose by choosing the
+        // provider. A secret without allowedHosts passes as before.
+        String defaultEndpoint = defaultEndpoint(provider, params);
+        if (defaultEndpoint != null) {
+            vaultHostAllowlist.requireAllowed(params, defaultEndpoint, "embedding model '" + provider + "'");
         }
     }
 
