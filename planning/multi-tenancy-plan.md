@@ -320,7 +320,9 @@ without NATS passes trivially.
       - drop the old unique keys;
       - on Postgres, `ALTER COLUMN org_id DROP DEFAULT` on every org table;
       - on Mongo, `collMod` each org collection with
-        `validator: {$jsonSchema: {required: ["orgId"]}}`, `validationAction: "error"`;
+        `validator: {$jsonSchema: {required: ["orgId"], properties: {orgId: {bsonType: "string"}}}}`,
+        `validationAction: "error"` (ADR 0001 DV-17: a string, so an array `orgId` cannot match
+        two orgs);
       - set `layout.required = org-layout-1` (§5.4).
 4. **RLS (Postgres).** Per org table: `ENABLE` + `FORCE ROW LEVEL SECURITY` and the policies
    (§8.4). Activate `OrgRlsPoolInterceptor`.
@@ -653,7 +655,7 @@ before taking the fallback.
 ### 8.5 MongoDB specifics
 
 - After the marker, `orgId` leads every index except the claim indexes.
-- Each org collection has the `$jsonSchema` validator requiring `orgId`.
+- Each org collection has the `$jsonSchema` validator requiring `orgId` as a string (DV-17).
 - Future shard key: `{orgId: 1, _id: 1}`, or hashed `orgId` if orgs are very uneven.
 - GridFS: `metadata.orgId`, index `(metadata.orgId, metadata.conversationId)`.
 - Dedicated tier (Phase 7): `OrgDatabaseRouter` replaces the single `MongoDatabase` bean.
@@ -709,7 +711,8 @@ fails closed. Both live where every Mongo access already passes:
    - Projections on org collections must include `orgId`. The wrapper adds it when a
      projection omits it.
    - Counts return no documents, so they are covered by the wrapper (1) and the guards (§14.2).
-3. **`$jsonSchema` validator** requiring `orgId` on every org collection (§5.3 step 3).
+3. **`$jsonSchema` validator** requiring `orgId`, as a string, on every org collection (§5.3
+   step 3, DV-17).
    It covers writes only.
 4. **Dedicated tier** (Phase 7) for orgs that need isolation at the database level.
 
@@ -1153,12 +1156,13 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
   `OrgCollections` / `OrgSql`;
 - `Caffeine.newBuilder()` appears only in classified classes;
 - `MongoClients.create`, `MongoClient` and `getDatabase(` appear only in `PersistenceModule`,
-  `OrgDatabaseRouter` and the allow-listed external vector-store client (`EmbeddingStoreFactory`,
+  `OrgDatabaseRouter`, `MongoResourceStorageFactory.getDatabase()` (which must return the
+  guarded database) and the allow-listed external vector-store client (`EmbeddingStoreFactory`,
   ADR 0001 DV-7), and `GridFSBuckets.create` appears only in `OrgGridFsBucket` (DV-6), so
   nothing can bypass `OrgGuardedMongoDatabase` (§8.5a);
-- no JTA (`@Transactional`, `QuarkusTransaction`, `UserTransaction`) on org data paths, and no
-  SQL other than `OrgRlsPoolInterceptor` names the `eddi.org_id` or `eddi.platform` GUCs
-  (ADR 0001 DV-2, DV-3);
+- no JTA on org data paths (any `jakarta.transaction.*` use, and `QuarkusTransaction`), and no
+  SQL other than `OrgRlsPoolInterceptor` names the `eddi.org_id` or `eddi.platform` GUCs or runs
+  `RESET`, `DISCARD`, `SET ROLE` or `SET SESSION AUTHORIZATION` (ADR 0001 DV-2, DV-3);
 - every JAX-RS implementation class and MCP tool class is `@OrgBound` or `@PlatformPlane`;
 - every A.12 class is annotated or uses `OrgRequest.callBound`;
 - every `@Scheduled` method uses the §7.4 patterns or is `@PlatformPlane`;
@@ -1408,13 +1412,14 @@ Phase 0, 2026-11-21. Each entry is detailed in
   *Why:* the naive interceptor adds a round trip to every acquire. Either way the
   key is the physical connection, because the caller's wrapper differs from the
   interceptor's.
-- **DV-3 (§6.1, §14.2).** No JTA on org data paths: `@Transactional`, `QuarkusTransaction`
-  and `UserTransaction` are refused by a new guard. *Why:* Agroal reuses a JTA-enlisted
+- **DV-3 (§6.1, §14.2).** No JTA on org data paths: any `jakarta.transaction.*` use
+  (`@Transactional`, `@TransactionScoped`, `UserTransaction`, `TransactionManager`) and
+  `QuarkusTransaction` are refused by a new guard. *Why:* Agroal reuses a JTA-enlisted
   connection without calling the interceptor.
 - **DV-4 (§8.5a).** The read verifier is installed per collection through
   `withCodecRegistry`, checks only the outermost document, and makes no extra copy.
   *Why:* `Codec.decode` has no namespace, nested documents pass through it too, and the copy
-  cost up to +65–71 % on scans in the loopback runs.
+  cost up to +71 % on scans in the loopback runs.
 - **DV-5 (§8.5a, §14.1).** Aggregation, `distinct` and count output is not decode-verified.
   The guard's pipeline/filter check covers it, with allow-listed call sites. *Why:* that
   output carries no `orgId`.
@@ -1431,7 +1436,8 @@ Phase 0, 2026-11-21. Each entry is detailed in
 - **DV-11 (§5.4).** `DataLayoutGuard` is a `StartupEvent` observer at
   `@Priority(Integer.MIN_VALUE)`, a priority reserved for it, and reads before the schema
   lock. On Mongo it reads with primary read preference and majority read concern. *Why:*
-  Spike C: exit 1 before any write, on both datastores, with the HTTP listener not yet open;
+  Spike C: exit 1 before any write on both datastores, and (probed on PostgreSQL) the HTTP
+  listener not yet open;
   and a lagging secondary could hide a raised layout.
 - **DV-12 (§8.5a).** The Mongo guard also checks **update documents**: no update operator may
   touch `orgId` or `orgId.*` (`$rename` onto it included) except `$set`/`$setOnInsert` of the

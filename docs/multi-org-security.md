@@ -43,7 +43,7 @@ policy), EDDI → IdP (verified access token only).
 | Layer | PostgreSQL | MongoDB |
 | --- | --- | --- |
 | 1. App filter | `OrgSql` adds `AND org_id = ?` and stamps `org_id` | `OrgCollections` adds the filter or `$match` and stamps `orgId` |
-| 2. Independent backstop | RLS `ENABLE` and `FORCE`, GUCs set by `OrgRlsPoolInterceptor`; app role `NOSUPERUSER NOBYPASSRLS`, required in multi mode (ADR DV-1) | `OrgGuardedCollection` refuses unscoped commands (deny by default). `OrgReadVerifier` refuses foreign documents at decode. The `$jsonSchema` validator requires `orgId` on writes |
+| 2. Independent backstop | RLS `ENABLE` and `FORCE`, GUCs set by `OrgRlsPoolInterceptor`; app role `NOSUPERUSER NOBYPASSRLS`, required in multi mode (ADR DV-1) | `OrgGuardedCollection` refuses unscoped commands (deny by default). `OrgReadVerifier` refuses foreign documents at decode. The `$jsonSchema` validator requires `orgId`, as a string, on writes |
 | 3. Context | `ScopedValue` binding with an epoch. An unbound access in multi mode is `OrgContextMissingException` → 500 | same |
 | 4. Keys | per-org KEK, AAD v2 bound to the org, per-org audit key and chain | same |
 | 5. Isolation tier | dedicated tier (own database), then own instance | same |
@@ -158,7 +158,7 @@ service, **E**levation of privilege. The § numbers point at the plan.
 
 | | Threat | Control |
 | --- | --- | --- |
-| I | A binary below the floor reads every org unfiltered on Mongo | **Not preventable by code**: a binary older than the floor release has no guard (§5.4). `DataLayoutGuard` stops binaries from the floor release onwards when `layout.required` is above what they support (Spike C: exit 1 before any write, on both datastores, with HTTP not yet listening). Rollback below the floor is therefore forbidden, and documented in the release notes and `docs/multi-org.md`. The guard reads with primary read preference and majority read concern, so a lagging secondary cannot hide a raised layout (ADR DV-11) |
+| I | A binary below the floor reads every org unfiltered on Mongo | **Not preventable by code**: a binary older than the floor release has no guard (§5.4). `DataLayoutGuard` stops binaries from the floor release onwards when `layout.required` is above what they support (Spike C: exit 1 before any write, on both datastores; on PostgreSQL, where it was probed, HTTP was not yet listening). Rollback below the floor is therefore forbidden, and documented in the release notes and `docs/multi-org.md`. The guard reads with primary read preference and majority read concern, so a lagging secondary cannot hide a raised layout (ADR DV-11) |
 | I | A pre-floor binary on Postgres | Contained only if it connects as `eddi_app` (NOBYPASSRLS) against `FORCE`d tables. This is why DV-1 makes the role split mandatory |
 | T | Enablement interrupted halfway | Leased, checkpointed and idempotent steps. The switch has a presence barrier (§5.3) |
 | T/I | Org bundle tampered with in transit, replayed, or crafted (moves M1–M5) | An Ed25519 signature over the manifest, which carries a SHA-256 for every file, `sealed.bin` included. Signature, checksums and `notAfter` are verified before any write. Only export keys a platform admin registered are accepted. Archive entries are validated (no `..`, no absolute paths, no unlisted entries). Secrets travel only re-encrypted for the target (ADR decision 9) |

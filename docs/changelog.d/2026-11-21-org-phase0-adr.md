@@ -91,6 +91,24 @@ The plan's §8.4, §8.5a, §14.2 and §16 point at the deviations that supersede
 statuses read *locked*. `planning/saas-connectors-plan.md` no longer describes the plan's
 withdrawn draft (an explicit `OrgId` parameter and `OrgJdbc`).
 
+### Third review
+
+A review of the fold-in commit found more gaps, now closed in the ADR and the plan:
+
+- **Collation.** A collection's **default** collation is refused too, not only one set per
+  operation.
+- **Database methods.** The ones the code calls today (`listCollectionNames`, `getName`,
+  `with*`) are classified.
+- **GridFS facade.** It mints file ids, and wraps `GridFSFindIterable` and every `with*`.
+- **Consistency.** `watch`/`bulkWrite` are refused in every place they are mentioned, and
+  `$out`/`$merge` are refused whatever they target. The omitted pipeline stages are explained.
+- **Bundle.** Gains archive size and ratio caps, refusal of id collisions, and single import
+  per `bundleId`.
+- **JTA guard (DV-3).** Covers all of `jakarta.transaction.*`.
+- **GUC guard (DV-2).** Also forbids `RESET`, `DISCARD`, `SET ROLE` and
+  `SET SESSION AUTHORIZATION`.
+- **Validator.** Requires `orgId` as a string everywhere the plan mentions it.
+
 ### What's next
 
 ADR 0001 is accepted. Phase 1 (context and stamping, the floor release) is next, one package
