@@ -432,8 +432,14 @@ describe("ChannelDetailPage — email integration", () => {
     const versions: string[] = [];
     server.use(
       http.get("*/channelstore/channels/:id", ({ request }) => {
-        versions.push(new URL(request.url).searchParams.get("version") ?? "");
-        return HttpResponse.json(emailChannel);
+        const version = new URL(request.url).searchParams.get("version") ?? "";
+        versions.push(version);
+        // Version 2 is the one the sender change wrote: it carries the new list.
+        return HttpResponse.json(
+          version === "2"
+            ? { ...emailChannel, platformConfig: { ...emailChannel.platformConfig, senderAllowlist: "alice@partner.com" } }
+            : emailChannel,
+        );
       }),
     );
     renderChannelDetail("mail1", 1);

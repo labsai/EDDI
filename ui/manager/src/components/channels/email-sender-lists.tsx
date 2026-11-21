@@ -47,13 +47,25 @@ export function EmailSenderListsEditor({
 }) {
   const { t } = useTranslation();
   const uid = useId();
-  const { data, isLoading, refetch } = useEmailSenders(integrationId);
+  const { data, isLoading, isError, error, refetch } = useEmailSenders(integrationId);
   const mutation = useUpdateEmailSenders();
   const [pending, setPending] = useState<Pending>(NOTHING_PENDING);
   const [drafts, setDrafts] = useState<Record<ListName, string>>({ allow: "", block: "" });
   const [reason, setReason] = useState("");
   const [confirmOpen, setConfirmOpen] = useState(false);
 
+  if (isError && !data) {
+    // The inline sender fields are not shown beside this editor, so a failed load
+    // must offer a way back rather than a spinner that never ends.
+    return (
+      <div className="space-y-2" role="alert" data-testid="email-senders-error">
+        <p className="text-xs text-destructive">{getErrorMessage(error)}</p>
+        <Button type="button" variant="outline" size="sm" onClick={() => void refetch()} data-testid="email-senders-retry">
+          {t("common.retry", "Retry")}
+        </Button>
+      </div>
+    );
+  }
   if (isLoading || !data) {
     return <p className="text-xs text-muted-foreground">{t("emailSenders.loading", "Loading the sender lists…")}</p>;
   }

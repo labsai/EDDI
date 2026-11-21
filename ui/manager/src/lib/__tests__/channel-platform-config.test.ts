@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { platformConfigForType } from "@/lib/channel-platform-config";
+import { platformConfigForType, withStoredSenderLists } from "@/lib/channel-platform-config";
 
 const WEBHOOK = {
   signingSecret: "${vault:hook-secret}",
@@ -62,5 +62,15 @@ describe("platformConfigForType", () => {
     expect(platformConfigForType("email", "email", EMAIL)).toEqual(EMAIL);
     expect(platformConfigForType("teams", "slack", SLACK)).toEqual({});
     expect(platformConfigForType("webhook", "slack", null)).toEqual({});
+  });
+});
+
+describe("withStoredSenderLists", () => {
+  it("adopts only the stored sender lists and keeps the rest of the draft", () => {
+    const merged = withStoredSenderLists(
+      { host: "edited", senderAllowlist: "old@x.com", senderBlocklist: "gone@x.com" },
+      { host: "stored", senderAllowlist: "new@x.com" },
+    );
+    expect(merged).toEqual({ host: "edited", senderAllowlist: "new@x.com" });
   });
 });

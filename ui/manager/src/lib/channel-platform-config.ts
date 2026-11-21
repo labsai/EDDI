@@ -65,3 +65,20 @@ export function platformConfigForType(
   }
   return next;
 }
+
+/**
+ * {@code draft} with the sender lists of {@code stored}: what a targeted
+ * sender-list change (its own new version of the integration) leaves the page,
+ * so the rest of an unsaved draft survives it.
+ */
+export function withStoredSenderLists(
+  draft: Record<string, string>,
+  stored: Record<string, string>,
+): Record<string, string> {
+  const next = { ...draft };
+  for (const key of ["senderAllowlist", "senderBlocklist"]) {
+    if (stored[key] === undefined) delete next[key];
+    else next[key] = stored[key];
+  }
+  return next;
+}

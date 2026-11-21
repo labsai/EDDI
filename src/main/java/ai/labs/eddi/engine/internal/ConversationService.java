@@ -3155,6 +3155,14 @@ public class ConversationService implements IConversationService, UserErasurePar
         turn.put("environment", environment == null ? null : environment.toString());
         turn.put("userId", memory.getUserId());
         turn.put("rerun", rerun);
+        // The email-origin taint this turn runs under, so a replay of it runs under the
+        // same one (email plan v3 section 5.3): the origin otherwise reaches the memory
+        // only when the turn builder runs, which a failed turn may never have reached.
+        String origin = TurnOrigin.combine(TurnOrigin.combine(TurnOrigin.current(),
+                TurnOrigin.fromContext(inputData == null ? null : inputData.getContext())), memory.getOrigin());
+        if (origin != null) {
+            turn.put("origin", origin);
+        }
         if (captureDeadLetterInput && inputData != null) {
             if (isSecretInput(inputData) || agent == null || agent.hasSecretPropertyInstructions()) {
                 // A turn the client flagged secretInput, or one addressed to an agent

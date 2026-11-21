@@ -60,6 +60,19 @@ class EmailSenderListsTest {
     }
 
     @Test
+    @DisplayName("an invalid entry already stored can be removed verbatim, and is still refused as an addition")
+    void removesStoredInvalidEntry() throws Exception {
+        var change = EmailSenderLists.apply(List.of("Not-An-Address", "bob@partner.com"), List.of(),
+                request(List.of("bob@partner.com"), null, List.of("not-an-address"), null, null));
+        assertEquals(List.of("bob@partner.com"), change.allow());
+        assertEquals(List.of("allow:not-an-address"), change.removed());
+        assertThrows(InvalidChange.class, () -> EmailSenderLists.apply(List.of("not-an-address"), List.of(),
+                request(List.of("not-an-address"), null, null, null, null)));
+        assertThrows(InvalidChange.class, () -> EmailSenderLists.apply(List.of("bob@partner.com"), List.of(),
+                request(null, null, List.of("never-stored"), null, null)));
+    }
+
+    @Test
     @DisplayName("an entry on both lists, or both added and removed, is refused")
     void bothLists() {
         assertThrows(InvalidChange.class, () -> EmailSenderLists.apply(List.of(), List.of("alice@partner.com"),

@@ -21,6 +21,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Writes one audit-ledger entry per change of an email integration's sender
@@ -79,7 +81,7 @@ public class EmailSenderListAudit {
             output.put("version", newVersion);
             output.put("added", recorded(added));
             output.put("removed", recorded(removed));
-            output.put("reason", reason);
+            output.put("reason", scrubAddresses(reason));
             output.put("allowlistEmptied", allowlistEmptied);
             ledger.get().submit(new AuditEntry(UUID.randomUUID().toString(), null, null, null, actor(), null, 0, TASK_ID, "email", 0, 0,
                     Map.of("action", ACTION), output, null, null, List.of(ACTION), 0.0, Instant.now(), null, null));
@@ -89,6 +91,27 @@ public class EmailSenderListAudit {
         }
     }
 
+    /** An address-shaped token inside free text; bounded classes, no nesting. */
+    private static final Pattern ADDRESS_IN_TEXT = Pattern.compile("[^\s@<>,;\"'()]{1,64}@[^\s@<>,;\"'()]{1,255}");
+
+    /**
+     * The free-text reason with every exact address replaced by its pseudonym, as
+     * the added and removed lists are: the ledger is immutable, so an address typed
+     * into the reason must not be written to it in clear.
+     */
+    String scrubAddresses(String text) {
+        if (text == null || text.indexOf('@') < 0) {
+            return text;
+        }
+        Matcher m = ADDRESS_IN_TEXT.matcher(text);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String hit = m.group();
+            m.appendReplacement(out, Matcher.quoteReplacement(hit.startsWith("*@") ? hit : pseudonym(hit)));
+        }
+        m.appendTail(out);
+        return out.toString();
+    }
     /** {@code list:entry} with an exact address replaced by its pseudonym. */
     List<String> recorded(List<String> entries) {
         List<String> out = new ArrayList<>();

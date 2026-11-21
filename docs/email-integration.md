@@ -321,7 +321,7 @@ cost); an unpriced model counts as zero.
 - Caps: raw size before download, MIME depth, parts and attachments, characters after conversion; executables never
   stored, archives never expanded, `message/rfc822` never walked into.
 - Logs name the integration and the ledger row — never a body, a subject or an address.
-- **A mail can never widen who may make EDDI act.** See [A mail cannot change its own rules](#a-mail-cannot-change-its-own-rules).
+- **A mail cannot widen who may make EDDI act through its own tools** (one limit: the [known limit](#a-mail-cannot-change-its-own-rules) on EDDI's own API). See [A mail cannot change its own rules](#a-mail-cannot-change-its-own-rules).
 
 ## Managing senders
 
@@ -336,10 +336,11 @@ anyone else editing it. The sender lists therefore have their own endpoint, MCP 
 | Manager | The integration's page: two lists of chips | Add, remove, a reason, then **Apply sender changes** |
 
 ```bash
-curl http://localhost:7070/channelstore/channels/<id>/email-senders
+CHANNEL_ID=<integration id>
+curl "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-senders"
 # {"version": 3, "allow": ["bob@partner.com"], "block": []}
 
-curl -X POST http://localhost:7070/channelstore/channels/<id>/email-senders \
+curl -X POST "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-senders" \
   -H 'Content-Type: application/json' \
   -d '{"expectedVersion": 3, "add": {"allow": ["alice@partner.com"]}, "reason": "new supplier, contract 2026-114"}'
 ```
@@ -369,7 +370,10 @@ curl -X POST http://localhost:7070/channelstore/channels/<id>/email-senders \
 A conversation whose root turn came from a mail carries the **origin taint** `origin=email`, and so does every
 conversation it leads to: a delegate (`converseWithAgent`) or sub-agent it starts or continues, a group discussion
 and every member and nested discussion of it, a check-back it books (`schedule_followup`), and a peer EDDI it calls
-over A2A (the `X-Eddi-Turn-Origin` header). The taint is stored with the conversation, so a HITL resume next week or
+over A2A (the `X-Eddi-Turn-Origin` header). **Known limit of this revision:** a tainted turn that calls EDDI's own
+API (an httpcall to `POST /agents/{id}/start` or the schedule store, or the MCP tools `chat_with_agent`,
+`create_schedule` and `start_group_discussion`) starts a conversation that does not inherit the taint; the guard
+does not see it. Choose the tools of an email-facing agent with that in mind. The taint is stored with the conversation, so a HITL resume next week or
 a self-continuation still carries it, and nothing clears it. A conversation of an `email:` or `email-anon:` user
 counts as tainted even when it predates the stored taint.
 

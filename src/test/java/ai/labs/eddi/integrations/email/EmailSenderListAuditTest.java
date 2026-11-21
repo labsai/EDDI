@@ -64,6 +64,22 @@ class EmailSenderListAuditTest {
     }
 
     @Test
+    @DisplayName("an address typed into the reason is pseudonymised, never written in clear")
+    void reasonIsScrubbed() {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        var pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor("alice@partner.com")).thenReturn("p-alice");
+
+        new EmailSenderListAudit(instance(ledger), instance(pseudonymizer), instance(null)).changed("int-1", 3, 4, List.of(), List.of(),
+                "Allow Alice@partner.com (new supplier), not *@spam.example", false);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("Allow p-alice (new supplier), not *@spam.example", entry.getValue().output().get("reason"));
+    }
+
+    @Test
     @DisplayName("a failing ledger never fails the change")
     void neverThrows() {
         var ledger = mock(AuditLedgerService.class);

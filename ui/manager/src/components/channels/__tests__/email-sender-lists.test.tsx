@@ -17,6 +17,23 @@ function render(onChanged = vi.fn(), disabled = false) {
 }
 
 describe("EmailSenderListsEditor", () => {
+  it("shows the failure with a retry instead of loading forever, and recovers on retry", async () => {
+    let failing = true;
+    server.use(
+      http.get("*/channelstore/channels/:id/email-senders", () =>
+        failing
+          ? HttpResponse.json({ error: "down" }, { status: 500 })
+          : HttpResponse.json({ version: 1, allow: ["bob@partner.com"], block: [] }),
+      ),
+    );
+    render();
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-error")).toBeInTheDocument());
+    failing = false;
+    await user.click(screen.getByTestId("email-senders-retry"));
+    await waitFor(() => expect(screen.getAllByTestId("email-sender-chip-allow")).toHaveLength(1));
+  });
+
   it("shows the current lists as chips", async () => {
     render();
     await waitFor(() => expect(screen.getAllByTestId("email-sender-chip-allow")).toHaveLength(1));

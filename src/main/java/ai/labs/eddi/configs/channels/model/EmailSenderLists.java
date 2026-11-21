@@ -141,8 +141,10 @@ public final class EmailSenderLists {
         Entries remove = request.remove() == null ? new Entries(List.of(), List.of()) : request.remove();
         List<String> addAllow = normaliseAll(add.allow(), "add.allow", errors);
         List<String> addBlock = normaliseAll(add.block(), "add.block", errors);
-        List<String> removeAllow = normaliseAll(remove.allow(), "remove.allow", errors);
-        List<String> removeBlock = normaliseAll(remove.block(), "remove.block", errors);
+        // A removal may name an entry stored around the validation verbatim: it must be
+        // possible to take an invalid entry out.
+        List<String> removeAllow = normaliseAll(remove.allow(), "remove.allow", errors, keyed(currentAllow).keySet());
+        List<String> removeBlock = normaliseAll(remove.block(), "remove.block", errors, keyed(currentBlock).keySet());
         bothWays(addAllow, removeAllow, "allow", errors);
         bothWays(addBlock, removeBlock, "block", errors);
         if (!errors.isEmpty()) {
@@ -227,6 +229,10 @@ public final class EmailSenderLists {
     }
 
     private static List<String> normaliseAll(List<String> entries, String field, List<String> errors) {
+        return normaliseAll(entries, field, errors, Set.of());
+    }
+
+    private static List<String> normaliseAll(List<String> entries, String field, List<String> errors, Set<String> existing) {
         Set<String> out = new LinkedHashSet<>();
         if (entries == null) {
             return List.of();
@@ -238,6 +244,11 @@ public final class EmailSenderLists {
             try {
                 out.add(normalise(entry));
             } catch (IllegalArgumentException e) {
+                String verbatim = entry.trim().toLowerCase(Locale.ROOT);
+                if (existing.contains(verbatim)) {
+                    out.add(verbatim);
+                    continue;
+                }
                 errors.add(field + ": '" + clip(entry) + "' must be 'user@domain', '*@domain' or '*@*.domain'.");
             }
         }

@@ -26,7 +26,7 @@ import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
-import { platformConfigForType } from "@/lib/channel-platform-config";
+import { platformConfigForType, withStoredSenderLists } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
   CHANNEL_TYPES,
@@ -274,10 +274,20 @@ export function ChannelDetailPage() {
    * reseed.
    */
   const seededFor = useRef<string | null>(null);
+  // The version a targeted sender-list change moved the integration to: moving
+  // to it keeps the draft's unsaved edits and adopts only the stored lists.
+  const senderChangeVersion = useRef<string | null>(null);
   useEffect(() => {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
+      const sameChannel = seededFor.current?.startsWith(`${id}@`) ?? false;
       seededFor.current = key;
+      if (sameChannel && senderChangeVersion.current === String(version)) {
+        senderChangeVersion.current = null;
+        setDraft((prev) => prev ? { ...prev, platformConfig: withStoredSenderLists(prev.platformConfig, config.platformConfig) } : { ...config });
+        setBaseline(JSON.stringify(config));
+        return;
+      }
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
@@ -522,13 +532,17 @@ export function ChannelDetailPage() {
             platformConfig={draft.platformConfig}
             onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)}
             senderLists={
-              id ? (
+              id && config?.channelType === "email" ? (
                 // A sender-list change is a new version: moving the URL to it
                 // reseeds the draft, so a later save cannot write the old lists back.
                 <EmailSenderListsEditor
+                  key={id}
                   integrationId={id}
                   disabled={isDirty}
-                  onChanged={(newVersion) => setSearchParams({ version: String(newVersion) }, { replace: true })}
+                  onChanged={(newVersion) => {
+                    senderChangeVersion.current = String(newVersion);
+                    setSearchParams({ version: String(newVersion) }, { replace: true });
+                  }}
                 />
               ) : undefined
             }
