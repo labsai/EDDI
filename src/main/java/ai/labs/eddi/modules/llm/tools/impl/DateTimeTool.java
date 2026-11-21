@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.llm.tools.NeverCached;
 import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -13,6 +14,7 @@ import java.time.*;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.time.temporal.ChronoUnit;
+import java.time.temporal.Temporal;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -25,6 +27,7 @@ public class DateTimeTool {
     private static final DateTimeFormatter ISO_FORMATTER = DateTimeFormatter.ISO_DATE_TIME;
     private static final DateTimeFormatter READABLE_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss z");
 
+    @NeverCached
     @Tool("Gets the current date and time in a specified timezone. Returns formatted date/time string.")
     public String getCurrentDateTime(@P("IANA timezone name, e.g. 'Europe/Vienna', 'America/New_York' or 'UTC'") String timezone) {
 
@@ -43,7 +46,7 @@ public class DateTimeTool {
     }
 
     @Tool("Converts a date/time from one timezone to another")
-    public String convertTimezone(@P("Local date-time in ISO-8601 form, e.g. '2025-11-03T10:30:00'") String dateTime,
+    public String convertTimezone(@P("ISO-8601 date-time, e.g. '2025-11-03T10:30:00' (local, in fromTimezone) or with an offset/zone such as '2025-11-03T10:30:00Z' (fromTimezone is then ignored)") String dateTime,
                                   @P("Timezone the date-time is expressed in (IANA name)") String fromTimezone,
                                   @P("Timezone to convert to (IANA name)") String toTimezone) {
 
@@ -51,8 +54,8 @@ public class DateTimeTool {
             ZoneId fromZone = ZoneId.of(fromTimezone);
             ZoneId toZone = ZoneId.of(toTimezone);
 
-            LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
-            ZonedDateTime fromZdt = ZonedDateTime.of(localDateTime, fromZone);
+            // An offset or zone written in the input wins over fromTimezone.
+            ZonedDateTime fromZdt = place(parse(dateTime), fromZone);
             ZonedDateTime toZdt = fromZdt.withZoneSameInstant(toZone);
 
             String result = toZdt.format(READABLE_FORMATTER);
@@ -71,8 +74,16 @@ public class DateTimeTool {
                                           @P("Unit of the result: days, hours, minutes or seconds") String unit) {
 
         try {
-            LocalDateTime start = LocalDateTime.parse(startDateTime, ISO_FORMATTER);
-            LocalDateTime end = LocalDateTime.parse(endDateTime, ISO_FORMATTER);
+            Parsed startParsed = parse(startDateTime);
+            Parsed endParsed = parse(endDateTime);
+            if ((startParsed.zoned() == null) != (endParsed.zoned() == null)) {
+                return "Error: Give both date-times with an offset or zone, or both without; a mix cannot be compared.";
+            }
+            // With offsets/zones the difference is between instants — as Instants, since
+            // ZonedDateTime counts DAYS on the calendar (a 23-hour spring-forward day is
+            // one day) — and without, between the local values, as before.
+            Temporal start = startParsed.zoned() != null ? startParsed.zoned().toInstant() : startParsed.local();
+            Temporal end = endParsed.zoned() != null ? endParsed.zoned().toInstant() : endParsed.local();
 
             long difference;
             String unitName;
@@ -115,37 +126,42 @@ public class DateTimeTool {
                           @P("Timezone of the date-time (IANA name)") String timezone) {
 
         try {
-            LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
             ZoneId zoneId = ZoneId.of(timezone);
+            // The start keeps its own offset: an input that names the later offset of
+            // a repeated (fall-back) hour stays on it.
+            ZonedDateTime start = place(parse(dateTime), zoneId);
 
-            LocalDateTime result;
+            // Date units move the wall clock (a day later is the same local time; one
+            // that lands in a skipped hour is reported, as for an input). Time units
+            // move the instant: an hour after 01:30 on the spring-forward night is
+            // 03:30, and across fall-back the repeated hour is counted.
+            ZonedDateTime zonedResult;
             switch (unit.toLowerCase()) {
                 case "years" :
-                    result = localDateTime.plusYears(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusYears(amount));
                     break;
                 case "months" :
-                    result = localDateTime.plusMonths(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusMonths(amount));
                     break;
                 case "weeks" :
-                    result = localDateTime.plusWeeks(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusWeeks(amount));
                     break;
                 case "days" :
-                    result = localDateTime.plusDays(amount);
+                    zonedResult = onWallClock(start, start.toLocalDateTime().plusDays(amount));
                     break;
                 case "hours" :
-                    result = localDateTime.plusHours(amount);
+                    zonedResult = start.plusHours(amount);
                     break;
                 case "minutes" :
-                    result = localDateTime.plusMinutes(amount);
+                    zonedResult = start.plusMinutes(amount);
                     break;
                 case "seconds" :
-                    result = localDateTime.plusSeconds(amount);
+                    zonedResult = start.plusSeconds(amount);
                     break;
                 default :
                     return "Error: Invalid unit. Use 'years', 'months', 'weeks', 'days', 'hours', 'minutes', or 'seconds'.";
             }
 
-            ZonedDateTime zonedResult = ZonedDateTime.of(result, zoneId);
             String formatted = zonedResult.format(READABLE_FORMATTER);
             LOGGER.debugf("Added %d %s to %s: %s", amount, sanitize(unit), sanitize(dateTime), formatted);
             return formatted;
@@ -156,15 +172,23 @@ public class DateTimeTool {
         }
     }
 
+    /**
+     * {@code local} in the start's zone: refused in a skipped hour, and in a
+     * repeated hour on the start's own offset when that offset is one of the two.
+     */
+    private static ZonedDateTime onWallClock(ZonedDateTime start, LocalDateTime local) {
+        place(new Parsed(local, null), start.getZone());
+        return ZonedDateTime.ofLocal(local, start.getZone(), start.getOffset());
+    }
+
     @Tool("Formats a date/time string into a different format")
     public String formatDateTime(@P("Local date-time in ISO-8601 form, e.g. '2025-11-03T10:30:00'") String dateTime,
                                  @P("java.time format pattern, e.g. 'dd.MM.yyyy HH:mm' or 'EEEE, MMMM d'") String pattern,
                                  @P("Timezone of the date-time (IANA name)") String timezone) {
 
         try {
-            LocalDateTime localDateTime = LocalDateTime.parse(dateTime, ISO_FORMATTER);
             ZoneId zoneId = ZoneId.of(timezone);
-            ZonedDateTime zonedDateTime = ZonedDateTime.of(localDateTime, zoneId);
+            ZonedDateTime zonedDateTime = place(parse(dateTime), zoneId);
 
             DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
             String result = zonedDateTime.format(formatter);
@@ -181,6 +205,40 @@ public class DateTimeTool {
         }
     }
 
+    /**
+     * A parsed ISO-8601 date-time: {@code zoned} is set when the text carried an
+     * offset or zone ({@code ...Z}, {@code +02:00}, {@code [Europe/Vienna]}),
+     * otherwise {@code local} is the wall-clock value.
+     */
+    record Parsed(LocalDateTime local, ZonedDateTime zoned) {
+    }
+
+    static Parsed parse(String text) {
+        var parsed = ISO_FORMATTER.parseBest(text.trim(), ZonedDateTime::from, LocalDateTime::from);
+        return parsed instanceof ZonedDateTime zdt ? new Parsed(zdt.toLocalDateTime(), zdt) : new Parsed((LocalDateTime) parsed, null);
+    }
+
+    /**
+     * The instant in {@code zone}: a value that carried its own offset or zone is
+     * converted; a local value is attached. A local time that does not exist in the
+     * zone (the hour skipped when clocks go forward) is refused rather than
+     * shifted. An ambiguous one (the repeated hour when clocks go back) takes the
+     * earlier offset, as {@link ZonedDateTime#of(LocalDateTime, ZoneId)} does.
+     */
+    static ZonedDateTime place(Parsed parsed, ZoneId zone) {
+        if (parsed.zoned() != null) {
+            return parsed.zoned().withZoneSameInstant(zone);
+        }
+        if (zone.getRules().getValidOffsets(parsed.local()).isEmpty()) {
+            throw new DateTimeException("The local time " + parsed.local() + " does not exist in " + zone
+                    + " (clocks are set forward over it). Pick a time outside the skipped hour or give an explicit offset.");
+        }
+        return ZonedDateTime.of(parsed.local(), zone);
+    }
+
+    // Reports the current local time, and takes no arguments: a cached answer would
+    // be served unchanged for the whole TTL.
+    @NeverCached
     @Tool("Lists common IANA timezone names with their current local time")
     public String listTimezones() {
         StringBuilder sb = new StringBuilder("Available timezones:\n");

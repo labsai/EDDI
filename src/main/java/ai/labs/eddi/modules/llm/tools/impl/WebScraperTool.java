@@ -31,10 +31,16 @@ import org.jsoup.select.Selector;
 
 import java.io.IOException;
 import java.net.URI;
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.Charset;
+import java.nio.charset.CharsetDecoder;
+import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.IdentityHashMap;
+import java.util.Locale;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
@@ -215,7 +221,7 @@ public class WebScraperTool {
             // dump, which dropped page titles living in <article><header><h1> and
             // merged adjacent blocks into single words. The converter keeps the
             // structure an LLM can actually use — headings, lists, tables, code.
-            return page.annotate(parseBounded(() -> htmlToMarkdownConverter.convert(page.html(), url, MAX_EXTRACTED_CHARACTERS)));
+            return page.annotate(parseBounded(() -> htmlToMarkdownConverter.convert(page.html(), page.baseUri(), MAX_EXTRACTED_CHARACTERS)));
 
         } catch (ToolFailureException e) {
             throw e;
@@ -240,7 +246,9 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting links from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Elements links = parseBounded(() -> Jsoup.parse(page.html()).select("a[href]"));
+            // The base URI is where the page was served (after redirects): without it
+            // abs:href is empty for every relative link and the tool reported "No links".
+            Elements links = parseBounded(() -> Jsoup.parse(page.html(), page.baseUri()).select("a[href]"));
 
             StringBuilder result = new StringBuilder();
             result.append("Links found on ").append(url).append(":\n\n");
@@ -294,7 +302,7 @@ public class WebScraperTool {
             FetchedPage page = fetchUrl(url);
             boolean positional = usesPositionalPseudo(cssSelector);
             Elements elements = parseBounded(() -> {
-                Document doc = Jsoup.parse(page.html());
+                Document doc = Jsoup.parse(page.html(), page.baseUri());
                 return positional && siblingScanWork(doc) > MAX_POSITIONAL_SCAN_WORK ? null : doc.select(cssSelector);
             });
             if (elements == null) {
@@ -603,7 +611,7 @@ public class WebScraperTool {
             LOGGER.debugf("Extracting metadata from URL: %s", sanitize(url));
 
             FetchedPage page = fetchUrl(url);
-            Document doc = parseBounded(() -> Jsoup.parse(page.html()));
+            Document doc = parseBounded(() -> Jsoup.parse(page.html(), page.baseUri()));
 
             StringBuilder result = new StringBuilder();
             result.append("Metadata for ").append(url).append(":\n\n");
@@ -739,8 +747,19 @@ public class WebScraperTool {
             throw new IOException("HTTP " + response.status() + " for URL: " + url);
         }
 
+        // Relative links resolve against where the page ended up, after redirects.
+        String baseUri = response.finalUri() != null ? response.finalUri().toString() : url;
+        String contentType = response.headers() != null ? response.firstHeader("Content-Type").orElse(null) : null;
+        String refusal = nonTextRefusal(contentType, response.body());
+        if (refusal != null) {
+            throw new ToolFailureException(refusal);
+        }
+        Charset charset = charsetOf(contentType, response.body());
+
         if (!response.truncated()) {
-            return new FetchedPage(new String(response.body(), StandardCharsets.UTF_8), null);
+            byte[] whole = response.body();
+            int bom = bomLength(whole, charset);
+            return new FetchedPage(new String(whole, bom, whole.length - bom, charset), null, baseUri);
         }
         // A truncated body is either over the size cap or cut off by the read
         // deadline; the flag does not say which. Both leave a partial page, so the
@@ -750,9 +769,226 @@ public class WebScraperTool {
         LOGGER.warnf("Response from %s was truncated (size cap of %d bytes or read deadline); returning partial content", sanitize(url),
                 maxResponseBytes);
         byte[] body = response.body();
-        String html = new String(body, 0, completeUtf8Length(body), StandardCharsets.UTF_8);
+        String html = decodeComplete(body, bomLength(body, charset), charset);
         return new FetchedPage(html, "\n\n[Note: the page response was truncated (it exceeded " + maxResponseBytes
-                + " bytes or the read deadline expired); the content above is partial.]");
+                + " bytes or the read deadline expired); the content above is partial.]", baseUri);
+    }
+
+    private static final Pattern CHARSET_PARAMETER = Pattern.compile("charset\\s*=\\s*[\"']?([A-Za-z0-9_.:\\-]+)", Pattern.CASE_INSENSITIVE);
+
+    /**
+     * A clear refusal for a body that is not text (an image, a PDF, a download),
+     * which decoded as text is noise the model would treat as the page. No declared
+     * type is read as HTML.
+     *
+     * @return the message, or {@code null} when the type is readable as text
+     */
+    static String nonTextRefusal(String contentType) {
+        if (contentType == null || contentType.isBlank()) {
+            return null;
+        }
+        String mediaType = contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT);
+        boolean text = mediaType.startsWith("text/") || mediaType.endsWith("+xml") || mediaType.endsWith("+json")
+                || mediaType.equals("application/xml") || mediaType.equals("application/json") || mediaType.equals("application/xhtml+xml");
+        return text
+                ? null
+                : "Error: the URL returned '" + mediaType + "', which is not a text page. This tool reads HTML and other text only.";
+    }
+
+    /**
+     * {@link #nonTextRefusal(String)}, except that a body served as
+     * {@code application/octet-stream} — a common mislabel of an HTML page — is
+     * read when it starts like markup ({@code <}, after an optional byte order mark
+     * and whitespace).
+     */
+    static String nonTextRefusal(String contentType, byte[] body) {
+        String refusal = nonTextRefusal(contentType);
+        if (refusal == null || !"application/octet-stream".equals(contentType.split(";", 2)[0].trim().toLowerCase(Locale.ROOT))) {
+            return refusal;
+        }
+        return startsLikeMarkup(body) ? null : refusal;
+    }
+
+    private static boolean startsLikeMarkup(byte[] body) {
+        if (body == null) {
+            return false;
+        }
+        int i = utf8BomLength(body);
+        while (i < body.length && i < 1024 && (body[i] == ' ' || body[i] == '\t' || body[i] == '\r' || body[i] == '\n')) {
+            i++;
+        }
+        return i < body.length && body[i] == '<';
+    }
+
+    /**
+     * The charset of the page, in the WHATWG order: a byte order mark first (it
+     * describes the bytes themselves), then the {@code Content-Type} header, then a
+     * {@code <meta charset>} or {@code <meta http-equiv="content-type">} in the
+     * first 1024 bytes; UTF-8 when none is declared or the name is not a charset
+     * the JVM knows. A {@code <meta>} naming UTF-16 is read as UTF-8: a document
+     * whose own ASCII text declared it cannot be UTF-16.
+     */
+    static Charset charsetOf(String contentType, byte[] body) {
+        if (body != null) {
+            if (utf8BomLength(body) > 0) {
+                return StandardCharsets.UTF_8;
+            }
+            if (body.length >= 2 && (body[0] & 0xFF) == 0xFE && (body[1] & 0xFF) == 0xFF) {
+                return StandardCharsets.UTF_16BE;
+            }
+            if (body.length >= 2 && (body[0] & 0xFF) == 0xFF && (body[1] & 0xFF) == 0xFE) {
+                return StandardCharsets.UTF_16LE;
+            }
+        }
+        if (contentType != null) {
+            var declared = CHARSET_PARAMETER.matcher(contentType);
+            if (declared.find()) {
+                Charset charset = lookup(declared.group(1));
+                if (charset != null) {
+                    return charset;
+                }
+            }
+        }
+        if (body != null) {
+            Charset charset = metaCharset(new String(body, 0, Math.min(body.length, META_SNIFF_BYTES), StandardCharsets.ISO_8859_1));
+            if (charset != null) {
+                return charset.name().startsWith("UTF-16") ? StandardCharsets.UTF_8 : charset;
+            }
+        }
+        return StandardCharsets.UTF_8;
+    }
+
+    /** How far into the body a {@code <meta>} charset declaration is looked for. */
+    private static final int META_SNIFF_BYTES = 1024;
+    private static final Pattern META_TAG = Pattern.compile("<meta\\s[^>]*>", Pattern.CASE_INSENSITIVE);
+    /** {@code charset} as an attribute name, up to its {@code =}. */
+    private static final Pattern META_CHARSET_NAME = Pattern.compile("\\scharset\\s*=\\s*", Pattern.CASE_INSENSITIVE);
+    private static final Pattern META_CHARSET_VALUE = Pattern.compile("[\"']?([A-Za-z0-9_.:\\-]+)");
+    private static final Pattern META_HTTP_EQUIV = Pattern.compile("\\shttp-equiv\\s*=\\s*[\"']?content-type", Pattern.CASE_INSENSITIVE);
+    private static final Pattern META_CONTENT = Pattern.compile("\\scontent\\s*=\\s*(\"[^\"]*\"|'[^']*')", Pattern.CASE_INSENSITIVE);
+
+    private static Charset metaCharset(String head) {
+        // The prescan skips comments (WHATWG "prescan a byte stream"): a commented-out
+        // <meta charset> is no declaration.
+        var tags = META_TAG.matcher(withoutComments(head));
+        while (tags.find()) {
+            String tag = tags.group();
+            // Found in a copy whose quoted attribute values are blanked (same length),
+            // so a description that mentions "charset=" is not a declaration.
+            var own = META_CHARSET_NAME.matcher(blankQuotedValues(tag));
+            if (own.find()) {
+                var value = META_CHARSET_VALUE.matcher(tag).region(own.end(), tag.length());
+                if (value.lookingAt()) {
+                    Charset charset = lookup(value.group(1));
+                    if (charset != null) {
+                        return charset;
+                    }
+                }
+                continue;
+            }
+            if (META_HTTP_EQUIV.matcher(tag).find()) {
+                var content = META_CONTENT.matcher(tag);
+                if (content.find()) {
+                    var declared = CHARSET_PARAMETER.matcher(content.group(1));
+                    if (declared.find()) {
+                        Charset charset = lookup(declared.group(1));
+                        if (charset != null) {
+                            return charset;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
+    /**
+     * {@code head} with every {@code <!-- ... -->} comment blanked (an unterminated
+     * one runs to the end), in one forward pass.
+     */
+    static String withoutComments(String head) {
+        int open = head.indexOf("<!--");
+        if (open < 0) {
+            return head;
+        }
+        StringBuilder out = new StringBuilder(head.length());
+        int copied = 0;
+        while (open >= 0) {
+            out.append(head, copied, open);
+            int close = head.indexOf("-->", open + 4);
+            int end = close < 0 ? head.length() : close + 3;
+            out.append(" ".repeat(end - open));
+            copied = end;
+            open = close < 0 ? -1 : head.indexOf("<!--", end);
+        }
+        out.append(head, copied, head.length());
+        return out.toString();
+    }
+
+    /** {@code tag} with the characters inside each quoted value replaced. */
+    private static String blankQuotedValues(String tag) {
+        StringBuilder out = new StringBuilder(tag.length());
+        char quote = 0;
+        for (int i = 0; i < tag.length(); i++) {
+            char c = tag.charAt(i);
+            if (quote != 0 && c != quote) {
+                out.append('x');
+                continue;
+            }
+            if (quote != 0) {
+                quote = 0;
+            } else if (c == '"' || c == '\'') {
+                quote = c;
+            }
+            out.append(c);
+        }
+        return out.toString();
+    }
+
+    private static int utf8BomLength(byte[] body) {
+        return body.length >= 3 && (body[0] & 0xFF) == 0xEF && (body[1] & 0xFF) == 0xBB && (body[2] & 0xFF) == 0xBF ? 3 : 0;
+    }
+
+    /**
+     * The length of the byte order mark that starts {@code body} in
+     * {@code charset}.
+     */
+    static int bomLength(byte[] body, Charset charset) {
+        if (StandardCharsets.UTF_8.equals(charset)) {
+            return utf8BomLength(body);
+        }
+        if ((StandardCharsets.UTF_16BE.equals(charset) || StandardCharsets.UTF_16LE.equals(charset)) && body.length >= 2
+                && ((body[0] & 0xFF) == 0xFE && (body[1] & 0xFF) == 0xFF || (body[0] & 0xFF) == 0xFF && (body[1] & 0xFF) == 0xFE)) {
+            return 2;
+        }
+        return 0;
+    }
+
+    /**
+     * {@code body} from {@code offset} decoded without the character a byte-count
+     * cut may have split: whatever the charset, an incomplete trailing sequence is
+     * left out rather than decoded to a replacement character.
+     */
+    static String decodeComplete(byte[] body, int offset, Charset charset) {
+        if (StandardCharsets.UTF_8.equals(charset)) {
+            int length = completeUtf8Length(body);
+            return new String(body, offset, Math.max(0, length - offset), charset);
+        }
+        CharsetDecoder decoder = charset.newDecoder().onMalformedInput(CodingErrorAction.REPLACE)
+                .onUnmappableCharacter(CodingErrorAction.REPLACE);
+        CharBuffer out = CharBuffer.allocate((int) ((body.length - offset) * (double) decoder.maxCharsPerByte()) + 1);
+        // endOfInput=false: a trailing partial sequence stays undecoded in the input.
+        decoder.decode(ByteBuffer.wrap(body, offset, body.length - offset), out, false);
+        out.flip();
+        return out.toString();
+    }
+
+    private static Charset lookup(String name) {
+        try {
+            return Charset.forName(name);
+        } catch (IllegalArgumentException unknown) {
+            return null;
+        }
     }
 
     /**
@@ -778,7 +1014,7 @@ public class WebScraperTool {
      * A fetched page and, when the body was truncated, the note to append to the
      * tool's output.
      */
-    private record FetchedPage(String html, String truncationNote) {
+    private record FetchedPage(String html, String truncationNote, String baseUri) {
         String annotate(String output) {
             return truncationNote == null ? output : output + truncationNote;
         }

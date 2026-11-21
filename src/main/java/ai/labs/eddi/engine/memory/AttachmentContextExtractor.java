@@ -64,6 +64,13 @@ public final class AttachmentContextExtractor {
     /** Default per-turn cap on the number of attachments forwarded. */
     public static final int DEFAULT_MAX_ATTACHMENTS_PER_TURN = 5;
 
+    /**
+     * The only reason given for a stored attachment that cannot be read: the same
+     * words whether it is missing or belongs to another conversation, so no
+     * attachment id can be probed for existence.
+     */
+    public static final String UNRESOLVABLE_STORED_ATTACHMENT = "it does not exist or is not part of this conversation.";
+
     private AttachmentContextExtractor() {
         // non-instantiable utility
     }
@@ -225,8 +232,10 @@ public final class AttachmentContextExtractor {
                     att.setSizeBytes(meta.sizeBytes());
                     out.add(att);
                 } catch (IAttachmentStore.AttachmentStoreException e) {
-                    errors.add("Stored attachment '" + att.getStorageRef()
-                            + "' could not be resolved: " + e.getMessage());
+                    // One fixed reason, never the store's own: its messages tell "not
+                    // found" from "belongs to another conversation", and this note is
+                    // conversation data a caller can read back (attachments:errors).
+                    errors.add("Stored attachment '" + att.getStorageRef() + "' could not be resolved: " + UNRESOLVABLE_STORED_ATTACHMENT);
                 }
             } else {
                 out.add(att);

@@ -303,8 +303,7 @@ public class RestAttachmentUpload {
                        + "the owning conversation (owner or explicit grant); references are "
                        + "unguessable.")
     @APIResponse(responseCode = "200", description = "Attachment bytes with Content-Type and Content-Disposition.")
-    @APIResponse(responseCode = "403", description = "The conversation is not permitted to access this attachment.")
-    @APIResponse(responseCode = "404", description = "Attachment not found.")
+    @APIResponse(responseCode = "404", description = "Attachment not found, or not accessible to this conversation (the two are indistinguishable).")
     public void downloadAttachment(
                                    @Parameter(description = "Owning conversation ID.")
                                    @PathParam("conversationId") String conversationId,
@@ -324,17 +323,13 @@ public class RestAttachmentUpload {
                         .header("Content-Disposition", "attachment; filename=\"" + downloadName + "\"")
                         .build());
             } catch (IAttachmentStore.AttachmentAccessDeniedException e) {
-                LOGGER.debugf("Attachment download denied for conversation '%s': %s",
-                        sanitize(conversationId), e.getMessage());
-                asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)
-                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_ACCESS_DENIED"))
-                        .build());
+                // "Not yours" answers exactly as "does not exist" (404, same body), so a
+                // prober cannot tell a reference that exists from one that does not.
+                LOGGER.debugf("Attachment download denied for conversation '%s'", sanitize(conversationId));
+                asyncResponse.resume(attachmentNotFound());
             } catch (IAttachmentStore.AttachmentNotFoundException e) {
-                LOGGER.debugf("Attachment download not found for conversation '%s': %s",
-                        sanitize(conversationId), e.getMessage());
-                asyncResponse.resume(Response.status(Response.Status.NOT_FOUND)
-                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_NOT_FOUND"))
-                        .build());
+                LOGGER.debugf("Attachment download not found for conversation '%s'", sanitize(conversationId));
+                asyncResponse.resume(attachmentNotFound());
             } catch (IAttachmentStore.AttachmentStoreException e) {
                 // A store/backend failure (not a missing blob) — surface as 500 and
                 // log at ERROR so outages are not silently misreported as 404.
@@ -359,8 +354,7 @@ public class RestAttachmentUpload {
                summary = "Delete a single attachment",
                description = "Removes one attachment. Restricted to the owning conversation.")
     @APIResponse(responseCode = "200", description = "Attachment deleted.")
-    @APIResponse(responseCode = "403", description = "The conversation does not own this attachment.")
-    @APIResponse(responseCode = "404", description = "Attachment not found.")
+    @APIResponse(responseCode = "404", description = "Attachment not found, or not accessible to this conversation (the two are indistinguishable).")
     public void deleteAttachment(
                                  @Parameter(description = "Owning conversation ID.")
                                  @PathParam("conversationId") String conversationId,
@@ -376,16 +370,11 @@ public class RestAttachmentUpload {
                     asyncResponse.resume(Response.ok(Map.of(
                             "storageRef", storageRef, "deleted", true)).build());
                 } else {
-                    asyncResponse.resume(Response.status(Response.Status.NOT_FOUND)
-                            .entity(Map.of("error", "Attachment not found", "code", "ATTACHMENT_NOT_FOUND"))
-                            .build());
+                    asyncResponse.resume(attachmentNotFound());
                 }
             } catch (IAttachmentStore.AttachmentAccessDeniedException e) {
-                LOGGER.debugf("Attachment delete denied for conversation '%s': %s",
-                        sanitize(conversationId), e.getMessage());
-                asyncResponse.resume(Response.status(Response.Status.FORBIDDEN)
-                        .entity(Map.of("error", e.getMessage(), "code", "ATTACHMENT_ACCESS_DENIED"))
-                        .build());
+                LOGGER.debugf("Attachment delete denied for conversation '%s'", sanitize(conversationId));
+                asyncResponse.resume(attachmentNotFound());
             } catch (Exception e) {
                 LOGGER.errorf(e, "Failed to delete attachment for conversation '%s'", sanitize(conversationId));
                 asyncResponse.resume(Response.status(Response.Status.INTERNAL_SERVER_ERROR)
@@ -435,6 +424,17 @@ public class RestAttachmentUpload {
             return null;
         }
         return tenantId;
+    }
+
+    /**
+     * The one answer for an attachment that is missing and for one the conversation
+     * may not touch: same status, same body, nothing that names an owner or echoes
+     * the reference.
+     */
+    private static Response attachmentNotFound() {
+        return Response.status(Response.Status.NOT_FOUND)
+                .entity(Map.of("error", "Attachment not found", "code", "ATTACHMENT_NOT_FOUND"))
+                .build();
     }
 
     /**

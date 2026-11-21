@@ -463,17 +463,23 @@ class RestAttachmentUploadTest {
         }
 
         @Test
-        void shouldReturn403WhenDenied() throws Exception {
+        void shouldAnswerDeniedExactlyLikeMissing() throws Exception {
+            // "not yours" must be indistinguishable from "does not exist" (existence
+            // oracle),
+            // and must not name the owning conversation.
             when(attachmentStore.getMetadata("ref-1", "conv-other"))
                     .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
-                            "Cross-conversation access denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+                            "Cross-conversation access denied: requested from 'conv-other'"));
+            when(attachmentStore.getMetadata("missing", "conv-other"))
+                    .thenThrow(new AttachmentNotFoundException("Attachment not found: missing"));
 
-            Response response = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "ref-1", ar));
+            Response denied = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "ref-1", ar));
+            Response missing = captureAsync(ar -> endpoint.downloadAttachment("conv-other", "missing", ar));
 
-            assertEquals(403, response.getStatus());
-            @SuppressWarnings("unchecked")
-            var body = (Map<String, Object>) response.getEntity();
-            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+            assertEquals(404, denied.getStatus());
+            assertEquals(missing.getStatus(), denied.getStatus());
+            assertEquals(missing.getEntity(), denied.getEntity());
+            assertFalse(String.valueOf(denied.getEntity()).contains("conv-1"));
         }
 
         @Test
@@ -541,17 +547,16 @@ class RestAttachmentUploadTest {
         }
 
         @Test
-        void shouldReturn403WhenNotOwner() throws Exception {
+        void shouldAnswerNotOwnerLikeMissing() throws Exception {
             when(attachmentStore.delete("ref-1", "conv-other"))
-                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException(
-                            "Delete denied: attachment belongs to 'conv-1', requested from 'conv-other'"));
+                    .thenThrow(new IAttachmentStore.AttachmentAccessDeniedException("Delete denied: requested from 'conv-other'"));
+            when(attachmentStore.delete("missing", "conv-other")).thenReturn(false);
 
-            Response response = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "ref-1", ar));
+            Response denied = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "ref-1", ar));
+            Response missing = captureAsync(ar -> endpoint.deleteAttachment("conv-other", "missing", ar));
 
-            assertEquals(403, response.getStatus());
-            @SuppressWarnings("unchecked")
-            var body = (Map<String, Object>) response.getEntity();
-            assertEquals("ATTACHMENT_ACCESS_DENIED", body.get("code"));
+            assertEquals(404, denied.getStatus());
+            assertEquals(missing.getEntity(), denied.getEntity());
         }
     }
 

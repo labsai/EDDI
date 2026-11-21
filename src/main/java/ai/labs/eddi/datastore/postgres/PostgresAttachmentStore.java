@@ -229,9 +229,7 @@ public class PostgresAttachmentStore implements IAttachmentStore {
             // A row that records no owner stays deletable, though the read path refuses
             // it: deleting discloses nothing, and refusing would strand personal data.
             if (owner != null && !owner.equals(requestingConversationId)) {
-                throw new AttachmentAccessDeniedException(
-                        "Delete denied: attachment belongs to '%s', requested from '%s'"
-                                .formatted(owner, requestingConversationId));
+                throw new AttachmentAccessDeniedException("Delete denied: requested from '%s'".formatted(requestingConversationId));
             }
             try (PreparedStatement ps = conn.prepareStatement(
                     "DELETE FROM attachments WHERE storage_ref = ?")) {
@@ -384,9 +382,8 @@ public class PostgresAttachmentStore implements IAttachmentStore {
         if (grantsContain(rs, requester)) {
             return;
         }
-        throw new AttachmentAccessDeniedException(
-                "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
-                        .formatted(owner, requester));
+        // The owner is not named: see GridFsAttachmentStore#authorize.
+        throw new AttachmentAccessDeniedException("Cross-conversation access denied: requested from '%s'".formatted(requester));
     }
 
     private static boolean grantsContain(ResultSet rs, String value) throws SQLException {

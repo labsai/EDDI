@@ -180,7 +180,9 @@ public class WebSearchTool {
         return warnings;
     }
 
-    @Tool("Searches the web for current information on any topic. Returns relevant search results with titles and snippets.")
+    @Tool("Searches the web. With a ranked-results provider (Brave) it returns titles, snippets and links; with the default DuckDuckGo Instant Answer "
+            + "provider it answers only well-known topics, and an empty answer means \"no instant answer\", not that nothing exists - then try "
+            + "searchWikipedia or fetch a page directly.")
     public String searchWeb(@P("Search terms") String query,
                             @P(value = "Maximum number of results, 1-10 (default 5)", required = false) Integer maxResults) {
 
@@ -204,6 +206,8 @@ public class WebSearchTool {
             LOGGER.debugf("Search completed for: %s", sanitize(query));
             return results;
 
+        } catch (ToolFailureException e) {
+            throw e;
         } catch (Exception e) {
             // The message can name the request URI, and Google's carries the API key.
             String error = redactApiKey(String.valueOf(e.getMessage()));
@@ -360,7 +364,8 @@ public class WebSearchTool {
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("Could not parse Google search results: " + e.getMessage());
+            LOGGER.warnf("Could not parse Google search results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("Google");
         }
 
         if (!hasResults) {
@@ -404,7 +409,8 @@ public class WebSearchTool {
                 }
             }
         } catch (Exception e) {
-            LOGGER.debug("Could not parse Brave search results: " + e.getMessage());
+            LOGGER.warnf("Could not parse Brave search results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("Brave");
         }
 
         if (!hasResults) {
@@ -470,12 +476,16 @@ public class WebSearchTool {
             }
 
         } catch (Exception e) {
-            LOGGER.error("Error parsing DuckDuckGo results", e);
-            return "Search completed but could not parse results. Query: " + query;
+            LOGGER.warnf("Error parsing DuckDuckGo results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("DuckDuckGo");
         }
 
         if (!hasResults) {
-            results.append("No instant results found. Try refining your search query.");
+            // The Instant Answer API answers only a few well-known topics; an empty
+            // answer is not evidence that the web has nothing on the query.
+            results.append("DuckDuckGo has no instant answer for this query. That does not mean nothing exists on it: this provider "
+                    + "answers only well-known topics. Try searchWikipedia, a more specific topic name, or fetch a page directly. "
+                    + "(An operator can configure a ranked-results provider with eddi.tools.websearch.provider=brave.)");
         }
 
         return results.toString();
@@ -500,6 +510,8 @@ public class WebSearchTool {
 
             return formatWikipediaResults(body, query);
 
+        } catch (ToolFailureException e) {
+            throw e;
         } catch (Exception e) {
             LOGGER.warnf(e, "Wikipedia search failed for query '%s'", sanitize(query));
             throw new ToolFailureException("Error: Could not search Wikipedia - " + e.getMessage());
@@ -514,34 +526,43 @@ public class WebSearchTool {
         results.append("Wikipedia results for '").append(query).append("':\n\n");
 
         boolean hasResults = false;
+        JsonNode root;
         try {
-            JsonNode root = objectMapper.readTree(jsonResponse);
-            JsonNode queryNode = root.get("query");
-            JsonNode searchResults = queryNode != null ? queryNode.get("search") : null;
-
-            if (searchResults != null && searchResults.isArray()) {
-                int count = 0;
-                for (JsonNode item : searchResults) {
-                    if (count >= 3)
-                        break;
-
-                    String title = getTextOrEmpty(item, "title");
-                    String snippet = getTextOrEmpty(item, "snippet")
-                            .replaceAll("<[^>]*>", ""); // Strip HTML tags
-
-                    String wikiUrl = "https://en.wikipedia.org/wiki/"
-                            + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
-
-                    results.append(++count).append(". ").append(title).append("\n");
-                    results.append("   ").append(snippet).append("\n");
-                    results.append("   ").append(wikiUrl).append("\n\n");
-                    hasResults = true;
-                }
-            }
-
+            root = objectMapper.readTree(jsonResponse);
         } catch (Exception e) {
-            LOGGER.error("Error parsing Wikipedia results", e);
-            return "Wikipedia search completed but could not parse results.";
+            LOGGER.warnf("Error parsing Wikipedia results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("Wikipedia");
+        }
+        JsonNode queryNode = root != null ? root.get("query") : null;
+        // An answer without a query result — an {"error": ...} envelope, warnings
+        // alone — is a failed search, not an empty one. A query result without hits
+        // ({"query":{"search":[]}}) is "nothing found".
+        if (queryNode == null || !queryNode.isObject() || root.has("error")) {
+            LOGGER.warnf("Wikipedia answered without a query result for query '%s'", sanitize(query));
+            throw unreadableAnswer("Wikipedia");
+        }
+        JsonNode searchResults = queryNode.path("search");
+        try {
+            int count = 0;
+            for (JsonNode item : searchResults) {
+                if (count >= 3)
+                    break;
+
+                String title = getTextOrEmpty(item, "title");
+                String snippet = getTextOrEmpty(item, "snippet")
+                        .replaceAll("<[^>]*>", ""); // Strip HTML tags
+
+                String wikiUrl = "https://en.wikipedia.org/wiki/"
+                        + URLEncoder.encode(title.replace(" ", "_"), StandardCharsets.UTF_8);
+
+                results.append(++count).append(". ").append(title).append("\n");
+                results.append("   ").append(snippet).append("\n");
+                results.append("   ").append(wikiUrl).append("\n\n");
+                hasResults = true;
+            }
+        } catch (Exception e) {
+            LOGGER.warnf("Error parsing Wikipedia results: %s", sanitize(e.getMessage()));
+            throw unreadableAnswer("Wikipedia");
         }
 
         if (!hasResults) {
@@ -549,6 +570,16 @@ public class WebSearchTool {
         }
 
         return results.toString();
+    }
+
+    /**
+     * A provider answered, but not with JSON this tool can read. That is a failed
+     * search, never "no results": the model must not conclude nothing exists.
+     */
+    private static ToolFailureException unreadableAnswer(String provider) {
+        return new ToolFailureException("Error: the search failed: " + provider
+                + " answered with something that could not be read as search results. Try again later; this says nothing about whether "
+                + "results exist.");
     }
 
     /**

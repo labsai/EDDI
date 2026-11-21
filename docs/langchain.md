@@ -1526,6 +1526,14 @@ Some tools require API keys or external configuration to function. These are con
 | `brave` | `eddi.tools.websearch.brave.api-key` | $0.005 | The [Brave Search API](https://brave.com/search/api/) web endpoint, from Brave's own index: up to 10 ranked results with title, snippet and URL |
 | `google` | `eddi.tools.websearch.google.api-key` + `.cx` | $0.005 | Google's Custom Search JSON API. **Deprecated** — see below |
 
+**What an empty answer means.** With the default provider, "DuckDuckGo has no
+instant answer for this query" is *not* "no results": the Instant Answer API
+answers only a few well-known topics, so most research queries come back empty.
+The tool says so, and its description tells the model to try `searchWikipedia`
+or fetch a page. A provider whose answer cannot be read as JSON fails the call
+with an `Error: the search failed…` tool error instead of reporting "no results".
+Use `brave` for ranked results.
+
 **Brave Search API (recommended paid provider).** Create a key in the
 [Brave Search API dashboard](https://api-dashboard.search.brave.com/) on the
 *Search* plan — $5 per 1,000 requests, with $5 of free usage each month
@@ -2839,7 +2847,9 @@ Tools that accept URLs from LLM-generated arguments are protected against **Serv
 - Cloud metadata endpoints are blocked (`169.254.169.254`, `metadata.google.internal`)
 - Internal hostnames (`.local`, `.internal`, `localhost`) are rejected
 
-The **Calculator** tool uses a sandboxed recursive-descent math parser (`SafeMathParser`) instead of a script engine, eliminating any possibility of code injection.
+The **Calculator** tool uses a sandboxed recursive-descent math parser (`SafeMathParser`) instead of a script engine, eliminating any possibility of code injection. It answers with an `Error:` instead of a value for division by zero, overflow and undefined results (`sqrt(-1)`), never `Infinity` or `NaN`; results below 1e-4 are written in scientific notation (`1E-12`) so a small value is not shown as `0`, and `round()` does not saturate for large values.
+
+**Built-in tool answers.** The web scraper resolves relative links against the URL it finally fetched (after redirects) or the page's own `<base href>`, and decodes the page in the WHATWG order: a byte order mark first, then the server's `charset`, then a `<meta charset>` / `<meta http-equiv="content-type">` in the first 1024 bytes outside HTML comments (a `<meta>` naming UTF-16 is read as UTF-8), UTF-8 otherwise; a page cut off at the size cap loses only the character the cut split. A non-text content type is refused with a clear message — except `application/octet-stream` whose body starts like markup, a common mislabel of an HTML page. The date/time tools honour an offset or zone written in the input (`2025-11-03T10:30:00Z`) and report a local time that does not exist in the zone (the skipped hour when clocks go forward) instead of shifting it. `addTime` moves the wall clock for years, months, weeks and days (and reports a result in a skipped hour) and the instant for hours, minutes and seconds — an hour after 01:30 on the spring-forward night is 03:30, and an input carrying the later offset of the repeated autumn hour keeps it. `calculateDateDifference` between two values with an offset or zone counts elapsed time (the 23-hour spring-forward day is 0 days); between two local values it counts calendar units. A Wikipedia answer without a `query` result (an `error` envelope, warnings alone) is a failed search, not "no articles". A result that starts with `Error:` is never stored in the tool result cache, and `getCurrentDateTime` and `listTimezones` (which shows the current local times) are never cached (`@NeverCached`).
 
 See the [Security documentation](security.md) for full details.
 

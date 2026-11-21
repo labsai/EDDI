@@ -133,7 +133,9 @@ public class ToolCacheService {
         if (!(executor instanceof DefaultToolExecutor reflected) || reflected.originalMethod() == null) {
             return false;
         }
-        return isConversationBound(reflected.originalMethod().getDeclaringClass());
+        // A time-dependent method is never cached, whatever its class is.
+        return reflected.originalMethod().isAnnotationPresent(NeverCached.class)
+                || isConversationBound(reflected.originalMethod().getDeclaringClass());
     }
 
     /**

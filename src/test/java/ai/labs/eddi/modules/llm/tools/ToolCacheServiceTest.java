@@ -68,6 +68,16 @@ class ToolCacheServiceTest {
                 WebSearchTool.class, WebScraperTool.class, WeatherTool.class, PdfReaderTool.class, TextSummarizerTool.class};
 
         @Test
+        @DisplayName("getCurrentDateTime is never cached, the pure DateTime conversions still are")
+        void currentTimeIsNeverCached() throws Exception {
+            DateTimeTool bean = mock(DateTimeTool.class);
+            assertTrue(ToolCacheService
+                    .isConversationBound(new DefaultToolExecutor(bean, DateTimeTool.class.getMethod("getCurrentDateTime", String.class))));
+            assertFalse(ToolCacheService.isConversationBound(new DefaultToolExecutor(bean,
+                    DateTimeTool.class.getMethod("convertTimezone", String.class, String.class, String.class))));
+        }
+
+        @Test
         @DisplayName("ReadAttachmentTool — the class the hand-kept list forgot — is conversation-bound")
         void readAttachmentToolIsConversationBound() throws Exception {
             Method listAttachments = ReadAttachmentTool.class.getMethod("listAttachments");

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.agenttests.ToolMockRegistry;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
@@ -263,6 +264,44 @@ class ToolLoopRunnerToolPolicyTest {
 
             assertEquals(1, executed.get());
             assertEquals(1, observed.get(), "3 refused rounds must not be reported as allowed calls");
+        }
+
+        /** An httpcall-like tool that refuses its arguments before sending anything. */
+        private static final class RefusingTool implements ToolExecutor, RefusalAwareToolExecutor {
+            @Override
+            public String execute(ToolExecutionRequest request, Object memoryId) {
+                return executeJudged(request, null).result();
+            }
+
+            @Override
+            public Outcome executeJudged(ToolExecutionRequest request, ToolMockRegistry.MockResult mock) {
+                return Outcome.refused("{\"error\": \"The request was NOT sent: an argument value would change the JSON.\"}");
+            }
+        }
+
+        @Test
+        @DisplayName("a call the tool refused before running is not reported to the allowed-call observer")
+        void observerSkipsArgumentRefusals() throws Exception {
+            task.setMaxToolContextTokens(-1);
+            task.setEnableToolCaching(false);
+            var observed = new AtomicInteger();
+            runner.setAllowedCallObserver((memory, request, sources, endpoints, approvals, trace) -> observed.incrementAndGet());
+            var spec = ToolSpecification.builder().name("createUser").description("d").build();
+            var setup = new AgentOrchestrator.ToolSetup(List.of(spec), new HashMap<>(Map.of("createUser", new RefusingTool())),
+                    new HashMap<>(Map.of("createUser", "http")), List.of(spec), new HashMap<>(), new HashMap<>(), new HashMap<>());
+            ChatModel model = mock(ChatModel.class);
+            when(model.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+                requests.add(invocation.getArgument(0));
+                return requests.size() == 1
+                        ? ChatResponse.builder().aiMessage(AiMessage.from(
+                                ToolExecutionRequest.builder().id("c1").name("createUser").arguments("{\"name\":\"x\"}").build())).build()
+                        : ChatResponse.builder().aiMessage(AiMessage.from("done")).build();
+            });
+
+            var result = runner.executeWithTools(model, null, List.of(UserMessage.from("go")), setup, task, memory("conv-1"), null, -1, 0, null);
+
+            assertEquals("done", result.response());
+            assertEquals(0, observed.get(), "an argument refusal is no executed call");
         }
 
         /**

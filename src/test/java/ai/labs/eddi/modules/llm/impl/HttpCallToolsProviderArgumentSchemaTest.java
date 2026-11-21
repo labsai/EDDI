@@ -264,7 +264,13 @@ class HttpCallToolsProviderArgumentSchemaTest {
         var executor = discover(legacy).executors().get(TOOL);
         executor.execute(toolCall("{\"teamId\":7,\"notify\":true,\"count\":5,\"name\":\"x\",\"tags\":{\"a\":1}}"), "m");
 
-        Map<String, Object> data = sentTemplateData();
+        // A JSON body that reads the arguments goes through the escaping guard (the
+        // five-argument overload); the template data itself is unchanged.
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
+        verify(apiCallExecutor).execute(any(), any(), captor.capture(), anyString(), any());
+        Map<String, Object> data = new HashMap<>(captor.getValue());
+        data.remove(ToolMockRegistry.TOOL_PATH_MARKER);
         assertEquals(7, data.get("teamId"), "an integer argument stays the deserialised Integer");
         assertEquals(Boolean.TRUE, data.get("notify"));
         assertEquals("{\"count\": 5, \"name\": \"x\", \"tags\": \"{a=1}\"}", TEMPLATES.processTemplate(legacy.getRequest().getBody(), data));

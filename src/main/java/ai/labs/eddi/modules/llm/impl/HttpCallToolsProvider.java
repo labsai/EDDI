@@ -14,6 +14,7 @@ import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.modules.apicalls.impl.IApiCallExecutor;
+import ai.labs.eddi.modules.apicalls.impl.ToolArgumentBodyEscaper;
 import ai.labs.eddi.modules.llm.capability.ResponseSchemaConverter;
 import ai.labs.eddi.modules.llm.guardrails.ToolArgumentSchemaValidator;
 import ai.labs.eddi.modules.llm.impl.orchestration.ToolApprovalGateSupport;
@@ -272,9 +273,12 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                     // Resolving and executing MUST build their template data the same
                     // way: the fingerprint pinned at gate time is only meaningful if it
                     // describes the request execution will actually construct.
-                    resolvers.put(apiCall.getName(),
-                            toolRequest -> apiCallExecutor.resolve(apiCall, memory, templateDataFor(apiCall, memory, toolRequest),
-                                    targetServerUrl));
+                    resolvers.put(apiCall.getName(), toolRequest -> {
+                        ToolCallData call = templateDataFor(apiCall, memory, toolRequest);
+                        return call.guard() == null
+                                ? apiCallExecutor.resolve(apiCall, memory, call.templateData(), targetServerUrl)
+                                : apiCallExecutor.resolve(apiCall, memory, call.templateData(), targetServerUrl, call.guard());
+                    });
 
                     executors.put(apiCall.getName(), new HttpCallToolExecutor() {
                         @Override
@@ -284,11 +288,16 @@ class HttpCallToolsProvider implements ToolSourceProvider {
 
                         @Override
                         public String execute(ToolExecutionRequest toolRequest, Object memoryId) {
-                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null);
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, null).result();
                         }
 
                         @Override
                         public String executeMocked(ToolExecutionRequest toolRequest, ToolMockRegistry.MockResult mock) {
+                            return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, mock).result();
+                        }
+
+                        @Override
+                        public Outcome executeJudged(ToolExecutionRequest toolRequest, ToolMockRegistry.MockResult mock) {
                             return executeHttpCallTool(apiCall, memory, toolRequest, targetServerUrl, mock);
                         }
                     });
@@ -333,8 +342,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      *            null to send the request — the executor answers the call with it
      *            and runs its response handling on it unchanged
      */
-    private String executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest, String targetServerUrl,
-                                       ToolMockRegistry.MockResult mock) {
+    private RefusalAwareToolExecutor.Outcome executeHttpCallTool(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest,
+                                                                 String targetServerUrl, ToolMockRegistry.MockResult mock) {
         try {
             // Normally already refused before the gate (ToolLoopRunner). Checked again
             // here because an approved call resumed after the configuration changed, or
@@ -342,9 +351,10 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // now refuses.
             List<String> violations = argumentViolationsOf(apiCall, toolRequest);
             if (!violations.isEmpty()) {
-                return ToolArgumentSchemaValidator.refusal(violations);
+                return RefusalAwareToolExecutor.Outcome.refused(ToolArgumentSchemaValidator.refusal(violations));
             }
-            Map<String, Object> templateData = templateDataFor(apiCall, memory, toolRequest);
+            ToolCallData call = templateDataFor(apiCall, memory, toolRequest);
+            Map<String, Object> templateData = call.templateData();
             // ToolLoopRunner already ran the agent-test interception for this call;
             // tell the executor not to intercept (and count) it again as a rule call.
             templateData.put(ToolMockRegistry.TOOL_PATH_MARKER, Boolean.TRUE);
@@ -357,17 +367,23 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // trip to be told something the string itself already says.
             String rejection = rejectUnparseableBody(apiCall, templateData);
             if (rejection != null) {
-                return rejection;
+                return RefusalAwareToolExecutor.Outcome.refused(rejection);
             }
 
-            Map<String, Object> result = apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl);
+            Map<String, Object> result = call.guard() == null
+                    ? apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl)
+                    : apiCallExecutor.execute(apiCall, memory, templateData, targetServerUrl, call.guard());
 
             String serialized = jsonSerialization.serialize(result);
             LOGGER.debugf("Httpcall tool '%s' result: keys=%s size=%d", apiCall.getName(), result.keySet(), serialized.length());
-            return serialized;
+            return RefusalAwareToolExecutor.Outcome.ran(serialized);
+        } catch (ToolArgumentBodyEscaper.ArgumentRefusedException refused) {
+            // Names the argument and the expectation, never the value.
+            LOGGER.warnf("Refusing httpcall tool '%s' before sending: %s", sanitize(apiCall.getName()), sanitize(refused.getMessage()));
+            return RefusalAwareToolExecutor.Outcome.refused(errorResult(refused.getMessage()));
         } catch (Exception e) {
             LOGGER.error("Error executing httpcall tool '" + apiCall.getName() + "'", e);
-            return errorResult(describeToolFailure(e, targetServerUrl, apiCall));
+            return RefusalAwareToolExecutor.Outcome.ran(errorResult(describeToolFailure(e, targetServerUrl, apiCall)));
         }
     }
 
@@ -378,9 +394,10 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * Shared by the executor and the resolver on purpose. The gate-time fingerprint
      * only means anything if it was computed from the same inputs execution will
      * use — two copies of this merge would eventually disagree, and the guard would
-     * then reject correct calls (or, worse, pass altered ones).
+     * then reject correct calls (or, worse, pass altered ones). The guard travels
+     * beside the data, never inside it.
      */
-    private Map<String, Object> templateDataFor(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest) {
+    private ToolCallData templateDataFor(ApiCall apiCall, IConversationMemory memory, ToolExecutionRequest toolRequest) {
         Map<String, Object> templateData = memoryItemConverter.convert(memory);
         if (hasArgumentSchema(apiCall)) {
             // A typed call: the arguments as the schema check normalised them
@@ -390,15 +407,20 @@ class HttpCallToolsProvider implements ToolSourceProvider {
             // exactly as a model-written string always was.
             var checked = ToolArgumentSchemaValidator.check(apiCall.getArgumentSchema(), apiCall.getUnknownFields(), toolRequest.arguments());
             if (checked.arguments() != null) {
-                safeTemplateMerge(templateData, renderArguments(checked.arguments()));
+                Map<String, Object> rendered = renderArguments(checked.arguments());
+                safeTemplateMerge(templateData, rendered);
+                Map<String, JsonNode> typed = new LinkedHashMap<>();
+                checked.arguments().fields().forEachRemaining(field -> typed.put(field.getKey(), field.getValue()));
+                return new ToolCallData(templateData, protectRequest(apiCall, templateData, rendered.keySet(), typed));
             }
-            return templateData;
+            return new ToolCallData(templateData, null);
         }
         if (toolRequest.arguments() != null && !toolRequest.arguments().isBlank()) {
             try {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> args = jsonSerialization.deserialize(toolRequest.arguments(), Map.class);
                 safeTemplateMerge(templateData, args);
+                return new ToolCallData(templateData, protectRequest(apiCall, templateData, args.keySet(), Map.of()));
             } catch (IOException e) {
                 // Redacted and capped, never raw: these are model-supplied arguments
                 // that routinely carry credentials — the pause record keeps only a
@@ -421,11 +443,39 @@ class HttpCallToolsProvider implements ToolSourceProvider {
                         sanitize(capUtf8(SecretRedactionFilter.redact(toolRequest.arguments()), ARGS_LOG_MAX_BYTES)));
             }
         }
-        return templateData;
+        return new ToolCallData(templateData, null);
+    }
+
+    /**
+     * The template data of one tool call, and the guard its request is built
+     * through ({@code null}: nothing to guard).
+     */
+    record ToolCallData(Map<String, Object> templateData, ToolArgumentBodyEscaper.Guard guard) {
+    }
+
+    /**
+     * The guard that makes the model's arguments safe in this call's JSON body and
+     * headers (see {@link ToolArgumentBodyEscaper}); {@code null} for a call that
+     * opted out with {@code escapeToolArguments: false} or has nothing to guard.
+     * Built in the shared template-data step so the gate-time fingerprint and the
+     * execution see the same request.
+     *
+     * @throws ToolArgumentBodyEscaper.ArgumentRefusedException
+     *             a bare argument that cannot be written as JSON
+     */
+    private static ToolArgumentBodyEscaper.Guard protectRequest(ApiCall apiCall, Map<String, Object> templateData, Set<String> argumentKeys,
+                                                                Map<String, JsonNode> typed) {
+        Set<String> names = new LinkedHashSet<>(argumentKeys);
+        names.removeAll(RESERVED_TEMPLATE_KEYS);
+        var guard = ToolArgumentBodyEscaper.guard(apiCall, names, typed);
+        if (guard != null) {
+            guard.validate(templateData);
+        }
+        return guard;
     }
 
     /** An httpcall tool: mock-aware and able to judge its arguments up front. */
-    private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator {
+    private interface HttpCallToolExecutor extends MockAwareToolExecutor, ToolArgumentValidator, RefusalAwareToolExecutor {
     }
 
     /**
@@ -454,10 +504,8 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      */
     static Map<String, Object> renderArguments(ObjectNode arguments) {
         Map<String, Object> rendered = new LinkedHashMap<>();
-        arguments.fields().forEachRemaining(field -> {
-            JsonNode value = field.getValue();
-            rendered.put(field.getKey(), value == null || value.isNull() ? null : value.isTextual() ? value.asText() : value.toString());
-        });
+        // The escaper's own definition: its guard compares the live binding against it.
+        arguments.fields().forEachRemaining(field -> rendered.put(field.getKey(), ToolArgumentBodyEscaper.templateValueOf(field.getValue())));
         return rendered;
     }
 
