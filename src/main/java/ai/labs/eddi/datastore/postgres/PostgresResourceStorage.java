@@ -147,7 +147,7 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
             String... indexes) {
         checkNotNull(dataSource, "dataSource");
         checkNotNull(collectionName, "collectionName");
-        this.dataSource = dataSource;
+        this.dataSource = PostgresSanitizingDataSource.wrap(dataSource);
         this.collectionName = collectionName;
         this.jsonSerialization = jsonSerialization;
         this.documentType = documentType;
@@ -191,15 +191,19 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     private void initSchema(String... indexes) {
         List<PostgresFieldIndexSwaps.Swap> swaps = new ArrayList<>();
-        try (Connection conn = dataSource.getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_RESOURCES_TABLE);
-            stmt.execute(CREATE_HISTORY_TABLE);
-            for (String createIndex : CREATE_INDEXES) {
-                createIndexQuietly(stmt, createIndex);
-            }
-            for (String index : indexes) {
-                createFieldIndex(conn, stmt, index, swaps);
-            }
+        try {
+            // Not runOnce: the field indexes differ per collection, and the swaps this
+            // run decides on must be found by every storage that asks for them.
+            PostgresSchema.run(dataSource, "PostgresResourceStorage:" + collectionName, (conn, stmt) -> {
+                stmt.execute(CREATE_RESOURCES_TABLE);
+                stmt.execute(CREATE_HISTORY_TABLE);
+                for (String createIndex : CREATE_INDEXES) {
+                    createIndexQuietly(stmt, createIndex);
+                }
+                for (String index : indexes) {
+                    createFieldIndex(conn, stmt, index, swaps);
+                }
+            });
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize PostgreSQL schema", e);
         }
@@ -346,14 +350,14 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
 
     @Override
     public IResource<T> newResource(T content) throws IOException {
-        String json = jsonSerialization.serialize(content);
+        String json = PostgresText.json(jsonSerialization.serialize(content));
         String id = UUID.randomUUID().toString();
         return new Resource(id, 1, json);
     }
 
     @Override
     public IResource<T> newResource(String id, Integer version, T content) throws IOException {
-        String json = jsonSerialization.serialize(content);
+        String json = PostgresText.json(jsonSerialization.serialize(content));
         return new Resource(id, version, json);
     }
 
@@ -485,6 +489,13 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
         // The field path is rendered as a traversal expression rather than bound as
         // a literal key, so a dotted fieldName means the same thing here as it does
         // on MongoDB (which resolves dotted paths natively in its filter).
+        if (expectedValue == null) {
+            // MongoDB's {field: null} matches an absent key; "= NULL" matches nothing in
+            // SQL, so
+            // a CAS that expects the field to be absent could never succeed here.
+            updateIfMatches(newResource, fieldName, null, toTextPathExpression(fieldName) + " IS NULL", List.of());
+            return;
+        }
         updateIfMatches(newResource, fieldName, expectedValue, toTextPathExpression(fieldName) + " = ?");
     }
 
@@ -991,6 +1002,11 @@ public class PostgresResourceStorage<T> implements IResourceStorage<T>, ISubstri
      * index.
      */
     static String toContainmentJsonPath(String jsonPath, String value) {
+        // the stored document holds the same replacement (see PostgresText); a lookup
+        // built from the
+        // raw value would not match it, and a NUL in a jsonpath literal is refused by
+        // PostgreSQL
+        value = PostgresText.text(value);
         StringBuilder path = new StringBuilder("$");
         for (String segment : sanitizeJsonPath(jsonPath).split("\\.")) {
             if (!segment.isEmpty()) {

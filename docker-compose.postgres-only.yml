@@ -31,7 +31,12 @@ services:
       # install that ever ran this file. The installers generate one into .env;
       # by hand: POSTGRES_PASSWORD=$(openssl rand -base64 24) docker compose ...
       QUARKUS_DATASOURCE_PASSWORD: "${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD (openssl rand -base64 24)}"
-      EDDI_DATASTORE_TYPE: "${EDDI_DATASTORE_TYPE:-postgres}"
+      # A literal, not "${EDDI_DATASTORE_TYPE:-postgres}": this stack IS PostgreSQL, and the
+      # variable is also the one .env.example ships as "mongodb" for docker-compose.yml. An
+      # operator who copied that file got profile=postgres with type=mongodb here, which an
+      # environment variable (config ordinal 300) wins over the profile's own %postgres line
+      # (250): MongoDB selected, its health check disabled by the profile.
+      EDDI_DATASTORE_TYPE: "postgres"
       # Same defaults as docker-compose.yml, and read from the environment like
       # every other setting here: a literal "true" ignores the operator who set
       # these to "false" in .env, so the surface fails open against an explicit

@@ -58,15 +58,16 @@ public class PostgresGlobalVariableStore implements IGlobalVariableStore {
 
     @Inject
     public PostgresGlobalVariableStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresGlobalVariableStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresGlobalVariableStore initialized (table=global_variables)");
         } catch (SQLException e) {

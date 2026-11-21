@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.connections.grants;
 
+import ai.labs.eddi.datastore.postgres.PostgresSchemaTestSupport;
+
 import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -263,14 +265,15 @@ class PostgresConnectionGrantStoreUnitTest {
     }
 
     @Test
-    @DisplayName("a failed schema creation is logged, not thrown, and is retried on the next call")
+    @DisplayName("a failed schema creation surfaces to the caller and is retried on the next call")
     void schemaFailureDoesNotAbortTheOperation() throws Exception {
         when(statement.execute(anyString())).thenThrow(new SQLException("permission denied for schema public"));
-        when(preparedStatement.executeUpdate()).thenReturn(1);
 
-        assertTrue(store.delete(TENANT, CONNECTION, PRINCIPAL),
-                "a login without DDL rights still has the table; refusing every read and write there would be a self-inflicted outage");
-        assertTrue(store.delete(TENANT, CONNECTION, PRINCIPAL));
+        // not swallowed any more: carrying on only moved the failure to a later, less
+        // explicit "relation does not exist"
+        assertThrows(IllegalStateException.class, () -> store.delete(TENANT, CONNECTION, PRINCIPAL));
+        PostgresSchemaTestSupport.reset(); // the back-off between two calls is covered by PostgresSchemaTest
+        assertThrows(IllegalStateException.class, () -> store.delete(TENANT, CONNECTION, PRINCIPAL));
 
         ArgumentCaptor<String> ddl = ArgumentCaptor.forClass(String.class);
         verify(statement, times(2)).execute(ddl.capture());

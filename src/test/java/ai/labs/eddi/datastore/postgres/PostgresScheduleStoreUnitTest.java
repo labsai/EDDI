@@ -1578,7 +1578,7 @@ class PostgresScheduleStoreUnitTest {
     // ─── ensureSchema failure ───────────────────────────────────
 
     @Test
-    void ensureSchema_sqlException_logsButDoesNotThrow() throws Exception {
+    void ensureSchema_sqlException_surfacesToTheCaller() throws Exception {
         // given
         DataSource failDs = mock(DataSource.class);
         when(failDs.getConnection()).thenThrow(new SQLException("Schema error"));
@@ -1589,8 +1589,10 @@ class PostgresScheduleStoreUnitTest {
 
         var freshStore = new PostgresScheduleStore(failInstance, jsonSerialization, 100);
 
-        // when/then — ensureSchema catches the error, but subsequent DB calls fail
-        assertThrows(IResourceStore.ResourceStoreException.class,
+        // when/then — a failed schema creation is no longer swallowed: the caller sees
+        // it
+        // (and the next call retries it)
+        assertThrows(IllegalStateException.class,
                 () -> freshStore.readAllSchedules(10));
     }
 

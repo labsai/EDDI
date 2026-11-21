@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.properties.mongo;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property.Visibility;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
+import ai.labs.eddi.datastore.DatastoreType;
 import ai.labs.eddi.secrets.sanitize.SecretScrubber;
 import ai.labs.eddi.utils.ProgressLogger;
 import com.mongodb.MongoNamespace;
@@ -81,7 +82,7 @@ public class PropertiesMigrationService {
 
     private final MongoDatabase database;
     private final IUserMemoryStore userMemoryStore;
-    private final String datastoreType;
+    private final boolean postgres;
     private final SecretScrubber secretScrubber;
     private final Set<String> skipKeys;
     private volatile boolean running;
@@ -92,7 +93,7 @@ public class PropertiesMigrationService {
             @ConfigProperty(name = "eddi.migration.properties.skip-keys", defaultValue = DEFAULT_SKIP_KEYS) List<String> skipKeys) {
         this.database = database;
         this.userMemoryStore = userMemoryStore;
-        this.datastoreType = datastoreType;
+        this.postgres = DatastoreType.isPostgres(datastoreType);
         this.secretScrubber = secretScrubber;
         this.skipKeys = new TreeSet<>(skipKeys == null ? List.of() : skipKeys.stream().map(String::trim).filter(k -> !k.isEmpty()).toList());
     }
@@ -273,7 +274,7 @@ public class PropertiesMigrationService {
         // V6 migrations): anything but "postgres" is MongoDB. Gating on "mongodb"
         // instead skipped this migration on a deployment that spelled the type any
         // other way while everything else ran against MongoDB.
-        if ("postgres".equals(datastoreType)) {
+        if (postgres) {
             LOGGER.debug("[MIGRATION] Skipping properties migration — not in MongoDB mode");
             return;
         }

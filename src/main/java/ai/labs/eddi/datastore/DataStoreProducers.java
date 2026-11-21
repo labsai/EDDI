@@ -164,7 +164,7 @@ public class DataStoreProducers {
     String datastoreType;
 
     private boolean isPostgres() {
-        return "postgres".equals(datastoreType);
+        return DatastoreType.isPostgres(datastoreType);
     }
 
     @Produces

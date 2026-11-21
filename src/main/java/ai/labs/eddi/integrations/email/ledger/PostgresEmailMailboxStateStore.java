@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import ai.labs.eddi.integrations.email.transport.MailboxCursor;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -16,7 +18,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.Optional;
@@ -74,7 +75,7 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
 
     @Inject
     public PostgresEmailMailboxStateStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private Connection connection() throws SQLException {
@@ -86,10 +87,12 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
         if (schemaInitialized) {
             return;
         }
-        try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-            for (String sql : SCHEMA) {
-                statement.execute(sql);
-            }
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresEmailMailboxStateStore", statement -> {
+                for (String sql : SCHEMA) {
+                    statement.execute(sql);
+                }
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             LOGGER.errorf(e, "Failed to create the %s schema", TABLE);

@@ -57,16 +57,18 @@ public class PostgresConversationCheckpointStore implements IConversationCheckpo
 
     @Inject
     public PostgresConversationCheckpointStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_TABLE);
-            stmt.execute(CREATE_INDEX_CONV);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresConversationCheckpointStore", stmt -> {
+                stmt.execute(CREATE_TABLE);
+                stmt.execute(CREATE_INDEX_CONV);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize conversation_checkpoints table", e);

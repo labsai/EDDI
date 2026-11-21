@@ -5,6 +5,7 @@
 package ai.labs.eddi.configs.migration;
 
 import ai.labs.eddi.configs.migration.model.MigrationLog;
+import ai.labs.eddi.datastore.DatastoreType;
 import com.mongodb.MongoCommandException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -105,7 +106,7 @@ public class V6QuteMigration {
         this.migrationLogStore = migrationLogStore;
         this.migrator = migrator;
         this.enabled = enabled;
-        this.postgres = "postgres".equals(datastoreType);
+        this.postgres = DatastoreType.isPostgres(datastoreType);
     }
 
     /**

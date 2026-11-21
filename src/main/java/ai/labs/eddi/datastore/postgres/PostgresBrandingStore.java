@@ -19,7 +19,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.util.Optional;
 
 /**
@@ -71,17 +70,18 @@ public class PostgresBrandingStore implements IBrandingStore {
 
     @Inject
     public PostgresBrandingStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private synchronized void ensureSchema() {
         if (schemaInitialized) {
             return;
         }
-        try (Connection conn = dataSourceInstance.get().getConnection();
-                Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_BRANDING);
-            stmt.execute(CREATE_ASSETS);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresBrandingStore", stmt -> {
+                stmt.execute(CREATE_BRANDING);
+                stmt.execute(CREATE_ASSETS);
+            });
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to initialize the branding tables", e);

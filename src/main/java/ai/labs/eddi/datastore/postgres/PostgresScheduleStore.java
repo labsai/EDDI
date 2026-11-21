@@ -61,7 +61,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     private static final String CREATE_SCHEDULES_TABLE = """
             CREATE TABLE IF NOT EXISTS eddi_schedules (
                 id VARCHAR(64) PRIMARY KEY,
-                name VARCHAR(512),
+                name TEXT,
                 agent_id VARCHAR(255),
                 agent_version INTEGER,
                 environment VARCHAR(64),
@@ -237,7 +237,7 @@ public class PostgresScheduleStore implements IScheduleStore {
     @Inject
     public PostgresScheduleStore(Instance<DataSource> dataSourceInstance, IJsonSerialization jsonSerialization,
             @ConfigProperty(name = "eddi.schedule.poll-batch-size", defaultValue = "100") int pollBatchSize) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
         this.jsonSerialization = jsonSerialization;
         this.pollBatchSize = pollBatchSize > 0 ? pollBatchSize : 100;
     }
@@ -271,25 +271,30 @@ public class PostgresScheduleStore implements IScheduleStore {
     private synchronized void ensureSchema() {
         if (schemaInitialized)
             return;
-        try (Connection conn = dataSourceInstance.get().getConnection(); Statement stmt = conn.createStatement()) {
-            stmt.execute(CREATE_SCHEDULES_TABLE);
-            stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
-            stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
-            for (String addColumn : ADD_PAYLOAD_COLUMNS) {
-                stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
-            }
-            warnAboutUnattributableSchedules(stmt);
-            stmt.execute(CREATE_FIRE_LOGS_TABLE);
-            for (String idx : CREATE_INDEXES.split(";")) {
-                String trimmed = idx.trim();
-                if (!trimmed.isEmpty()) {
-                    stmt.execute(trimmed);
+        try {
+            PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresScheduleStore", stmt -> {
+                stmt.execute(CREATE_SCHEDULES_TABLE);
+                // the name is whatever the caller chose; a 600-character one answered 500 here
+                // and 201 on MongoDB
+                PostgresSchema.widenToText(stmt, "eddi_schedules", "name");
+                stmt.execute(ADD_METADATA_COLUMN); // idempotent upgrade for pre-existing tables
+                stmt.execute(ADD_USER_ID_COLUMN); // idempotent upgrade for pre-existing tables (GDPR erasure)
+                for (String addColumn : ADD_PAYLOAD_COLUMNS) {
+                    stmt.execute(addColumn); // idempotent upgrade for pre-existing tables (schedule payload)
                 }
-            }
+                warnAboutUnattributableSchedules(stmt);
+                stmt.execute(CREATE_FIRE_LOGS_TABLE);
+                for (String idx : CREATE_INDEXES.split(";")) {
+                    String trimmed = idx.trim();
+                    if (!trimmed.isEmpty()) {
+                        stmt.execute(trimmed);
+                    }
+                }
+            });
             schemaInitialized = true;
             LOGGER.info("PostgresScheduleStore schema initialized");
         } catch (SQLException e) {
-            LOGGER.error("Failed to initialize schedule tables", e);
+            throw new IllegalStateException("Failed to initialize schedule tables", e);
         }
     }
 

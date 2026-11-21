@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security.spaces.settings;
 
+import ai.labs.eddi.datastore.postgres.PostgresSanitizingDataSource;
+import ai.labs.eddi.datastore.postgres.PostgresSchema;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
@@ -15,7 +17,6 @@ import java.sql.Connection;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
-import java.sql.Statement;
 import java.sql.Timestamp;
 import java.sql.Types;
 import java.util.Optional;
@@ -57,7 +58,7 @@ public class PostgresWorkspaceSettingsStore implements IWorkspaceSettingsStore {
 
     @Inject
     public PostgresWorkspaceSettingsStore(Instance<DataSource> dataSourceInstance) {
-        this.dataSourceInstance = dataSourceInstance;
+        this.dataSourceInstance = PostgresSanitizingDataSource.wrap(dataSourceInstance);
     }
 
     private void ensureSchema() {
@@ -68,8 +69,10 @@ public class PostgresWorkspaceSettingsStore implements IWorkspaceSettingsStore {
             if (schemaInitialized) {
                 return;
             }
-            try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
-                statement.execute(CREATE_TABLE);
+            try {
+                PostgresSchema.runOnce(dataSourceInstance.get(), "PostgresWorkspaceSettingsStore", statement -> {
+                    statement.execute(CREATE_TABLE);
+                });
                 schemaInitialized = true;
                 LOGGER.info("PostgresWorkspaceSettingsStore initialized (table=workspace_settings)");
             } catch (SQLException e) {
