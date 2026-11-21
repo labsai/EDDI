@@ -11,9 +11,12 @@ import javax.xml.stream.XMLStreamException;
 import javax.xml.stream.XMLStreamReader;
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
@@ -54,7 +57,7 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         List<String> sharedStrings = archive.has(SHARED_STRINGS)
                 ? readSharedStrings(archive.part(SHARED_STRINGS))
                 : List.of();
-        Map<String, String> sheets = sheetsInWorkbookOrder(archive);
+        Map<String, String> sheets = sheetsInWorkbookOrder(archive, limits.visibleTextOnly());
 
         StringBuilder markdown = new StringBuilder();
         int rendered = 0;
@@ -84,18 +87,27 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
      * order the tabs appear in, and is unrelated to ZIP entry order or to the
      * numbers in the part names.
      */
-    private static Map<String, String> sheetsInWorkbookOrder(OpenXmlPackage archive) {
+    private static Map<String, String> sheetsInWorkbookOrder(OpenXmlPackage archive, boolean visibleOnly) {
         Map<String, String> byRelationshipId = archive.has(WORKBOOK_RELS)
                 ? readRelationships(archive.part(WORKBOOK_RELS))
                 : Map.of();
 
         Map<String, String> sheets = new LinkedHashMap<>();
+        boolean skippedHidden = false;
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(archive.part(WORKBOOK))) {
             XMLStreamReader xml = reader.reader();
             while (xml.hasNext()) {
                 if (xml.next() == XMLStreamConstants.START_ELEMENT && "sheet".equals(xml.getLocalName())) {
                     String name = OpenXmlPackage.attribute(xml, "name");
                     String part = byRelationshipId.get(OpenXmlPackage.relationshipId(xml));
+                    // "hidden" is a sheet the author tucked away; "veryHidden" cannot even be
+                    // unhidden from the Excel menu. Neither is something a reader sees.
+                    String state = OpenXmlPackage.attribute(xml, "state");
+                    boolean hiddenSheet = "hidden".equalsIgnoreCase(state) || "veryHidden".equalsIgnoreCase(state);
+                    if (visibleOnly && hiddenSheet) {
+                        skippedHidden = true;
+                        continue;
+                    }
                     if (name != null && part != null && archive.has(part)) {
                         sheets.putIfAbsent(name, part);
                     }
@@ -105,6 +117,10 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
             throw new UnreadableDocumentException("This workbook's sheet index could not be read.", e);
         }
 
+        if (sheets.isEmpty() && skippedHidden) {
+            throw new UnreadableDocumentException("This workbook has only hidden sheets, so there is no visible content to ingest. "
+                    + "Unhide a sheet, or set visibleTextOnly to false on the ingestion source to read hidden ones too.");
+        }
         if (sheets.isEmpty()) {
             // Some generators write no relationships. Part order is then the only
             // ordering available, and the numbers in the names are better than nothing.
@@ -167,6 +183,20 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         String cellType = null;
         int column = -1;
         StringBuilder cell = new StringBuilder();
+        boolean visibleOnly = limits.visibleTextOnly();
+        Set<Integer> hiddenColumns = new HashSet<>();
+        // A row hidden by hand is dropped; one hidden by an autofilter or collapsed by
+        // grouping is not (the file marks all of them hidden="1"; a filter's rows are
+        // recognised by the sheet's autoFilter element, which follows the data, and a
+        // group's by outlineLevel). So hidden rows are kept until the sheet is read.
+        boolean rowHidden = false;
+        int rowNumber = -1;
+        // The rows an autoFilter covers (1-based, inclusive), once its element is read.
+        int filterFrom = -1;
+        int filterTo = -1;
+        // Per kept row: its row number when it is hidden by hand (a candidate to drop),
+        // else -1.
+        List<Integer> handHiddenRows = new ArrayList<>();
 
         try (OpenXmlPackage.Part reader = OpenXmlPackage.readerFor(sheetXml)) {
             XMLStreamReader xml = reader.reader();
@@ -174,6 +204,21 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                 int event = xml.next();
                 if (event == XMLStreamConstants.START_ELEMENT) {
                     switch (xml.getLocalName()) {
+                        case "col" -> {
+                            if (visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml)) {
+                                addColumnRange(hiddenColumns, OpenXmlPackage.attribute(xml, "min"), OpenXmlPackage.attribute(xml, "max"),
+                                        limits.maxColumnsPerSheet());
+                            }
+                        }
+                        case "row" -> {
+                            rowHidden = visibleOnly && isOn(OpenXmlPackage.attribute(xml, "hidden")) && !isGrouped(xml);
+                            rowNumber = intOr(OpenXmlPackage.attribute(xml, "r"), -1);
+                        }
+                        case "autoFilter" -> {
+                            int[] range = rowRange(OpenXmlPackage.attribute(xml, "ref"));
+                            filterFrom = range[0];
+                            filterTo = range[1];
+                        }
                         case "c" -> {
                             cellType = OpenXmlPackage.attribute(xml, "t");
                             column = columnOf(OpenXmlPackage.attribute(xml, "r"));
@@ -186,10 +231,13 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
                     }
                 } else if (event == XMLStreamConstants.END_ELEMENT) {
                     if ("c".equals(xml.getLocalName())) {
-                        placeCell(row, column, resolve(cell.toString(), cellType, sharedStrings), limits);
+                        // A hidden column keeps its place, empty, so the others stay aligned.
+                        placeCell(row, column, hiddenColumns.contains(column) ? "" : resolve(cell.toString(), cellType, sharedStrings),
+                                limits);
                     } else if ("row".equals(xml.getLocalName())) {
                         if (row.stream().anyMatch(value -> !value.isEmpty())) {
                             rows.add(List.copyOf(row));
+                            handHiddenRows.add(rowHidden ? rowNumber : -1);
                         }
                         row = new ArrayList<>();
                     }
@@ -198,7 +246,73 @@ public class ExcelTextExtractor implements DocumentTextExtractor {
         } catch (XMLStreamException e) {
             throw new UnreadableDocumentException("A sheet in this workbook could not be read.", e);
         }
+        // A hidden row is kept when a filter can be the reason: it lies inside the
+        // autoFilter's range. A row hidden by hand outside any filter is dropped. (A
+        // row
+        // that is both grouped and explicitly hidden counts as grouped, and is kept.)
+        for (int i = rows.size() - 1; i >= 0; i--) {
+            int hiddenRow = handHiddenRows.get(i);
+            boolean insideFilter = filterFrom > 0 && hiddenRow >= filterFrom && hiddenRow <= filterTo;
+            if (hiddenRow >= 0 && !insideFilter) {
+                rows.remove(i);
+            }
+        }
         return rows;
+    }
+
+    private static int intOr(String value, int fallback) {
+        try {
+            return value == null ? fallback : Integer.parseInt(value.trim());
+        } catch (NumberFormatException e) {
+            return fallback;
+        }
+    }
+
+    /**
+     * {@code A1:C10} as {@code [1, 10]}; {@code [-1, -1]} when it cannot be read —
+     * then no row counts as filtered.
+     */
+    private static int[] rowRange(String ref) {
+        if (ref == null) {
+            return new int[]{-1, -1};
+        }
+        Matcher matcher = Pattern.compile("[A-Za-z]{1,3}(\\d{1,9})(?::[A-Za-z]{1,3}(\\d{1,9}))?").matcher(ref.trim());
+        if (!matcher.matches()) {
+            return new int[]{-1, -1};
+        }
+        int from = Integer.parseInt(matcher.group(1));
+        int to = matcher.group(2) == null ? from : Integer.parseInt(matcher.group(2));
+        return new int[]{Math.min(from, to), Math.max(from, to)};
+    }
+
+    /** A row or column in an outline group: collapsed, not hidden by its author. */
+    private static boolean isGrouped(XMLStreamReader xml) {
+        String level = OpenXmlPackage.attribute(xml, "outlineLevel");
+        try {
+            return level != null && Integer.parseInt(level.trim()) > 0;
+        } catch (NumberFormatException e) {
+            return false;
+        }
+    }
+
+    private static boolean isOn(String value) {
+        return value != null && (value.equals("1") || value.equalsIgnoreCase("true"));
+    }
+
+    /**
+     * {@code min} and {@code max} are 1-based and inclusive; kept to the columns
+     * that are read.
+     */
+    private static void addColumnRange(Set<Integer> columns, String min, String max, int maxColumns) {
+        try {
+            int from = Integer.parseInt(min.trim()) - 1;
+            int to = Math.min(Integer.parseInt(max.trim()) - 1, maxColumns - 1);
+            for (int column = Math.max(0, from); column <= to; column++) {
+                columns.add(column);
+            }
+        } catch (NumberFormatException | NullPointerException e) {
+            // A range that cannot be read hides nothing: the cells are kept.
+        }
     }
 
     /**

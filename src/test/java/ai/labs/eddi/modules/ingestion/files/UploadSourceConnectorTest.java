@@ -170,7 +170,10 @@ class UploadSourceConnectorTest {
         assertEquals(1, context.errors.size());
         assertNull(context.failedIds.get(0), "about the source, not a document");
         assertInstanceOf(SourceError.Transient.class, context.errors.get(0));
-        assertTrue(context.errors.get(0).reason().contains("the database is unwell"));
+        // The storage's own words stay in the log: what reaches a run record is fixed
+        // text.
+        assertFalse(context.errors.get(0).reason().contains("the database is unwell"));
+        assertTrue(context.errors.get(0).reason().contains("could not be listed"));
     }
 
     @Test
@@ -250,7 +253,8 @@ class UploadSourceConnectorTest {
                 () -> new UploadSourceConnector(broken).fetch(item, context.source()));
         assertInstanceOf(SourceError.Transient.class, e.error());
         assertFalse(e.error().isDefinitive());
-        assertEquals("read timed out", e.getMessage());
+        assertFalse(e.getMessage().contains("read timed out"), "the storage's own words are not for the run record");
+        assertTrue(e.getMessage().contains("could not be read from storage"), e.getMessage());
     }
 
     @Test

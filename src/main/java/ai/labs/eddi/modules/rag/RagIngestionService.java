@@ -18,7 +18,8 @@ import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
-import dev.langchain4j.store.embedding.EmbeddingStoreIngestor;
+import dev.langchain4j.data.embedding.Embedding;
+import java.util.List;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -90,6 +91,14 @@ public class RagIngestionService {
     static final String METADATA_KB_ID = KnowledgeBaseStorage.METADATA_KB_ID;
     /** Chunk metadata: the ingestion that wrote the chunk. */
     static final String METADATA_INGESTION_ID = "ingestionId";
+
+    /**
+     * Refuses a write into a vector space other than the one the store holds. Field
+     * injection keeps the constructor's shape; null in tests that build the service
+     * directly, which then skip the check.
+     */
+    @Inject
+    VectorSpaceGuard vectorSpaceGuard;
 
     @Inject
     public RagIngestionService(EmbeddingModelFactory embeddingModelFactory, EmbeddingStoreFactory embeddingStoreFactory,
@@ -184,6 +193,13 @@ public class RagIngestionService {
             // 2. Chunk
             DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.chunkSizeOrDefault(), ragConfig.chunkOverlapOrDefault());
 
+            // Before the store is even built — building may create its table at the
+            // configured size — and before a single document is embedded: a knowledge
+            // base whose embedding model changed would otherwise add new vectors next to
+            // the old ones.
+            if (vectorSpaceGuard != null) {
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, ragConfig);
+            }
             // 3. Embed + Store
             // DOCUMENT: these vectors are being stored. An asymmetric model embeds a
             // document differently from a query, and gets to know which.
@@ -192,8 +208,7 @@ public class RagIngestionService {
             // configuration is replaced rather than mixed with these vectors.
             EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
 
-            EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
-                    .build();
+            Embedder ingestor = new Embedder(splitter, model, ragConfigId, ragConfig);
 
             if (replace) {
                 ReentrantLock replaceLock = documentLock(ragConfigId, kbId, documentName);
@@ -211,14 +226,53 @@ public class RagIngestionService {
             LOGGER.infof("Ingestion %s completed for KB '%s'", ingestionId, sanitize(kbId));
 
         } catch (Exception e) {
-            ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + e.getMessage());
+            // The full failure — driver text, SQL — goes to the log only; the status is
+            // read by whoever can poll it.
+            ingestionState.put(statusKey(ragConfigId, ingestionId), "failed: " + RagFailures.clientMessage(e));
             LOGGER.errorf(e, "Ingestion %s failed for KB '%s': %s", ingestionId, sanitize(kbId), e.getMessage());
         }
     }
 
-    private void storeAndReplace(EmbeddingStoreIngestor ingestor, Document document, EmbeddingStore<TextSegment> store, String ragConfigId,
+    /**
+     * Splits, embeds and stores one document — what {@code EmbeddingStoreIngestor}
+     * does, except that the first embedding is checked against the knowledge base's
+     * vector space before anything is written.
+     */
+    private final class Embedder {
+        private final DocumentSplitter splitter;
+        private final EmbeddingModel model;
+        private final String ragConfigId;
+        private final RagConfiguration ragConfig;
+
+        private Embedder(DocumentSplitter splitter, EmbeddingModel model, String ragConfigId, RagConfiguration ragConfig) {
+            this.splitter = splitter;
+            this.model = model;
+            this.ragConfigId = ragConfigId;
+            this.ragConfig = ragConfig;
+        }
+
+        void ingest(Document document, EmbeddingStore<TextSegment> store) {
+            List<TextSegment> segments = splitter.split(document);
+            if (segments.isEmpty()) {
+                return;
+            }
+            List<Embedding> embeddings = model.embedAll(segments).content();
+            if (vectorSpaceGuard != null) {
+                // Again, now that the provider has answered: a re-embed may have started
+                // while this document was being embedded — on any node, so the record is
+                // read from the store, not from this node's cache.
+                vectorSpaceGuard.requireCompatibleForWrite(ragConfigId, ragConfig);
+            }
+            if (vectorSpaceGuard != null && !embeddings.isEmpty()) {
+                vectorSpaceGuard.verifyDimension(ragConfigId, ragConfig, embeddings.get(0).dimension(), true);
+            }
+            store.addAll(embeddings, segments);
+        }
+    }
+
+    private void storeAndReplace(Embedder ingestor, Document document, EmbeddingStore<TextSegment> store, String ragConfigId,
                                  String kbId, String documentName, String ingestionId, boolean replace) {
-        ingestor.ingest(document);
+        ingestor.ingest(document, store);
 
         // 4. Replace: remove what the document had before, AFTER the new version is
         // stored — a failure above leaves the previous version retrievable rather

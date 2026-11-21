@@ -348,7 +348,9 @@ class RestRagIngestionEvaluationTest {
 
         assertEquals(502, response.getStatus());
         assertEquals(1, body(response).get("queryIndex"));
-        assertTrue(error(response).contains("401 from provider"));
+        assertTrue(error(response).contains("Query 1"), error(response));
+        // The provider's own text is not for the caller.
+        assertFalse(error(response).contains("401 from provider"), error(response));
     }
 
     @Test

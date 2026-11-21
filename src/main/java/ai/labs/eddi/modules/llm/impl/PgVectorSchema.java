@@ -508,6 +508,46 @@ final class PgVectorSchema {
         }
     }
 
+    /**
+     * Whether {@code table} has the four columns EDDI's pgvector layout creates
+     * ({@code embedding_id}, {@code embedding} of type vector, {@code text},
+     * {@code metadata}). Anything else is not a table to delete from or drop: it is
+     * somebody else's.
+     */
+    static boolean layoutMatches(Connection connection, String table) throws SQLException {
+        String trimmed = table.trim();
+        String sql = "SELECT count(*) FROM pg_attribute a WHERE a.attrelid = " + regclass(isQualified(trimmed))
+                + " AND a.attnum > 0 AND NOT a.attisdropped AND ((a.attname = 'embedding' AND format_type(a.atttypid, NULL) = 'vector') "
+                + "OR a.attname IN ('embedding_id', 'text', 'metadata'))";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, trimmed);
+            try (ResultSet rs = statement.executeQuery()) {
+                return rs.next() && rs.getInt(1) == 4;
+            }
+        }
+    }
+
+    /**
+     * The vector size the table's {@code embedding} column was made for (its type
+     * modifier), or {@code null} when the table or column is absent or has no fixed
+     * size.
+     */
+    static Integer vectorDimension(Connection connection, String table) throws SQLException {
+        String trimmed = table.trim();
+        String sql = "SELECT a.atttypmod FROM pg_attribute a WHERE a.attrelid = " + regclass(isQualified(trimmed))
+                + " AND a.attname = 'embedding' AND NOT a.attisdropped";
+        try (PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, trimmed);
+            try (ResultSet rs = statement.executeQuery()) {
+                if (!rs.next()) {
+                    return null;
+                }
+                int modifier = rs.getInt(1);
+                return modifier > 0 ? modifier : null;
+            }
+        }
+    }
+
     private static boolean isQualified(String table) {
         return table.indexOf('.') >= 0;
     }
