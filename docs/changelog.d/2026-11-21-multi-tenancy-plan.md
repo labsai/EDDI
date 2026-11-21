@@ -72,8 +72,12 @@ The product owner decided three open points:
 - **Datastores.** MongoDB and PostgreSQL are both fully supported in the pooled tier. On
   MongoDB, which has no row-level security, the second layer is a guarded collection boundary
   that refuses unscoped commands, plus decode-time read verification.
-- **Moving an org to the dedicated tier** is an explicit platform-admin action, with no
-  automatic criteria.
+- **Moving an org** is an explicit platform-admin action, with no automatic criteria. Every
+  move must be easy and documented: own instance ↔ shared cluster, pooled ↔ dedicated,
+  cluster ↔ cluster, and MongoDB ↔ PostgreSQL. All of them share one versioned org bundle
+  and the same flow (preflight, resumable copy, freeze, verify, cutover, rollback). Each
+  move has a runbook in `docs/org-migrations.md` that is tested by someone performing it
+  from the doc alone.
 - **Break-glass** is granted by one platform admin with a reason and a time limit; the org's
   admins are notified, and four-eyes approval can be configured.
 

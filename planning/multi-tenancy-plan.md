@@ -1006,7 +1006,94 @@ the org's copy wins over the platform default.
   org. Ids are kept; any collision is a hard refusal with a report.
 - **Delete.** `DELETING` → crypto-shred → async purge of every Appendix B store and the
   archives → a deletion certificate in the platform ledger.
-- **Move tier** (Phase 7): copy, dual-read window, cutover.
+- **Move tier** (Phase 7): copy, dual-read window, cutover (§13.1).
+
+### 13.1 Org moves: easy, safe and documented (product owner requirement)
+
+An org's data must be easy to move in every direction, by EDDI's platform team or by any
+operator who runs EDDI, with no knowledge of EDDI's internals.
+
+**Supported moves:**
+
+| # | Move | Use case |
+|---|---|---|
+| M1 | Own instance (single mode, option A) → org on a shared cluster | Consolidate existing customer instances |
+| M2 | Org on a shared cluster → own instance | A customer outgrows the cluster, needs full isolation, or leaves |
+| M3 | Pooled tier ↔ dedicated tier (same cluster) | A large or regulated customer gets its own database, or comes back |
+| M4 | Org → org on another shared cluster | Rebalancing, region change, datastore change |
+| M5 | Between datastores (MongoDB ↔ PostgreSQL), combined with any move above | Change of datastore |
+
+**One mechanism behind all of them.** All five moves use the same **org bundle**, a
+versioned, logical, datastore-neutral format, produced by export and consumed by import:
+- `manifest.json`: format version, source EDDI version, org id, record counts and
+  checksums per store, created-at;
+- one stream per `OrgDataCatalog` store;
+- attachments and archives as blobs;
+- the audit chain with its key ids;
+- secret **metadata** only.
+
+The bundle is signed with the source deployment's export key.
+
+- **Secrets never travel in plain text.** They are either:
+  - re-entered at the target (the import report lists them); or
+  - rewrapped for the target's public key in an optional encrypted section
+    (`--with-secrets --recipient <target-pubkey>`).
+- **Ids are kept**, so references, conversations and links survive. An id collision at the
+  target is a hard refusal with a report, never a silent rename.
+- **Dedicated-tier moves (M3)** don't copy files around. They use the same streams between
+  two databases in the same cluster, through `OrgDatabaseRouter`.
+
+**Every move follows the same five steps:**
+1. **Preflight** (`--dry-run`), which changes nothing. It checks:
+   - versions are compatible;
+   - the target is enabled for orgs (or is empty, for M2);
+   - no id or hostname collisions;
+   - quotas and capacity at the target;
+   - required IdP and hostname mappings;
+   - secret handling.
+
+   It outputs a report with every blocker and its fix.
+2. **Copy.** Resumable, idempotent, throttled and checkpointed. The source stays live.
+3. **Freeze.** The org is set `SUSPENDED` (or read-only) on the source for the final delta;
+   writes are refused with a clear message.
+4. **Delta copy and verify.** Record counts and checksums per store must match the
+   manifest, and a sample of conversations and agents is read back through the API at the
+   target.
+5. **Cutover.** Switch the routing (hostnames, `/v1` keys, IdP binding, webhook URLs shown in
+   the report), activate the org at the target, and keep the source **suspended, not
+   deleted**, for a retention window (`eddi.org.move.source-retention-days`, default 14).
+
+**Rollback** before the retention window ends: reactivate the source and revert the
+routing. This is a single command.
+
+**Operator surface.** The same operation is exposed through:
+- REST: `POST /platform/orgs/{orgId}/moves`, `GET /platform/orgs/{orgId}/moves/{moveId}`
+  (status, progress, report), `POST …/moves/{moveId}/{verify|cutover|rollback}`;
+- MCP platform tools;
+- the platform Operator, which can walk an admin through a move;
+- a Manager platform-console wizard showing preflight, progress, verify and cutover;
+- a CLI wrapper script under `scripts/`, for operators without the UI.
+
+Every step writes to the platform audit ledger and to the org's ledger.
+
+**Documentation (a deliverable, not an afterthought):** `docs/org-migrations.md`, listed in
+`docs/SUMMARY.md`, with:
+- one runbook per move (M1–M5): prerequisites, the exact commands and UI steps, the expected
+  output of each step, how long it takes on reference data sizes, how to verify, how to roll
+  back, and what to tell the customer (URLs, webhooks, keys that change);
+- a troubleshooting section keyed by every preflight blocker and error code;
+- the bundle format specification (versioned, so third parties can read it).
+
+`docs/multi-org.md` links to it.
+
+**Tests.** `OrgMoveIT` runs, on both datastores and across them:
+- M1, M2, M3 and M5 round trips (M4 is M2 + M1);
+- a kill-and-resume mid-copy;
+- a forced checksum mismatch (verify must fail);
+- a rollback.
+
+Every round trip must pass the conformance suite at the target and leave the source intact
+until the retention window ends.
 
 ---
 
@@ -1075,7 +1162,8 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
   fallback counter stays 0, and the load test stays within 3 %.
 - **Floor guard.** An IT sets `layout.required` above the binary's level and expects startup
   to be refused.
-- **Docs.** Write `docs/multi-org.md` (operations) and `docs/multi-org-security.md` (STRIDE
+- **Docs.** Write `docs/multi-org.md` (operations), `docs/org-migrations.md` (§13.1 runbooks
+  and the bundle spec) and `docs/multi-org-security.md` (STRIDE
   threat model per entry point), and add both to `docs/SUMMARY.md`.
 - **Pentest.** An external pentest happens before the first external org.
 
@@ -1223,27 +1311,42 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
 
 **Tasks:**
 
-1. `/platform/orgs` (create, suspend, resume, export, delete) and instance-as-org import (§13).
-2. The Manager platform console (orgs, status, quotas, usage, enablement, members) and the
-   org admin's settings. The Workforce org switcher. Read `ui/manager/AGENTS.md` and
-   `ui/workforce/AGENTS.md` first.
-3. Optional: the `issuer` resolver.
+1. `/platform/orgs` (create, suspend, resume, delete) (§13).
+2. **Org moves M1, M2, M4, M5 (§13.1):**
+   - the org bundle format and its spec;
+   - export and import with preflight, resumable copy, freeze, delta, verify, cutover and
+     rollback;
+   - the REST and MCP surface and the CLI script;
+   - `OrgMoveIT`;
+   - `docs/org-migrations.md` with the M1, M2, M4 and M5 runbooks.
+3. The Manager platform console (orgs, status, quotas, usage, enablement, members, **the move
+   wizard**) and the org admin's settings. The Workforce org switcher. Read
+   `ui/manager/AGENTS.md` and `ui/workforce/AGENTS.md` first.
+4. The platform Operator learns moves. Bump the Operator revision.
+5. Optional: the `issuer` resolver.
 
 **Exit:**
 
 - A create → use → export → delete round trip leaves nothing behind.
-- An option-A export imports as an org and passes the conformance suite.
+- `OrgMoveIT` is green for M1, M2 and M5, on both datastores and across them, including
+  kill-and-resume, checksum failure and rollback.
+- **A person who has not seen the code performs M1 and M2 using only
+  `docs/org-migrations.md`,** on a test deployment. Every step where they got stuck is fixed
+  in the doc or the tooling before the phase closes.
 
 ### Phase 7 — Dedicated tier and scale (~4–6 PRs)
 
 **Tasks:**
 
-1. `OrgDatabaseRouter` and online tier moves.
+1. `OrgDatabaseRouter`, plus tier move M3 on the §13.1 mechanism. It uses the same REST,
+   MCP, wizard and CLI entry points, and adds an M3 runbook to `docs/org-migrations.md`.
 2. Lazy agent deployment with an LRU working set.
 
 **Exit:**
 
 - The conformance suite is green with one pooled and one dedicated org.
+- `OrgMoveIT` covers M3 in both directions.
+- The M3 runbook passes the same "performed from the doc alone" test.
 - A 1,000-org load test is documented: startup, heap, p95.
 
 ---
@@ -1263,7 +1366,7 @@ change later.
 | 6 | Trust model for author-supplied infra | SSRF forced on; derived, hashed RAG names; per-org LLM keys by default; host-bound anonymous access; NATS signature v2 | LOCK |
 | 7 | IdP | Keycloak Organizations, matched by org id from the access token; `issuer` later | LOCK (after Spike B) |
 | 8 | Key hierarchy and AAD | Per-org KEK; AAD v2 with the org, v1 kept for `default`; KMS later | LOCK |
-| 9 | Moving an org to the dedicated tier | No automatic criteria. A platform admin moves an org explicitly (§13 "Move tier"), informed by the per-org usage API. The plan provides the mechanism, not a policy | decided |
+| 9 | Moving an org | No automatic criteria; a platform admin moves an org explicitly, informed by the per-org usage API. **Every move (M1–M5) must be easy and fully documented** (product owner, 2026-11-21): one bundle mechanism, preflight, resumable copy, verify, cutover, rollback, a runbook per move (§13.1). LOCK the bundle format in the ADR, because third parties will depend on it | decided |
 | 10 | Cross-org features | None; cross-org A2A only as external peers | recommend |
 | 11 | Data residency | `region` field reserved | recommend |
 | 12 | Datastores for the pooled tier | **Both MongoDB and PostgreSQL, fully supported and equally tested** (product owner, 2026-11-21). Second layer: RLS on Postgres; on Mongo the guarded collection boundary plus decode-time read verification (§8.5a). The conformance suite and the backstop run (§14.1 step 4) run on both | decided (LOCK the §8.5a design after Spike D) |
@@ -1589,6 +1692,7 @@ Example: in `PostgresUserMemoryStore`, `ON CONFLICT (user_id, key) WHERE visibil
 | `eddi.org.agents.max-resident` | (unset = eager) | Phase 7 |
 | `eddi.org.multi.preview-acknowledged` | `false` | Required for multi mode until the pentest |
 | `eddi.org.break-glass.require-second-approver` | `false` | Four-eyes approval for break-glass (§9.3) |
+| `eddi.org.move.source-retention-days` | `14` | How long a moved org's source stays suspended for rollback (§13.1) |
 | `eddi.datastore.postgres.migration-username` / `-password` | (main credentials) | Optional role split (§8.4) |
 | `quarkus.http.cors.headers` | add `x-eddi-org` | §7.3 |
 
@@ -1602,4 +1706,5 @@ Example: in `PostgresUserMemoryStore`, `ON CONFLICT (user_id, key) WHERE visibil
 - **Marker, layout and migration:** `OrgMarker`, `IOrgMarkerStore`, `DataLayoutGuard`, `OrgEnablementMigration`, `OrgIntegrityCheck`, `OrgDataCatalog`.
 - **Data access:** `OrgCollections`, `OrgSql`, `OrgRlsPoolInterceptor`, `OrgGuardedMongoDatabase`, `OrgGuardedCollection`, `OrgReadVerifier`, `OrgKey<K>`, `OrgDatabaseRouter` (Phase 7).
 - **Jobs:** `OrgIterator` (Phase 5).
+- **Moves:** `OrgBundle` (format + manifest), `OrgExporter`, `OrgImporter`, `OrgMoveService`, `OrgMovePreflight` (§13.1).
 - **Tests:** `MultiOrgConformanceIT`, `OrgTestProfile`.
