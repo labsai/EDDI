@@ -15,7 +15,7 @@ and was revised after an adversarial review. It covers four items:
 
 It also explains why agent sandboxing is out of scope.
 
-**Fact-checked against `main` @ `a2acb28e86` the same day.** Every "(verified)" claim was
+**Fact-checked against `main` @ `a2acb28e86` the same day.** The "(verified)" claims were
 re-checked in source and in the jars. Corrections are marked *Fact-check* in the plan:
 
 - the system-prompt cap is opt-in, and the rolling summary is appended after it;
@@ -29,23 +29,42 @@ re-checked in source and in the jars. Corrections are marked *Fact-check* in the
 - `StepUpAuthenticationPolicy` is internal to Quarkus;
 - the parity test's tool count was wrong, and a tier map would make it circular.
 
+**A second adversarial review then found what the fact-check missed.** Its corrections are
+marked *Second review* in the plan:
+
+- In quarkus-mcp-server 2.0.4 a `ToolFilter` that throws fails **open**: the tool is
+  listed and callable. So the role filter must catch everything and return `false`.
+- There is no server-side `tools/list` cache. `ttlMs` and `cacheScope` are response hints,
+  and a per-caller list needs `cacheScope: PRIVATE`.
+- The agent and tool-loop path builds its own system message (`LlmTask.java:822`), so the
+  marker has to go inside `composeSystemMessage` or on both paths.
+
+The design gaps it found are listed in a new "Second review" section, undecided:
+
+- `call`-scope canaries are disarmed after a pause;
+- one leaked marker poisons every conversation under `agent` scope;
+- a more specific approval rule drops step-up for that call;
+- step-up must follow per-call decisions;
+- changing a connection to token exchange re-points existing editor-authored references.
+
 ### Design decisions
 
-- The canary marker is applied **after** `capSystemPrompt` and is scrubbed from
-  `AUDIT_COMPILED_PROMPT`. It is kept in the pause transcript. Its only action is `block`.
+- The canary marker goes at the tail of the final system message, after the cap and the
+  rolling summary. It is kept in the pause transcript. Its only blocking action is `block`;
+  the INPUT entry is `warn`.
 - The role filter applies only to `TOOLS_LIST`. In quarkus-mcp-server, `tools/call`
   goes through the same filter, so filtering there would turn `FORBIDDEN` into
-  "not found".
+  "not found". The filter fails closed.
 - Token exchange sends the subject token only to the validating tenant's discovery
   `token_endpoint`, and checks that on every resolve. It fails closed on HITL resume and
   on scheduled calls, and on `/v1` under the default `permit` policy (allowing it under
   `authenticated` is left open). Exchanged tokens are cached in memory only, which is a
   §12 carve-out still to be agreed.
-- Step-up merges `acr` by intersection and `maxAge` by minimum, across every matched
-  rule, into a separately persisted field. Only approvals need step-up; rejections
-  never do.
+- Step-up merges `acr` by intersection and `maxAge` by minimum into a separately persisted
+  field. Only approvals need step-up; rejections never do. Which rules and calls the merge
+  covers is an open gap.
 
 ### What's next
 
-Item 1 of the suggested order, `McpToolTiers`, has no gate. The others wait on the
-gates the plan lists.
+Item 1 of the suggested order, `McpToolTiers`, is built on `refactor/mcp-tool-tiers`
+(not yet merged). The others wait on the gates and open gaps the plan lists.

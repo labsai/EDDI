@@ -6,6 +6,33 @@
 
 > **Provenance.** **(verified)** means checked in this repository, or in the jars it builds against, with a file reference. **(external)** means the claim comes from the video summary and has not been checked against the MCP specification, LangChain4j or Keycloak; check it before relying on it (AGENTS.md §2 rule 7). **(unverified)** means an open question that must be settled before or during the build.
 
+## Second review (2026-11-21): open design gaps and corrections
+
+A second adversarial review followed the fact-check. Its corrections to facts are written into the sections as *Second review* notes: the filter fails open (§2), there is no server-side list cache (§2), and the agent path builds its own system message (§1). The points below are **design gaps**. They are not decided here; each needs a decision before its item is built.
+
+- **§1, `call` scope across a pause.** The detector gets its token from `GuardrailContext.canaryToken`, set by `LlmTask`. On resume the restored system message holds the *old* random token, so a freshly generated one never matches, and the canary is silently disarmed. When the transcript was omitted (`ToolApprovalGateSupport.java:347-349`), `fallbackRebuildMessages` has no marker at all. Either recover the token from the transcript, or persist it with the pause, or drop `call` scope.
+- **§1, poisoning under `agent` scope.** "Knowing the marker only lets someone trigger the guardrail" understates it. Under `agent` scope, one leaked marker planted in shared content (a RAG document, a fetched page, a tool result, long-term memory, a group transcript) makes every answer that quotes it `block`, for every user of the agent. The INPUT `warn` does not help: it screens only user messages (`GuardrailService.screenHistory`, `:521-530`), and it re-screens earlier user messages each turn, so one pasted marker repeats the audit event on every turn.
+- **§1, audit scrub target.** `:1216` stores the system prompt *before* the summary is composed. If the marker goes after the summary, `:1216` never contains it. Then the scrub is moot, and the audit does not show what the model saw. Decide which prompt the audit records.
+- **§1, actions.** "`block` only" means for OUTPUT and TOOL_CALL. The INPUT entry is `warn` by design.
+- **§4, step-up can be dropped per call.** `ToolApprovalRules.compile` (`:149-161`) sorts rules most-specific-first, and `firstMatch` returns one rule per call. If `http.*` sets `requiredAuthLevel` and a narrower `http.post:/agentstore/agents` only tunes `timeoutPolicy`, that call loses step-up. Merge `requiredAuthLevel` across every rule that matches a call, or warn at save time about shadowed rules.
+- **§4, per-call decisions.** Batches are decided per call (`HitlDecision.getToolDecisions()`), and edited approvals exist (`APPROVED_EDITED`). A batch-level `effectiveAuthLevel` would demand step-up from someone who approves only the harmless call and rejects the gated one, which contradicts "only approval needs step-up". Compute the level over the calls being approved, edited ones included. "Empty intersection → reject only" is then also too broad when a subset could be approved.
+- **§4, auth off.** Refusing to deploy an agent with `requiredAuthLevel` when auth is off also refuses a production agent imported into a dev instance. State that trade-off.
+- **§4, challenge.** "The failure response reuses Quarkus' step-up challenge" means matching its format. EDDI emits the challenge itself (see the §4 fact-check).
+- **§3, re-pointing an existing reference.** `CallerTokenAuthorPolicy` matches the literal `${caller:token}` (`:80`, `:125`). An exchange connection is referenced as `${connection:name}`, which carries no author rule. An editor saves an agent that references connection `crm` while it is `API_KEY`. An admin later changes `crm` to `OAUTH2_TOKEN_EXCHANGE`. Every existing editor-authored reference now spends the token of whoever chats, admins included: the confused deputy the `CallerIdentityResolver` javadoc (`:52-59`) describes. Needed: a resolve-time author check, or re-validation of referencing configs when a connection's type changes.
+- **§3, more sites than `isOAuth()`.** A new `AuthType` and `Binding` also reach the binding matrix in `ConnectionConfiguration.java:258-272` and `:425-430`, `OAuthTokenService:658` and `RestConnectionAuthorization:143`/`:558`. `OAuthConfig` has `audience` (`:110`) but no `resource` field yet.
+- **§1, compatibility with a pre-6.7 EDDI.** An EDDI that does not know `toolCallGuardrails` at all behaves as Jackson treats unknown properties. Not verified.
+- **Citations.**
+  - `ToolCallGuardrailValidation.java:28-31` is the class javadoc; the refusal code is at `:82-86`.
+  - `system:*` tool decisions are described at `docs/hitl.md:192` and `:485`; `:322` is about group TASK-gate budgets.
+  - `docs/mcp-server.md:898` says `/mcp` cannot be opened selectively; it does not itself say an unauthenticated `tools/list` is refused.
+  - §12's wording is "Not accept a client-supplied header as the grant principal — ever."
+- **Not yet checked:**
+  - whether `"*"` passes `ToolApprovalPatterns.validate`;
+  - the `token_endpoint` host in Keycloak's discovery document under `KC_HOSTNAME` (it matters for the exact-match rule);
+  - how a caller token survives the NATS coordinator running a turn on another replica;
+  - the streaming path's system-message source;
+  - that the side-call builders carry no system prompt.
+
 ## 0. Out of scope: agent sandboxing
 
 ISX-style system-container sandboxes and credential-injecting TLS proxies guard an agent that runs arbitrary code with credentials in its environment. EDDI does neither:
@@ -50,6 +77,8 @@ A marker appended before step 5 is silently cut from any long prompt. So:
   - `ToolLoopResumer.fallbackRebuildMessages` (verified: it rebuilds from the raw `systemMessage` parameter at `:543-562`, so today that path would carry no marker);
   - any cascade step that rebuilds messages.
 - The tool loop and cascade reuse the message list built once, so they inherit the marker. A test per path pins this: normal, cascade, tool loop, resume, degraded resume, streaming.
+
+> *Second review: the agent and tool-loop path builds its own string.* `LlmTask.java:822` composes `agentSystemMessage = composeSystemMessage(systemMessage, summaryPrefix)`, and `:823` strips the history builder's leading `SystemMessage` only when it is exactly equal (`withoutLeadingSystemMessage`). `agentSystemMessage` then goes to the cascade and the tool loop (`:889`, `:980`, `:992`, `:1025`). So "the tool loop and cascade inherit the marker" is false. Running the helper only inside `ConversationHistoryBuilder` would break this path: `:822` would recompose the prompt without the marker, the strip would miss, and the loop would receive two system messages. The consistent placements are inside `composeSystemMessage` itself, or on both the builder input and `:822`. Add tests for "rolling summary active" and "agent mode with a summary". Also, the helper runs after the cap and the summary is never capped, so nothing truncates the marker: drop "replaces the tail of the prompt", which would only destroy author text.
 - Side calls do not carry the system prompt and so need no marker: the summarizer, the title generator and the convergence judge. Group member turns are ordinary `LlmTask` turns and are covered. (unverified: confirm each side-call builder while implementing.)
 
 ### Token scope
@@ -134,9 +163,13 @@ Revision 1 called this "disclosure, not enforcement". That was wrong. In quarkus
 
 `FilterContext` carries no identity (verified with `javap`). The extension's operation path calls `contextStart()`, which sets the current identity (verified in review, not tested), so injecting `SecurityIdentity` into the filter bean will probably work for `tools/list` over HTTP. **Prove it with a test first.** If it fails, stop and raise it with the extension; do not key anything on the connection id.
 
+> *Second review: the filter must not throw.* quarkus-mcp-server 2.0.4 runs each `ToolFilter` inside a `RuntimeException` handler. On an exception it logs "Unable to apply filter", skips that filter and returns **true** (`ToolManagerImpl.test`, verified with `javap`), and `getInvoker` uses the same method for `tools/call`. An identity lookup that throws (`ContextNotActiveException`, say) would therefore show every tool, and on `TOOLS_CALL` would bypass today's name whitelist, which is the second line of defence against langchain4j `@Tool` beans. So the filter catches everything itself and returns `false`. A test makes the identity lookup throw and asserts the tool is hidden *and* not callable. A test that only proves identity works passes with this path still open.
+
 ### Caching and paging
 
 `ToolMessageHandler.toolsList` honours `tools().ttlMs()` and `cacheScope()` and paginates (verified in review). A list that differs per caller must not be cached across callers. Pin the extension's cache to per-connection scope, or disable it, and test that paging over a filtered list is stable.
+
+> *Second review: there is no server-side cache to pin.* `ttlMs` and `cacheScope` only go into the response as hints (`MessageHandler.putCacheControl`). `CacheScope` has exactly two values, `PUBLIC` and `PRIVATE`, and a stateless protocol version with nothing configured emits `PUBLIC` with `ttlMs: 0` (verified with `javap`). The action is to set `cacheScope` to `PRIVATE` once the list differs per caller, so a shared client or intermediary does not hand one caller's list to another. The §5 test "no cross-caller caching" becomes "a filtered `tools/list` response carries `cacheScope: PRIVATE`".
 
 ### Clients that see a different list
 
@@ -273,15 +306,15 @@ Unit tests with JUnit 5 and Mockito, plus ITs where a real store or HTTP is need
 
 | Item | Tests |
 | --- | --- |
-| §1 | Marker present on each path (normal, cascade, tool loop, resume, degraded resume, streaming); survives `capSystemPrompt`; scrubbed in `AUDIT_COMPILED_PROMPT`; `redact` refused at save; input `warn` does not refuse; mutation check (remove the injection, so the leak test must fail) |
-| §2 | List filtered per role; a call to a hidden tool still returns `FORBIDDEN` through the real handler; parity test reads `McpToolTiers`; union tier for argument-dependent tools; no cross-caller caching; paging over a filtered list |
+| §1 | Marker present on each path (normal, cascade, tool loop and agent mode, resume, degraded resume, streaming, rolling summary active); marker at the tail after the summary; scrubbed wherever the audit stores the prompt the model saw; `redact` refused where `disclosure` enforces it (output: deploy; tool-call: save); input `warn` does not refuse; `call` scope across a pause; mutation check (remove the injection, so the leak test must fail) |
+| §2 | List filtered per role; a call to a hidden tool still returns `FORBIDDEN` through the real handler; a filter whose identity lookup throws hides the tool and refuses the call (fail closed); the tier map equals the parity test's hand-written record, and every tool is measured (`McpVersionTools` included); union tier for argument-dependent tools; a filtered list carries `cacheScope: PRIVATE`; paging over a filtered list |
 | §3 | Token endpoint mismatch refused at save and resolve (via ZIP import); every fail-closed row; cache expiry and bound; LLM/embedding/vector binding refused; IT against Keycloak for the real exchange |
 | §4 | Field-wise merge across a mixed batch; empty `acr` intersection; persistence round trip of `effectiveAuthLevel`; approve refused and reject allowed on Slack/MCP; decision-time conversion of automated approvals; deploy refused with auth off |
 
 ### Docs and operator
 
-- §1 → [`docs/tool-call-guardrails.md`](../docs/tool-call-guardrails.md) plus the output-guardrail page.
-- §2 → [`docs/mcp-server.md`](../docs/mcp-server.md) (Tool Filtering, the tool count).
+- §1 → [`docs/tool-call-guardrails.md`](../docs/tool-call-guardrails.md) plus the output guardrails in [`docs/langchain.md`](../docs/langchain.md) ("Input and Output Guardrails"; there is no separate page).
+- §2 → [`docs/mcp-server.md`](../docs/mcp-server.md) (Tool Filtering, Role Mapping). The documented count of 120 is right; what was stale was the parity test.
 - §3 → [`docs/connections.md`](../docs/connections.md).
 - §4 → [`docs/hitl.md`](../docs/hitl.md).
 - A `docs/changelog.d/` fragment per item.
@@ -295,8 +328,8 @@ Unit tests with JUnit 5 and Mockito, plus ITs where a real store or HTTP is need
 
 | # | Item | Size | Gate before starting |
 | --- | --- | --- | --- |
-| 1 | `McpToolTiers` single source (§2) | S | None; removes tier drift on its own |
-| 2 | Canary guardrail (§1), without the overlap companion | M | None left: `GuardrailModelClient` was checked and forwards no system message. Decide where the marker goes relative to the rolling summary |
-| 3 | Role-aware `tools/list` (§2) | S | Identity-in-filter spike passes |
-| 4 | Step-up on approvals (§4) | M–L (backend, two UIs, realm) | Confirm the resume path sees `acr` / `auth_time` |
-| 5 | Token exchange (§3) | M–L | Keycloak 26.8 exchange check; §12 carve-out agreed |
+| 1 | `McpToolTiers` single source (§2) | S | None. Built on branch `refactor/mcp-tool-tiers` (not yet merged) |
+| 2 | Canary guardrail (§1), without the overlap companion | M | `GuardrailModelClient` was checked and forwards no system message. Still open: marker placement (inside `composeSystemMessage`, see the agent-path note), `call` scope across a pause, poisoning under `agent` scope |
+| 3 | Role-aware `tools/list` (§2) | S | Identity-in-filter spike passes, *and* the filter is proven to fail closed when the lookup throws |
+| 4 | Step-up on approvals (§4) | M–L (backend, two UIs, realm) | Confirm the resume path sees `acr` / `auth_time`; decide per-call shadowing and per-call decisions (open gaps below) |
+| 5 | Token exchange (§3) | M–L | Keycloak 26.8 exchange check; §12 carve-out agreed; `/v1` under `http-policy=authenticated` decided; connection-type change re-validation decided |
