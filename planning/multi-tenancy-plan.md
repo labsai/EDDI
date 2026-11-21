@@ -1,845 +1,1533 @@
 # Multi-Tenancy Plan — Shared Organizations on One EDDI Cluster
 
-**Status:** Design approved for implementation, nothing of the org model built yet. Shipped
-pieces this plan builds on: tenant quotas on Mongo and Postgres
-([`docs/tenant-quotas.md`](../docs/tenant-quotas.md)), per-user/team workspaces
-([`docs/workspaces.md`](../docs/workspaces.md)), per-tenant DEKs in the vault
+**Status:** Design ready for implementation. Nothing of the org model is built yet. It builds on
+shipped work: tenant quotas ([`docs/tenant-quotas.md`](../docs/tenant-quotas.md)), workspaces
+([`docs/workspaces.md`](../docs/workspaces.md)) and per-tenant DEKs
 ([`docs/secrets-vault.md`](../docs/secrets-vault.md)).
-**Created:** 2026-04-17 · **Rewritten:** 2026-11-19. This version replaces the April draft
-entirely. The April draft's "Strategy B" (a `@RequestScoped TenantContext`, filtering in
-`MongoResourceStorage`/`PostgresResourceStorage` only, Phase 4 as a one-line change) was
-verified against the code and **does not work**. §2 says why. Do not resurrect it.
-**Scope:** backend first (EDDI repo), then Manager/Workforce, Helm and docs.
-**Audience:** a coding agent picking this up cold. Everything needed is in here. Counts
-and file lists were taken from `main` at `985ebb608f` (2026-11-19). Re-run the commands in
-Appendix A before relying on a count, because they drift.
 
-Read first, in this order: `AGENTS.md` (§2 workflow rules and §4 Java rules are binding),
-[`docs/project-philosophy.md`](../docs/project-philosophy.md),
-[`docs/workspaces.md`](../docs/workspaces.md), [`docs/security.md`](../docs/security.md),
-[`docs/secrets-vault.md`](../docs/secrets-vault.md), [`docs/clustering.md`](../docs/clustering.md),
-then this file.
+**History:**
+- 2026-04-17: created.
+- 2026-11-19: rewritten.
+- 2026-11-21: revised three times after independent reviews. This is the final version.
+
+The 2026-04 "Strategy B" design (a `@RequestScoped TenantContext` with filtering only in the
+generic storage SPI) does not work against the current code (§3.2). Do not resurrect it.
+
+**Facts as of** `main` at `985ebb608f` (2026-11-19). Counts drift. Re-run the commands in
+Appendix A before relying on any count.
 
 ---
 
-## 0. Goal, non-goals, hard requirements
+## 0. Execution brief: read this first if you are implementing the plan
 
-**Goal.** Several customers ("organizations", §1) share one EDDI cluster: the same pods,
-the same database server, the same NATS. Each org's data, configuration, secrets, identity,
-spend and operations are isolated as strongly as if it had its own instance. The operator
-is a platform team that runs the cluster.
+You are implementing this plan in the EDDI repository: Java 25, Quarkus, MongoDB **or**
+PostgreSQL, NATS JetStream, Keycloak 26.8. `AGENTS.md` loads automatically and is binding.
+In particular:
+
+- **Branching.** Branch from `origin/main`:
+  `git fetch origin main && git checkout -b feat/org-<phase>-<slug> origin/main`.
+  If the worktree tool gave you a `claude/*` branch, rename it before the first commit.
+- **Push and merge.** Never push without the user's explicit approval. Never force-push.
+  Never merge without a completed CodeRabbit review (AGENTS §2 rule 4).
+- **Commits.** Stage files by name only. Every commit must build with `./mvnw compile`
+  (Windows: `.\mvnw.cmd`).
+- **Changelog.** Every PR adds a fragment under `docs/changelog.d/YYYY-MM-DD-<slug>.md`.
+  Give its relative links one extra `../`. Never edit `docs/changelog.md` by hand.
+- **Attribution.** No AI attribution anywhere.
+- **Tests before pushing.** Run the plain `./mvnw test`. Targeted `-Dtest=` runs skip the
+  repo-wide guards. Redirect Maven output to a file and check the exit code; never pipe it
+  through `grep`.
+- **Formatting.** Format with `./mvnw formatter:format`. Checkstyle fails on unused imports
+  in `src/main/java`.
+- **Reading.** Read [`docs/project-philosophy.md`](../docs/project-philosophy.md), then the
+  docs each phase names.
+
+**How to proceed:**
+
+1. Read this whole file once.
+2. **Phase 0 is a stop point.** Run the three spikes (§15 Phase 0) and write the ADR (§16
+   LOCK items) and the threat model. Present them to the user. Write no production code
+   until the user approves.
+3. Do the phases strictly in order (§15). **Stop after each phase**, report against its exit
+   criteria, and wait for the user. Every item marked **STOP** in this file needs a decision
+   from the user before you continue.
+4. Keep PRs small, one package each.
+5. Single-tenant behaviour must not change in any phase (§5.1). If a change would alter it,
+   stop and ask.
+6. Where this plan and the code disagree, the code wins. Verify, adapt, and record the
+   deviation in the PR description and in the §16 Deviations log.
+7. A store, entry point, setting or leak path this plan does not list goes into Appendix A/B
+   and §3.3 in the same PR.
+
+---
+
+## 1. Goal, requirements, non-goals
+
+**Goal.** Several customers ("organizations", §2) share one EDDI cluster: the same pods, the
+same database server, the same NATS. Each org's data, configuration, secrets, identity, spend
+and operations are isolated as if it ran on its own instance. A platform team runs the cluster.
 
 **Hard requirements (from the product owner):**
 
-1. **Super secure.** A missed check in one endpoint must not be enough to leak data
-   between orgs. Defense in depth, fail closed, provable by tests.
-2. **Zero pain with one tenant.** A deployment that never uses multi-tenancy needs no new
-   configuration, keeps its roles, URLs, UI and performance, and upgrades without manual
-   steps. **Both modes must work flawlessly**, so both modes are tested in CI on every PR.
-3. **Well designed, future-proof, scalable.** Thousands of small orgs in a pooled tier.
-   Large or regulated orgs can move to a dedicated tier (own database) or out to their
-   own instance without code changes.
+1. **Super secure.** A missed check in one place must not be enough to leak data between
+   orgs. Defense in depth, fail closed, proven by tests.
+2. **Zero pain with one tenant.** A deployment that never enables multi-tenancy needs no new
+   configuration and no manual migration step. Its roles, URLs, UI, behaviour and
+   performance stay the same. The only upgrade-time change is that Phase 1 adds a defaulted
+   `org_id` column on PostgreSQL (§5.2), automatically and as a metadata-only change.
+   **Both modes must work flawlessly**, and CI tests both on every PR.
+3. **Well designed, future-proof, scalable.** Thousands of small orgs share a pooled tier.
+   Large or regulated orgs move to a dedicated tier or to their own instance without code
+   changes. An existing single instance can be imported as an org.
 
-**Non-goals (for this plan):** cross-org features (shared agent marketplace, cross-org
-group conversations, cross-org user memories), billing/invoicing, data residency across
-regions. Keep the seams open (§12 Open decisions), but do not build them.
+**Non-goals:**
 
-**Context:** the owner already runs "one EDDI instance per customer" (Helm release per
-namespace, chart NetworkPolicy, own DB, own NATS, own Keycloak realm, own vault master key).
-That stays the top isolation tier and the fallback for customers who need it.
+- cross-org features: marketplace, cross-org groups or memories, cross-org A2A except as
+  external peers;
+- billing;
+- multi-region residency.
+
+Leave the seams open for these (§16).
+
+**Context.** The owner already runs one EDDI instance per customer: a Helm release per
+namespace with NetworkPolicy, its own DB, NATS, realm and master key. That stays the top
+isolation tier.
 
 ---
 
-## 1. Terminology — read this before touching code
+## 2. Terminology (binding)
 
-The word **tenant** already means three different things in EDDI. A fourth meaning would
-be a permanent bug source, so the customer boundary is called an **organization (org)**.
+"Tenant" already means three things in EDDI, so the customer boundary is called an
+**organization (org)**.
 
-| Term | Meaning | Where it lives today |
+| Term | Meaning | Where |
 |---|---|---|
-| **org** (NEW) | The customer isolation boundary. Every piece of customer data belongs to exactly one org. | This plan |
-| vault / variables **tenant** | Namespace inside the secrets vault and global variables: `default`, plus per-space tenants `t.<slug>.<hash>` (team) and `u.<slug>.<hash>` (user) | `secrets/model/SecretReference.java` (`tenantId, keyName`), `engine/security/spaces/SpaceTenants.java`, `${vault:<tenant>/key}`, `${vars:<tenant>/key}` |
-| quota **tenant** | Key of the quota/usage counters, always `eddi.tenant.default-id` today | `engine/tenancy/*`, `/administration/quotas/{tenantId}` |
-| Quarkus OIDC **tenant** | An IdP configuration in Quarkus OIDC. `quarkus.oidc.tenant-enabled` is simply "auth on/off" | `application.properties` |
-| **space** | Workspace inside an org: `user:<principal>` or `team:<group path>` | `engine/security/spaces/*` |
-| **platform** | The operator of the cluster, above all orgs | This plan |
+| **org** (NEW) | Customer isolation boundary | `ai.labs.eddi.engine.org` |
+| **platform** (NEW) | The cluster operator, above all orgs | this plan |
+| vault/variables **tenant** | Namespace inside the vault and global variables: `default`, plus per-space `t.<slug>.<hash>` / `u.<slug>.<hash>` | `secrets/model/SecretReference.java`, `engine/security/spaces/SpaceTenants.java` |
+| quota **tenant** | Quota/usage counter key, `eddi.tenant.default-id` today | `engine/tenancy/*` |
+| Quarkus OIDC **tenant** | An IdP config. `quarkus.oidc.tenant-enabled` means "auth on/off" | `application.properties` |
+| **space** | Workspace inside an org: `user:<principal>` / `team:<path>` | `engine/security/spaces/*` |
 
-Rules:
-- **No new code, config key or doc may use "tenant" for the org concept.** New config keys
-  live under `eddi.org.*`. New classes are named `Org*`.
-- The quota "tenant id" **becomes** the org id. Keep the REST path
-  `/administration/quotas/{tenantId}` working as an alias, document `{orgId}`.
-- The vault/variables tenant **stays** a namespace *inside* an org. The key becomes
-  `(orgId, vaultTenant, keyName)`. Reference syntax `${vault:<tenant>/key}` stays unchanged
-  and is resolved **relative to the current org**.
-- Ignore `ScheduleConfiguration.tenantId` (`engine/schedule/model/ScheduleConfiguration.java`).
-  It is `@Deprecated(since = "6.8.0")`, never read, and kept only so stored rows stay valid.
-  Add a new `orgId` field. **Do not reuse the deprecated one.**
+**Rules:**
+
+- **Naming.** New config keys use `eddi.org.*`. New classes are named `Org*`. Never call
+  the org a "tenant".
+- **Org ids.** The default org id is the constant `default` and is not configurable.
+  - Reserved ids that can never be created: `default` (pre-existing only), `platform`,
+    `current`, `system`, `eddi`, `admin`, `api`.
+  - Format: `^[a-z0-9][a-z0-9-]{1,62}$`. Ids are immutable and opaque, and never reused
+    after deletion.
+- **Quota key.** Single mode keeps the configured `eddi.tenant.default-id` as its quota key,
+  so nothing is re-keyed (§12).
+- **Vault tenants.** The vault tenant stays a namespace inside the org. Storage keys become
+  `(orgId, vaultTenant, keyName)`. Reference syntax is unchanged and resolves relative to
+  the current org.
+- **Deprecated field.** Do **not** reuse `ScheduleConfiguration.tenantId`
+  (`@Deprecated(since = "6.8.0")`, never read). Add `orgId` instead.
 
 ---
 
-## 2. Current state — verified inventory and why the naive approach fails
+## 3. Current state (verified)
 
-### 2.1 What exists and is reusable
+Paths are relative to `src/main/java/ai/labs/eddi/` unless they start with a top-level
+directory. `a.p` is short for `src/main/resources/application.properties`.
 
-| Piece | What it gives us | Files |
+### 3.1 Reusable foundations
+
+| Piece | Gives | Files |
 |---|---|---|
-| Descriptor ownership + visibility (workspaces) | owner, space, visibility (`private`/`space`/`internal`/`published`), grants, listing restriction **in the query** | `engine/security/spaces/ResourceAccessGuard.java` (used by 92 files), `datastore/DescriptorStore.readDescriptorsRestricted(...)`, `configs/descriptors/model/DocumentDescriptor.java` |
-| `X-EDDI-Space` header → one stamp point for all creates | every create ends in `ResourceAccessGuard.stampNewDescriptor` | `engine/security/spaces/SpaceContext.java`, `SpaceHeaderFilter.java` |
-| Per-tenant DEKs, envelope encryption | DEK per vault tenant, wrapped by a KEK from the master key (PBKDF2) | `secrets/impl/VaultSecretProvider.java`, `secrets/crypto/*`, `secrets/persistence/*` |
-| Tenant-keyed quotas, cluster-safe | atomic counters in Mongo/Postgres, keyed by a tenant string | `engine/tenancy/TenantQuotaService.java`, `MongoTenantQuotaStore.java`, `PostgresTenantQuotaStore.java` |
-| Reserved principal prefixes | rejects tokens whose principal looks like `system:`, `slack:`, … | `ReservedPrincipals` (see `docs/security.md`) |
-| Cluster message signing | HMAC on NATS messages | `engine/cluster/ClusterMessageSigner.java` |
-| Configurable NATS prefix | `eddi.nats.prefix=EDDI` | `engine/cluster/ClusterSubjects.java` |
-| Loopback calls forward the caller's bearer | in-request internal REST calls carry the user's token | `engine/runtime/client/factory/LoopbackCallerAuthFilter.java` |
-| `ScopedValue` precedent | lexically bound per-call context | `modules/rules/impl/conditions/TemplateDataScope.java` |
-| Postgres generic resource table | `resources(collection_name, id, version, data JSONB)` + `resources_history` | `datastore/postgres/PostgresResourceStorage.java` |
-| Helm NetworkPolicy | default-deny, release-namespace ingress, private-range egress block | `helm/eddi/templates/networkpolicy.yaml` |
+| Workspaces | Owner, space, visibility and grants on descriptors; listings restricted in the query | `engine/security/spaces/ResourceAccessGuard.java` (92 call-site files), `datastore/DescriptorStore.readDescriptorsRestricted` |
+| Caller-derived context | `SpaceContext` derives state from `SecurityIdentity` and the current Vert.x request | `engine/security/spaces/SpaceContext.java` |
+| Envelope encryption | DEK per vault tenant, AAD `(tenant\|key\|dekId)`, legacy no-AAD values | `secrets/impl/VaultSecretProvider.java` |
+| Quotas | Atomic counters keyed by string | `engine/tenancy/*` |
+| NATS signing | HMAC over subject, timestamp, nonce and body (**not headers**). Unsigned when no key is set | `engine/cluster/ClusterMessageSigner.java` |
+| Cluster presence | Nodes publish version and payload protocol | `engine/cluster/ClusterPresence.java` (writer), `admin/ClusterWatcher.java` (reader) |
+| Audit keyring | Records key ids on entries | `engine/audit/AuditKeyring.java` |
+| Loopback bearer forwarding | Forwards **only** `Authorization` | `engine/runtime/client/factory/LoopbackCallerAuthFilter.java` |
+| Migrations, leases, startup auth guard | | `configs/migration/MigrationManager`, `datastore/postgres/PostgresMigrationManager`, `engine/cluster/lease/*`, `engine/security/AuthStartupGuard.java` |
+| Rolling-upgrade tolerance | Jackson ignores unknown fields | `SerializationCustomizer` |
 
-### 2.2 Facts that break the April plan (code-verified 2026-11-19)
+### 3.2 Facts every design choice must respect (code-verified)
 
-| April assumption | Reality | Consequence for this plan |
-|---|---|---|
-| ~15 stores, filter in the storage SPI | **31** files use `IResourceStorageFactory`. **48** files use `MongoCollection<>` directly. **~52** classes use a `DataSource` directly (28 real stores in `datastore/postgres/`, 19+ outside it: connections, email ledger, Slack approvals, team budget, vault, pgvector) | The SPI covers configuration resources only. Most runtime data (conversation memory, user memory, audit, logs, schedules, HITL, attachments, ratings, alerts, ingestion, OAuth, grants) bypasses it. **Every** store needs the org (§5) |
-| `@RequestScoped TenantContext` + `Provider<>` in stores | ~60–75 files run work on executors, virtual threads, `@Scheduled` (20 files), NATS consumers (17 files), channel inbound (Slack, webhook, email sweeper), A2A, `/v1` | There is no request scope in most places data is touched. The context must be a value carried explicitly (§4) |
-| Loopback REST calls have no identity | `LoopbackCallerAuthFilter` forwards the caller's bearer. **Without a caller** (background, scheduler, OIDC off) the call goes out anonymous | Background loopback calls must carry an org (§4.4) or be replaced by in-process calls |
-| Phase 4 is "1 line" | `getDefaultTenantId()` has **22 call sites** (Appendix A.6) | Its own task in Phase 1 |
-| Quota store is in-memory | Mongo and Postgres quota stores exist | Done. Reuse |
-| `SET LOCAL` per transaction for RLS | **380** `getConnection()` sites, **0** `@Transactional`, ~7 `setAutoCommit(false)`. Stores run in autocommit, where `SET LOCAL` has no effect | RLS needs an explicit transaction helper (§5.4) |
-| Cache keys prefixed in the cache factory | Only a handful of `ICacheFactory` users. **39 files build Caffeine directly** (Appendix A.5) | Every cache is audited and keyed by org (§5.6) |
-| Add `org_id` leading in the Postgres PK | PK is `(collection_name, id)` on fresh installs and `(id, collection_name)` on old ones. Startup **refuses** PK rewrites (`PostgresResourceStorage.java` ~L98-108). `resources_history` differs again | Never rewrite PKs. Add composite indexes (§5.4) |
-| Mongo: pick a database per org in the driver | One `MongoDatabase` bean (`datastore/bootstrap/PersistenceModule.java`), collections bound in constructors (`MongoResourceStorage`) | The dedicated tier needs an `OrgDatabaseRouter` touching all 49 injecting files. Build it last (Phase 7) |
-| Workspaces could be the customer boundary | Workspaces rely on a guard call in 92 files. `internal` = **every signed-in user of the deployment**. The directory finds any user by exact username or verified email. `eddi-admin` is global | Workspaces remain *intra-org* sharing. The org boundary sits below them, at persistence |
+| Fact | Consequence |
+|---|---|
+| **31** files use `IResourceStorageFactory`. **48** use `MongoCollection<>` directly and **51** use `DataSource` directly (A.2/A.3) | Every store is scoped, through helpers (§8) |
+| Work off the request thread: executors, virtual threads, 20 `@Scheduled` classes (A.7), NATS classes (A.8), 44 `AsyncResponse` uses, the coordinator `Callable` queues, SSE, `StreamingOutput`, LLM streaming | The org is a value carried explicitly (§6) |
+| Code outside resource methods (A.12): the quarkus-mcp-server Vert.x route, raw Vert.x routes, JAX-RS filters (`UserDirectoryRecorder` writes the directory asynchronously on every request), `SecurityIdentityAugmentor`s, 18 `ExceptionMapper`s, response serialisation after the method returns | Binding cannot rely on resource interceptors alone (§6.2) |
+| `@RolesAllowed` sits on `IRest*` **interfaces** (~80 of 107). Interceptor bindings on interfaces are not inherited by the 87 implementations | Bindings go on impl classes. Background code never calls `IRest*` (§7.3) |
+| `getDefaultTenantId()` has **22** call sites (A.6) | Phase 1 |
+| Postgres: 380 `getConnection()` calls, no `@Transactional`, mostly autocommit; 7 files use `setAutoCommit(false)` | RLS through an Agroal pool interceptor (§8.4) |
+| DataSource injection: 96 `Instance<DataSource>`, 8 constructor `DataSource`. The 11 `AgroalDataSource` uses are hand-built pgvector pools. `quarkus.datasource.active=false` by default (`a.p:126`), so every Mongo deployment has an inactive datasource | §8.4 spike |
+| Claims today: plain SELECT plus compare-and-set (`PostgresScheduleStore` ~L904–914, `MongoScheduleStore` `findOneAndUpdate`) | §7.4 keeps this |
+| 60 `ON CONFLICT (` targets, 18 SQL `UNIQUE`, 25 Mongo `unique(true)` (B.2) | Marker-driven switch (§5.3) |
+| 39 files build Caffeine directly (A.5) | §8.6 |
+| Postgres `resources` PK order differs between old and new installs. Startup refuses PK rewrites | Never rewrite PKs |
+| One `MongoDatabase` bean | Dedicated tier comes last |
+| `AgentFactory` holds every deployed agent in memory, keyed by `AgentId(id, version)`. `DeploymentInfo` has no org. Everything is deployed on every node | §8.7, §12 |
+| Migration managers have **no** "data newer than binary" refusal | A floor release is needed (§5.4) |
+| Roles: `quarkus.oidc.roles.role-claim-path=realm_access/roles` (`a.p:883`). Realm roles are global, and Keycloak Organizations has no org-scoped roles | §9.3 |
+| Team spaces come from the realm-global `groups` claim (`SpaceContext` ~L152–173, `keycloak/eddi-realm.json` group mappers) | §9.4 |
+| `/q/metrics` policy defaults to `eddi-admin,eddi-metrics` (`a.p:1150-1151`). `/openapi` is readable by every EDDI role (`a.p:~1177`) | §9.3, §7.1 |
+| CORS headers are `…, x-eddi-space` (`a.p:569`) | Add `x-eddi-org` |
+| Auth is off by default (`quarkus.oidc.tenant-enabled=false`, `a.p:830`) | Enablement is guarded (§5.3) |
+| Deployment-wide settings that are really per customer: one SMTP sender and `eddi.mail.notify.allowed-recipient-domains`, `eddi.openai-compat.api-key`, `eddi.slack.*`, `SelfUrlResolver` (links in HITL mail), CORS origins, update-check notices to `WorkspaceNotifications` | A.13, `OrgSettings` |
+| `ClusterArchiveStore` holds agent export ZIPs in the shared `<prefix>_ARCHIVES` bucket, plus node-local `tmp/archives` (`backup/impl/RestExportService`) | Org data (§8.9) |
+| `eddi.security.ssrf-protection.enabled=false` by default | Forced on (§11.1) |
+| `StructuredTaskScope` is still preview in Java 25 | Do not rely on it |
+| Versions: Keycloak 26.8.0, Mongo 7.0, Postgres 16 | Document minimums: Mongo 5.2 (`$topN`/`$jsonSchema`), PG 11 (metadata-only `ADD COLUMN … DEFAULT`) |
 
-### 2.3 Leak paths specific to shared hosting (must all be closed before the first external org)
+### 3.3 Leak paths in shared hosting (all closed before the first external org)
 
-Severity ordered. Each one maps to a task in §11.
-
-1. **SSRF into EDDI itself or other orgs.** `eddi.security.ssrf-protection.enabled=false` is
-   the default (`application.properties` ~L1039). An org's `httpcalls`, MCP client server
-   URL, RAG/vector host or connection endpoint can reach `127.0.0.1:7070` (where background
-   loopback calls are anonymous), NATS, the DB and cloud metadata.
-2. **RAG/vector stores.** The physical table/collection name is author-chosen
-   (`modules/llm/impl/EmbeddingStoreFactory.java`, `physicalName(...)`, `databaseName`
-   default `eddi`). pgvector uses its own pools (`PgVectorConnectionPools`), outside any
-   app or RLS layer. On a platform-shared vector store, org A can name org B's table.
-3. **Postgres table owner bypasses RLS.** The app creates its tables at startup, so it owns
-   them, and RLS is inert without `FORCE ROW LEVEL SECURITY` plus a role split.
-4. **Shared NATS control plane.** One subject root (`ClusterSubjects`), one HMAC key.
-   KV/dead-letter/tombstone keys are bare conversation ids (`ErasureTombstones`,
-   `JetStreamDeadLetterStore`). Cluster-admin views (dead letters, diagnose, activity log)
-   are cross-org by construction.
-5. **Platform Operator and MCP server.** Roles are global (`engine/mcp/McpToolUtils.java`).
-   The Operator allow-list (`ui/manager/src/lib/operator/tool-scopes.ts`) includes
-   `GET /administration/logs` and `cluster/*`. An org admin's Operator would read platform data.
-6. **Audit ledger.** One HMAC key and one chain (`engine/audit/AuditKeyring.java`). A per-org
-   export would expose the verification key and cross-org ordering.
-7. **Import / export / agent sync.** Import matches by `originId`
-   (`backup/impl/RestImportService.java`, `documentDescriptorStore.findByOriginId(...)`).
-   Unscoped, an import in org B merges into org A's resource.
-8. **Shared LLM provider keys.** Platform-supplied keys mean shared provider rate limits,
-   prompt-cache timing side channels and merged billing.
-9. **Identity collisions.** User memories are keyed on `user_id` alone
-   (`PostgresUserMemoryStore`, `MongoUserMemoryStore`). Attachments are keyed by
-   `conversationId`/`userId` metadata (`GridFsAttachmentStore`). The same `sub` or email
-   in two IdPs collides.
-10. **`/v1` OpenAI-compatible API.** One deployment-wide key (`integrations/openai/OpenAiCompatConfig.java`),
-    and the user id is a caller-supplied header.
-11. **Metrics/tracing.** Metrics already tag `tenant` and `agentId`. `/q/metrics` is
-    platform-only data, with a cardinality risk.
-12. **DB logs, error messages, correlation ids.** Platform-wide `logs` collection.
-    Substring-search/GIN indexes are global (index timing).
-13. **Channels.** Slack/webhook/email share endpoints. The org must come from the
-    **verified signing secret / integration record**, never from a payload field such as
-    `team_id` (`integrations/slack/SlackEventHandler` already does this within one deployment).
-14. **Templating.** `{vars.*}`, `{snippets.*}`, `${vault:<tenant>/…}`, `${vars:<tenant>/…}`
-    name namespaces textually and must resolve relative to the current org.
-15. **HITL approvals, Slack approval records, group conversations, dynamic/sub-agents,
-    OAuth state and grants, team budgets, schedules, triggers** all start or resume work
-    later. Each must carry `orgId`.
-16. **Backups/restore per org** are impossible in the pooled tier without a logical export (§9).
+1. SSRF into EDDI, infrastructure or other orgs (§11.1).
+2. Author-chosen vector store names (`EmbeddingStoreFactory.physicalName`) (§8.8).
+3. Table owners bypass RLS without `FORCE`; connections reused across bindings (§8.4).
+4. NATS: one subject root, unsigned headers, cross-org admin views, archives bucket (§8.9).
+5. In-memory registries: deployed agents, coordinator queues, SSE audiences,
+   credential-bearing model registries, `WorkflowTraversal` memo, limiter and breaker state
+   (§8.7).
+6. Platform Operator allow-list (`administration/logs`, `cluster/*`), global MCP roles (§9.5).
+7. One audit key and one chain (§11.3).
+8. `originId` import matching (§8.2).
+9. Shared LLM keys (§11.4).
+10. Identity collisions: user memories keyed by `user_id`, attachments by user metadata
+    (§9.2).
+11. `/v1`: one key, user id taken from a header (§7.1).
+12. Anonymous entry points with no org: public chat, A2A, `/.well-known/*`, the branded
+    shell, `/manage/__auth_config__.js` (§7.1).
+13. Shared channel endpoints (§7.1).
+14. Metrics with `tenant`/`agentId` tags, the `eddi_agents_deployed` gauge, org admins
+    reaching `/q/metrics` (§11.5, §9.3).
+15. Global DB logs and search indexes (§10).
+16. Templating namespaces (§10).
+17. Work-starters (§6.4).
+18. Per-org backup (§13).
+19. Realm roles and realm groups that apply in every org (§9.3, §9.4).
+20. Loopback calls that drop the org selection (§7.3).
+21. Per-customer settings held deployment-wide (A.13).
+22. A rolled-back binary reading the shared layout unfiltered (§5.4).
 
 ---
 
-## 3. Design principles (binding)
+## 4. Design principles (binding)
 
-1. **Org is the outer boundary.** Spaces, workspaces, vault tenants and quotas live inside it.
-2. **Enforce at the persistence boundary.** Every read, write, query, aggregation, delete,
-   cache lookup, NATS message and vector-store access is scoped by org **in the data layer**.
-   Endpoint guards (workspaces) handle sharing *within* an org only.
-3. **Fail closed.** In multi mode, data access without a bound org throws
-   `OrgContextMissingException` (500, logged `[SECURITY]`). Crossing orgs is possible only
-   inside `OrgScope.platform(reason, () -> …)`, which is audited and restricted to an
-   allow-listed set of classes (§10 build guard).
-4. **One code path for both modes.** Single mode = multi mode with one org, `default`.
-   No `if (multi)` in stores. The context is always bound. What differs between modes is
-   only (a) how the org is resolved and (b) what happens when it is missing (§7).
-5. **The org is data.** Everything that starts or resumes work without a user request stores
-   its `orgId` and re-binds it: conversations, schedules, triggers, channel integrations,
-   group conversations, HITL pauses, ingestion jobs, NATS messages, OAuth states, team budgets.
-6. **Defense in depth:** app filter (always), Postgres RLS (multi mode; opt-in single),
-   per-org crypto keys, forced SSRF policy, dedicated tier, then a separate instance.
-7. **404, never 403, across orgs.** An id from another org is "not found". Existence is never
-   disclosed. Ids stay globally unique (ObjectId/UUID). No org id appears in public ids.
-8. **Platform plane ≠ org plane.** Platform operators manage the cluster. They see no
-   customer content by default, and break-glass access is explicit, time-boxed and audited
-   into the **customer's** ledger.
-9. **Isolation tier is a property of the org** (`POOLED` | `DEDICATED`), resolved in one
-   place, so moving an org needs no code change.
+1. **The org is the outer boundary.** Everything else lives inside it.
+2. **Enforce at the data layer:** stores, caches, in-memory registries, NATS, vector stores.
+   Workspace guards decide sharing *within* an org only.
+3. **Fail closed, never leak.** A missed propagation is an error, never a silent wrong org.
+   Crossing orgs works only through `OrgScope.platform(reason, …)`, which is audited and
+   allow-listed.
+4. **One code path.** Single mode is the same code with exactly one org. The persisted
+   **marker** (§5.3), not the mode flag, decides predicates, unique-key shape and RLS.
+5. **The org is data.** Every durable work-starter stores its `orgId`.
+6. **Defense in depth:**
+   - app filter;
+   - Postgres RLS;
+   - Mongo `$jsonSchema` requiring `orgId` (stamping only);
+   - per-org keys;
+   - forced SSRF;
+   - the dedicated tier;
+   - an own instance.
 
----
-
-## 4. Org context and propagation
-
-### 4.1 The primitive
-
-New package `ai.labs.eddi.engine.org`.
-
-```java
-public record OrgId(String value) {            // validated: ^[a-z0-9][a-z0-9-]{1,62}$, immutable, opaque
-    public static final OrgId DEFAULT = new OrgId("default");
-}
-
-public final class OrgContext {
-    private static final ScopedValue<OrgId> CURRENT = ScopedValue.newInstance();
-
-    /** Throws OrgContextMissingException in multi mode; returns DEFAULT in single mode (and logs once per call site). */
-    public static OrgId require();
-    public static Optional<OrgId> current();
-    public static <T> T callAs(OrgId org, Callable<T> work);   // ScopedValue.where(CURRENT, org).call(...)
-    public static void runAs(OrgId org, Runnable work);
-}
-
-public final class OrgScope {
-    /** Only for allow-listed platform code (§10). Binds a PLATFORM marker; storage refuses unfiltered
-        access unless inside this scope. Every entry is logged + metered with the reason. */
-    public static <T> T platform(String reason, Callable<T> work);
-}
-```
-
-- **Why `ScopedValue`:** final in Java 25, safe with virtual threads, cannot leak between
-  pooled threads like a `ThreadLocal`, already used in the codebase. A `ScopedValue`
-  **cannot** be carried by Quarkus `ThreadContextProvider` (that API sets and restores
-  imperatively), so do not try. Hand-offs are explicit (§4.3).
-- **Org id format:** opaque, immutable, lower-case slug, max 63 chars. Not derived from
-  the customer's name, never reused after deletion. The display name lives in the `Org` record.
-- **Why not explicit parameters everywhere:** ~100 stores and hundreds of call sites. Use
-  the `ScopedValue` for the ambient value, **plus** an explicit `OrgId` argument on the thin
-  store APIs of §5.3, where the cost is low and a missing value is a compile error.
-
-### 4.2 Entry points that bind the org
-
-| Entry point | How the org is resolved | Class to add/change |
-|---|---|---|
-| REST (JAX-RS), SSE, MCP over HTTP | `OrgResolver` from the **verified** token (§6.1); optional cross-check against `Host` → org mapping. Never from a header alone | new `OrgRequestFilter` (`@Priority(Priorities.AUTHENTICATION + 10)` `ContainerRequestFilter`) that binds the value for the resource invocation via a Quarkus interceptor `@OrgBound` around resource methods (a filter cannot wrap a lexical scope, so the binding happens in an interceptor; the filter only resolves and stores the `OrgId` on the request context) |
-| MCP tools (`engine/mcp/*`, 19 classes) | same as REST, from `SecurityIdentity` | interceptor binding on the tool classes |
-| Public chat endpoints, anonymous | org of the **agent** being addressed (agent descriptor carries `orgId`), plus optional `Host` mapping | `RestAgentEngine` / conversation start path |
-| Slack, webhook (`/integrations/*`) | org of the `ChannelIntegration` whose signing secret verified the request | `RestSlackWebhook`, `RestWebhookChannel`, `SlackEventHandler`, `WebhookEventHandler` |
-| Email inbound | org of the mailbox/integration record | `integrations/email/EmailInboundSweeper` + ledger stores |
-| A2A (`/a2a/*`, `/.well-known/*`) | org of the addressed agent. The deployment-level card lists only agents of the `Host`-mapped org, or none in multi mode | `engine/a2a/RestA2AEndpoint.java`, `AgentCardService` |
-| `/v1` (OpenAI-compatible) | **per-org API keys** (new `OrgApiKey` store, hashed). Header user ids are namespaced under that org | `integrations/openai/*` |
-| `@Scheduled` jobs (Appendix A.7) | iterate orgs explicitly: `for org in orgStore.active(): OrgContext.runAs(org, …)` with per-org fairness (round-robin, per-org budget per tick) | each job; shared helper `OrgIterator` |
-| Schedule fires (`SchedulePollerService`, `ScheduleFireExecutor`) | `ScheduleConfiguration.orgId` (new field) | engine/schedule/* |
-| NATS consumers (Appendix A.8) | `Eddi-Org` header, covered by `ClusterMessageSigner` | engine/cluster/* |
-| Conversation turns resumed later (HITL, `CONTINUE_CONVERSATION`, group member turns, sub-agents) | `orgId` on the conversation memory snapshot / group conversation | engine/memory, engine/internal/groups |
-| Startup / migrations | `OrgScope.platform("migration:<name>", …)` | configs/migration/*, datastore/postgres/PostgresMigrationManager |
-
-### 4.3 Hand-offs (where a `ScopedValue` is lost)
-
-Every hand-off to another thread must capture and rebind. Provide one helper and use it
-everywhere:
-
-```java
-public final class OrgPropagation {
-    public static Runnable wrap(Runnable r);                 // captures OrgContext.require() at wrap time
-    public static <T> Callable<T> wrap(Callable<T> c);
-    public static <T> Supplier<T> wrap(Supplier<T> s);
-    public static Executor wrap(Executor e);                 // decorates every submit
-}
-```
-
-Apply it to `ExecutorService`/`ManagedExecutor`/virtual-thread executors,
-`CompletableFuture.*Async`, Mutiny `emitOn`/`runSubscriptionOn`, SSE emitters, and the
-LLM streaming callbacks in `modules/llm/impl/*`. Search patterns are in Appendix A.9.
-The build guard (§10) flags new raw `Executors.new*`, `CompletableFuture.supplyAsync(` without
-an executor, and similar.
-
-### 4.4 Internal loopback REST calls
-
-12 files use `IRestInterfaceFactory` (Appendix A.4). Rules:
-- With a caller: keep forwarding the bearer. The org comes from the token on the receiving side.
-- Without a caller (background): forward a short-lived **internal context token**
-  (HMAC-signed, `{orgId, actor: "system:<job>", exp ≤ 60s, aud: "eddi-loopback"}`) in header
-  `X-EDDI-Internal-Context`, accepted **only** from loopback addresses and only with a
-  valid signature. Key: per-deployment, held next to `ClusterMessageSigner`'s.
-- Preferred long-term: replace loopback calls with in-process calls. `ResourceAccessGuard`
-  and the MCP tools already hold injected `IRest*Store` beans for most paths.
+   MongoDB has **no** database-level read isolation in the pooled tier, which is why §16
+   decision 12 exists.
+7. **404, never 403, across orgs.** Ids are globally unique. An org id never appears in a
+   public id.
+8. **The platform plane is separate from the org plane.** Platform staff see no customer
+   content without an audited break-glass grant.
+9. **The isolation tier is a property of the org** (`POOLED` | `DEDICATED`).
+10. **Single-tenant installs pay nothing they don't use.** Until the marker exists, no
+    predicate is added, so performance is unchanged. All expensive steps happen in the
+    explicit enablement.
 
 ---
 
-## 5. Persistence enforcement
+## 5. Modes, marker, enablement, floor
 
-### 5.1 What every stored record gets
-
-- Field `orgId` (Mongo) / column `org_id TEXT NOT NULL` (Postgres) on **every**
-  collection/table holding org data. Appendix A lists them.
-- Platform-only data (Appendix B, "platform" rows) has **no** `orgId` and is reachable only
-  inside `OrgScope.platform`.
-- Values are stamped by the store layer from `OrgContext.require()`. **A caller-supplied
-  `orgId` in a document is overwritten, never trusted** (imports, REST bodies, ZIPs).
-
-### 5.2 Generic resource SPI (configuration resources, 31 files)
-
-- `IResourceStorageFactory.create(...)` keeps its signature. Mongo and Postgres factories
-  return storages that **always** add `orgId = OrgContext.require()` to every
-  `read/readHistory/store/createNew/remove/removeAllPermanently/findResources/...`
-  filter, and stamp it on writes. Same for `DescriptorStore` (descriptors carry `orgId`).
-  `HistorizedResourceStore`, `ModifiableHistorizedResourceStore` and
-  `AbstractResourceStore` need no change if the storage enforces it. Verify by test.
-- `DocumentDescriptorStore.findByOriginId(...)` becomes org-scoped (closes leak 7).
-- Substring search (`ISubstringSearchIndexing`, `PostgresSubstringSearchIndexes`) filters by org.
-
-### 5.3 Direct stores (~100 classes, Appendix A.2/A.3)
-
-Do **not** build a "MongoCollection view that rewrites filters". It cannot cover
-aggregations, `$lookup`, `$unionWith`, bulk writes, change streams or GridFS correctly.
-Instead:
-
-- **Mongo:** `OrgCollections` helper with explicit methods:
-  `filter(OrgId, Bson)`, `stamp(OrgId, Document)`, `matchStage(OrgId)` (first stage of every
-  pipeline), `gridFsMetadata(OrgId, …)`. Every direct store method takes `OrgId org` as
-  its **first parameter**, internally or through its interface, so a missing org is a
-  compile error. Interfaces (`IUserMemoryStore`, `IConversationMemoryStore`, …) gain the
-  parameter, and callers pass `OrgContext.require()`.
-- **Postgres:** `OrgJdbc` helper:
-  `inTx(OrgId, SqlWork<T>)` opens a connection, `setAutoCommit(false)`,
-  `SELECT set_config('eddi.org_id', ?, true)`, runs the work, commits, and restores
-  autocommit on return to the pool. Every SQL statement in a store adds
-  `AND org_id = ?` (app filter, always) and runs inside `inTx` (needed for RLS).
-- Unique constraints/upsert keys gain `org_id` as the first column (e.g. user memory
-  `(org_id, user_id, agent_id, key, visibility)`; connection names; email ledger; OAuth state).
-
-### 5.4 Postgres Row-Level Security (backstop)
-
-Introduced in Phase 5, after the app filter is proven (§11):
-
-- Role split: `eddi_migrator` (DDL, owns tables) and `eddi_app` (DML, `NOBYPASSRLS`).
-  Config: `eddi.datastore.postgres.migration-username/-password` (falls back to the main
-  credentials in single mode, where RLS is off by default).
-- Per table: `ALTER TABLE t ENABLE ROW LEVEL SECURITY; ALTER TABLE t FORCE ROW LEVEL SECURITY;`
-  `CREATE POLICY org_isolation ON t USING (org_id = current_setting('eddi.org_id', true))
-   WITH CHECK (org_id = current_setting('eddi.org_id', true));`
-  `current_setting(..., true)` returns NULL when unset, so **no rows** come back: fail closed.
-- Platform access: a separate policy for `current_setting('eddi.platform', true) = 'on'`,
-  set only by `OrgScope.platform` inside `OrgJdbc`.
-- Indexes: **never rewrite PKs.** Add `CREATE INDEX CONCURRENTLY … (org_id, <existing leading cols>)`.
-  `resources`/`resources_history` get `(org_id, collection_name, id)`.
-- PgBouncer: transaction pooling only. `set_config(..., true)` is transaction-local, so this is safe.
-- Measure: one extra round trip per transaction. The benchmark is part of the Phase 5 exit criteria.
-- pgvector pools (`PgVectorConnectionPools`) use `OrgJdbc` semantics too, or a per-org table (§5.7).
-
-### 5.5 MongoDB
-
-- Pooled tier: `orgId` field, **leading** in every compound index (replace indexes in a
-  background, resumable migration; build new, then drop old), future shard-key prefix
-  `{orgId: 1, _id: 1}` (hashed `orgId` if orgs are very uneven).
-- Do not rely on "absent `orgId` = default" beyond the migration window. It defeats index
-  prefixes. Backfill stamps `default` (§8).
-- GridFS (`GridFsAttachmentStore`): `metadata.orgId`, index `(metadata.orgId, metadata.conversationId)`.
-- Dedicated tier (Phase 7): `OrgDatabaseRouter` replaces the single `MongoDatabase` bean
-  (`PersistenceModule`). Stores resolve collections per call (`router.db(org).getCollection(name)`)
-  and cache handles per org. Database-per-org does **not** scale to thousands of orgs
-  (~60 collection names plus `.history` and their indexes, each a WiredTiger file), so it
-  is reserved for at most tens of dedicated orgs.
-
-### 5.6 Caches (39 direct Caffeine builders + `ICacheFactory` + `ClusterInvalidatingCache` + `SharedKvCache`)
-
-- Audit each cache in Appendix A.5 and classify: **org data** (key must include `OrgId`),
-  **platform data** (no change, document why), **id-keyed with globally unique ids**
-  (still prefix with org: a cached object fetched by one org must not be served to another,
-  even by id).
-- Introduce `OrgKey<K>(OrgId org, K key)` and use it as the key type. Make
-  `ClusterInvalidatingCache` / `SharedKvCache` / NATS KV keys `<org>.<key>`.
-- Build guard: new `Caffeine.newBuilder()` outside an allow-list fails the build.
-
-### 5.7 RAG / vector stores
-
-- Physical names are **derived**, not chosen: `eddi_<org>_<ragConfigId>` (sanitised,
-  length-capped, hashed if too long). Author-supplied `collectionName`/`tableName`/
-  `databaseName`/`indexName` are refused in multi mode unless the caller is a platform admin
-  and the store is org-dedicated. In single mode, existing names keep working (the
-  `storeNamespace` mechanism from 6.6 already shows how to migrate layouts; see
-  [`docs/rag.md`](../docs/rag.md#knowledge-base-isolation)).
-- External vector providers configured per org with the org's own credentials, never a
-  platform-shared credential that can address arbitrary indexes.
-
-### 5.8 NATS / cluster
-
-- Message header `Eddi-Org` on every org-scoped message, included in the HMAC
-  (`ClusterMessageSigner`). Consumers bind the org from it.
-- Subjects stay on the common root (subject-per-org explodes consumers). KV/dead-letter/
-  tombstone keys become `<org>.<id>`.
-- Cluster-admin views (dead letters, diagnose, activity log, `cluster/*` REST) are
-  **platform plane**. An org admin sees only entries for its org, filtered by header.
-- Mixed-version rollout: `eddi.org.nats.require-org-header=false` first (accept and treat
-  as `default`), then `true` (§8).
-
----
-
-## 6. Identity, roles and the two planes
-
-### 6.1 Resolving the org from identity
-
-`OrgResolver` SPI with two built-in implementations. Choose via `eddi.org.resolver`.
-
-| Resolver | How | When |
-|---|---|---|
-| `keycloak-organizations` (**default for multi**) | One realm, Keycloak 26 Organizations. Claim `organization` (configurable `eddi.org.claim`), mapped to `OrgId` through the `Org.idpBinding`. A user in several orgs selects one via `X-EDDI-Org`, validated against the claim | SaaS, platform-managed users |
-| `issuer` | One Quarkus OIDC tenant (issuer) per org, via a `TenantConfigResolver` reading `Org.idpBinding.issuer`. The org = the issuer that validated the token | BYO-IdP enterprise customers |
-| `single` (single mode) | Always `default` | default |
-
-Missing or unknown org claim in multi mode: **403**, logged `[SECURITY]`. Never a fallback to `default`.
-Host cross-check (optional `eddi.org.host-binding=true`): the `Host` must map to the same org.
-
-### 6.2 Principal namespacing
-
-- Every stored principal becomes the pair `(orgId, subject)`. Store `orgId` in its own field.
-  **Do not** string-prefix principals. Ownership, grants, user memories, directory entries,
-  conversation `userId` and HITL `decidedBy` are compared as pairs.
-- `ReservedPrincipals` stays. In multi mode the subject is additionally checked to be
-  unique only within the org.
-
-### 6.3 Roles
-
-| Plane | Roles | Scope |
-|---|---|---|
-| Platform | `eddi-platform-admin`, `eddi-platform-operator`, `eddi-metrics` | the cluster: orgs, quotas, cluster admin, platform catalog, metrics, platform logs. **No customer content** unless break-glass |
-| Org | `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver` (unchanged names) | only inside the caller's org |
-
-- Platform roles come from a separate client or realm (recommended), require MFA, and are
-  never mapped from an org's IdP. `issuer` resolver: platform roles are accepted only from
-  the platform issuer.
-- **Break-glass:** `POST /platform/orgs/{orgId}/access` with reason and TTL (≤ 4h) yields a
-  scoped grant. Every action under it is written into the **target org's** audit ledger and
-  the platform ledger.
-- Single mode: `eddi-admin` implies the platform roles. Behaviour is identical to today.
-- `RestTenantQuota` (quotas) becomes platform plane. An org admin may read its own usage.
-- Keep role checks literal (`hasRole`, no hierarchy). `McpRoleTierParityTest` must be
-  extended with the platform tier.
-
-### 6.4 Workspaces inside an org
-
-- Spaces, visibility and grants work unchanged, evaluated within the org.
-- `internal` = signed-in members **of the same org**. `published` = anonymous callers on that
-  org's public endpoints (agent's org, optional host binding).
-- User directory (`engine/security/spaces/directory/*`): entries carry `orgId`. Search and
-  exact lookup are org-local. An admin sees only its org.
-- `legacy-visibility=shared` applies to legacy resources **within the org** (after backfill,
-  all legacy data is in `default`).
-- The setup API's unowned resources are stamped with the caller's org.
-
-### 6.5 Platform Operator and MCP server
-
-- Two Operator profiles: **org operator** (allow-list without `administration/logs`,
-  `cluster/*`, quotas write, platform endpoints) and **platform operator**. Files:
-  `ui/manager/src/lib/operator/tool-scopes.ts`, `system-prompt.ts`. **Bump
-  `operator-revision.json`** (`operator-revision.test.ts` enforces it) and follow
-  `ui/manager/AGENTS.md` → Platform Operator.
-- MCP tools: every tool binds the org. Platform tools (cluster, quotas, org admin) move
-  to a platform tier. Update `docs/mcp-server.md#role-mapping` and the Claude plugin skills
-  (`integrations/claude-plugin/`; `SkillToolReferencesTest`).
-
----
-
-## 7. Single-tenant mode contract (must never regress)
+### 5.1 The contract
 
 | Aspect | Single mode (`eddi.org.mode=single`, **default**) | Multi mode (`eddi.org.mode=multi`) |
 |---|---|---|
-| Config needed | none | `eddi.org.mode=multi`, `eddi.org.resolver`, platform role setup, `eddi.security.ssrf-protection.enabled=true` (**startup refuses multi mode without it**), `eddi.vault.master-key` |
-| Org resolution | constant `default` | `OrgResolver` (§6.1) |
-| Unbound context | falls back to `default`, WARN once per call site, counter `eddi_org_context_fallback_total{site}` | `OrgContextMissingException` (fail closed) |
-| Roles | today's roles. `eddi-admin` = platform + org admin | split (§6.3) |
-| Postgres RLS | off by default (`eddi.org.postgres-rls=off`), opt-in | on (startup refuses `multi` + `off` unless `eddi.org.postgres-rls=off-i-understand`) |
-| App filter | **on** (always `org_id = 'default'`) | on |
-| UI | no org UI at all | org switcher (if multi-org user), platform console for platform roles |
-| Performance | one extra indexed equality predicate. Phase 3 exit criterion: ≤ 3% p95 regression on `scripts/loadtest` | same |
-| Upgrade | automatic, background backfill, no manual step (§8) | — |
-| Switch single → multi | set the mode, existing data = org `default` (rename by creating an alias display name, the id stays `default`) | — |
+| Startup preconditions | none | Startup is **refused** unless all of these hold:<br>• the marker is `ENABLED`;<br>• `eddi.security.ssrf-protection.enabled=true`;<br>• `eddi.vault.master-key` is set;<br>• auth is on and `eddi.security.allow-unauthenticated` is not set;<br>• platform roles are configured (§9.3);<br>• no org role appears in `eddi.metrics.roles-allowed` or in any platform `quarkus.http.auth.policy.*`;<br>• a NATS signing key is set (if NATS is used);<br>• `eddi.org.multi.preview-acknowledged=true` (until the pentest);<br>• on Mongo pooled: `eddi.org.mongo.pooled-acknowledged=true` (§16 decision 12) |
+| Org resolution | constant `default` | `OrgResolver` (§9.1) |
+| Unbound context | `default`, WARN once per call site, `eddi_org_context_fallback_total{site}` (stays 0 in CI) | `OrgContextMissingException` → 500 `[SECURITY]` |
+| Other orgs | Binding any org other than `default` throws, and org creation is refused | allowed |
+| Data predicates | **none before the marker**. After the marker, strict (a single-mode deployment may run the marker layout) | strict |
+| Roles | today's; `eddi-admin` also holds platform rights | split (§9.3) |
+| UI | no org UI | org switcher, platform console |
+| Performance | ≤ 3 % p95 on `scripts/loadtest`, counts included | measured in Phase 5 |
+| Switching | Run enablement, then set `mode=multi` and restart | multi → single is refused when more than one org exists |
 
-**CI:** the full unit suite runs in single mode. A `MultiOrgConformanceIT` (§10) plus a
-chosen subset of ITs runs in multi mode with two orgs on both Mongo and Postgres, on every PR.
+### 5.2 Before the marker (single-mode default)
 
-Existing properties: `eddi.tenant.default-id` becomes a deprecated alias of
-`eddi.org.default-id` (default `default`). Changing it in multi mode is refused.
+- **Writes always stamp.** Every write sets `orgId`/`org_id` to `default`, so the data is
+  ready for enablement.
+- **No predicate is added to any read**, because only `default` can exist. Binding another
+  org throws, and org creation is refused.
+- **PostgreSQL, Phase 1:**
+  - Add `org_id TEXT NOT NULL DEFAULT 'default'` with `ADD COLUMN IF NOT EXISTS`, under
+    `SET lock_timeout = '5s'` with retry.
+  - This is a metadata-only change on PG ≥ 11. It takes only a brief `ACCESS EXCLUSIVE`
+    lock and rewrites nothing.
+  - Old nodes in a rolling upgrade get the default from the column.
+- **MongoDB:** documents written before Phase 1 have no `orgId` until enablement backfills
+  them.
+
+### 5.3 Marker and enablement migration
+
+**Types.** `OrgMarker` and `IOrgMarkerStore` live in the platform plane, on Mongo and
+Postgres. The marker states are `ABSENT` → `SWITCHING` → `ENABLED`. Every node:
+
+- loads the marker at startup and polls it every 10 s;
+- publishes `markerState` in `ClusterPresence`.
+
+**Fresh install in multi mode.** An empty database started with `eddi.org.mode=multi` is
+bootstrapped directly into the `ENABLED` layout. `OrgTestProfile` uses this.
+
+**Who can run it.** `OrgEnablementMigration` runs **while the deployment is still in
+single mode**, where `eddi-admin` holds platform rights.
+
+- `POST /platform/org-enablement` is refused unless:
+  - auth is on;
+  - `eddi.org.enablement.allowed=true` is set;
+  - the body carries `{"confirm": "enable-organizations", "backupTaken": true}`.
+- Progress: `GET /platform/org-enablement`.
+- It runs under a cluster lease and is resumable.
+- When it finishes: set `mode=multi` and restart.
+
+**Precondition:** every live member advertises `org-layout-1` (§5.4). A single node
+without NATS passes trivially.
+
+**Steps** (each is idempotent and checkpointed in the migration log):
+
+1. **Backfill.** Stamp `orgId: "default"` where it is missing in every Mongo collection of
+   Appendix B. Use `_id`-ordered batches (`eddi.org.enablement.batch-size`, default 1,000)
+   and throttle them. Postgres needs nothing here.
+2. **Indexes.**
+   - Build org-leading indexes: Mongo background builds, Postgres `CREATE INDEX CONCURRENTLY`.
+   - Claim-query indexes keep `(status, due, …)` leading (§7.4).
+   - Build the B.2 org-including unique keys **alongside** the old ones.
+3. **Switch. This step is the point of no return.**
+   1. Set the marker to `SWITCHING`.
+   2. Each node, on seeing `SWITCHING`, starts using:
+      - predicates (strict, `{orgId: "default"}`);
+      - org-including upsert targets: `OrgSql.conflictTarget`, `OrgCollections.uniqueFilter`;
+      - NATS signature v2 (§8.9).
+
+      It then reports `SWITCHING` in presence.
+   3. **Barrier:** only after every live member has reported `SWITCHING` for one full
+      presence TTL:
+      - drop the old unique keys;
+      - on Postgres, `ALTER COLUMN org_id DROP DEFAULT` on every org table;
+      - on Mongo, `collMod` each org collection with
+        `validator: {$jsonSchema: {required: ["orgId"]}}`, `validationAction: "error"`;
+      - set `layout.required = org-layout-1` (§5.4).
+4. **RLS (Postgres).** Per org table: `ENABLE` + `FORCE ROW LEVEL SECURITY` and the policies
+   (§8.4). Activate `OrgRlsPoolInterceptor`.
+5. **Crypto.** Create the `default` org KEK and rewrap the DEKs. Values sealed earlier keep
+   AAD v1 and open only in `default`; new seals use AAD v2, which includes the org (§11.2).
+   The existing audit chain becomes the genesis of `default`'s chain under its recorded key
+   id (§11.3).
+6. **Integrity.** Check that:
+   - no record lacks an org;
+   - every org table is `FORCE`d and every Mongo validator is present;
+   - every member reports `ENABLED`-capable.
+7. Set the marker to `ENABLED`.
+
+A deployment may stay in single mode with the marker `ENABLED`. That is a valid, tested
+state: one org on the strict layout.
+
+### 5.4 Floor release and capabilities (no unsafe rollback)
+
+- **Phase 1 ships `DataLayoutGuard`.** At startup it reads the platform record
+  `layout.required` and refuses to start if its own supported layout level is lower. The
+  first release containing the guard is the **floor release**; release notes must say so.
+- **Capabilities advertised in `ClusterPresence`:**
+  - `org-ctx-1`, from Phase 1 (context and stamping);
+  - `org-layout-1`, only from the release that implements all of §5.3.
+- **What can't be prevented.** A binary older than the floor cannot be stopped from
+  starting. On Mongo it would read every org unfiltered. Rollback below the floor is
+  therefore forbidden once `layout.required` is set, and `docs/multi-org.md` and the release
+  notes state this. Postgres RLS still contains such a binary, but only if it connects as a
+  role without `BYPASSRLS` and the table is `FORCE`d.
 
 ---
 
-## 8. Migration and rolling upgrades
+## 6. Org context and propagation
 
-Three releases. A mixed-version cluster is always valid.
+### 6.1 The primitive (`ai.labs.eddi.engine.org`)
 
-| Release | Writes | Reads | NATS | DB |
-|---|---|---|---|---|
-| **N** (Phase 1) | stamp `orgId` on all new writes, everywhere | unchanged (tolerant: absent = default) | send `Eddi-Org` header, don't require it | add nullable column / no Mongo change |
-| **N+1** (Phases 2–3) | stamp | **filter enforced**: `orgId = current` with a temporary `OR orgId missing` only for `default` until backfill reports complete | still tolerant | background backfill job (`OrgBackfillMigration`): resumable, idempotent, batched (e.g. 1,000 docs, configurable, throttled), progress in `migrationlog`. Postgres: `UPDATE … SET org_id='default' WHERE org_id IS NULL` in batches by PK range. Then new composite indexes `CONCURRENTLY` / Mongo background index builds |
-| **N+2** (Phase 5) | stamp | strict (no missing-tolerance) | `require-org-header=true` | `org_id NOT NULL` (Postgres: add `CHECK … NOT VALID`, then `VALIDATE`, then `SET NOT NULL`), RLS on in multi mode, old indexes dropped |
+```java
+public record OrgId(String value) { public static final OrgId DEFAULT = new OrgId("default"); } // validated §2
+public final class OrgContext {
+    private static final ScopedValue<Binding> CURRENT = ScopedValue.newInstance(); // Binding = Org(OrgId, epoch) | Platform(reason, epoch)
+    public static OrgId require();       // bound org; throws inside Platform; multi: throws if unbound; single: DEFAULT + WARN/counter if unbound
+    public static Optional<OrgId> current();
+    public static boolean isPlatform();
+    public static long epoch();          // unique per binding; used by §8.4
+    public static <T> T callAs(OrgId org, Callable<T> work) throws Exception;
+    public static void runAs(OrgId org, Runnable work);
+}
+public final class OrgScope {
+    public static <T> T platform(String reason, Callable<T> work); // allow-listed callers only (§14.2); logged + counted per reason
+}
+```
 
-- The backfill runs in `OrgScope.platform("migration:org-backfill", …)` and uses the existing
-  `MigrationManager` / `PostgresMigrationManager` with a cluster lease (`NatsLeaseManager`)
-  so only one node runs it.
-- Large collections: no full-collection rewrite in a single transaction, no blocking index
-  builds. The backfill must survive restarts.
-- Imports of old ZIPs: no `orgId` inside, stamped with the importer's org.
-- Rollback: release N+1 can be rolled back to N (old nodes ignore `orgId`). After N+2,
-  rollback only to N+1.
+**Binding transitions:**
+
+| From | To | Result |
+|---|---|---|
+| unbound | any | allowed |
+| Org X | Org X | no-op |
+| Org X | Org Y | **throws** |
+| Platform | Org | allowed (per-item processing) |
+| Org | Platform | allowed only from allow-listed classes |
+
+Under `Platform`, any method that writes or reads org data needs a nested `runAs`. The only
+exceptions are the dedicated cross-org platform methods (§8.1).
+
+**Platform data versus cross-org access:**
+
+- Platform tables (Appendix B) have no RLS. Their stores read no org and can be called from
+  any binding, including ordinary org requests that read catalog defaults.
+- `OrgScope.platform` is used **only** for cross-org access to org tables: claim queries,
+  lookups by unguessable id (integrations, OAuth state), migrations, integrity checks,
+  platform admin views.
+
+**Why `ScopedValue`:**
+
+- It is final in Java 25 and safe on virtual threads.
+- It cannot leak to the next task on a pooled thread, so a missed propagation fails closed
+  instead of serving a stale org.
+- `ThreadContextProvider` cannot carry it, so every hand-off is explicit (§6.3).
+
+**Store API (ADR LOCK 3).** The org-aware helpers `OrgCollections` and `OrgSql` read
+`OrgContext.require()` themselves. Store interfaces do **not** get an `OrgId` parameter. An
+explicit parameter is no safer when every caller passes `OrgContext.require()`, and it would
+churn ~100 interfaces. The guards (§14.2) ensure every DB access goes through the helpers.
+
+### 6.2 Binding on request paths
+
+- **`OrgResolution.resolve()`** is request-scoped and memoised on the Vert.x `RoutingContext`.
+  It derives the `OrgId` from `SecurityIdentity`, the proxy-aware authority, the routing keys
+  (§7.1) and `X-EDDI-Org`, the way `SpaceContext` does. In single mode it returns `DEFAULT`.
+- **`@OrgBound` interceptor** (`@AroundInvoke`, `Interceptor.Priority.PLATFORM_BEFORE`, so
+  outermost; `McpErrorResultInterceptor` is `PLATFORM_AFTER`). It binds the resolved org,
+  and is a no-op when the same org is already bound. Apply it to:
+  - every JAX-RS **implementation** class;
+  - every MCP tool class (`engine/mcp/*`: 21 files with `@Tool`).
+- **Code outside resource methods (A.12):** filters, augmentors, exception mappers and raw
+  Vert.x routes.
+  - Each one that touches org data wraps that work in `OrgRequest.callBound(() -> …)`.
+  - The others are marked `@PlatformPlane` or `@OrgNeutral`, with a comment saying why.
+  - `UserDirectoryRecorder` must capture the org before its `executor.execute(...)`.
+- **Work after the method returns.** The scope ends when the method returns, so:
+  - work for `AsyncResponse` (44 uses) is wrapped (§6.3);
+  - `StreamingOutput`, `SseEventSink`, `Multi` and LLM streaming callbacks capture the org at
+    creation and rebind in every callback;
+  - response entities are fully materialised inside the scope. Lazy iterables that hit the
+    DB during serialisation are forbidden (`RestLogAdmin`, `RestClusterAdmin`,
+    `RestCoordinatorAdmin`, `RestUserEvents`, `RestOpenAiAdapter` and `RestA2AEndpoint`
+    stream; check each).
+
+### 6.3 Hand-offs
+
+```java
+public final class OrgPropagation {
+    public static Runnable wrap(Runnable r);   // captures the current binding now, rebinds when run
+    public static <T> Callable<T> wrap(Callable<T> c);
+    public static <T> Supplier<T> wrap(Supplier<T> s);
+    public static Executor wrap(Executor e);
+}
+```
+
+Apply it to:
+
+- executors (`ExecutorService`, `ManagedExecutor`, virtual threads);
+- `CompletableFuture.*Async`;
+- Mutiny `emitOn` / `runSubscriptionOn`;
+- every `Callable` enqueued in `AbstractQueuedConversationCoordinator`;
+- group-member turns and sub-agent calls;
+- SSE and streaming handlers.
+
+Use the A.9 search to find the call sites. The guard (§14.2) flags raw async calls that
+bypass `OrgPropagation`.
+
+### 6.4 Work-starters persist their org
+
+Each of these gets an `orgId`, stamped on create. Resuming work from it binds that org:
+
+- conversation memory snapshot and conversation descriptor;
+- group conversation;
+- schedule;
+- agent trigger;
+- channel integration;
+- HITL pause and tool journal;
+- Slack approval record;
+- email ledger;
+- OAuth state and grant;
+- team budget;
+- ingestion state;
+- agent test run;
+- **`DeploymentInfo`** and the cluster deploy/undeploy events;
+- export archives;
+- dynamic and sub-agents (they inherit the parent's org).
 
 ---
 
-## 9. Feature-by-feature rules
+## 7. Entry points and org routing
+
+### 7.1 Org source per entry point (multi mode)
+
+| Entry point | Org source | Classes |
+|---|---|---|
+| Authenticated REST, SSE, MCP | Verified token via `OrgResolver` (§9.1). With host binding and a mapped host, the host's org must match, otherwise 404 | `OrgResolution` |
+| Anonymous public chat | **Host binding (mandatory).** Unmapped host → 404 | `engine/api/IRestAgentEngine` (`/agents/...`) and the streaming variant |
+| A2A, `/.well-known/*` | Host binding; cards list only that org's agents | `engine/a2a/RestA2AEndpoint.java`, `AgentCardService` |
+| Branded shell and static config (`ui/Branded*Route`, `/manage/__auth_config__.js` from `ui/IRestManagerResource`) | Host binding; an unmapped host gets the platform brand; caches keyed `(org, revision)`. `planning/white-label-ui-plan.md` reserves `BrandingService.current(request)` | `ui/*`, `configs/branding/BrandingService` |
+| `/openapi`, Swagger UI | Org callers never see `/platform/*` operations (filter the document per plane) | `ui/BrandedOpenApiRoute` |
+| Slack / webhook | Integration id in the path (`/integrations/slack/{integrationId}/…`, `/integrations/webhook/{integrationId}/…`; old paths stay in single mode). A cross-org platform read by that unguessable id, then the signature is verified with **that** integration's secret. Payload fields never select the org | `integrations/slack/rest/RestSlackWebhook`, `integrations/webhook/rest/RestWebhookChannel`, `SlackEventHandler`, `WebhookEventHandler` |
+| Email inbound | Org of the swept mailbox integration | `integrations/email/EmailInboundSweeper` |
+| `/v1` | Per-org `OrgApiKey` (hashed, via the routing index). The header user id is namespaced inside that org | `integrations/openai/*` |
+| `/connections/callback` | Org of the stored single-use `OAuthState` (cross-org platform read by state value) | `connections/*` |
+| Jobs | Item's `orgId` (§7.4) | A.7 |
+| NATS consumers | Signed `Eddi-Org` header (§8.9) | A.8 |
+| Startup / migrations | `OrgScope.platform("migration:<name>", …)` | migration classes |
+
+**Host binding:**
+
+- The host comes from Quarkus' proxy-aware authority, with `quarkus.http.proxy.*`
+  configured. Never use raw `X-Forwarded-Host`.
+- Hostnames are lower-cased, globally unique, and set by platform admins only.
+
+### 7.2 `OrgRoutingIndex` (platform plane)
+
+`OrgRoutingIndex` maps a routing key to an org and returns nothing else. Its keys are:
+
+- hostnames;
+- `/v1` key hashes;
+- Keycloak organization ids.
+
+It is maintained in the same write as its source record and cached. Only `OrgResolution`,
+the `/v1` filter and the org store may call it (§14.2).
+
+### 7.3 Loopback and `IRest*` calls
+
+- **With a caller,** the loopback forwards the bearer token and also **`X-EDDI-Org`** with
+  the bound org (extend `LoopbackCallerAuthFilter`). The receiver re-validates the header
+  against the claim. Add `x-eddi-org` to `quarkus.http.cors.headers`.
+- **Anonymous host-bound callers never go through the loopback,** because the self address
+  is an unmapped host. Convert those call paths to direct service calls.
+- **Background code never calls `IRest*` beans,** neither over the loopback nor in-process,
+  because `@RolesAllowed` on the interfaces would see an anonymous identity. In Phase 3,
+  convert every such call (A.4) to the underlying store or service, inside the item's org.
+  There is no internal token.
+
+### 7.4 Background jobs: claim across orgs, bind per item
+
+**Work-queue jobs** (schedule poller, HITL timeouts, OAuth maintenance, log retention, email
+sweeper, Dream/lesson queues, agent-test recovery) keep today's predicate and
+compare-and-set claim.
+
+- **Before the marker:** run today's query unchanged.
+- **After the marker,** inside `OrgScope.platform("job:<name>", …)`:
+  - **Postgres:** select candidate ids from the oldest `:scan` due rows (default 20 × batch),
+    apply `row_number() OVER (PARTITION BY org_id ORDER BY due)` with
+    `rn <= :cap` (`eddi.org.jobs.max-per-org-per-tick`, default 50), and limit to `:batch`.
+    **Close the connection.** No `FOR UPDATE`.
+  - **Mongo:** an aggregation over the same bounded window: `$match` → `$sort {due:1}` →
+    `$limit :scan` → `$group {_id:"$orgId", ids:{$topN:{n:cap, sortBy:{due:1}, output:"$_id"}}}`.
+  - Rotate the starting org each tick, round-robin over the group results.
+  - For each id: `OrgContext.runAs(item.orgId, …)`, then the CAS claim and the processing,
+    on a **new** connection.
+
+**Per-org aggregate jobs** (quota maintenance, per-org metrics) use `OrgIterator`
+(Phase 5): paged, with a per-tick budget and a persisted cursor.
+
+---
+
+## 8. Persistence and runtime enforcement
+
+### 8.1 Field and stamping rules
+
+- Every org collection or table carries `orgId` / `org_id` (Appendix B). The helpers stamp
+  it from the context.
+- **A caller-supplied `orgId` is always overwritten.** This covers bodies, imports, ZIPs and
+  NATS payloads.
+- Platform tables carry no org field. Their stores are callable from any binding (§6.1).
+  Cross-org reads of org tables happen only through dedicated `platform*` store methods,
+  which require `OrgContext.isPlatform()`.
+
+### 8.2 Generic resource SPI (31 files)
+
+- `IResourceStorageFactory.create(...)` keeps its signature. The Mongo and Postgres storages
+  call the helpers for every read, history read, find, update and delete, and stamp on every
+  write. `DescriptorStore` does the same.
+- `DocumentDescriptorStore.findByOriginId` and substring search (`ISubstringSearchIndexing`,
+  `PostgresSubstringSearchIndexes`) become org-scoped.
+
+### 8.3 Direct stores (A.2/A.3)
+
+Do not build a `MongoCollection` wrapper that rewrites filters. It cannot cover
+aggregations, `$lookup`/`$unionWith`, bulk writes, change streams or GridFS.
+
+- **`OrgCollections`** (Mongo):
+  - `filter(Bson)`: no-op before the marker, strict after;
+  - `stamp(Document)`;
+  - `matchStage()`: the mandatory first pipeline stage;
+  - `gridFsMetadata(…)`;
+  - `uniqueFilter(Bson)`: shaped by the marker.
+- **`OrgSql`** (Postgres):
+  - `whereOrg()`: an empty fragment before the marker, `AND org_id = ?` after;
+  - `bind(...)`;
+  - `conflictTarget(key)`: the B.2 target for the current marker state;
+  - `insertColumns()`;
+  - the connection-epoch assertion (§8.4).
+- `estimatedDocumentCount` is platform-only, because it cannot be filtered.
+
+### 8.4 PostgreSQL RLS (backstop after the marker)
+
+**Policies.** Apply to every org table:
+
+```sql
+ALTER TABLE <t> ENABLE ROW LEVEL SECURITY;
+ALTER TABLE <t> FORCE ROW LEVEL SECURITY;
+CREATE POLICY org_isolation ON <t>
+  USING (org_id = current_setting('eddi.org_id', true))
+  WITH CHECK (org_id = current_setting('eddi.org_id', true));
+CREATE POLICY platform_access ON <t> USING (current_setting('eddi.platform', true) = 'on');
+```
+
+An unset GUC is NULL, so the policy returns no rows. Platform tables have no RLS.
+
+**`OrgRlsPoolInterceptor`** (`@ApplicationScoped`, `io.agroal.api.AgroalPoolInterceptor`):
+
+- `onConnectionAcquire` runs on the caller's thread. It executes
+  `SELECT set_config('eddi.org_id', ?, false), set_config('eddi.platform', ?, false)`:
+  - with an org binding: the org and an empty platform flag;
+  - inside `OrgScope.platform`: an empty org and `on`;
+  - unbound: both empty.
+- It records the binding epoch on the connection, e.g. in a `WeakHashMap<Connection, Long>`
+  keyed by the wrapped connection.
+- No `RESET ALL`. Each acquire overwrites both values, and a reset would also wipe the
+  `new-connection-sql` settings.
+- It does nothing until the marker enables RLS.
+
+**A connection never spans a binding change.**
+
+- Claim methods materialise their results and close the connection before `runAs`.
+- `OrgSql` asserts that the connection's acquire epoch equals `OrgContext.epoch()`. A
+  mismatch throws `[SECURITY]`.
+- Code that holds a connection across a hand-off is a defect.
+
+**Spike (Phase 0).** Prove each of these:
+
+- the interceptor is registered for the default datasource;
+- it runs on the acquiring thread for the `Instance<DataSource>` users;
+- **an exception in `onConnectionAcquire` aborts the borrow.** If it does not, also clear
+  both GUCs in `onConnectionReturn`;
+- the bean is harmless when `quarkus.datasource.active=false`, as on every Mongo deployment;
+- the per-acquire overhead.
+
+If the spike fails, the fallback is `OrgSql.inTx(work)` with `set_config(..., true)` around
+every statement path. The ~380 sites are touched in Phase 1 anyway. **STOP:** ask the user
+before taking the fallback.
+
+**Further rules:**
+
+- **Role split** (`eddi_migrator` owns, `eddi_app` `NOBYPASSRLS`): optional hardening, since
+  `FORCE` binds the owner. It is required only to contain pre-floor binaries (§5.4).
+- **Threat model:** `eddi_app` can call `set_config('eddi.platform','on')` itself, so RLS
+  stops missed filters, not SQL injection.
+- **PgBouncer** in transaction pooling mode breaks session GUCs. Either run it in session
+  mode, or set `eddi.org.postgres-rls=off-i-understand`, which leaves the app filter only
+  and logs a WARN. **STOP** if a deployment needs this. Document it in `docs/multi-org.md`.
+- **pgvector pools** (`PgVectorConnectionPools`) connect to author-supplied external
+  databases and are not covered. The controls there are §8.8 names and per-org credentials.
+- **Never rewrite PKs.** `resources` and `resources_history` get
+  `(org_id, collection_name, id)`.
+
+### 8.5 MongoDB specifics
+
+- After the marker, `orgId` leads every index except the claim indexes.
+- Each org collection has the `$jsonSchema` validator requiring `orgId`.
+- Future shard key: `{orgId: 1, _id: 1}`, or hashed `orgId` if orgs are very uneven.
+- GridFS: `metadata.orgId`, index `(metadata.orgId, metadata.conversationId)`.
+- Dedicated tier (Phase 7): `OrgDatabaseRouter` replaces the single `MongoDatabase` bean.
+  Use it for at most tens of orgs.
+
+### 8.6 Caches (A.5 plus `ICacheFactory`, `ClusterInvalidatingCache`, `SharedKvCache`)
+
+- Classify each cache:
+  - **org data:** the key includes `OrgKey<K>(OrgId, K)`. This is mandatory whenever the key
+    is not a globally unique id (names, keys, aliases) and recommended always;
+  - **platform data:** document why.
+- Credential-bearing caches are always org-keyed: `ChatModelRegistry`,
+  `EmbeddingModelFactory`, `SecretResolver`, `ConnectionRegistry`.
+- A new `Caffeine.newBuilder()` outside the classified list fails the build.
+
+### 8.7 In-memory runtime registries
+
+- **Deployed agents.**
+  - `IAgent.orgId` comes from `DeploymentInfo.orgId`, and the deploy events carry it too.
+  - The map stays keyed by `AgentId(id, version)`, since ids are globally unique. Every
+    lookup compares the agent's org with the bound org and returns `null` on a mismatch.
+  - `getAllLatestAgents(env)` filters to the bound org. A platform variant exists.
+  - `AgentDeploymentManagement` deploys each agent inside its own org scope.
+  - The `eddi_agents_deployed` gauge is platform plane.
+- **Coordinator queues** are keyed `<org>.<conversationId>`, and tasks are wrapped.
+- **SSE and user events** (`UserEventPublisher`, `GroupConversationEventSink`) use the
+  audience `(orgId, userId)`.
+- **Org-keyed state:** `TurnIdempotencyService`, `LlmCircuitBreakers`, `ToolRateLimiter`,
+  `GroupSigningGuard`, `ConversationReviewPolicy`, `ConversationRatingPolicy`,
+  `AutonomyOverlayService`, `ApprovalAnalyticsService`, and the `WorkflowTraversal` memo.
+
+### 8.8 RAG and vector stores
+
+- **Derived names after the marker:** `eddi_<sanitised org>_<sanitised ragConfigId>_<hash8(orgId + "/" + ragConfigId)>`.
+  The hash prevents sanitising collisions such as `a-b` versus `a_b`.
+- **Author-supplied physical names are refused.** That covers `collectionName`,
+  `tableName`, `databaseName` and `indexName`. The only exception is a platform admin on a
+  dedicated org.
+- **Before the marker,** existing names keep working
+  ([`docs/rag.md`](../docs/rag.md#knowledge-base-isolation)).
+- **External providers** use the org's own credentials.
+
+### 8.9 NATS and cluster
+
+- **Signature v2.** `ClusterMessageSigner` gains a v2 signed text that covers the
+  `Eddi-Org` header.
+  - Before the marker, receivers accept v1 and v2.
+  - Senders switch to v2 at `SWITCHING` (§5.3).
+  - After the barrier, only v2 is accepted for org-scoped subjects.
+- **Signing key.** After the marker, a NATS deployment needs a signing key, and unsigned
+  sending stops.
+- **Consumers** bind the org from the header and reject org-scoped messages without one.
+- **Keys stay id-keyed.** That covers KV, tombstone (`ErasureTombstones`), lease
+  (`KvLeaseManager`, `NatsLeaseManager`) and dead-letter (`JetStreamDeadLetterStore`) keys.
+  Ids are globally unique, and re-keying would orphan existing erasure tombstones.
+- **Values and dead-letter payloads carry `orgId`.** Listings filter on it, and the
+  dead-letter forwarder rebinds the payload's org.
+- **Archives** (`ClusterArchiveStore`, `<prefix>_ARCHIVES` bucket, node-local
+  `tmp/archives`) are org data:
+  - object names are `<org>/<file>`;
+  - each org has a byte cap;
+  - they are purged on org deletion.
+- **Platform-plane views:** cluster admin, dead letters, diagnose and activity
+  (`ClusterAdminService`, `ClusterWatcher`, `ClusterActivityLog`). An org admin sees only
+  their own org's entries.
+- **Coordinator.** In NATS mode (`ClusterConversationCoordinator`), turns carry the org
+  header.
+
+---
+
+## 9. Identity, roles, planes
+
+### 9.1 `OrgResolver` SPI (`eddi.org.resolver`)
+
+| Resolver | How | Use |
+|---|---|---|
+| `single` | Always `default` | Phase 1 |
+| `keycloak-organizations` (multi default) | Reads the `organization` claim from the **verified access token**, never from UserInfo. The client requests `scope=organization:*` explicitly. Only the `{alias: {id: …}}` shape is accepted (configure the mapper to include ids). The org is matched by **Keycloak's immutable organization id** via `OrgRoutingIndex`, never by alias. Verify the claim shape against 26.8 in the Phase 0 spike | SaaS users |
+| `issuer` (optional, after Phase 6) | One Quarkus OIDC tenant per org via `TenantConfigResolver` | BYO-IdP |
+
+- **Several orgs in the token:** select one with `X-EDDI-Org`, checked against the claim.
+  Several orgs and no header → 403.
+- **Missing or unknown org** → 403 `[SECURITY]`. Never fall back to `default`.
+
+### 9.2 Principals
+
+- Principals are stored as `(orgId, subject)` pairs with `orgId` in its own field, never as a
+  string prefix.
+- Pairs are used for ownership, grants, user memories, the directory, conversation `userId`,
+  HITL `decidedBy`, attachments and GDPR subjects.
+- `ReservedPrincipals` stays.
+
+### 9.3 Roles and planes
+
+**Platform plane.**
+
+- **Roles:** `eddi-platform-admin`, `eddi-platform-operator`, `eddi-metrics`.
+- **Source:** **client roles of the `eddi-platform` client**, read from
+  `eddi.org.platform.role-claim-path` (default `resource_access/eddi-platform/roles`). Only
+  platform staff hold them, with MFA. They are never mapped from an org IdP.
+- **Scope:** orgs, enablement, quotas, cluster admin, platform catalog, metrics, platform
+  logs. **No customer content without break-glass.**
+
+**Org plane.**
+
+- **Roles:** `eddi-admin`, `eddi-editor`, `eddi-user`, `eddi-viewer`, `eddi-approver`.
+- **Source:** **EDDI-side `OrgMembership(orgId, subject, roles, teams)`**.
+- **Scope:** the caller's org only.
+
+**`OrgRoleAugmentor`** (a `SecurityIdentityAugmentor`, multi mode only):
+
+- It builds a **fresh** identity, not `QuarkusSecurityIdentity.builder(identity)`.
+- It drops every token `eddi-*` role.
+- It adds the membership roles for the request's org, plus the platform roles from the
+  platform claim.
+- It looks memberships up through `context.runBlocking(...)` and caches them for at most
+  60 s, with cluster invalidation.
+- Revocation latency is bounded by that cache and by the 3-minute OIDC token cache (`a.p:861`).
+
+**Rules:**
+
+- **New members** get `Org.defaultMemberRoles` (default `eddi-user`). Org admins manage
+  members via `/orgs/current/members`.
+- **Single mode:** realm roles work as today, and `eddi-admin` implies the platform roles.
+- **Break-glass:** `POST /platform/orgs/{orgId}/access` with a reason and a TTL of at most
+  4 h, requested by `eddi-platform-admin`. **STOP (ADR):** decide whether a second platform
+  admin must approve it. Every action under it is written to the org's audit ledger and to
+  the platform ledger.
+- **Role checks stay literal.** Extend `McpRoleTierParityTest` with the platform tier.
+- **Never visible to an org admin:** other orgs, platform logs, cluster admin, `/q/metrics`,
+  platform catalog writes, enablement state, other orgs' quotas, `/platform/*` in OpenAPI.
+
+### 9.4 Workspaces inside the org
+
+- Spaces, visibility and grants are unchanged, evaluated within the org.
+- **Team spaces in multi mode** come from `OrgMembership.teams`, or from Keycloak groups
+  under `/orgs/<kc-org-id>/` only. All other groups are ignored.
+- `SpaceTenants` hashes include the org.
+- `internal` means signed-in members of the org. `published` means anonymous callers on the
+  org's hosts.
+- The directory is org-local. `legacy-visibility` applies within the org.
+- Setup-API resources are stamped with the caller's org.
+
+### 9.5 Platform Operator and MCP
+
+- **Operator.** It gets two profiles, **org** and **platform**. The org profile has no
+  `administration/logs`, `cluster/*` or quota writes.
+  - Files to change: `ui/manager/src/lib/operator/tool-scopes.ts`, `system-prompt.ts`.
+  - Bump `operator-revision.json`.
+  - Read `ui/manager/AGENTS.md` → Platform Operator first.
+- **MCP.** Every MCP tool class is `@OrgBound` or `@PlatformPlane`.
+- **Docs.** Update `docs/mcp-server.md#role-mapping` and `integrations/claude-plugin/`.
+
+### 9.6 Per-org settings (`OrgSettings`)
+
+Settings that are deployment-wide today but belong to a customer move into the org-scoped
+`OrgSettings`, with the deployment value as the fallback:
+
+- mail sender identity and allowed recipient domains;
+- the Slack app and signing secrets (per integration);
+- CORS origins (per org host);
+- the public base URL (`SelfUrlResolver`, per org host);
+- the `/v1` keys (`OrgApiKey`);
+- branding.
+
+A.13 classifies every `eddi.*` key. Platform update-check notices go to platform admins
+only, not to org `WorkspaceNotifications`.
+
+---
+
+## 10. Rules per feature area
 
 | Area | Rule | Main files |
 |---|---|---|
-| Conversation memory and snapshots | `orgId` on snapshot and descriptor. Reads by id filter by org. `returnDetailed` unchanged | `engine/memory/*`, `PostgresConversationMemoryStore` |
-| User memories, Dream, lessons | key `(orgId, userId, …)`. Dream/lesson consolidation iterate per org with per-org cost ceilings | `configs/properties/*`, `engine/runtime/internal/DreamService.java`, `LessonConsolidationService.java` |
-| Attachments | `metadata.orgId`. Per-org size caps | `GridFsAttachmentStore`, `PostgresAttachmentStore` |
-| Audit ledger | **per-org HMAC key** (derived via HKDF from the platform audit key + `orgId`, or org KEK-wrapped) and **per-org chain**. Platform ledger separate. Exports are per org and verifiable with that org's key only | `engine/audit/*` (`AuditKeyring`, `AuditStore`, `PostgresAuditStore`) |
-| DB logs | `orgId` on entries. Org admins see their org. Platform sees all via platform scope | `engine/runtime/DatabaseLogs.java`, `PostgresDatabaseLogs` |
-| Secrets vault | key `(orgId, vaultTenant, keyName)`. **Per-org KEK**: org DEKs wrapped by the org KEK, the org KEK wrapped by the platform master key (later: per-org KMS key, BYOK). AAD includes `orgId`. Org deletion destroys the org KEK (crypto-shredding). Today's KEK = org `default` | `secrets/*` |
-| Global variables, prompt snippets, branding, alert rules, model prices | per org. A platform catalog provides read-only defaults (§9.1) | respective stores |
-| Connections, OAuth state, grants | `orgId` on all. The OAuth callback resolves the org from the stored state, never from the request | `connections/*`, `configs/connections/*` |
-| Channels (Slack, webhook, email) | integration record carries `orgId`. The inbound org comes from the verified record | `integrations/*`, `configs/channels/*` |
-| HITL, oversight, approvals, Slack approval records | `orgId`. Approver must be in the same org | `engine/hitl/*`, `integrations/slack/hitl/*` |
-| Groups, team budgets, handoffs, shared artifacts, task lists | `orgId`. All members, moderator and facilitator must be agents of the same org (validated at authoring and run) | `engine/groups/*`, `configs/groups/*` |
-| Sub-agents / dynamic agents | inherit the parent conversation's org | `modules/llm/impl/*ToolsProvider` |
-| Schedules, triggers | `orgId`. A fire binds it | `engine/schedule/*`, `engine/triggermanagement/*` |
-| Import/export, agent sync, upgrade executor | export carries no `orgId`. Import stamps the importer's org. `originId` matching is org-scoped. Instance-to-instance sync authenticates into one org | `backup/impl/*`, `engine/setup/ApiAgentSyncService.java` |
-| GDPR erase/export | scoped to org + subject. Org admin may act for its org only | `engine/gdpr/*` |
-| Agent tests, ratings, outcomes, spend control changes | `orgId` | respective packages |
-| Templating | `{vars}`/`{snippets}`/`${vault:…}`/`${vars:…}`/`${connection:…}` resolve within the current org. A reference cannot name another org (there is no syntax for it, keep it that way) | `modules/templating/*`, `configs/variables/GlobalVariableResolver.java`, `secrets/SecretResolver.java` |
-| Outbound HTTP / SSRF | multi mode forces `eddi.security.ssrf-protection.enabled=true` and adds a non-overridable deny for self addresses, the NATS URL, the DB host(s), the Keycloak admin API and cloud metadata. Allow-list entries (`eddi.security.ssrf-protection.allowed-hosts` or equivalent) are platform config, per org override only by platform admin | `engine/httpclient/outbound/*`, `UrlValidationUtils`, `modules/apicalls/*`, MCP client, RAG |
-| LLM provider keys | multi mode: **per-org keys** (in the org vault) are the default. Platform-provided keys only through an explicit platform "provider pool" with per-org rate buckets, per-org spend attribution, and prompt caching namespaced by org where the provider allows it | `modules/llm/*`, `engine/pricing/*` |
-| Metrics / tracing | tag `org` only when `eddi.org.metrics.tag-org=true` (default false in multi mode above `eddi.org.metrics.max-tagged-orgs`, default 200). Per-org usage is exposed through the quota/usage API, not Prometheus. Spans carry `eddi.org` as an attribute. `/q/metrics` is platform plane | `engine/tenancy/TenantQuotaService.java`, metrics classes |
-| Errors | no other org's ids, names or counts in error text | everywhere |
+| Conversation memory, descriptors, checkpoints | `orgId`; reads by id org-filtered | `engine/memory/*` |
+| User memories, Dream, lessons | `(orgId, userId, …)`; claim pattern; per-org cost ceilings | `configs/properties/*`, `DreamService`, `LessonConsolidationService` |
+| Attachments | `metadata.orgId`; per-org caps | `GridFsAttachmentStore`, `PostgresAttachmentStore` |
+| Secrets, variables, snippets, branding, alert rules, model prices | Per org; platform catalog defaults (§10.1) | respective stores |
+| Connections, OAuth, grants | `orgId`; callback takes the org from state | `connections/*`, `configs/connections/*` |
+| Channels | §7.1; outbound identity from `OrgSettings` | `integrations/*` |
+| HITL, oversight, approvals | `orgId`; approver must be in the same org | `engine/hitl/*`, `integrations/slack/hitl/*` |
+| Groups, budgets, handoffs, artifacts, tasks | `orgId`; all members in the same org (checked at authoring and at run) | `engine/groups/*`, `configs/groups/*` |
+| Sub-agents, dynamic agents | Inherit the parent's org | `modules/llm/impl/*ToolsProvider` |
+| Schedules, triggers | `orgId`; a fire binds it | `engine/schedule/*`, `engine/triggermanagement/*` |
+| Import/export/sync | Exports carry no org; imports stamp the importer's org; `originId` match org-scoped; archives per §8.9 | `backup/impl/*`, `engine/setup/ApiAgentSyncService` |
+| GDPR | Org + subject | `engine/gdpr/*` |
+| Tests, ratings, outcomes, spend changes, alerts | `orgId` | respective packages |
+| DB logs | `orgId`; org admins see their own; retention uses the claim pattern | `engine/runtime/DatabaseLogs`, `PostgresDatabaseLogs` |
+| Templating | Resolves within the current org; no syntax names another org | `modules/templating/*`, `GlobalVariableResolver`, `SecretResolver` |
+| Agent signing | Signing keys and nonce caches per org | `configs/agents/AgentSigningService`, `configs/agents/crypto/*` |
+| Errors | Never contain another org's ids, names or counts | everywhere |
 
-### 9.1 Platform catalog (shared, read-only to orgs)
+### 10.1 Platform catalog
 
-Model price catalog defaults, documentation, built-in group templates, built-in Operator
-definition, default agents/templates, branding defaults. Stored without `orgId`, written
-only by platform admins, read by any org. Orgs can **override** with their own
-org-scoped copy (an org price table, org templates). Resolution order: org first, then platform.
+The platform catalog holds:
 
----
+- model price defaults;
+- documentation;
+- built-in group templates;
+- the built-in Operator;
+- default agents and templates;
+- branding defaults.
 
-## 10. Verification — what makes it "super secure"
-
-1. **`MultiOrgConformanceIT`** (Testcontainers, Mongo **and** Postgres, multi mode, two orgs
-   A/B with users of every role):
-   - As A, create one of every resource type, a conversation, a memory, an attachment,
-     a secret, a schedule, a channel integration, a group conversation, an audit entry.
-   - As B (every role, plus anonymous), call **every** REST operation from the OpenAPI
-     document and **every** MCP tool with A's ids. Expect 404 / empty list / refusal,
-     never A's data. The operation list is generated from `/openapi` and the MCP tool
-     registry, so a **new endpoint without a test case fails the build**. Explicit,
-     reviewed exemptions live in one file.
-   - Channel inbound with A's signing secret cannot address B's agents.
-2. **Build guards** (JUnit, style of `ImportStyleTest`/`BuildQualityGatesTest`), report-only
-   in Phase 1, failing from Phase 3:
-   - No `MongoDatabase`/`MongoCollection`/`DataSource`/`getConnection()` outside
-     `datastore/**` and the allow-listed store classes, and each allow-listed store
-     method that touches the DB takes an `OrgId`.
-   - No `Caffeine.newBuilder()` outside an allow-list with a written classification.
-   - Every JAX-RS resource method and MCP tool is `@OrgBound` or `@PlatformPlane`.
-   - Every `@Scheduled` method uses `OrgIterator` or is `@PlatformPlane`.
-   - Every class that persists a "work starter" (list in §9) has an `orgId` field.
-   - `OrgScope.platform(` is used only in allow-listed classes.
-   - No new use of the word `tenant` in new `eddi.org.*` keys or `Org*` classes.
-3. **Mutation checks:** remove the org predicate in each storage/helper, and the conformance
-   suite must go red. Keep a scripted check (cf. memory "mutation-check behavioural tests").
-4. **RLS backstop test:** disable the app filter in a test profile and run the conformance
-   suite on Postgres with RLS: still green.
-5. **Single-mode regression:** the full existing unit and IT suites stay green in single mode.
-   `scripts/loadtest` p95 within 3%.
-6. **Threat model** document `docs/multi-org-security.md` (STRIDE per entry point) and an
-   **external pentest** before the first external org goes live.
+Platform admins write it, and every binding reads it (§6.1). An org may override any entry;
+the org's copy wins over the platform default.
 
 ---
 
-## 11. Phases — tasks, files, exit criteria
+## 11. Security controls
 
-Each phase is one or more PRs. Every PR: branch from `origin/main` (`feat/org-…`), changelog
-fragment under `docs/changelog.d/`, docs updated, `./mvnw test` green, both modes in CI.
-**Do not start a phase before the previous one's exit criteria hold.**
+### 11.1 SSRF
 
-### Phase 0 — ADR and threat model (docs only)
-- `docs/adr/` (create if absent) `0001-organizations.md`, locking the §12 decisions marked LOCK.
-- `docs/multi-org-security.md` threat model draft.
-- Exit: the product owner approves the ADR.
+- **After the marker,** `eddi.security.ssrf-protection.enabled=true` is forced.
+- **Non-overridable deny list:**
+  - EDDI's own addresses and port;
+  - NATS, the DB hosts and Keycloak admin;
+  - cloud metadata;
+  - `eddi.org.ssrf.cluster-cidrs`.
+- Allow-list entries are platform config.
+- **Applies to** everything that goes through `engine/httpclient/outbound/*`,
+  `UrlValidationUtils` and the langchain4j model builders: httpcalls, the MCP client, RAG
+  hosts, connections, A2A peers, outbound webhooks and email-link fetches.
 
-### Phase 1 — Org context everywhere, constant `default` (no behaviour change)
-1. `engine/org/`: `OrgId`, `OrgContext`, `OrgScope`, `OrgPropagation`, `OrgIterator`,
-   `OrgContextMissingException`, `OrgConfig` (`eddi.org.mode`, `eddi.org.default-id`,
-   alias `eddi.tenant.default-id`).
-2. Interceptor `@OrgBound` + `OrgRequestFilter` resolving `default` (single resolver only).
-3. Bind the org at every entry point of §4.2 (single mode: always `default`).
-4. Wrap every hand-off (§4.3, Appendix A.9).
-5. Replace all 22 `getDefaultTenantId()` call sites (Appendix A.6) with `OrgContext.require().value()`.
-   `TenantQuotaService.getDefaultTenantId()` becomes `@Deprecated`.
-6. Add `orgId` fields to all work-starter models (§9) and **stamp on write** in every store
-   (Mongo: field. Postgres: nullable `org_id` column added with `ADD COLUMN IF NOT EXISTS`).
-   Reads unchanged.
-7. NATS: send the `Eddi-Org` header (signed). Accept missing.
-8. Build guards in **report-only** mode (print violations, don't fail).
-9. Docs: `docs/configuration-reference.md` (new keys), changelog fragment.
-- Exit: all suites green in single mode. Stamp coverage report: every collection/table in
-  Appendix B shows `orgId` on new writes (a test that writes one of each and inspects raw DB).
-  Fallback counter stays at 0 in the IT suite.
+### 11.2 Keys
 
-### Phase 2 — Backfill + conformance suite (red is expected)
-1. `OrgBackfillMigration` (Mongo + Postgres) per §8, with lease, batching and progress.
-2. `MultiOrgConformanceIT` per §10.1, plus an `OrgTestProfile` with two orgs and a fake
-   `OrgResolver` that reads the org from a test claim.
-3. CI job `Multi-Org Conformance` (non-required, reports).
-- Exit: backfill proven on a copy of a large dataset (≥ 10M conversation docs on Mongo,
-  measured duration and DB load documented). Conformance suite runs and lists every leak.
+- **Hierarchy.** Each org has a KEK that wraps its DEKs. The platform master key wraps the
+  KEK; a per-org KMS (BYOK) comes later.
+- **AAD v2** = `(orgId|tenant|key|dekId)`. Values sealed before enablement keep v1 and open
+  only in `default`.
+- **Deleting an org** destroys its KEK (crypto-shredding).
+- **Threat model:** until KMS, exposure of the platform master key exposes all orgs.
 
-### Phase 3 — Enforce the app filter
-1. SPI enforcement (§5.2), `findByOriginId` scoped.
-2. Direct stores: `OrgCollections` / `OrgJdbc`, `OrgId` parameter on store interfaces
-   (§5.3, Appendix A.2/A.3). Do it package by package, one PR each.
-3. Caches (§5.6), NATS keys and consumer binding (§5.8).
-4. RAG physical naming (§5.7).
-5. Multi mode refuses to start with SSRF protection off. Add the self/infra deny list (§9).
-6. Loopback internal context token (§4.4).
-7. Indexes with `orgId` leading (background builds).
-8. Build guards switch to **failing**.
-- Exit: conformance suite green for data access (identity tests may still be pending),
-  RLS-less mutation checks red as expected, single-mode load test within 3%.
+### 11.3 Audit
 
-### Phase 4 — Identity, roles, planes
-1. `OrgResolver` SPI + `keycloak-organizations` + `issuer` resolvers (§6.1), `X-EDDI-Org` selection.
-2. `Org` record + `IOrgStore` (Mongo/Postgres, platform plane): id, displayName, status
-   (`ACTIVE`/`SUSPENDED`/`DELETING`), tier (`POOLED`/`DEDICATED`), idpBinding, createdAt, quotas ref, kmsKeyRef.
-   Suspended orgs get 403 at the resolver.
-3. Principal pairs (§6.2): ownership, grants, directory, memories, HITL deciders.
-4. Platform roles + break-glass (§6.3). Quotas move to the platform plane.
-5. Workspaces nested (§6.4).
-6. Per-org `/v1` keys, channel/A2A binding (§4.2).
-7. Operator split + revision bump, MCP tiers, plugin skills (§6.5).
-8. Keycloak realm changes: `keycloak/eddi-realm.json` gets an example org, an Organizations
-   mapper and a platform client. Document it in `docs/multi-org.md` (new).
-- Exit: conformance suite fully green (including identity, roles, anonymous, channels,
-  `/v1`, A2A). `McpRoleTierParityTest` extended and green.
+- Each org has its own HMAC key, derived with HKDF from the platform audit key and the
+  `orgId`, recorded by key id. Each org also has its own chain.
+- The pre-enablement chain is `default`'s genesis.
+- The platform ledger is separate.
+- Exports are per org and verifiable with that org's key.
 
-### Phase 5 — Crypto, RLS, fairness
-1. Per-org KEK hierarchy in the vault + AAD with `orgId` (§9 vault row). Migration rewraps
-   existing DEKs under org `default`'s KEK.
-2. Per-org audit key + chain (§9 audit row).
-3. Postgres RLS (§5.4) with the role split, plus `org_id NOT NULL` (release N+2 of §8).
-4. Fairness: per-org concurrent-turn semaphore in the conversation coordinator, per-org LLM
-   and tool rate buckets, scheduler round-robin, per-org NATS consumer share, storage caps.
-   Wire `TenantQuotaService` limits per org.
-- Exit: RLS backstop test green. Benchmark documented. A noisy-neighbour test (org A at
-  10× load) keeps org B's p95 within its SLO.
+### 11.4 LLM keys
 
-### Phase 6 — Org lifecycle and platform console
-1. REST `/platform/orgs` (create, suspend, resume, delete, export) + MCP platform tools.
-2. Create: org record, KEK, quota row, default branding/catalog links, IdP binding
-   (optional Keycloak admin API integration behind a feature flag).
-3. Export: full logical org bundle (configs via the agent export format, conversations,
-   memories, attachments, audit chain, secrets metadata, never values) for offboarding
-   or moving to option A.
-4. Delete: `DELETING` → destroy the org KEK (crypto-shred) → asynchronous purge of all rows
-   per Appendix B → deletion certificate in the platform ledger.
-5. Manager: platform console (org list, status, quotas, usage). Org admins see their org
-   settings. Workforce: org switcher for multi-org users. Read `ui/manager/AGENTS.md` and
+- **Default:** per-org keys in the org vault.
+- **Platform provider pool:** opt-in, with per-org rate buckets, per-org spend attribution
+  and an org-namespaced prompt cache.
+
+### 11.5 Metrics and tracing
+
+- The `org` tag is off by default (`eddi.org.metrics.tag-org`, cap
+  `eddi.org.metrics.max-tagged-orgs` = 200).
+- Per-org usage is exposed through the usage API.
+- Spans carry `eddi.org`.
+- `/q/metrics` is platform plane: the multi-mode startup check refuses org roles in its policy.
+
+---
+
+## 12. Fairness and scalability
+
+- **Quotas.**
+  - `OrgQuotaKeys.keyFor(OrgId)` returns the configured `eddi.tenant.default-id` in single
+    mode and the org id in multi mode.
+  - Limits enforced: cost, conversations per day, API calls per minute, agents, and storage
+    caps (attachments, vectors, memories, archives).
+- **Bulkheads:**
+  - a per-org concurrent-turn semaphore in the coordinator;
+  - per-org LLM and tool buckets;
+  - job caps (§7.4);
+  - per-org admission control before publishing to JetStream.
+- **Agent working set (Phase 7).** Agents deploy lazily on first use per node, with LRU
+  eviction (`eddi.org.agents.max-resident`). Trigger it on the measured startup-time or heap
+  threshold. Single mode stays eager.
+- **Noisy-neighbour test (Phase 5):** org A runs at 10× load while org B's p95 stays within
+  its SLO.
+
+---
+
+## 13. Org lifecycle
+
+**`Org` record** (platform plane, `IOrgStore`, Mongo and Postgres). Fields:
+
+- `id`, `displayName`;
+- `status`: `ACTIVE` | `SUSPENDED` | `DELETING`;
+- `tier`: `POOLED` | `DEDICATED`;
+- `idpBinding` (Keycloak org id), `hostnames[]`, `defaultMemberRoles`;
+- `region` (reserved);
+- a quotas reference, `kmsKeyRef`, `createdAt`.
+
+**Operations** (`/platform/orgs` plus MCP platform tools):
+
+- **Create.** Creates the record, KEK, quota row, routing entries and `OrgSettings`.
+  Creating the Keycloak Organization is optional, behind a flag.
+- **Suspend / resume.** A suspended org gets 403 at the resolver, and the claim queries skip it.
+- **Export.** A logical bundle: configs, conversations, memories, attachments, the audit
+  chain and secret metadata (never secret values).
+- **Import an instance as an org.** An existing option-A single instance comes in as a new
+  org. Ids are kept; any collision is a hard refusal with a report.
+- **Delete.** `DELETING` → crypto-shred → async purge of every Appendix B store and the
+  archives → a deletion certificate in the platform ledger.
+- **Move tier** (Phase 7): copy, dual-read window, cutover.
+
+---
+
+## 14. Verification
+
+### 14.1 `MultiOrgConformanceIT`
+
+Runs with Testcontainers on Mongo **and** Postgres, in multi mode with the `ENABLED` layout
+(fresh bootstrap), orgs A and B, every role plus anonymous.
+
+1. **Setup.** As A, create one of everything:
+   - every resource type;
+   - a conversation, memory, attachment and secret;
+   - a schedule, trigger and channel integration;
+   - a group conversation, audit entry and vector store;
+   - an OAuth state, deployed agent and export archive;
+   - branding.
+2. **Probe.** As every role of B, and anonymously on B's host, call **every** REST operation
+   from `/openapi` and every MCP tool, using A's ids. Expect 404, an empty list or a refusal.
+   - A fixture registry maps parameter names to A's ids. An unknown parameter name fails
+     the test.
+   - Exemptions live in one reviewed file.
+3. **Side channels.**
+   - Channel inbound signed with A's integration cannot reach B.
+   - A's `/v1` key cannot reach B.
+   - A NATS message carrying B's org and A's ids is refused or filtered.
+   - A loopback call made with `X-EDDI-Org: A` by a B-only user is refused.
+4. **RLS backstop (Postgres only).** Disable the app filter in a test profile; the suite must
+   stay green with RLS. Mongo has no such backstop. Its compensations are the `$jsonSchema`
+   validator (writes only), the mutation checks and the guards.
+
+### 14.2 Build guards
+
+Report-only in Phase 1, failing the build from Phase 3. The guards check that:
+
+- raw `MongoDatabase`, `MongoCollection`, `DataSource` and `getConnection()` appear only in
+  `datastore/**` and the listed stores, and that every org-table access goes through
+  `OrgCollections` / `OrgSql`;
+- `Caffeine.newBuilder()` appears only in classified classes;
+- every JAX-RS implementation class and MCP tool class is `@OrgBound` or `@PlatformPlane`;
+- every A.12 class is annotated or uses `OrgRequest.callBound`;
+- every `@Scheduled` method uses the §7.4 patterns or is `@PlatformPlane`;
+- every work-starter (§6.4) has `orgId`;
+- `OrgScope.platform(`, `platform*` store methods and `OrgRoutingIndex` are used only by
+  allow-listed classes;
+- background code never injects `IRest*`;
+- there are no raw `Executors.new*`, unwrapped `supplyAsync(`/`runAsync(` or
+  `Thread.ofVirtual` outside `OrgPropagation`;
+- `OrgDataCatalog` matches the actual collections and tables (an IT);
+- every `eddi.*` key is classified in A.13 (a test diffs `application.properties` against
+  the list);
+- no `tenant` appears in new `eddi.org.*` keys or `Org*` classes.
+
+### 14.3 Other checks
+
+- **Mutation checks.** Remove each predicate or comparison (storage, helper, registry,
+  cache, epoch assertion) and confirm the suite goes red. Script it.
+- **Single mode.** All suites pass with the marker `ABSENT` and again with it `ENABLED`. The
+  fallback counter stays 0, and the load test stays within 3 %.
+- **Floor guard.** An IT sets `layout.required` above the binary's level and expects startup
+  to be refused.
+- **Docs.** Write `docs/multi-org.md` (operations) and `docs/multi-org-security.md` (STRIDE
+  threat model per entry point), and add both to `docs/SUMMARY.md`.
+- **Pentest.** An external pentest happens before the first external org.
+
+---
+
+## 15. Phases
+
+**Stop after each phase** and wait for the user. PR counts are estimates.
+
+### Phase 0 — Spikes, ADR, threat model (~2 PRs, no production code)
+
+**Tasks:**
+
+1. **Spike A, Agroal interceptor (§8.4).** Throwaway branch. Report the results.
+2. **Spike B, Keycloak 26.8 Organizations.** Use a compose realm with two orgs and one user
+   in both. Capture the exact access-token claim for `scope=organization:*` and for the
+   default scope. Confirm that ids are included, and how roles and groups appear.
+3. **Spike C, floor guard.** Prototype `DataLayoutGuard` and confirm it can be enforced at
+   startup on both datastores.
+4. Write `docs/adr/0001-organizations.md` (create `docs/adr/`) covering every §16 LOCK item,
+   updated with the spike results.
+5. Draft `docs/multi-org-security.md`.
+
+**Exit:** the user approves the ADR. **STOP**
+
+### Phase 1 — Context and stamping, no behaviour change (~6–9 PRs)
+
+**Tasks:**
+
+1. Add `engine/org/`:
+   - `OrgId`, `OrgContext` (bindings, transitions, epoch), `OrgScope`, `OrgPropagation`;
+   - `OrgContextMissingException`, `OrgConfig` (`eddi.org.mode`), `OrgQuotaKeys`;
+   - the `OrgResolver` SPI with `SingleOrgResolver`;
+   - `OrgResolution`, `OrgRequest.callBound`;
+   - the annotations `@OrgBound`, `@PlatformPlane`, `@OrgNeutral`;
+   - `OrgMarker` and `IOrgMarkerStore` (state `ABSENT`);
+   - `DataLayoutGuard` and `layout.required`. This makes Phase 1 the **floor release**.
+2. Add `@OrgBound` to all JAX-RS implementation and MCP tool classes, and handle A.12 and
+   the after-return work (§6.2).
+3. Bind the org in every background entry point (A.7, A.8, startup and deploy paths) and
+   wrap the hand-offs (§6.3) and the coordinator tasks.
+4. Replace the 22 `getDefaultTenantId()` sites with
+   `OrgQuotaKeys.keyFor(OrgContext.require())`, and deprecate the method.
+5. Add `OrgCollections` and `OrgSql`, with predicates as no-ops before the marker, and route
+   **every** store's DB access through them. **Stamp on every write.** Add the Postgres
+   `org_id` column (§5.2). Add `orgId` to the §6.4 models, including `DeploymentInfo`, the
+   deploy events and archives.
+6. NATS: an unsigned `Eddi-Org` header on org-scoped messages. Presence advertises
+   `org-ctx-1` and `markerState`.
+7. Loopback forwards `X-EDDI-Org`; add `x-eddi-org` to the CORS headers.
+8. `OrgDataCatalog` (Appendix B), the A.13 settings classification, and the build guards in
+   report mode.
+9. Docs (`docs/configuration-reference.md`, release notes naming the floor) and a changelog
+   fragment.
+
+**Exit:**
+
+- All suites are green in single mode.
+- A test writes one record per Appendix B store and asserts the `orgId` in the raw DB.
+- The fallback counter is 0.
+- The load test is within 3 %.
+- The floor-guard IT is green.
+
+### Phase 2 — Test harness (~2–3 PRs)
+
+**Tasks:**
+
+1. `OrgTestProfile`: an empty DB, multi mode, bootstrapped `ENABLED` (§5.3), two orgs, and a
+   test resolver.
+2. `MultiOrgConformanceIT` (§14.1) as a non-required CI job. It is **expected to be red**;
+   its failures are the leak list.
+3. `OrgEnablementMigration` steps 1 and 6 (backfill, integrity), proven on at least 10M
+   Mongo conversation documents, with timing and load documented.
+
+**Exit:** the harness runs in CI. The leak list is attached.
+
+### Phase 3 — Enforce (~10–15 PRs, one per package)
+
+**Tasks:**
+
+1. SPI and descriptors, `findByOriginId`, substring search (§8.2).
+2. Direct-store predicates. B.2 target pairs. Enablement steps 2–3: indexes, the
+   marker switch with the barrier, `DROP DEFAULT`, the Mongo validators.
+3. Registries (§8.7) and caches (§8.6).
+4. NATS signature v2, value/payload org, archives, consumer binding (§8.9).
+5. RAG names (§8.8).
+6. SSRF forcing (§11.1).
+7. Convert background `IRest*`/loopback calls (§7.3).
+8. Claim-pattern jobs (§7.4).
+9. Build guards fail the build.
+
+**Exit:**
+
+- The conformance suite is green for data access.
+- The mutation checks behave as expected.
+- Single mode is unchanged in both marker states, within 3 %.
+
+### Phase 4 — Identity, routing, planes, settings (~8–10 PRs)
+
+**Tasks:**
+
+1. `Org`, `IOrgStore`, `OrgRoutingIndex`, `OrgApiKey`, `OrgSettings` (§9.6).
+2. The `keycloak-organizations` resolver, `X-EDDI-Org` selection and host binding (§7.1, §9.1).
+3. `OrgMembership` (roles and teams), `OrgRoleAugmentor`, `/orgs/current/members`, platform
+   client roles, break-glass, and the multi-mode startup checks (§5.1, §9.3).
+4. Principal pairs (§9.2) and org-scoped team spaces (§9.4).
+5. Entry points: public chat, A2A, branding/shell/auth-config host binding,
+   integration-id webhooks, `/v1`, OAuth state, the OpenAPI filter (§7.1).
+6. The Operator split and revision bump, MCP tiers, plugin skills (§9.5).
+7. `keycloak/eddi-realm.json`: an example org, the organization scope with ids, the
+   `eddi-platform` client. Write `docs/multi-org.md`.
+
+**Exit:**
+
+- The conformance suite is fully green.
+- `McpRoleTierParityTest` is extended and green.
+
+### Phase 5 — RLS, crypto, fairness, complete enablement (~5–7 PRs)
+
+**Tasks:**
+
+1. `OrgRlsPoolInterceptor` per the Phase 0 spike, plus the connection-epoch assertion (§8.4).
+2. Enablement steps 4–5 and the `ENABLED` marker. From here on, presence advertises
+   `org-layout-1`.
+3. Per-org KEK and AAD v2 (§11.2), per-org audit key and chain (§11.3).
+4. Bulkheads and buckets. `OrgIterator` for the aggregate jobs.
+5. `OrgIntegrityCheck`.
+
+**Exit:**
+
+- The RLS backstop run is green.
+- The RLS overhead is benchmarked.
+- The noisy-neighbour test passes.
+- Enablement on a copy of a large dataset succeeds and resumes after being killed.
+- The procedure is documented, including "no rollback below the floor".
+
+### Phase 6 — Lifecycle and console (~5–7 PRs, includes UI)
+
+**Tasks:**
+
+1. `/platform/orgs` (create, suspend, resume, export, delete) and instance-as-org import (§13).
+2. The Manager platform console (orgs, status, quotas, usage, enablement, members) and the
+   org admin's settings. The Workforce org switcher. Read `ui/manager/AGENTS.md` and
    `ui/workforce/AGENTS.md` first.
-- Exit: create → use → export → delete round trip in an IT, and nothing of the org is left in
-  any collection/table (a test sweeps Appendix B).
+3. Optional: the `issuer` resolver.
 
-### Phase 7 — Dedicated tier
-1. `OrgDatabaseRouter` (Mongo database per org / Postgres schema or database per org),
-   replacing the single `MongoDatabase` bean and `DataSource` usage behind `OrgJdbc`.
-2. Move org POOLED → DEDICATED online (copy, dual-read window, cutover) and back.
-- Exit: conformance suite green with one org pooled and one dedicated.
+**Exit:**
 
-**Smallest valuable first slice:** Phase 1 alone. No read path changes, so it is low risk,
-and it makes every later phase mechanical.
+- A create → use → export → delete round trip leaves nothing behind.
+- An option-A export imports as an org and passes the conformance suite.
+
+### Phase 7 — Dedicated tier and scale (~4–6 PRs)
+
+**Tasks:**
+
+1. `OrgDatabaseRouter` and online tier moves.
+2. Lazy agent deployment with an LRU working set.
+
+**Exit:**
+
+- The conformance suite is green with one pooled and one dedicated org.
+- A 1,000-org load test is documented: startup, heap, p95.
 
 ---
 
-## 12. Decisions
+## 16. Decisions
 
-LOCK = decide in the Phase 0 ADR. These are expensive to change later.
+LOCK means: decide it in the Phase 0 ADR. These decisions are expensive or impossible to
+change later.
 
 | # | Decision | Recommendation | Status |
 |---|---|---|---|
-| 1 | Org id format and principal shape | opaque immutable slug in its own field. Principals are `(orgId, subject)` pairs, never string-prefixed | LOCK |
-| 2 | Storage key shape | `orgId` leading in Mongo indexes and shard key, new composite indexes in Postgres (no PK rewrite), globally unique ids, 404 across orgs | LOCK |
-| 3 | Context contract | `ScopedValue` + explicit hand-off + `OrgId` parameter on direct-store APIs. Fail closed in multi, `default` fallback in single. One `OrgScope.platform` escape. Three-release protocol | LOCK |
-| 4 | Platform vs org plane | as §6.3. Written list of what an org admin can never see: other orgs, platform logs, cluster admin, metrics, platform catalog writes | LOCK |
-| 5 | Trust model for author-supplied infrastructure | SSRF forced on in multi, RAG names derived, per-org LLM keys by default, one `OrgResolver` SPI | LOCK |
-| 6 | Default IdP model | Keycloak Organizations. `issuer` resolver for BYO-IdP | recommend |
-| 7 | KMS / BYOK | key hierarchy now, external KMS later | recommend |
-| 8 | Dedicated tier threshold | an org moves when it exceeds the platform's configured size/regulation criteria. Not automatic | open |
-| 9 | Cross-org features (marketplace, cross-org A2A) | none. Cross-org A2A only as external peers over the public A2A endpoint | recommend |
-| 10 | Data residency | add a `region` field to `Org` now (unused), so nothing has to change later | recommend |
+| 1 | Org id format, reserved ids, principal shape | §2 format and reserved list; `default` constant; `(orgId, subject)` pairs | LOCK |
+| 2 | Storage key shape | `orgId` field/column; strict predicates and org-leading indexes after the marker (claim indexes exempt); org-including unique keys after the switch; no PK rewrites; globally unique ids; NATS/KV keys stay id-keyed with the org in the value; 404 across orgs | LOCK |
+| 3 | Context contract | `ScopedValue` with an epoch; the §6.1 transition table; explicit hand-offs; helpers read the context (no `OrgId` parameters on store interfaces); a connection never spans a binding change | LOCK |
+| 4 | Marker, floor, enablement | No predicates before the marker; enablement runs in single mode; two-step switch with a presence barrier; floor release with `DataLayoutGuard`; no rollback below the floor | LOCK |
+| 5 | Planes, roles, teams | Platform roles = client roles of `eddi-platform`; org roles and teams from `OrgMembership`; realm roles and groups ignored for orgs in multi mode; the "never visible" list | LOCK |
+| 6 | Trust model for author-supplied infra | SSRF forced on; derived, hashed RAG names; per-org LLM keys by default; host-bound anonymous access; NATS signature v2 | LOCK |
+| 7 | IdP | Keycloak Organizations, matched by org id from the access token; `issuer` later | LOCK (after Spike B) |
+| 8 | Key hierarchy and AAD | Per-org KEK; AAD v2 with the org, v1 kept for `default`; KMS later | LOCK |
+| 9 | Dedicated-tier criteria | Thresholds set by the platform; manual moves | **open: STOP, ask the user in Phase 0** |
+| 10 | Cross-org features | None; cross-org A2A only as external peers | recommend |
+| 11 | Data residency | `region` field reserved | recommend |
+| 12 | Datastore for the pooled tier | **PostgreSQL first** (RLS backstop). Mongo pooled multi mode stays behind `eddi.org.mongo.pooled-acknowledged=true` until the pentest and a clean conformance history; Mongo customers who need isolation sooner use the dedicated tier or their own instance | **LOCK: STOP, the user decides** |
+| 13 | Break-glass approval | Single platform admin with an audited reason and TTL, or four-eyes | **STOP, the user decides** |
+
+**Deviations log** (the implementer appends: date, phase, what, why):
+
+- *(empty)*
 
 ---
 
-## 13. Risks
+## 17. Risks
 
 | Risk | Mitigation |
 |---|---|
-| A missed store or hand-off leaks data | fail-closed context, build guards, generated conformance suite, RLS backstop, mutation checks |
-| Single-mode regression or slowdown | always-on app filter tested in single mode, load-test gate, `default` fallback |
-| Backfill overload on large databases | batched, throttled, resumable, leased. Measured in Phase 2 |
-| Mixed-version cluster during upgrade | three-release protocol (§8), header tolerance switch |
-| Postgres RLS cost | measured gate in Phase 5. RLS is a backstop, the app filter does the work |
-| Scope creep into the UI | backend phases 1–5 need no UI change except the Operator split |
-| Naming confusion (tenant vs org) | §1 rules, build guard on new keys/classes |
+| A missed store, cache, registry, filter or hand-off | Fail-closed context, helper-only DB access, guards, generated conformance suite, RLS (Postgres), mutation checks |
+| A missed filter on Mongo pooled | No DB-level read backstop: decision 12, `$jsonSchema` for writes, mutation checks, dedicated tier |
+| Rollback below the floor | Floor release, `DataLayoutGuard`, documented prohibition; on Mongo a pre-floor binary reads unfiltered |
+| Single-mode regression | No predicates before the marker, both marker states tested, 3 % gate, fallback counter |
+| Marker switch while nodes run | `SWITCHING` with a presence barrier for one TTL; old and new unique keys coexist until then |
+| Enablement load | Batched, throttled, resumable, leased; proven in Phases 2 and 5 |
+| Agroal interceptor assumptions | Phase 0 spike; STOP before the fallback |
+| Keycloak claim shape | Phase 0 spike before the IdP decision is locked |
+| Thousands of orgs × eager deploy | Lazy deployment (Phase 7) |
+| Realm roles or groups leaking across orgs | `OrgMembership` plus the augmentor drops token roles |
+| Naming confusion | §2 plus a guard |
 
 ---
 
 ## Appendix A — inventories (regenerate before use)
 
-Paths relative to `src/main/java/ai/labs/eddi/`. Commands run from that directory.
+Run the commands from `src/main/java/ai/labs/eddi/`.
 
-**A.1 Storage SPI users** (`grep -rl IResourceStorageFactory --include=*.java .`, 31):
-configs/agents/mongo/AgentStore · configs/agenttests/mongo/AgentTestSuiteStore ·
-configs/apicalls/mongo/ApiCallsStore · configs/channels/mongo/ChannelIntegrationStore ·
-configs/connections/mongo/ConnectionStore · configs/descriptors/mongo/DocumentDescriptorStore ·
-configs/dictionary/mongo/DictionaryStore · configs/groups/IGroupConversationStore ·
-configs/groups/mongo/{AgentGroupStore, GroupConversationStore, GroupWorkspaceStore, SharedArtifactStore} ·
-configs/llm/mongo/LlmStore · configs/mcpcalls/mongo/McpCallsStore · configs/output/mongo/OutputStore ·
-configs/parser/mongo/ParserStore · configs/propertysetter/mongo/PropertySetterStore ·
-configs/rag/mongo/RagStore · configs/rules/mongo/RuleSetStore · configs/snippets/mongo/PromptSnippetStore ·
-configs/workflows/mongo/WorkflowStore · datastore/{AbstractResourceStore, DataStoreProducers,
-DescriptorStore, IResourceStorage, IResourceStorageFactory, ISubstringSearchIndexing} ·
-datastore/mongo/MongoResourceStorageFactory · datastore/postgres/PostgresResourceStorageFactory ·
-engine/agenttests/AgentTestRunStore · engine/memory/ConversationDescriptorStore
+**A.1 Storage SPI users** — `grep -rl IResourceStorageFactory --include=*.java .` (31):
+- configs/agents/mongo/AgentStore
+- configs/agenttests/mongo/AgentTestSuiteStore
+- configs/apicalls/mongo/ApiCallsStore
+- configs/channels/mongo/ChannelIntegrationStore
+- configs/connections/mongo/ConnectionStore
+- configs/descriptors/mongo/DocumentDescriptorStore
+- configs/dictionary/mongo/DictionaryStore
+- configs/groups/IGroupConversationStore
+- configs/groups/mongo/{AgentGroupStore, GroupConversationStore, GroupWorkspaceStore, SharedArtifactStore}
+- configs/llm/mongo/LlmStore
+- configs/mcpcalls/mongo/McpCallsStore
+- configs/output/mongo/OutputStore
+- configs/parser/mongo/ParserStore
+- configs/propertysetter/mongo/PropertySetterStore
+- configs/rag/mongo/RagStore
+- configs/rules/mongo/RuleSetStore
+- configs/snippets/mongo/PromptSnippetStore
+- configs/workflows/mongo/WorkflowStore
+- datastore/{AbstractResourceStore, DataStoreProducers, DescriptorStore, IResourceStorage, IResourceStorageFactory, ISubstringSearchIndexing}
+- datastore/mongo/MongoResourceStorageFactory
+- datastore/postgres/PostgresResourceStorageFactory
+- engine/agenttests/AgentTestRunStore
+- engine/memory/ConversationDescriptorStore
 
-**A.2 Direct Mongo** (`grep -rl "MongoCollection<" --include=*.java .`, 48):
-configs/branding/mongo/BrandingStore · configs/connections/names/MongoConnectionNameClaimStore ·
-configs/deployment/mongo/MongoDeploymentStorage · configs/migration/{MigrationLogStore,
-MigrationManager, V6QuteMigration, V6RenameMigration} · configs/properties/mongo/{MongoUserMemoryStore,
-PropertiesMigrationService, UserMemoryIdentityIndexes} · configs/variables/mongo/GlobalVariableStore ·
-connections/grants/MongoConnectionGrantStore · connections/oauth/MongoOAuthStateStore ·
-connections/settings/MongoConnectionSettingsStore · datastore/mongo/{GridFsAttachmentStore,
-MongoResourceStorage} · engine/alerts/mongo/{AlertEventStore, AlertRuleStore} · engine/audit/AuditStore ·
-engine/groups/budget/MongoTeamBudgetStore · engine/groups/lessons/mongo/MongoLessonHistoryStore ·
-engine/groups/outcomes/mongo/MongoOutcomeEventStore ·
-engine/hitl/oversight/analytics/mongo/MongoApprovalDecisionStore ·
-engine/hitl/oversight/autonomy/mongo/MongoAutonomyStateStore ·
-engine/hitl/oversight/samples/mongo/MongoAuditSampleStore · engine/hitl/tools/mongo/HitlToolJournalStore ·
-engine/memory/{ConversationMemoryStore, MongoConversationCheckpointStore} ·
-engine/pricing/mongo/MongoModelPriceCatalogStore · engine/ratings/mongo/ConversationRatingStore ·
-engine/runtime/DatabaseLogs · engine/schedule/mongo/MongoScheduleStore ·
-engine/security/spaces/directory/MongoUserDirectoryStore ·
-engine/security/spaces/notifications/MongoWorkspaceNotificationStore ·
-engine/security/spaces/settings/MongoWorkspaceSettingsStore ·
-engine/spendcontrol/mongo/MongoSpendControlChangeStore · engine/tenancy/MongoTenantQuotaStore ·
-engine/triggermanagement/mongo/{AgentTriggerStore, UserConversationStore} ·
-engine/updatecheck/MongoSystemSettingStore · integrations/email/ledger/{MongoEmailMailboxStateStore,
-MongoEmailMessageLedger, MongoEmailSuppressionStore} · integrations/slack/hitl/MongoSlackApprovalRecordStore ·
-modules/ingestion/mongo/{MongoIngestedFileStore, MongoIngestionStateStore} ·
-modules/llm/tools/quota/MongoToolQuotaStore · secrets/persistence/MongoSecretPersistence
+**A.2 Direct Mongo** — `grep -rl "MongoCollection<" --include=*.java .` (48):
+- configs/branding/mongo/BrandingStore
+- configs/connections/names/MongoConnectionNameClaimStore
+- configs/deployment/mongo/MongoDeploymentStorage
+- configs/migration/{MigrationLogStore, MigrationManager, V6QuteMigration, V6RenameMigration}
+- configs/properties/mongo/{MongoUserMemoryStore, PropertiesMigrationService, UserMemoryIdentityIndexes}
+- configs/variables/mongo/GlobalVariableStore
+- connections/grants/MongoConnectionGrantStore
+- connections/oauth/MongoOAuthStateStore
+- connections/settings/MongoConnectionSettingsStore
+- datastore/mongo/{GridFsAttachmentStore, MongoResourceStorage}
+- engine/alerts/mongo/{AlertEventStore, AlertRuleStore}
+- engine/audit/AuditStore
+- engine/groups/budget/MongoTeamBudgetStore
+- engine/groups/lessons/mongo/MongoLessonHistoryStore
+- engine/groups/outcomes/mongo/MongoOutcomeEventStore
+- engine/hitl/oversight/analytics/mongo/MongoApprovalDecisionStore
+- engine/hitl/oversight/autonomy/mongo/MongoAutonomyStateStore
+- engine/hitl/oversight/samples/mongo/MongoAuditSampleStore
+- engine/hitl/tools/mongo/HitlToolJournalStore
+- engine/memory/{ConversationMemoryStore, MongoConversationCheckpointStore}
+- engine/pricing/mongo/MongoModelPriceCatalogStore
+- engine/ratings/mongo/ConversationRatingStore
+- engine/runtime/DatabaseLogs
+- engine/schedule/mongo/MongoScheduleStore
+- engine/security/spaces/directory/MongoUserDirectoryStore
+- engine/security/spaces/notifications/MongoWorkspaceNotificationStore
+- engine/security/spaces/settings/MongoWorkspaceSettingsStore
+- engine/spendcontrol/mongo/MongoSpendControlChangeStore
+- engine/tenancy/MongoTenantQuotaStore
+- engine/triggermanagement/mongo/{AgentTriggerStore, UserConversationStore}
+- engine/updatecheck/MongoSystemSettingStore
+- integrations/email/ledger/{MongoEmailMailboxStateStore, MongoEmailMessageLedger, MongoEmailSuppressionStore}
+- integrations/slack/hitl/MongoSlackApprovalRecordStore
+- modules/ingestion/mongo/{MongoIngestedFileStore, MongoIngestionStateStore}
+- modules/llm/tools/quota/MongoToolQuotaStore
+- secrets/persistence/MongoSecretPersistence
 
-**A.3 Direct Postgres** (`grep -rlE "\bDataSource\b" --include=*.java .`, ~52):
-configs/connections/names/PostgresConnectionNameClaimStore · connections/grants/PostgresConnectionGrantStore ·
-connections/oauth/PostgresOAuthStateStore · connections/settings/PostgresConnectionSettingsStore ·
-datastore/postgres/{PostgresAgentTriggerStore, PostgresAlertEventStore, PostgresAlertRuleStore,
-PostgresApprovalDecisionStore, PostgresAttachmentStore, PostgresAuditSampleStore, PostgresAuditStore,
-PostgresAutonomyStateStore, PostgresBrandingStore, PostgresConversationCheckpointStore,
-PostgresConversationMemoryStore, PostgresConversationRatingStore, PostgresDatabaseLogs,
-PostgresDeploymentStorage, PostgresFieldIndexSwaps*, PostgresGlobalVariableStore, PostgresHealthCheck*,
-PostgresHitlToolJournalStore, PostgresIngestedFileStore, PostgresIngestionStateStore,
-PostgresLessonHistoryStore, PostgresMigrationLogStore*, PostgresMigrationManager*,
-PostgresModelPriceCatalogStore, PostgresOutcomeEventStore, PostgresResourceStorage,
-PostgresResourceStorageFactory, PostgresScheduleStore, PostgresSpendControlChangeStore,
-PostgresStartupSchemaLock*, PostgresSubstringSearchIndexes, PostgresUserConversationStore,
-PostgresUserMemoryStore} · engine/groups/budget/PostgresTeamBudgetStore ·
-engine/security/spaces/directory/PostgresUserDirectoryStore ·
-engine/security/spaces/notifications/PostgresWorkspaceNotificationStore ·
-engine/security/spaces/settings/PostgresWorkspaceSettingsStore · engine/tenancy/PostgresTenantQuotaStore ·
-engine/updatecheck/PostgresSystemSettingStore · integrations/email/ledger/{PostgresEmailMailboxStateStore,
-PostgresEmailMessageLedger, PostgresEmailSuppressionStore} ·
-integrations/slack/hitl/PostgresSlackApprovalRecordStore · modules/llm/impl/{EmbeddingStoreFactory,
-PgVectorConnectionPools, PgVectorPoolHandle} · modules/llm/tools/quota/PostgresToolQuotaStore ·
-secrets/persistence/PostgresSecretPersistence
-(* = infrastructure helper, platform plane. No `org_id` filter, but still behind the guard allow-list.)
+**A.3 Direct Postgres** — `grep -rlE "\bDataSource\b" --include=*.java .` (51). `*` marks platform infrastructure; `†` marks an author-supplied external database, which RLS does not cover:
+- configs/connections/names/PostgresConnectionNameClaimStore
+- connections/grants/PostgresConnectionGrantStore
+- connections/oauth/PostgresOAuthStateStore
+- connections/settings/PostgresConnectionSettingsStore
+- datastore/postgres/{PostgresAgentTriggerStore, PostgresAlertEventStore, PostgresAlertRuleStore,
+  PostgresApprovalDecisionStore, PostgresAttachmentStore, PostgresAuditSampleStore, PostgresAuditStore,
+  PostgresAutonomyStateStore, PostgresBrandingStore, PostgresConversationCheckpointStore,
+  PostgresConversationMemoryStore, PostgresConversationRatingStore, PostgresDatabaseLogs,
+  PostgresDeploymentStorage, PostgresFieldIndexSwaps*, PostgresGlobalVariableStore, PostgresHealthCheck*,
+  PostgresHitlToolJournalStore, PostgresIngestedFileStore, PostgresIngestionStateStore,
+  PostgresLessonHistoryStore, PostgresMigrationLogStore*, PostgresMigrationManager*,
+  PostgresModelPriceCatalogStore, PostgresOutcomeEventStore, PostgresResourceStorage,
+  PostgresResourceStorageFactory, PostgresScheduleStore, PostgresSpendControlChangeStore,
+  PostgresStartupSchemaLock*, PostgresSubstringSearchIndexes, PostgresUserConversationStore,
+  PostgresUserMemoryStore}
+- engine/groups/budget/PostgresTeamBudgetStore
+- engine/security/spaces/directory/PostgresUserDirectoryStore
+- engine/security/spaces/notifications/PostgresWorkspaceNotificationStore
+- engine/security/spaces/settings/PostgresWorkspaceSettingsStore
+- engine/tenancy/PostgresTenantQuotaStore
+- engine/updatecheck/PostgresSystemSettingStore*
+- integrations/email/ledger/{PostgresEmailMailboxStateStore, PostgresEmailMessageLedger, PostgresEmailSuppressionStore}
+- integrations/slack/hitl/PostgresSlackApprovalRecordStore
+- modules/llm/impl/{EmbeddingStoreFactory†, PgVectorConnectionPools†, PgVectorPoolHandle†}
+- modules/llm/tools/quota/PostgresToolQuotaStore
+- secrets/persistence/PostgresSecretPersistence
 
-**A.4 Loopback REST** (`grep -rl IRestInterfaceFactory --include=*.java .`, 12): backup/impl/StructuralMatcher ·
-configs/agents/AgentCascadeService · configs/rest/RestVersionInfo · engine/mcp/{McpAdminTools,
-McpConversationTools, McpToolUtils} · engine/runtime/client/factory/{CurrentVersionRouting,
-IRestInterfaceFactory, RestInterfaceFactory} · engine/security/spaces/ResourceAccessGuard ·
-engine/setup/{AgentSetupService, ApiAgentSyncService}
+**A.4 Loopback / `IRest*` in background** — `grep -rl IRestInterfaceFactory --include=*.java .` (12):
+- backup/impl/StructuralMatcher
+- configs/agents/AgentCascadeService
+- configs/rest/RestVersionInfo
+- engine/mcp/{McpAdminTools, McpConversationTools, McpToolUtils}
+- engine/runtime/client/factory/{CurrentVersionRouting, IRestInterfaceFactory, RestInterfaceFactory}
+- engine/security/spaces/ResourceAccessGuard
+- engine/setup/{AgentSetupService, ApiAgentSyncService}
 
-**A.5 Direct Caffeine** (`grep -rl "Caffeine.newBuilder" --include=*.java .`, 39): configs/agents/{AgentConfigurationCache,
-AgentSigningService} · configs/branding/BrandingService · configs/variables/GlobalVariableResolver ·
-connections/ConnectionRegistry · engine/a2a/AgentCardService · engine/alerts/AlertRuleCache ·
-engine/audit/AuditAgentSigner · engine/caching/CacheFactory · engine/cluster/ClusterMessageSigner ·
-engine/hitl/oversight/analytics/ApprovalAnalyticsService · engine/hitl/oversight/autonomy/AutonomyOverlayService ·
-engine/internal/TurnIdempotencyService · engine/internal/groups/GroupSigningGuard · engine/mail/MailDnsResolver ·
-engine/ratings/ConversationRatingPolicy · engine/security/ConversationReviewPolicy ·
-engine/security/spaces/directory/UserDirectory · engine/security/spaces/notifications/WorkspaceNotifications ·
-integrations/email/reply/EmailReplySender · integrations/openai/AgentModelResolver ·
-integrations/webhook/WebhookEventHandler · modules/llm/guardrails/impl/ExpressionGuardrail ·
-modules/llm/impl/{ChatModelRegistry, ContextualToolsProvider, EmbeddingModelFactory, EmbeddingStoreFactory,
-LlmCircuitBreakers, PgVectorConnectionPools, PromptSnippetService, TokenCounterFactory, WorkflowTraversal} ·
-modules/llm/tools/ToolRateLimiter · modules/nlp/impl/RestSemanticParser · modules/rag/RagIngestionService ·
-modules/templating/impl/TemplatingEngine · secrets/SecretResolver · ui/{BrandedShellRenderer, BrandedSwaggerUiRoute}
-Note: `WorkflowTraversal` has a static, agentId-keyed memo. `ChatModelRegistry` and
-`EmbeddingModelFactory` cache models built with **credentials**, so they must be org-keyed.
+**A.5 Direct Caffeine** — `grep -rl "Caffeine.newBuilder" --include=*.java .` (39):
+- configs/agents/{AgentConfigurationCache, AgentSigningService}
+- configs/branding/BrandingService
+- configs/variables/GlobalVariableResolver
+- connections/ConnectionRegistry
+- engine/a2a/AgentCardService
+- engine/alerts/AlertRuleCache
+- engine/audit/AuditAgentSigner
+- engine/caching/CacheFactory
+- engine/cluster/ClusterMessageSigner
+- engine/hitl/oversight/analytics/ApprovalAnalyticsService
+- engine/hitl/oversight/autonomy/AutonomyOverlayService
+- engine/internal/TurnIdempotencyService
+- engine/internal/groups/GroupSigningGuard
+- engine/mail/MailDnsResolver
+- engine/ratings/ConversationRatingPolicy
+- engine/security/ConversationReviewPolicy
+- engine/security/spaces/directory/UserDirectory
+- engine/security/spaces/notifications/WorkspaceNotifications
+- integrations/email/reply/EmailReplySender
+- integrations/openai/AgentModelResolver
+- integrations/webhook/WebhookEventHandler
+- modules/llm/guardrails/impl/ExpressionGuardrail
+- modules/llm/impl/{ChatModelRegistry, ContextualToolsProvider, EmbeddingModelFactory, EmbeddingStoreFactory, LlmCircuitBreakers, PgVectorConnectionPools, PromptSnippetService, TokenCounterFactory, WorkflowTraversal}
+- modules/llm/tools/ToolRateLimiter
+- modules/nlp/impl/RestSemanticParser
+- modules/rag/RagIngestionService
+- modules/templating/impl/TemplatingEngine
+- secrets/SecretResolver
+- ui/{BrandedShellRenderer, BrandedSwaggerUiRoute}
 
-**A.6 `getDefaultTenantId()` call sites** (22): engine/groups/budget/TeamBudgetService ·
-engine/internal/ConversationTitleService (×2) · engine/internal/RestAgentAdministration (×2) ·
-engine/pricing/SystemSpendMeter (×3) · engine/runtime/internal/DreamService (×3) ·
-engine/runtime/internal/LessonConsolidationService (×2) · engine/spendcontrol/SpendControlChangeService ·
-engine/tenancy/TurnCostMeter (×2) · modules/llm/impl/LlmSpendGate (×3) ·
-modules/llm/impl/LoopSideCallSpend · modules/llm/impl/ToolLoopRunner (×2)
+**A.6 `getDefaultTenantId()` call sites** (22). The 23rd grep hit is the declaration:
+- engine/groups/budget/TeamBudgetService
+- engine/internal/ConversationTitleService (×2)
+- engine/internal/RestAgentAdministration (×2)
+- engine/pricing/SystemSpendMeter (×3)
+- engine/runtime/internal/DreamService (×3)
+- engine/runtime/internal/LessonConsolidationService (×2)
+- engine/spendcontrol/SpendControlChangeService
+- engine/tenancy/TurnCostMeter (×2)
+- modules/llm/impl/LlmSpendGate (×3)
+- modules/llm/impl/LoopSideCallSpend
+- modules/llm/impl/ToolLoopRunner (×2)
 
-**A.7 `@Scheduled`** (20): backup/impl/RestExportService · connections/oauth/OAuthStateMaintenance ·
-engine/agenttests/AgentTestRunRecovery · engine/groups/budget/TeamBudgetMaintenance ·
-engine/hitl/{HitlCrashRecoveryObserver, HitlPendingMetrics} · engine/hitl/oversight/OversightMetrics ·
-engine/hitl/tools/HitlToolJournalMaintenance · engine/memory/rest/RestConversationStore ·
-engine/pricing/ModelPriceCatalogService · engine/runtime/DatabaseLogRetention ·
-engine/runtime/internal/{AgentDeploymentManagement, SchedulePollerService} · engine/security/AuthStartupGuard ·
-engine/updatecheck/UpdateCheckService · integrations/email/{EmailInboundSweeper,
-notify/HitlEmailNotifier, reply/EmailReplySender} · modules/llm/impl/ChatModelRegistry ·
-modules/llm/tools/quota/ToolQuotaMaintenance
+**A.7 `@Scheduled` classes** — `grep -rl "@Scheduled" --include=*.java .` (20):
+- backup/impl/RestExportService
+- connections/oauth/OAuthStateMaintenance
+- engine/agenttests/AgentTestRunRecovery
+- engine/groups/budget/TeamBudgetMaintenance
+- engine/hitl/{HitlCrashRecoveryObserver, HitlPendingMetrics}
+- engine/hitl/oversight/OversightMetrics
+- engine/hitl/tools/HitlToolJournalMaintenance
+- engine/memory/rest/RestConversationStore
+- engine/pricing/ModelPriceCatalogService
+- engine/runtime/DatabaseLogRetention
+- engine/runtime/internal/{AgentDeploymentManagement, SchedulePollerService}
+- engine/security/AuthStartupGuard
+- engine/updatecheck/UpdateCheckService
+- integrations/email/{EmailInboundSweeper, notify/HitlEmailNotifier, reply/EmailReplySender}
+- modules/llm/impl/ChatModelRegistry
+- modules/llm/tools/quota/ToolQuotaMaintenance
 
-**A.8 NATS consumers / KV** (17): configs/variables/GlobalVariableResolver · connections/ConnectionRegistry ·
-engine/caching/CacheFactory · engine/cluster/{AuditClusterSupport, NatsSharedKv,
-admin/ClusterActivityLog, admin/ClusterWatcher, events/IClusterEventBus, events/JetStreamEventBus,
-events/LocalEventBus, lease/NatsLeaseManager, rpc/NatsClusterRpc, ErasureTombstones,
-ClusterArchiveStore} · engine/mail/AutoReplyDetector · engine/runtime/internal/{AgentDeploymentManagement,
-WorkflowFactory} · engine/userevents/UserEventPublisher · secrets/SecretResolver
+**A.8 NATS, KV, presence, cluster** — `grep -rlE "io\.nats|JetStream|KeyValue|ClusterSubjects|IClusterEventBus" --include=*.java .`. Known members:
+- configs/variables/GlobalVariableResolver
+- connections/ConnectionRegistry
+- engine/caching/CacheFactory
+- engine/cluster/{AuditClusterSupport, NatsSharedKv, ErasureTombstones, ClusterArchiveStore, ClusterPresence, ClusterProducers, JetStreamDeadLetterStore}
+- engine/cluster/admin/{ClusterActivityLog, ClusterWatcher, ClusterAdminService}
+- engine/cluster/events/{IClusterEventBus, JetStreamEventBus, LocalEventBus}
+- engine/cluster/lease/{NatsLeaseManager, KvLeaseManager}
+- engine/cluster/rpc/NatsClusterRpc
+- `ClusterConversationCoordinator` (find its package)
+- engine/mail/AutoReplyDetector
+- engine/runtime/internal/{AgentDeploymentManagement, WorkflowFactory}
+- engine/userevents/UserEventPublisher
+- secrets/SecretResolver
 
-**A.9 Hand-off search patterns:**
-`grep -rnE "Executors\.new|newVirtualThread|ManagedExecutor|supplyAsync\(|runAsync\(|thenApplyAsync|emitOn\(|runSubscriptionOn\(|Thread\.ofVirtual|StructuredTaskScope" --include=*.java .`
+**A.9 Hand-off and after-return search:**
+`grep -rnE "Executors\.new|newVirtualThread|ManagedExecutor|supplyAsync\(|runAsync\(|thenApplyAsync|emitOn\(|runSubscriptionOn\(|Thread\.ofVirtual|AsyncResponse|executor\.(execute|submit)|StreamingOutput|SseEventSink|Multi<" --include=*.java .`
 
-**A.10 Inbound endpoints without a user token:** integrations/openai/RestOpenAiAdapter (`/v1`) ·
-integrations/slack/rest/RestSlackWebhook · integrations/webhook/rest/RestWebhookChannel ·
-engine/a2a/RestA2AEndpoint (`/a2a/*`, `/.well-known/*`) · email sweeper (A.7) ·
-connections OAuth callback (`/connections/callback`) · public chat endpoints (anonymous production).
+**A.10 Entry points without a user token:**
+- integrations/openai/RestOpenAiAdapter
+- integrations/slack/rest/RestSlackWebhook
+- integrations/webhook/rest/RestWebhookChannel
+- engine/a2a/RestA2AEndpoint
+- the email sweeper
+- `/connections/callback`
+- public chat in `engine/api/IRestAgentEngine`
+- `ui/Branded*Route`
+- `/manage/__auth_config__.js` (`ui/IRestManagerResource`)
 
-**A.11 Existing `tenantId` fields** (vault/variables/quota/connection meaning; see §1):
-`grep -rlE "String tenantId" --include=*.java .`. About 60 files across `configs/connections`,
-`configs/variables`, `connections/*`, `engine/tenancy/*`, `engine/security/spaces/*`,
-`engine/pricing/*`, `engine/spendcontrol/*`, attachments and secrets. Each keeps its meaning.
-The org is added next to it, not merged into it.
+**A.11 Existing `tenantId` fields** (vault, variables, quota or connection meaning, see §2) — `grep -rlE "String tenantId" --include=*.java .` (~60). Each keeps its meaning; the org is added next to it.
 
-## Appendix B — data classification
+**A.12 Code outside resource methods** — `grep -rlE "implements (ContainerRequestFilter|ContainerResponseFilter|SecurityIdentityAugmentor|ExceptionMapper)|@ServerRequestFilter|@Route\(|Router router" --include=*.java .` (33), plus the quarkus-mcp-server route:
+- engine/audit/rest/AdminActionAuditFilter
+- engine/exception/{ClientErrorExceptionMapper, ConnectionExceptionMapper, ConversationNotFoundExceptionMapper, IllegalArgumentExceptionMapper, InputTooLargeExceptionMapper, MismatchedJsonInputExceptionMapper, ParameterConversionExceptionMapper, RejectedExecutionExceptionMapper, ResourceAlreadyExistsExceptionMapper, ResourceModifiedExceptionMapper, ResourceNotFoundExceptionMapper, ResourceStoreExceptionMapper, UnreadableBodyExceptionMapper}
+- engine/gdpr/{ProcessingRestrictedExceptionMapper, ProcessingRestrictionUnavailableExceptionMapper}
+- engine/hitl/oversight/rest/AgentOriginatedRequestFilter
+- engine/internal/{MetricsScrapeRoute, RequestArrivalStamp}
+- engine/runtime/rest/interceptors/{DocumentDescriptorFilter, LegacyPathRewriteFilter}
+- engine/security/NamelessPrincipalAugmentor
+- engine/security/spaces/directory/UserDirectoryRecorder
+- engine/security/spaces/SpaceHeaderFilter
+- engine/tenancy/rest/{QuotaAccountingUnavailableExceptionMapper, QuotaExceededExceptionMapper}
+- integrations/openai/{OpenAiAuthFilter, OpenAiExceptionMapper}
+- integrations/webhook/{rest/RestWebhookChannel, WebhookEventHandler}
+- ui/{BrandedOpenApiRoute, BrandedShellRoute, BrandedSwaggerUiRoute}
 
-| Class | Org-scoped (`orgId` required) | Platform (no `orgId`) |
+**A.13 Settings classification.** Produce it in Phase 1 from `src/main/resources/application.properties` and the `@ConfigProperty`/`@ConfigMapping` classes. Classify every `eddi.*` key as one of:
+- **platform**, e.g. NATS, datastore, SSRF deny list, metrics;
+- **org setting with deployment fallback** (moves to `OrgSettings`, §9.6), e.g. mail sender and allowed domains, Slack, CORS origins, public base URL, `/v1` keys, branding;
+- **per-agent config**, which needs no change.
+
+## Appendix B — data classification (`OrgDataCatalog`)
+
+### B.1 Classes
+
+| Class | Org-scoped | Platform |
 |---|---|---|
-| Configuration resources (agents, workflows, rules, llm, apicalls, mcpcalls, output, parser, dictionary, propertysetter, rag, snippets, groups, channels, connections, agent tests, descriptors) | ✓ | |
-| Runtime (conversation memory, descriptors, checkpoints, user conversations, user memories, attachments, ratings, outcomes, lessons, HITL journal, approvals, autonomy, audit samples, schedules, triggers, team budgets, spend control changes, alerts, alert rules, ingestion state/files, tool quota, email ledger, Slack approval records, OAuth state, grants, connection names/settings, workspace settings/notifications, user directory, branding, global variables, secrets, audit ledger, DB logs) | ✓ | |
-| Tenant quotas/usage | ✓ (keyed by orgId) | read/write = platform plane |
+| Configuration resources: agents, workflows, rules, llm, apicalls, mcpcalls, output, parser, dictionary, propertysetter, rag, snippets, groups, channels, connections, agent tests, descriptors, deployments | ✓ | |
+| Runtime: conversation memory, descriptors, checkpoints, user conversations, user memories, attachments, ratings, outcomes, lessons, HITL journal, approvals, autonomy, audit samples, schedules, triggers, team budgets, spend-control changes, alert events and rules, ingestion state and files, tool quota, email ledger, Slack approval records, OAuth state, grants, connection names and settings, workspace settings and notifications, user directory, branding, global variables, secrets, audit ledger, DB logs, vector stores, `OrgMembership`, `OrgSettings`, **export archives** (`ClusterArchiveStore`, `tmp/archives`), agent signing keys | ✓ | |
+| Quota rows and usage | ✓ (key per §12) | admin in the platform plane |
 | Model price catalog | org overrides | platform defaults |
-| Migration log, system settings, update check, schema lock, health, cluster archive/activity, NATS leases | | ✓ |
-| Org records, org API keys, platform audit ledger, break-glass grants | | ✓ |
+| Org records, `OrgRoutingIndex`, `OrgApiKey` lookup, `OrgMarker`, `layout.required`, platform audit ledger, break-glass grants | | ✓ |
+| Migration log, system settings, update check, schema lock, health, cluster activity, NATS leases (keys), erasure tombstones (keys; values carry the org) | | ✓ |
 
-Every new collection/table must be added to this table in the PR that creates it.
-`MultiOrgConformanceIT` and the deletion sweep (Phase 6) read the list from one Java constant
-`OrgDataCatalog`, which a test compares against the actual collections/tables at startup.
+Every PR that creates a collection or table adds it here and to `OrgDataCatalog`.
+
+### B.2 Unique keys and upsert targets (switch at the marker, §5.3)
+
+In Phase 1, write the table `store · today's key / ON CONFLICT target · post-switch key with org` for each store below.
+
+**Mongo `unique(true)`** (25 indexes in 18 files):
+- configs/connections/names/MongoConnectionNameClaimStore
+- configs/deployment/mongo/MongoDeploymentStorage
+- configs/properties/mongo/{MongoUserMemoryStore, UserMemoryIdentityIndexes}
+- connections/grants/MongoConnectionGrantStore
+- connections/oauth/MongoOAuthStateStore
+- engine/alerts/mongo/AlertEventStore
+- engine/groups/outcomes/mongo/MongoOutcomeEventStore
+- engine/hitl/oversight/autonomy/mongo/MongoAutonomyStateStore
+- engine/hitl/tools/mongo/HitlToolJournalStore
+- engine/ratings/mongo/ConversationRatingStore
+- engine/tenancy/MongoTenantQuotaStore
+- engine/triggermanagement/mongo/{AgentTriggerStore, UserConversationStore}
+- integrations/email/ledger/MongoEmailMessageLedger
+- integrations/slack/hitl/MongoSlackApprovalRecordStore
+- modules/ingestion/mongo/MongoIngestionStateStore
+- secrets/persistence/MongoSecretPersistence
+
+**Postgres `UNIQUE` / `ON CONFLICT (`** (18 constraints, 60 targets):
+- configs/connections/names/PostgresConnectionNameClaimStore
+- connections/grants/PostgresConnectionGrantStore
+- connections/settings/PostgresConnectionSettingsStore
+- datastore/postgres/{PostgresAlertEventStore, PostgresApprovalDecisionStore, PostgresAuditStore,
+  PostgresAutonomyStateStore, PostgresBrandingStore, PostgresConversationRatingStore,
+  PostgresDeploymentStorage, PostgresGlobalVariableStore, PostgresHitlToolJournalStore,
+  PostgresIngestedFileStore, PostgresIngestionStateStore, PostgresLessonHistoryStore,
+  PostgresMigrationLogStore*, PostgresModelPriceCatalogStore, PostgresOutcomeEventStore,
+  PostgresResourceStorage, PostgresUserConversationStore, PostgresUserMemoryStore}
+- engine/audit/{AuditLedgerService, AuditStore}
+- engine/groups/budget/PostgresTeamBudgetStore
+- engine/security/spaces/directory/PostgresUserDirectoryStore
+- engine/security/spaces/settings/PostgresWorkspaceSettingsStore
+- engine/tenancy/PostgresTenantQuotaStore
+- engine/updatecheck/PostgresSystemSettingStore*
+- integrations/email/ledger/{PostgresEmailMailboxStateStore, PostgresEmailMessageLedger}
+- integrations/slack/hitl/PostgresSlackApprovalRecordStore
+- modules/llm/tools/quota/PostgresToolQuotaStore
+- secrets/persistence/PostgresSecretPersistence
+
+Example: in `PostgresUserMemoryStore`, `ON CONFLICT (user_id, key) WHERE visibility = 'global'` becomes `(org_id, user_id, key) WHERE visibility = 'global'`.
+
+## Appendix C — configuration keys
+
+| Key | Default | Meaning |
+|---|---|---|
+| `eddi.org.mode` | `single` | `single` \| `multi` |
+| `eddi.org.resolver` | `single` (single), `keycloak-organizations` (multi) | §9.1 |
+| `eddi.org.claim` | `organization` | Token claim that carries the org |
+| `eddi.org.platform.role-claim-path` | `resource_access/eddi-platform/roles` | Platform roles (§9.3) |
+| `eddi.org.host-binding` | `false` (single), `true` (multi) | §7.1 |
+| `eddi.org.enablement.allowed` | `false` | Must be `true` to start enablement (§5.3) |
+| `eddi.org.enablement.batch-size` | `1000` | Backfill batch size |
+| `eddi.org.postgres-rls` | follows the marker | `on`, or `off-i-understand` (PgBouncer transaction mode) |
+| `eddi.org.jobs.max-per-org-per-tick` / `scan-factor` | `50` / `20` | §7.4 |
+| `eddi.org.metrics.tag-org` / `max-tagged-orgs` | `false` / `200` | §11.5 |
+| `eddi.org.ssrf.cluster-cidrs` | (empty) | §11.1 |
+| `eddi.org.agents.max-resident` | (unset = eager) | Phase 7 |
+| `eddi.org.multi.preview-acknowledged` | `false` | Required for multi mode until the pentest |
+| `eddi.org.mongo.pooled-acknowledged` | `false` | Required for multi mode on the Mongo pooled tier (decision 12) |
+| `eddi.datastore.postgres.migration-username` / `-password` | (main credentials) | Optional role split (§8.4) |
+| `quarkus.http.cors.headers` | add `x-eddi-org` | §7.3 |
+
+`eddi.tenant.default-id` keeps its meaning: the quota key in single mode. There is no `eddi.org.default-id`.
+
+## Appendix D — new types at a glance
+
+- **Context and binding:** `OrgId`, `OrgContext`, `OrgScope`, `OrgPropagation`, `OrgContextMissingException`, `OrgConfig`, `OrgQuotaKeys`, `OrgResolution`, `OrgRequest`, `@OrgBound`, `@PlatformPlane`, `@OrgNeutral`.
+- **Identity and resolution:** `OrgResolver` (+ `SingleOrgResolver`, `KeycloakOrganizationsOrgResolver`, later `IssuerOrgResolver`), `OrgMembership`, `OrgRoleAugmentor`, `OrgRoutingIndex`, `OrgApiKey`.
+- **Org records:** `Org`, `IOrgStore`, `OrgSettings`.
+- **Marker, layout and migration:** `OrgMarker`, `IOrgMarkerStore`, `DataLayoutGuard`, `OrgEnablementMigration`, `OrgIntegrityCheck`, `OrgDataCatalog`.
+- **Data access:** `OrgCollections`, `OrgSql`, `OrgRlsPoolInterceptor`, `OrgKey<K>`, `OrgDatabaseRouter` (Phase 7).
+- **Jobs:** `OrgIterator` (Phase 5).
+- **Tests:** `MultiOrgConformanceIT`, `OrgTestProfile`.
