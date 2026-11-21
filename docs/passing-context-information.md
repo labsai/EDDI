@@ -115,6 +115,7 @@ behalf, and the engine trusts them to decide what a turn may do:
 | `dynamicCreatedAgentIds` | Group conversations | The agents the discussion has created (and may tear down) |
 | `delegationDepth` | `converse_with_agent` | How many delegation hops led to this conversation |
 | `selfContinuation` | [Self-continuation](long-jobs.md) | Marks a turn the agent started itself with `CONTINUE_CONVERSATION`, with its `number` and `max` |
+| `turnOrigin` | The [email channel](email-integration.md#managing-senders), groups and scheduled check-backs | Taints a conversation a mail started (`email`), so its turns cannot change channel integrations or decide approvals |
 
 A client cannot set them. EDDI drops these keys from the context of every externally
 supplied request — `POST /agents/{agentId}/start`, `POST /agents/{conversationId}`

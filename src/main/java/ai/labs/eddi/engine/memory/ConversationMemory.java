@@ -76,6 +76,8 @@ public class ConversationMemory implements IConversationMemory {
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
+    /** The origin taint (TurnOrigin), sticky once set. */
+    private String origin;
     private volatile boolean cancelled;
     /**
      * Cluster mode: whether this turn's lease is lost; see
@@ -461,6 +463,18 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setResolutionProvenance(ResolutionPrincipal.Provenance provenance) {
         this.resolutionProvenance = provenance;
+    }
+
+    @Override
+    public String getOrigin() {
+        return this.origin;
+    }
+
+    @Override
+    public void setOrigin(String origin) {
+        if (origin != null) {
+            this.origin = origin;
+        }
     }
 
     @Override

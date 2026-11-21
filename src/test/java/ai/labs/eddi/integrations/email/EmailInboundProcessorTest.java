@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
@@ -66,6 +67,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
@@ -195,8 +197,11 @@ class EmailInboundProcessorTest {
             assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), mail.polled(1), Instant.now()));
 
             verify(conversations).startConversation(eq(Deployment.Environment.production), eq(AGENT),
-                    eq("email:" + INTEGRATION + ":alice@supplier.com"), any());
+                    eq("email:" + INTEGRATION + ":alice@supplier.com"),
+                    argThat(start -> TurnOrigin.EMAIL.equals(TurnOrigin.fromContext(start))));
             assertEquals(1, inputs.size());
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(inputs.get(0).getContext()),
+                    "every mail turn carries the origin taint (email plan v3 §5.3)");
             assertTrue(inputs.get(0).getInput().contains("Invoice 4711"));
             assertTrue(inputs.get(0).getInput().contains("Please find the invoice attached."));
             assertTrue(inputs.get(0).getInput().contains("untrusted third-party content"), "the default template frames the mail");

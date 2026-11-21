@@ -28,6 +28,7 @@ import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -410,6 +411,40 @@ class MemberTurnExecutorTest {
         executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
 
         assertEquals(List.of(placeholder), sent[0].getContext().get("groupTranscript").getValue());
+    }
+
+    /**
+     * Email plan v3 §5.3: a discussion a mail started hands its origin taint to
+     * every member conversation it starts; an untainted one hands none.
+     */
+    @Test
+    void executeAgentTurn_taintedDiscussion_taintsTheMemberConversation() throws Exception {
+        for (String origin : new String[]{TurnOrigin.EMAIL, null}) {
+            var conversationService = Mockito.mock(IConversationService.class);
+            var agentFactory = Mockito.mock(IAgentFactory.class);
+            when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+            @SuppressWarnings("unchecked")
+            Map<String, Context>[] startContext = new Map[1];
+            when(conversationService.startConversation(any(), eq(AGENT_A), any(), any())).thenAnswer(inv -> {
+                startContext[0] = inv.getArgument(3);
+                return new IConversationService.ConversationResult("conv-1", null);
+            });
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            doAnswer(inv -> {
+                inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+            var gc = newGc();
+            gc.setOrigin(origin);
+            var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                    new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                    new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+            executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+            assertEquals(origin, TurnOrigin.fromContext(startContext[0]));
+        }
     }
 
     /**

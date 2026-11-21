@@ -23,6 +23,7 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -1109,6 +1110,9 @@ public class ScheduleFireExecutor {
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
         }
+        // A check-back a mail-started turn booked starts a conversation that is just as
+        // tainted (email plan v3 §5.3).
+        context = TurnOrigin.withOrigin(context, TurnOrigin.fromMetadata(schedule.getMetadata()));
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, context);
 
@@ -1430,6 +1434,10 @@ public class ScheduleFireExecutor {
         // Set userId context
         String userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
         contextMap.put("userId", new Context(Context.ContextType.string, userId));
+        String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
+        if (origin != null) {
+            contextMap.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, origin));
+        }
 
         inputData.setContext(contextMap);
         return inputData;
