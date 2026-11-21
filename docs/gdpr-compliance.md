@@ -137,6 +137,14 @@ principal, not a user: erasing or exporting it is refused with 400.
    because no conversation has that id any more. To clear the id sooner, delete the
    rows whose `conversationId` (`conversation_id` on PostgreSQL) is the erased id from
    `attachment_grants`
+
+   **Derived files** (views EDDI stores of an uploaded file: its structure, page text,
+   images, slices) belong to the uploaded file's owner and are stored under its
+   conversation, so the same per-conversation delete removes every view of the user's
+   files. A view the user's conversation produced of *someone else's* file — one it was
+   granted — belongs to that file's owner and stays; the user's grant on it goes, and
+   with it the user's access. `attachmentsDeleted` counts uploaded files; their
+   views are deleted with them and not counted.
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**

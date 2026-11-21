@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.documents;
 
+import ai.labs.eddi.engine.attachments.DerivedCaps;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -91,5 +92,15 @@ class DocumentSettingsDefaultsTest {
             System.clearProperty("eddi.documents.sharing.max-depth");
             System.clearProperty("eddi.documents.sharing.max-files-per-share");
         }
+    }
+
+    // --- WP-2a.2 ---
+
+    @Test
+    @DisplayName("derived-blob caps: the design's defaults, from the deployment's configuration")
+    void derivedCaps() {
+        var expected = new DerivedCaps.Limits(200, 52_428_800L, 20, 52_428_800L, 209_715_200L);
+        assertEquals(expected, DocumentSettings.none().derivedCaps());
+        assertEquals(expected, new DocumentSettings().derivedCaps(), "no property set in the test configuration");
     }
 }

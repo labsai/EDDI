@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import javax.sql.DataSource;
+import java.nio.charset.StandardCharsets;
 import java.sql.Array;
 import java.sql.Connection;
 import java.sql.PreparedStatement;
@@ -27,7 +31,10 @@ import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -46,6 +53,8 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store = new PostgresAttachmentStore(createDataSourceInstance());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
+        rootDeleted = new RecordingEvent<>();
+        store.rootDeletedEvent = rootDeleted;
         // The first calls create the schemas; then start from empty tables.
         store.listByConversation(OWNER);
         store.ensureGrantIndexes();
@@ -59,6 +68,26 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
     private PostgresMigrationLogStore migrationLog;
     private JsonSerialization json;
     private GroupConversationStore groupConversations;
+    private RecordingEvent<AttachmentRootDeleted> rootDeleted;
+
+    @Override
+    public void setDerivedLimits(DerivedCaps.Limits limits) {
+        store.derivedMaxPerSource = limits.maxPerSource();
+        store.derivedMaxTotalBytesPerSource = limits.maxTotalBytesPerSource();
+        store.derivedMaxSlicesPerSource = limits.maxSlicesPerSource();
+        store.derivedMaxSliceBytesPerSource = limits.maxSliceBytesPerSource();
+        store.derivedMaxTextBytesPerSource = limits.maxTextBytesPerSource();
+    }
+
+    @Override
+    public List<AttachmentRootDeleted> rootDeletions() {
+        return rootDeleted.fired();
+    }
+
+    @Override
+    public long lineageRows(String rootRef) {
+        return count("SELECT COUNT(*) FROM attachments WHERE root_ref = ?", rootRef);
+    }
 
     @Override
     public IMigrationLogStore migrationLog() {
@@ -183,5 +212,93 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
             }
         }
         assertTrue(indexes.containsAll(List.of("attachment_grants_pkey", "idx_attach_grants_conv", "idx_attach_grants")), indexes.toString());
+    }
+
+    @Override
+    public void makePreUpgradeRoot(String storageRef) {
+        // owner_scope is NOT NULL DEFAULT 'CONVERSATION': the ALTER gave every old row
+        // that value; owner_key stayed NULL.
+        execute("UPDATE attachments SET owner_key = NULL WHERE storage_ref = ?", storageRef);
+    }
+
+    /**
+     * A storeDerived that holds the root FOR SHARE while a delete starts: the
+     * delete waits, and must still remove the view committed meanwhile. Played with
+     * a raw connection standing in for storeDerived, so the interleaving is fixed
+     * rather than left to timing.
+     */
+    private void assertADeleteWaitingOnTheRootRemovesAViewCommittedMeanwhile(String root, Runnable delete) throws Exception {
+        try (Connection writer = DATA_SOURCE.getConnection()) {
+            writer.setAutoCommit(false);
+            try (PreparedStatement ps = writer.prepareStatement("SELECT 1 FROM attachments WHERE storage_ref = ? FOR SHARE")) {
+                ps.setString(1, root);
+                ps.executeQuery().close();
+            }
+            Thread deleter = Thread.ofVirtual().start(delete);
+            awaitALockWait();
+            try (PreparedStatement ps = writer.prepareStatement("INSERT INTO attachments (storage_ref, conversation_id, mime_type, size_bytes, "
+                    + "data, owner_key, root_ref, kind) VALUES ('8d4f6f1e-0000-4000-8000-0000000000ff', ?, 'text/plain', 1, 'x', ?, ?, 'TEXT_PART')")) {
+                ps.setString(1, OWNER);
+                ps.setString(2, OWNER);
+                ps.setString(3, root);
+                ps.executeUpdate();
+            }
+            writer.commit();
+            deleter.join(TimeUnit.SECONDS.toMillis(30));
+            assertFalse(deleter.isAlive(), "the delete finished");
+        }
+        assertEquals(0, lineageRows(root), "no view outlives its root");
+    }
+
+    /** Waits until some backend waits on a row lock, i.e. the delete is blocked. */
+    private static void awaitALockWait() throws Exception {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (System.nanoTime() < deadline) {
+            if (countAll("SELECT COUNT(*) FROM pg_stat_activity WHERE wait_event_type = 'Lock'") > 0) {
+                return;
+            }
+            Thread.sleep(20);
+        }
+        throw new AssertionError("the delete never waited on the root's row");
+    }
+
+    private static long countAll(String sql) throws SQLException {
+        try (Connection conn = DATA_SOURCE.getConnection(); Statement stmt = conn.createStatement(); ResultSet rs = stmt.executeQuery(sql)) {
+            rs.next();
+            return rs.getLong(1);
+        }
+    }
+
+    @Test
+    void deletingARootWaitsForAViewBeingStoredAndRemovesIt() throws Exception {
+        String root = store.store("root".getBytes(StandardCharsets.UTF_8), "text/plain", "r.txt", OWNER, "default", null).storageRef();
+        assertADeleteWaitingOnTheRootRemovesAViewCommittedMeanwhile(root, () -> {
+            try {
+                assertTrue(store.delete(root, OWNER));
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+    }
+
+    @Test
+    void deletingAConversationWaitsForAViewBeingStoredAndRemovesIt() throws Exception {
+        String root = store.store("root".getBytes(StandardCharsets.UTF_8), "text/plain", "r.txt", OWNER, "default", null).storageRef();
+        assertADeleteWaitingOnTheRootRemovesAViewCommittedMeanwhile(root, () -> assertEquals(1, store.deleteByConversation(OWNER)));
+    }
+
+    @Test
+    void createsThePartialLineageIndexes() throws Exception {
+        List<String> definitions = new ArrayList<>();
+        try (Connection conn = DATA_SOURCE.getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                        "SELECT indexdef FROM pg_indexes WHERE tablename = 'attachments' AND indexname IN ('idx_attach_lineage', 'idx_attach_dedup')")) {
+            while (rs.next()) {
+                definitions.add(rs.getString(1));
+            }
+        }
+        assertTrue(definitions.size() == 2 && definitions.stream().allMatch(d -> d.contains("WHERE (root_ref IS NOT NULL)")), definitions.toString());
+        assertTrue(definitions.stream().anyMatch(d -> d.startsWith("CREATE UNIQUE INDEX idx_attach_dedup")), definitions.toString());
     }
 }

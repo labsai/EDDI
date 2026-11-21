@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -97,5 +98,47 @@ public class InMemoryAttachmentStore implements IAttachmentStore {
             }
         }
         return result;
+    }
+
+    @Override
+    public Attachment storeDerived(byte[] bytes, String mimeType, String filename, Derivation derivation,
+                                   String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Derivation> getDerivation(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<Attachment> listDerived(String rootRef, Derivation.Kind kind, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Optional<Attachment> findDerived(String rootRef, Derivation.Kind kind, String unitId,
+                                            String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public String rootOf(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public OwnerRef ownerOf(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Integer pageCount(String rootRef, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void setPageCount(String rootRef, int pages) {
+        throw new UnsupportedOperationException();
     }
 }
