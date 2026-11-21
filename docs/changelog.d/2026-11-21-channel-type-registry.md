@@ -23,6 +23,26 @@ New: `ChannelTypeRegistryTest`, `ChannelConnectionCredentialsTest`, `ConnectionR
 
 **Files:** [`ChannelTypeDescriptor.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTypeDescriptor.java), [`ChannelTypeRegistry.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTypeRegistry.java), [`ChannelConnectionCredentials.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelConnectionCredentials.java), [`RestChannelIntegrationStore.java`](../../src/main/java/ai/labs/eddi/configs/channels/rest/RestChannelIntegrationStore.java), [`ChannelTargetRouter.java`](../../src/main/java/ai/labs/eddi/integrations/channels/ChannelTargetRouter.java), [`ConnectionResolver.java`](../../src/main/java/ai/labs/eddi/connections/ConnectionResolver.java)
 
+## ✨ feat(channels): inbound origin and routing keys per channel type (2026-11-21)
+
+**Repo:** EDDI · **Branch:** `feat/channel-type-registry`
+
+Phase 0.4–0.5 of the same plan.
+
+### What changed and why
+
+- **0.5 Routing keys per type.** The router indexed only integrations with a non-blank `channelId` (webhooks by resource id as a special case), so a Teams integration for personal chats, which has no channel, would never be routed. Each integration is now indexed under the keys its descriptor returns: `channelId` for Slack, the resource id for a webhook, nothing for email (unchanged), and for a channel-less integration of a type that declares an application id, the namespaced key `@app:<id>`. The scans that look for one integration by name, signing secret or approval channel (`getIntegrationByName`, `getSigningIdentities`, `threadCredentialsForDm`, `resolveDefaultForDm`, `getIntegrationByApprovalChannel`, `hasAnyChannels`) now go through a per-type list of distinct integrations, derived from and memoized on the index snapshot. An integration under two keys is therefore not mistaken for two, which would have made `getIntegrationByName` refuse it as ambiguous. The save-time uniqueness guard compares every routing key of the type (`validateUniqueRoutingKeys`, also run by `duplicateChannel` now), so two channel-less integrations of one application are refused.
+- **0.4 Inbound origin.** New `InboundOrigin` record (`channelType`, `integrationName`, `verifiedApplicationId`, `verifiedSigningSecret`, with a redacting `toString`) describes what an adapter's authentication established. New router methods: `resolveDefaultForOrigin(origin, text)`, which picks by name, then by verified application id (fails closed for an unknown one), then the Slack legacy connector by secret; `threadCredentialsForDm(lockedTarget, origin)`, where the integration must match the same secret or the same application id and serve the locked target; and `getIntegrationForApplication(type, appId)`. The Slack-specific `threadCredentialsForDm(type, target, secret)` delegates to the origin overload, so both paths share one comparison.
+
+### Design decisions
+
+- **Additive for Slack.** `SlackEventHandler.EventOrigin` and every Slack call site are unchanged. Slack's tests pin those signatures, and the shared comparison now lives in the router. Teams and Discord construct `InboundOrigin.application(...)` from their verified JWT `aud` and endpoint path.
+- **The per-type list is derived, not maintained.** It is rebuilt whenever `integrationMap` is swapped, so it cannot disagree with the index, including in tests that set the map by reflection.
+
+### Tests
+
+`ChannelTargetRouterChannelTypeTest` covers channel-less routing by DM fallback, name and application; fail-closed unknown application; multi-key indexing that is not ambiguous; application-scoped thread credentials; Slack secret equivalence; and redaction. Three mutants were checked: application matching ignored, an unknown application falling back to any integration, and scans seeing one entry per key. Each fails a test. The 965 channel, Slack, webhook, email, connection and alert tests all pass.
+
 ### What's next
 
-Phase 0.4–0.5 (inbound origin, routing keys per type) on this branch, then Teams T1 and Discord D1 as their own PRs.
+Teams T1 and Discord D1, each its own PR. Items 0.6 (`ChatThreadConversations`) and 0.7 (`ChatHitlNotices`) are extracted together with their second consumer (plan §6.1).
