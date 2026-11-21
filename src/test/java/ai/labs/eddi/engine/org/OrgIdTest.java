@@ -22,7 +22,7 @@ class OrgIdTest {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"", "a", "Acme", "-acme", "acme_corp", "acme.corp", "acme corp", "äcme"})
+    @ValueSource(strings = {"", "a", "Acme", "-acme", "acme_corp", "acme.corp", "acme corp", "äcme", "acme\n", " acme"})
     void refusesInvalidIds(String value) {
         assertThrows(IllegalArgumentException.class, () -> OrgId.of(value));
     }

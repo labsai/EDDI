@@ -19,9 +19,12 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Applies {@code eddi.org.mode} and {@code eddi.org.resolver} at startup, ahead
- * of every other startup observer, and wires {@link OrgContext}'s counters into
- * Micrometer.
+ * Applies {@code eddi.org.mode} and {@code eddi.org.resolver} at startup and
+ * wires {@link OrgContext}'s counters into Micrometer. It observes at
+ * {@link #STARTUP_PRIORITY}, right after {@code Integer.MIN_VALUE}, which stays
+ * reserved for the data-layout floor guard (ADR 0001, DV-11). The mode itself
+ * is already read when {@link OrgContext} loads, so code that runs earlier
+ * fails closed too.
  * <p>
  * This release supports single mode only. {@code eddi.org.mode=multi} is
  * refused: its preconditions (the enablement marker, forced SSRF, the platform
@@ -33,6 +36,8 @@ public class OrgConfig {
 
     private static final Logger LOGGER = Logger.getLogger(OrgConfig.class);
 
+    /** Directly after the floor guard, which takes {@code Integer.MIN_VALUE}. */
+    static final int STARTUP_PRIORITY = Integer.MIN_VALUE + 1;
     static final String FALLBACK_METRIC = "eddi.org.context.fallback";
     static final String PLATFORM_METRIC = "eddi.org.platform.scope";
     /**
@@ -54,7 +59,7 @@ public class OrgConfig {
     }
 
     void onStart(@Observes
-    @Priority(Integer.MIN_VALUE) StartupEvent event) {
+    @Priority(STARTUP_PRIORITY) StartupEvent event) {
         apply();
     }
 

@@ -23,9 +23,8 @@ New package `ai.labs.eddi.engine.org`:
   `eddi_org_platform_scope_total`.
 - **`OrgPropagation`.** Wraps `Runnable`, `Callable`, `Supplier` (as `wrapSupplier`, because
   `Callable`/`Supplier` overloads are ambiguous for lambdas) and `Executor`. A wrapper captures
-  the binding when it is created and restores exactly that binding, including "unbound". It
-  never moves an org-bound thread out of its org: same-org work keeps the thread's epoch, while
-  work captured for another org or for the platform plane is refused.
+  the binding when it is created and restores it, including "unbound". It never moves an
+  org-bound thread out of its org.
 - **Resolution.**
   - `OrgResolver` is the SPI, with `SingleOrgResolver`.
   - `OrgResolution` returns `default` in single mode; in multi mode it consults the resolver,
@@ -45,15 +44,39 @@ Also in this package:
 - Both counters are added to `docs/metrics.md` and to a new "Organizations" row on the Full
   Metrics dashboard.
 
+### Review fixes
+
+Two local reviews ran before any caller exists. Everything they found is fixed:
+
+- **Request identity.** The request identity is a request-scoped proxy. Outside a request
+  context it throws on first use, so the resolver now gets an anonymous identity without
+  touching the proxy.
+- **MCP errors.** An `OrgResolutionException` on an MCP `@Tool` becomes the FORBIDDEN tool
+  error. Its client message is fixed, and the reason goes only to the server log.
+- **Hand-off rules.** A same-org hand-off keeps the thread's epoch. Platform work is refused on
+  an org-bound thread. Unbound work keeps an org-bound thread's org but sheds the platform
+  plane. A refused hand-off is logged at ERROR.
+- **Request facts.** A repeated `X-EDDI-Org` header is refused, and a blank authority reads as
+  empty.
+- **Configuration.**
+  - `eddi.org.resolver` is normalised like `eddi.org.mode`.
+  - The mode is read when `OrgContext` loads, so code that runs before startup fails closed in
+    multi mode.
+  - `OrgConfig` observes at `Integer.MIN_VALUE + 1`, which leaves `MIN_VALUE` to the floor
+    guard.
+- **Fallback counter.** It names the caller of `OrgQuotaKeys`, not the helper. Capped tags
+  overflow into `(overflow)`.
+
 ### Tests
 
-62 unit tests in `src/test/java/ai/labs/eddi/engine/org/`. Two mutation checks pass: allowing an
-org-to-org rebinding fails `crossingOrgsThrowsAndTheMessageNamesNoOrg`, and dropping the rebind
-in `OrgPropagation` fails 5 propagation tests. A local review found four risks before any
-caller exists, and all four are fixed: a same-org restore that changed the epoch, platform or
-reported as `OrgQuotaKeys` instead of its caller. The full unit suite ran 37,519 tests with one failure: the split
-Kubernetes dashboard was stale. It was regenerated with `scripts/sync-monitoring-assets.py`, and that test now passes.
-split Kubernetes dashboard was regenerated with `scripts/sync-monitoring-assets.py`.
+77 unit tests in `src/test/java/ai/labs/eddi/engine/org/`. Two mutation checks pass:
+
+- allowing an org-to-org rebinding fails `crossingOrgsThrowsAndTheMessageNamesNoOrg`;
+- dropping the rebind in `OrgPropagation` fails 5 propagation tests.
+
+The full unit suite ran 37,519 tests before the review fixes, with one failure: the split
+Kubernetes dashboard was stale. It was regenerated with `scripts/sync-monitoring-assets.py`, and
+that test now passes.
 
 ### What's next
 

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.org;
 
+import org.jboss.logging.Logger;
+
 import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executor;
@@ -30,12 +32,24 @@ import java.util.function.Supplier;
  * <li>work captured unbound runs under the thread's org, so it cannot shed the
  * binding and then bind another org.</li>
  * </ul>
+ * On a thread bound to the platform plane:
+ * <ul>
+ * <li>platform work runs directly, under the thread's epoch;</li>
+ * <li>org work binds its org (platform to org is allowed);</li>
+ * <li>work captured unbound runs <em>unbound</em>. Inheriting the platform
+ * plane would give work that was never meant to cross orgs that privilege, so
+ * it sheds it and fails closed instead.</li>
+ * </ul>
+ * A refused hand-off is logged at ERROR before it throws, because an inline
+ * {@code CompletableFuture} stage may swallow the exception.
  * <p>
  * The supplier variant is named {@link #wrapSupplier} because a lambda fits
  * {@code Callable} and {@code Supplier} alike, and the two overloads would be
  * ambiguous.
  */
 public final class OrgPropagation {
+
+    private static final Logger LOGGER = Logger.getLogger(OrgPropagation.class);
 
     private OrgPropagation() {
     }
@@ -93,19 +107,31 @@ public final class OrgPropagation {
         if (current instanceof OrgContext.Org bound) {
             if (captured instanceof OrgContext.Org wanted) {
                 if (!bound.org().equals(wanted.org())) {
-                    throw new OrgBindingException("work captured for one org ran on a thread bound to another");
+                    throw refused("work captured for one org ran on a thread bound to another");
                 }
                 // same org: a no-op that keeps the thread's epoch, as OrgContext.callAs does
                 return work.call();
             }
             if (captured instanceof OrgContext.Platform) {
                 // leaving an org for the platform plane goes through OrgScope.platform only
-                throw new OrgBindingException("platform work ran inline on a thread bound to an org");
+                throw refused("platform work ran inline on a thread bound to an org");
             }
             // captured unbound: keep the thread's org rather than dropping it, so the work
             // cannot shed the binding and then bind another org
             return work.call();
         }
+        if (current instanceof OrgContext.Platform && captured instanceof OrgContext.Platform) {
+            // platform inside platform: a no-op, like a nested OrgScope.platform
+            return work.call();
+        }
+        // unbound thread: restore exactly; platform thread: org work binds its org,
+        // unbound work sheds the platform plane (null binding) and fails closed
         return OrgContext.callUnder(captured, work);
+    }
+
+    private static OrgBindingException refused(String reason) {
+        OrgBindingException e = new OrgBindingException(reason);
+        LOGGER.error(e.getMessage(), e);
+        return e;
     }
 }

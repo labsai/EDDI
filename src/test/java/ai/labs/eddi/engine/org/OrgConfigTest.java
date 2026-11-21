@@ -53,6 +53,21 @@ class OrgConfigTest {
     }
 
     @Test
+    void theClassLoadModeComesFromTheConfigurationAndDefaultsToSingle() {
+        // the test classpath carries application.properties with eddi.org.mode=single
+        assertEquals(OrgMode.SINGLE, OrgContext.initialMode());
+    }
+
+    @Test
+    void aResolverNameInAnotherCaseIsAccepted() {
+        assertEquals("single", OrgResolution.normalize(" Single "));
+        OrgResolution resolution = mock(OrgResolution.class);
+        when(resolution.resolverName()).thenReturn(OrgResolution.normalize(" Single "));
+        new OrgConfig("single", resolution, new SimpleMeterRegistry()).apply();
+        assertEquals(OrgMode.SINGLE, OrgContext.mode());
+    }
+
+    @Test
     void modeIsParsedCaseInsensitively() {
         assertEquals(OrgMode.SINGLE, OrgConfig.parseMode(" Single "));
         assertEquals(OrgMode.MULTI, OrgConfig.parseMode("MULTI"));

@@ -4,8 +4,10 @@
  */
 package ai.labs.eddi.engine.org;
 
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
+import java.util.Locale;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
@@ -24,8 +26,11 @@ import java.util.concurrent.atomic.AtomicLong;
  * <p>
  * A binding is either an org or the platform ({@link OrgScope#platform}), and
  * each one gets a unique {@link #epoch()}, which the PostgreSQL layer uses to
- * prove that a connection never spans a change of binding. The allowed
- * transitions:
+ * prove that a connection never spans a change of binding. An epoch is unique
+ * per binding, not per thread: {@link OrgPropagation} and forks that inherit
+ * scoped values run the same binding, and so the same epoch, on several threads
+ * at once. One epoch always means one org (or the platform plane), so a check
+ * per physical connection stays sound. The allowed transitions:
  * <table>
  * <tr>
  * <th>From</th>
@@ -91,7 +96,13 @@ public final class OrgContext {
     private static final Set<String> INTERNAL_CLASSES = Set.of(OrgContext.class.getName(), OrgScope.class.getName(),
             OrgPropagation.class.getName(), OrgQuotaKeys.class.getName());
 
-    private static volatile OrgMode mode = OrgMode.SINGLE;
+    /**
+     * Read from the configuration when the class loads, not only when
+     * {@link OrgConfig} applies it at startup. Code that runs before the
+     * {@code StartupEvent} (runtime init, an eager bean) must already fail closed
+     * in multi mode instead of falling back to the default org.
+     */
+    private static volatile OrgMode mode = initialMode();
     private static volatile OrgContextObserver observer = OrgContextObserver.NONE;
 
     private OrgContext() {
@@ -138,7 +149,10 @@ public final class OrgContext {
         return bindingOrNull() instanceof Platform;
     }
 
-    /** The current binding's unique epoch, or 0 when unbound. */
+    /**
+     * The current binding's epoch (unique per binding, possibly active on several
+     * threads), or 0 when unbound.
+     */
     public static long epoch() {
         Binding binding = bindingOrNull();
         return binding == null ? 0L : binding.epoch();
@@ -205,6 +219,21 @@ public final class OrgContext {
     /** Runs {@code work} under exactly {@code binding} ({@code null} = unbound). */
     static <T> T callUnder(Binding binding, Callable<T> work) throws Exception {
         return ScopedValue.where(CURRENT, binding).call(work::call);
+    }
+
+    /**
+     * {@code eddi.org.mode} as the configuration holds it at class load. Any value
+     * other than {@code multi}, and a configuration that cannot be read, start as
+     * {@link OrgMode#SINGLE}; {@link OrgConfig} then validates the value and
+     * refuses a bad one at startup.
+     */
+    static OrgMode initialMode() {
+        try {
+            String value = ConfigProvider.getConfig().getOptionalValue("eddi.org.mode", String.class).orElse("single");
+            return "multi".equals(value.trim().toLowerCase(Locale.ROOT)) ? OrgMode.MULTI : OrgMode.SINGLE;
+        } catch (RuntimeException e) {
+            return OrgMode.SINGLE;
+        }
     }
 
     static long nextEpoch() {

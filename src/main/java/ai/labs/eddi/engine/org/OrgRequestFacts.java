@@ -25,11 +25,22 @@ public interface OrgRequestFacts {
     SecurityIdentity identity();
 
     /**
-     * The request authority as Quarkus' proxy-aware request reports it,
-     * lower-cased, never a raw {@code X-Forwarded-Host}. Empty outside a request.
+     * The request host as Quarkus' proxy-aware request reports it, lower-cased,
+     * without the port. Empty outside a request.
+     * <p>
+     * It reflects a forwarded host header only as far as
+     * {@code quarkus.http.proxy.*} allows. With {@code enable-forwarded-host} on
+     * and no {@code trusted-proxies}, any client can set it. A resolver that routes
+     * on it (host binding, plan §7.1) therefore needs trusted proxies, and the
+     * multi-mode startup check will require them.
      */
     Optional<String> authority();
 
-    /** The trimmed {@link #ORG_HEADER} value, or empty. */
+    /**
+     * The trimmed {@link #ORG_HEADER} value, or empty.
+     *
+     * @throws OrgResolutionException
+     *             when the header is sent more than once, which would be ambiguous
+     */
     Optional<String> requestedOrg();
 }

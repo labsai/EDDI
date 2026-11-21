@@ -106,6 +106,33 @@ class OrgPropagationTest {
     }
 
     @Test
+    void onAPlatformThreadPlatformWorkKeepsTheThreadsEpoch() throws Exception {
+        Callable<Long> captured = OrgScope.platform("test:a", () -> OrgPropagation.wrap((Callable<Long>) OrgContext::epoch));
+
+        long[] epochs = OrgScope.platform("test:b", () -> new long[]{OrgContext.epoch(), captured.call()});
+
+        assertEquals(epochs[0], epochs[1]);
+    }
+
+    @Test
+    void onAPlatformThreadOrgWorkBindsItsOrg() throws Exception {
+        Callable<OrgId> forAcme = OrgContext.callAs(ACME, () -> OrgPropagation.wrap((Callable<OrgId>) OrgContext::require));
+
+        assertEquals(ACME, OrgScope.platform("test:per-item", forAcme));
+    }
+
+    @Test
+    void onAPlatformThreadUnboundWorkShedsThePlatformPlane() throws Exception {
+        Callable<Boolean> unbound = OrgPropagation.wrap((Callable<Boolean>) OrgContext::isPlatform);
+        Callable<Long> unboundEpoch = OrgPropagation.wrap((Callable<Long>) OrgContext::epoch);
+
+        assertEquals(Boolean.FALSE, OrgScope.platform("test:shed", unbound));
+        assertEquals(0L, OrgScope.platform("test:shed", unboundEpoch));
+        assertThrows(OrgContextMissingException.class,
+                () -> OrgScope.platform("test:shed", OrgPropagation.wrap((Callable<OrgId>) OrgContext::require)));
+    }
+
+    @Test
     void platformWorkRefusesToRunInlineOnAnOrgBoundThread() throws Exception {
         Runnable platformWork = OrgScope.platform("test:inline", () -> OrgPropagation.wrap(() -> {
         }));
