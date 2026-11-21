@@ -225,13 +225,18 @@ create `IGuardrail` or a `Verdict` enum with a `PASS` member; persisted actions 
 EDDI-owned and neutral (`block | redact | reprompt | warn`, `:261`).
 
 **C9 — Tenant scoping follows the existing plan, not a bespoke one.**
-[`multi-tenancy-plan.md`](multi-tenancy-plan.md) was rewritten on 2026-11-19. The
-customer boundary is an **org** (`OrgId`), carried by a `ScopedValue`-based
-`OrgContext` (§4), not a request-scoped bean, and every durable work-starter stores
-its `orgId` (§3 principle 5). Direct stores take an explicit `OrgId` parameter, and
-Postgres SQL runs through `OrgJdbc` (§5.3). New stores add an `orgId` field / `org_id`
-column stamped by the store, with `orgId` leading in their indexes (§5.5), and register
-in that plan's Appendix B. The vault/variables "tenant" stays a namespace inside an org (§1).
+[`multi-tenancy-plan.md`](multi-tenancy-plan.md) was rewritten on 2026-11-19, and its
+decisions are locked in [ADR 0001](../docs/adr/0001-organizations.md):
+
+- **The boundary.** The customer boundary is an **org** (`OrgId`), carried by a
+  `ScopedValue`-based `OrgContext` (§6), not a request-scoped bean.
+- **Work-starters.** Every durable work-starter stores its `orgId` (§4 principle 5).
+- **Stores.** Store interfaces take **no** `OrgId` parameter. Data access goes through
+  `OrgCollections` (Mongo) and `OrgSql` (Postgres), which read the context themselves (§6.1,
+  §8.3; ADR LOCK 3). New stores add an `orgId` field / `org_id` column stamped by those
+  helpers, with `orgId` leading in their indexes after enablement (§8.5), and register in
+  that plan's Appendix B.
+- **Vault tenants.** The vault/variables "tenant" stays a namespace inside an org (§2).
 
 **C10 — Golden Rule 1.** Provider behavior is JSON configuration; Java is the
 engine (`AGENTS.md:181`). No provider may be hardcoded. Conversely,
@@ -426,10 +431,10 @@ That distinction drives one integration decision per path:
 | Vector / embedding / LLM | Cached on unresolved params by design (C3). **`SERVICE` binding only** — reject `PER_USER` at validate time. Register a `SecretResolver`-style invalidation listener. | Small |
 | Slack | 60s poll refresh; `SERVICE` only | Small |
 
-`ConnectionResolver` is `@ApplicationScoped`, injects `Provider<TenantContext>`
+`ConnectionResolver` is `@ApplicationScoped`, reads the org from `OrgContext`
 (C9) and reads the principal from `CallerIdentityContext` where available. In the
 pipeline, where request scope may be absent, the principal comes from conversation
-memory — the same rule `multi-tenancy-plan.md` §3 principle 5 sets for `orgId`.
+memory — the same rule `multi-tenancy-plan.md` §4 principle 5 sets for `orgId`.
 
 **Fail-closed rules**, mirroring `CallerIdentityResolver`:
 
@@ -901,7 +906,7 @@ If built, the shape is constrained:
 ## 8. Phases
 
 Each phase must build cleanly, compile, and pass tests before the next begins
-(`multi-tenancy-plan.md` §11). Phases 0-2 are independently shippable and worth
+(`multi-tenancy-plan.md` §15). Phases 0-2 are independently shippable and worth
 doing even if the connector work never starts.
 
 ### Phase 0 — Close the exposure gap (~2-3 days) · P0
@@ -1141,9 +1146,9 @@ class or the run silently passes with zero tests.
 - **Not implement dynamic client registration (RFC 7591).** An admin registers once.
 - **Not build a proactive refresh sweeper in Phase 5.** Lazy + single-flight is
   correct; add the sweeper only if telemetry shows cold-start latency matters.
-- **Not add bespoke tenant scoping.** `tenantId` field + `"default"` +
-  `Provider<TenantContext>` when Phase 1 of the multi-tenancy plan lands (C9).
-  Register the new stores in that plan's Phase 2 table rather than forking it.
+- **Not add bespoke tenant scoping.** An `orgId` field stamped through `OrgCollections` /
+  `OrgSql`, with the org read from `OrgContext`, once Phase 1 of the multi-tenancy plan lands
+  (C9). Register the new stores in that plan's Appendix B rather than forking it.
 - **Not accept a client-supplied header as the grant principal — ever.** Not even
   behind a `trust-user-headers`-style toggle. The `/v1` adapter's toggle trades
   impersonation risk for Open WebUI compatibility on *conversation* data; a token
@@ -1174,7 +1179,7 @@ class or the run silently passes with zero tests.
 2. **How many providers ship natively in Phase 5** before Option D (§4) takes over
    the long tail. A buy/build call, not a technical one.
 3. **Row-level tenant filtering vs database-per-tenant** — resolved in
-   `multi-tenancy-plan.md` §5.5: pooled rows with `orgId` leading in indexes, and
+   `multi-tenancy-plan.md` §8.5: pooled rows with `orgId` leading in indexes, and
    database-per-org only for the dedicated tier. The grant store's index design follows that.
 4. **Should connection-backed writes require HITL approval by default?** Argument
    for: a per-user OAuth token plus an LLM plus a write tool is the configuration

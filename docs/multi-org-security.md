@@ -51,8 +51,21 @@ policy), EDDI → IdP (verified access token only).
 **Known single-layer spots, accepted for now:**
 
 - **Mongo aggregations, `distinct` and counts** are protected by the guard's pipeline and filter
-  check only. Their output carries no `orgId` to verify (ADR DV-5). Each call site is reviewed and
-  allow-listed, and covered by conformance and mutation tests.
+  check only. Their output carries no `orgId` to verify (ADR DV-5).
+  - Pipelines are checked against a stage allow-list, recursively, and `$out`/`$merge` on org
+    collections are refused (DV-14).
+  - The iterables' `filter()` and `collation()` are checked too (DV-16).
+  - Each call site is reviewed and allow-listed, and covered by conformance and mutation tests.
+- **GridFS.** Chunks carry no `orgId`, so the `OrgGridFsBucket` facade (ADR DV-6) is the only
+  runtime layer. It checks the files document's `metadata.orgId` before any chunk is read,
+  renamed or deleted, and offers no lookup by filename and no `drop`.
+- **JTA-enlisted connections on Postgres.** Agroal reuses them without calling the RLS
+  interceptor (ADR DV-3). No JTA may run on org data paths, which a build guard enforces, and
+  `OrgSql`'s epoch assertion catches a reuse that slips through.
+- **Org bundle import.** The importer is a single trust boundary: signature, checksums, expiry,
+  registered export keys, archive-entry validation and re-validation of routing records (ADR
+  decision 9). A bundle from a customer-run source (M1) is untrusted input even when its
+  signature is valid.
 - **SQL injection on Postgres.** The app role can run `set_config('eddi.platform','on')`. RLS
   stops missed filters, not injection. Parameterised statements and the build guards are the
   control. With the per-connection memo (ADR DV-2, accepted), an injected change to
@@ -60,8 +73,9 @@ policy), EDDI → IdP (verified access token only).
   the binding changes. Always overwriting would reset it on every borrow. A build guard forbids
   any SQL other than the interceptor's from naming these GUCs.
 - **Mongo writes that move data between orgs.** The guard refuses update operators that change,
-  unset or rename onto `orgId` (ADR DV-12). It also refuses a `FindIterable.filter()` that drops
-  the org equality (DV-13).
+  unset or rename onto `orgId` (ADR DV-12), and aggregation `$out`/`$merge` into org collections
+  (DV-14). It also refuses an iterable `filter()` that drops the org equality (DV-13, DV-16). The
+  validator requires `orgId` to be a string, so an array `orgId` cannot match two orgs (DV-17).
 
 ## 4. STRIDE per entry point
 
@@ -144,10 +158,11 @@ service, **E**levation of privilege. The § numbers point at the plan.
 
 | | Threat | Control |
 | --- | --- | --- |
-| I | A binary below the floor reads every org unfiltered on Mongo | `DataLayoutGuard` refuses binaries below the floor (Spike C: exit 1 before any write, on both datastores). Rollback below the floor is forbidden and documented, because a pre-floor binary cannot be stopped (§5.4) |
+| I | A binary below the floor reads every org unfiltered on Mongo | **Not preventable by code**: a binary older than the floor release has no guard (§5.4). `DataLayoutGuard` stops binaries from the floor release onwards when `layout.required` is above what they support (Spike C: exit 1 before any write, on both datastores, with HTTP not yet listening). Rollback below the floor is therefore forbidden, and documented in the release notes and `docs/multi-org.md`. The guard reads with primary read preference and majority read concern, so a lagging secondary cannot hide a raised layout (ADR DV-11) |
 | I | A pre-floor binary on Postgres | Contained only if it connects as `eddi_app` (NOBYPASSRLS) against `FORCE`d tables. This is why DV-1 makes the role split mandatory |
 | T | Enablement interrupted halfway | Leased, checkpointed and idempotent steps. The switch has a presence barrier (§5.3) |
-| I | Org bundle tampered with in transit (moves M1–M5) | Ed25519 signature over the manifest and SHA-256 per stream, verified before any write. Secrets travel only re-encrypted for the target (ADR decision 9) |
+| T/I | Org bundle tampered with in transit, replayed, or crafted (moves M1–M5) | An Ed25519 signature over the manifest, which carries a SHA-256 for every file, `sealed.bin` included. Signature, checksums and `notAfter` are verified before any write. Only export keys a platform admin registered are accepted. Archive entries are validated (no `..`, no absolute paths, no unlisted entries). Secrets travel only re-encrypted for the target (ADR decision 9) |
+| S/E | A bundle claims another org's hostnames, `/v1` keys, integrations or Keycloak org | Routing records are never imported as trusted: they are listed in the report and re-created or confirmed by a platform admin, which re-checks their global uniqueness (ADR decision 9) |
 
 ## 5. Residual risks
 

@@ -45,6 +45,52 @@ never pushed.
 - **C (floor guard).** A `StartupEvent` observer at `Integer.MIN_VALUE` refused a too-new
   layout with exit 1 before anything wrote, on MongoDB and on PostgreSQL.
 
+### Critical review after acceptance
+
+A second, independent review checked every claim against the spike logs and the code, and
+found real holes in the MongoDB design. The ADR now adds DV-14 to DV-17:
+
+- **DV-14.** Aggregation pipelines are checked against a stage allow-list, recursively into
+  `$facet`, `$lookup` and `$unionWith`. `$out`/`$merge` into org collections are refused. Before
+  this, a scoped `$match` followed by `$merge` could have written across orgs.
+- **DV-15.** `MongoDatabase` methods are classified. `runCommand`, `listCollections` and
+  `createCollection` are platform-only.
+- **DV-16.** Every returned iterable is wrapped, `DistinctIterable.filter()` included, and
+  non-simple collations are refused.
+- **DV-17.** The verifier covers every document class. `orgId` must be a string, which the
+  validator enforces.
+
+Existing rules were tightened:
+
+- **DV-2 (memo).** The entry is removed on any non-autocommit acquire or failed `set_config`.
+- **DV-3 (JTA).** Covers `QuarkusTransaction` and `UserTransaction` as well as
+  `@Transactional`.
+- **DV-11 (floor guard).** Reads with primary read preference and majority read concern, and
+  keeps `Integer.MIN_VALUE` to itself.
+- **Decision 9 (bundle).** Gains:
+  - a checksum for `sealed.bin`;
+  - an expiry and target binding;
+  - registered export keys;
+  - archive-entry validation;
+  - routing records (hostnames, `/v1` keys, integrations, Keycloak orgs) re-created at the
+    target, never imported as trusted;
+  - attachments stored as `BYTEA` on Postgres, not large objects.
+
+Evidence corrections:
+
+- The Mongo overhead table now gives the range over both runs. The no-copy verifier is noisy
+  (up to +33 % on a loopback Jackson scan), so the ADR no longer calls it "within noise", and
+  the 3 % budget is left to the Phase 5 load test.
+- `countDocuments` has 40 call sites, not about 45.
+- Results that were only printed to the console are copied into the spike branch.
+
+The threat model now lists GridFS, the JTA path and bundle import as single-layer spots, and no
+longer says the floor guard stops pre-floor binaries.
+
+The plan's §8.4, §8.5a, §14.2 and §16 point at the deviations that supersede them, and their
+statuses read *locked*. `planning/saas-connectors-plan.md` no longer describes the plan's
+withdrawn draft (an explicit `OrgId` parameter and `OrgJdbc`).
+
 ### What's next
 
 ADR 0001 is accepted. Phase 1 (context and stamping, the floor release) is next, one package

@@ -607,10 +607,11 @@ An unset GUC is NULL, so the policy returns no rows. Platform tables have no RLS
   - with an org binding: the org and an empty platform flag;
   - inside `OrgScope.platform`: an empty org and `on`;
   - unbound: both empty.
-- It records the binding epoch on the connection, e.g. in a `WeakHashMap<Connection, Long>`
-  keyed by the wrapped connection.
-- No `RESET ALL`. Each acquire overwrites both values, and a reset would also wipe the
-  `new-connection-sql` settings.
+- It records the binding epoch per **physical** connection (`unwrap(PGConnection.class)`):
+  the wrapper the interceptor receives is a different object from the caller's (ADR 0001 DV-2).
+- No `RESET ALL`: a reset would also wipe the `new-connection-sql` settings. The values are
+  set on every acquire that changes them; DV-2 memoises them per physical connection and
+  spells out when the memo is dropped.
 - It does nothing until the marker enables RLS.
 
 **A connection never spans a binding change.**
@@ -635,8 +636,10 @@ before taking the fallback.
 
 **Further rules:**
 
-- **Role split** (`eddi_migrator` owns, `eddi_app` `NOBYPASSRLS`): optional hardening, since
-  `FORCE` binds the owner. It is required only to contain pre-floor binaries (§5.4).
+- **Role split** (`eddi_migrator` owns, `eddi_app` `NOSUPERUSER NOBYPASSRLS`): **required in
+  multi mode** (ADR 0001 DV-1). `FORCE` binds a table owner, but a superuser or a
+  `BYPASSRLS` role ignores every policy, and the stock compose and Helm `POSTGRES_USER` is a
+  superuser. Enablement and every multi-mode startup refuse such a role.
 - **Threat model:** `eddi_app` can call `set_config('eddi.platform','on')` itself, so RLS
   stops missed filters, not SQL injection.
 - **PgBouncer** in transaction pooling mode breaks session GUCs. Either run it in session
@@ -658,6 +661,15 @@ before taking the fallback.
 
 ### 8.5a MongoDB second layer (replaces RLS)
 
+> **Amended by [ADR 0001](../docs/adr/0001-organizations.md#decision-12--mongodb-second-layer-locked-after-spike-d).**
+> Where this section and the ADR differ, the ADR wins:
+> - DV-4: the verifier is installed per collection, not in the central registry.
+> - DV-6: GridFS goes through a facade over the raw database.
+> - DV-8: the guarded types are deny-by-default proxies.
+> - DV-12 to DV-17: update documents are checked, every iterable is wrapped, pipelines are
+>   checked against a stage allow-list, database methods are classified, collation is
+>   restricted, and `orgId` must be a string.
+
 MongoDB cannot filter rows per session, so EDDI adds two checks of its own. Both are
 independent of `OrgCollections`, so a missed or wrong helper call is caught by them and
 fails closed. Both live where every Mongo access already passes:
@@ -672,11 +684,11 @@ fails closed. Both live where every Mongo access already passes:
      - `find`, `count`, `distinct`, `update*`, `replace*`, `delete*`, `findOneAnd*`:
        the filter must have a top-level `orgId` equality, or an `$and` containing one,
        equal to `OrgContext.require()`;
-     - `aggregate`: the first stage must be `$match` with that equality, and `$lookup`,
-       `$unionWith` and `$graphLookup` sub-pipelines on org collections must start with
-       one too;
-     - `insert*` and `bulkWrite`: every document or filter must carry the bound org;
-     - `watch`: the pipeline must start with the org `$match`;
+     - `aggregate`: the first stage must be `$match` with that equality, and every stage
+       must be on the allow-list, recursively; `$out`/`$merge` and `$graphLookup` on org
+       collections are refused (DV-14);
+     - `insert*`: every document must carry the bound org; `bulkWrite` and `watch` are
+       refused on org collections (DV-14, nothing calls them today);
      - `estimatedDocumentCount` and `drop` are allowed only inside `OrgScope.platform`.
    - Inside `OrgScope.platform`, only the dedicated `platform*` store methods may run
      cross-org operations. They call `guarded.platform(reason)`, which is allow-listed and
@@ -684,11 +696,14 @@ fails closed. Both live where every Mongo access already passes:
    - Before the marker the wrapper only counts unscoped operations (metric
      `eddi_org_mongo_unscoped_total`, must be 0 in CI). Single mode therefore pays nothing
      and fails nothing.
-   - GridFS is created only through the guarded database (`GridFSBuckets.create(guardedDb, …)`),
-     and its metadata filters are verified the same way.
+   - GridFS goes through the `OrgGridFsBucket` facade over the raw database, which checks
+     `metadata.orgId` before any chunk is touched (DV-6). The bucket's internals issue
+     unfiltered queries, so it cannot sit on the guarded database.
 2. **`OrgReadVerifier`: checks every decoded document.**
-   - A codec decorator in the central registry, for `Document`, `BsonDocument` and EDDI's
-     `JacksonCodec`, checks every document decoded from an org collection.
+   - The guarded collection installs it per collection, through `withCodecRegistry`,
+     because a central codec cannot tell which collection it decodes for (DV-4). It covers
+     every document class, and inside `JacksonCodec` it reads the raw bytes it already
+     has.
    - After the marker, an `orgId` that differs from the bound org, or a missing `orgId`,
      throws `[SECURITY]` and the document is never returned.
    - Projections on org collections must include `orgId`. The wrapper adds it when a
@@ -1137,9 +1152,13 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
   `datastore/**` and the listed stores, and that every org-table access goes through
   `OrgCollections` / `OrgSql`;
 - `Caffeine.newBuilder()` appears only in classified classes;
-- `MongoClients.create`, `MongoClient` and `getDatabase(` appear only in `PersistenceModule`
-  and `OrgDatabaseRouter`, and `GridFSBuckets.create` only takes the guarded database, so
+- `MongoClients.create`, `MongoClient` and `getDatabase(` appear only in `PersistenceModule`,
+  `OrgDatabaseRouter` and the allow-listed external vector-store client (`EmbeddingStoreFactory`,
+  ADR 0001 DV-7), and `GridFSBuckets.create` appears only in `OrgGridFsBucket` (DV-6), so
   nothing can bypass `OrgGuardedMongoDatabase` (§8.5a);
+- no JTA (`@Transactional`, `QuarkusTransaction`, `UserTransaction`) on org data paths, and no
+  SQL other than `OrgRlsPoolInterceptor` names the `eddi.org_id` or `eddi.platform` GUCs
+  (ADR 0001 DV-2, DV-3);
 - every JAX-RS implementation class and MCP tool class is `@OrgBound` or `@PlatformPlane`;
 - every A.12 class is annotated or uses `OrgRequest.callBound`;
 - every `@Scheduled` method uses the §7.4 patterns or is `@PlatformPlane`;
@@ -1358,18 +1377,18 @@ change later.
 
 | # | Decision | Recommendation | Status |
 |---|---|---|---|
-| 1 | Org id format, reserved ids, principal shape | §2 format and reserved list; `default` constant; `(orgId, subject)` pairs | LOCK |
-| 2 | Storage key shape | `orgId` field/column; strict predicates and org-leading indexes after the marker (claim indexes exempt); org-including unique keys after the switch; no PK rewrites; globally unique ids; NATS/KV keys stay id-keyed with the org in the value; 404 across orgs | LOCK |
-| 3 | Context contract | `ScopedValue` with an epoch; the §6.1 transition table; explicit hand-offs; helpers read the context (no `OrgId` parameters on store interfaces); a connection never spans a binding change | LOCK |
-| 4 | Marker, floor, enablement | No predicates before the marker; enablement runs in single mode; two-step switch with a presence barrier; floor release with `DataLayoutGuard`; no rollback below the floor | LOCK |
-| 5 | Planes, roles, teams | Platform roles = client roles of `eddi-platform`; org roles and teams from `OrgMembership`; realm roles and groups ignored for orgs in multi mode; the "never visible" list | LOCK |
-| 6 | Trust model for author-supplied infra | SSRF forced on; derived, hashed RAG names; per-org LLM keys by default; host-bound anonymous access; NATS signature v2 | LOCK |
-| 7 | IdP | Keycloak Organizations, matched by org id from the access token; `issuer` later | LOCK (after Spike B) |
-| 8 | Key hierarchy and AAD | Per-org KEK; AAD v2 with the org, v1 kept for `default`; KMS later | LOCK |
-| 9 | Moving an org | No automatic criteria; a platform admin moves an org explicitly, informed by the per-org usage API. **Every move (M1–M5) must be easy and fully documented** (product owner, 2026-11-21): one bundle mechanism, preflight, resumable copy, verify, cutover, rollback, a runbook per move (§13.1). LOCK the bundle format in the ADR, because third parties will depend on it | decided |
+| 1 | Org id format, reserved ids, principal shape | §2 format and reserved list; `default` constant; `(orgId, subject)` pairs | **locked** (ADR 0001, accepted 2026-11-21) |
+| 2 | Storage key shape | `orgId` field/column; strict predicates and org-leading indexes after the marker (claim indexes exempt); org-including unique keys after the switch; no PK rewrites; globally unique ids; NATS/KV keys stay id-keyed with the org in the value; 404 across orgs | **locked** (ADR 0001, accepted 2026-11-21) |
+| 3 | Context contract | `ScopedValue` with an epoch; the §6.1 transition table; explicit hand-offs; helpers read the context (no `OrgId` parameters on store interfaces); a connection never spans a binding change | **locked** (ADR 0001, accepted 2026-11-21) |
+| 4 | Marker, floor, enablement | No predicates before the marker; enablement runs in single mode; two-step switch with a presence barrier; floor release with `DataLayoutGuard`; no rollback below the floor | **locked** (ADR 0001, accepted 2026-11-21) |
+| 5 | Planes, roles, teams | Platform roles = client roles of `eddi-platform`; org roles and teams from `OrgMembership`; realm roles and groups ignored for orgs in multi mode; the "never visible" list | **locked** (ADR 0001, accepted 2026-11-21) |
+| 6 | Trust model for author-supplied infra | SSRF forced on; derived, hashed RAG names; per-org LLM keys by default; host-bound anonymous access; NATS signature v2 | **locked** (ADR 0001, accepted 2026-11-21) |
+| 7 | IdP | Keycloak Organizations, matched by org id from the access token; `issuer` later | **locked** after Spike B (ADR 0001 LOCK 7, DV-9) |
+| 8 | Key hierarchy and AAD | Per-org KEK; AAD v2 with the org, v1 kept for `default`; KMS later | **locked** (ADR 0001, accepted 2026-11-21) |
+| 9 | Moving an org | No automatic criteria; a platform admin moves an org explicitly, informed by the per-org usage API. **Every move (M1–M5) must be easy and fully documented** (product owner, 2026-11-21): one bundle mechanism, preflight, resumable copy, verify, cutover, rollback, a runbook per move (§13.1). LOCK the bundle format in the ADR, because third parties will depend on it | decided; bundle container **locked**, record and trust rules proposed (ADR 0001 decision 9) |
 | 10 | Cross-org features | None; cross-org A2A only as external peers | recommend |
 | 11 | Data residency | `region` field reserved | recommend |
-| 12 | Datastores for the pooled tier | **Both MongoDB and PostgreSQL, fully supported and equally tested** (product owner, 2026-11-21). Second layer: RLS on Postgres; on Mongo the guarded collection boundary plus decode-time read verification (§8.5a). The conformance suite and the backstop run (§14.1 step 4) run on both | decided (LOCK the §8.5a design after Spike D) |
+| 12 | Datastores for the pooled tier | **Both MongoDB and PostgreSQL, fully supported and equally tested** (product owner, 2026-11-21). Second layer: RLS on Postgres; on Mongo the guarded collection boundary plus decode-time read verification (§8.5a). The conformance suite and the backstop run (§14.1 step 4) run on both | decided; §8.5a design **locked** after Spike D, as amended by DV-4 to DV-8 and DV-12 to DV-17 (ADR 0001 decision 12) |
 | 13 | Break-glass approval | One `eddi-platform-admin` with a reason and a TTL of at most 4 h; org admins are notified; full audit in the org's ledger; four-eyes approval optional via `eddi.org.break-glass.require-second-approver` | decided |
 
 **Deviations log** (the implementer appends: date, phase, what, why):
@@ -1383,17 +1402,19 @@ Phase 0, 2026-11-21. Each entry is detailed in
   ignore `FORCE`d RLS, and the stock compose/Helm `POSTGRES_USER` is a superuser.
 - **DV-2 (§8.4), decided 2026-11-21 by the product owner: memo.** The RLS interceptor memoises
   per physical connection (`unwrap(PGConnection.class)`) and skips `set_config` when the values
-  are unchanged. The memo is recorded only in autocommit, the epoch on every acquire, and a
+  are unchanged. The memo is recorded only in autocommit; an existing entry is removed on any
+  non-autocommit acquire or failed `set_config`; the epoch is recorded on every acquire; and a
   guard forbids other SQL from naming `eddi.*` GUCs.
   *Why:* the naive interceptor adds a round trip to every acquire. Either way the
   key is the physical connection, because the caller's wrapper differs from the
   interceptor's.
-- **DV-3 (§6.1, §14.2).** No `@Transactional` on org data paths (new guard). *Why:* Agroal
-  reuses a JTA-enlisted connection without calling the interceptor.
+- **DV-3 (§6.1, §14.2).** No JTA on org data paths: `@Transactional`, `QuarkusTransaction`
+  and `UserTransaction` are refused by a new guard. *Why:* Agroal reuses a JTA-enlisted
+  connection without calling the interceptor.
 - **DV-4 (§8.5a).** The read verifier is installed per collection through
   `withCodecRegistry`, checks only the outermost document, and makes no extra copy.
   *Why:* `Codec.decode` has no namespace, nested documents pass through it too, and the copy
-  cost +25–65 % on scans.
+  cost up to +65–71 % on scans in the loopback runs.
 - **DV-5 (§8.5a, §14.1).** Aggregation, `distinct` and count output is not decode-verified.
   The guard's pipeline/filter check covers it, with allow-listed call sites. *Why:* that
   output carries no `orgId`.
@@ -1408,16 +1429,35 @@ Phase 0, 2026-11-21. Each entry is detailed in
 - **DV-10 (§6.1).** `callAs` adapts `Callable` to `ScopedValue.CallableOp`. *Why:* the Java 25
   API.
 - **DV-11 (§5.4).** `DataLayoutGuard` is a `StartupEvent` observer at
-  `@Priority(Integer.MIN_VALUE)` and reads before the schema lock. *Why:* Spike C: exit 1
-  before any write, on both datastores, with the HTTP listener not yet open.
-- **DV-12 (§8.5a).** The Mongo guard also checks **update documents**: no `$set`, `$unset` or
-  `$rename` of `orgId` except to the bound org, and no pipeline updates on org collections.
+  `@Priority(Integer.MIN_VALUE)`, a priority reserved for it, and reads before the schema
+  lock. On Mongo it reads with primary read preference and majority read concern. *Why:*
+  Spike C: exit 1 before any write, on both datastores, with the HTTP listener not yet open;
+  and a lagging secondary could hide a raised layout.
+- **DV-12 (§8.5a).** The Mongo guard also checks **update documents**: no update operator may
+  touch `orgId` or `orgId.*` (`$rename` onto it included) except `$set`/`$setOnInsert` of the
+  bound org, and no pipeline updates on org collections.
   *Why:* a filter-only check let `$set orgId=b` move a document into another org.
 - **DV-13 (§8.5a).** `FindIterable.filter()` must carry the org equality. *Why:* it replaces
   the `find(...)` filter, and returned a foreign document with the verifier off.
+- **DV-14 (§8.5a).** Aggregation pipelines are checked against a stage allow-list,
+  recursively; `$out`/`$merge` on org collections are refused; `watch`, `bulkWrite` and
+  `$graphLookup` on org collections are refused instead of allowed when scoped. *Why:*
+  review after Spike D: a scoped `$match` followed by `$merge` would have written across
+  orgs, and nothing calls the other three today.
+- **DV-15 (§8.5a, A.2).** `MongoDatabase` methods are classified, deny-by-default:
+  `runCommand`, `listCollections` and `createCollection` are platform-only. *Why:* the
+  prototype passed every database method through, and EDDI calls `runCommand(collMod)`.
+- **DV-16 (§8.5a).** Every returned iterable is wrapped, `DistinctIterable.filter()` included,
+  and a non-simple collation is refused on org collections. *Why:* `distinct` output is
+  unverified, and a punctuation-ignoring collation makes `acme-x` equal `acmex`.
+- **DV-17 (§8.5a, §5.3).** The verifier covers every document class, and `orgId` must be a
+  string, which the validator enforces with `bsonType: "string"`. *Why:* `RawBsonDocument`
+  was unverified, and an array `orgId` matches an equality filter for each element.
 - **Decision 9 (§13.1).** Only the bundle *container* and its compatibility rules are locked.
-  The record-level rewrite rules (re-derive anything derived from the org id or from a key)
-  are a proposal for Phase 6 to settle.
+  The record-level rewrite rules and the import trust rules are a proposal for Phase 6 to
+  settle: export keys registered per move, an expiry, a checksum for every file including
+  `sealed.bin`, archive-entry validation, and routing records re-created at the target rather
+  than imported.
 
 ---
 
@@ -1427,7 +1467,7 @@ Phase 0, 2026-11-21. Each entry is detailed in
 |---|---|
 | A missed store, cache, registry, filter or hand-off | Fail-closed context, helper-only DB access, guards, generated conformance suite, RLS (Postgres), mutation checks |
 | A missed filter on Mongo pooled | The guarded collection refuses unscoped commands; the read verifier refuses foreign documents; `$jsonSchema` on writes; backstop run and mutation checks on Mongo too (§8.5a, §14.1) |
-| A code path bypasses the guarded Mongo wrapper (e.g. a second `MongoClient`) | Build guard: `MongoClient`/`MongoClients` and `getDatabase(` appear only in `PersistenceModule` and the dedicated-tier router. Spike D lists every method that is used |
+| A code path bypasses the guarded Mongo wrapper (e.g. a second `MongoClient`) | Build guard: `MongoClient`/`MongoClients` and `getDatabase(` appear only in `PersistenceModule`, the dedicated-tier router and the allow-listed external vector-store client (DV-7). The guarded types deny by default (DV-8, DV-15, DV-16). Spike D lists every method that is used |
 | Rollback below the floor | Floor release, `DataLayoutGuard`, documented prohibition; on Mongo a pre-floor binary reads unfiltered |
 | Single-mode regression | No predicates before the marker, both marker states tested, 3 % gate, fallback counter |
 | Marker switch while nodes run | `SWITCHING` with a presence barrier for one TTL; old and new unique keys coexist until then |

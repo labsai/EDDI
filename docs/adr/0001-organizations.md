@@ -10,7 +10,9 @@
 
 This ADR locks the decisions the plan marks **LOCK** in §16. Each one is expensive or impossible
 to change after Phase 1. It records the results of the four Phase 0 spikes and the deviations
-from the plan that they forced.
+from the plan that they forced. A critical review after acceptance found further holes in the
+MongoDB design and in the bundle's trust model. They are folded in as DV-14 to DV-17 and in
+decision 9; nothing in them reverses a decision that was accepted.
 
 Every fact below was checked against `main` at `a2acb28e86`, on 2026-11-21. The inventory counts
 the plan relies on were regenerated with its Appendix A commands, and all of them are still
@@ -32,8 +34,10 @@ holds the full design. This ADR covers only what has to be fixed now.
 The spike code is throwaway. It lives on the local branch `test/org-phase0-spikes`, which is not
 pushed and never will be: `6e3031066b` (A), `6e5f1065ee` (D), `d75ae514fa` (C), and
 `f5aeb96dc0`. The last one holds the booted interceptor, the probe of HTTP during the guard,
-the update and `filter()` rules, the GridFS trace, and every log quoted below under
-`spike-evidence/`. Spike B is the script `spike-evidence/spike_b_keycloak.py`, run against a
+the update and `filter()` rules and the GridFS trace. The test logs quoted below are under
+`spike-evidence/`. Results that were only printed to the console are copied into
+`spike-evidence/console-transcript.md`: process exit codes, the `curl` status codes and the
+collection and table listings. Spike B is the script `spike-evidence/spike_b_keycloak.py`, run against a
 throwaway realm. All four ran on this workstation against Testcontainers
 `postgres:16-alpine`, `mongo:7.0` and `quay.io/keycloak/keycloak:26.8.0`. The timings are
 loopback numbers from Docker on Windows: they compare variants and are not production figures.
@@ -53,8 +57,8 @@ policies.
 | On the caller's thread? Sees the `ScopedValue`? | **Yes**, on platform and on virtual threads. A virtual-thread caller bound to org `b` read only `b`'s rows |
 | Values carried over to the next borrower? | **No**, as long as every acquire overwrites both GUCs. An unbound acquire after a bound one read `[]` |
 | An exception in `onConnectionAcquire` aborts the borrow? | **Yes.** The caller gets the exception. The connection is not leaked: afterwards all 4 of the pool's 4 connections could be borrowed |
-| Harmless when `quarkus.datasource.active=false`? | **Yes, booted.** The same jar on MongoDB, with the datasource inactive, started normally, served requests, and logged **0** interceptor calls |
-| Overhead | A microbenchmark, not the p95 gate. Naive interceptor (one `set_config` round trip per acquire), one-statement autocommit pattern: **210 → 460 µs/op**, so one extra round trip on every DB call, and most of the ~380 call sites are short. **Memoised interceptor** (skips `set_config` when the physical connection already holds the bound values): **210 → 220 µs/op, within noise**. In the steady state, 1 round trip in 15,000 acquires. Which one ships is a decision for the user (DV-2) |
+| Harmless when `quarkus.datasource.active=false`? | **Yes, booted.** The same jar on MongoDB, with the datasource inactive, started normally. After three API requests it had logged **0** interceptor calls. The requests' status codes were not recorded |
+| Overhead | A single-threaded microbenchmark, not the p95 gate. Contention on the memo map was not measured. Naive interceptor (one `set_config` round trip per acquire), one-statement autocommit pattern: **210 → 460 µs/op**, so one extra round trip on every DB call, and most of the ~380 call sites are short. **Memoised interceptor** (skips `set_config` when the physical connection already holds the bound values): **210 → 220 µs/op, within noise**. In the steady state, 1 round trip in 15,000 acquires. The memo was chosen (DV-2) |
 | Does `WITH CHECK` refuse a foreign-org insert, or an insert that relies on the column `DEFAULT 'default'` while another org is bound? | **Yes**, both fail with SQLSTATE `42501` |
 | Does a table owner bypass RLS under `FORCE`? | **No.** With `FORCE`, the owning plain role sees only its org |
 | Can the app role escape on its own? | **Yes**, as the plan's threat model states: `set_config('eddi.platform','on')` makes every row visible. RLS stops missed filters, not SQL injection |
@@ -91,11 +95,18 @@ Counted exactly per call site in the 48 A.2 files plus `MongoResourceStorage`: *
 in `MongoDeploymentStorage`, `UserMemoryIdentityIndexes`, `AuditStore`,
 `ConversationMemoryStore` ×3, `ConversationRatingStore` ×2 and `MongoIngestedFileStore`;
 **3 `distinct`**, in `AlertEventStore`, `ConversationMemoryStore` and `MongoUserDirectoryStore`;
-and about 45 `countDocuments`. Unfiltered `find()` calls exist in `MongoDeploymentStorage` and in
-the migrations; under the guard they become platform methods. There is no `bulkWrite` and no
-`watch`. `ClientSession` appears only in an unrelated HTTP-client class. There are two `MongoClients.create` calls: `PersistenceModule` and
-`EmbeddingStoreFactory`, which connects to author-supplied Atlas vector stores. There are two
-`GridFSBuckets.create` calls: `GridFsAttachmentStore` and `MongoIngestedFileStore`.
+and **40 `countDocuments`** across all of `src/main/java`.
+
+- **Unfiltered and database-level calls.** Unfiltered `find()` calls exist in
+  `MongoDeploymentStorage` and in the migrations; under the guard they become platform
+  methods. Database-level calls exist too: `MongoResourceStorage` runs
+  `runCommand({collMod: …})` and `listCollections()`.
+- **Absent.** There is no `bulkWrite` and no `watch`. `ClientSession` appears only in an
+  unrelated HTTP-client class.
+- **Clients.** There are two `MongoClients.create` calls: `PersistenceModule`, and
+  `EmbeddingStoreFactory`, which connects to author-supplied Atlas vector stores.
+- **GridFS.** There are two `GridFSBuckets.create` calls: `GridFsAttachmentStore` and
+  `MongoIngestedFileStore`.
 
 | Probe (bound org `a`) | Guarded result |
 | --- | --- |
@@ -104,6 +115,7 @@ the migrations; under the guard they become platform methods. There is no `bulkW
 | Same unscoped find through `withReadPreference(...)` or a `ClientSession` overload | refused: every `with*` result is wrapped again |
 | `countDocuments()`, `estimatedDocumentCount`, `drop`, `watch` | refused (the last three are platform-only) |
 | `aggregate` without a leading org `$match`; `$lookup` (no pipeline) or `$unionWith` on an org collection whose sub-pipeline is unscoped | refused |
+| `aggregate` with a leading org `$match`, then `$merge`/`$out` into an org collection, or a `$facet` with unscoped sub-pipelines | **not probed, and the prototype would let it through**: it inspected only `$lookup`, `$unionWith` and `$graphLookup`, at top level. Found in review. Decision 12 now allow-lists stage types (DV-14) |
 | `updateOne` / `deleteMany` without org equality | refused |
 | **An update document that moves data out of the org:** `updateOne(orgId=a, $set orgId=b)`, `updateMany(orgId=a, $unset orgId)`, `$rename n→orgId`, `$set orgId.x`, a pipeline-style update | refused, by the update-document rule (DV-12). Without that rule the filter check alone let all of these through, and the `$jsonSchema` validator only requires that `orgId` is *present* |
 | `$setOnInsert orgId=a` on an upsert; an upsert whose filter has only the org equality | allowed. The upserted document gets `orgId: "a"` from the equality filter |
@@ -117,7 +129,8 @@ helper call is wrong, and the verifier stayed on:
 
 - a foreign `find`, an unfiltered `find`, and a foreign `findOneAndUpdate` on `Document` and on a
   Jackson POJO were all **refused at decode** (`orgId=b bound=a`);
-- `countDocuments()` returned **3**: the verifier never sees counts;
+- `countDocuments()` returned every document in the collection: 3 in the first run, and 5 in
+  the final run after its upserts. The verifier never sees counts;
 - an `aggregate` with `$group` was refused, because its output has no `orgId`. The verifier
   therefore cannot be applied to aggregation output at all (**DV-5**).
 
@@ -148,16 +161,22 @@ helper call is wrong, and the verifier stayed on:
    None of the chunk operations carry an org, and the index check is unfiltered by design. See
    **DV-6**.
 
-**Overhead.** 200-document scans and 2,000 point finds, 3 warm rounds per mode:
+**Overhead.** 200-document scans and 2,000 point finds, 3 rounds per mode. Two runs were made:
+`spikeD-overhead.log`, and the final `spikeD.log`, which also repeats the no-copy mode. The
+ranges below cover both runs:
 
 | Mode | Point find | Jackson scan | `Document` scan |
 | --- | --- | --- | --- |
-| Raw driver (baseline) | ~400 µs | ~1.0–1.3 ms | ~1.0–1.2 ms |
-| Guard + verifier, **with an extra raw copy** | +0–8 % | **+40–65 %** | **+25–40 %** |
-| Guard + verifier, **no extra copy** (check the decoded `Document`; check inside `JacksonCodec`) | within noise | +0–15 % (noisy) | within noise |
-| Guard only | within noise | within noise | within noise |
+| Raw driver (baseline) | 366–651 µs | 1.0–3.6 ms | 1.0–1.9 ms |
+| Guard + verifier, **with an extra raw copy** | −12 to +8 % | **0 to +65 %** | **−4 to +71 %** |
+| Guard + verifier, **no extra copy** (check the decoded `Document`; check inside `JacksonCodec`) | −8 to +5 % | **−4 to +33 %** | −16 to +25 % |
+| Guard only | −5 to +7 % | −8 to +8 % | −12 to +25 % |
 
-The extra-copy variant is rejected. The no-copy variant is the design (DV-4).
+These are loopback runs of about 50 scans each on a Windows workstation, and the round-to-round
+spread is as large as the effect. They show that the extra copy is the expensive part. They do
+**not** show that the no-copy verifier meets the 3 % budget. The extra-copy variant is rejected,
+and the no-copy variant is the design (DV-4). Whether it meets the budget is decided by the
+Phase 5 load test, not by these numbers.
 
 ### 2.3 Spike B — Keycloak 26.8 Organizations (§9.1)
 
@@ -228,6 +247,12 @@ The guard took about 130 ms, mostly the first connection. It ran **before**
 (50), `AgentDeploymentManagement` (60) and every `@Startup(1000)` module. It reads without the
 schema lock, which is fine because it only reads.
 
+**Not covered by the prototype.** It read through EDDI's one client, built with
+`ReadPreference.nearest()` (`PersistenceModule`). On a replica set, a lagging secondary can
+miss a just-raised `layout.required`, so the real guard reads with primary read preference and
+majority read concern (DV-11). Exit codes, the `curl` results and the collection and table
+listings are in `spike-evidence/console-transcript.md`.
+
 ---
 
 ## 3. Decisions
@@ -286,8 +311,10 @@ schema lock, which is fine because it only reads.
 **Accepted as in plan §9.3–§9.4.**
 
 - **Platform plane:** platform roles are client roles of `eddi-platform`, read from
-  `resource_access/eddi-platform/roles`. Spike B confirmed that client roles appear under
-  `resource_access.<client>.roles` in the access token.
+  `resource_access/eddi-platform/roles`. Spike B showed client roles under
+  `resource_access.<client>.roles`, but only for the built-in `account` client. No
+  `eddi-platform` client was created, so Phase 4 verifies that client's mapping before relying
+  on it.
 - **Org plane:** org roles and teams come from `OrgMembership`. In multi mode, realm roles and
   realm groups are ignored for orgs. Spike B shows they would otherwise grant `eddi-admin` in
   every org.
@@ -335,12 +362,12 @@ schema lock, which is fine because it only reads.
 - Per-org KMS comes later. Until then the threat model records that exposing the master key
   exposes every org.
 
-### Decision 9 — Org bundle format (container LOCKed; record rules PROPOSED, needs your call)
+### Decision 9 — Org bundle format (container LOCKed; record rules are a proposal)
 
-The **container** and its **compatibility rules** are proposed for locking now, because third
-parties will read them. The per-store record schemas and the rewrite rules below are a
-**proposal** that the Phase 6 spec (`docs/org-migrations.md`) settles. They were not exercised in
-Phase 0.
+The **container** and its **compatibility rules** are locked, because third parties will read
+them. The per-store record schemas, the rewrite rules and the import trust rules below are a
+**proposal**. The Phase 6 spec (`docs/org-migrations.md`) settles them. None of this was
+exercised in Phase 0.
 
 **How it relates to the existing agent ZIP** (`backup/impl`,
 [Import/Export an Agent](../import-export-an-agent.md)):
@@ -357,7 +384,7 @@ Phase 0.
 <orgId>-<createdAt>.eddi-org.zip
 ├── manifest.json            REQUIRED, read first
 ├── stores/<catalog>.ndjson  one per OrgDataCatalog entry; one JSON record per line
-├── blobs/attachments/<id>   attachment bytes (GridFS / Postgres large objects)
+├── blobs/attachments/<id>   attachment bytes (GridFS on Mongo, the BYTEA column on Postgres)
 ├── blobs/archives/<name>    export archives (ClusterArchiveStore)
 ├── audit/chain.ndjson       the org's audit chain, entries in order, with key ids
 ├── secrets/metadata.ndjson  secret names, vault tenants, dekIds, timestamps: NEVER values
@@ -372,15 +399,36 @@ Phase 0.
   - `stores[]`, each with `{name, file, records, sha256}`;
   - `blobs[]` with `{path, bytes, sha256}`;
   - `audit` with `{entries, sha256, keyIds[]}`;
-  - `secrets` with `{metadataSha256, sealed: bool, recipientKeyId?, alg?}`.
+  - `secrets` with `{metadataSha256, sealed: bool, sealedSha256?, recipientKeyId?, alg?}`. When
+    `sealed.bin` is present its checksum is in the manifest, so the signature covers it like
+    every other file;
+  - `target` with `{deploymentId?, notAfter}`. It binds the bundle to one target, when known,
+    and gives it an expiry, so a captured bundle cannot be replayed anywhere, indefinitely.
 - **Records are datastore-neutral.** Each is the logical model, serialised through EDDI's
   Jackson configuration (`SerializationCustomizer`). Records are never raw BSON and never SQL
   rows, so M5 (Mongo ↔ Postgres) is the same import. `orgId` is **omitted** from records: the
   importer stamps the target org (§8.1).
-- **Integrity.** Every stream carries a SHA-256 checksum in the manifest. `signature.json`
-  holds `{alg: "Ed25519", keyId, signature}` over the manifest's exact bytes. Ed25519 is what
-  `configs/agents/crypto` already uses, and the key is the source deployment's export key. An
-  importer **verifies the signature and every checksum before writing anything**.
+- **Integrity.**
+  - **Coverage.** Every file in the bundle except `signature.json` has a SHA-256 checksum in
+    the manifest. `signature.json` holds `{alg: "Ed25519", keyId, signature}` over the
+    manifest's exact bytes, which covers every file. Ed25519 is what `configs/agents/crypto`
+    already uses, and the key is the source deployment's export key.
+  - **Order.** An importer **verifies the signature, every checksum and `notAfter` before
+    writing anything**.
+  - **Archive safety.** Entry names are validated as for the agent ZIP: no absolute paths, no
+    `..`, nothing outside the listed directories, and no duplicates. An entry that is not in
+    the manifest refuses the import.
+- **Trust.** A valid signature proves the bundle is intact, **not** that its source can be
+  trusted.
+  - **Who is trusted.** The target accepts only export keys that a platform admin has
+    registered for that move (`keyId`). An unknown key refuses the import.
+  - **M1 sources are customer-controlled.** For an M1 move the customer runs the source
+    instance, so the signed content is treated as untrusted input either way.
+  - **Routing records are never imported as trusted.** Hostnames, `OrgApiKey` hashes, channel
+    integration ids and secrets, Keycloak org ids and pending `OAuthState` are only *listed* in
+    the import report. A platform admin re-creates or confirms each one at the target. That
+    re-checks the global uniqueness of hostnames and integration ids, and stops a bundle from
+    claiming another org's routing.
 - **Versioning.**
   - A reader refuses an unknown **major** version.
   - Within a major version it ignores unknown fields and unknown store files, and lists them
@@ -407,20 +455,38 @@ kept. The derived values known today:
 Open questions for Phase 6:
 
 - whether quota counters and usage history travel;
-- how `OAuthState` and grants that are in flight are handled (proposed: dropped, users relink);
+- how grants that are in flight are handled (proposed: pending `OAuthState` is dropped, and
+  users relink);
 - whether `blobs/archives/` is worth carrying at all, since archives are transient.
 
 ### Decision 12 — MongoDB second layer (LOCKed after Spike D)
 
-**Accepted with DV-4 to DV-8, DV-12 and DV-13.** The two layers are the guarded boundary and the per-collection
-decode verifier, plus the `$jsonSchema` validator on writes.
+**Accepted with DV-4 to DV-8 and DV-12 to DV-17.** The two layers are the guarded boundary and
+the per-collection decode verifier, plus the `$jsonSchema` validator on writes. The spike
+prototype is the starting point, not the specification: the review after Spike D found holes in
+it that this section closes (DV-14 to DV-17).
 
 1. **`OrgGuardedMongoDatabase` and `OrgGuardedCollection` deny by default.** They are
-   `java.lang.reflect.Proxy` instances over `MongoDatabase`, `MongoCollection` and
-   `FindIterable`, not hand-written delegates. A proxy covers every overload (`ClientSession`,
-   `Class<T>`), and a method that a newer driver adds is refused until someone classifies it.
-   The rules per method class are those of the spike table above.
+   `java.lang.reflect.Proxy` instances over `MongoDatabase`, `MongoCollection` and **every
+   iterable these return** (`FindIterable`, `DistinctIterable`, `AggregateIterable`,
+   `ListIndexesIterable`), not hand-written delegates. A proxy covers every overload
+   (`ClientSession`, `Class<T>`), and a method that a newer driver adds is refused until someone
+   classifies it. The rules per method class are those of the spike table above, plus the ones
+   below.
+   - **Database methods are classified too (DV-15).** `getCollection` returns a guarded
+     collection. `listCollections`, `createCollection` and `runCommand` are platform-only:
+     today's only `runCommand` is the `collMod` in `MongoResourceStorage`, a schema change made
+     at startup. `aggregate` and `watch` at database level are refused. Anything else is denied
+     by default.
    - `with*` results are wrapped again.
+   - **Iterables (DV-13, DV-16).**
+     - `filter(...)` on `FindIterable` and `DistinctIterable` must carry the org equality,
+       because it *replaces* the filter given to `find` or `distinct`.
+     - `projection(...)` is rewritten so that `orgId` is always returned.
+   - **Collation (DV-16).** Any `collation(...)` other than the simple binary one is refused
+     on org collections, whether on find, count, distinct, update, delete or aggregate. A
+     collation such as `alternate: "shifted"` ignores punctuation, so `orgId: "acme-x"` would
+     also match `acmex`, and both are valid ids.
    - `createIndex`, `createIndexes`, `listIndexes`, `dropIndex` and `dropIndexes` pass, because
      they change schema and read no data.
    - `drop`, `estimatedDocumentCount`, `renameCollection`, `watch`, `mapReduce` and
@@ -430,42 +496,67 @@ decode verifier, plus the `$jsonSchema` validator on writes.
      touches `orgId` or `orgId.*`, `$rename` onto it included. The one exception is `$set` or
      `$setOnInsert` of the **bound** org. Pipeline-style updates on org collections are refused.
      `replace*` and `insert*` documents must carry the bound org.
-   - **`FindIterable` is wrapped too (DV-13).** `filter(...)` must carry the org equality,
-     because it replaces the `find(...)` filter. `projection(...)` is rewritten so that `orgId`
-     is always returned.
 2. **`OrgReadVerifier` is installed per collection, not centrally (DV-4).** The guarded
    collection carries a `withCodecRegistry` that wraps the codecs, so only org collections are
    verified.
    - Only the outermost document is checked, tracked by a depth counter.
-   - `Document` and `BsonDocument` are checked after decode, on the decoded field.
-   - `JacksonCodec` gets the check inside its existing `RawBsonDocument` step. That is the
-     only change to the central registry, and it is a hook that is off unless the guarded
-     collection passes a verification context.
-   - There is no extra copy.
-3. **Aggregation and `distinct` output is not verified (DV-5).** `$group` and value lists
-   carry no `orgId`. For these the runtime layer is the pipeline check alone: a leading org
-   `$match`, plus scoped `$lookup`/`$unionWith` sub-pipelines on org collections, with
-   `$graphLookup` on an org collection refused.
-   - There are 9 `aggregate` and 3 `distinct` call sites. Each is listed in the guard's
-     allow-list with its reviewed shape.
+   - **Every document class is covered (DV-17).**
+     - `Document`, `BsonDocument` and `RawBsonDocument` are checked on the decoded value.
+     - `JacksonCodec` gets the check inside its existing `RawBsonDocument` step. That is the
+       only change to the central registry, and it is a hook that is off unless the guarded
+       collection passes a verification context.
+     - A document class the verifier has no rule for is refused on org collections, not
+       passed through. The prototype returned `null` for `BsonValue` subclasses other than
+       `BsonDocument`, so `withDocumentClass(RawBsonDocument.class)` would have gone
+       unverified.
+   - `orgId` must be a **string** equal to the bound org. An array such as `["a", "b"]` is
+     refused: an equality filter `orgId: "a"` matches it. For the same reason the
+     `$jsonSchema` validator requires `orgId` with `bsonType: "string"`, not mere presence.
+   - There is no extra copy. The prototype measured the no-copy variant for `Document` and
+     Jackson; Phase 3 measures `BsonDocument` and `RawBsonDocument` when it builds them.
+3. **Aggregation output is not decode-verified (DV-5); the pipeline is checked by an
+   allow-list (DV-14).** `$group` output and value lists carry no `orgId`, so for aggregations
+   the runtime layer is the pipeline check:
+   - **First stage.** The first stage must be `$match` with the org equality.
+   - **Allowed stages.** Every stage is from an allow-list: `$match`, `$project`, `$addFields`
+     / `$set`, `$unset`, `$sort`, `$limit`, `$skip`, `$group`, `$count`, `$unwind`,
+     `$replaceRoot` / `$replaceWith`, `$sortByCount`, `$bucket`, `$facet`, `$lookup`,
+     `$unionWith`. Anything else is refused.
+   - **Writing stages.** `$out` and `$merge` are refused on org collections. A leading org
+     `$match` followed by `$merge into: <org collection>` could overwrite another org's
+     documents by their global `_id`, and `$out` replaces the whole collection.
+   - **Sub-pipelines.** The rules apply recursively inside `$facet`, `$lookup` and
+     `$unionWith`. A `$lookup` or `$unionWith` on an org collection needs a sub-pipeline that
+     starts with the org `$match`, so `localField`/`foreignField` alone is refused there.
+     `$graphLookup` on an org collection is refused.
+   - **Counts and distinct.** `distinct` and `countDocuments` filters must carry the org
+     equality, and their iterables are wrapped as above.
+   - **Call sites.** There are 9 `aggregate`, 3 `distinct` and 40 `countDocuments` call sites.
+     Each `aggregate` and `distinct` site is listed in the guard's allow-list with its reviewed
+     shape.
    - The conformance suite (§14.1) and the mutation checks (§14.3) cover each one.
    - `countDocuments` is likewise covered by the guard alone.
 4. **GridFS goes through `OrgGridFsBucket`, not the guarded database (DV-6).** It is a facade
    over a bucket created on the raw database. It:
    - requires `metadata.orgId` equality on every files query;
    - stamps `metadata.orgId` on upload;
-   - opens, downloads and deletes by id only after reading the files document and verifying
-     its `metadata.orgId`. Chunks are reachable only through a verified files id, which
-     matches the traced internals: chunk calls are keyed only by `files_id`.
+   - opens, downloads, renames and deletes by id only after reading the files document and
+     verifying its `metadata.orgId`. Chunks are reachable only through a verified files id,
+     which matches the traced internals: chunk calls are keyed only by `files_id`;
+   - offers no lookup by filename (`openDownloadStream(String)`, `downloadToStream(String)`),
+     because filenames are not unique across orgs, and no `drop()`, which is platform-only.
 
    The bucket's own unfiltered index-check `find()` stays inside the facade. The facade
-   exposes no `find` without an org.
+   exposes no `find` without an org. GridFS is therefore a **single runtime layer**: chunks
+   carry no `orgId`, so nothing can verify them at decode. The threat model lists it among the
+   single-layer spots.
 
    The build guard (§14.2) changes accordingly: `GridFSBuckets.create` may appear only in
    `OrgGridFsBucket` (and in `OrgDatabaseRouter` in Phase 7).
 5. **Exactly one second `MongoClient` is allowed:** `EmbeddingStoreFactory`, for author-supplied
-   Atlas vector stores (DV-7). Like the pgvector pools (†), it is outside the guarded database,
-   and its controls are those of §8.8.
+   Atlas vector stores (DV-7). Like the pgvector pools (marked † in plan Appendix A.3: an
+   author-supplied external database), it is outside the guarded database, and its controls
+   are those of §8.8.
 
 ---
 
@@ -476,18 +567,22 @@ These rows are also appended to the plan's §16 Deviations log.
 | # | Where | Deviation | Why |
 | --- | --- | --- | --- |
 | DV-1 | §8.4, §5.1, §5.3 | **The role split is required in multi mode**, not optional hardening. The check that the connected role has neither `rolsuper` nor `rolbypassrls` runs at two points. First as an **enablement precondition**, before `SWITCHING`, so no deployment passes the point of no return on a role that RLS cannot bind. Then at **every multi-mode startup**. Single mode is unchanged and checks nothing. `docs/multi-org.md` documents creating `eddi_app` (`NOSUPERUSER NOBYPASSRLS`, owner or granted) and pointing `quarkus.datasource.username` at it. The Helm chart and compose files get an opt-in app role in Phase 5 | Spike A: superusers ignore RLS even under `FORCE`, and the stock `POSTGRES_USER` in compose and Helm is a superuser. Under the plan's wording, the most common install would have had no second layer at all |
-| DV-2 | §8.4 | **Decided 2026-11-21: memo.** The plan said "every acquire overwrites both values". Instead, `OrgRlsPoolInterceptor` **memoises** per physical connection, keyed by `unwrap(PGConnection.class)` in a weak map, and issues `set_config` only when the bound `(org, platform)` pair differs from what it last set on that connection. The tightening rules:<br>• a memo entry is recorded only when `set_config` ran in autocommit. A connection that is not in autocommit at acquire time is always overwritten and never memoised, because a session `set_config` inside a rolled-back transaction reverts;<br>• the binding epoch is recorded on **every** acquire, memo hit or not;<br>• the entry is dropped in `onConnectionDestroy`;<br>• a new build guard forbids any SQL other than the interceptor's from naming `eddi.org_id` or `eddi.platform`.<br>**Trade-off:** with the memo, a GUC changed by injected SQL persists for later borrowers of the same connection *in the same org* until the binding changes. Always overwriting resets it on every borrow. The threat model records this. The alternative is to keep the plan (always overwrite) and accept one extra round trip per acquire | Spike A: the naive interceptor adds a round trip to every acquire, and the memo removes it in the steady state. Separately from the choice: the caller's wrapper is a different object from the interceptor's, so the key must be the physical connection either way |
-| DV-3 | §6.1, §14.2 | **No `@Transactional` on org data paths.** This is a new build guard. `OrgSql` asserts the epoch on every statement path, so a JTA reuse after a rebinding fails closed instead of silently | Agroal hands out a JTA-enlisted connection again without calling the interceptor |
-| DV-4 | §8.5a (2) | The read verifier is installed **per collection** by the guarded collection (`withCodecRegistry`), checks only the outermost document, and never copies. It is not a decorator in the central registry | `Codec.decode` has no namespace. Nested sub-documents pass through the registry too. The extra-copy variant cost +25–65 % on scans |
+| DV-2 | §8.4 | **Decided 2026-11-21: memo.** The plan said "every acquire overwrites both values". Instead, `OrgRlsPoolInterceptor` **memoises** per physical connection, keyed by `unwrap(PGConnection.class)` in a weak map, and issues `set_config` only when the bound `(org, platform)` pair differs from what it last set on that connection. The tightening rules:<br>• a memo entry is recorded only when `set_config` ran in autocommit. A connection that is not in autocommit at acquire time is always overwritten and never memoised, because a session `set_config` inside a rolled-back transaction reverts;<br>• **any existing memo entry is removed first** when an acquire is not in autocommit, and also when `set_config` fails. Otherwise the memo would keep saying X after a non-autocommit acquire set Y, and a later X acquire would skip `set_config` and run as Y;<br>• the binding epoch is recorded on **every** acquire, memo hit or not;<br>• the entry is dropped in `onConnectionDestroy`;<br>• a new build guard forbids any SQL other than the interceptor's from naming `eddi.org_id` or `eddi.platform`.<br>**Trade-off:** with the memo, a GUC changed by injected SQL persists for later borrowers of the same connection *in the same org* until the binding changes. Always overwriting resets it on every borrow. The threat model records this. The alternative is to keep the plan (always overwrite) and accept one extra round trip per acquire | Spike A: the naive interceptor adds a round trip to every acquire, and the memo removes it in the steady state. Separately from the choice: the caller's wrapper is a different object from the interceptor's, so the key must be the physical connection either way |
+| DV-3 | §6.1, §14.2 | **No JTA on org data paths.** A new build guard refuses `@Transactional`, `QuarkusTransaction` and `UserTransaction` there; `narayana-jta` is an installed feature, so all three are available. `OrgSql` asserts the epoch on every statement path, so a JTA reuse after a rebinding fails closed instead of silently | Agroal hands out a JTA-enlisted connection again without calling the interceptor |
+| DV-4 | §8.5a (2) | The read verifier is installed **per collection** by the guarded collection (`withCodecRegistry`), checks only the outermost document, and never copies. It is not a decorator in the central registry | `Codec.decode` has no namespace. Nested sub-documents pass through the registry too. The extra-copy variant cost up to +65 to +71 % on scans in the loopback runs |
 | DV-5 | §8.5a, §14.1 | Aggregation, `distinct` and count results are **not decode-verified**. Their runtime layer is the pipeline/filter check, plus per-call-site review, conformance and mutation coverage | Their outputs carry no `orgId` by construction. Spike D shows the verifier refusing a legitimate `$group` |
 | DV-6 | §8.5, §8.5a, §14.2 | GridFS goes through `OrgGridFsBucket` over the raw database, and the build guard allows `GridFSBuckets.create` only there. It replaces "GridFSBuckets.create only takes the guarded database" | The traced internals: an unfiltered index-check `find()`, filters applied through `FindIterable.filter()`, and chunk reads and deletes keyed only by `files_id` |
-| DV-12 | §8.5a (1) | **An update-document rule.** No operator may change, unset or rename onto `orgId`, except `$set`/`$setOnInsert` of the bound org. Pipeline updates on org collections are refused | Spike D: the plan's rule checked only filters. `updateOne(orgId=a, {$set: {orgId: "b"}})` would have moved a document into another org, and the validator only requires that `orgId` is present |
-| DV-13 | §8.5a (1) | `FindIterable` is wrapped: `filter()` must carry the org equality, and `projection()` keeps `orgId` | Spike D: `find(orgId=a).filter(_id=b1)` *replaces* the filter and returned org `b`'s document with the verifier off. GridFS uses exactly this pattern internally |
 | DV-7 | §14.2, §8.8, App. A.2 | `EmbeddingStoreFactory`'s `MongoClients.create` is a second allowed client (author-supplied external Atlas store) | Found by Spike D's grep; the plan listed only `PersistenceModule` |
 | DV-8 | §8.5a (1) | The guarded types are `Proxy`-based and deny by default | Overload coverage without hand-written delegates. New driver methods fail closed |
 | DV-9 | §9.1 | `organization:*` is always requested explicitly. `addOrganizationId=true` is a documented realm requirement, and the list shape is refused with a diagnostic. A dropped `organization:<alias>` scope gives 403 | Spike B: plain `organization` issued no claim in the password grant. The default mapper emits aliases only. A non-member's `organization:<alias>` is dropped silently |
 | DV-10 | §6.1 | `OrgContext.callAs(OrgId, Callable)` adapts to `ScopedValue.CallableOp` (`work::call`) | `ScopedValue.Carrier.call` takes `CallableOp<T, X>`, not `Callable` (Java 25) |
-| DV-11 | §5.4, §14.3 | `DataLayoutGuard` is a `StartupEvent` observer at `@Priority(Integer.MIN_VALUE)`, ahead of every other startup observer. Its record lives in the platform plane (`platform_layout`; the final name is set in Phase 1) and is read before the schema lock. Postgres checks `to_regclass` first, so a fresh install passes | Spike C |
+| DV-11 | §5.4, §14.3 | `DataLayoutGuard` is a `StartupEvent` observer at `@Priority(Integer.MIN_VALUE)`. That priority is reserved for it: `OrgConfig` observes at `MIN_VALUE + 1`, so nothing ties with it. Its record lives in the platform plane (`platform_layout`; the final name is set in Phase 1) and is read before the schema lock. On Mongo it reads with primary read preference and majority read concern, not through the client's `nearest()` default. Postgres checks `to_regclass` first, so a fresh install passes | Spike C. Review: a lagging secondary could hide a just-raised `layout.required` |
+| DV-12 | §8.5a (1) | **An update-document rule.** No update operator may change, unset or rename onto `orgId` or `orgId.*`, except `$set`/`$setOnInsert` of the bound org. Pipeline updates on org collections are refused | Spike D: the plan's rule checked only filters. `updateOne(orgId=a, {$set: {orgId: "b"}})` would have moved a document into another org, and the validator only requires that `orgId` is present |
+| DV-13 | §8.5a (1) | `FindIterable` is wrapped: `filter()` must carry the org equality, and `projection()` keeps `orgId` | Spike D: `find(orgId=a).filter(_id=b1)` *replaces* the filter and returned org `b`'s document with the verifier off. GridFS uses exactly this pattern internally |
+| DV-14 | §8.5a (1) | Aggregation pipelines are checked against a **stage allow-list**, recursively (`$facet`, `$lookup`, `$unionWith`). `$out` and `$merge` on org collections are refused. `watch`, `bulkWrite` and `$graphLookup` on org collections are refused rather than allowed when scoped: today's code uses none of them | Review: the prototype checked only three stage types at top level, so a scoped `$match` followed by `$merge` into an org collection would have written across orgs. The plan allowed scoped `watch` and `$graphLookup`; with no caller, refusing them is the smaller surface |
+| DV-15 | §8.5a (1), App. A.2 | `MongoDatabase` methods are classified: guarded `getCollection`; platform-only `runCommand`, `listCollections` and `createCollection`; database-level `aggregate` and `watch` refused; everything else denied by default | Review: the prototype passed every database method through, and EDDI calls `runCommand(collMod)` and `listCollections` |
+| DV-16 | §8.5a (1) | Every iterable the guarded collection returns is wrapped deny-by-default, `DistinctIterable.filter()` included. A non-simple collation is refused on org collections | Review: `DistinctIterable.filter()` replaces the filter like `FindIterable.filter()`, and `distinct` output is not decode-verified (DV-5). A punctuation-ignoring collation makes `acme-x` equal `acmex` |
+| DV-17 | §8.5a (2), §5.3 | The verifier covers every document class, refusing unknown ones on org collections. `orgId` must be a string, and the `$jsonSchema` validator requires `bsonType: "string"` | Review: `RawBsonDocument` was unverified in the prototype, and an array `orgId` matches an equality filter for each element |
 
 ---
 
@@ -500,11 +595,15 @@ These rows are also appended to the plan's §16 Deviations log.
 - **What Phase 5 must still measure.** The microbenchmarks above are loopback numbers. Phase 5
   must show the 3 % p95 gate on `scripts/loadtest` with RLS (in the variant chosen for DV-2) and the Mongo guard and
   verifier (no-copy) **active**.
-- **What the spikes did not verify.** Phase 4 exercises each of these before LOCK 7 is relied
-  on in production:
-  - the browser authorization-code flow with plain `organization` (org picker);
-  - token refresh carrying the selected org;
-  - Keycloak's behaviour when an org is disabled.
+- **What the spikes did not verify.**
+  - Phase 4 exercises each of these before LOCK 7 is relied on in production:
+    - the browser authorization-code flow with plain `organization` (org picker);
+    - token refresh carrying the selected org;
+    - Keycloak's behaviour when an org is disabled;
+    - client roles of an `eddi-platform` client.
+  - Phase 3 builds the Mongo rules that DV-14 to DV-17 added after the spike. The prototype
+    did not implement them, so each one needs its own refusal test and mutation check there.
+  - The bundle's import trust rules (decision 9) are a design only.
 
 ## 6. Alternatives rejected
 

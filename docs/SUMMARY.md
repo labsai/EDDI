@@ -16,7 +16,7 @@
 
 - [Architecture Overview](architecture.md)
 - [Project Philosophy](project-philosophy.md)
-- [ADR 0001 — Organizations (proposed)](adr/0001-organizations.md)
+- [ADR 0001 — Organizations](adr/0001-organizations.md)
 - [Conversation Memory & State Management](conversation-memory.md)
 - [Memory Policy (Commit Flags)](memory-policy.md)
 - [Properties](properties.md)
