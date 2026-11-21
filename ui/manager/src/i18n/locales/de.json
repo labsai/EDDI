@@ -5583,7 +5583,9 @@
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
       "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
       "allowlistEmptied": "Gespeichert, aber die Allowlist ist jetzt leer: Jeder Absender kann den Agenten starten, begrenzt nur durch die Absender-Authentifizierung.",
-      "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen."
+      "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen.",
+      "approvalPolicyNone": "Gespeichert, aber ein Ziel, dessen Agent handeln kann, hat keine Freigaberichtlinie: Mails nutzen seine Tools nur unter den eigenen Tool-Freigaben des Agenten. Erwägen Sie „Jede Aktion freigeben“.",
+      "ruleCallsRefused": "Gespeichert. Ein Ziel mit Freigaberichtlinie hat regelgesteuerte HTTP- oder MCP-Aufrufe: Ein Mail-Turn verweigert sie, sofern „Nur lesende Tools“ sie nicht nennt."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5616,7 +5618,27 @@
     "replyTemplate": "Antwortvorlage",
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
-    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "approval": {
+      "policyLabel": "Freigabe vor dem Handeln",
+      "policy": {
+        "none": "Keine Freigabe (nur die Tool-Freigaben des Agenten)",
+        "actions": "Jede Aktion freigeben",
+        "firstContact": "Aktionen und die erste Mail eines Absenders freigeben",
+        "everyTurn": "Jede Mail freigeben, bevor der Agent läuft"
+      },
+      "hint": {
+        "none": "Mails nutzen die Tools des Agenten nur unter dessen eigenen Tool-Freigaben.",
+        "actions": "Der Agent liest und antwortet; jeder Tool-Aufruf, der nicht als nur lesend gelistet ist, wartet auf eine Freigabe.",
+        "firstContact": "Wie „Jede Aktion freigeben“, und die erste Mail eines Absenders an dieses Ziel wartet, bevor der Agent läuft.",
+        "everyTurn": "Jede Mail wartet auf eine Freigabe, bevor der Agent läuft; abgelehnte Mails erhalten die Antwort unten."
+      },
+      "readOnlyLabel": "Nur lesende Tools",
+      "readOnlyHint": "Tool-Freigabe-Muster, die eine Mail ohne Freigabe nutzen darf, etwa http.get:* oder lookup_order. EDDI erkennt nicht, was etwas verändert: Listen Sie nur Tools, die nichts ändern.",
+      "rejectedReplyLabel": "Antwort bei Ablehnung",
+      "rejectedReplyPlaceholder": "Ihre Anfrage wurde nicht freigegeben.",
+      "rejectedReplyHint": "Wird nur im Konversationsmodus gesendet; der Trigger-Modus antwortet nie."
+    }
   },
   "emailSenders": {
     "loading": "Absenderlisten werden geladen…",

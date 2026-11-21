@@ -99,7 +99,7 @@ export function CreateChannelDialog({
             botToken: botToken.trim(),
             signingSecret: signingSecret.trim(),
           },
-      targets: [createDefaultTarget(targetAgentId.trim())],
+      targets: [createDefaultTarget(targetAgentId.trim(), isEmail)],
       defaultTargetName: "default",
     };
 

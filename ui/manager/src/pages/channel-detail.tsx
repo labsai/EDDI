@@ -29,8 +29,8 @@ import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-
 import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
-  CHANNEL_TYPES,
-  type ChannelIntegrationConfiguration, type ChannelTarget,
+  APPROVAL_POLICIES, CHANNEL_TYPES, DEFAULT_EMAIL_APPROVAL_POLICY, withoutEmailApproval,
+  type ApprovalPolicy, type ChannelIntegrationConfiguration, type ChannelTarget,
 } from "@/lib/api/channels";
 
 // NOTE: ObserveConfigForm removed — backend defers observeMode implementation
@@ -111,7 +111,12 @@ function TargetCard({
                   // carrying one across the switch leaves the target pointing at
                   // something that does not exist under the new type.
                   const type = e.target.value as "AGENT" | "GROUP";
-                  onUpdate({ ...target, type, targetId: type === target.type ? target.targetId : "" });
+                  const switched = { ...target, type, targetId: type === target.type ? target.targetId : "" };
+                  // A GROUP target cannot carry the email approval gate (the backend
+                  // refuses it); an agent target of an email integration starts on actions.
+                  onUpdate(type === "GROUP"
+                    ? withoutEmailApproval(switched)
+                    : mailTriggers && type !== target.type ? { ...switched, approvalPolicy: DEFAULT_EMAIL_APPROVAL_POLICY } : switched);
                 }}
               >
                 <option value="AGENT">{t("channelDetail.typeAgent", "Agent")}</option>
@@ -163,6 +168,10 @@ function TargetCard({
             </div>
           </div>
 
+          {mailTriggers && target.type === "AGENT" && (
+            <EmailApprovalFields target={target} index={index} onUpdate={onUpdate} />
+          )}
+
           {/* Observe Mode — hidden until backend implements support */}
 
           <div className="flex items-center gap-2 pt-2 border-t border-border/30">
@@ -176,6 +185,96 @@ function TargetCard({
             </Button>
           </div>
         </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The email approval gate of one email AGENT target (email plan v3 §8.1): the
+ * policy, the tools a mail turn may call without approval, and what a sender is
+ * told when an approver rejects their mail.
+ */
+function EmailApprovalFields({
+  target, index, onUpdate,
+}: {
+  target: ChannelTarget; index: number; onUpdate: (t: ChannelTarget) => void;
+}) {
+  const { t } = useTranslation();
+  const uid = useId();
+  const [toolInput, setToolInput] = useState("");
+  const policy: ApprovalPolicy = target.approvalPolicy ?? "none";
+  const readOnly = target.readOnlyTools ?? [];
+
+  const addTool = () => {
+    const pattern = toolInput.trim();
+    if (pattern && !readOnly.includes(pattern)) {
+      onUpdate({ ...target, readOnlyTools: [...readOnly, pattern] });
+    }
+    setToolInput("");
+  };
+  const removeTool = (pattern: string) => {
+    const next = readOnly.filter((p) => p !== pattern);
+    onUpdate({ ...target, readOnlyTools: next.length > 0 ? next : undefined });
+  };
+
+  return (
+    <div className="space-y-3 rounded-lg border border-border/40 p-3" data-testid={`target-approval-${index}`}>
+      <div className="space-y-1">
+        <label htmlFor={`${uid}-policy`} className="text-xs font-medium">{t("emailChannel.approval.policyLabel", "Approval before acting")}</label>
+        <select
+          id={`${uid}-policy`}
+          data-testid={`target-approval-policy-${index}`}
+          className="flex h-8 w-full rounded-lg border border-border bg-background px-2 text-sm"
+          value={policy}
+          onChange={(e) => {
+            const next = e.target.value as ApprovalPolicy;
+            onUpdate({ ...target, approvalPolicy: next });
+          }}
+        >
+          {APPROVAL_POLICIES.map((value) => (
+            <option key={value} value={value}>{t(`emailChannel.approval.policy.${value}`, value)}</option>
+          ))}
+        </select>
+        <p className="text-xs text-muted-foreground" data-testid={`target-approval-hint-${index}`}>
+          {t(`emailChannel.approval.hint.${policy}`, "")}
+        </p>
+      </div>
+
+      {policy !== "none" && (
+        <>
+          <div className="space-y-1">
+            <label htmlFor={`${uid}-readonly`} className="text-xs font-medium">{t("emailChannel.approval.readOnlyLabel", "Read-only tools")}</label>
+            <p className="text-xs text-muted-foreground">{t("emailChannel.approval.readOnlyHint", "Tool-approval patterns a mail may use without approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not.")}</p>
+            <div className="flex gap-1.5 flex-wrap">
+              {readOnly.map((pattern) => (
+                <Badge key={pattern} variant="secondary" className="text-xs gap-1 font-mono">
+                  {pattern}
+                  <button aria-label={t("common.removeItem", { item: pattern, defaultValue: "Remove {{item}}" })} onClick={() => removeTool(pattern)} className="hover:text-destructive"><X className="h-3 w-3" /></button>
+                </Badge>
+              ))}
+            </div>
+            <div className="flex gap-1">
+              <Input id={`${uid}-readonly`} data-testid={`target-readonly-input-${index}`} className="h-7 text-xs font-mono" value={toolInput} onChange={(e) => setToolInput(e.target.value)} placeholder="http.get:*" onKeyDown={(e) => { if (isImeComposing(e)) return; if (e.key === "Enter") { e.preventDefault(); addTool(); } }} />
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTool}>{t("common.add", "Add")}</Button>
+            </div>
+          </div>
+          {(policy === "firstContact" || policy === "everyTurn") && (
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-rejected`} className="text-xs font-medium">{t("emailChannel.approval.rejectedReplyLabel", "Reply when rejected")}</label>
+              <Input
+                id={`${uid}-rejected`}
+                data-testid={`target-rejected-reply-${index}`}
+                className="h-8 text-sm"
+                value={target.rejectedReply ?? ""}
+                maxLength={2000}
+                onChange={(e) => onUpdate({ ...target, rejectedReply: e.target.value === "" ? undefined : e.target.value })}
+                placeholder={t("emailChannel.approval.rejectedReplyPlaceholder", "Your request was not approved.")}
+              />
+              <p className="text-xs text-muted-foreground">{t("emailChannel.approval.rejectedReplyHint", "Sent in conversation mode only; trigger mode never replies.")}</p>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
@@ -416,6 +515,8 @@ export function ChannelDetailPage() {
         triggers: [],
         observeMode: false,
         observeConfig: null,
+        // Mail is untrusted input: a new email target's tool calls wait for approval.
+        ...(prev.channelType === "email" ? { approvalPolicy: DEFAULT_EMAIL_APPROVAL_POLICY } : {}),
       };
       return { ...prev, targets: [...prev.targets, newTarget] };
     });

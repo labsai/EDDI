@@ -5583,7 +5583,9 @@
       "aiDisclosureDisabled": "已保存，但回复不再说明由 AI 撰写。欧盟《人工智能法案》等透明度规则要求人们知道自己在与 AI 交流。",
       "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。",
       "allowlistEmptied": "已保存，但允许列表现在为空：任何发件人都能让该代理运行，仅受发件人认证的限制。",
-      "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。"
+      "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。",
+      "approvalPolicyNone": "已保存，但一个智能体可执行操作的目标没有审批策略：邮件仅在智能体自身的工具审批范围内使用其工具。建议使用“审批每个操作”。",
+      "ruleCallsRefused": "已保存。一个带审批策略的目标包含规则驱动的 HTTP 或 MCP 调用：除非只读工具中列出，否则邮件轮次会拒绝它们。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5616,7 +5618,27 @@
     "replyTemplate": "回复模板",
     "replyTemplateHint": "包裹智能体的回答；回答作为文本插入，绝不会作为模板执行。变量：",
     "noteDkim": "回复需要一台为邮箱所在域使用 DKIM 签名外发邮件的邮件服务器，以及该域的 DMARC 记录——{{productName}} 不签名。缺少它们，回复会进入垃圾邮件或被拒收。为该域启用 DKIM 后，Exchange Online 和大多数托管商都会对提交的邮件签名。",
-    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "approval": {
+      "policyLabel": "执行前审批",
+      "policy": {
+        "none": "无需审批（仅智能体自身的工具审批）",
+        "actions": "审批每个操作",
+        "firstContact": "审批操作及发件人的首封邮件",
+        "everyTurn": "智能体运行前审批每封邮件"
+      },
+      "hint": {
+        "none": "邮件仅在智能体自身的工具审批范围内使用其工具。",
+        "actions": "智能体会阅读并回答；每个未列为只读的工具调用都要等待审批人。",
+        "firstContact": "同“审批每个操作”，并且发件人发往此目标的首封邮件会在智能体运行前等待。",
+        "everyTurn": "每封邮件都在智能体运行前等待审批人；被拒绝的邮件会收到下方的回复。"
+      },
+      "readOnlyLabel": "只读工具",
+      "readOnlyHint": "邮件无需审批即可使用的工具审批模式，例如 http.get:* 或 lookup_order。EDDI 无法判断什么会改变数据：只列出不改变任何内容的工具。",
+      "rejectedReplyLabel": "被拒绝时的回复",
+      "rejectedReplyPlaceholder": "您的请求未获批准。",
+      "rejectedReplyHint": "仅在会话模式下发送；触发模式从不回复。"
+    }
   },
   "emailSenders": {
     "loading": "正在加载发件人列表…",

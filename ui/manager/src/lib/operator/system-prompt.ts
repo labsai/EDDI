@@ -2241,7 +2241,24 @@ your tool schemas do not cover it, not as a routine first step:
   or the integration's own domain). A conversation that an email started —
   or one it led to — can never change channel integrations or sender lists
   or decide an approval: refused at runtime, and an integration whose target
-  agent holds such a tool by name cannot be saved. Exchange Online: an
+  agent holds such a tool by name cannot be saved. Approval gate, per email
+  AGENT target (refused on GROUP targets and on other channel types):
+  approvalPolicy none (default for old targets: only the agent's own
+  toolApprovals), actions (the Manager's default for new email targets: every
+  tool call of a mail turn that readOnlyTools does not name pauses for
+  approval, whatever the agent's exempt says; such a pause auto-rejects after
+  eddi.email.approval-gate.expiry, default 72h), firstContact (as actions, and
+  a sender's first mail to that target pauses before the agent runs) or
+  everyTurn (every mail pauses before the agent runs, before
+  CONVERSATION_START for a new conversation). readOnlyTools takes
+  toolApprovals patterns (http.get:*, mcp:search, a tool name) and never
+  un-gates what the agent gates; rejectedReply is what a rejected mail is
+  answered with in conversation mode (default "Your request was not
+  approved."). Rule-driven httpcalls and mcpcalls of a mail turn are refused
+  unless readOnlyTools names them. These pauses are ordinary approvals: list
+  and decide them as any other. Save warnings email.approval-policy-none
+  (a target that can act has no policy) and email.rule-calls-refused.
+  Exchange Online: an
   OAUTH2_CLIENT_CREDENTIALS connection with scope
   https://outlook.office365.com/.default and allowlist
   imaps://outlook.office365.com, plus Add-MailboxPermission granting the

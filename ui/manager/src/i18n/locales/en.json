@@ -5583,7 +5583,9 @@
       "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
       "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
       "allowlistEmptied": "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication.",
-      "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses."
+      "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
+      "approvalPolicyNone": "Saved, but a target whose agent can act has no approval policy: mail runs its tools under the agent's own tool approvals only. Consider \"Approve every action\".",
+      "ruleCallsRefused": "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5616,7 +5618,27 @@
     "replyTemplate": "Reply template",
     "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
     "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
-    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "approval": {
+      "policyLabel": "Approval before acting",
+      "policy": {
+        "none": "No approval (agent's own tool approvals only)",
+        "actions": "Approve every action",
+        "firstContact": "Approve actions and a sender's first mail",
+        "everyTurn": "Approve every mail before the agent runs"
+      },
+      "hint": {
+        "none": "Mail runs the agent's tools under the agent's own tool approvals only.",
+        "actions": "The agent reads and answers; every tool call not listed as read-only waits for an approver.",
+        "firstContact": "As \"Approve every action\", and a sender's first mail to this target waits before the agent runs.",
+        "everyTurn": "Every mail waits for an approver before the agent runs; rejected mail is answered with the reply below."
+      },
+      "readOnlyLabel": "Read-only tools",
+      "readOnlyHint": "Tool-approval patterns a mail may use without approval, such as http.get:* or lookup_order. EDDI cannot tell what changes something: list only tools that do not.",
+      "rejectedReplyLabel": "Reply when rejected",
+      "rejectedReplyPlaceholder": "Your request was not approved.",
+      "rejectedReplyHint": "Sent in conversation mode only; trigger mode never replies."
+    }
   },
   "emailSenders": {
     "loading": "Loading the sender lists…",

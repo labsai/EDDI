@@ -5635,7 +5635,9 @@
       "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
       "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta.",
       "allowlistEmptied": "Guardado, pero la lista de permitidos está vacía: cualquier remitente puede hacer que el agente actúe, limitado solo por la autenticación del remitente.",
-      "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas."
+      "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas.",
+      "approvalPolicyNone": "Guardado, pero un destino cuyo agente puede actuar no tiene política de aprobación: el correo usa sus herramientas solo bajo las aprobaciones propias del agente. Considere «Aprobar cada acción».",
+      "ruleCallsRefused": "Guardado. Un destino con política de aprobación tiene llamadas HTTP o MCP guiadas por reglas: un turno de correo las rechaza salvo que Herramientas de solo lectura las nombre."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5668,7 +5670,27 @@
     "replyTemplate": "Plantilla de respuesta",
     "replyTemplateHint": "Envuelve la respuesta del agente, que se inserta como texto y nunca se ejecuta como plantilla. Variables:",
     "noteDkim": "Las respuestas necesitan un servidor de correo que firme el correo saliente con DKIM para el dominio del buzón, y un registro DMARC para ese dominio — {{productName}} no firma. Sin ellos, las respuestas acaban en spam o se rechazan. Exchange Online y la mayoría de los proveedores firman el correo enviado en cuanto DKIM está activado para el dominio.",
-    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "approval": {
+      "policyLabel": "Aprobación antes de actuar",
+      "policy": {
+        "none": "Sin aprobación (solo las aprobaciones de herramientas del agente)",
+        "actions": "Aprobar cada acción",
+        "firstContact": "Aprobar acciones y el primer correo de un remitente",
+        "everyTurn": "Aprobar cada correo antes de que actúe el agente"
+      },
+      "hint": {
+        "none": "El correo usa las herramientas del agente solo bajo sus propias aprobaciones de herramientas.",
+        "actions": "El agente lee y responde; cada llamada a herramienta que no figure como de solo lectura espera a un aprobador.",
+        "firstContact": "Como «Aprobar cada acción», y el primer correo de un remitente a este destino espera antes de que actúe el agente.",
+        "everyTurn": "Cada correo espera a un aprobador antes de que actúe el agente; el correo rechazado recibe la respuesta de abajo."
+      },
+      "readOnlyLabel": "Herramientas de solo lectura",
+      "readOnlyHint": "Patrones de aprobación de herramientas que un correo puede usar sin aprobación, como http.get:* o lookup_order. EDDI no sabe qué cambia algo: indique solo herramientas que no cambian nada.",
+      "rejectedReplyLabel": "Respuesta si se rechaza",
+      "rejectedReplyPlaceholder": "Su solicitud no fue aprobada.",
+      "rejectedReplyHint": "Solo se envía en modo conversación; el modo disparador nunca responde."
+    }
   },
   "emailSenders": {
     "loading": "Cargando las listas de remitentes…",
