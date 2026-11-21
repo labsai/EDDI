@@ -168,6 +168,39 @@ public final class LlmFailureClassifier {
         return new LlmFailure(FailureClass.UNKNOWN, null, "unrecognised failure (" + failure.getClass().getSimpleName() + ")");
     }
 
+    /**
+     * The id of the quota a provider says was violated — Gemini's
+     * {@code QuotaFailure.violations[].quotaId}, such as
+     * {@code EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier} —
+     * from the first error body in the cause chain that names one.
+     * <p>
+     * {@link #classify} already tells a per-day quota from a rate limit; this is
+     * for a caller that has to say <em>which</em> window ran out, and that may only
+     * trust a delay's length when the provider names none.
+     *
+     * @return the quota id, or {@code null} when no body in the chain names one
+     */
+    public static String violatedQuotaId(Throwable failure) {
+        if (failure == null) {
+            return null;
+        }
+        for (Throwable current : chain(failure)) {
+            JsonNode error = errorNode(parseJson(current.getMessage()));
+            for (JsonNode detail : error.path("details")) {
+                if (!text(detail, "@type").endsWith("QuotaFailure")) {
+                    continue;
+                }
+                for (JsonNode violation : detail.path("violations")) {
+                    String quotaId = text(violation, "quotaId");
+                    if (!quotaId.isBlank()) {
+                        return quotaId;
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------ HTTP
 
     /**

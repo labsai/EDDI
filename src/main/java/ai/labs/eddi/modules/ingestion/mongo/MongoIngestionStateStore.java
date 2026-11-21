@@ -108,6 +108,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_DOCS_SKIPPED = "documentsSkipped";
     private static final String FIELD_STOP_REASON = "stopReason";
     private static final String FIELD_TRIGGER = "trigger";
+    private static final String FIELD_DOCS_THROTTLED = "documentsThrottled";
+    private static final String FIELD_RESUME_AFTER = "resumeAfter";
 
     private final MongoCollection<Document> documents;
     private final MongoCollection<Document> runs;
@@ -377,6 +379,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
         if (run.stopReason() != null) {
             updates.add(Updates.set(FIELD_STOP_REASON, run.stopReason()));
         }
+        if (run.resumeAfter() != null) {
+            updates.add(Updates.set(FIELD_RESUME_AFTER, Date.from(run.resumeAfter())));
+        }
         var result = translating("finish a run", () -> runs.updateOne(
                 Filters.and(Filters.eq(FIELD_RUN_ID, run.runId()),
                         Filters.eq(FIELD_STATUS, IngestionRun.Status.RUNNING.name())),
@@ -414,7 +419,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 Updates.set(FIELD_DOCS_TOMBSTONED, run.documentsTombstoned()),
                 Updates.set(FIELD_DOCS_SKIPPED, run.documentsSkipped()),
                 Updates.set(FIELD_SEGMENTS_STORED, run.segmentsStored()),
-                Updates.set(FIELD_COST_USD, run.costUsd())));
+                Updates.set(FIELD_COST_USD, run.costUsd()),
+                Updates.set(FIELD_DOCS_THROTTLED, run.documentsThrottled())));
         if (run.trigger() != null) {
             updates.add(Updates.set(FIELD_TRIGGER, run.trigger().name()));
         }
@@ -596,7 +602,9 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 document.getString(FIELD_ERROR),
                 intOrZero(document, FIELD_DOCS_SKIPPED),
                 document.getString(FIELD_STOP_REASON),
-                IngestionRun.Trigger.parse(document.getString(FIELD_TRIGGER)));
+                IngestionRun.Trigger.parse(document.getString(FIELD_TRIGGER)),
+                intOrZero(document, FIELD_DOCS_THROTTLED),
+                toInstant(document.getDate(FIELD_RESUME_AFTER)));
     }
 
     private static int intOrZero(Document document, String field) {

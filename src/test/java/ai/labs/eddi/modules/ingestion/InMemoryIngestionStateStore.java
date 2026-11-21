@@ -278,7 +278,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
                 run.documentsTombstoned(), run.segmentsStored(), run.costUsd(), run.error(),
                 run.documentsSkipped(),
                 run.stopReason() != null ? run.stopReason() : existing.stopReason(),
-                run.trigger() != null ? run.trigger() : existing.trigger()));
+                run.trigger() != null ? run.trigger() : existing.trigger(),
+                run.documentsThrottled(), run.resumeAfter()));
     }
 
     @Override
@@ -291,7 +292,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
                 existing.startedAt(), null, progress.documentsSeen(), progress.documentsIngested(),
                 progress.documentsUnchanged(), progress.documentsFailed(), progress.documentsTombstoned(),
                 progress.segmentsStored(), progress.costUsd(), existing.error(), progress.documentsSkipped(),
-                existing.stopReason(), progress.trigger() != null ? progress.trigger() : existing.trigger()));
+                existing.stopReason(), progress.trigger() != null ? progress.trigger() : existing.trigger(),
+                progress.documentsThrottled(), existing.resumeAfter()));
     }
 
     @Override

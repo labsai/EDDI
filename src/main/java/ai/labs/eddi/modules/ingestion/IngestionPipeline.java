@@ -34,6 +34,8 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
+import ai.labs.eddi.modules.llm.impl.ProviderThrottledException;
+import ai.labs.eddi.modules.llm.impl.ThrottledEmbeddingModel;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -617,7 +619,8 @@ public class IngestionPipeline {
                 report.documentsSeen(), report.documentsIngested(), report.documentsUnchanged(),
                 report.documentsFailed(), report.documentsTombstoned(), report.segmentsStored(),
                 report.costUsd(), report.message(), report.documentsSkipped(),
-                report.stopReason() == null ? null : report.stopReason().name(), trigger));
+                report.stopReason() == null ? null : report.stopReason().name(), trigger,
+                report.documentsThrottled(), report.resumeAfter()));
     }
 
     /**
@@ -811,9 +814,20 @@ public class IngestionPipeline {
             Partition partition = partitions.get(0);
             connector.verifyAccess(context, partition);
             Instant deadline = uploadDeadline(Instant.now(), source);
+            // One deadline for the run: discovery stops at it, and a provider's rate
+            // limit is waited out only as long as it allows.
+            collector.deadline = deadline;
             result = connector.discover(new Discovery(connector, context, partition, deadline, collector));
         } catch (SourceException e) {
             throw new IllegalStateException(e.getMessage(), e);
+        }
+        if (collector.throttle != null) {
+            // Not the connector's verdict: a throttle on the last document leaves a
+            // connector reporting COMPLETED over a full listing, and one that does not
+            // poll isCancelled never notices at all. The documents left for later were
+            // not looked at, so nothing may be concluded deleted.
+            return new SourceRun(WebCrawler.StopReason.THROTTLED, Coverage.PARTIAL, false,
+                    "the embedding provider's rate limit stopped the run", result.summary());
         }
         if (result.nextCursor() != null) {
             // Nothing persists cursors yet, so the next run lists in full — the safe
@@ -1065,6 +1079,22 @@ public class IngestionPipeline {
          * there rather than failing every remaining document the same way.
          */
         private String storeRefused;
+        /**
+         * Documents left for a later run because the embedding provider refused this
+         * one for its quota. Neither failed nor missing.
+         */
+        private int throttled;
+        /**
+         * The provider's refusal that stopped this run, once one has: every later
+         * document is left for the next run without a fetch or a provider call.
+         */
+        private ProviderThrottledException throttle;
+        /**
+         * When the provider said it would take calls again; null when it did not say.
+         */
+        private Instant resumeAfter;
+        /** The run's deadline, set when discovery starts. */
+        private Instant deadline;
         private ExtractionLimits extractionLimits;
         private Instant nextOwnershipCheck = Instant.MIN;
         private final IngestionRun.Trigger trigger;
@@ -1099,7 +1129,10 @@ public class IngestionPipeline {
             if (model == null) {
                 // DOCUMENT: the crawler is storing these vectors. An asymmetric model
                 // embeds a document differently from a query, and gets to know which.
-                model = embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT);
+                // Bound to this run's deadline: a rate limit is waited out only while
+                // the run has time left, and otherwise stops it as THROTTLED.
+                model = ThrottledEmbeddingModel.boundTo(
+                        embeddingModelFactory.getOrCreate(knowledgeBase, EmbeddingInputType.DOCUMENT), deadline);
             }
             return model;
         }
@@ -1119,7 +1152,7 @@ public class IngestionPipeline {
         }
 
         boolean isCancelled() {
-            return budgetExhausted || storeRefused != null || !stillOwnsRun(false);
+            return budgetExhausted || storeRefused != null || throttle != null || !stillOwnsRun(false);
         }
 
         /**
@@ -1188,7 +1221,7 @@ public class IngestionPipeline {
             try {
                 stateStore.reportProgress(new IngestionRun(runId, sourceKey, IngestionRun.Status.RUNNING, null, null,
                         seen, ingested, unchanged, failed, tombstoned, segments, currentCost(), null, skipped, null,
-                        trigger));
+                        trigger, throttled, null));
             } catch (RuntimeException e) {
                 LOGGER.debugf(e, "Could not record the progress of ingestion run %s", LogSanitizer.sanitize(runId));
             }
@@ -1211,6 +1244,13 @@ public class IngestionPipeline {
         }
 
         private void upsert(WorkItem item, SourceConnector connector, SourceContext context) {
+            if (throttle != null) {
+                // The provider has already said no for now. Fetching and asking again
+                // would only spend the source's quota and hear the same answer.
+                deferThrottled(item.documentId(), mode == Mode.INGEST && stateStore.lookup(sourceKey,
+                        item.documentId()).isPresent());
+                return;
+            }
             SourceDocument document = item.prefetched();
             if (document == null) {
                 // Asked before the content is fetched: an unchanged document needs
@@ -1549,7 +1589,16 @@ public class IngestionPipeline {
                 return;
             }
 
-            int stored = embed(documentId, textSegments);
+            int stored;
+            try {
+                stored = embed(documentId, textSegments);
+            } catch (ProviderThrottledException e) {
+                // Caught here, before onPage/onFile/onText can count the document as
+                // failed: the provider's quota ran out, which says nothing about it.
+                onThrottled(e);
+                deferThrottled(documentId, existing.isPresent());
+                return;
+            }
             if (stored < 0) {
                 discardedSegments += textSegments.size();
                 ownershipUnverified(documentId, existing.isPresent());
@@ -1594,6 +1643,44 @@ public class IngestionPipeline {
                     LOGGER.debugf(e, "Could not mark document %s unreachable", LogSanitizer.sanitize(documentId));
                 }
             }
+        }
+
+        /**
+         * The embedding provider refused this run for its quota, and the wait did not
+         * fit. Recorded once; the run stops at the next {@link #isCancelled} check.
+         */
+        private void onThrottled(ProviderThrottledException e) {
+            if (throttle != null) {
+                return;
+            }
+            throttle = e;
+            resumeAfter = e.retryAfter() == null ? null : Instant.now().plus(e.retryAfter());
+            LOGGER.warnf("Ingestion of source '%s' paused: %s. The remaining documents wait for the next run%s",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(e.getMessage()),
+                    resumeAfter == null ? "" : " (the provider takes calls again from " + resumeAfter + ")");
+        }
+
+        /**
+         * A document left for a later run because the provider is throttling.
+         *
+         * <p>
+         * Not failed and not missing: a known document is stamped as looked at, as an
+         * unreachable page is, so leaving it does not count towards deleting it. Its
+         * old chunks stay; nothing about it is concluded. Counted as inconclusive too,
+         * which keeps the orphan sweep away even if the run's coverage were trusted.
+         */
+        private void deferThrottled(String documentId, boolean known) {
+            throttled++;
+            inconclusive++;
+            meterRegistry.counter("eddi.ingestion.throttled", metricTags).increment();
+            if (known && mode == Mode.INGEST) {
+                try {
+                    stateStore.recordUnreachable(sourceKey, documentId, runId);
+                } catch (RuntimeException e) {
+                    LOGGER.debugf(e, "Could not mark document %s unreachable", LogSanitizer.sanitize(documentId));
+                }
+            }
+            reportProgress(false);
         }
 
         /**
@@ -1712,19 +1799,29 @@ public class IngestionPipeline {
             if (error == null && storeRefused != null) {
                 error = storeRefused;
             }
+            IngestionReport.Outcome outcome;
+            if (error != null) {
+                outcome = IngestionReport.Outcome.FAILED;
+            } else if (mode == Mode.PREVIEW) {
+                outcome = IngestionReport.Outcome.PREVIEW;
+            } else if (throttle != null) {
+                // Not FAILED, and not the error column either, which the Manager shows
+                // as an alert: the stop reason and resumeAfter say it.
+                outcome = IngestionReport.Outcome.THROTTLED;
+            } else {
+                outcome = IngestionReport.Outcome.COMPLETED;
+            }
             return new IngestionReport(
                     runId,
                     source.effectiveId(),
-                    error != null
-                            ? IngestionReport.Outcome.FAILED
-                            : mode == Mode.PREVIEW
-                                    ? IngestionReport.Outcome.PREVIEW
-                                    : IngestionReport.Outcome.COMPLETED,
+                    outcome,
                     seen, ingested, unchanged, skipped, failed, tombstoned, segments, cost,
                     replaceUnsupported, tombstoningSkipped,
                     stopReason,
                     Duration.between(startedAt, Instant.now()),
-                    error != null ? error : summary);
+                    error != null ? error : summary,
+                    throttled,
+                    resumeAfter);
         }
     }
 
@@ -1744,6 +1841,13 @@ public class IngestionPipeline {
      * @param tombstoningSkipped
      *            the crawl did not cover the whole source, so nothing was concluded
      *            to be deleted
+     * @param documentsThrottled
+     *            documents left for a later run because the embedding provider
+     *            refused calls for its quota — neither failed nor missing
+     * @param resumeAfter
+     *            when the provider said it would take calls again, for a
+     *            {@link Outcome#THROTTLED} run; null otherwise, or when it did not
+     *            say
      */
     public record IngestionReport(
             String runId,
@@ -1761,7 +1865,19 @@ public class IngestionPipeline {
             boolean tombstoningSkipped,
             WebCrawler.StopReason stopReason,
             Duration duration,
-            String message) {
+            String message,
+            int documentsThrottled,
+            Instant resumeAfter) {
+
+        /** A report from before throttled runs were told apart. */
+        public IngestionReport(String runId, String sourceId, Outcome outcome, int documentsSeen,
+                int documentsIngested, int documentsUnchanged, int documentsSkipped, int documentsFailed,
+                int documentsTombstoned, int segmentsStored, double costUsd, boolean replaceUnsupported,
+                boolean tombstoningSkipped, WebCrawler.StopReason stopReason, Duration duration, String message) {
+            this(runId, sourceId, outcome, documentsSeen, documentsIngested, documentsUnchanged, documentsSkipped,
+                    documentsFailed, documentsTombstoned, segmentsStored, costUsd, replaceUnsupported,
+                    tombstoningSkipped, stopReason, duration, message, 0, null);
+        }
 
         public enum Outcome {
             COMPLETED, PREVIEW, FAILED, SKIPPED, ALREADY_RUNNING,
@@ -1769,7 +1885,14 @@ public class IngestionPipeline {
              * A run was claimed and handed to its own worker; its outcome goes to the
              * source's run history, not to whoever started it.
              */
-            STARTED
+            STARTED,
+            /**
+             * The embedding provider refused calls for its quota and the wait did not fit
+             * in the run: it stopped with coverage {@code PARTIAL}, no document counted as
+             * failed and nothing tombstoned. The next run lists the source again and takes
+             * the documents left over.
+             */
+            THROTTLED
         }
 
         static IngestionReport failed(String runId, String sourceId, String message) {

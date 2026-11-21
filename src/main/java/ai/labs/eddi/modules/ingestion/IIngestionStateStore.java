@@ -412,7 +412,17 @@ public interface IIngestionStateStore {
         }
     }
 
-    /** One execution of a source's ingestion. */
+    /**
+     * One execution of a source's ingestion.
+     *
+     * @param documentsThrottled
+     *            documents left for a later run because the embedding provider
+     *            refused calls for its quota; zero on a row written before it was
+     *            recorded
+     * @param resumeAfter
+     *            when the provider said it would take calls again, on a run that
+     *            stopped as {@code THROTTLED}; null otherwise
+     */
     record IngestionRun(
             String runId,
             String sourceId,
@@ -429,7 +439,19 @@ public interface IIngestionStateStore {
             String error,
             int documentsSkipped,
             String stopReason,
-            Trigger trigger) {
+            Trigger trigger,
+            int documentsThrottled,
+            Instant resumeAfter) {
+
+        /** A run as recorded before throttled documents were. */
+        public IngestionRun(String runId, String sourceId, Status status, Instant startedAt, Instant finishedAt,
+                int documentsSeen, int documentsIngested, int documentsUnchanged, int documentsFailed,
+                int documentsTombstoned, int segmentsStored, double costUsd, String error, int documentsSkipped,
+                String stopReason, Trigger trigger) {
+            this(runId, sourceId, status, startedAt, finishedAt, documentsSeen, documentsIngested,
+                    documentsUnchanged, documentsFailed, documentsTombstoned, segmentsStored, costUsd, error,
+                    documentsSkipped, stopReason, trigger, 0, null);
+        }
 
         /**
          * A run as recorded before skipped documents, stop reasons and triggers were —

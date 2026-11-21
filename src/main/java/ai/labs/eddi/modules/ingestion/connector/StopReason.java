@@ -26,5 +26,11 @@ public enum StopReason {
     /** The run's time budget was spent. */
     TIME_LIMIT,
     /** The framework asked discovery to stop, or the source could not be read. */
-    CANCELLED
+    CANCELLED,
+    /**
+     * The embedding provider refused calls for its quota and the wait did not fit
+     * in the run. Set by the framework, not by a connector: a connector whose run
+     * was stopped for it reports {@link #CANCELLED}, and the pipeline reports this.
+     */
+    THROTTLED
 }
