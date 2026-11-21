@@ -96,10 +96,16 @@ class CappedInMemoryMetadataUpdateTest {
     @Test
     @DisplayName("a chunk whose vector is the opposite of all ones is still found")
     void oppositeVectorIsFound() {
-        chunk("n1", "doc-n", "src", "Old", new float[]{-1f, -1f});
+        // Three components: the cosine of [-1,-1,-1] against all ones rounds to just
+        // under -1,
+        // which the old all-ones probe scored below the minimum.
+        chunk("n1", "doc-n", "src", "Old", new float[]{-1f, -1f, -1f});
 
         assertEquals(1, store.updateMetadata(Map.of("documentId", "doc-n"), Map.of("title", "New")));
-        assertEquals("New", byId("n1").embedded().metadata().getString("title"));
+        var found = store.search(EmbeddingSearchRequest.builder().queryEmbedding(Embedding.from(new float[]{1f, 0f, 0f}))
+                .maxResults(100).minScore(0.0).build()).matches();
+        assertEquals(1, found.size());
+        assertEquals("New", found.get(0).embedded().metadata().getString("title"));
     }
 
     @Test
