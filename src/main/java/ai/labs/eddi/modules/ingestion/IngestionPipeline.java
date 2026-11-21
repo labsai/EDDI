@@ -1336,7 +1336,7 @@ public class IngestionPipeline {
                 logIfTruncated(document);
                 acceptDocument(document, markdown);
             } catch (RuntimeException e) {
-                recordDocumentFailure(e);
+                recordDocumentFailure(document.documentId(), e);
             }
         }
 
@@ -1367,7 +1367,7 @@ public class IngestionPipeline {
                 try {
                     acceptDocument(document, markdown);
                 } catch (RuntimeException e) {
-                    recordDocumentFailure(e);
+                    recordDocumentFailure(document.documentId(), e);
                 }
             } catch (UnreadableDocumentException e) {
                 onUnreadable(document, describe(e));
@@ -1380,7 +1380,7 @@ public class IngestionPipeline {
                 logIfTruncated(document);
                 acceptDocument(document, text.text());
             } catch (RuntimeException e) {
-                recordDocumentFailure(e);
+                recordDocumentFailure(document.documentId(), e);
             }
         }
 
@@ -1472,7 +1472,7 @@ public class IngestionPipeline {
             tombstoned++;
         }
 
-        private void recordDocumentFailure(RuntimeException e) {
+        private void recordDocumentFailure(String documentId, RuntimeException e) {
             // Either refusal ends the run: no later document could be stored either.
             if ((e instanceof InMemoryStoreFullException || e instanceof InMemoryStoreRetiredException) && storeRefused == null) {
                 storeRefused = e.getMessage();
@@ -1481,6 +1481,17 @@ public class IngestionPipeline {
             }
             failed++;
             inconclusive++;
+            if (mode == Mode.INGEST && documentId != null) {
+                // A document that was there but could not be stored this time keeps its
+                // previous vectors; the run still saw it, so it must not count as a miss
+                // at reconciliation.
+                try {
+                    stateStore.recordUnreachable(sourceKey, documentId, runId);
+                } catch (RuntimeException markFailure) {
+                    LOGGER.debugf(markFailure, "Could not mark document %s unreachable",
+                            LogSanitizer.sanitize(documentId));
+                }
+            }
             reportProgress(false);
             meterRegistry.counter("eddi.ingestion.errors", metricTags).increment();
             LOGGER.warnf(e, "Failed to ingest a document of source '%s'",

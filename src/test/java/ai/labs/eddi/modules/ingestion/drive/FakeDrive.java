@@ -80,6 +80,7 @@ public final class FakeDrive implements DriveTransport {
     public FakeDrive nativeFile(String id, String name, String mimeType, String parent, long version,
                                 Map<String, byte[]> exports) {
         items.put(id, new Item(id, name, mimeType, parent, null, null, version, null, null, false));
+        contents.keySet().removeIf(key -> key.startsWith(id + "|"));
         exports.forEach((mime, bytes) -> contents.put(id + "|" + mime, bytes));
         return this;
     }
@@ -192,7 +193,15 @@ public final class FakeDrive implements DriveTransport {
                 }
             }
         }
-        int offset = query.containsKey("pageToken") ? Integer.parseInt(query.get("pageToken").substring(1)) : 0;
+        int offset;
+        try {
+            offset = query.containsKey("pageToken") ? Integer.parseInt(query.get("pageToken").substring(1)) : 0;
+        } catch (NumberFormatException | StringIndexOutOfBoundsException e) {
+            return error(400, "invalid", "Invalid pageToken");
+        }
+        if (offset < 0) {
+            return error(400, "invalid", "Invalid pageToken");
+        }
         int end = Math.min(children.size(), offset + pageSize);
         ObjectNode page = JSON.createObjectNode();
         ArrayNode files = page.putArray("files");

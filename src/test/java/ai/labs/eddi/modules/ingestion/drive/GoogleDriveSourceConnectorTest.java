@@ -256,6 +256,16 @@ class GoogleDriveSourceConnectorTest {
             assertTrue(GoogleDriveSourceConnector.nameMatches("*", "2026/11 notes"));
             assertFalse(GoogleDriveSourceConnector.nameMatches("*.tmp", "a.tmp.txt"));
             assertFalse(GoogleDriveSourceConnector.nameMatches("draft", "draft.txt"));
+            // A literal "*" in the name must not be consumed as an ordinary character.
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*.tmp", "*draft.tmp"));
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*.tmp", "draft.tmp"));
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*?", "*a"));
+            assertEquals("see ![x](a.png) and more text",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("see ![x](a.png) and more text"));
+            assertEquals("pre  post",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("pre ![x](data:image/png;base64,AAAA) post"));
+            assertEquals("![x](a.png) keep this [data](data:text/plain,hi)",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("![x](a.png) keep this [data](data:text/plain,hi)"));
         }
     }
 
@@ -279,11 +289,23 @@ class GoogleDriveSourceConnectorTest {
         void nativeUnchanged() throws SourceException {
             fake.nativeFile("d1", "Handbook", FakeDrive.DOC, DRIVE, 7, Map.of("text/markdown", utf8("# H")));
             Recorder recorder = new Recorder(context(false));
-            recorder.known.put("d1", new KnownVersion("hash", "v:7", null));
+            recorder.known.put("d1", new KnownVersion("hash", "v:7@26214400", null));
 
             connector.discover(recorder);
 
             assertEquals(WorkItem.Action.UNCHANGED, recorder.accepted.get(0).action());
+        }
+
+        @Test
+        @DisplayName("a changed maxFileBytes makes an unchanged native version be rechecked")
+        void nativeLimitChanged() throws SourceException {
+            fake.nativeFile("d1", "Handbook", FakeDrive.DOC, DRIVE, 7, Map.of("text/markdown", utf8("# H")));
+            Recorder recorder = new Recorder(context(false));
+            recorder.known.put("d1", new KnownVersion("hash", "v:7@1", null));
+
+            connector.discover(recorder);
+
+            assertEquals(WorkItem.Action.UPSERT, recorder.accepted.get(0).action());
         }
 
         @Test
@@ -300,7 +322,7 @@ class GoogleDriveSourceConnectorTest {
             assertEquals(WorkItem.Action.UPSERT, item.action());
             assertNull(item.versionToken());
             assertNull(document.versionToken(), "the hash of the export is the change key");
-            assertEquals("v:8", document.validators().etag());
+            assertEquals("v:8@26214400", document.validators().etag());
         }
     }
 

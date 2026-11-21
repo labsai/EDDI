@@ -882,12 +882,15 @@ Drive's listing query; the connection name is held to the connections framework'
 6. Allow the token endpoint for the deployment (an empty list resolves no OAuth connection at all) —
    `credentialEndpointAllowlist` in the [connection settings](connections.md#enabling-connections):
 
-   ```bash
-   curl -X PUT "$EDDI/connectionstore/settings" -H 'Content-Type: application/json' \
-     -d '{"credentialEndpointAllowlist": ["https://oauth2.googleapis.com"]}'
-   ```
+   Read the current settings first and send **all** of them back with the allowlist extended. A field
+   left out is unset: that would switch `enabled` off, clear `publicBaseUrl` (account linking), and a
+   shorter `credentialEndpointAllowlist` would stop existing OAuth connections resolving.
 
-   A `null` field unsets a stored value, so send the settings you already have along with it.
+   ```bash
+   curl "$EDDI/connectionstore/settings" > settings.json
+   # add "https://oauth2.googleapis.com" to credentialEndpointAllowlist, keep every other field
+   curl -X PUT "$EDDI/connectionstore/settings" -H 'Content-Type: application/json' -d @settings.json
+   ```
 7. Create the [`OAUTH2_JWT_BEARER` connection](connections.md#a-service-account-that-signs-instead-of-sending-a-secret).
    Its `baseUrlAllowlist` must list `https://www.googleapis.com`, or every request is refused before
    it is sent:

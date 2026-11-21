@@ -236,7 +236,7 @@ public class KnowledgeBaseInspector {
         }
         // A crawled page's id is its URL. Any other source's id is the provider's
         // file id, which is no link at all.
-        String url = IngestionSource.TYPE_WEB.equals(source.getType()) ? id : null;
+        String url = IngestionSource.TYPE_WEB.equals(source.typeOrDefault()) ? id : null;
         return new DocumentSummary(id, id, url, state.firstIngestedAt(), state.lastIngestedAt(), state.missedRuns(),
                 state.tombstoned());
     }

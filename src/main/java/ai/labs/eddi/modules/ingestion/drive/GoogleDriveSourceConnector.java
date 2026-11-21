@@ -209,10 +209,24 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     complete = false;
                     incompleteReason = "Google Drive reported an incomplete listing";
                 }
+                if (!folder.listable() && pageToken == null && page.files().isEmpty()) {
+                    // Shown to the account but not listable by it: empty here is a
+                    // lack of access, not a lack of files.
+                    complete = false;
+                    incompleteReason = "the service account cannot list " + folder.label();
+                }
                 if (folder.root()) {
                     rootChildren.merge(folder.id(), page.files().size(), Integer::sum);
                 }
                 for (DriveFile file : page.files()) {
+                    if (context.isCancelled()) {
+                        stopReason = StopReason.CANCELLED;
+                        break outer;
+                    }
+                    if (clock.get().isAfter(context.deadline())) {
+                        stopReason = StopReason.TIME_LIMIT;
+                        break outer;
+                    }
                     if (!listing.add(file, folder, queue, visited)) {
                         stopReason = StopReason.PAGE_LIMIT;
                         break outer;
@@ -222,6 +236,11 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             } while (pageToken != null);
         }
 
+        if (stopReason == StopReason.COMPLETED && context.isCancelled()) {
+            stopReason = StopReason.CANCELLED;
+        } else if (stopReason == StopReason.COMPLETED && clock.get().isAfter(context.deadline())) {
+            stopReason = StopReason.TIME_LIMIT;
+        }
         if (stopReason == StopReason.COMPLETED && complete) {
             // An empty root is the one listing that could be an outage dressed as
             // coverage: a removed member or a moved folder lists nothing rather than
@@ -357,8 +376,13 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         String current = line;
         int marker;
         while ((marker = current.toLowerCase(Locale.ROOT).indexOf("](data:")) >= 0) {
-            int start = current.lastIndexOf("![", marker);
             int end = current.indexOf(')', marker);
+            int start = current.lastIndexOf("![", marker);
+            // The opener must own this destination: a "](" between it and the marker
+            // closes an earlier construct, and the prose after that is not ours to cut.
+            if (start >= 0 && current.indexOf("](", start) != marker) {
+                start = -1;
+            }
             if (start < 0 || end < 0) {
                 break;
             }
@@ -448,6 +472,11 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             throw new SourceException(new SourceError.Rejected("Folder " + folderId + " is not in Shared Drive "
                     + drive.getSharedDriveId()));
         }
+        if (folder.path("capabilities").path("canListChildren").isBoolean()
+                && !folder.path("capabilities").path("canListChildren").asBoolean()) {
+            throw new SourceException(new SourceError.Auth("The service account cannot list the children of folder "
+                    + folderId + ": Drive shows it but lists it as empty. Share the folder with the account."));
+        }
         if (folder.path("trashed").asBoolean(false)) {
             throw new SourceException(new SourceError.Auth("Folder " + folderId + " is in the trash. Restore it, or "
                     + "remove it from googleDrive.folderIds."));
@@ -484,12 +513,12 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         int star = -1;
         int resume = 0;
         while (t < text.length()) {
-            if (g < glob.length() && (glob.charAt(g) == '?' || glob.charAt(g) == text.charAt(t))) {
-                g++;
-                t++;
-            } else if (g < glob.length() && glob.charAt(g) == '*') {
+            if (g < glob.length() && glob.charAt(g) == '*') {
                 star = g++;
                 resume = t;
+            } else if (g < glob.length() && (glob.charAt(g) == '?' || glob.charAt(g) == text.charAt(t))) {
+                g++;
+                t++;
             } else if (star >= 0) {
                 g = star + 1;
                 t = ++resume;
@@ -504,7 +533,11 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     }
 
     /** A folder waiting to be listed, and the path to it from its root. */
-    private record Folder(String id, String path, boolean root) {
+    private record Folder(String id, String path, boolean root, boolean listable) {
+
+        Folder(String id, String path, boolean root) {
+            this(id, path, root, true);
+        }
 
         String label() {
             return path.isEmpty() ? "folder " + id : path;
@@ -558,7 +591,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             String name = file.name() == null ? file.id() : file.name();
             if (DriveFormat.FOLDER_MIME.equals(file.mimeType())) {
                 if (drive.isIncludeSubfolders() && visited.add(file.id())) {
-                    queue.add(new Folder(file.id(), folder.child(name), false));
+                    queue.add(new Folder(file.id(), folder.child(name), false, !Boolean.FALSE.equals(file.canListChildren())));
                 }
                 return true;
             }
@@ -615,7 +648,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                 acceptedBytes += file.size();
                 sizedFiles++;
             }
-            Map<String, String> hints = hints(file, name, folder.child(name));
+            Map<String, String> hints = hints(file, name, folder.child(name), drive.maxFileBytesOrDefault());
             if (format.isNative()) {
                 String version = hints.get(HINT_VERSION);
                 Optional<KnownVersion> known = context.knownVersion(file.id());
@@ -639,7 +672,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             return file.headRevisionId() != null ? "rev:" + file.headRevisionId() : null;
         }
 
-        private static Map<String, String> hints(DriveFile file, String name, String path) {
+        private static Map<String, String> hints(DriveFile file, String name, String path, long maxBytes) {
             Map<String, String> hints = new HashMap<>();
             hints.put(HINT_NAME, name);
             hints.put(HINT_PATH, path);
@@ -648,7 +681,9 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             putIfPresent(hints, HINT_MODIFIED, file.modifiedTime());
             putIfPresent(hints, HINT_AUTHOR, file.author());
             if (file.version() != null) {
-                hints.put(HINT_VERSION, "v:" + file.version());
+                // The limit is part of the token: lowering it must force one recheck of an
+                // export that was within the old limit.
+                hints.put(HINT_VERSION, "v:" + file.version() + "@" + maxBytes);
             }
             return hints;
         }

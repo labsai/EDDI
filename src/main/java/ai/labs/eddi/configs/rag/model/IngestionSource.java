@@ -157,7 +157,7 @@ public class IngestionSource {
         return other != null && Objects.equals(typeOrDefault(), other.typeOrDefault());
     }
 
-    private String typeOrDefault() {
+    public String typeOrDefault() {
         return type == null || type.isBlank() ? TYPE_WEB : type;
     }
 
