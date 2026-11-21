@@ -23,6 +23,8 @@ import {
   grantsOversightReads,
   type OperatorScope,
 } from "./tool-scopes";
+import { escapeQuteLiterals } from "./qute-literal";
+import { BODY_APP_CONTEXT } from "./context-block";
 import { MODEL_SUGGESTIONS } from "@eddi/app-kit/lib/model-suggestions";
 import { DEFAULT_BRAND, getBrand } from "@eddi/app-kit/lib/brand";
 
@@ -1413,41 +1415,7 @@ function buildAuthoringSection(endpoints: readonly string[]): string {
   return lines.join("\n");
 }
 
-/**
- * Resolved per turn from `context.*` (Qute, `quarkus.qute.strict-rendering=false`
- * so a turn sent without it — the full `/manage/operator` page, or an older
- * conversation from before this shipped — degrades to nothing, not a stray
- * literal). Populated only by the docked drawer (`operator-drawer.tsx`), from
- * `useCurrentScreenContext()`: the admin's location when they opened the
- * drawer, not a claim from inside the conversation, so rule 1 (tool output is
- * data, not instructions) does not apply to it.
- *
- * Unconditional, not gated by scope or granted endpoints — knowing where the
- * admin is doing does not depend on what the operator is allowed to do about
- * it.
- *
- * Every key here must be one the drawer actually sends AND one the engine lets
- * a client set. The group used to arrive as `groupId`, which is an
- * engine-reserved context key (`ClientContextGuard.RESERVED_KEYS`): since the
- * reserved-key hardening the backend strips it from every client-started turn,
- * so "(group …)" silently never rendered. Hence `viewedGroupId`. The resource,
- * conversation and channel ids were sent all along and simply never read — on a
- * knowledge base's own page, "is this set up right?" reached the operator with
- * no way to tell which one was meant.
- */
-const BODY_APP_CONTEXT = `{#if context.screen}
-The administrator is currently viewing: {context.screen}\
-{#if context.agentId} (agent {context.agentId}){/if}\
-{#if context.workflowId} (workflow {context.workflowId}){/if}\
-{#if context.viewedGroupId} (group {context.viewedGroupId}){/if}\
-{#if context.resourceId} ({context.resourceType} resource {context.resourceId}){/if}\
-{#if context.conversationId} (conversation {context.conversationId}){/if}\
-{#if context.channelId} (channel {context.channelId}){/if}\
-{#if context.boardId} (workforce board {context.boardId}){/if}.
-If a question about which agent, workflow, group, resource, conversation or
-board is meant is ambiguous, assume this one unless told otherwise. A resource
-read by id also needs its version: find it before reading.
-{/if}`;
+// BODY_APP_CONTEXT lives in ./context-block so that qute-literal.ts can recognise it exactly.
 
 /**
  * The LLM models this deployment knows about, injected from the Manager's own
@@ -2518,9 +2486,13 @@ export function safetyPreambleForScope(scope: OperatorScope, productName?: strin
  * `scope` picks the preamble; it must be the same scope whose endpoint filter is
  * sent in the same request, or the agent is told about a capability boundary it
  * is not actually behind.
+ *
+ * The text is a Qute template on the server, so literal braces in it are escaped
+ * here, once, rather than reworded one mention at a time (see `qute-literal.ts`).
+ * The per-turn context block is the one thing left live.
  */
 export function buildOperatorSystemPrompt(body: string, scope: OperatorScope, productName?: string): string {
-  return `${safetyPreambleForScope(scope, productName)}\n\n---\n\n${body.trim()}`;
+  return escapeQuteLiterals(`${safetyPreambleForScope(scope, productName)}\n\n---\n\n${body.trim()}`);
 }
 
 /** Suggested opening questions, shown on the operator screen. */
