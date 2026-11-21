@@ -886,8 +886,8 @@ public class ScheduleFireExecutor {
     private static boolean isBenignOutcome(IngestionReport report) {
         var outcome = report.outcome();
         // THROTTLED: the embedding provider's quota stopped the run, which says
-        // nothing about the schedule. Counted as a failure, a daily quota would raise
-        // failCount on every fire and dead-letter the schedule within days.
+        // nothing about the schedule. Not benign, every throttled run would add a
+        // FAILED row to the fire log (and a synchronous fire would count as failed).
         return outcome == IngestionReport.Outcome.ALREADY_RUNNING || outcome == IngestionReport.Outcome.SKIPPED
                 || outcome == IngestionReport.Outcome.THROTTLED;
     }

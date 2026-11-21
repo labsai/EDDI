@@ -35,10 +35,12 @@ the pipeline counted each document failed: 49 of 68. This is phase T1-min (§3.2
   back-compatible constructors. Postgres: `ADD COLUMN IF NOT EXISTS documents_throttled INTEGER NOT
   NULL DEFAULT 0` and `resume_after TIMESTAMP`. Mongo: `documentsThrottled` and `resumeAfter`. Absent
   values read as 0 and null.
-- **Schedules.** `ScheduleFireExecutor` counts a `THROTTLED` run as a benign outcome, so a daily
-  quota does not raise `failCount` and dead-letter the schedule.
+- **Schedules.** `ScheduleFireExecutor` counts a `THROTTLED` run as a benign outcome, so a
+  throttled run writes no FAILED row to the fire log.
 - **Metrics.** `eddi.ingestion.throttled` (tags `knowledgeBase`, `source`) and
-  `eddi.provider.throttle.wait` (timer, tag `provider`).
+  `eddi.provider.throttle.wait` (timer, tag `provider`), listed in
+  [`docs/metrics.md`](../metrics.md). `documentsThrottled` counts the documents the source still
+  handed over after the stop, not everything left to do.
 - **Manager.** The run history shows a pause icon. The stop reason reads "Paused by the provider's
   rate limit — it takes requests again from 14:32…". Runs gain a "Waiting (rate limit)" counter and
   "N waiting" in the summary. The progress estimate ignores throttled runs. Strings are in all 11

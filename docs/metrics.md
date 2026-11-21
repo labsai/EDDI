@@ -1158,6 +1158,8 @@ eddi_ingestion_errors_total                 # Pages that failed to fetch, conver
 eddi_ingestion_files_stored_total           # Files accepted onto an upload source
 eddi_ingestion_files_rejected_total         # Files an upload source refused, with a reason
 eddi_ingestion_files_deleted_total          # Files removed from an upload source
+eddi_ingestion_throttled_total              # Documents a run left for later because the embedding provider throttled
+eddi_provider_throttle_wait_seconds         # Waits sat out on an embedding provider's rate limit (timer, tag provider)
 ```
 
 The first two carry `knowledgeBase` (the RAG configuration's name) and `source` (the

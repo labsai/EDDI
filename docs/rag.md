@@ -1009,14 +1009,16 @@ the provider client's short retry and never sleeps on a throttle.
   when no quota is named — any delay over 5 minutes stop the run at once.
 - **Stopping is not failing.** A run that cannot wait ends with `stopReason: THROTTLED` (the REST
   outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit,
-  and every one after it, is counted in `documentsThrottled` — not in `documentsFailed` — and is not
-  sent to the provider again during the run. The run's coverage is partial, so **nothing is
+  and any the source still hands over before it notices the stop (the rest of a Drive listing page,
+  for example), are counted in `documentsThrottled` — not in `documentsFailed` — and are not sent to
+  the provider again during the run. It is not a count of everything still to do: documents the
+  source never listed are not counted. The run's coverage is partial, so **nothing is
   tombstoned**, and documents already in the knowledge base keep their chunks. `resumeAfter` records
   when the provider said it would take calls again (absent for a daily quota with no time given).
 - **The next run picks up the rest.** There is no automatic retry run: the source's next scheduled run,
   or the next **Run now**, lists the source again and finds the documents left over as new or changed.
-  A source without a `cron` waits for a manual run. A scheduled fire whose run is throttled is not
-  counted as a failed fire, so a daily quota cannot dead-letter the schedule.
+  A source without a `cron` waits for a manual run. A scheduled fire whose run is throttled writes no
+  failed entry to the schedule's fire log.
 
 For the providers whose client is langchain4j's own (`openai`, `ollama`, `mistral`, `gemini`), the
 ingestion-side model is built with the provider's own retries off and EDDI does the retrying —

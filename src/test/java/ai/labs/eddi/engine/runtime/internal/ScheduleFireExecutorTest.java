@@ -1646,6 +1646,27 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_ragIngestion_aThrottledRunIsNotLoggedAsAFailedFire() throws Exception {
+        // The provider's quota stopped the run; nothing about the schedule failed.
+        var schedule = makeIngestionSchedule("rag-6", "kb-1", 1, "src-1");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any())).thenAnswer(invocation -> {
+            Consumer<IngestionPipeline.IngestionReport> onFinished = invocation.getArgument(3);
+            onFinished.accept(new IngestionPipeline.IngestionReport("run-9", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.THROTTLED, 3, 2, 0, 0, 0, 0, 8, 0.0,
+                    false, true, null, Duration.ZERO, null));
+            return new IngestionPipeline.IngestionReport("run-9", "src-1",
+                    IngestionPipeline.IngestionReport.Outcome.STARTED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, null, Duration.ZERO, "Run run-9 started");
+        });
+
+        executor.fire(schedule, "instance-1", 1);
+
+        var logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore, times(1)).logFire(logged.capture());
+        assertEquals(FireStatus.COMPLETED.name(), logged.getValue().status());
+    }
+
+    @Test
     void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
         // A run can outlast the interval between fires, so the next fire legitimately
         // finds it still going. Calling that FAILED increments failCount on every fire
