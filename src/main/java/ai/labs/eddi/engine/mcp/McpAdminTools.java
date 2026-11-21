@@ -49,6 +49,7 @@ import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -1516,7 +1517,16 @@ public class McpAdminTools {
                     new EmailSenderLists.Entries(commaSeparated(addAllow), commaSeparated(addBlock)),
                     new EmailSenderLists.Entries(commaSeparated(removeAllow), commaSeparated(removeBlock)), reason,
                     Boolean.TRUE.equals(confirmOpen));
-            Response response = getRestStore(IRestChannelIntegrationStore.class).updateEmailSenders(integrationId, request);
+            Response response;
+            try {
+                response = getRestStore(IRestChannelIntegrationStore.class).updateEmailSenders(integrationId, request);
+            } catch (WebApplicationException refused) {
+                // A client that throws on a 4xx instead of handing the response back.
+                if (refused.getResponse() == null || refused.getResponse().getStatus() != Response.Status.CONFLICT.getStatusCode()) {
+                    throw refused;
+                }
+                response = refused.getResponse();
+            }
             Object body = entityOf(response);
             if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
                 return errorJson("expectedVersion " + expectedVersion + " is not the current version; nothing was changed. Read the "
