@@ -983,7 +983,8 @@
       "useDefaultKey": "المفتاح الافتراضي لفريق العمل",
       "useExisting": "استخدام وكيل موجود",
       "useStarterPrompt": "إدراج موجّه أولي",
-      "yourAdvisors": "مستشاروك"
+      "yourAdvisors": "مستشاروك",
+      "createNeedsAdmin": "إنشاء مستشار جديد يتطلب مسؤولًا. استخدم وكيلًا موجودًا بدلاً من ذلك."
     }
   },
   "connections": {

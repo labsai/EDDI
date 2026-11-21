@@ -1,6 +1,6 @@
 import { useCallback, useContext } from "react";
 import { AuthContext, type AuthContextValue } from "../components/auth/auth-context";
-import { mayUse, rolesForScreen, ROLE_ADMIN } from "../lib/roles";
+import { mayDo, mayUse, rolesForScreen, ROLE_ADMIN, type Capability } from "../lib/roles";
 import { isUpdateUiVisible, UPDATES_PATH } from "../lib/brand";
 import { useBrand } from "./use-brand";
 
@@ -36,6 +36,16 @@ export function useMayUse(): (required: readonly string[] | null) => boolean {
     (required: readonly string[] | null) => mayUse(required, roles, method === "none"),
     [method, roles],
   );
+}
+
+/**
+ * Whether the signed-in user holds `capability` (the permission map in
+ * `lib/roles.ts`). Everything is granted with auth off and for a token that
+ * carries no EDDI role (see `rolesAreKnown`).
+ */
+export function useCan(capability: Capability): boolean {
+  const { method, roles } = useAuth();
+  return mayDo(capability, roles, method === "none");
 }
 
 /**

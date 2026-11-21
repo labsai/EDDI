@@ -88,6 +88,7 @@ export function DashboardPage() {
   // strip says "requires admin" — it used to fire both, get two 403s, and show
   // "Coordinator —" and "Vault unavailable" as if something were down.
   const mayOpen = useMayOpenScreen();
+  const mayGuidedSetup = mayOpen("/manage/agents/wizard");
   const canSeeAdminHealth = useIsAdminOrUnknown();
   const { data: coordinatorStatus, error: coordinatorError } = useCoordinatorStatusLight({
     enabled: canSeeAdminHealth,
@@ -343,12 +344,16 @@ export function DashboardPage() {
           {t("pages.dashboard.quickActions")}
         </h2>
         <div className="flex flex-wrap gap-2" data-tour="dashboard-actions">
-          <Button variant="outline" asChild>
-            <Link to="/manage/agents/wizard">
-              <Wand2 className="h-4 w-4" />
-              {t("wizard.title")}
-            </Link>
-          </Button>
+          {/* Guided setup is eddi-admin only (the setup endpoint writes API keys to
+              the vault); an editor creates agents from the Agents page instead. */}
+          {mayGuidedSetup && (
+            <Button variant="outline" asChild>
+              <Link to="/manage/agents/wizard">
+                <Wand2 className="h-4 w-4" />
+                {t("wizard.title")}
+              </Link>
+            </Button>
+          )}
           <Button variant="outline" asChild>
             <Link to="/manage/chat">
               <MessageCircle className="h-4 w-4" />
@@ -511,7 +516,7 @@ export function DashboardPage() {
                 {t("pages.dashboard.noRecentAgents")}
               </p>
               <Button variant="outline" size="sm" className="mt-3" asChild>
-                <Link to="/manage/agents/wizard">
+                <Link to={mayGuidedSetup ? "/manage/agents/wizard" : "/manage/agents"}>
                   <Plus className="h-4 w-4" />
                   {t("agents.createAgent")}
                 </Link>

@@ -45,9 +45,9 @@ describe("LandingPage (D6)", () => {
 
   // `/catalog/*` (all Workforce reads for a non-author) admits admin, editor and
   // user only — sending these roles to Workforce would show them nothing but 403s.
-  it("sends a viewer-only user to the Manager, not to Workforce", () => {
+  it("sends a viewer-only user to the coordinator, not to Workforce", () => {
     renderAs(["eddi-viewer"], "/welcome", [["/welcome", <LandingPage />]]);
-    expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage$/);
+    expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/coordinator$/);
   });
 
   it("sends an approver-only user to the approvals inbox, not to Workforce", () => {
@@ -61,7 +61,7 @@ describe("LandingPage (D6)", () => {
     localStorage.setItem("eddi-landing-preference", "workforce");
     try {
       const viewer = renderAs(["eddi-viewer"], "/welcome", [["/welcome", <LandingPage />]]);
-      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage$/);
+      expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/coordinator$/);
       viewer.unmount();
       renderAs(["eddi-approver"], "/welcome", [["/welcome", <LandingPage />]]);
       expect(screen.getByTestId("where")).toHaveTextContent(/^\/manage\/approvals$/);

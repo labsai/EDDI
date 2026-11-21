@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
+import { useCan } from "@eddi/app-kit/hooks/use-auth";
 import { toast } from "sonner";
 import {
   ChevronDown,
@@ -95,6 +96,8 @@ export function ConnectionDetailPage() {
 
   const { data: config, isLoading, isError, error, refetch } = useConnection(id!, version);
   const updateMutation = useUpdateConnection();
+  // An editor may read a connection; saving or deleting it is admin-only.
+  const mayManage = useCan("connections.manage");
   const deleteMutation = useDeleteConnection();
 
   const [draft, setDraft] = useState<ConnectionConfiguration | null>(null);
@@ -514,6 +517,12 @@ export function ConnectionDetailPage() {
             {t("common.versionShort", "v{{version}}", { version })}
           </p>
         </div>
+        {!mayManage && (
+          <p className="text-xs text-muted-foreground" data-testid="connection-read-only">
+            {t("connections.readOnlyForRole", "Read-only: changing a connection needs the administrator role.")}
+          </p>
+        )}
+        {mayManage && (<>
         <Button
           variant="outline"
           size="sm"
@@ -535,6 +544,7 @@ export function ConnectionDetailPage() {
             ? t("common.saving", "Saving…")
             : t("common.save", "Save")}
         </Button>
+        </>)}
       </div>
 
       {/* General */}

@@ -240,11 +240,54 @@ describe("BearerEventSource", () => {
     es.close();
   });
 
-  it("gives up after the attempt budget and fires onexhausted", async () => {
-    // Regression: reconnection was unbounded, so a stream the backend refuses
-    // outright — a 403 on /administration/logs without the eddi-admin role — was
-    // re-requested every five seconds for the lifetime of the session.
+  it("stops at once on a 403 instead of showing 'Reconnecting' for ever", async () => {
+    // Regression (BR5): a viewer on /administration/logs got a 403 that was
+    // retried, so the page said "Reconnecting…" indefinitely. Forbidden is the
+    // role's answer — report it once and stop.
     fetchSpy.mockResolvedValue(new Response(null, { status: 403 }));
+    const exhausted = vi.fn();
+    const es = new BearerEventSource("http://test/sse");
+    es.onexhausted = exhausted;
+
+    await vi.advanceTimersByTimeAsync(SSE_RECONNECT_MAX_DELAY_MS * 20);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(exhausted).toHaveBeenCalledTimes(1);
+    expect(es.forbidden).toBe(true);
+    es.close();
+  });
+
+  it("cancels the 403 response body and releases the controller", async () => {
+    const response = new Response(createSSEStream(["data: x\n\n"]), { status: 403 });
+    const cancel = vi.spyOn(response.body!, "cancel");
+    fetchSpy.mockResolvedValue(response);
+    const es = new BearerEventSource("http://test/sse");
+    await vi.advanceTimersByTimeAsync(0);
+    expect(cancel).toHaveBeenCalled();
+    expect((es as unknown as { abortController: unknown }).abortController).toBeNull();
+    es.close();
+  });
+
+  it("still retries a 401, with the headers read again (a refreshed token)", async () => {
+    fetchSpy
+      .mockResolvedValueOnce(new Response(null, { status: 401 }))
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    let token = "old";
+    const es = new BearerEventSource("http://test/sse", () => ({ Authorization: "Bearer " + token }));
+    await vi.advanceTimersByTimeAsync(0);
+    token = "fresh";
+    await vi.advanceTimersByTimeAsync(5000);
+    expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
+    const second = fetchSpy.mock.calls[1]![1] as RequestInit;
+    expect((second.headers as Record<string, string>).Authorization).toBe("Bearer fresh");
+    expect(es.forbidden).toBe(false);
+    es.close();
+  });
+
+  it("gives up after the attempt budget and fires onexhausted", async () => {
+    // Regression: reconnection was unbounded, so a stream that keeps failing
+    // was re-requested every five seconds for the lifetime of the session.
+    fetchSpy.mockResolvedValue(new Response(null, { status: 502 }));
     const exhausted = vi.fn();
     const es = new BearerEventSource("http://test/sse");
     es.onexhausted = exhausted;

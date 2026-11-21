@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import { screen } from "@testing-library/react";
 import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { AuthContext, GUEST_CONTEXT } from "@eddi/app-kit/components/auth/auth-context";
 import { CreateOrWizardDialog } from "@/components/shared/create-or-wizard-dialog";
 
 describe("CreateOrWizardDialog", () => {
@@ -130,5 +131,43 @@ describe("CreateOrWizardDialog", () => {
         "Step-by-step wizard with LLM provider, prompts, and deployment."
       )
     ).toBeInTheDocument();
+  });
+});
+
+describe("CreateOrWizardDialog — guided setup is admin-only (OI3, BR6)", () => {
+  const renderAsRole = (roles: string[], type: "agent" | "group") =>
+    renderWithProviders(
+      <AuthContext.Provider value={{ ...GUEST_CONTEXT, method: "keycloak", roles }}>
+        <CreateOrWizardDialog
+          open={true}
+          onClose={vi.fn()}
+          type={type}
+          wizardPath="/wizard"
+          onQuickCreate={vi.fn()}
+        />
+      </AuthContext.Provider>,
+    );
+
+  it("disables the agent wizard for an editor and keeps Quick Create usable", () => {
+    renderAsRole(["eddi-editor"], "agent");
+    expect(screen.getByTestId("choice-wizard")).toBeDisabled();
+    expect(screen.getByTestId("choice-quick-create")).toBeEnabled();
+  });
+
+  it("leaves the agent wizard enabled for an administrator", () => {
+    renderAsRole(["eddi-admin"], "agent");
+    expect(screen.getByTestId("choice-wizard")).toBeEnabled();
+  });
+
+  it("does not gate the group wizard, which has no admin-only endpoint", () => {
+    renderAsRole(["eddi-editor"], "group");
+    expect(screen.getByTestId("choice-wizard")).toBeEnabled();
+  });
+
+  it("offers everything with auth off", () => {
+    renderWithProviders(
+      <CreateOrWizardDialog open={true} onClose={vi.fn()} type="agent" wizardPath="/wizard" onQuickCreate={vi.fn()} />,
+    );
+    expect(screen.getByTestId("choice-wizard")).toBeEnabled();
   });
 });
