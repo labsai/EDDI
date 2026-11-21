@@ -86,6 +86,15 @@ class LlmTaskParameterReferenceGuardTest {
     }
 
     @Test
+    @DisplayName("emptyInputPrompt is prompt text too: reference-shaped conversation data in it is not refused")
+    void emptyInputPromptIsNotGuarded() throws Exception {
+        var configured = Map.of("emptyInputPrompt", "Greet the user. Note: {context.model}");
+        var data = dataWith("${vault:whatever}");
+
+        assertDoesNotThrow(() -> LlmTask.guardRenderedParameters(configured, render(configured, data), data, Map.of()));
+    }
+
+    @Test
     @DisplayName("this conversation's auto-vaulted property, named by the template, is allowed")
     void autoVaultedPropertyAllowed() throws Exception {
         var property = new Property("endpointKey", "${vault:agent1.endpointKey}", Scope.conversation);
