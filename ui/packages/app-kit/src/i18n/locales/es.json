@@ -327,7 +327,9 @@
     "runSkipConflict": "{{codes}} también está en la lista de omisión, así que esta instrucción nunca se ejecuta con ese código.",
     "httpCodeFilterSkipSet": "Un «Ejecutar con códigos» vacío usa 200, 201; un «Omitir códigos» vacío no omite nada.",
     "useDefaultSkipCodes": "Usar la lista de omisión predeterminada",
-    "scope": "Ámbito"
+    "scope": "Ámbito",
+    "retryIdempotency": "{{method}} no es idempotente: una solicitud reintentada puede haberse procesado ya (un pedido, cargo o mensaje duplicado). Activa los reintentos solo si el endpoint ignora las repeticiones, por ejemplo con una clave de idempotencia.",
+    "bodyEscapeHelp": "Los valores se insertan tal como están, salvo que el servidor esté configurado para escaparlos, así que un valor con comillas puede salirse de una cadena JSON. Para escaparlo tú, envuélvelo en json:serialize sin añadir comillas, por ejemplo {json:serialize(memory.current.input)}."
   },
   "llmEditor": {
     "unknownType": "{{type}} (personalizado)"
@@ -914,7 +916,11 @@
     "restricted_other": "Restringida a {{count}} agentes",
     "restrictedTooltip": "Autorizada para: {{agents}}",
     "notGrantedAdmin": "Este agente aún no tiene acceso a esta clave. Se le pedirá que lo añada al desplegar.",
-    "notGrantedNonAdmin": "Este agente aún no tiene acceso a esta clave. Pida a un administrador que la autorice antes de desplegar."
+    "notGrantedNonAdmin": "Este agente aún no tiene acceso a esta clave. Pida a un administrador que la autorice antes de desplegar.",
+    "createAllAgents": "Este campo no sabe a qué agente pertenece, así que el secreto se crea para todos los agentes. Restríngelo después en Secretos.",
+    "literalNudge": "Parece un secreto escrito en texto plano. Se guardaría en la configuración, su historial de versiones y las exportaciones. Guárdalo en la bóveda y usa una referencia.",
+    "literalStoreInVault": "Guardar en la bóveda",
+    "literalKeepPlain": "Mantener como texto plano"
   },
   "Workforce": {
     "advisor": {

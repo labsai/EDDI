@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import { Bot, ScanEye } from "lucide-react";
@@ -23,6 +23,13 @@ const PERIODS = [7, 30, 90] as const;
  * Scoping is the backend's: administrators and approvers see every agent;
  * anyone else picks an agent they can edit first, rather than meeting a 400.
  */
+const NOW_STEP_MS = 5 * 60_000;
+
+/** The current time, rounded down to five minutes. */
+function roundedNow(): number {
+  return Math.floor(Date.now() / NOW_STEP_MS) * NOW_STEP_MS;
+}
+
 export function OversightPage() {
   const { t } = useTranslation();
   const [params, setParams] = useSearchParams();
@@ -33,7 +40,19 @@ export function OversightPage() {
   const days = (PERIODS as readonly number[]).includes(requestedDays) ? requestedDays : 30;
   const seesAll = useMayUse()([ROLE_ADMIN, ROLE_APPROVER]);
   const needsAgent = !seesAll && !agentId;
-  const [now] = useState(() => Date.now());
+  // "Now" moves: frozen at mount, a page left open for a day kept asking for the
+  // window that ended when it was opened. Rounded down to five minutes so the
+  // query key (and so the request) only changes when the window really moved.
+  const [now, setNow] = useState(() => roundedNow());
+  useEffect(() => {
+    const refresh = () => setNow((prev) => (roundedNow() === prev ? prev : roundedNow()));
+    const timer = setInterval(refresh, 60_000);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, []);
 
   const set = (key: string, value: string) => {
     const next = new URLSearchParams(params);
@@ -96,7 +115,27 @@ export function OversightPage() {
         </label>
       </div>
 
-      <div role="tablist" aria-label={t("oversight.views", "Oversight views")} className="flex gap-1 border-b border-border">
+      <div
+        role="tablist"
+        aria-label={t("oversight.views", "Oversight views")}
+        className="flex gap-1 border-b border-border"
+        onKeyDown={(e) => {
+          // Roving tabindex puts only the selected tab in the tab order; the
+          // arrow keys (and Home/End) are how the others are reached.
+          const rtl = getComputedStyle(e.currentTarget).direction === "rtl";
+          const index = TABS.indexOf(tab);
+          let next: number;
+          if (e.key === "ArrowRight") next = index + (rtl ? -1 : 1);
+          else if (e.key === "ArrowLeft") next = index + (rtl ? 1 : -1);
+          else if (e.key === "Home") next = 0;
+          else if (e.key === "End") next = TABS.length - 1;
+          else return;
+          e.preventDefault();
+          const target = TABS[(next + TABS.length) % TABS.length]!;
+          set("tab", target);
+          requestAnimationFrame(() => document.getElementById(`oversight-tab-${target}`)?.focus());
+        }}
+      >
         {TABS.map((key) => (
           <button
             key={key}

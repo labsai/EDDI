@@ -149,7 +149,9 @@ describe("ResourceDetailPage — retrying a Save that failed partway", () => {
 
       // The first try wrote the resource, then stopped.
       await waitFor(() => expect(chain.resource).toBe(2));
-      await waitFor(() => expect(screen.getByText(new RegExp(`${hop} unavailable`))).toBeInTheDocument());
+      // The reason is in two places: the toast, and the inline error that stays.
+      await waitFor(() => expect(screen.getAllByText(new RegExp(`${hop} unavailable`))).toHaveLength(2));
+      expect(screen.getByTestId("save-error")).toHaveTextContent(new RegExp(`${hop} unavailable`));
       expect(chain.agent).toBe(1);
 
       // Retry: the page moved onto the version it wrote. Whether the editor
@@ -165,4 +167,32 @@ describe("ResourceDetailPage — retrying a Save that failed partway", () => {
       expect(chain.agentWorkflowRef[2]).toBe(chain.workflow);
     },
   );
+
+  it("still shows the warnings the resource save answered with when a later hop fails", async () => {
+    const chain = stubChain("workflow");
+    server.use(
+      http.put("*/llmstore/llms/res1", () => {
+        chain.resource += 1;
+        return HttpResponse.json(
+          { warnings: ["Vectors are stale for this knowledge base"] },
+          { status: 200, headers: { Location: `eddi://ai.labs.llm/llmstore/llms/res1?version=${chain.resource}` } },
+        );
+      }),
+    );
+    renderEditor();
+    const user = userEvent.setup();
+
+    await waitFor(() => expect(screen.getByTestId("model-type-select")).toBeInTheDocument());
+    await user.selectOptions(screen.getByTestId("model-type-select"), "azure-openai");
+    await waitFor(() => expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument());
+    await user.click(screen.getByTestId("save-btn"));
+
+    await waitFor(() => expect(chain.resource).toBe(2));
+    // Beside the cascade's error, a toast says the saved resource came with warnings.
+    await waitFor(() => {
+      const toasts = Array.from(document.querySelectorAll("[data-sonner-toast]")).map((el) => el.textContent ?? "");
+      expect(toasts.some((text) => text.includes("Vectors are stale for this knowledge base"))).toBe(true);
+    });
+    expect(screen.getByTestId("save-error")).toHaveTextContent(/workflow unavailable/);
+  });
 });

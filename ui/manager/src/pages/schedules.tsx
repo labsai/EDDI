@@ -1,3 +1,4 @@
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { formatUsd } from "@eddi/app-kit/lib/utils";
 import { useState, useEffect, useCallback, useMemo, useId, Fragment } from "react";
 import { Link, useSearchParams } from "react-router-dom";
@@ -1032,28 +1033,22 @@ function ScheduleFormDialog({
   const labelCls = "mb-1 block text-sm font-medium text-muted-foreground";
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="schedule-form-title"
+    // Edits survive a stray click: once the form is touched the backdrop and
+    // Escape no longer close it (Cancel still does), as the hand-rolled overlay
+    // did — now with the shared dialog's focus trap and focus return.
+    <AccessibleDialog
+      open
+      onClose={touched ? () => {} : onClose}
+      title={
+        isEdit
+          ? t("schedules.editTitle", "Edit Schedule")
+          : t("schedules.createTitle", "Create Schedule")
+      }
+      testId="schedule-form-dialog"
+      maxWidth="max-w-lg"
+      showClose={!touched}
     >
-      <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
-        onClick={touched ? undefined : onClose}
-      />
-      <div
-        onChangeCapture={() => setTouched(true)}
-        className="relative max-h-[90dvh] w-full max-w-lg overflow-y-auto rounded-2xl border border-border bg-card p-6 shadow-2xl"
-      >
-        <h2
-          id="schedule-form-title"
-          className="mb-4 text-lg font-bold text-foreground"
-        >
-          {isEdit
-            ? t("schedules.editTitle", "Edit Schedule")
-            : t("schedules.createTitle", "Create Schedule")}
-        </h2>
+      <div onChangeCapture={() => setTouched(true)} className="p-5">
 
         <div className="space-y-4">
           {/* Name */}
@@ -1478,7 +1473,7 @@ function ScheduleFormDialog({
           </button>
         </div>
       </div>
-    </div>
+    </AccessibleDialog>
   );
 }
 

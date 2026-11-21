@@ -37,6 +37,19 @@ describe("OversightPage", () => {
     expect(within(screen.getByTestId(`oversight-category-${LOOKUP_CATEGORY}`)).getByTestId("oversight-tier-SUSPENDED")).toBeInTheDocument();
   });
 
+  it("moves between the tabs with the arrow keys, Home and End", async () => {
+    renderOversight();
+    await screen.findByTestId("oversight-analytics");
+    const analytics = screen.getByTestId("oversight-tab-analytics");
+    analytics.focus();
+    fireEvent.keyDown(analytics, { key: "ArrowRight" });
+    await waitFor(() => expect(screen.getByTestId("oversight-tab-samples")).toHaveAttribute("aria-selected", "true"));
+    fireEvent.keyDown(screen.getByTestId("oversight-tab-samples"), { key: "End" });
+    await waitFor(() => expect(screen.getByTestId("oversight-tab-autonomy")).toHaveAttribute("aria-selected", "true"));
+    fireEvent.keyDown(screen.getByTestId("oversight-tab-autonomy"), { key: "Home" });
+    await waitFor(() => expect(screen.getByTestId("oversight-tab-analytics")).toHaveAttribute("aria-selected", "true"));
+  });
+
   it("falls back to 30 days for a ?days= value that is not an offered period instead of throwing", async () => {
     renderOversight("/manage/oversight?days=1000000000");
     expect(await screen.findByTestId("oversight-analytics")).toBeInTheDocument();

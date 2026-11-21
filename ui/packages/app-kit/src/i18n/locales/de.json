@@ -325,7 +325,9 @@
     "runSkipConflict": "{{codes}} steht auch in der Überspringen-Liste – diese Anweisung wird dafür nie ausgeführt.",
     "httpCodeFilterSkipSet": "Ein leeres „Bei Codes ausführen“ verwendet 200, 201; ein leeres „Bei Codes überspringen“ überspringt nichts.",
     "useDefaultSkipCodes": "Standard-Überspringliste verwenden",
-    "scope": "Gültigkeitsbereich"
+    "scope": "Gültigkeitsbereich",
+    "retryIdempotency": "{{method}} ist nicht idempotent: Eine wiederholte Anfrage wurde möglicherweise bereits verarbeitet (doppelte Bestellung, Abbuchung oder Nachricht). Aktivieren Sie Wiederholungen nur, wenn der Endpunkt Wiederholungen ignoriert, z. B. über einen Idempotenzschlüssel.",
+    "bodyEscapeHelp": "Werte werden so eingefügt, wie sie sind, sofern der Server sie nicht escaped; ein Wert mit Anführungszeichen kann daher aus einem JSON-String ausbrechen. Zum eigenen Escapen verwenden Sie json:serialize ohne eigene Anführungszeichen, z. B. {json:serialize(memory.current.input)}."
   },
   "llmEditor": {
     "unknownType": "{{type}} (benutzerdefiniert)"
@@ -906,7 +908,11 @@
     "restricted_other": "Auf {{count}} Agenten beschränkt",
     "restrictedTooltip": "Freigegeben für: {{agents}}",
     "notGrantedAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bei der Bereitstellung werden Sie gefragt, ob er hinzugefügt werden soll.",
-    "notGrantedNonAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bitten Sie vor der Bereitstellung einen Administrator um die Freigabe."
+    "notGrantedNonAdmin": "Diesem Agenten ist der Schlüssel noch nicht freigegeben. Bitten Sie vor der Bereitstellung einen Administrator um die Freigabe.",
+    "createAllAgents": "Dieses Feld weiß nicht, zu welchem Agent es gehört, deshalb wird das Secret für alle Agents angelegt. Schränken Sie es anschließend unter Secrets ein.",
+    "literalNudge": "Das sieht nach einem im Klartext eingegebenen Secret aus. Es würde in der Konfiguration, ihrem Versionsverlauf und in Exporten gespeichert. Legen Sie es besser im Tresor ab und verweisen Sie darauf.",
+    "literalStoreInVault": "Im Tresor ablegen",
+    "literalKeepPlain": "Als Klartext behalten"
   },
   "Workforce": {
     "advisor": {

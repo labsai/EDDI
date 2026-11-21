@@ -1,3 +1,4 @@
+import { localId } from "@/lib/local-id";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
@@ -27,7 +28,10 @@ import { ConnectionReferenceWarning } from "@eddi/app-kit/components/shared/conn
 import { IngestionSourcesPanel } from "@/components/editors/ingestion-sources-panel";
 import { RagStoragePanel } from "@/components/editors/rag-storage-panel";
 import { RetrievalTester } from "@/components/editors/retrieval-tester";
-import type { IngestionSource } from "@/lib/api/ingestion-sources";
+import { getSourceRuns, type IngestionSource } from "@/lib/api/ingestion-sources";
+import { ingestionKeys } from "@/hooks/use-ingestion-sources";
+import { embeddingChanges, type EmbeddingChange } from "@/lib/rag-embedding-change";
+import { useQueries } from "@tanstack/react-query";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -230,6 +234,7 @@ function Section({
   defaultOpen = true,
   badge,
   children,
+  testId,
 }: {
   label: string;
   icon: React.ElementType;
@@ -237,6 +242,8 @@ function Section({
   defaultOpen?: boolean;
   badge?: string;
   children: React.ReactNode;
+  /** data-testid of the header button that opens and closes the section. */
+  testId?: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -245,6 +252,7 @@ function Section({
         type="button"
         onClick={() => setOpen(!open)}
         aria-expanded={open}
+        data-testid={testId}
         className="flex w-full items-center gap-2.5 px-4 py-2.5 text-start transition-colors hover:bg-muted/30"
       >
         <Icon className={cn("h-4 w-4 shrink-0", accent)} />
@@ -583,6 +591,13 @@ const STATUS_STOPPED_WATCHING = "stopped-watching";
 /** Seconds-scale polling for the first minute, then a slower cadence, for ~11 minutes in all. */
 const FAST_POLL_ATTEMPTS = 30;
 const MAX_POLL_ATTEMPTS = 90;
+/** One failed status check is a blip, not a failed ingestion: give up after this many in a row. */
+const MAX_CONSECUTIVE_POLL_ERRORS = 5;
+/** A file larger than this is not read into the page (it is held in memory and sent as one body). */
+const MAX_INGEST_FILE_BYTES = 10 * 1024 * 1024;
+/** Status prefixes for failures this editor reports itself, so the label can be translated. */
+const TOO_LARGE_PREFIX = "failed: too large ";
+const REJECTED_PREFIX = "failed: upload rejected ";
 const FAST_POLL_MS = 2000;
 const SLOW_POLL_MS = 10_000;
 
@@ -608,6 +623,17 @@ function ingestionStatusLabel(status: string, t: TFunction): string {
     case "failed: upload error":
       return t("ragEditor.statusUploadError", "Failed: upload error");
   }
+  if (status.startsWith(TOO_LARGE_PREFIX)) {
+    return t("ragEditor.statusTooLarge", "Failed: {{name}} is larger than {{max}} MB and was not read here. A Files source under Ingestion Sources takes larger files.", {
+      name: status.slice(TOO_LARGE_PREFIX.length),
+      max: MAX_INGEST_FILE_BYTES / (1024 * 1024),
+    });
+  }
+  if (status.startsWith(REJECTED_PREFIX)) {
+    return t("ragEditor.statusUploadRejected", "Failed: the server refused the upload ({{detail}})", {
+      detail: status.slice(REJECTED_PREFIX.length),
+    });
+  }
   const READ_PREFIX = "failed: could not read ";
   if (status.startsWith(READ_PREFIX)) {
     return t("ragEditor.statusReadError", "Failed: could not read {{name}}", {
@@ -632,10 +658,13 @@ function IngestionPanel({
   version,
   readOnly,
   hasUnsavedChanges,
+  onIngested,
 }: {
   kbId: string;
   version: number;
   readOnly?: boolean;
+  /** Called when a document finished ingesting (the knowledge base now holds vectors). */
+  onIngested?: () => void;
   /**
    * The ingest endpoint resolves the *saved* knowledge base: its store, its
    * embedding model, its chunking. Ingesting with unsaved edits on screen put
@@ -667,14 +696,27 @@ function IngestionPanel({
   const pollStatus = useCallback(
     (ingestionId: string) => {
       let attempts = 0;
+      let consecutiveErrors = 0;
       const poll = async () => {
         if (!mountedRef.current) return;
         attempts++;
+        // An id that cannot go into a path is a bug in the answer, not a blip: no retry.
+        let statusPath: string;
         try {
-          const result = await api.get<{ status: string; warning?: string }>(
-            `/ragstore/rags/${seg(kbId)}/ingestion/${seg(ingestionId)}/status`,
+          statusPath = `/ragstore/rags/${seg(kbId)}/ingestion/${seg(ingestionId)}/status`;
+        } catch {
+          setIngestions((prev) =>
+            prev.map((ing) =>
+              ing.ingestionId === ingestionId ? { ...ing, status: "failed: polling error" } : ing,
+            ),
           );
+          return;
+        }
+        try {
+          const result = await api.get<{ status: string; warning?: string }>(statusPath);
           if (!mountedRef.current) return;
+          consecutiveErrors = 0;
+          if (result.status === "completed") onIngested?.();
           setIngestions((prev) =>
             prev.map((ing) =>
               ing.ingestionId === ingestionId ? { ...ing, status: result.status, warning: result.warning } : ing,
@@ -694,6 +736,13 @@ function IngestionPanel({
           }
         } catch {
           if (!mountedRef.current) return;
+          // One failed check (a proxy hiccup, a token refresh) says nothing about
+          // the ingestion itself: ask again, backing off, before calling it failed.
+          consecutiveErrors++;
+          if (consecutiveErrors < MAX_CONSECUTIVE_POLL_ERRORS && attempts < MAX_POLL_ATTEMPTS) {
+            setTimeout(poll, Math.min(FAST_POLL_MS * 2 ** consecutiveErrors, SLOW_POLL_MS));
+            return;
+          }
           setIngestions((prev) =>
             prev.map((ing) =>
               ing.ingestionId === ingestionId ? { ...ing, status: "failed: polling error" } : ing,
@@ -703,12 +752,12 @@ function IngestionPanel({
       };
       poll();
     },
-    [kbId],
+    [kbId, onIngested],
   );
 
   const startIngestion = useCallback(
     async (content: string, name: string, replace = false) => {
-      const tempId = `local-${Date.now()}`;
+      const tempId = localId("local");
       setIngestions((prev) => [...prev, { ingestionId: tempId, status: "uploading", documentName: name }]);
 
       try {
@@ -732,7 +781,29 @@ function IngestionPanel({
         );
 
         if (!response.ok) {
-          throw new Error(`HTTP ${response.status}`);
+          // Say what the server said (a size limit, a missing store) instead of
+          // a bare "upload error" that leaves the user guessing.
+          let detail = "";
+          try {
+            const raw = (await response.text()).trim();
+            try {
+              const body = JSON.parse(raw) as { message?: unknown; error?: unknown };
+              detail = String(body.message ?? body.error ?? "");
+            } catch {
+              detail = raw;
+            }
+          } catch {
+            // The status alone then.
+          }
+          const shown = detail.replace(/\s+/g, " ").slice(0, 200);
+          setIngestions((prev) =>
+            prev.map((ing) =>
+              ing.ingestionId === tempId
+                ? { ...ing, status: `${REJECTED_PREFIX}HTTP ${response.status}${shown ? `: ${shown}` : ""}` }
+                : ing,
+            ),
+          );
+          return;
         }
 
         const result: { ingestionId: string } = await response.json();
@@ -769,6 +840,13 @@ function IngestionPanel({
     (files: FileList) => {
       if (hasUnsavedChanges) return;
       Array.from(files).forEach((file) => {
+        if (file.size > MAX_INGEST_FILE_BYTES) {
+          setIngestions((prev) => [
+            ...prev,
+            { ingestionId: localId("err"), status: `${TOO_LARGE_PREFIX}${file.name}`, documentName: file.name },
+          ]);
+          return;
+        }
         const reader = new FileReader();
         reader.onload = () => {
           if (!mountedRef.current) return;
@@ -778,7 +856,7 @@ function IngestionPanel({
             setIngestions((prev) => [
               ...prev,
               {
-                ingestionId: `err-${Date.now()}`,
+                ingestionId: localId("err"),
                 status: `failed: ${file.name} was not ingested — the knowledge base changed while it was read`,
                 documentName: file.name,
               },
@@ -791,7 +869,7 @@ function IngestionPanel({
         reader.onerror = () => {
           setIngestions((prev) => [
             ...prev,
-            { ingestionId: `err-${Date.now()}`, status: `failed: could not read ${file.name}`, documentName: file.name },
+            { ingestionId: localId("err"), status: `failed: could not read ${file.name}`, documentName: file.name },
           ]);
         };
         reader.readAsText(file);
@@ -889,6 +967,7 @@ function IngestionPanel({
           onChange={(e) => setTextContent(e.target.value)}
           placeholder={t("ragEditor.pastePlaceholder", "Paste document text here...")}
           rows={3}
+          data-testid="ingest-text-input"
           className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground placeholder:text-muted-foreground/50 focus:outline-none focus:ring-1 focus:ring-ring resize-y"
         />
         {textContent.trim() && (
@@ -942,6 +1021,8 @@ function IngestionPanel({
                         ? "text-muted-foreground"
                         : "text-primary",
                 )}
+                data-testid="ingestion-status"
+                data-status={ing.status}
               >
                 {ingestionStatusLabel(ing.status, t)}
               </span>
@@ -1019,6 +1100,49 @@ export function RagEditor({
   const storeHints = storeParamHints(data.storeType ?? "in-memory", perKbName);
   const embeddingHints = EMBEDDING_PARAM_HINTS[data.embeddingProvider ?? "openai"] ?? [];
 
+  // Does this knowledge base already hold vectors? Read from what the editor
+  // already loads: the run history of each saved source (the same queries the
+  // sources panel uses, so nothing extra is fetched), and documents ingested
+  // through the panel below during this session.
+  const savedSourceIds = (data.sources ?? []).map((s) => s.id).filter((id): id is string => Boolean(id));
+  const runQueries = useQueries({
+    queries: savedSourceIds.map((sourceId) => ({
+      queryKey: ingestionKeys.runs(resourceId ?? "", sourceId, version),
+      queryFn: () => getSourceRuns(resourceId as string, sourceId, version),
+      enabled: Boolean(resourceId),
+    })),
+  });
+  const [sessionIngested, setSessionIngested] = useState(false);
+  const hasDocuments =
+    sessionIngested ||
+    runQueries.some((q) => (q.data ?? []).some((run) => run.documentsIngested > 0 || run.segmentsStored > 0));
+  // The configuration as it was when this version was opened. A save moves the
+  // editor onto the new version, whose configuration becomes the new baseline.
+  const baselineKey = `${resourceId ?? ""}@${version}`;
+  const baselineRef = useRef<{ key: string; settings: RagConfig } | null>(null);
+  if (baselineRef.current === null || baselineRef.current.key !== baselineKey) {
+    baselineRef.current = { key: baselineKey, settings: data };
+  }
+  const changedEmbedding = embeddingChanges(baselineRef.current.settings, data);
+  const staleChanges: EmbeddingChange[] = hasDocuments ? changedEmbedding : [];
+  // No run history proves nothing: a document ingested by hand in an earlier
+  // session leaves none, and a source can be gone. Only a knowledge base that
+  // was never saved is known to be empty; for any other the warning is
+  // conditional rather than absent.
+  const possiblyStaleChanges: EmbeddingChange[] = !hasDocuments && Boolean(resourceId) ? changedEmbedding : [];
+  const describeChanges = (changes: EmbeddingChange[]) =>
+    changes
+      .map((c) =>
+        c === "provider"
+          ? t("ragEditor.reembedProvider", "the embedding provider")
+          : c === "model"
+            ? t("ragEditor.reembedModel", "the embedding model")
+            : c === "dimension"
+              ? t("ragEditor.reembedDimension", "the vector dimension")
+              : t("ragEditor.reembedChunking", "the chunk settings"),
+      )
+      .join(", ");
+
   const unknownChunkStrategy =
     !!data.chunkStrategy?.trim() &&
     !CHUNK_STRATEGIES.some((s) => s.value === data.chunkStrategy!.trim().toLowerCase());
@@ -1058,6 +1182,39 @@ export function RagEditor({
           </div>
         </div>
       </Section>
+
+      {staleChanges.length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warn-300 bg-warn-50 p-3 text-xs text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="alert"
+          data-testid="rag-reembed-warning"
+        >
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            {t(
+              "ragEditor.reembedWarning",
+              "This knowledge base already has ingested documents, and you changed {{what}}. Saving does not re-embed them: the stored vectors stay as they are, so searches may return poor or no matches until the documents are ingested again (or a new knowledge base is created).",
+              { what: describeChanges(staleChanges) },
+            )}
+          </p>
+        </div>
+      )}
+      {possiblyStaleChanges.length > 0 && (
+        <div
+          className="flex items-start gap-2 rounded-lg border border-warn-300 bg-warn-50 p-3 text-xs text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="status"
+          data-testid="rag-reembed-warning-unknown"
+        >
+          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <p>
+            {t(
+              "ragEditor.reembedWarningUnknown",
+              "You changed {{what}}. If this knowledge base already holds documents — this page cannot tell, for example for text ingested by hand earlier — saving does not re-embed them, and searches may return poor or no matches until they are ingested again.",
+              { what: describeChanges(possiblyStaleChanges) },
+            )}
+          </p>
+        </div>
+      )}
 
       {/* ══════ Embedding Model ══════ */}
       <Section
@@ -1464,6 +1621,7 @@ export function RagEditor({
         icon={Upload}
         accent="text-rose-500"
         defaultOpen={false}
+        testId="rag-ingestion-section"
       >
         {/* Pasted documents only ever accumulate: nothing lists them afterwards, and
             nothing re-reads or removes them. A Files source does all three. */}
@@ -1483,6 +1641,7 @@ export function RagEditor({
             version={version}
             readOnly={readOnly}
             hasUnsavedChanges={isDirty}
+            onIngested={() => setSessionIngested(true)}
           />
         ) : (
           <p className="text-xs text-muted-foreground italic">

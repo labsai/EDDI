@@ -219,7 +219,8 @@
       "forbidden": "이 항목을 볼 권한이 없습니다.",
       "notFound": "찾을 수 없음 — 삭제되었을 수 있습니다."
     },
-    "rename": "이름 바꾸기"
+    "rename": "이름 바꾸기",
+    "versionLookupFailed": "현재 버전을 찾을 수 없습니다."
   },
   "agents": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 에이전트와 모든 데이터가 영구적으로 제거됩니다.",
@@ -267,7 +268,10 @@
     "deployFailedIn": "{{environment}}에 배포하지 못했습니다",
     "undeployCompatibleHint": "호환되는 배포 버전이 이어갈 수 있는 대화는 종료되지 않고 다음 턴에 그 버전으로 이동합니다.",
     "sortLoadingAll": "정렬이 완전하도록 모든 에이전트를 불러오는 중…",
-    "createNamingFailed": "에이전트는 생성되었지만 이름을 저장하지 못했습니다. 에이전트 페이지에서 이름을 바꾸세요."
+    "createNamingFailed": "에이전트는 생성되었지만 이름을 저장하지 못했습니다. 에이전트 페이지에서 이름을 바꾸세요.",
+    "deleted": "{{name}}을(를) 삭제했습니다",
+    "confirmDeleteNamed": "{{name}}을(를) 삭제할까요?",
+    "deleteReload": "현재 버전 다시 불러오기"
   },
   "agentDetail": {
     "a2aDescHint": "에이전트 카드에 표시됩니다 — 다른 에이전트가 이 에이전트의 기능을 이해하는 데 도움이 됩니다",
@@ -511,6 +515,7 @@
     "removeWorkflow": "에이전트에서 워크플로 제거",
     "a2aAddSkill": "스킬 추가",
     "saveConflict": "이 에이전트를 연 후 다른 곳에서 변경되었습니다. 편집 내용은 유지됩니다. 검토 후 다시 저장하세요.",
+    "saveWaitForVersion": "최신 버전을 아직 불러오는 중입니다. 잠시 후 다시 저장하세요.",
     "saveBeforeDeploy": "배포하기 전에 변경 사항을 저장하거나 취소하세요",
     "reviewChanges": "변경 사항 검토",
     "unsavedSections": "저장하지 않은 변경 사항이 있는 섹션: {{count}}",
@@ -692,7 +697,11 @@
     "step_llm": "모델",
     "step_apispec": "API 사양",
     "step_features": "기능",
-    "step_review": "검토"
+    "step_review": "검토",
+    "providerResetNote": "공급자를 바꾸면서 {{fields}}이(가) 초기화되었습니다. 이전 공급자의 값이므로 다시 돌아가면 복원됩니다.",
+    "resetModel": "모델 이름",
+    "resetApiKey": "API 키",
+    "resetBaseUrl": "기본 URL"
   },
   "packages": {
     "confirmDeleteDescription": "이 작업은 되돌릴 수 없습니다. 워크플로와 모든 데이터가 영구적으로 제거됩니다.",
@@ -845,7 +854,10 @@
     "endReasonRetired": "종료됨: 에이전트 버전이 폐기되었습니다",
     "waitingForPause": "일시 중지가 저장되기를 기다리는 중…",
     "searchTranscriptLabel": "대화 기록 검색",
-    "matchCount": "일치하는 단계: {{matches}}"
+    "matchCount": "일치하는 단계: {{matches}}",
+    "errorTitle": "이 대화는 오류 상태입니다",
+    "errorNoDetail": "엔진이 이유를 기록하지 않았습니다. 실패한 턴의 서버 로그에 자세한 내용이 있습니다.",
+    "errorStep": "{{step}}단계"
   },
   "resources": {
     "backToWorkflow": "워크플로로 돌아가기",
@@ -963,7 +975,12 @@
     "updateAgentAndSave": "에이전트 업데이트 후 저장",
     "keepEditing": "계속 편집",
     "discardChanges": "변경 사항 취소",
-    "deployDone": "배포됨 — 변경 사항이 적용되었습니다"
+    "deployDone": "배포됨 — 변경 사항이 적용되었습니다",
+    "loadingEditor": "편집기를 불러오는 중…",
+    "saveErrorReason": "저장되지 않음: {{reason}}",
+    "savedWithWarnings": "저장됨, 경고 있음",
+    "documentCheckFailed": "이 문서는 편집기가 확인할 수 없는 구조입니다. 저장하기 전에 JSON 탭에서 수정하세요.",
+    "dismissWarnings": "닫기"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1634,7 +1651,11 @@
     "agentOpsFollowUpDesc": "에이전트 자신의 대화 또는 새 대화에 대한 일회성 후속 확인을 예약, 조회, 취소합니다. 각 실행에는 비용 상한이 있습니다.",
     "agentOpsMaxPending": "동시 대기 수",
     "agentOpsHorizon": "기간(일, 최대 90)",
-    "agentOpsCostPerFire": "실행당 비용 상한($)"
+    "agentOpsCostPerFire": "실행당 비용 상한($)",
+    "temperatureBlocksSave": "temperature는 0 이상의 숫자여야 합니다. 저장하기 전에 수정하세요.",
+    "grPatternBlocksSave": "regex-filter 가드레일에 잘못된 패턴이 있습니다({{line}}번째 줄). 저장하기 전에 수정하세요.",
+    "grPatternInvalid": "{{line}}번째 줄이 올바른 정규식이 아닙니다: {{detail}}",
+    "grPatternUnchecked": "{{lines}}번째 줄은 이 페이지에서 확인할 수 없는 구문을 사용합니다. 서버는 저장이나 배포 시 패턴을 검사하지 않으며, 컴파일할 수 없는 줄은 실행 시 무시됩니다."
   },
   "outputEditor": {
     "labelPlaceholder": "링크 라벨...",
@@ -1956,7 +1977,9 @@
     "noMatchesHint": "검색은 여기에 이미 불러온 항목만 대상으로 합니다. 더 이전 기록을 보려면 이전 항목을 불러오거나 필터를 조정하세요.",
     "searchLogsLabel": "불러온 로그 항목 검색",
     "errorCount_one": "오류 {{count}}개",
-    "warnCount_one": "경고 {{count}}개"
+    "warnCount_one": "경고 {{count}}개",
+    "filteredCountLoaded": "불러온 {{total}}개 중 {{shown}}개",
+    "filterLoadedOnly": "수준 필터와 개수는 지금까지 불러온 항목에만 적용됩니다. 더 오래된 항목도 일치할 수 있으니 더 오래된 항목을 불러와 더 이전까지 검색하세요."
   },
   "secrets": {
     "loadError": "시크릿을 불러올 수 없습니다",
@@ -2638,7 +2661,15 @@
       "title": "검색 테스트",
       "saveFirst": "검색하려면 먼저 이 지식 베이스를 저장하세요."
     },
-    "legacyIngestionNote": "일회성 텍스트용입니다. 여기에 추가한 문서는 나중에 목록 보기, 업데이트, 삭제를 할 수 없습니다. 계속 관리할 문서는 대신 수집 소스에서 파일 소스를 추가하세요."
+    "legacyIngestionNote": "일회성 텍스트용입니다. 여기에 추가한 문서는 나중에 목록 보기, 업데이트, 삭제를 할 수 없습니다. 계속 관리할 문서는 대신 수집 소스에서 파일 소스를 추가하세요.",
+    "statusTooLarge": "실패: {{name}}은(는) {{max}}MB보다 커서 여기서 읽지 않았습니다. 수집 소스의 파일 소스는 더 큰 파일을 받습니다.",
+    "statusUploadRejected": "실패: 서버가 업로드를 거부했습니다({{detail}})",
+    "reembedWarning": "이 지식 베이스에는 이미 수집된 문서가 있으며 {{what}}을(를) 변경했습니다. 저장해도 다시 임베딩되지 않습니다. 저장된 벡터는 그대로이므로 문서를 다시 수집하거나 새 지식 베이스를 만들기 전까지 검색 결과가 나쁘거나 없을 수 있습니다.",
+    "reembedWarningUnknown": "{{what}}을(를) 변경했습니다. 이 지식 베이스에 이미 문서가 있다면(이 페이지는 알 수 없습니다. 예를 들어 이전에 직접 수집한 텍스트), 저장해도 다시 임베딩되지 않으며 다시 수집할 때까지 검색 결과가 좋지 않거나 없을 수 있습니다.",
+    "reembedProvider": "임베딩 공급자",
+    "reembedModel": "임베딩 모델",
+    "reembedDimension": "벡터 차원",
+    "reembedChunking": "청크 설정"
   },
   "onboarding": {
     "welcome": {
@@ -2996,7 +3027,8 @@
     "discardEditsDescription": "구성의 한 섹션이 아직 편집 중입니다. 패널을 닫으면 그곳에서 변경한 내용이 취소됩니다.",
     "discardEditsConfirm": "버리기",
     "keepEditing": "계속 편집",
-    "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다."
+    "streamInterrupted": "실시간 연결이 끊어졌습니다. 저장된 토론을 표시하며, 진행 중에는 계속 업데이트됩니다.",
+    "inputDisabledNoMembers": "토론을 시작하려면 이 그룹에 멤버를 한 명 이상 추가하세요"
   },
   "memories": {
     "title": "사용자 메모리",
@@ -3474,7 +3506,8 @@
     "targetsCol": "대상",
     "type": "유형",
     "unnamed": "이름 없는 채널",
-    "version": "버전"
+    "version": "버전",
+    "duplicated": "채널을 복제했습니다"
   },
   "channelDetail": {
     "saveSuccess": "채널이 저장되었습니다",
@@ -3525,7 +3558,11 @@
     "selectGroup": "그룹 선택…",
     "unknownGroup": "{{id}} (찾을 수 없음)",
     "plaintextSecret": "{{fields}}을(를) 시크릿 볼트에 저장하고 ${vault:…}로 참조하세요. 평문 자격 증명은 저장되지 않습니다.",
-    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요."
+    "plaintextStored": "이 채널은 {{fields}}을(를) 평문으로 저장하고 있습니다. 시크릿 볼트로 옮긴 뒤 저장하여 참조로 바꾸세요.",
+    "triggerReserved": "\"help\"는 예약어입니다. 봇이 대상 목록으로 응답하므로 트리거로 사용할 수 없습니다.",
+    "triggerDuplicate": "이 트리거는 이미 이 대상에 있습니다.",
+    "channelIdEmpty": "채널 ID가 없으면 라우터가 이 연동을 무시합니다. Slack 메시지가 전달되지 않습니다.",
+    "routerRefreshNote": "메시지 라우터는 약 1분 안에 변경 사항을 반영합니다."
   },
   "hitl": {
     "loadingApprovalDetails": "승인 세부 정보를 불러오는 중…",

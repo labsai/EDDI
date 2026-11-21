@@ -177,4 +177,41 @@ describe("Agent detail — a save that conflicts", () => {
     await waitFor(() => expect(screen.getByTestId("version-picker")).toHaveValue("4"));
     expect(toast.error).toHaveBeenCalledTimes(1);
   });
+
+  it("'Reload the current version' after a refused delete carries an open draft onto the newer version", async () => {
+    server.use(
+      http.delete("*/agentstore/agents/:id", ({ params }) => {
+        if (params.id !== agentId) return;
+        return HttpResponse.json({ message: "Version is not current" }, { status: 409 });
+      }),
+    );
+    const user = userEvent.setup();
+    renderPage();
+
+    await waitFor(() => expect(screen.getByTestId("version-badge")).toHaveTextContent("v1"));
+    await user.click(screen.getByText(/Session Management/i));
+    await user.click(snapshotToggle());
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+
+    // Another client writes v2 meanwhile.
+    current = 2;
+    docs[2] = { ...docs[1]!, description: "edited elsewhere" };
+
+    await user.click(screen.getByTestId("delete-agent-btn"));
+    await user.click(screen.getByTestId("alert-dialog-confirm"));
+    await user.click(await screen.findByTestId("delete-agent-reload"));
+
+    await waitFor(() => expect(screen.getByTestId("version-picker")).toHaveValue("2"));
+    expect(snapshotToggle().checked).toBe(true);
+    expect(screen.getByTestId("dirty-indicator")).toBeInTheDocument();
+
+    // The save lands on v2 and keeps the other client's change.
+    await user.click(screen.getByTestId("save-btn"));
+    await waitFor(() => expect(current).toBe(3));
+    expect(puts).toEqual([2]);
+    expect(docs[3]).toMatchObject({
+      description: "edited elsewhere",
+      sessionManagement: { autoSnapshot: { enabled: true } },
+    });
+  });
 });

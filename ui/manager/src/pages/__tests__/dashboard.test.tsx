@@ -29,11 +29,16 @@ vi.mock("@eddi/app-kit/hooks/use-secrets", () => ({
 }));
 
 vi.mock("@eddi/app-kit/hooks/use-agents", () => ({
-  useAgentDescriptors: () => ({
-    data: [
-      { resource: "eddi://ai.labs.bot/botstore/bots/agent-1?version=1", name: "Support Agent" },
-      { resource: "eddi://ai.labs.bot/botstore/bots/agent-2?version=1", name: "FAQ Agent" },
-    ],
+  // The dashboard names agents from the full, paged list (`useAgentNames`).
+  useAllAgentDescriptors: () => ({
+    data: {
+      pages: [
+        [
+          { resource: "eddi://ai.labs.bot/botstore/bots/agent-1?version=1", name: "Support Agent" },
+          { resource: "eddi://ai.labs.bot/botstore/bots/agent-2?version=1", name: "FAQ Agent" },
+        ],
+      ],
+    },
   }),
   groupAgentsByName: (agents: unknown[]) =>
     (agents as { resource: string; name?: string; description?: string; lastModifiedOn?: string | null }[]).map((a) => {

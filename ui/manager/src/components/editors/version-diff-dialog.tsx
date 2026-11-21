@@ -1,3 +1,4 @@
+import { maskCredentials } from "@/lib/mask-credentials";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 // Configures the self-hosted Monaco instance before <Editor> can look for one.
@@ -188,7 +189,9 @@ export function VersionDiffDialog({
 
 function prettify(json: string): string {
   try {
-    return JSON.stringify(JSON.parse(json), null, 2);
+    // Credential-shaped values are masked: the dialog prints stored documents
+    // verbatim, and a literal key must not land on screen for it.
+    return JSON.stringify(maskCredentials(JSON.parse(json)), null, 2);
   } catch {
     return json;
   }

@@ -1,9 +1,11 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { EditorValidityContext, type EditorValidity } from "@eddi/app-kit/components/editors/editor-validity";
 import { JsonEditor } from "./json-editor";
+import type { DocumentValidator } from "./document-validators";
 import { VersionPicker, type VersionInfo } from "./version-picker";
 import { Save, Undo2, FileCode, FormInput, AlertCircle, GitCompareArrows, Rocket } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
@@ -35,6 +37,11 @@ export interface ConfigEditorLayoutProps {
   saveSuccess?: boolean;
   /** Save error message */
   saveError?: string;
+  /**
+   * Warnings the last successful save answered with ("saved, but …"). Shown
+   * until the next edit or save.
+   */
+  saveWarnings?: string[];
   /** Read-only mode */
   readOnly?: boolean;
   /** Static children for the form view (fallback placeholder if absent) */
@@ -58,8 +65,23 @@ export interface ConfigEditorLayoutProps {
    * Reports the working copy whenever it changes. For a host that must act on
    * unsaved edits from outside the layout: the Studio asks before it replaces
    * this editor with another stage's, and saves from there if asked to.
+   * `blockedBy` is why Save is refused right now (a field or document problem),
+   * or null — a host that saves from outside must refuse for the same reason.
    */
-  onDraftChange?: (draft: { data: string; dirty: boolean }) => void;
+  onDraftChange?: (draft: EditorDraft) => void;
+  /**
+   * Blocking checks on the parsed document, run whichever tab is showing — the
+   * form editor's own reports vanish with the form, so without this a value the
+   * form refuses could be saved from the JSON tab.
+   */
+  validateDocument?: DocumentValidator;
+}
+
+/** The working copy the layout reports through `onDraftChange`. */
+export interface EditorDraft {
+  data: string;
+  dirty: boolean;
+  blockedBy: string | null;
 }
 
 type EditorTab = "form" | "json";
@@ -85,12 +107,14 @@ export function ConfigEditorLayout({
   isSaveAndDeploying = false,
   saveSuccess = false,
   saveError,
+  saveWarnings,
   readOnly = false,
   children,
   renderFormEditor,
   jsonSchema,
   onCompare,
   onDraftChange,
+  validateDocument,
 }: ConfigEditorLayoutProps) {
   const { t } = useTranslation();
   const hasFormEditor = !!(renderFormEditor || children);
@@ -107,6 +131,52 @@ export function ConfigEditorLayout({
   editedDataRef.current = editedData;
   /** Why the last Save click did nothing — shown instead of a silent no-op. */
   const [invalidJson, setInvalidJson] = useState<string | null>(null);
+  /** Field problems the form editor reported (id -> reason); any entry blocks Save. */
+  const [fieldProblems, setFieldProblems] = useState<Record<string, string>>({});
+  const validity = useMemo<EditorValidity>(
+    () => ({
+      report: (id, reason) =>
+        setFieldProblems((prev) => {
+          if (reason === null) {
+            if (!(id in prev)) return prev;
+            const next = { ...prev };
+            delete next[id];
+            return next;
+          }
+          return prev[id] === reason ? prev : { ...prev, [id]: reason };
+        }),
+    }),
+    [],
+  );
+  // The document-level check sees the JSON as it will be saved, on either tab.
+  const documentProblem = useMemo(() => {
+    if (!validateDocument) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(editedData);
+    } catch {
+      return null; // unparseable JSON has its own refusal
+    }
+    try {
+      return validateDocument(parsed, t);
+    } catch {
+      // A validator that cannot judge a document refuses it: answering "no
+      // problem" here would let the very documents the check exists for through.
+      return t("editor.documentCheckFailed", "This document has a shape the editor cannot check — fix it in the JSON tab before saving.");
+    }
+  }, [validateDocument, editedData, t]);
+  const blockingReason = Object.values(fieldProblems)[0] ?? documentProblem;
+  /** The warnings array the user dismissed — a newer save brings a new array. */
+  const [dismissedWarnings, setDismissedWarnings] = useState<string[] | undefined>(undefined);
+
+  // A failed save must not cost the draft: the buffer is what the user typed, and
+  // `data` did not change. The ref only exists to recognise "this is what was
+  // saved" when the refetch lands — after a failure there is no such refetch, and
+  // leaving it set let an unrelated later refetch (a window focus, another tab's
+  // save) overwrite the draft because it still equalled the "saved" payload.
+  useEffect(() => {
+    if (saveError) savedPayloadRef.current = null;
+  }, [saveError]);
 
   // Reset edited data when the source data changes (version switch, initial
   // load, the new version a save created) — but only when doing so loses
@@ -136,8 +206,8 @@ export function ConfigEditorLayout({
   const isDirty = editedData !== data;
 
   useEffect(() => {
-    onDraftChange?.({ data: editedData, dirty: editedData !== data });
-  }, [editedData, data, onDraftChange]);
+    onDraftChange?.({ data: editedData, dirty: editedData !== data, blockedBy: blockingReason });
+  }, [editedData, data, onDraftChange, blockingReason]);
 
   // Discard confirmation state
   const [showDiscardConfirm, setShowDiscardConfirm] = useState(false);
@@ -176,17 +246,18 @@ export function ConfigEditorLayout({
   }, [editedData, t]);
 
   const handleSave = useCallback(() => {
+    if (blockingReason) return;
     if (!validJsonOrExplain()) return;
     savedPayloadRef.current = editedData;
     onSave(editedData);
-  }, [editedData, onSave, validJsonOrExplain]);
+  }, [editedData, onSave, validJsonOrExplain, blockingReason]);
 
   const handleSaveAndDeploy = useCallback(() => {
-    if (!onSaveAndDeploy) return;
+    if (!onSaveAndDeploy || blockingReason) return;
     if (!validJsonOrExplain()) return;
     savedPayloadRef.current = editedData;
     onSaveAndDeploy(editedData);
-  }, [editedData, onSaveAndDeploy, validJsonOrExplain]);
+  }, [editedData, onSaveAndDeploy, validJsonOrExplain, blockingReason]);
 
   const handleJsonChange = useCallback((val: string) => {
     setEditedData(val);
@@ -197,6 +268,14 @@ export function ConfigEditorLayout({
   // saves stale data.
   const containerRef = useRef<HTMLDivElement>(null);
   const busy = isSaving || isSaveAndDeploying;
+  // A failed attempt must not leave the "what was saved" marker behind, even when
+  // the parent keeps showing the very same error text across retries: clear it on
+  // the way from in-flight to failed.
+  const wasBusyRef = useRef(false);
+  useEffect(() => {
+    if (wasBusyRef.current && !busy && saveError) savedPayloadRef.current = null;
+    wasBusyRef.current = busy;
+  }, [busy, saveError]);
   useEffect(() => {
     if (readOnly) return;
     function onKeyDown(e: KeyboardEvent) {
@@ -207,14 +286,15 @@ export function ConfigEditorLayout({
         const target = e.target instanceof Node ? e.target : document.activeElement;
         if (!containerRef.current || !target || !containerRef.current.contains(target)) return;
         e.preventDefault();
-        if (isDirty && !busy) handleSave();
+        if (isDirty && !busy && !blockingReason) handleSave();
       }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [readOnly, isDirty, busy, handleSave]);
+  }, [readOnly, isDirty, busy, blockingReason, handleSave]);
 
   return (
+    <EditorValidityContext.Provider value={validity}>
     <div ref={containerRef} className="space-y-4" data-testid="config-editor-layout">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -269,6 +349,11 @@ export function ConfigEditorLayout({
               {saveError}
             </span>
           )}
+          {blockingReason && !readOnly && isDirty && (
+            <span className="text-xs font-medium text-destructive" role="alert" data-testid="save-blocked-reason">
+              {blockingReason}
+            </span>
+          )}
           {invalidJson && (
             <span className="text-xs font-medium text-destructive" role="alert" data-testid="save-invalid-json">
               {t("editor.invalidJsonNotSaved", "Not saved — the JSON is invalid: {{reason}}", {
@@ -289,7 +374,8 @@ export function ConfigEditorLayout({
               </button>
               <button
                 onClick={handleSave}
-                disabled={!isDirty || isSaving || isSaveAndDeploying}
+                disabled={!isDirty || isSaving || isSaveAndDeploying || !!blockingReason}
+                title={blockingReason ?? undefined}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm transition-all hover:bg-primary/90 active:scale-[0.98] disabled:opacity-50"
                 data-testid="save-btn"
               >
@@ -301,7 +387,8 @@ export function ConfigEditorLayout({
               {onSaveAndDeploy && (
                 <button
                   onClick={handleSaveAndDeploy}
-                  disabled={!isDirty || isSaving || isSaveAndDeploying}
+                  disabled={!isDirty || isSaving || isSaveAndDeploying || !!blockingReason}
+                  title={blockingReason ?? undefined}
                   className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium text-white shadow-sm transition-all hover:bg-emerald-700 active:scale-[0.98] disabled:opacity-50 dark:bg-emerald-600 dark:hover:bg-emerald-700"
                   data-testid="save-test-btn"
                 >
@@ -315,6 +402,33 @@ export function ConfigEditorLayout({
           )}
         </div>
       </div>
+
+      {saveWarnings && saveWarnings.length > 0 && dismissedWarnings !== saveWarnings && !isDirty && (
+        <div
+          className="rounded-lg border border-warn-300 bg-warn-50 p-3 text-sm text-warn-900 dark:border-warn-800 dark:bg-warn-900/20 dark:text-warn-200"
+          role="status"
+          data-testid="save-warnings"
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <p className="font-medium">{t("editor.savedWithWarnings", "Saved, with warnings")}</p>
+              <ul className="mt-1 list-disc ps-5">
+                {saveWarnings.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissedWarnings(saveWarnings)}
+              className="text-xs underline"
+              data-testid="save-warnings-dismiss"
+            >
+              {t("editor.dismissWarnings", "Dismiss")}
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Tab bar */}
       <div
@@ -446,5 +560,6 @@ export function ConfigEditorLayout({
       />
 
     </div>
+    </EditorValidityContext.Provider>
   );
 }

@@ -1,3 +1,4 @@
+import { copyToClipboard } from "../../lib/copy-to-clipboard";
 import { useState, useMemo, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
@@ -686,9 +687,12 @@ function CopyButton({ text }: { text: string }) {
       type="button"
       onClick={(e) => {
         e.stopPropagation();
-        navigator.clipboard.writeText(text);
-        setCopied(true);
-        setTimeout(() => setCopied(false), 1500);
+        // The tick only once the clipboard really has the text.
+        void copyToClipboard(text).then((ok) => {
+          if (!ok) return;
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
       }}
       className="rounded p-0.5 text-muted-foreground/50 hover:text-foreground transition-colors"
       title="Copy"

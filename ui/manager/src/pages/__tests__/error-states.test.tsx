@@ -198,7 +198,7 @@ describe("page error states", () => {
       ),
     );
     renderPage(
-      "/manage/channels/does-not-exist",
+      "/manage/channels/does-not-exist?version=1",
       <ChannelDetailPage />,
       "/manage/channels/:id",
     );

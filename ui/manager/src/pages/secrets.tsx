@@ -49,6 +49,7 @@ import {
   type SecretMetadata,
 } from "@eddi/app-kit/lib/api/secrets";
 import { AllowedHostsField } from "@eddi/app-kit/components/secrets/allowed-hosts-field";
+import { AccessibleDialog } from "@eddi/app-kit/components/ui/accessible-dialog";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { EditGrantDialog } from "@/components/secrets/edit-grant-dialog";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
@@ -265,6 +266,23 @@ export function SecretsPage() {
     },
     [rotateMut],
   );
+
+  /** Close the rotate dialog and forget what was typed into it. */
+  const closeRotate = useCallback(() => {
+    setRotateTarget(null);
+    setRotateValue("");
+    setRotateVisible(false);
+  }, []);
+
+  /** Close the create dialog and forget what was typed into it. */
+  const closeCreate = useCallback(() => {
+    setShowCreate(false);
+    setNewKeyName("");
+    setNewValue("");
+    setNewDescription("");
+    setValueVisible(false);
+    setNewAllowedAgents([]);
+  }, []);
 
   const handleRotate = useCallback(() => {
     const target = rotateTarget;
@@ -1068,59 +1086,14 @@ export function SecretsPage() {
       </AlertDialog>
 
       {/* ─── Create dialog ─── */}
-      {showCreate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => {
-            setShowCreate(false);
-            setNewKeyName("");
-            setNewValue("");
-            setNewDescription("");
-            setValueVisible(false);
-            setNewAllowedAgents([]);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setShowCreate(false);
-              setNewKeyName("");
-              setNewValue("");
-              setNewDescription("");
-              setValueVisible(false);
-              setNewAllowedAgents([]);
-            }
-          }}
-        >
-          <div
-            className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="create-secret-title"
-          >
-            <div className="flex items-center justify-between">
-              <h2
-                id="create-secret-title"
-                className="text-lg font-semibold text-foreground"
-              >
-                {t("secrets.createTitle", "Add Secret")}
-              </h2>
-              <button
-                aria-label={t("common.close", "Close")}
-                onClick={() => {
-                  setShowCreate(false);
-                  setNewKeyName("");
-                  setNewValue("");
-                  setNewDescription("");
-                  setValueVisible(false);
-                  setNewAllowedAgents([]);
-                }}
-                className="rounded-lg p-1.5 text-muted-foreground hover:bg-muted"
-                data-testid="close-create-dialog"
-              >
-                <X className="h-4 w-4" />
-              </button>
-            </div>
-
+      <AccessibleDialog
+        open={showCreate}
+        onClose={closeCreate}
+        title={t("secrets.createTitle", "Add Secret")}
+        testId="create-secret-dialog"
+        closeTestId="close-create-dialog"
+      >
+        <div className="p-5">
             {/* Tenant context badge */}
             <div className="mt-3 flex items-center gap-2 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
               <KeyRound className="h-3.5 w-3.5 shrink-0" />
@@ -1186,12 +1159,7 @@ export function SecretsPage() {
                         <button
                           type="button"
                           onClick={() => {
-                            setShowCreate(false);
-                            setNewKeyName("");
-                            setNewValue("");
-                            setNewDescription("");
-                            setValueVisible(false);
-                            setNewAllowedAgents([]);
+                            closeCreate();
                             openRotate(existing);
                           }}
                           className="text-xs font-medium text-primary hover:underline"
@@ -1336,14 +1304,7 @@ export function SecretsPage() {
 
             <div className="mt-6 flex justify-end gap-2">
               <button
-                onClick={() => {
-                  setShowCreate(false);
-                  setNewKeyName("");
-                  setNewValue("");
-                  setNewDescription("");
-                  setValueVisible(false);
-                  setNewAllowedAgents([]);
-                }}
+                onClick={closeCreate}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted"
               >
                 {t("common.cancel", "Cancel")}
@@ -1365,9 +1326,8 @@ export function SecretsPage() {
                 {t("secrets.store", "Store Secret")}
               </button>
             </div>
-          </div>
         </div>
-      )}
+      </AccessibleDialog>
 
       {/* ─── Agent grant editor — changes allowedAgents, never the value ─── */}
       <EditGrantDialog
@@ -1396,30 +1356,17 @@ export function SecretsPage() {
       />
 
       {/* ─── Rotate secret dialog ─── */}
-      {rotateTarget && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => {
-            if (!rotateMut.isPending) setRotateTarget(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape" && !rotateMut.isPending) setRotateTarget(null);
-          }}
-        >
-          <div
-            className="w-full max-w-sm rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[calc(100dvh-2rem)] overflow-y-auto"
-            onClick={(e) => e.stopPropagation()}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="rotate-secret-title"
-          >
-            <h2
-              id="rotate-secret-title"
-              className="flex items-center gap-2 text-lg font-semibold text-foreground"
-            >
-              <RefreshCw className="h-5 w-5 text-warn-500" />
-              {t("secrets.rotateTitle", { key: rotateTarget.keyName, defaultValue: `Rotate "${rotateTarget.keyName}"` })}
-            </h2>
+      <AccessibleDialog
+        open={rotateTarget !== null}
+        onClose={() => {
+          if (!rotateMut.isPending) closeRotate();
+        }}
+        title={t("secrets.rotateTitle", { key: rotateTarget?.keyName ?? "", defaultValue: `Rotate "${rotateTarget?.keyName ?? ""}"` })}
+        testId="rotate-secret-dialog"
+        maxWidth="max-w-sm"
+      >
+        {rotateTarget && (
+          <div className="p-5">
             <p className="mt-2 text-sm text-muted-foreground">
               {t("secrets.rotateDesc", "Enter the new value. The existing references will continue to resolve to the updated value.")}
             </p>
@@ -1453,7 +1400,7 @@ export function SecretsPage() {
             </p>
             <div className="mt-6 flex justify-end gap-2">
               <button
-                onClick={() => setRotateTarget(null)}
+                onClick={closeRotate}
                 disabled={rotateMut.isPending}
                 className="rounded-lg px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
               >
@@ -1470,8 +1417,8 @@ export function SecretsPage() {
               </button>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </AccessibleDialog>
     </div>
   );
 }

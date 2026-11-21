@@ -16,6 +16,7 @@
     "./components/editors/*": "./src/components/editors/*.tsx",
     "./components/editors/apicalls-types": "./src/components/editors/apicalls-types.ts",
     "./components/editors/editor-value-utils": "./src/components/editors/editor-value-utils.ts",
+    "./components/editors/editor-validity": "./src/components/editors/editor-validity.ts",
     "./components/editors/llm/*": "./src/components/editors/llm/*.ts",
     "./components/editors/property-value-utils": "./src/components/editors/property-value-utils.ts",
     "./components/groups/*": "./src/components/groups/*.tsx",

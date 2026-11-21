@@ -327,7 +327,9 @@
     "runSkipConflict": "{{codes}} figure aussi dans la liste à ignorer : cette instruction ne s'exécute donc jamais pour ce code.",
     "httpCodeFilterSkipSet": "Un champ « Exécuter sur les codes » vide utilise 200, 201 ; un champ « Ignorer les codes » vide n'ignore rien.",
     "useDefaultSkipCodes": "Utiliser la liste à ignorer par défaut",
-    "scope": "Portée"
+    "scope": "Portée",
+    "retryIdempotency": "{{method}} n’est pas idempotent : une requête rejouée a peut-être déjà été traitée (commande, paiement ou message en double). N’activez les nouvelles tentatives que si le point de terminaison ignore les répétitions, par exemple grâce à une clé d’idempotence.",
+    "bodyEscapeHelp": "Les valeurs sont insérées telles quelles, sauf si le serveur est configuré pour les échapper : une valeur contenant un guillemet peut donc sortir d’une chaîne JSON. Pour l’échapper vous-même, enveloppez-la dans json:serialize sans ajouter de guillemets, par exemple {json:serialize(memory.current.input)}."
   },
   "llmEditor": {
     "unknownType": "{{type}} (personnalisé)"
@@ -914,7 +916,11 @@
     "restricted_other": "Réservée à {{count}} agents",
     "restrictedTooltip": "Autorisée pour : {{agents}}",
     "notGrantedAdmin": "Cet agent n'a pas encore accès à cette clé. Vous serez invité à l'ajouter lors du déploiement.",
-    "notGrantedNonAdmin": "Cet agent n'a pas encore accès à cette clé. Demandez à un administrateur de l'autoriser avant de déployer."
+    "notGrantedNonAdmin": "Cet agent n'a pas encore accès à cette clé. Demandez à un administrateur de l'autoriser avant de déployer.",
+    "createAllAgents": "Ce champ ne sait pas à quel agent il appartient : le secret est donc créé pour tous les agents. Restreignez-le ensuite dans Secrets.",
+    "literalNudge": "Cela ressemble à un secret saisi en clair. Il serait enregistré dans la configuration, son historique de versions et les exports. Stockez-le plutôt dans le coffre et référencez-le.",
+    "literalStoreInVault": "Stocker dans le coffre",
+    "literalKeepPlain": "Garder en clair"
   },
   "Workforce": {
     "advisor": {

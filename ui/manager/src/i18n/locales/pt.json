@@ -219,7 +219,8 @@
       "forbidden": "Você não tem permissão para ver isto.",
       "notFound": "Não encontrado — pode ter sido excluído."
     },
-    "rename": "Mudar o nome"
+    "rename": "Mudar o nome",
+    "versionLookupFailed": "Não foi possível encontrar a versão atual."
   },
   "agents": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O agente e todos os seus dados serão removidos permanentemente.",
@@ -268,7 +269,10 @@
     "deployFailedIn": "A implantação falhou em {{environment}}",
     "undeployCompatibleHint": "Conversas que uma versão compatível implantada pode continuar não são encerradas: elas passam para ela no próximo turno.",
     "sortLoadingAll": "A carregar todos os agentes para que a ordenação fique completa…",
-    "createNamingFailed": "Agente criado, mas não foi possível guardar o respetivo nome. Mude-o na página do agente."
+    "createNamingFailed": "Agente criado, mas não foi possível guardar o respetivo nome. Mude-o na página do agente.",
+    "deleted": "{{name}} excluído",
+    "confirmDeleteNamed": "Excluir {{name}}?",
+    "deleteReload": "Recarregar a versão atual"
   },
   "agentDetail": {
     "a2aDescHint": "Apresentado no Agent Card — ajuda outros agentes a entender o que este agente faz",
@@ -512,6 +516,7 @@
     "removeWorkflow": "Remover o fluxo de trabalho do agente",
     "a2aAddSkill": "Adicionar competência",
     "saveConflict": "Este agente foi alterado em outro lugar desde que você o abriu. Suas edições foram mantidas: revise-as e salve novamente.",
+    "saveWaitForVersion": "A versão mais recente ainda está carregando — salve novamente em instantes.",
     "saveBeforeDeploy": "Salve ou descarte suas alterações antes de implantar",
     "reviewChanges": "Revisar alterações",
     "unsavedSections": "Seções com alterações não salvas: {{count}}",
@@ -693,7 +698,11 @@
     "step_llm": "Modelo",
     "step_apispec": "Especificação da API",
     "step_features": "Recursos",
-    "step_review": "Revisão"
+    "step_review": "Revisão",
+    "providerResetNote": "A troca de provedor redefiniu: {{fields}}. Eles pertencem ao provedor anterior; volte e eles retornam.",
+    "resetModel": "nome do modelo",
+    "resetApiKey": "chave de API",
+    "resetBaseUrl": "URL base"
   },
   "packages": {
     "confirmDeleteDescription": "Esta ação não pode ser desfeita. O workflow e todos os seus dados serão removidos permanentemente.",
@@ -855,7 +864,10 @@
     "endReasonRetired": "Encerrada: a versão do agente foi desativada",
     "waitingForPause": "Aguardando a pausa ser salva…",
     "searchTranscriptLabel": "Pesquisar na transcrição",
-    "matchCount": "Etapas correspondentes: {{matches}}"
+    "matchCount": "Etapas correspondentes: {{matches}}",
+    "errorTitle": "Esta conversa está em estado de erro",
+    "errorNoDetail": "O mecanismo não registrou nenhum motivo. O log do servidor do turno com falha tem os detalhes.",
+    "errorStep": "Etapa {{step}}"
   },
   "resources": {
     "backToWorkflow": "Voltar ao workflow",
@@ -977,7 +989,12 @@
     "updateAgentAndSave": "Atualizar o agente e guardar",
     "keepEditing": "Continuar editando",
     "discardChanges": "Descartar alterações",
-    "deployDone": "Implantado — a alteração já está ativa"
+    "deployDone": "Implantado — a alteração já está ativa",
+    "loadingEditor": "Carregando o editor…",
+    "saveErrorReason": "Não salvo: {{reason}}",
+    "savedWithWarnings": "Salvo, com avisos",
+    "documentCheckFailed": "Este documento tem um formato que o editor não consegue verificar — corrija-o na aba JSON antes de salvar.",
+    "dismissWarnings": "Dispensar"
   },
   "rulesEditor": {
     "condCapabilityMatch": "capabilityMatch",
@@ -1652,7 +1669,11 @@
     "agentOpsFollowUpDesc": "Marcar, listar e cancelar acompanhamentos pontuais para a conversa do agente ou uma nova. Cada execução tem um teto de custo.",
     "agentOpsMaxPending": "Em espera em simultâneo",
     "agentOpsHorizon": "Horizonte (dias, máx. 90)",
-    "agentOpsCostPerFire": "Teto de custo por execução ($)"
+    "agentOpsCostPerFire": "Teto de custo por execução ($)",
+    "temperatureBlocksSave": "A temperatura deve ser um número maior ou igual a 0 — corrija antes de salvar.",
+    "grPatternBlocksSave": "Um guardrail regex-filter tem um padrão inválido (linha {{line}}) — corrija antes de salvar.",
+    "grPatternInvalid": "A linha {{line}} não é uma expressão regular válida: {{detail}}",
+    "grPatternUnchecked": "A linha {{lines}} usa uma sintaxe que esta página não consegue verificar. O servidor não verifica padrões ao salvar nem ao implantar: uma linha que ele não consegue compilar é ignorada em tempo de execução."
   },
   "outputEditor": {
     "labelPlaceholder": "Rótulo do link...",
@@ -1976,7 +1997,9 @@
     "copied": "Entrada de log copiada",
     "noMatches": "Nenhuma entrada carregada corresponde à sua pesquisa.",
     "noMatchesHint": "A pesquisa abrange apenas as entradas já carregadas aqui. Carregue entradas mais antigas ou ajuste os filtros para olhar mais atrás.",
-    "searchLogsLabel": "Pesquisar nas entradas de log carregadas"
+    "searchLogsLabel": "Pesquisar nas entradas de log carregadas",
+    "filteredCountLoaded": "{{shown}} de {{total}} entradas carregadas",
+    "filterLoadedOnly": "O filtro de nível e as contagens cobrem apenas as entradas carregadas até agora; entradas mais antigas ainda podem corresponder. Carregue entradas mais antigas para buscar mais atrás."
   },
   "secrets": {
     "loadError": "Não foi possível carregar os secrets",
@@ -2666,7 +2689,15 @@
       "title": "Testar recuperação",
       "saveFirst": "Salve esta base de conhecimento primeiro para pesquisá-la."
     },
-    "legacyIngestionNote": "Para textos avulsos. Documentos adicionados aqui não podem ser listados, atualizados nem removidos depois — para documentos que você vai manter, adicione uma fonte de Arquivos em Fontes de ingestão."
+    "legacyIngestionNote": "Para textos avulsos. Documentos adicionados aqui não podem ser listados, atualizados nem removidos depois — para documentos que você vai manter, adicione uma fonte de Arquivos em Fontes de ingestão.",
+    "statusTooLarge": "Falha: {{name}} é maior que {{max}} MB e não foi lido aqui. Uma fonte de Arquivos em Fontes de ingestão aceita arquivos maiores.",
+    "statusUploadRejected": "Falha: o servidor recusou o envio ({{detail}})",
+    "reembedWarning": "Esta base de conhecimento já tem documentos ingeridos e você alterou {{what}}. Salvar não os incorpora novamente: os vetores armazenados permanecem como estão, então as buscas podem retornar resultados ruins ou nenhum até que os documentos sejam ingeridos de novo (ou uma nova base seja criada).",
+    "reembedWarningUnknown": "Você alterou {{what}}. Se esta base de conhecimento já contém documentos — esta página não consegue saber, por exemplo, para texto ingerido manualmente antes —, salvar não os reincorpora, e as buscas podem retornar resultados ruins ou nenhum até que sejam ingeridos novamente.",
+    "reembedProvider": "o provedor de embeddings",
+    "reembedModel": "o modelo de embeddings",
+    "reembedDimension": "a dimensão do vetor",
+    "reembedChunking": "as configurações de fragmentos"
   },
   "onboarding": {
     "welcome": {
@@ -3026,7 +3057,8 @@
     "discardEditsDescription": "Uma secção da configuração ainda está a ser editada. Fechar o painel descarta as alterações feitas nela.",
     "discardEditsConfirm": "Descartar",
     "keepEditing": "Continuar a editar",
-    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre."
+    "streamInterrupted": "A ligação em direto perdeu-se. A mostrar a discussão guardada, que continua a atualizar enquanto decorre.",
+    "inputDisabledNoMembers": "Adicione pelo menos um membro a este grupo para iniciar uma discussão"
   },
   "memories": {
     "title": "Memória do utilizador",
@@ -3506,7 +3538,8 @@
     "targetsCol": "Destinos",
     "type": "Tipo",
     "unnamed": "Canal sem nome",
-    "version": "Versão"
+    "version": "Versão",
+    "duplicated": "Canal duplicado"
   },
   "channelDetail": {
     "saveSuccess": "Canal salvo",
@@ -3558,7 +3591,11 @@
     "selectGroup": "Escolher um grupo…",
     "unknownGroup": "{{id}} (não encontrado)",
     "plaintextSecret": "Guarde {{fields}} no cofre de segredos e referencie-o como ${vault:…} — credenciais em texto simples não são guardadas.",
-    "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência."
+    "plaintextStored": "Este canal guarda {{fields}} em texto simples. Mova-o para o cofre de segredos e guarde para o substituir por uma referência.",
+    "triggerReserved": "\"help\" é reservado: o bot responde com a lista de destinos, então não pode ser um gatilho.",
+    "triggerDuplicate": "Este gatilho já está neste destino.",
+    "channelIdEmpty": "Sem um ID de canal, o roteador ignora esta integração: nenhuma mensagem do Slack chega a ela.",
+    "routerRefreshNote": "O roteador de mensagens aplica as alterações em cerca de um minuto."
   },
   "hitl": {
     "loadingApprovalDetails": "Carregando detalhes de aprovação…",
