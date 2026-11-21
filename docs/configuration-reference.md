@@ -716,7 +716,9 @@ below. See [Enabling connections](connections.md#enabling-connections).
 | `eddi.groups.team-budget.admin-only-edits` | `true` | Changing a group's `teamBudget` needs `eddi-admin`; `false` lets editors change it (and so raise their own cap). See [Team Budgets](team-budgets.md#who-may-change-what) |
 | `eddi.groups.team-budget.metering-enabled` | `true` | Charge root-discussion spend to the owning team's monthly budget of groups that configure a `teamBudget` (a group without one is never metered or gated). `false` is one global kill switch: no metering, no in-run ceiling, and no admission refusals for any team. A discussion already running when it is switched keeps its team ceiling until its current leg ends; its next leg (a resume, continuation or follow-up) drops it |
 | `eddi.groups.team-budget.retention-months` | `13` | How many months of team budget history are kept |
-| `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none |
+| `eddi.org.mode` | `single` | Organizations. `single` is one org, `default`, and is today's behaviour. `multi` (several orgs on one cluster, designed in `planning/multi-tenancy-plan.md`) is not available in this release, and startup refuses it |
+| `eddi.org.resolver` | `single` | How a request's org is derived. Only `single` (always `default`) exists in this release; any other value refuses startup |
+| `eddi.tenant.default-id` | `default` | Tenant assigned when a request names none. In single mode it is also the org's quota key, so counters are not re-keyed |
 | `eddi.tenant.quota.enabled` | `false` | Per-tenant quota enforcement |
 | `eddi.tenant.quota.max-conversations-per-day` | `-1` | `-1` = unlimited |
 | `eddi.tenant.quota.max-agents-per-tenant` | `-1` | `-1` = unlimited |
