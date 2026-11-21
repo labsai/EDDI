@@ -2224,9 +2224,11 @@ your tool schemas do not cover it, not as a routine first step:
   refused not_addressed (ledger reason, metric outcome not_addressed),
   checked after the sender lists and authentication and before budgets. It
   is a noise filter, not security: In-Reply-To is unsigned at Gmail.
-  aliases: up to 20 extra addresses delivering to the mailbox (alias,
-  distribution list), unique across integrations; mail from them is refused
-  as the integration's own. Routing reads DKIM-signed headers only, first
+  aliases: up to 20 extra addresses delivering to the mailbox, unique across
+  integrations; mail from them is refused as the integration's own, and no
+  reply goes to one (or to a plus-address of one). Only forwarding aliases
+  and lists without list headers work: Google Groups or Mailman mail carries
+  List-Id/List-Unsubscribe/Precedence: list and is refused as loop:* first. Routing reads DKIM-signed headers only, first
   match wins: targets[].addresses (each an alias or a plus-address of
   address) in To, then Cc; the plus-tag (invoices+urgent@... matches the
   trigger "urgent"); targets[].mentions (handles [a-z0-9][a-z0-9_-]{0,39},
@@ -2277,7 +2279,10 @@ your tool schemas do not cover it, not as a routine first step:
   else forwarding the thread starts their own. Such a continuation keeps the
   conversation's agent even when the mail names another target by address,
   plus-tag or mention: the turn runs there, mail.route.redirectRefused names
-  the target it asked for, and both targets' allowedSenders apply. A turn without output sends
+  the target it asked for. Its sender is checked against the allowedSenders
+  of that agent's targets (any one admitting is enough), not the routed
+  target's: a plain reply routes to the default target. Only when no target
+  names the agent any more does the routed target decide. A turn without output sends
   nothing. A paused turn (HITL) sends an in-thread notice with the output so
   far and the pause reason only (no tool, no arguments); the decision brings a
   follow-up: the continuation after an approval, a plain notice after a
