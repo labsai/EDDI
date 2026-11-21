@@ -297,7 +297,7 @@ From 6.7.1, the EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak
 
 ### Behaviour changes in 6.7.1
 
-Besides the Java4Shell flag above, 6.7.1 changes four things a working 6.7.0 deployment can notice:
+Besides the Java4Shell flag above, 6.7.1 changes five things a working 6.7.0 deployment can notice:
 
 - **Tools generated from an OpenAPI spec.** A query parameter the spec does not mark as required is now an
   optional tool argument, and an empty value is left off the request instead of being sent as `?name=`. An operation
@@ -311,5 +311,11 @@ Besides the Java4Shell flag above, 6.7.1 changes four things a working 6.7.0 dep
   the characters `(`, `)` and `,` removed, so a message with stray parentheses no longer fails the turn. A behavior
   rule that matched those characters inside `unknown(...)` no longer sees them.
 - **Platform Operator.** Activation works again on a fresh install or upgrade (the `setup-api` prompt cap is
-  250,000 characters, up from 100,000), and the operator revision becomes 61, so the Manager reports that existing
+  250,000 characters, up from 100,000), and the operator revision becomes 62, so the Manager reports that existing
   operators should be upgraded.
+- **Model catalog.** The model pickers suggest Claude Fable 5.2, GPT-6.2, Gemini 4 and Kimi K3.1, and the Gemini,
+  Vertex and Mistral pickers no longer suggest `gemini-2.5-pro`, `gemini-2.5-flash`, `mistral-large-2512` or
+  `mistral-medium-3-5`; agents that name those
+  models keep running. Gemini `thinkingLevel` accepts `xhigh` on Gemini 4 Neon and Hydrogen. Cost tracking prices
+  `claude-fable-5-2` at $8 / $40 per million input / output tokens instead of the `claude-fable-5*` fallback of
+  $10 / $50.

@@ -1,12 +1,12 @@
 ## Model catalog refresh: Fable 5.2, GPT-6.2, Gemini 4, Kimi K3.1 (2026-11-19)
 
-**Repo/branch:** EDDI, `claude/model-api-support-audit-6cd65c` (rename before pushing).
+**Repo/branch:** EDDI, `chore/model-catalog-refresh` (labsai/EDDI#1494); on the 6.7 line, `fix/6.7.1-backports`.
 
 Audited the model pickers and the parameter rules against each provider's own
 docs (Anthropic models overview, OpenAI models + changelog, Gemini models +
 changelog, Mistral models, Moonshot models page, xAI release notes).
 
-- **Pickers** (`ui/packages/app-kit/src/lib/model-suggestions.ts`,
+- **Pickers** (`ui/manager/src/lib/model-suggestions.ts` on the 6.7 line,
   `llm-provider-catalog.ts`, `openai-compatible-providers.json`): added
   `claude-fable-5-2` and the limited-access `claude-mythos-5-2`/`5-1`/`5` (Anthropic list; Fable 5.2 also Vertex, Bedrock `global.` profile),
   `gpt-6.2-astra`, `gpt-6.2-sol`, `gpt-6.1-terra` (OpenAI, Azure),
