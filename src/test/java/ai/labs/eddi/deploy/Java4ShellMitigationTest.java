@@ -28,10 +28,13 @@ import static org.junit.jupiter.api.Assertions.fail;
  * VBMI accelerated path of {@code java.util.Base64.Decoder}, reachable with
  * malformed input and exploitable for code execution. EDDI decodes such input
  * before authentication (MIME encoded words and DKIM signatures of inbound
- * mail, webhook signature headers), and so does Keycloak. The base images
- * pinned here carry OpenJDK 25.0.5 (EDDI, demo) and 21.0.12.1 (Keycloak
- * 26.8.0); the fixes are 25.0.5.1 and 21.0.13.1, and Red Hat had not published
- * a fixed UBI image when this was written.
+ * mail, webhook signature headers), and so does Keycloak. The flag was added
+ * while the pinned bases carried OpenJDK 25.0.5 (EDDI, demo) and 21.0.12.1
+ * (Keycloak 26.8.0). The fixes are 25.0.5.1 and 21.0.13.1, and the pins now
+ * carry them (UBI openjdk-25-runtime 1.24-21, Temurin 25.0.5.1+2, Keycloak
+ * 26.8.2 rebuilt on 2026-11-19), confirmed with {@code java -version} on
+ * 2026-11-21. The flag and this test are removed together, in a change of their
+ * own.
  *
  * <p>
  * Dropping the flag fails nothing else: the JVM runs, every test passes, and
