@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.runtime.internal.LessonConsolidationService;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.quarkus.security.ForbiddenException;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -182,8 +183,10 @@ public class RestGroupLessons implements IRestGroupLessons {
             schedule.setCreatedBy(principal);
             schedule.setNextFire(firstFire);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(Map.of(LessonConsolidationService.METADATA_TYPE_KEY, LessonConsolidationService.METADATA_TYPE_CONSOLIDATION,
-                    LessonConsolidationService.METADATA_GROUP_ID_KEY, groupId));
+            // Tainted when a mail-started turn schedules it (email plan v3 §5.3).
+            schedule.setMetadata(TurnOrigin.stampMetadata(Map.of(LessonConsolidationService.METADATA_TYPE_KEY,
+                    LessonConsolidationService.METADATA_TYPE_CONSOLIDATION, LessonConsolidationService.METADATA_GROUP_ID_KEY, groupId),
+                    TurnOrigin.current()));
             String id = scheduleStore.createSchedule(schedule);
             return Response.status(Response.Status.CREATED)
                     .entity(Map.of("scheduleId", id, "cronExpression", schedule.getCronExpression(), "timeZone",

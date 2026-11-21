@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.client.factory;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import jakarta.ws.rs.client.ClientRequestContext;
@@ -100,5 +102,32 @@ class LoopbackCallerAuthFilterTest {
         new LoopbackCallerAuthFilter(context).filter(requestWith(headers));
 
         assertFalse(headers.containsKey(HttpHeaders.AUTHORIZATION));
+    }
+
+    /**
+     * The internal loopback (MCP admin tools, setup-api) re-enters EDDI with no
+     * credential of its own: a tainted request's inner request carries the taint
+     * too, so the receiving side refuses or taints exactly as for the outer one —
+     * anonymous included.
+     */
+    @Test
+    @DisplayName("a tainted request's loopback carries X-Eddi-Turn-Origin, also without a token")
+    void forwardsTheTaint() throws Exception {
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            filterFor(null, null).filter(requestWith(headers));
+        }
+
+        assertEquals(TurnOrigin.EMAIL, headers.getFirst(TurnOrigin.HEADER));
+        assertFalse(headers.containsKey(HttpHeaders.AUTHORIZATION));
+    }
+
+    @Test
+    @DisplayName("an untainted request's loopback carries no X-Eddi-Turn-Origin")
+    void untaintedForwardsNoTaint() {
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        filterFor(null, null).filter(requestWith(headers));
+
+        assertFalse(headers.containsKey(TurnOrigin.HEADER));
     }
 }

@@ -26,6 +26,7 @@ import ai.labs.eddi.engine.runtime.internal.TeamCadenceService;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.hitl.HitlSchedules;
 import ai.labs.eddi.engine.security.OwnershipValidator;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
@@ -270,6 +271,11 @@ public class RestScheduleStore implements IRestScheduleStore {
             // nulls it for the same reason.
             schedule.setPersistentConversationId(null);
 
+            // The origin taint (email plan v3 §5.3): a schedule a mail-started turn
+            // creates — over httpcalls, MCP or the loopback — fires tainted. Added to
+            // what the body says, never taken away by it.
+            schedule.setMetadata(TurnOrigin.stampMetadata(schedule.getMetadata(), TurnOrigin.current()));
+
             // Compute initial nextFire
             computeInitialNextFire(schedule);
 
@@ -433,6 +439,13 @@ public class RestScheduleStore implements IRestScheduleStore {
             // in-flight fire's state — re-opening a claim on a schedule that was
             // running. Carry them over from the stored row instead.
             carryOverNonEditableFields(stored, schedule);
+
+            // The origin taint is sticky: an edit keeps the stored one whatever the body
+            // says, and an edit from a tainted turn taints the schedule (email plan v3
+            // §5.3) — otherwise rewriting the message of an existing schedule would be
+            // an untainted conversation start.
+            schedule.setMetadata(TurnOrigin.stampMetadata(schedule.getMetadata(),
+                    TurnOrigin.combine(TurnOrigin.fromMetadata(stored != null ? stored.getMetadata() : null), TurnOrigin.current())));
 
             // Recompute nextFire
             computeInitialNextFire(schedule);
@@ -605,7 +618,11 @@ public class RestScheduleStore implements IRestScheduleStore {
                 // Bounded like a polled fire: unbounded, a long run outlived its claim's
                 // lease and the poller started the same schedule a second time.
                 String instanceId = pollerService.getInstanceId();
-                fireLog = SchedulePollerService.runWithinDeadline(() -> fireExecutor.fire(schedule, instanceId, attemptNumber),
+                // Read here, on the request thread: the fire runs on another one, and a
+                // manual fire from a tainted turn must run tainted (email plan v3 §5.3).
+                String origin = TurnOrigin.current();
+                fireLog = SchedulePollerService.runWithinDeadline(
+                        () -> TurnOrigin.callWith(origin, () -> fireExecutor.fire(schedule, instanceId, attemptNumber)),
                         pollerService.manualFireDeadline());
             } catch (SchedulePollerService.FireAbandonedException e) {
                 // Not released: a worker that ignores the interrupt is still acting, and
@@ -752,6 +769,9 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (guard != null) {
                 return guard;
             }
+            // The retry fires later, on the poller: a tainted turn's retry taints the
+            // schedule itself (email plan v3 §5.3), as an edit from it would.
+            stampTurnOrigin(scheduleId);
             scheduleStore.requeueDeadLetter(scheduleId);
             return Response.ok().build();
         } catch (IResourceStore.ResourceNotFoundException e) {
@@ -760,6 +780,23 @@ public class RestScheduleStore implements IRestScheduleStore {
             LOGGER.error("Failed to retry dead-letter " + scheduleId, e);
             throw new InternalServerErrorException("Failed to retry dead-letter");
         }
+    }
+
+    /**
+     * Writes the origin taint of the request into the stored schedule's metadata
+     * when the request is tainted and the schedule is not yet; otherwise nothing.
+     */
+    private void stampTurnOrigin(String scheduleId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
+        String origin = TurnOrigin.current();
+        if (origin == null) {
+            return;
+        }
+        ScheduleConfiguration stored = scheduleStore.readSchedule(scheduleId);
+        if (stored == null || origin.equals(TurnOrigin.fromMetadata(stored.getMetadata()))) {
+            return;
+        }
+        stored.setMetadata(TurnOrigin.stampMetadata(stored.getMetadata(), origin));
+        scheduleStore.updateSchedule(scheduleId, stored);
     }
 
     /**

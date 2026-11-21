@@ -6,10 +6,17 @@ package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
+import io.quarkus.arc.Arc;
+import io.quarkus.arc.ArcContainer;
+import io.quarkus.arc.InstanceHandle;
+import io.quarkus.vertx.http.runtime.CurrentVertxRequest;
+import io.vertx.ext.web.RoutingContext;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * The origin taint of a conversation: {@link #EMAIL} when its root turn came
@@ -22,8 +29,14 @@ import java.util.concurrent.Callable;
  * <li><b>set</b> where the turn is submitted — the email channel puts
  * {@link #CONTEXT_KEY} into the context of the conversation start and of every
  * turn, a group stores it on the discussion and hands it to its members, a
- * scheduled check-back carries it in the schedule's metadata, and an A2A call
- * sends it as {@link #HEADER};</li>
+ * schedule a tainted turn creates or changes carries it in its metadata, and
+ * every HTTP request a tainted turn sends ({@code httpcalls},
+ * {@code OutboundHttp}, MCP, A2A, the internal loopback) carries it as
+ * {@link #HEADER};</li>
+ * <li><b>read back</b> from an inbound request: a REST or MCP request carrying
+ * {@link #HEADER} runs tainted ({@link #current()}), so a conversation,
+ * schedule or group discussion it starts or continues is tainted too — the hop
+ * through EDDI's own API does not shed it;</li>
  * <li><b>persisted</b> on the conversation memory and on a group conversation,
  * so a HITL resume next week or a self-continuation still carries it;</li>
  * <li><b>bound</b> per turn on the {@link ResolutionPrincipal}, so it travels
@@ -58,17 +71,91 @@ public final class TurnOrigin {
      */
     private static final ThreadLocal<String> BOUND = new ThreadLocal<>();
 
+    /**
+     * Where {@link #fromRequest()} reads the inbound request's taint from; replaced
+     * only by tests ({@link #useRequestSource}).
+     */
+    private static volatile Supplier<String> requestSource = TurnOrigin::fromActiveRequest;
+
     private TurnOrigin() {
     }
 
     /**
      * The taint of the work running on this thread, or {@code null}: the bound
-     * principal's ({@link #of}) or one bound by {@link #callWith}. A turn whose
-     * user id is an email identity counts as tainted even when its conversation
-     * predates the stored taint.
+     * principal's ({@link #of}), one bound by {@link #callWith}, or the one the
+     * inbound REST or MCP request served on this thread carries in {@link #HEADER}
+     * ({@link #fromRequest()}). A turn whose user id is an email identity counts as
+     * tainted even when its conversation predates the stored taint.
      */
     public static String current() {
-        return combine(of(PRINCIPALS.current()), BOUND.get());
+        return combine(combine(of(PRINCIPALS.current()), BOUND.get()), fromRequest());
+    }
+
+    /**
+     * The taint the inbound request served on this thread carries in
+     * {@link #HEADER}, or {@code null} — also when there is no request at all (a
+     * pool thread, the poller, a unit test).
+     * <p>
+     * Taken from any caller, authenticated or not, because it can only restrict:
+     * the internal loopback carries no credential, and a request without the header
+     * is simply untainted. A header can add the taint and never remove it, since
+     * what it says is only ever {@link #combine combined} with the other sources.
+     */
+    public static String fromRequest() {
+        try {
+            return requestSource.get();
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * {@link #EMAIL} when any of the header values names it, otherwise
+     * {@code null}: a repeated, empty or unknown value never clears a known one.
+     */
+    public static String fromHeaderValues(List<String> values) {
+        if (values == null) {
+            return null;
+        }
+        for (String value : values) {
+            if (normalise(value) != null) {
+                return EMAIL;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The request's taint, read from the {@link CurrentVertxRequest} of the active
+     * request context. Quarkus REST sets it for every resource method, and the MCP
+     * HTTP transport sets it when it activates the request context for a tool call
+     * ({@code ContextSupport.requestContextActivated}).
+     */
+    private static String fromActiveRequest() {
+        ArcContainer container = Arc.container();
+        if (container == null || !container.isRunning() || !container.requestContext().isActive()) {
+            return null;
+        }
+        // Not closed: the bean is request-scoped, and closing a handle may destroy the
+        // contextual instance the rest of the request still uses.
+        InstanceHandle<CurrentVertxRequest> handle = container.instance(CurrentVertxRequest.class);
+        if (!handle.isAvailable()) {
+            return null;
+        }
+        RoutingContext routingContext = handle.get().getCurrent();
+        return routingContext == null || routingContext.request() == null
+                ? null
+                : fromHeaderValues(routingContext.request().headers().getAll(HEADER));
+    }
+
+    /**
+     * Test seam: {@link #fromRequest()} answers from {@code source} instead of the
+     * active request until the returned handle is closed.
+     */
+    static AutoCloseable useRequestSource(Supplier<String> source) {
+        Supplier<String> previous = requestSource;
+        requestSource = source;
+        return () -> requestSource = previous;
     }
 
     /**
@@ -140,6 +227,20 @@ public final class TurnOrigin {
     /** The stronger of two taints: {@link #EMAIL} when either is. */
     public static String combine(String first, String second) {
         return EMAIL.equals(first) || EMAIL.equals(second) ? EMAIL : null;
+    }
+
+    /**
+     * {@code metadata} (a schedule's) with {@link #CONTEXT_KEY} set to
+     * {@code origin}, as a new mutable map; the argument itself when {@code origin}
+     * is {@code null}, so a taint already there is never removed.
+     */
+    public static Map<String, Object> stampMetadata(Map<String, Object> metadata, String origin) {
+        if (origin == null) {
+            return metadata;
+        }
+        Map<String, Object> stamped = metadata == null ? new LinkedHashMap<>() : new LinkedHashMap<>(metadata);
+        stamped.put(CONTEXT_KEY, origin);
+        return stamped;
     }
 
     /**

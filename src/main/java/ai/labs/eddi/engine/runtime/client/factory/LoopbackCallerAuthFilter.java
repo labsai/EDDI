@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.runtime.client.factory;
 
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.client.ClientRequestContext;
@@ -66,6 +67,13 @@ public class LoopbackCallerAuthFilter implements ClientRequestFilter {
 
     @Override
     public void filter(ClientRequestContext requestContext) {
+        // The origin taint (email plan v3 §5.3) re-enters with the request, so the
+        // inner request is refused or tainted exactly as the outer one would be. It
+        // needs no credential: it only restricts.
+        String origin = TurnOrigin.current();
+        if (origin != null) {
+            requestContext.getHeaders().putSingle(TurnOrigin.HEADER, origin);
+        }
         if (requestContext.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
             // An explicit header wins. Nothing sets one today, but a caller that does
             // has said what it wants and should not be silently overridden.

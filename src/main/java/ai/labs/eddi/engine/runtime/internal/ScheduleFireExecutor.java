@@ -235,6 +235,25 @@ public class ScheduleFireExecutor {
      * @return the completed fire log
      */
     public ScheduleFireLog fire(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
+        // A schedule a tainted turn created or changed carries the origin taint (email
+        // plan v3 §5.3), and so does all its fire does — every branch, the team cadence
+        // discussion and the conversation strategies alike — on top of whatever taint
+        // the thread already has (a manual fire from a tainted request).
+        String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
+        if (origin == null) {
+            return fireBound(schedule, instanceId, attemptNumber);
+        }
+        try {
+            return TurnOrigin.callWith(origin, () -> fireBound(schedule, instanceId, attemptNumber));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            // fireBound records every failure as a fire log; nothing checked escapes it.
+            throw new IllegalStateException(e);
+        }
+    }
+
+    private ScheduleFireLog fireBound(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Map<String, Object> md = schedule.getMetadata();
         if (HitlSchedules.isHitlTimeout(md)) {
             // HITL timeout fast-path — isolate exceptions and record a fire log for

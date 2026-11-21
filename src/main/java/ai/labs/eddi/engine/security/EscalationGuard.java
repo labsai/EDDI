@@ -26,6 +26,12 @@ import java.util.Set;
  * The save-time check in {@code EmailAgentToolsInspector} is best effort on top
  * of it, never instead of it.
  * <p>
+ * The same lists are asked on the receiving side, for a request that carries
+ * the taint in {@link TurnOrigin#HEADER}: {@code TaintedRequestFilter} for REST
+ * and {@code McpErrorResultInterceptor} for EDDI's MCP tools. Starting or
+ * continuing a conversation, a schedule or a group discussion is not refused:
+ * what a tainted turn starts that way is tainted itself ({@link TurnOrigin}).
+ * <p>
  * Whether a turn is tainted is {@link TurnOrigin#currentIsEmail()}; outside a
  * tainted turn nothing here refuses anything.
  * <p>
@@ -49,7 +55,9 @@ public final class EscalationGuard {
             // later phases of the email control plan, guarded before they exist
             "update_email_roles", "update_email_send_out", "decide_held_email",
             // HITL decisions (McpHitlTools)
-            "resume_conversation", "approve_group_phase", "submit_group_human_input");
+            "resume_conversation", "approve_group_phase", "submit_group_human_input",
+            // team handoff decisions (McpTeamHandoffTools): "a human decision"
+            "accept_team_handoff", "decline_team_handoff");
 
     /**
      * EDDI's own control endpoints a tainted turn may never write to. Segments are
@@ -62,7 +70,16 @@ public final class EscalationGuard {
             List.of("agents", "*", "resume", "**"),
             List.of("groups", "*", "conversations", "*", "approve", "**"),
             List.of("groups", "*", "conversations", "*", "human-input", "**"),
-            List.of("administration", "spend-control-changes", "*", "approve", "**"));
+            // Oversight: sample verdicts, earned autonomy, the analytics rebuild and
+            // every spend-control decision — the paths AgentOriginatedRequestFilter
+            // keeps from any agent's httpcall.
+            List.of("hitl", "samples", "**"),
+            List.of("hitl", "autonomy", "**"),
+            List.of("hitl", "analytics", "rebuild", "**"),
+            List.of("administration", "spend-control-changes", "**"),
+            // Team handoff decisions.
+            List.of("groupstore", "groups", "*", "workspace", "handoffs", "*", "accept", "**"),
+            List.of("groupstore", "groups", "*", "workspace", "handoffs", "*", "decline", "**"));
 
     /** Methods that cannot change anything; never refused. */
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS", "TRACE");

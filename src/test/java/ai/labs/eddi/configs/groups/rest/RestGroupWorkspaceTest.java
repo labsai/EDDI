@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
@@ -27,6 +29,7 @@ import org.mockito.ArgumentCaptor;
 import java.security.Principal;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -215,6 +218,29 @@ class RestGroupWorkspaceTest {
 
         assertEquals(500, response.getStatus());
         verify(scheduleStore).deleteSchedule("sched-9");
+    }
+
+    /**
+     * Email plan v3 §5.3: MCP {@code create_team_cadence} (or the REST endpoint)
+     * from a tainted turn adds a cadence whose schedule carries the taint, so its
+     * discussions start tainted; an untainted request's carries none.
+     */
+    @Test
+    @DisplayName("a cadence added for a tainted request fires tainted")
+    void addCadence_fromTaintedRequest_taintsTheSchedule() throws Exception {
+        workspace();
+        when(scheduleStore.createSchedule(any())).thenReturn("sched-9");
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals(201, rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 1", "UTC", null, 3, 2.50)).getStatus());
+        }
+        assertEquals(201, rest.addCadence(GROUP_ID, new CadenceRequest("0 9 * * 2", "UTC", null, 3, 2.50)).getStatus());
+
+        ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(scheduleStore, times(2)).createSchedule(captor.capture());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(captor.getAllValues().get(0).getMetadata()));
+        assertEquals(TeamCadenceService.METADATA_TYPE_CADENCE, captor.getAllValues().get(0).getMetadata().get(TeamCadenceService.METADATA_TYPE_KEY));
+        assertNull(TurnOrigin.fromMetadata(captor.getAllValues().get(1).getMetadata()));
     }
 
     @Test

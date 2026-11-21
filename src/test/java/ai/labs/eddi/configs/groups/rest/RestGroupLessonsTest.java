@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.rest;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IRestGroupLessons.ScheduleRequest;
@@ -123,6 +125,23 @@ class RestGroupLessonsTest {
     }
 
     // === scheduling ===
+
+    /**
+     * Email plan v3 §5.3: a consolidation a tainted turn schedules fires tainted.
+     */
+    @Test
+    void schedulingForATaintedRequestTaintsTheSchedule() throws Exception {
+        when(schedules.createSchedule(any())).thenReturn("sched-1");
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals(201, rest.schedule(GROUP, new ScheduleRequest("0 3 * * 1", "Europe/Vienna")).getStatus());
+        }
+
+        var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(schedules).createSchedule(captor.capture());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(captor.getValue().getMetadata()));
+        assertEquals(GROUP, captor.getValue().getMetadata().get(LessonConsolidationService.METADATA_GROUP_ID_KEY));
+    }
 
     @Test
     void schedulingCreatesACronScheduleCarryingTheMarkerAndTheGroup() throws Exception {

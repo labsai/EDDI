@@ -29,6 +29,8 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import java.util.Map;
+import org.mockito.InOrder;
 
 import java.net.URI;
 import java.util.HashMap;
@@ -37,6 +39,8 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.inOrder;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -55,6 +59,7 @@ class ApiCallExecutorEscalationGuardTest {
     private IHttpClient httpClient;
     private ApiCallExecutor executor;
     private IConversationMemory memory;
+    private IRequest request;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -71,7 +76,7 @@ class ApiCallExecutorEscalationGuardTest {
                 mock(IDataFactory.class), mock(SecretPropertyVault.class));
         memory = mock(IConversationMemory.class);
         when(memory.getCurrentStep()).thenReturn(mock(IWritableConversationStep.class));
-        var request = mock(IRequest.class);
+        request = mock(IRequest.class);
         var response = mock(IResponse.class);
         when(request.toMap()).thenReturn(new HashMap<>());
         when(httpClient.newRequest(any(URI.class), any())).thenReturn(request);
@@ -123,5 +128,37 @@ class ApiCallExecutorEscalationGuardTest {
         executor.execute(call("GET", "/channelstore/channels/abc/email-senders"), memory, new HashMap<>(), "https://graph.example.com");
 
         verify(httpClient, times(2)).newRequest(any(URI.class), any());
+    }
+
+    /**
+     * The sending half of the start-path routes: a tainted turn's httpcall to
+     * {@code POST /agents/{id}/start} or {@code /schedulestore/schedules} is made —
+     * starting is not refused — and carries {@code X-Eddi-Turn-Origin: email}, set
+     * after the configured headers, so the EDDI that receives it taints what it
+     * starts.
+     */
+    @Test
+    @DisplayName("a tainted turn's call to start a conversation or create a schedule is made, and carries X-Eddi-Turn-Origin")
+    void taintedStartCarriesTheHeader() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        var start = call("POST", "/agents/aabbccddee1122334455aa01/start");
+        start.getRequest().setHeaders(new HashMap<>(Map.of(TurnOrigin.HEADER, "none")));
+
+        executor.execute(start, memory, new HashMap<>(), "https://graph.example.com");
+        executor.execute(call("POST", "/schedulestore/schedules"), memory, new HashMap<>(), "https://graph.example.com");
+
+        verify(httpClient, times(2)).newRequest(any(URI.class), any());
+        InOrder order = inOrder(request);
+        order.verify(request).setHttpHeader(TurnOrigin.HEADER, "none");
+        order.verify(request).setHttpHeader(TurnOrigin.HEADER, TurnOrigin.EMAIL);
+        verify(request, times(2)).setHttpHeader(TurnOrigin.HEADER, TurnOrigin.EMAIL);
+    }
+
+    @Test
+    @DisplayName("an untainted turn's calls carry no X-Eddi-Turn-Origin")
+    void untaintedCarriesNoHeader() throws Exception {
+        executor.execute(call("POST", "/agents/aabbccddee1122334455aa01/start"), memory, new HashMap<>(), "https://graph.example.com");
+
+        verify(request, never()).setHttpHeader(eq(TurnOrigin.HEADER), any());
     }
 }
