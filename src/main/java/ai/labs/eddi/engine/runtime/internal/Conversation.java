@@ -690,7 +690,8 @@ public class Conversation implements IConversation {
         if (!parsedAttachments.isEmpty()) {
             var extraction = AttachmentContextExtractor.resolveAndGuard(
                     parsedAttachments, propertiesHandler.getAttachmentStore(),
-                    conversationMemory.getConversationId(), propertiesHandler.getMaxAttachmentsPerTurn());
+                    conversationMemory.getConversationId(), propertiesHandler.getMaxAttachmentsPerTurn(),
+                    propertiesHandler.getAttachmentPartResolver());
 
             if (!extraction.errors().isEmpty()) {
                 extraction.errors().forEach(err -> LOGGER.warnv("Attachment issue in conversation {0}: {1}",

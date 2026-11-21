@@ -6,6 +6,8 @@ package ai.labs.eddi.engine.attachments;
 
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
+import ai.labs.eddi.engine.documents.DocumentStructureService;
+import ai.labs.eddi.engine.documents.SelectorException;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -38,6 +40,16 @@ import java.util.stream.Collectors;
  * accepts a selector only when it is an entry of the listing it is given, and
  * re-checks with {@link #mayRead} that the source can still read the file, so a
  * stale or hand-built listing cannot widen access.
+ * <p>
+ * A <strong>part</strong> of a file ({@code report.pdf#u3},
+ * {@code report.pdf#p4-9}, or a part recorded on the conversation's steps) is
+ * shared as a selector whose {@code pages} are authoritative: a unit label is
+ * resolved to pages under the policy's split by
+ * {@link DocumentStructureService#resolve} before the grant, so the receiver
+ * gets the sender's pages whatever its own split. The grant is on the
+ * <em>root</em>, so a receiver of a part may read the whole file through
+ * {@code readAttachment}; the selector limits what is sent, not what may be
+ * read.
  * <p>
  * Each share grants the target read access to the file's <em>root</em> — access
  * to a stored view is decided on its root — counts
@@ -76,11 +88,12 @@ public class AttachmentShareService {
      * text never says whether a file it cannot name exists elsewhere.
      */
     public enum Refusal {
-        NOT_FOUND("not found"), AMBIGUOUS("ambiguous"), PART("parts of a file cannot be shared yet; share the whole file"), MIME_TYPE(
-                "this kind of file may not be shared"), DEPTH("files cannot be passed on any further from here"), FILES_PER_SHARE(
-                        "too many files for one share"), SHARES_PER_TURN("too many files shared this turn"), TARGET(
-                                "files can only be shared with a conversation started for it"), GRANT_FAILED(
-                                        "the file could not be shared"), UNAVAILABLE("file sharing is not available");
+        NOT_FOUND("not found"), AMBIGUOUS("ambiguous"), PART("parts of this file cannot be shared; share the whole file"), PART_INVALID(
+                "this part of the file cannot be shared"), MIME_TYPE(
+                        "this kind of file may not be shared"), DEPTH("files cannot be passed on any further from here"), FILES_PER_SHARE(
+                                "too many files for one share"), SHARES_PER_TURN("too many files shared this turn"), TARGET(
+                                        "files can only be shared with a conversation started for it"), GRANT_FAILED(
+                                                "the file could not be shared"), UNAVAILABLE("file sharing is not available");
 
         private final String text;
 
@@ -103,14 +116,24 @@ public class AttachmentShareService {
     private final IAttachmentStore directStore;
     private final MeterRegistry meterRegistry;
     private final AuditLedgerService auditLedger;
+    private final Instance<DocumentStructureService> structureInstance;
+    private final DocumentStructureService directStructure;
 
     @Inject
     public AttachmentShareService(Instance<IAttachmentStore> attachmentStore, MeterRegistry meterRegistry,
-            AuditLedgerService auditLedger) {
+            AuditLedgerService auditLedger, Instance<DocumentStructureService> structureService) {
         this.storeInstance = attachmentStore;
         this.directStore = null;
         this.meterRegistry = meterRegistry;
         this.auditLedger = auditLedger;
+        this.structureInstance = structureService;
+        this.directStructure = null;
+    }
+
+    /** Without document structure: every part of a file is refused. */
+    public AttachmentShareService(Instance<IAttachmentStore> attachmentStore, MeterRegistry meterRegistry,
+            AuditLedgerService auditLedger) {
+        this(attachmentStore, meterRegistry, auditLedger, (Instance<DocumentStructureService>) null);
     }
 
     /**
@@ -125,10 +148,31 @@ public class AttachmentShareService {
      *            the ledger, or {@code null} for no audit entries
      */
     public AttachmentShareService(IAttachmentStore attachmentStore, MeterRegistry meterRegistry, AuditLedgerService auditLedger) {
+        this(attachmentStore, meterRegistry, auditLedger, (DocumentStructureService) null);
+    }
+
+    /**
+     * Direct construction with document structure, so parts of a file can be
+     * shared.
+     *
+     * @param structureService
+     *            resolves parts; {@code null} refuses every part
+     */
+    public AttachmentShareService(IAttachmentStore attachmentStore, MeterRegistry meterRegistry, AuditLedgerService auditLedger,
+            DocumentStructureService structureService) {
         this.storeInstance = null;
         this.directStore = attachmentStore;
         this.meterRegistry = meterRegistry;
         this.auditLedger = auditLedger;
+        this.structureInstance = null;
+        this.directStructure = structureService;
+    }
+
+    private DocumentStructureService structure() {
+        if (structureInstance != null) {
+            return structureInstance.isResolvable() ? structureInstance.get() : null;
+        }
+        return directStructure;
     }
 
     private IAttachmentStore store() {
@@ -180,10 +224,12 @@ public class AttachmentShareService {
     /**
      * Resolves what a model wrote to entries of {@code listing}: an exact display
      * name first, then a 1-based entry number. A name that matches several entries
-     * is refused with their numbers; a name with a part suffix ({@code #u3},
-     * {@code #p4-9}) is refused, since parts cannot be shared yet. Anything else is
-     * "not found" — the same text whether the file exists somewhere else or
-     * nowhere, so the answer is no oracle.
+     * is refused with their numbers. A name with a part suffix ({@code #u3},
+     * {@code #p4-9}) on a listed file resolves to an entry for that part — its unit
+     * is turned into pages only when it is shared ({@link #share}, under the
+     * policy's split) — or is refused when this service has no document structure.
+     * Anything else is "not found" — the same text whether the file exists
+     * somewhere else or nowhere, so the answer is no oracle.
      */
     public Resolution resolveNames(ConversationListing listing, List<String> names) {
         ConversationListing list = listing != null ? listing : ConversationListing.empty();
@@ -196,13 +242,15 @@ public class AttachmentShareService {
         for (String raw : names) {
             SelectorText.Parsed parsed = SelectorText.parse(raw, displayNames);
             String requested = echo(raw);
-            if (parsed.hasPart()) {
+            if (parsed.hasPart() && structure() == null) {
                 refuse(refused, requested, Refusal.PART);
                 continue;
             }
             List<Integer> matches = new ArrayList<>();
             for (int i = 0; i < displayNames.size(); i++) {
-                if (!parsed.name().isEmpty() && displayNames.get(i).equals(parsed.name())) {
+                // A part is only of a root: a recorded part or view has no parts.
+                if (!parsed.name().isEmpty() && displayNames.get(i).equals(parsed.name())
+                        && !(parsed.hasPart() && list.entries().get(i).derived())) {
                     matches.add(i);
                 }
             }
@@ -222,6 +270,15 @@ public class AttachmentShareService {
                 continue;
             }
             ConversationListing.Entry entry = list.entries().get(index);
+            if (parsed.hasPart()) {
+                if (entry.derived()) {
+                    refuse(refused, requested, Refusal.NOT_FOUND);
+                    continue;
+                }
+                AttachmentSelector part = new AttachmentSelector(entry.rootRef(), parsed.pages(), parsed.unit(), null);
+                entry = new ConversationListing.Entry(ConversationListing.partName(entry.displayName(), part), part, entry.mimeType(),
+                        entry.sizeBytes(), false, entry.rootRef());
+            }
             if (!resolved.contains(entry)) {
                 resolved.add(entry);
             }
@@ -258,11 +315,13 @@ public class AttachmentShareService {
      * <p>
      * Source and target are derived by the <strong>caller</strong> (server code),
      * never by a model. The listing must have been built for the source
-     * conversation. Per selector, in order: it must be an entry of {@code listing},
-     * not withheld by the source, and its root readable by the source
-     * ({@link #mayRead} — so a stale listing widens nothing); a whole file (parts
-     * cannot be shared yet); of an allowed MIME type; the source must be below
-     * {@code maxDepth}; the call below {@code maxFilesPerShare}; the turn below
+     * conversation. Per selector, in order: it must be an entry of {@code listing}
+     * or a part of a listed root, not withheld by the source, and its root readable
+     * by the source ({@link #mayRead} — so a stale listing widens nothing); a part
+     * must resolve ({@link DocumentStructureService#resolve} under
+     * {@link SharePolicy#split()}: given pages are checked and kept, a unit becomes
+     * pages); of an allowed MIME type; the source must be below {@code maxDepth};
+     * the call below {@code maxFilesPerShare}; the turn below
      * {@code maxSharesPerTurn}. Then the root is granted to the target, the share
      * is counted against both caps, metered and audited. A selector repeated in the
      * same call is shared once.
@@ -325,7 +384,9 @@ public class AttachmentShareService {
                 refuse(refused, UNKNOWN_FILE, Refusal.NOT_FOUND);
                 continue;
             }
-            Optional<ConversationListing.Entry> listed = list.entryForRoot(selector.storageRef());
+            // A recorded part or view is an entry of its own; any other selector must be
+            // of a listed root.
+            Optional<ConversationListing.Entry> listed = list.entryFor(selector).or(() -> list.entryForRoot(selector.storageRef()));
             // A file the listing does not hold has no name the model may see.
             String name = listed.map(ConversationListing.Entry::displayName).orElse(UNKNOWN_FILE);
             if (listed.isEmpty()) {
@@ -344,16 +405,29 @@ public class AttachmentShareService {
                 refuse(refused, UNKNOWN_FILE, Refusal.NOT_FOUND);
                 continue;
             }
+            ConversationListing.Entry e = listed.get();
+            AttachmentSelector effective = e.selector();
             if (!selector.isWholeFile()) {
-                refuse(refused, name, Refusal.PART);
-                continue;
+                DocumentStructureService structure = structure();
+                if (structure == null) {
+                    refuse(refused, name, Refusal.PART);
+                    continue;
+                }
+                try {
+                    // The one place a unit becomes pages; given pages are kept as sent.
+                    effective = structure.resolve(e.rootRef(), sourceConversationId, selector.unit(), selector.pages(), selector.split(),
+                            policy.split());
+                } catch (SelectorException ex) {
+                    countRefusal(Refusal.PART_INVALID);
+                    refused.add(new ShareResult.Refused(name, ex.getMessage()));
+                    continue;
+                }
+                if (!e.derived() || !effective.equals(e.selector())) {
+                    ConversationListing.Entry root = list.entryForRoot(e.rootRef()).orElse(e);
+                    e = new ConversationListing.Entry(ConversationListing.partName(root.displayName(), effective), effective,
+                            root.mimeType(), root.sizeBytes(), e.derived(), e.rootRef());
+                }
             }
-            Optional<ConversationListing.Entry> entry = list.entryFor(selector);
-            if (entry.isEmpty()) {
-                refuse(refused, name, Refusal.NOT_FOUND);
-                continue;
-            }
-            ConversationListing.Entry e = entry.get();
             if (!policy.allowsMimeType(e.mimeType())) {
                 refuse(refused, name, Refusal.MIME_TYPE);
                 continue;
@@ -384,7 +458,7 @@ public class AttachmentShareService {
             }
             sharedByThisCall++;
             policy.sharesThisTurn().increment();
-            shared.add(new ShareResult.Shared(e.selector(), e.displayName(), e.mimeType(), e.sizeBytes()));
+            shared.add(new ShareResult.Shared(effective, e.displayName(), e.mimeType(), e.sizeBytes()));
             if (meterRegistry != null) {
                 meterRegistry.counter(SHARED_METER, "path", reason.tag()).increment();
             }
