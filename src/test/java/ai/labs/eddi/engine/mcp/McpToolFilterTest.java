@@ -92,11 +92,12 @@ class McpToolFilterTest {
     // --- Edge cases ---
 
     @Test
-    void test_nullToolName_throwsNpe() {
+    void test_nullToolName_isHidden() {
+        // MCP_TOOLS is the key set of McpToolTiers.TIERS, which answers false for a
+        // null name (Set.of(...) used to throw). Either way the tool is not exposed.
         var toolInfo = mock(ToolInfo.class);
         when(toolInfo.name()).thenReturn(null);
-        assertThrows(NullPointerException.class,
-                () -> filter.test(toolInfo, (FilterContext) null));
+        assertFalse(filter.test(toolInfo, (FilterContext) null));
     }
 
     @Test

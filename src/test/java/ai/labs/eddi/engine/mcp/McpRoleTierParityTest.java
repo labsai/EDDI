@@ -63,17 +63,24 @@ import static ai.labs.eddi.engine.mcp.McpRoles.EDITOR;
 import static ai.labs.eddi.engine.mcp.McpRoles.USER;
 import static ai.labs.eddi.engine.mcp.McpRoles.VIEWER;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 
 /**
- * The MCP role matrix, measured rather than read: every one of the 107 tools is
- * invoked with authorization on, once per single-role identity, and the test
- * records whether the role gate let the call through. The result must equal the
- * documented tier of the tool, and each tier must equal the
- * {@code @RolesAllowed} of the REST resource it mirrors.
+ * The MCP role matrix, measured rather than read: every tool is invoked with
+ * authorization on, once per single-role identity, and the test records whether
+ * the role gate let the call through. The result must equal the tool's entry in
+ * {@link McpToolTiers}, which every tool's gate reads, and each tier must equal
+ * the {@code @RolesAllowed} of the REST resource it mirrors.
+ * <p>
+ * Because the gates read {@link McpToolTiers}, "measured equals the map" alone
+ * would compare the map with itself. So the sets below are a second,
+ * hand-written record of which tool belongs to which tier, and
+ * {@link #tierMapEqualsTheHandWrittenRecord()} requires the map to equal it:
+ * moving a tool to another tier takes an edit in both places.
  * <p>
  * This replaces three divergences: MCP agent setup open to editors while REST
  * setup is admin-only, MCP deploy admin-only while REST deploy admits editors,
@@ -90,7 +97,7 @@ class McpRoleTierParityTest {
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
             McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
             McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
-            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class};
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class, McpVersionTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -104,8 +111,8 @@ class McpRoleTierParityTest {
     private static final Set<String> ADMIN_ONLY_TOOLS = Set.of("setup_agent", "create_api_agent", "create_schedule", "list_schedules",
             "read_schedule", "delete_schedule", "fire_schedule_now", "retry_failed_schedule", "upsert_user_memory", "delete_user_memory",
             "delete_all_user_memories", "delete_user_data", "export_user_data",
-            // unscoped: the shared server log buffer (see readAgentLogsScoping)
-            "read_agent_logs",
+            // the running build (McpVersionTools)
+            "get_eddi_version",
             // a team's cap is a spending lever (IRestGroupBudget#setCurrentMonthCap,
             // IRestTeamBudgets#transfer)
             "adjust_team_budget", "transfer_team_budget",
@@ -126,10 +133,22 @@ class McpRoleTierParityTest {
     /**
      * Conversation diagnostics: admin plus the MCP observer role. Their REST
      * counterparts (audit, logs) are admin-only; see {@link McpRoles#OBSERVE}.
-     * read_agent_logs is listed under ADMIN_ONLY_TOOLS because the measured call
-     * passes no conversationId; readAgentLogsScoping covers the scoped read.
+     * read_agent_logs is here under the union of its tiers; see
+     * {@link #MEASURED_WITHOUT_ARGUMENTS}.
      */
-    private static final Set<String> OBSERVE_TOOLS = Set.of("read_audit_trail");
+    private static final Set<String> OBSERVE_TOOLS = Set.of("read_agent_logs", "read_audit_trail");
+
+    /**
+     * Tools whose tier depends on their arguments. {@link McpToolTiers} lists them
+     * under the union of their tiers, but the matrix calls every tool with null
+     * arguments, which takes the narrowest branch. The value is the tier that
+     * branch admits; a dedicated test covers the other branch.
+     * <p>
+     * read_agent_logs without a conversationId reads the shared server log buffer,
+     * which is admin-only; readAgentLogsScoping covers the conversation-scoped
+     * read.
+     */
+    private static final Map<String, List<String>> MEASURED_WITHOUT_ARGUMENTS = Map.of("read_agent_logs", McpRoles.ADMIN_ONLY);
 
     private static final Set<String> DOCS_TOOLS = Set.of("list_docs", "read_docs");
 
@@ -243,16 +262,45 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(119, measured.size());
+        assertEquals(McpToolTiers.TIERS.keySet(), measured.keySet(), "the measured tools are exactly the tools with a tier");
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
-            Set<String> expected = new HashSet<>(expectedTier(entry.getKey()));
+            Set<String> expected = new HashSet<>(
+                    MEASURED_WITHOUT_ARGUMENTS.getOrDefault(entry.getKey(), McpToolTiers.of(entry.getKey())));
             if (!expected.equals(entry.getValue())) {
                 violations.add(entry.getKey() + ": admitted " + new TreeSet<>(entry.getValue()) + ", expected " + new TreeSet<>(expected));
             }
         }
         assertTrue(violations.isEmpty(), String.join("\n", violations));
+    }
+
+    @Test
+    @DisplayName("McpToolTiers equals the hand-written tier record — a tier change needs both edits")
+    void tierMapEqualsTheHandWrittenRecord() {
+        var violations = new ArrayList<String>();
+        for (var entry : McpToolTiers.TIERS.entrySet()) {
+            if (!new HashSet<>(expectedTier(entry.getKey())).equals(new HashSet<>(entry.getValue()))) {
+                violations.add(entry.getKey() + ": McpToolTiers says " + new TreeSet<>(entry.getValue()) + ", the record says "
+                        + new TreeSet<>(expectedTier(entry.getKey())));
+            }
+        }
+        assertTrue(violations.isEmpty(), String.join("\n", violations));
+        // every hand-written name is a real tool, so the record cannot hold stale
+        // entries
+        var named = new TreeSet<String>();
+        for (Set<String> set : List.of(HITL_TOOLS, ADMIN_ONLY_TOOLS, CONVERSE_TOOLS, OBSERVE_TOOLS, DOCS_TOOLS, OVERSIGHT_TOOLS,
+                BUDGET_READ_TOOLS)) {
+            named.addAll(set);
+        }
+        named.removeAll(McpToolTiers.TIERS.keySet());
+        assertEquals(Set.of(), named, "names in the record that have no tier");
+    }
+
+    @Test
+    @DisplayName("an unknown tool name has no tier, so its gate fails closed")
+    void unknownToolHasNoTier() {
+        assertThrows(IllegalArgumentException.class, () -> McpToolTiers.of("no_such_tool"));
     }
 
     @Test
