@@ -24,9 +24,18 @@ still said 107.
 - **`McpRoleTierParityTest`** now measures all 120 tools, `McpVersionTools` included. It
   asserts two things: the measured matrix equals the map, and the map equals the test's own
   hand-written tier record (`tierMapEqualsTheHandWrittenRecord`). Since the gates read the map,
-  the first check alone would compare the map with itself. Mutation-checked: moving
-  `delete_user_data` to `CONVERSE` in the map fails only the new record check, and putting
-  `deploy_agent`'s gate back to a `CONVERSE` literal fails the measured check.
+  the first check alone would compare the map with itself. The record lists every tier
+  explicitly, AUTHOR included. AUTHOR used to be the fall-through, which would have let a new
+  tool filed under AUTHOR in the map pass with no record entry. The record must name exactly
+  the map's tools, each once. A third test, `eachGateNamesItsOwnTool`, scans the tool sources
+  and requires every tool to have exactly one `McpToolTiers.of(…)` gate, naming itself.
+  Mutation-checked, one test failing for each:
+  - moving `delete_user_data` to `CONVERSE` in the map;
+  - putting `deploy_agent`'s gate back to a `CONVERSE` literal;
+  - dropping `deploy_agent` from the record;
+  - pointing `deploy_agent`'s gate at `undeploy_agent`.
+- **Test messages** in `McpToolFilterTest` and `McpToolFilterCoverageTest` now point at
+  `McpToolTiers` rather than `MCP_TOOLS`.
 - **`docs/mcp-server.md`**: the Tool Filtering and Authorization sections, and the Role Mapping
   note, now say where tiers are assigned and how to add a tool.
 

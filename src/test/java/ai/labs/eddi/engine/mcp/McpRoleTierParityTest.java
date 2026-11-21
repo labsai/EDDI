@@ -46,6 +46,8 @@ import org.junit.jupiter.api.Test;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.security.Principal;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -56,6 +58,8 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import static ai.labs.eddi.engine.mcp.McpRoles.ADMIN;
 import static ai.labs.eddi.engine.mcp.McpRoles.APPROVER;
@@ -160,9 +164,47 @@ class McpRoleTierParityTest {
     private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
     /**
-     * Everything else is AUTHOR: McpAdminTools minus schedules, config reads, group
-     * configuration.
+     * Authoring: McpAdminTools minus schedules, config reads, group configuration,
+     * and the authoring tools of the smaller classes. Listed explicitly, not as a
+     * fall-through: a tool that is in no set has no expected tier, so a new tool
+     * filed under AUTHOR in McpToolTiers cannot pass without an entry here.
      */
+    private static final Set<String> AUTHOR_TOOLS = Set.of(
+            // McpConversationTools: config reads
+            "list_agents", "list_agent_configs", "get_agent",
+            // McpAdminTools
+            "deploy_agent", "undeploy_agent", "upgrade_conversations", "get_deployment_status", "list_workflows", "create_agent",
+            "delete_agent", "update_agent", "read_workflow", "read_resource", "update_resource", "create_resource", "delete_resource",
+            "apply_agent_changes", "list_agent_resources", "list_agent_triggers", "create_agent_trigger", "update_agent_trigger",
+            "delete_agent_trigger", "list_channel_integrations", "read_channel_integration", "create_channel_integration",
+            "update_channel_integration", "delete_channel_integration",
+            // McpGroupTools
+            "list_groups", "read_group", "create_group", "update_group", "delete_group", "add_team_task", "list_team_backlog",
+            "list_group_templates", "create_group_from_template",
+            // McpTeamHandoffTools, McpTeamCadenceTools
+            "list_team_handoffs", "accept_team_handoff", "decline_team_handoff", "list_team_cadences", "create_team_cadence",
+            "delete_team_cadence", "read_lesson_consolidation", "schedule_lesson_consolidation", "unschedule_lesson_consolidation",
+            // McpAgentTestTools, McpRatingTools, McpAlertTools, McpPricingTools
+            "run_agent_tests", "get_agent_test_run", "list_agent_test_runs", "cancel_agent_test_run", "list_conversation_ratings",
+            "summarize_conversation_ratings", "count_ratings_needing_attention", "review_conversation_rating", "list_alert_events",
+            "acknowledge_alert_event", "read_model_prices");
+
+    private static final Map<List<String>, Set<String>> RECORD = recordByTier();
+
+    private static Map<List<String>, Set<String>> recordByTier() {
+        Map<List<String>, Set<String>> record = new LinkedHashMap<>();
+        record.put(McpRoles.HITL, HITL_TOOLS);
+        record.put(McpRoles.ADMIN_ONLY, ADMIN_ONLY_TOOLS);
+        record.put(McpRoles.CONVERSE, CONVERSE_TOOLS);
+        record.put(McpRoles.OBSERVE, OBSERVE_TOOLS);
+        record.put(McpRoles.DOCS, DOCS_TOOLS);
+        record.put(McpRoles.OVERSIGHT, OVERSIGHT_TOOLS);
+        record.put(McpRoles.BUDGET_READ, BUDGET_READ_TOOLS);
+        record.put(McpRoles.AUTHOR, AUTHOR_TOOLS);
+        return record;
+    }
+
+    /** The hand-written tier of {@code tool}, or null when the record has none. */
     private static List<String> expectedTier(String tool) {
         if (HITL_TOOLS.contains(tool)) {
             return McpRoles.HITL;
@@ -185,7 +227,10 @@ class McpRoleTierParityTest {
         if (BUDGET_READ_TOOLS.contains(tool)) {
             return McpRoles.BUDGET_READ;
         }
-        return McpRoles.AUTHOR;
+        if (AUTHOR_TOOLS.contains(tool)) {
+            return McpRoles.AUTHOR;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------------ harness
@@ -280,21 +325,76 @@ class McpRoleTierParityTest {
     void tierMapEqualsTheHandWrittenRecord() {
         var violations = new ArrayList<String>();
         for (var entry : McpToolTiers.TIERS.entrySet()) {
-            if (!new HashSet<>(expectedTier(entry.getKey())).equals(new HashSet<>(entry.getValue()))) {
+            List<String> recorded = expectedTier(entry.getKey());
+            if (recorded == null) {
+                violations.add(entry.getKey() + ": has a tier in McpToolTiers but none in this test's record");
+            } else if (!new HashSet<>(recorded).equals(new HashSet<>(entry.getValue()))) {
                 violations.add(entry.getKey() + ": McpToolTiers says " + new TreeSet<>(entry.getValue()) + ", the record says "
-                        + new TreeSet<>(expectedTier(entry.getKey())));
+                        + new TreeSet<>(recorded));
             }
         }
         assertTrue(violations.isEmpty(), String.join("\n", violations));
-        // every hand-written name is a real tool, so the record cannot hold stale
-        // entries
+
+        // The record names every tool exactly once, and only real tools
         var named = new TreeSet<String>();
-        for (Set<String> set : List.of(HITL_TOOLS, ADMIN_ONLY_TOOLS, CONVERSE_TOOLS, OBSERVE_TOOLS, DOCS_TOOLS, OVERSIGHT_TOOLS,
-                BUDGET_READ_TOOLS)) {
-            named.addAll(set);
+        var duplicates = new TreeSet<String>();
+        for (Set<String> set : RECORD.values()) {
+            for (String tool : set) {
+                if (!named.add(tool)) {
+                    duplicates.add(tool);
+                }
+            }
         }
-        named.removeAll(McpToolTiers.TIERS.keySet());
-        assertEquals(Set.of(), named, "names in the record that have no tier");
+        assertEquals(Set.of(), duplicates, "names in more than one tier of the record");
+        assertEquals(new TreeSet<>(McpToolTiers.TIERS.keySet()), named, "the record and McpToolTiers must name the same tools");
+    }
+
+    /**
+     * Each gate reads its own tool's tier. Nothing else would notice a gate in
+     * deploy_agent that reads {@code McpToolTiers.of("undeploy_agent")} while both
+     * happen to share a tier, so the sources are scanned: every
+     * {@code McpToolTiers.of("x")} must sit in the body of the {@code @Tool} named
+     * x, and every tool must have exactly one.
+     */
+    @Test
+    @DisplayName("every tool's gate reads its own tool name — once")
+    void eachGateNamesItsOwnTool() throws Exception {
+        Pattern lookup = Pattern.compile("McpToolTiers\\.of\\(\"([a-z_]+)\"\\)");
+        Pattern explicitName = Pattern.compile("^@Tool\\((?:[^()]|\\([^()]*\\))*?\\bname\\s*=\\s*\"([a-z_]+)\"", Pattern.DOTALL);
+        Pattern signature = Pattern.compile("public\\s+[\\w<>\\[\\], ?]+\\s+(\\w+)\\s*\\(");
+        var violations = new ArrayList<String>();
+        var gatesPerTool = new TreeMap<String, Integer>();
+        for (Class<?> toolClass : TOOL_CLASSES) {
+            String src = Files.readString(Path.of("src/main/java", toolClass.getName().replace('.', '/') + ".java"));
+            List<Integer> starts = new ArrayList<>();
+            Matcher tool = Pattern.compile("@Tool\\(").matcher(src);
+            while (tool.find()) {
+                starts.add(tool.start());
+            }
+            for (int i = 0; i < starts.size(); i++) {
+                String segment = src.substring(starts.get(i), i + 1 < starts.size() ? starts.get(i + 1) : src.length());
+                Matcher sig = signature.matcher(segment);
+                assertTrue(sig.find(), "no method after an @Tool in " + toolClass.getSimpleName());
+                Matcher named = explicitName.matcher(segment.substring(0, sig.start()));
+                String name = named.find() ? named.group(1) : sig.group(1);
+                Matcher gate = lookup.matcher(segment.substring(sig.start()));
+                int count = 0;
+                while (gate.find()) {
+                    count++;
+                    if (!gate.group(1).equals(name)) {
+                        violations.add(name + " reads the tier of " + gate.group(1));
+                    }
+                }
+                gatesPerTool.put(name, count);
+            }
+        }
+        assertEquals(McpToolTiers.TIERS.keySet(), gatesPerTool.keySet(), "the scan must see every tool");
+        gatesPerTool.forEach((name, count) -> {
+            if (count != 1) {
+                violations.add(name + " has " + count + " McpToolTiers gates, expected 1");
+            }
+        });
+        assertTrue(violations.isEmpty(), String.join("\n", violations));
     }
 
     @Test
