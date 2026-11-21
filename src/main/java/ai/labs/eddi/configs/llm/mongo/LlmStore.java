@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.configs.llm.mongo;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.groups.HandoffConfigValidator;
+import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.hitl.HitlConfigValidation;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.properties.SecretScopeValidation;
@@ -15,9 +17,12 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
+import ai.labs.eddi.modules.llm.impl.CascadeCredentialPolicy;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
+import ai.labs.eddi.modules.llm.pricing.ExplicitPrices;
 import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
 import ai.labs.eddi.modules.llm.tools.ToolDisplayConfigValidator;
@@ -27,6 +32,9 @@ import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * @author ginccc
  */
@@ -35,9 +43,21 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
 
     private static final Logger LOGGER = Logger.getLogger(LlmStore.class);
 
+    /**
+     * Knows the registered guardrail types, so a mistyped input or output guardrail
+     * is refused at save time. Null (the two-argument constructor) skips that
+     * check.
+     */
+    private final GuardrailService guardrailService;
+
     @Inject
-    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder, GuardrailService guardrailService) {
         super(storageFactory, "llms", documentBuilder, LlmConfiguration.class);
+        this.guardrailService = guardrailService;
+    }
+
+    public LlmStore(IResourceStorageFactory storageFactory, IDocumentBuilder documentBuilder) {
+        this(storageFactory, documentBuilder, null);
     }
 
     @Override
@@ -62,13 +82,21 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
      * strict-mode approval implications only log a warning. Field paths in the
      * messages keep the legacy {@code langchain.task[i]} prefix.
      */
-    private static void validateTaskToolApprovals(LlmConfiguration content) {
+    private void validateTaskToolApprovals(LlmConfiguration content) {
         if (content == null || content.tasks() == null) {
             return;
         }
+        List<String> credentialProblems = CascadeCredentialPolicy.problems(content);
+        refuseOrWarn(credentialProblems, "Invalid modelCascade: ");
         for (int i = 0; i < content.tasks().size(); i++) {
             LlmConfiguration.Task task = content.tasks().get(i);
             if (task != null) {
+                validateGuardrailTypes(task, "langchain.task[" + i + "]");
+                // Not a rejection (a free model is legitimate), but the author learns at save
+                // time.
+                for (String warning : ExplicitPrices.zeroPriceWarnings(task)) {
+                    LOGGER.warnf("langchain.task[%d]: %s", i, warning);
+                }
                 String fieldPath = "langchain.task[" + i + "].toolApprovals";
                 HitlConfigValidation.validateToolApprovals(task.getToolApprovals(), fieldPath);
                 ToolCallGuardrailConfigValidator.validate(task.getToolCallGuardrails(), "langchain.task[" + i + "].toolCallGuardrails");
@@ -85,6 +113,43 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 // responseSchema, no name collision).
                 AnswerToolConfigValidator.validate(task, "langchain.task[" + i + "]");
             }
+        }
+    }
+
+    /**
+     * An unknown input or output guardrail type is refused: it would otherwise be
+     * skipped at run time and silently disable the protection the author asked for.
+     */
+    private void validateGuardrailTypes(LlmConfiguration.Task task, String taskPath) {
+        if (guardrailService == null) {
+            return;
+        }
+        List<String> problems = new ArrayList<>();
+        for (String problem : guardrailService.unknownTypeProblems(GuardrailService.LIST_INPUT, task.getInputGuardrails())) {
+            problems.add(taskPath + "." + problem);
+        }
+        for (String problem : guardrailService.unknownTypeProblems("outputGuardrails", task.getOutputGuardrails())) {
+            problems.add(taskPath + "." + problem);
+        }
+        refuseOrWarn(problems, "");
+    }
+
+    /**
+     * An interactive save (REST, MCP, the Manager) refuses these problems. An
+     * import, sync, upgrade or duplicate ({@link LenientConfigWrite}) writes a
+     * config that exists already, so it only logs one WARN per problem — the hard
+     * failure for it is at deploy.
+     */
+    private static void refuseOrWarn(List<String> problems, String prefix) {
+        if (problems.isEmpty()) {
+            return;
+        }
+        if (!LenientConfigWrite.isActive()) {
+            throw new IllegalArgumentException(prefix + String.join("; ", problems));
+        }
+        for (String problem : problems) {
+            LOGGER.warnf("LLM config import, sync, upgrade or copy accepted with a problem that a new save would refuse: %s",
+                    LogSanitizer.sanitize(problem));
         }
     }
 

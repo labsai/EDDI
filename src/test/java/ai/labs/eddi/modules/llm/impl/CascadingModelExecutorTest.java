@@ -526,6 +526,60 @@ class CascadingModelExecutorTest {
             assertEquals("val2", result.get("key2"));
             assertEquals(2, result.size());
         }
+
+        @Test
+        @DisplayName("a step of another provider type inherits no credential, endpoint or header — but keeps the tuning")
+        void crossProviderDropsCredentials() {
+            var base = Map.of("apiKey", "sk-openai", "baseUrl", "https://api.openai.com", "customHeaders", "X-Org=1", "region", "eu", "temperature",
+                    "0.2", "timeout", "30000");
+            var step = Map.of("modelName", "claude");
+
+            var result = CascadingModelExecutor.mergeParams(base, step, "openai", "anthropic");
+
+            assertNull(result.get("apiKey"));
+            assertNull(result.get("baseUrl"));
+            assertNull(result.get("customHeaders"));
+            assertNull(result.get("region"));
+            for (String bound : List.of("guardrailId", "guardrailVersion", "cachedContentName", "customParameters", "serviceVersion", "location")) {
+                assertNull(CascadingModelExecutor.mergeParams(Map.of(bound, "x", "temperature", "0.2"), Map.of(), "bedrock", "gemini").get(bound),
+                        bound);
+            }
+            assertEquals("0.2", result.get("temperature"));
+            assertEquals("30000", result.get("timeout"));
+            assertEquals("claude", result.get("modelName"));
+        }
+
+        @Test
+        @DisplayName("an allow-list, not a deny-list: account-bound keys a deny-list missed, and keys no builder reads yet, stay behind")
+        void crossProviderInheritsOnlyTheAllowList() {
+            // Azure deployment and api version, Vertex project/publisher, an end-user id,
+            // provider-specific options, and a key invented after this test was written.
+            for (String bound : List.of("deploymentName", "apiVersion", "project", "publisher", "user", "safetyIdentifier", "logitBias",
+                    "additionalModelRequestFields", "promptCacheKey", "requestMetadata", "labels", "someFutureAccountId")) {
+                assertNull(CascadingModelExecutor.mergeParams(Map.of(bound, "x"), Map.of(), "azure-openai", "anthropic").get(bound), bound);
+            }
+            var neutral = Map.of("temperature", "0.2", "topP", "0.9", "maxTokens", "512", "timeout", "30000", "logRequests", "true", "model",
+                    "m", "systemMessage", "s");
+            assertEquals(neutral, CascadingModelExecutor.mergeParams(neutral, Map.of(), "openai", "anthropic"));
+            assertTrue(CascadeCredentialPolicy.mayCrossProviders("MaxOutputTokens"), "case-insensitive");
+            assertFalse(CascadeCredentialPolicy.mayCrossProviders(null));
+        }
+
+        @Test
+        @DisplayName("the step's own credentials survive a provider change")
+        void crossProviderKeepsStepCredentials() {
+            var result = CascadingModelExecutor.mergeParams(Map.of("apiKey", "sk-openai"), Map.of("apiKey", "sk-anthropic"), "openai", "anthropic");
+            assertEquals("sk-anthropic", result.get("apiKey"));
+        }
+
+        @Test
+        @DisplayName("the same provider type (any case) or a step without a type inherits everything")
+        void sameProviderInherits() {
+            var base = Map.of("apiKey", "sk-openai", "baseUrl", "https://api.openai.com");
+            assertEquals("sk-openai", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", "OpenAI").get("apiKey"));
+            assertEquals("sk-openai", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", null).get("apiKey"));
+            assertEquals("https://api.openai.com", CascadingModelExecutor.mergeParams(base, Map.of(), "openai", " openai ").get("baseUrl"));
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════

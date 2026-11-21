@@ -25,6 +25,7 @@ import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.IRestConnectionStore;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.dictionary.IDictionaryStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.llm.ILlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.output.IOutputStore;
@@ -2007,7 +2008,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     private List<URI> createNewLlm(List<LlmConfiguration> configs, ImportTransaction transaction) {
-        return configs.stream().map(c -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction)).toList();
+        // An imported config exists already: the save-time checks of an LLM config only
+        // warn here.
+        return configs.stream()
+                .map(c -> LenientConfigWrite.call(() -> createResourceDirect(ILlmStore.class, c, IRestLlmStore.resourceURI, transaction)))
+                .toList();
     }
 
     private List<URI> createNewProperties(List<PropertySetterConfiguration> configs, ImportTransaction transaction) {
@@ -2041,7 +2046,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
 
     private URI updateLangchain(LlmConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {
         IRestLlmStore store = getRestResourceStore(IRestLlmStore.class);
-        return updateTracked(ILlmStore.class, IRestLlmStore.resourceURI, localId, localVersion, config, store::updateLlm, transaction);
+        // Entered inside the callback: updateTracked also calls it for the
+        // compensation.
+        return updateTracked(ILlmStore.class, IRestLlmStore.resourceURI, localId, localVersion, config,
+                (id, version, document) -> LenientConfigWrite.call(() -> store.updateLlm(id, version, document)), transaction);
     }
 
     private URI updateProperty(PropertySetterConfiguration config, String localId, Integer localVersion, ImportTransaction transaction) {

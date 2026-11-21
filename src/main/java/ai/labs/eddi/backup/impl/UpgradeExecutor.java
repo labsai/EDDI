@@ -28,6 +28,7 @@ import ai.labs.eddi.configs.dictionary.IDictionaryStore;
 import ai.labs.eddi.configs.dictionary.IRestDictionaryStore;
 import ai.labs.eddi.configs.dictionary.model.DictionaryConfiguration;
 import ai.labs.eddi.configs.llm.ILlmStore;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
 import ai.labs.eddi.configs.mcpcalls.IMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
@@ -982,7 +983,7 @@ public class UpgradeExecutor {
             // it would replace a credential with the marker. Recorded as this resource
             // failing, like the check above.
             RedactionMarkerGuard.requireNoneIfRedactedType(content);
-            IResourceId created = store.create(content);
+            IResourceId created = LenientConfigWrite.call(() -> store.create(content));
             URI createdUri = URI.create(ops.resourceUri() + created.getId() + ops.versionQueryParam() + created.getVersion());
             DocumentDescriptor descriptor = createDocumentDescriptor(createdUri);
             descriptor.setName(source.name());
@@ -1054,7 +1055,7 @@ public class UpgradeExecutor {
             case "langchain" -> new ExtensionStoreOps<>(
                     LlmConfiguration.class,
                     ILlmStore.class,
-                    (id, version, config) -> getStore(IRestLlmStore.class).updateLlm(id, version, config),
+                    (id, version, config) -> LenientConfigWrite.call(() -> getStore(IRestLlmStore.class).updateLlm(id, version, config)),
                     IRestLlmStore.resourceURI,
                     IRestLlmStore.versionQueryParam);
             case "property" -> new ExtensionStoreOps<>(

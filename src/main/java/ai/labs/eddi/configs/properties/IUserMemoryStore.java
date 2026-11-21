@@ -412,6 +412,27 @@ public interface IUserMemoryStore {
      */
     List<UserMemoryEntry> getAllEntries(String userId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * One page of a user's entries, <b>newest first</b> (by last update, then by
+     * id, so entries updated at the same instant keep their places and no entry is
+     * skipped or repeated between two pages of an unchanged store), read in the
+     * store so that only the page is loaded. Scoped exactly as
+     * {@link #getAllEntries}: the user's own entries, nothing else. The default
+     * reads everything and slices; both datastores override it, with an index on
+     * that order.
+     *
+     * @param offset
+     *            entries to skip (negative counts as 0)
+     * @param limit
+     *            most entries to return (below 1 returns none)
+     */
+    default List<UserMemoryEntry> getEntriesPage(String userId, int offset, int limit) throws IResourceStore.ResourceStoreException {
+        List<UserMemoryEntry> all = getAllEntries(userId);
+        int from = Math.min(Math.max(offset, 0), all.size());
+        int to = limit < 1 ? from : (int) Math.min((long) from + limit, all.size());
+        return List.copyOf(all.subList(from, to));
+    }
+
     // === GDPR ===
 
     /**

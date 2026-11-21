@@ -104,7 +104,7 @@ class McpErrorResultInterceptorTest {
     @DisplayName("isErrorPayload matches every errorJson builder and nothing else")
     void isErrorPayload() {
         assertTrue(McpErrorResultInterceptor.isErrorPayload(McpToolUtils.errorJson("m")));
-        assertTrue(McpErrorResultInterceptor.isErrorPayload(McpToolUtils.errorJson("m", new RuntimeException("c"))));
+        assertTrue(McpErrorResultInterceptor.isErrorPayload(McpToolUtils.errorJson("m: c")));
         assertTrue(McpErrorResultInterceptor.isErrorPayload(McpToolUtils.errorJson("m", "NOT_FOUND", null)));
         assertFalse(McpErrorResultInterceptor.isErrorPayload("{\"status\":\"RESUMED\"}"));
         assertFalse(McpErrorResultInterceptor.isErrorPayload("Document not found: x"));

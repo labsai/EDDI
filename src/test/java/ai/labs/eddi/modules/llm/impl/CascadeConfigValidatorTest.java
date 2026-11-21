@@ -243,12 +243,27 @@ class CascadeConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("cross-provider step without its own apiKey — validates (warns only)")
-    void crossProviderStepMissingApiKey_ok() {
+    @DisplayName("cross-provider step without its own apiKey — refused: credentials never cross provider types")
+    void crossProviderStepMissingApiKey_refused() {
         // task provider is openai (with apiKey); step 2 is anthropic without its own
         // key
         var c = enabled(List.of(step("openai", 0.7), step("anthropic", null)));
+        var ex = assertThrows(WorkflowConfigurationException.class, () -> CascadeConfigValidator.validate(configWith(c, Map.of("apiKey", "k"))));
+        assertTrue(ex.getMessage().contains("step 1") && ex.getMessage().contains("anthropic"), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("cross-provider step of a keyless provider (ollama) needs no apiKey")
+    void crossProviderKeylessStep_ok() {
+        var c = enabled(List.of(step("openai", 0.7), step("ollama", null)));
         assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("apiKey", "k"))));
+    }
+
+    @Test
+    @DisplayName("cross-provider step is fine when the task carries no secret to inherit")
+    void crossProviderNoTaskSecret_ok() {
+        var c = enabled(List.of(step("openai", 0.7), step("anthropic", null)));
+        assertDoesNotThrow(() -> CascadeConfigValidator.validate(configWith(c, Map.of("temperature", "0.2"))));
     }
 
     @Test

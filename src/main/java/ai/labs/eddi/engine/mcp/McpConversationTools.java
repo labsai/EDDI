@@ -183,7 +183,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(statuses);
         } catch (Exception e) {
             LOGGER.error("MCP list_agents failed", e);
-            return errorJson("Failed to list agents", e);
+            return toolFailure(LOGGER, "list_agents", "Failed to list agents", e);
         }
     }
 
@@ -194,13 +194,13 @@ public class McpConversationTools {
                                             defaultValue = "20") Integer limit) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
-            int limitInt = limit != null ? limit : 20;
+            int limitInt = clampLimit(limit, 20, MAX_PAGE_SIZE);
             String filterStr = filter != null ? filter : "";
             List<DocumentDescriptor> descriptors = agentStore.readAgentDescriptors(filterStr, 0, limitInt, "");
             return jsonSerialization.serialize(descriptors);
         } catch (Exception e) {
             LOGGER.error("MCP list_agent_configs failed", e);
-            return errorJson("Failed to list Agent configs", e);
+            return toolFailure(LOGGER, "list_agent_configs", "Failed to list Agent configs", e);
         }
     }
 
@@ -229,7 +229,7 @@ public class McpConversationTools {
                     result.conversationUri().toString(), "agentId", agentId, "environment", env.name()));
         } catch (Exception e) {
             LOGGER.error("MCP create_conversation failed for Agent " + agentId, e);
-            return errorJson("Failed to create conversation", e);
+            return toolFailure(LOGGER, "create_conversation", "Failed to create conversation", e);
         }
     }
 
@@ -283,7 +283,7 @@ public class McpConversationTools {
             return skippedResultJson(conversationId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP talk_to_agent failed for Agent " + agentId + " conversation " + conversationId, e);
-            return errorJson("Failed to talk to agent", e);
+            return toolFailure(LOGGER, "talk_to_agent", "Failed to talk to agent", e);
         }
     }
 
@@ -355,7 +355,7 @@ public class McpConversationTools {
             return skippedResultJson(convId, e.state());
         } catch (Exception e) {
             LOGGER.error("MCP chat_with_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to chat with agent", e);
+            return toolFailure(LOGGER, "chat_with_agent", "Failed to chat with agent", e);
         }
     }
 
@@ -418,37 +418,49 @@ public class McpConversationTools {
                 snapshot.setConversationOutputs(filteredOutputs);
             }
 
-            return jsonSerialization.serialize(snapshot);
+            return bounded(jsonSerialization.serialize(snapshot), MAX_RESULT_CHARS,
+                    "The conversation is too large for one result, so only the newest steps and outputs are returned (totalConversationSteps says "
+                            + "how many there are). Ask for less: currentStepOnly=true, returningFields (e.g. 'input,output,actions'), "
+                            + "or read_conversation_log with a logSize.",
+                    "conversationSteps", "conversationOutputs");
         } catch (ForbiddenException e) {
             return accessDenied("read_conversation", conversationId);
         } catch (NotFoundException e) {
             return conversationNotFound("read_conversation", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation", e);
+            return toolFailure(LOGGER, "read_conversation", "Failed to read conversation", e);
         }
     }
 
     @Tool(name = "read_conversation_log", description = "Read conversation log as formatted text. "
             + "Returns the conversation history in a human-readable format. "
-            + "This is the preferred tool for reviewing what was said in a conversation.")
+            + "This is the preferred tool for reviewing what was said in a conversation. "
+            + "The result is bounded: the newest 50 steps by default (at most 500), and a text over 100,000 characters is cut "
+            + "with a '[truncated: true …]' line at the end.")
     public String readConversationLog(@ToolArg(description = "Conversation ID (required)") String conversationId,
-                                      @ToolArg(description = "Number of recent steps to include (default: all)", required = false) Integer logSize) {
+                                      @ToolArg(description = "Number of recent steps to include (default: 50, max: 500)",
+                                               required = false) Integer logSize) {
         requireAnyRole(identity, authEnabled, McpRoles.CONVERSE);
         if (conversationId == null || conversationId.isBlank())
             return errorJson("conversationId is required");
         try {
             conversationAccessGuard.requireConversationOwner(conversationId);
 
-            var result = conversationService.readConversationLog(conversationId, "text", logSize != null && logSize > 0 ? logSize : null);
-            return result.content().toString();
+            // Never "everything": the newest steps up to a bound, and the text itself is
+            // cut at MAX_RESULT_CHARS with an explicit marker, so a long conversation
+            // cannot flood the caller's context.
+            int steps = clampLimit(logSize, DEFAULT_LOG_STEPS, MAX_LOG_STEPS);
+            var result = conversationService.readConversationLog(conversationId, "text", steps);
+            return boundedText(result.content().toString(), MAX_RESULT_CHARS,
+                    "Ask for fewer steps with a smaller logSize (the newest steps are returned; at most " + MAX_LOG_STEPS + ").");
         } catch (ForbiddenException e) {
             return accessDenied("read_conversation_log", conversationId);
         } catch (NotFoundException e) {
             return conversationNotFound("read_conversation_log", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_conversation_log failed for conversation " + conversationId, e);
-            return errorJson("Failed to read conversation log", e);
+            return toolFailure(LOGGER, "read_conversation_log", "Failed to read conversation log", e);
         }
     }
 
@@ -465,7 +477,7 @@ public class McpConversationTools {
         if (agentId == null || agentId.isBlank())
             return errorJson("agentId is required");
         try {
-            int limitInt = Math.min(limit != null ? limit : 20, 100);
+            int limitInt = clampLimit(limit, 20, 100);
             int ver = agentVersion != null ? agentVersion : 0;
 
             // Parse ConversationState enum if provided
@@ -483,7 +495,7 @@ public class McpConversationTools {
             try {
                 convStore = restInterfaceFactory.get(IRestConversationStore.class);
             } catch (RestInterfaceFactory.RestInterfaceFactoryException e) {
-                return errorJson("Failed to get conversation store", e);
+                return toolFailure(LOGGER, "list_conversations", "Failed to get conversation store", e);
             }
 
             // Ownership filtering is enforced by the conversation store itself:
@@ -503,7 +515,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP list_conversations failed for Agent " + agentId, e);
-            return errorJson("Failed to list conversations", e);
+            return toolFailure(LOGGER, "list_conversations", "Failed to list conversations", e);
         }
     }
 
@@ -545,7 +557,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP get_agent failed for Agent " + agentId, e);
-            return errorJson("Failed to get agent", e);
+            return toolFailure(LOGGER, "get_agent", "Failed to get agent", e);
         }
     }
 
@@ -606,7 +618,7 @@ public class McpConversationTools {
             return conversationNotFound("read_agent_logs", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_agent_logs failed", e);
-            return errorJson("Failed to read Agent logs", e);
+            return toolFailure(LOGGER, "read_agent_logs", "Failed to read Agent logs", e);
         }
     }
 
@@ -639,7 +651,7 @@ public class McpConversationTools {
             return conversationNotFound("read_audit_trail", conversationId);
         } catch (Exception e) {
             LOGGER.error("MCP read_audit_trail failed for conversation " + conversationId, e);
-            return errorJson("Failed to read audit trail", e);
+            return toolFailure(LOGGER, "read_audit_trail", "Failed to read audit trail", e);
         }
     }
 
@@ -746,7 +758,7 @@ public class McpConversationTools {
             return jsonSerialization.serialize(result);
         } catch (Exception e) {
             LOGGER.error("MCP discover_agents failed", e);
-            return errorJson("Failed to discover agents", e);
+            return toolFailure(LOGGER, "discover_agents", "Failed to discover agents", e);
         }
     }
 
@@ -844,7 +856,7 @@ public class McpConversationTools {
             return errorJson("Agent for intent '" + intent + "' is not ready yet; retry shortly", "UNAVAILABLE", null);
         } catch (Exception e) {
             LOGGER.errorv("MCP chat_managed failed for intent={0}, userId={1}: {2}", intent, userId, e.getMessage());
-            return errorJson("Failed to chat via managed agent", e);
+            return toolFailure(LOGGER, "chat_managed", "Failed to chat via managed agent", e);
         }
     }
 
@@ -975,7 +987,7 @@ public class McpConversationTools {
                 }
                 if (triggerEx instanceof IResourceStore.ResourceNotFoundException) {
                     userConversationStore.deleteUserConversation(intent, userId);
-                    throw new RuntimeException("Agent trigger for intent '" + intent + "' no longer exists");
+                    throw new CallerFacingException("Agent trigger for intent '" + intent + "' no longer exists");
                 }
                 throw triggerEx; // Rethrow transient DB errors
             }
@@ -1006,7 +1018,7 @@ public class McpConversationTools {
         // Create a new conversation from the Agent trigger
         AgentTriggerConfiguration trigger = agentTriggerStore.readAgentTrigger(intent);
         if (trigger == null || trigger.getAgentDeployments().isEmpty()) {
-            throw new RuntimeException("No Agent trigger configured for intent: " + intent);
+            throw new CallerFacingException("No Agent trigger configured for intent: " + intent);
         }
 
         // A random deployment, as RestAgentManagement.selectAgentDeployment picks it:
@@ -1083,7 +1095,7 @@ public class McpConversationTools {
                         if (snapshot != null) {
                             responseFuture.complete(snapshot);
                         } else {
-                            responseFuture.completeExceptionally(new RuntimeException("Agent returned null response"));
+                            responseFuture.completeExceptionally(new CallerFacingException("Agent returned null response"));
                         }
                     }
 
@@ -1100,6 +1112,9 @@ public class McpConversationTools {
             // Unwrap the skip signal so callers can catch it directly.
             if (e.getCause() instanceof ConversationSkippedException cse) {
                 throw cse;
+            }
+            if (e.getCause() instanceof CallerFacingException refusal) {
+                throw refusal;
             }
             throw e;
         }

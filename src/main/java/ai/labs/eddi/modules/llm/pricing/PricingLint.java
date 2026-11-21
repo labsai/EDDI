@@ -87,6 +87,9 @@ public final class PricingLint {
                     : PriceOverride.NONE;
             check("tool summarizer", taskType, model, own, catalog, suffix, warnings);
         }
+        // An explicit 0 on a hosted provider: priced, so not "unpriced", but its spend
+        // is invisible.
+        warnings.addAll(ExplicitPrices.zeroPriceWarnings(task));
         return new ArrayList<>(warnings);
     }
 

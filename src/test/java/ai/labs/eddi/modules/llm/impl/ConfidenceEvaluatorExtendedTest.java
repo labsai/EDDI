@@ -4,9 +4,14 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import io.micrometer.core.instrument.Metrics;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
@@ -44,17 +49,38 @@ class ConfidenceEvaluatorExtendedTest {
         }
 
         @Test
-        @DisplayName("should clamp judge confidence to 0.0-1.0")
-        void clampsJudgeConfidence() {
+        @DisplayName("a judge confidence of 85 or 85% is 85 percent; a fraction above 1, a negative or above 100 escalates")
+        void judgeConfidenceAboveOne() {
+            assertEquals(0.85, judgeSays("{\"confidence\": 85}").confidence(), 0.001);
+            assertEquals(0.85, judgeSays("{\"confidence\": \"85%\"}").confidence(), 0.001);
+            assertEquals(0.85, judgeSays("{\"confidence\": 8.5e-1}").confidence(), 0.001);
+            assertEquals(1.0, judgeSays("{\"confidence\": 1}").confidence(), 0.001);
+            // 1.5 (a 1-5 scale), 400, -3 and a word are no confidence: escalate
+            for (String unusable : List.of("{\"confidence\": 1.5}", "{\"confidence\": 400}", "{\"confidence\": -3}",
+                    "{\"confidence\": \"high\"}")) {
+                assertEquals(0.0, judgeSays(unusable).confidence(), 0.001, unusable);
+            }
+        }
+
+        @Test
+        @DisplayName("fallbackWhenJudgeUnavailable=true restores the heuristic for a failed judge")
+        void optInHeuristic() {
+            var heuristic = new LlmConfiguration.HeuristicConfig();
+            heuristic.setFallbackWhenJudgeUnavailable(true);
             ChatModel judgeModel = mock(ChatModel.class);
-            var aiMessage = AiMessage.from("{\"confidence\": 1.5}");
-            var chatResponse = ChatResponse.builder().aiMessage(aiMessage).build();
+            when(judgeModel.chat(any(List.class))).thenThrow(new RuntimeException("API error"));
+
+            var result = ConfidenceEvaluator.evaluateWithJudge("A reasonably long response that should get decent heuristic confidence",
+                    judgeModel, heuristic);
+
+            assertEquals(0.8, result.confidence(), 0.01);
+        }
+
+        private ConfidenceEvaluator.EvaluationResult judgeSays(String reply) {
+            ChatModel judgeModel = mock(ChatModel.class);
+            var chatResponse = ChatResponse.builder().aiMessage(AiMessage.from(reply)).build();
             when(judgeModel.chat(any(List.class))).thenReturn(chatResponse);
-
-            var result = ConfidenceEvaluator.evaluateWithJudge(
-                    "Some response", judgeModel);
-
-            assertEquals(1.0, result.confidence(), 0.01);
+            return ConfidenceEvaluator.evaluateWithJudge("Some response", judgeModel);
         }
 
         @Test
@@ -68,8 +94,9 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            // Falls back to heuristic — long response with no hedging → 0.8
-            assertEquals(0.8, result.confidence(), 0.01);
+            // No usable verdict: fails towards escalation, not the heuristic's accepting
+            // 0.8
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test
@@ -81,8 +108,8 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            // Falls back to heuristic
-            assertEquals(0.8, result.confidence(), 0.01);
+            // A judge that threw: escalate
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test
@@ -97,7 +124,7 @@ class ConfidenceEvaluatorExtendedTest {
             var result = ConfidenceEvaluator.evaluateWithJudge(
                     "A reasonably long response that should get decent heuristic confidence", judgeModel);
 
-            assertEquals(0.8, result.confidence(), 0.01);
+            assertEquals(0.0, result.confidence(), 0.01);
         }
 
         @Test
@@ -238,6 +265,65 @@ class ConfidenceEvaluatorExtendedTest {
                     "{\"response\": \"hello\", \"confidence\": 0.6}", null);
 
             assertEquals(0.6, result.confidence(), 0.01);
+        }
+    }
+    @Nested
+    @DisplayName("Unusable confidences — counted and escalated")
+    class Unusable {
+
+        private SimpleMeterRegistry registry;
+
+        @BeforeEach
+        void register() {
+            registry = new SimpleMeterRegistry();
+            Metrics.addRegistry(registry);
+        }
+
+        @AfterEach
+        void unregister() {
+            Metrics.removeRegistry(registry);
+        }
+
+        private double counted(String source) {
+            var counter = registry.find(ReportedConfidence.UNUSABLE_METER).tag("source", source).counter();
+            return counter == null ? 0 : counter.count();
+        }
+
+        @Test
+        @DisplayName("a wrapper whose confidence is present but null or a word escalates (it is not a missing wrapper) and is counted")
+        void presentButUnusableWrapper() {
+            for (String reply : List.of("{\"response\": \"Paris is the capital.\", \"confidence\": null}",
+                    "{\"response\": \"Paris is the capital.\", \"confidence\": \"high\"}",
+                    "{\"response\": \"Paris is the capital.\", \"confidence\": {\"score\": 0.9}}")) {
+                var result = ConfidenceEvaluator.evaluateStructuredOutput(reply);
+                assertEquals(0.0, result.confidence(), 0.001, reply);
+                assertEquals("Paris is the capital.", result.response(), reply);
+            }
+            assertEquals(3, counted(ReportedConfidence.SOURCE_STRUCTURED_OUTPUT), 0.001);
+        }
+
+        @Test
+        @DisplayName("a decimal comma in a wrapper is read, not escalated")
+        void decimalCommaWrapper() {
+            var result = ConfidenceEvaluator.evaluateStructuredOutput("{\"response\": \"ok\", \"confidence\": \"0,85\"}");
+            assertEquals(0.85, result.confidence(), 0.001);
+            assertEquals(0, counted(ReportedConfidence.SOURCE_STRUCTURED_OUTPUT), 0.001);
+        }
+
+        @Test
+        @DisplayName("a missing judge, a failed judge and a judge without a usable value are each counted under their own source")
+        void judgeSourcesAreCounted() {
+            ConfidenceEvaluator.evaluateWithJudge("answer", null);
+            ChatModel failing = mock(ChatModel.class);
+            when(failing.chat(any(List.class))).thenThrow(new RuntimeException("API error"));
+            ConfidenceEvaluator.evaluateWithJudge("answer", failing);
+            ChatModel vague = mock(ChatModel.class);
+            when(vague.chat(any(List.class))).thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("{\"confidence\": \"high\"}")).build());
+            ConfidenceEvaluator.evaluateWithJudge("answer", vague);
+
+            assertEquals(1, counted(ReportedConfidence.SOURCE_JUDGE_UNAVAILABLE), 0.001);
+            assertEquals(1, counted(ReportedConfidence.SOURCE_JUDGE_FAILED), 0.001);
+            assertEquals(1, counted(ReportedConfidence.SOURCE_JUDGE_VALUE), 0.001);
         }
     }
 }

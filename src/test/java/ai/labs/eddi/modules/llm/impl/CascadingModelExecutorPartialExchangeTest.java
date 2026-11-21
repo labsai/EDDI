@@ -203,11 +203,28 @@ class CascadingModelExecutorPartialExchangeTest {
         return task;
     }
 
+    /**
+     * The cheap step's timeout for a script whose step 0 fails by throwing: long
+     * enough never to fire, so a slow (loaded) machine cannot turn the scripted
+     * failure into a timeout and change what the test measures.
+     */
+    private static final long NO_TIMEOUT_MS = 120_000L;
+
+    /**
+     * The cheap step's timeout for a script whose step 0 hangs (for 10 s): its
+     * first, answered round must still finish inside it on a loaded machine.
+     */
+    private static final long HANG_TIMEOUT_MS = 3_000L;
+
     private static ModelCascadeConfig twoStepCascade() {
+        return twoStepCascade(NO_TIMEOUT_MS);
+    }
+
+    private static ModelCascadeConfig twoStepCascade(long cheapTimeoutMs) {
         var cheap = new CascadeStep();
         cheap.setType("openai");
         cheap.setConfidenceThreshold(0.9);
-        cheap.setTimeoutMs(1_000L);
+        cheap.setTimeoutMs(cheapTimeoutMs);
         var strong = new CascadeStep();
         strong.setType("openai");
         var cascade = new ModelCascadeConfig();
@@ -236,7 +253,7 @@ class CascadingModelExecutorPartialExchangeTest {
     void timeoutAfterToolCarriesCompletedExchange() throws Exception {
         scriptModel(SecondRequest.HANGS, false);
 
-        var result = run(twoStepCascade());
+        var result = run(twoStepCascade(HANG_TIMEOUT_MS));
 
         assertEquals(1, result.stepUsed());
         assertEquals(LONG_ANSWER, result.response());
@@ -322,7 +339,11 @@ class CascadingModelExecutorPartialExchangeTest {
     }
 
     private static ModelCascadeConfig pricedTwoStepCascade() {
-        var cascade = twoStepCascade();
+        return pricedTwoStepCascade(NO_TIMEOUT_MS);
+    }
+
+    private static ModelCascadeConfig pricedTwoStepCascade(long cheapTimeoutMs) {
+        var cascade = twoStepCascade(cheapTimeoutMs);
         cascade.setCarryToolResultsOnEscalation(false);
         cascade.getSteps().get(0).setInputPricePer1M(0.01);
         cascade.getSteps().get(1).setInputPricePer1M(0.10);
@@ -346,7 +367,7 @@ class CascadingModelExecutorPartialExchangeTest {
     void timedOutStepRoundIsCharged() throws Exception {
         scriptPricedModel(SecondRequest.HANGS, false);
 
-        var result = run(pricedTwoStepCascade());
+        var result = run(pricedTwoStepCascade(HANG_TIMEOUT_MS));
 
         assertEquals(1, result.stepUsed());
         assertEquals(0.21, result.runCostUsd(), 1e-9, result.trace().toString());

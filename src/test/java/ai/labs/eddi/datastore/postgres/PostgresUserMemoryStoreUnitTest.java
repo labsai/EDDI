@@ -954,6 +954,24 @@ class PostgresUserMemoryStoreUnitTest {
                 () -> sut.getAllEntries("user1"));
     }
 
+    // ─── getEntriesPage ─────────────────────────────────────────
+
+    @Test
+    void getEntriesPage_ordersStablyAndBindsTheUserTheLimitAndAClampedOffset() throws Exception {
+        // given
+        when(resultSet.next()).thenReturn(false);
+
+        // when
+        sut.getEntriesPage("user1", -5, 20);
+
+        // then — the id breaks ties on equal updated_at, so no entry moves between
+        // pages
+        verify(connection).prepareStatement("SELECT * FROM usermemories WHERE user_id = ? ORDER BY updated_at DESC, id DESC LIMIT ? OFFSET ?");
+        verify(preparedStatement).setString(1, "user1");
+        verify(preparedStatement).setInt(2, 20);
+        verify(preparedStatement).setInt(3, 0);
+    }
+
     // ─── Helpers ────────────────────────────────────────────────
 
     private void setupResultSetForEntry() throws Exception {

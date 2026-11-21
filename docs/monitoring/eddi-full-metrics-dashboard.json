@@ -4992,7 +4992,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "Why the cascade moved to a more expensive model: low_confidence, timeout, or an error type. A cascade that never escalates is paying for steps it does not use; one that always escalates is paying twice for every turn.",
+          "description": "Why the cascade moved to a more expensive model: low_confidence, timeout, or an error type. A cascade that never escalates is paying for steps it does not use; one that always escalates is paying twice for every turn. Query B, `eddi_llm_confidence_unusable_total` by `source` (judge_unavailable, judge_failed, judge_value, structured_output, bid): confidences that could not be read and so escalated (a bid counts 0.0) — a model answering on another scale, or a broken judge, shows up here as a cost increase.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -5010,6 +5010,17 @@
               "legendFormat": "{{reason}}",
               "range": true,
               "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "expr": "sum by (source) (rate(eddi_llm_confidence_unusable_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "legendFormat": "unusable confidence {{source}}",
+              "range": true,
+              "refId": "B"
             }
           ],
           "fieldConfig": {
@@ -18690,7 +18701,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_llm_calls_unpriced_total` — model calls that had no price ($0) by `provider`, `model`, `site`; `eddi_llm_pricing_refused_total` (query B) — calls the strict unpriced policy refused. Flat unpriced is the goal; add catalog prices for what shows up.",
+          "description": "`eddi_llm_calls_unpriced_total` — model calls that had no price ($0) by `provider`, `model`, `site`; `eddi_llm_pricing_refused_total` (query B) — calls the strict unpriced policy refused; `eddi_llm_pricing_explicit_zero_calls_total` (query C) — calls priced at an explicit 0 on a hosted provider, whose spend no budget sees. Flat unpriced is the goal; add catalog prices for what shows up.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -18719,6 +18730,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "refused @ {{site}} ({{reason}})"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (provider) (rate(eddi_llm_pricing_explicit_zero_calls_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "explicit 0 price {{provider}}"
             }
           ],
           "fieldConfig": {

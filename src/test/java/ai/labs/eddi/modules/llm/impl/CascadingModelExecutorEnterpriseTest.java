@@ -118,8 +118,8 @@ class CascadingModelExecutorEnterpriseTest {
     }
 
     @Test
-    @DisplayName("judge_model strategy but judge build fails — falls back to heuristic")
-    void judgeModel_buildFails_fallsBackToHeuristic() throws Exception {
+    @DisplayName("judge_model strategy but judge build fails — fails towards escalation (0.0), the heuristic only on opt-in")
+    void judgeModel_buildFails_escalatesUnlessOptedIn() throws Exception {
         var cascade = new ModelCascadeConfig();
         cascade.setEnabled(true);
         cascade.setEvaluationStrategy("judge_model");
@@ -136,9 +136,15 @@ class CascadingModelExecutorEnterpriseTest {
         when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(stepModel);
         when(registry.getOrCreate(eq("brokenJudge"), anyMap())).thenThrow(new ChatModelRegistry.UnsupportedLlmTaskException("no such judge"));
 
-        var result = run(registry, cascade, null);
-        // Heuristic on a decent-length answer with no red flags → default 0.8.
-        assertEquals(0.8, result.confidence(), 0.001);
+        // Not the heuristic's accepting default 0.8: no judge means no acceptance.
+        assertEquals(0.0, run(registry, cascade, null).confidence(), 0.001);
+
+        // Opted in: heuristic on a decent-length answer with no red flags → default
+        // 0.8.
+        var heuristic = new LlmConfiguration.HeuristicConfig();
+        heuristic.setFallbackWhenJudgeUnavailable(true);
+        cascade.setHeuristic(heuristic);
+        assertEquals(0.8, run(registry, cascade, null).confidence(), 0.001);
     }
 
     // ─── returnBestAcrossSteps ───────────────────────────────────────

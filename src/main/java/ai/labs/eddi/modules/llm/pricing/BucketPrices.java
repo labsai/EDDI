@@ -56,6 +56,26 @@ public record BucketPrices(Double input, Double output, Double cacheRead, Double
     }
 
     /**
+     * Each price this sets, raised to {@code floor}'s where {@code floor} has a
+     * higher one — the catalog as a lower bound on what a configuration may charge.
+     * A price this does not set stays unset ({@link #orElse} fills it).
+     */
+    public BucketPrices atLeast(BucketPrices floor) {
+        if (floor == null) {
+            return this;
+        }
+        return new BucketPrices(higher(input, floor.input), higher(output, floor.output), higher(cacheRead, floor.cacheRead),
+                higher(cacheWrite, floor.cacheWrite));
+    }
+
+    private static Double higher(Double own, Double floor) {
+        if (own == null || floor == null) {
+            return own;
+        }
+        return Double.valueOf(Math.max(own, floor));
+    }
+
+    /**
      * The long-context tier's prices over these base prices: a tier price that is
      * not set falls back to the base price of the same kind.
      */
