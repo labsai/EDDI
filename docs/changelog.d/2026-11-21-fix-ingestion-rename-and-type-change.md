@@ -10,14 +10,15 @@ two findings CodeRabbit raised on [#1495](https://github.com/labsai/EDDI/pull/14
   frees the run slot, so the new type's first run can start while the old run is still finishing. The
   old run's `cleanUpAfterRun` then called `forgetSource`, which removed every chunk under the shared
   source key and purged its state — the new run's chunks, state rows and `RUNNING` row included.
-  `RagSourceIngestionService.discardWhatTheRunWrote` now takes the source's maintenance claim first.
-  With the claim and no other run in the history since the old one, everything under the key is the
-  old run's or older and the source is forgotten as before (which also retries a save whose own removal
-  failed). Otherwise — the new run holds the slot, or has already finished — only the chunks tagged
-  with the old run's id go (`IngestionPipeline.forgetRun`: `sourceKey AND runId`), nothing is purged,
-  and the source's content hashes are invalidated, because the new run may have called one of the old
-  run's documents "unchanged". The claim is released in `finally`, so a failed vector delete no longer
-  leaves the source blocked until it is reaped. `cleanUpAfterRun` takes the run id.
+  `RagSourceIngestionService.discardWhatTheRunWrote` now takes the source's maintenance claim and reads
+  the run history under it. Only when the old run's own row is still the newest — the save's removal
+  failed — is everything under the key forgotten, as a retry. Otherwise only the chunks tagged with the
+  old run's id go (`IngestionPipeline.forgetRun`: `sourceKey AND runId`); with no other run listed the
+  state is purged, and with one listed (the new run holds the slot, or has finished) nothing is purged
+  and the content hashes are invalidated, because the new run may have called one of the old run's
+  documents "unchanged". An empty history is deliberately not read as "nobody else wrote": a purge
+  erases run rows and keeps chunks. The claim is released in `finally`, so a failed vector delete no
+  longer leaves the source blocked until it is reaped. `cleanUpAfterRun` takes the run id.
 - **A renamed document gets its new citation without being embedded again (Minor).** A Drive file
   renamed without a byte change keeps its checksum, and a Google Doc whose `version` moved for a rename
   exports the same text, so the chunks kept the old `title` and `url`. `DocumentState` gains
@@ -28,7 +29,9 @@ two findings CodeRabbit raised on [#1495](https://github.com/labsai/EDDI/pull/14
   The collector checks it on both unchanged paths — the version-token skip before a fetch and the
   unchanged-hash branch after one (Google Docs, a crawled page with a new `<title>`) — and on a
   difference rewrites the chunks' `title` and `url` through the new `SegmentMetadataUpdates`, under
-  `stillOwnsRun(true)`, never touching `runId`. The fingerprint is recorded only after the write.
+  `stillOwnsRun(true)`, never touching `runId`. The fingerprint is recorded only after the write; when
+  the write fails, the response's new validators are not recorded either, so a Google Doc is exported
+  again next run instead of being skipped by its now-current `version` with the old title.
 
 ### Design decisions
 
@@ -56,6 +59,9 @@ two Drive pipeline cases, three `IngestionStateStoreContract` cases (in-memory, 
 `CappedInMemoryMetadataUpdateTest`, and `PgVectorMetadataUpdateIT` on both pgvector layouts.
 
 ### Not done
+
+- The save path itself (`discardRemovedSources`) still forgets the whole key. That is intended: at the
+  save, the only run that can hold the key is one of the old type, which is exactly what it must stop.
 
 - The rename branch of `cleanUpAfterRun` (`purge` after a knowledge-base rename) has the same shape: a
   run that started and finished in between has its state purged (not its chunks). It costs a

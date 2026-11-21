@@ -1040,10 +1040,15 @@ public class IngestionPipeline {
      * {@code refreshCitation}.
      */
     private enum CitationCheck {
-        /** It already matched, or was adopted, or cannot be written now. */
+        /** It already matched, or was adopted. */
         CURRENT,
         /** The chunks' metadata was rewritten in place. */
         UPDATED,
+        /**
+         * It differs and could not be written this time — the store failed, or the run
+         * no longer owns its source. Unchanged for this run, retried by the next.
+         */
+        PENDING,
         /** The store cannot rewrite it, so the document is embedded again. */
         REEMBED
     }
@@ -1331,8 +1336,8 @@ public class IngestionPipeline {
          * upgrade. A preview writes nothing.
          *
          * @return whether the document can be treated as unchanged
-         *         ({@link CitationCheck#CURRENT}, {@link CitationCheck#UPDATED}) or has
-         *         to be embedded again
+         *         ({@link CitationCheck#CURRENT}, {@link CitationCheck#UPDATED},
+         *         {@link CitationCheck#PENDING}) or has to be embedded again
          */
         private CitationCheck refreshCitation(DocumentState known, String title, String url) {
             String chunkTitle = cap(title, MAX_TITLE_LENGTH);
@@ -1350,7 +1355,7 @@ public class IngestionPipeline {
             }
             if (!stillOwnsRun(true)) {
                 // Nothing written for a source that is no longer this run's.
-                return CitationCheck.CURRENT;
+                return CitationCheck.PENDING;
             }
             Map<String, String> values = new HashMap<>();
             values.put(METADATA_TITLE, chunkTitle);
@@ -1367,7 +1372,7 @@ public class IngestionPipeline {
                 LOGGER.warnf(e, "Could not update the citation of document '%s' of source '%s'; it keeps its "
                         + "previous title until the next run", LogSanitizer.sanitize(documentId),
                         LogSanitizer.sanitize(source.getName()));
-                return CitationCheck.CURRENT;
+                return CitationCheck.PENDING;
             }
             stateStore.recordCitation(sourceKey, documentId, runId, current);
             LOGGER.debugf("Updated the citation of %d chunk(s) of document '%s' of source '%s' without embedding",
@@ -1647,12 +1652,17 @@ public class IngestionPipeline {
             }
 
             var existing = stateStore.lookup(sourceKey, documentId);
-            if (!reembedAll && existing.isPresent() && !existing.get().hasChanged(changeKey)
-                    && refreshCitation(existing.get(), title, url) != CitationCheck.REEMBED) {
+            CitationCheck citation = !reembedAll && existing.isPresent() && !existing.get().hasChanged(changeKey)
+                    ? refreshCitation(existing.get(), title, url)
+                    : CitationCheck.REEMBED;
+            if (citation != CitationCheck.REEMBED) {
                 unchanged++;
-                if (mode == Mode.INGEST && fromResponse) {
+                if (mode == Mode.INGEST && fromResponse && citation != CitationCheck.PENDING) {
                     // The page was downloaded again, so the validators the server sent
-                    // this time are the ones worth sending back next time.
+                    // this time are the ones worth sending back next time — unless the
+                    // new citation did not land. For a Google Doc the validator is its
+                    // version: recording the new one would let the next listing skip the
+                    // export, and with it the only chance to see the new title again.
                     stateStore.recordSeen(sourceKey, documentId, runId, etag, lastModified);
                 } else if (mode == Mode.INGEST) {
                     stateStore.recordSeen(sourceKey, documentId, runId);

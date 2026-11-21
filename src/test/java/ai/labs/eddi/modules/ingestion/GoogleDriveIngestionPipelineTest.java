@@ -165,6 +165,25 @@ class GoogleDriveIngestionPipelineTest {
         assertEquals("travel-policy.txt", titleOf("f1"));
     }
 
+    @Test
+    @DisplayName("a Google Doc rename whose citation update fails is exported and updated again next run")
+    void failedCitationUpdateIsRetried() {
+        run(Mode.INGEST);
+        drive.nativeFile("d1", "Leave policy (renamed)", FakeDrive.DOC, DRIVE, 5,
+                Map.of("text/markdown", utf8("# Leave\n\nTwenty-five days a year.")));
+        embeddingStore.failNextMetadataUpdate();
+
+        run(Mode.INGEST);
+        assertEquals("Leave policy", titleOf("d1"), "the update failed");
+        int exports = drive.countRequests("/export");
+
+        IngestionReport retried = run(Mode.INGEST);
+
+        assertEquals(exports + 1, drive.countRequests("/export"), "the new version was not recorded as seen");
+        assertEquals(0, retried.documentsIngested());
+        assertEquals("Leave policy (renamed)", titleOf("d1"));
+    }
+
     private String titleOf(String documentId) {
         return embeddingStore.segmentsOf(documentId).getFirst().metadata().getString(IngestionPipeline.METADATA_TITLE);
     }

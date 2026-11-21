@@ -42,6 +42,7 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
     private boolean removalFails;
     private boolean metadataUpdatesSupported = true;
     private int metadataUpdates;
+    private int metadataFailuresLeft;
 
     /** Simulates a backend whose driver cannot delete by metadata. */
     public RecordingEmbeddingStore withoutRemovalSupport() {
@@ -61,6 +62,12 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
         return this;
     }
 
+    /** Simulates a store that fails the next metadata update, then recovers. */
+    public RecordingEmbeddingStore failNextMetadataUpdate() {
+        this.metadataFailuresLeft = 1;
+        return this;
+    }
+
     /** How many metadata updates were applied. */
     public int metadataUpdates() {
         return metadataUpdates;
@@ -72,6 +79,10 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
             throw new UnsupportedFeatureException("Not supported yet.");
         }
         SegmentMetadataUpdates.requireValid(match, values);
+        if (metadataFailuresLeft > 0) {
+            metadataFailuresLeft--;
+            throw new IllegalStateException("vector store is unwell");
+        }
         metadataUpdates++;
         int changed = 0;
         for (int i = 0; i < segments.size(); i++) {

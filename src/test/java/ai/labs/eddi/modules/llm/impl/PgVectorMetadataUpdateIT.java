@@ -127,6 +127,17 @@ class PgVectorMetadataUpdateIT {
             }
         }
         assertEquals(0, updates.updateMetadata(Map.of("documentId", "doc-none"), Map.of("title", "x")));
+
+        // A null value removes the key, and the row still reads back through a search.
+        var removal = new HashMap<String, String>();
+        removal.put("url", null);
+        assertEquals(1, updates.updateMetadata(Map.of("documentId", "doc-b"), removal));
+        Metadata docB = store.search(EmbeddingSearchRequest.builder()
+                .queryEmbedding(Embedding.from(new float[]{0f, 0f, 1f})).maxResults(1).minScore(0.0).build())
+                .matches().getFirst().embedded().metadata();
+        assertEquals("doc-b", docB.getString("documentId"));
+        assertTrue(!docB.containsKey("url"), "the key is gone, not null");
+        assertEquals("Other", docB.getString("title"));
     }
 
     private static Connection admin() throws SQLException {

@@ -609,12 +609,12 @@ frees the source, so a new run may already hold it by then and may have read a r
 as "unchanged"; the state cannot be purged from under that run, so every document's content hash and
 validators are forgotten instead, and the next run embeds each page into the store the new name
 addresses. A source that was removed or **changed type** (a crawl switched to Google Drive, say) is
-settled the same careful way: the cleanup takes the source's run slot first, and only when it gets it
-and no run has had the source since does it forget everything under the source's key. Otherwise — the
-new type's first run is already writing, or has finished — it removes only the chunks tagged with the
-old run's id and leaves the state to the run that owns it, with every document's content forgotten so
-that nothing the old run wrote can be called "unchanged". The new run's chunks, state and run row are
-never touched.
+settled the same careful way: the cleanup takes the source's run slot first and removes only the
+chunks tagged with the old run's id — everything under the source's key only when the old run is still
+the newest in the history, which means the save's own removal failed and is being retried. When no
+other run is listed, the state goes too; when one is — the new type's first run is writing, or has
+finished — the state is left to it, with every document's content forgotten so that nothing the old run
+wrote can be called "unchanged". The new run's chunks, state and run row are never touched.
 
 **A rename that leaves the content alone updates the citation, not the vectors.** A Drive file renamed
 without a byte change keeps its checksum, and a Google Doc whose `version` moved only for a rename
@@ -1224,7 +1224,7 @@ refuses two beans for one type at startup.
 | `discover(DiscoveryContext)` | Lists one partition from its cursor and hands each document to `context.accept(WorkItem)` as it is found, streamed rather than returned. Downloads nothing it does not have to. Returns a `DiscoveryResult`: the stop reason, the `Coverage`, and the next cursor |
 | `fetch(WorkItem, SourceContext)` | Reads one document as a `SourceDocument`. Not called for an item that arrived `prefetched`, which is what a crawler does, since it reads the page to find the next link |
 | `listPartitions` / `verifyAccess` | Drives, sites, mailboxes. The default is one implicit partition that is always accessible. **This version runs exactly one partition per source** |
-| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, and an optional prefetched document. When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched |
+| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, an optional prefetched document, and an optional `citation` (the title and URL `fetch` will put on the document). When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched; when it also carries a `citation` that differs from the one its chunks carry, their title and URL are updated without fetching |
 | `SourceDocument` | `content`, which is one of three kinds: `HtmlPage` (page converter; blank text means navigation and is skipped), `FileBytes` (extracted by MIME type; no text means a definitive failure that retires older chunks) or `Text`. It also carries `versionToken` (the change key when present, otherwise the text hash), HTTP `validators`, `truncated` and `metadata` under `SourceMetadataKeys` |
 | `Coverage` | `FULL_LISTING`: an authoritative listing, where absence means deletion, even when the listing is empty. `FULL_TRAVERSAL`: a crawl; absence means deletion only if the run learned something definitive. `INCREMENTAL`: a change feed; absence means nothing, and deletions arrive as `DELETE` items. `PARTIAL`: nothing is concluded |
 | `SourceError` | `TRANSIENT`, `THROTTLED` (each with an optional retry-after), `AUTH`, `NOT_FOUND`, `PERMANENT`, `REJECTED`, `CURSOR_INVALID`. Only `NOT_FOUND` and `PERMANENT` count as evidence about a document. Use `PERMANENT` only when the answer concerns the document itself, such as a format that cannot be exported. A request the provider refuses as you made it (malformed, an unknown field) is `REJECTED`: it is a fault in the connector, and counting it would delete every document it touched. The others mean "could not look", and the document is kept. A failure reported without a document id is never evidence. Per-document failures go to `context.reportFailure` or are thrown from `fetch` as `SourceException`. A whole-source failure thrown from `discover` fails the run |

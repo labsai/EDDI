@@ -15,6 +15,7 @@ import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -99,14 +100,28 @@ final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore implements
      * the expression the metadata indexes are built on, so a document's rows are
      * found by index. Keys are spliced into the statement and therefore held to
      * {@link SegmentMetadataUpdates#METADATA_KEY}; values are bound. A null value
-     * is written as JSON {@code null}, which reads back as absent.
+     * removes its key, as on the in-memory store: a JSON {@code null} would come
+     * back from a search as a metadata value langchain4j does not accept.
      */
     @Override
     public int updateMetadata(Map<String, String> match, Map<String, String> values) {
         SegmentMetadataUpdates.requireValid(match, values);
         List<String> keys = new ArrayList<>(match.keySet());
+        Map<String, String> set = new LinkedHashMap<>();
+        List<String> removed = new ArrayList<>();
+        values.forEach((key, value) -> {
+            if (value == null) {
+                removed.add("'" + key + "'");
+            } else {
+                set.put(key, value);
+            }
+        });
         StringBuilder sql = new StringBuilder("UPDATE ").append(table)
-                .append(" SET metadata = COALESCE(metadata::jsonb, '{}'::jsonb) || ?::jsonb WHERE ");
+                .append(" SET metadata = (COALESCE(metadata::jsonb, '{}'::jsonb)");
+        if (!removed.isEmpty()) {
+            sql.append(" - ARRAY[").append(String.join(", ", removed)).append("]::text[]");
+        }
+        sql.append(") || ?::jsonb WHERE ");
         for (int i = 0; i < keys.size(); i++) {
             if (i > 0) {
                 sql.append(" AND ");
@@ -114,7 +129,7 @@ final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore implements
             sql.append("(metadata->>'").append(keys.get(i)).append("')::text = ?");
         }
         try (Connection connection = getConnection(); PreparedStatement statement = connection.prepareStatement(sql.toString())) {
-            statement.setString(1, JSON.writeValueAsString(values));
+            statement.setString(1, JSON.writeValueAsString(set));
             for (int i = 0; i < keys.size(); i++) {
                 statement.setString(i + 2, match.get(keys.get(i)));
             }
