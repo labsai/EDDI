@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion.crawl;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.function.Predicate;
 
 /**
  * One HTTP GET, as the crawler needs it.
@@ -43,6 +44,12 @@ public interface PageFetcher {
      * @param maxBytes
      *            hard cap on the body read, so one oversized response cannot
      *            exhaust the heap
+     * @param redirectAllowed
+     *            whether a redirect hop may be followed, checked before it is
+     *            requested and on top of the SSRF rules; null for any hop those
+     *            rules admit. The crawler passes its scope, so a page cannot bounce
+     *            it to another scheme, port or path before the scope check of the
+     *            final URL runs
      */
     record FetchCommand(
             String url,
@@ -50,7 +57,13 @@ public interface PageFetcher {
             Duration timeout,
             String ifNoneMatch,
             String ifModifiedSince,
-            long maxBytes) {
+            long maxBytes,
+            Predicate<String> redirectAllowed) {
+
+        /** A fetch whose redirects are held to the SSRF rules only. */
+        public FetchCommand(String url, String userAgent, Duration timeout, String ifNoneMatch, String ifModifiedSince, long maxBytes) {
+            this(url, userAgent, timeout, ifNoneMatch, ifModifiedSince, maxBytes, null);
+        }
     }
 
     /**

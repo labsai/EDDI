@@ -253,7 +253,7 @@ public class IngestionPipeline {
         String sourceKey = stateKey(ragConfigId, source);
         IngestionReport early;
         try {
-            source.validate();
+            source.validateStored();
             String name = knowledgeBase.getName();
             boolean keyedByName = !KnowledgeBaseStorage.usesIdNamespace(knowledgeBase);
             if (keyedByName && (name == null || name.isBlank())) {

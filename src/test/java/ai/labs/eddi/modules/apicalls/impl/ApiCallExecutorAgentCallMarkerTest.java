@@ -49,6 +49,7 @@ class ApiCallExecutorAgentCallMarkerTest {
     private ApiCallExecutor executor;
     private IConversationMemory memory;
     private IRequest mockRequest;
+    private CallerIdentityResolver callerIdentityResolver;
 
     @BeforeEach
     void setUp() throws Exception {
@@ -56,7 +57,7 @@ class ApiCallExecutorAgentCallMarkerTest {
         PrePostUtils prePostUtils = mock(PrePostUtils.class);
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
-        CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
+        callerIdentityResolver = mock(CallerIdentityResolver.class);
         when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
@@ -105,6 +106,21 @@ class ApiCallExecutorAgentCallMarkerTest {
     @DisplayName("a call to a loopback address is marked")
     void loopbackMarked() throws Exception {
         executor.execute(call(Map.of()), memory, new HashMap<>(), "http://127.0.0.1:7070");
+
+        assertMarkedLast();
+    }
+
+    @Test
+    @DisplayName("a call carrying the released caller token is marked even on the public hostname no self setting names")
+    void callerTokenReleaseMarked() throws Exception {
+        // The token is released when the target is same-origin with the origin the
+        // caller addressed - the deployment's public name, which neither loopback nor
+        // eddi.self.base-url nor the self-hosts list need cover. Unmarked, an agent
+        // could POST a resume verdict as the approver it is talking to.
+        when(callerIdentityResolver.resolveValue(anyString(), any()))
+                .thenAnswer(inv -> ((String) inv.getArgument(0)).replace("${caller:token}", "approver-token"));
+
+        executor.execute(call(Map.of("Authorization", "Bearer ${caller:token}")), memory, new HashMap<>(), "https://chat.public.example");
 
         assertMarkedLast();
     }

@@ -18,7 +18,10 @@ import java.util.regex.Pattern;
  * <li>Write to the oversight API at all — sample verdicts, apply, dismiss,
  * suspend, lift and rebuild are human actions ({@code /hitl/samples},
  * {@code /hitl/autonomy}, {@code /hitl/analytics/rebuild}) — and so is deciding
- * a spend-control change ({@code /administration/spend-control-changes}).</li>
+ * a spend-control change ({@code /administration/spend-control-changes}) and
+ * deciding a paused conversation ({@code /agents/{id}/resume}, a group's
+ * {@code approve} and {@code human-input}): a resume verdict is evidence toward
+ * earned autonomy.</li>
  * <li>Change an agent's {@code hitlConfig.oversight} (sampled audit and
  * autonomy policy) through a full-document write: an agent could otherwise
  * lower its own sample rate or loosen its own policy. A JSON-patch naming
@@ -41,6 +44,8 @@ public final class OversightWriteGuard {
             + "/hitl/autonomy) — those are human actions";
     public static final String SPEND_CONTROL_API_REASON = "an agent may not decide a spend-control change "
             + "(/administration/spend-control-changes) — approving a looser price or quota is a human action";
+    public static final String DECISION_API_REASON = "an agent may not decide a paused conversation (resume, approve, human-input) "
+            + "— that is a human action";
     public static final String OVERSIGHT_CONFIG_REASON = "an agent may not change an agent's oversight policy (hitlConfig.oversight)";
 
     private OversightWriteGuard() {
@@ -76,6 +81,11 @@ public final class OversightWriteGuard {
         }
         if (SPEND_CONTROL_API.matcher(routed).find()) {
             return SPEND_CONTROL_API_REASON;
+        }
+        // Matched segment by segment (matrix parameters, ids spanning segments): a
+        // regex with two open-ended id groups backtracked polynomially on the path.
+        if (AgentOriginatedRequests.containsDecisionPath(decodedUri)) {
+            return DECISION_API_REASON;
         }
         Matcher target = agentStoreTarget != null ? agentStoreTarget.matcher(decodedUri) : null;
         String agentStoreTargetId = target != null && target.find() ? target.group(1) : null;

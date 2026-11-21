@@ -81,7 +81,26 @@ public class IngestionSource {
      */
     private String cron;
 
+    /**
+     * Validates a source as new input: a save, an import. {@code maxBytesPerPage}
+     * above {@link IngestionSettings#MAX_BYTES_PER_PAGE_CEILING} is refused here.
+     */
     public void validate() {
+        validate(true);
+    }
+
+    /**
+     * Validates a source already stored, before it runs: the same checks, except
+     * that a {@code maxBytesPerPage} saved above the ceiling before it existed is
+     * not an error — it is clamped where it is read
+     * ({@code maxBytesPerPageOrDefault}, {@code CrawlRequest.Limits}), so the
+     * source keeps crawling within the limit.
+     */
+    public void validateStored() {
+        validate(false);
+    }
+
+    private void validate(boolean newInput) {
         if (name == null || name.isBlank()) {
             throw new IllegalArgumentException("Ingestion source needs a name");
         }
@@ -100,7 +119,7 @@ public class IngestionSource {
                     "Unsupported ingestion source type '" + type + "' on source '" + name
                             + "'. Supported: " + TYPE_WEB + ", " + TYPE_UPLOAD);
         }
-        settings().validate(name);
+        settings().validate(name, newInput);
     }
 
     /**
@@ -539,6 +558,10 @@ public class IngestionSource {
         private Integer timeBudgetMinutes = 10;
 
         void validate(String sourceName) {
+            validate(sourceName, true);
+        }
+
+        void validate(String sourceName, boolean newInput) {
             if (maxContentLength != null && maxContentLength <= 0) {
                 throw new IllegalArgumentException(
                         "maxContentLength of ingestion source '" + sourceName + "' must be positive");
@@ -565,7 +588,18 @@ public class IngestionSource {
                 throw new IllegalArgumentException(
                         "maxBytesPerPage of ingestion source '" + sourceName + "' must be positive");
             }
+            // Each page is buffered whole in memory up to this cap, so an unbounded value
+            // let one source pin the heap with a single large response.
+            if (newInput) {
+                UploadSource.requirePositiveAtMost(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING, "maxBytesPerPage", sourceName);
+            }
         }
+
+        /**
+         * The largest {@code maxBytesPerPage}: the same ceiling as an uploaded file.
+         * The crawler buffers a page in memory up to the cap.
+         */
+        public static final long MAX_BYTES_PER_PAGE_CEILING = 50L * 1024 * 1024;
 
         public int maxContentLengthOrDefault() {
             return maxContentLength == null ? 100_000 : maxContentLength;
@@ -580,7 +614,8 @@ public class IngestionSource {
         }
 
         public long maxBytesPerPageOrDefault() {
-            return maxBytesPerPage == null ? 5L * 1024 * 1024 : maxBytesPerPage;
+            // Clamped for documents stored before the ceiling was validated.
+            return maxBytesPerPage == null ? 5L * 1024 * 1024 : Math.min(maxBytesPerPage, MAX_BYTES_PER_PAGE_CEILING);
         }
 
         public int timeBudgetMinutesOrDefault() {
