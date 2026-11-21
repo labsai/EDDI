@@ -1185,6 +1185,7 @@ eddi_connection_token_refresh_claim_count_total # Refresh lease protocol; tag: o
 
 ```text
 eddi_agents_deployed                        # Currently deployed agents (gauge)
+eddi_deployment_failed_total{reason}        # Failed deployments by reason code: VAULT_GRANT_MISSING, STEP_TYPE_UNKNOWN, CONFIG_INVALID, REFERENCE_MISSING, DEPLOYMENT_FAILED
 ```
 
 ### Cluster Metrics

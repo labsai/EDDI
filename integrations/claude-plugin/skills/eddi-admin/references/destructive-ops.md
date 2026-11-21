@@ -10,8 +10,8 @@ conversation, transcript, memory entry or document is not a yes.
 | `deploy_agent` to `production` | Users get this version; with a compatible version, running conversations move to it | Deploy the previous version again |
 | `apply_agent_changes` with `redeploy` to `production` | Same as above, in one step | As above |
 | `undeploy_agent` | Version stops serving; with `endConversations` `true`, users' conversations are ended mid-flow | Redeploy — ended conversations stay ended |
-| `delete_agent` | Removes the agent; with cascade, its workflows and resources too | Not with MCP tools |
-| `delete_resource` | Soft delete; with `permanent` `true`, gone | Not with MCP tools; permanent: none |
+| `delete_agent` | Removes the agent; with cascade, its workflows and resources too. A deployed agent with open conversations is refused (409) unless `endAllActiveConversations` is `true`, which ends them | Not with MCP tools |
+| `delete_resource` | Soft delete; with `permanent` `true`, gone. A resource a workflow still uses is refused and the users are named; `force` `true` deletes anyway (agents that use it then fail) | Not with MCP tools; permanent: none |
 | `delete_agent_trigger` | Every client using that intent with `chat_managed` stops working | Recreate it |
 | `delete_channel_integration` | The channel (e.g. Slack) stops reaching the agent | Recreate it |
 | `fire_schedule_now`, `retry_failed_schedule` | A real agent run, with real side effects (API calls, messages) | None |

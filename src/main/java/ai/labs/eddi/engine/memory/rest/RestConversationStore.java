@@ -1380,7 +1380,8 @@ public class RestConversationStore implements IRestConversationStore {
      * reason is stored on the conversation and shown to its user by clients, so it
      * must be a code they know, never caller-supplied prose.
      */
-    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED);
+    static final Set<String> ACCEPTED_END_REASONS = Set.of(IConversationService.END_REASON_AGENT_VERSION_RETIRED,
+            IConversationService.END_REASON_AGENT_DELETED);
 
     /**
      * Ends the listed conversations. Only the conversation ids are read from the

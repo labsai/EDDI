@@ -15,6 +15,7 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.hitl.tools.TaskToolApprovalsResolver;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
+import ai.labs.eddi.modules.llm.impl.LlmConfigSaveValidator;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -43,6 +44,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     @Override
     public IResourceStore.IResourceId create(LlmConfiguration content) throws IResourceStore.ResourceStoreException {
         validateTaskToolApprovals(content);
+        LlmConfigSaveValidator.validate(content);
         return super.create(content);
     }
 
@@ -51,6 +53,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     public Integer update(String id, Integer version, LlmConfiguration content)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         validateTaskToolApprovals(content);
+        LlmConfigSaveValidator.validate(content);
         return super.update(id, version, content);
     }
 

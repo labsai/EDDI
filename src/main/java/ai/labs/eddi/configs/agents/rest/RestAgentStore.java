@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.agents.model.AgentCascadeResult;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
 import ai.labs.eddi.configs.deployment.model.DeploymentInfo;
+import ai.labs.eddi.configs.rest.ResourceInUseGuard;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.engine.exception.ErrorResponses;
 import ai.labs.eddi.engine.model.Deployment;
@@ -26,6 +27,7 @@ import ai.labs.eddi.engine.security.spaces.DescriptorAccess;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.workflows.IRestWorkflowStore;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -83,6 +85,23 @@ public class RestAgentStore implements IRestAgentStore {
 
     private static final Logger log = Logger.getLogger(RestAgentStore.class);
 
+    /**
+     * Refuses deleting a deployed agent with active conversations; null skips it.
+     */
+    private final ResourceInUseGuard inUseGuard;
+
+    /**
+     * Without the open-conversation guard: for unit tests that do not delete. The
+     * container uses the constructor below.
+     */
+    public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
+            IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
+            IDeploymentStore deploymentStore, ResourceAccessGuard resourceAccessGuard, AgentSigningService agentSigningService,
+            IAgentFactory agentFactory, String defaultTenantId, AgentCascadeService agentCascadeService) {
+        this(agentStore, restWorkflowStore, documentDescriptorStore, jsonSchemaCreator, scheduleStore, capabilityRegistryService,
+                deploymentStore, resourceAccessGuard, agentSigningService, agentFactory, defaultTenantId, agentCascadeService, null);
+    }
+
     @Inject
     public RestAgentStore(IAgentStore agentStore, IRestWorkflowStore restWorkflowStore, IDocumentDescriptorStore documentDescriptorStore,
             IJsonSchemaCreator jsonSchemaCreator, IScheduleStore scheduleStore, CapabilityRegistryService capabilityRegistryService,
@@ -91,7 +110,9 @@ public class RestAgentStore implements IRestAgentStore {
             AgentSigningService agentSigningService,
             IAgentFactory agentFactory,
             @ConfigProperty(name = "eddi.tenant.default-id", defaultValue = "default") String defaultTenantId,
-            AgentCascadeService agentCascadeService) {
+            AgentCascadeService agentCascadeService,
+            ResourceInUseGuard inUseGuard) {
+        this.inUseGuard = inUseGuard;
         this.agentCascadeService = agentCascadeService;
         this.agentFactory = agentFactory;
         this.resourceAccessGuard = resourceAccessGuard;
@@ -352,6 +373,12 @@ public class RestAgentStore implements IRestAgentStore {
 
     @Override
     public Response duplicateAgent(String id, Integer version, Boolean deepCopy) {
+        // A copy of stored configurations (a deep copy duplicates every workflow and
+        // config too): the save-time structure checks only warn.
+        return LenientConfigWrite.call(() -> copyAgent(id, version, deepCopy));
+    }
+
+    private Response copyAgent(String id, Integer version, Boolean deepCopy) {
         restVersionInfo.requireViewAccess(id);
         // Keep the normalised version: validateParameters maps 0 -> current, and
         // discarding the return value left agentStore.read(id, 0) matching nothing,
@@ -441,7 +468,7 @@ public class RestAgentStore implements IRestAgentStore {
     }
 
     @Override
-    public Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade) {
+    public Response deleteAgent(String id, Integer version, Boolean permanent, Boolean cascade, Boolean endAllActiveConversations) {
         // Before the cascade, not after — see RestVersionInfo.requireOwnAccess.
         restVersionInfo.requireOwnAccess(id);
 
@@ -461,6 +488,14 @@ public class RestAgentStore implements IRestAgentStore {
         // removed below, and afterwards nothing names the versions still running.
         List<DeploymentInfo> liveDeployments = liveDeploymentsOf(id);
 
+        // 409 while a deployed version has active conversations, as undeploy does —
+        // unless endAllActiveConversations=true. Only counted here: nothing is ended
+        // until every check below that can still refuse the delete has passed.
+        ResourceInUseGuard.OpenConversations toEnd = inUseGuard == null
+                ? null
+                : inUseGuard.requireNoOpenConversations(id, liveDeployments.stream().map(DeploymentInfo::getAgentVersion).distinct().toList(),
+                        Boolean.TRUE.equals(endAllActiveConversations));
+
         // DECIDED before the delete, EXECUTED after it — the same split, and for the
         // same reason, as RestWorkflowStore.deleteWorkflow.
         //
@@ -479,6 +514,17 @@ public class RestAgentStore implements IRestAgentStore {
         // counts this Agent among a workflow's referrers, which it only is while it
         // still exists.
         List<IResourceId> cascadeTargets = cascade && isCurrentVersion(id, version) ? planCascade(id, version) : null;
+
+        if (toEnd != null && !toEnd.isEmpty()) {
+            // Ending users' conversations cannot be undone, so it waits for the last
+            // check that can still refuse: the store's own version check. Run it now —
+            // a stale version (409) or one with no live version on a soft delete
+            // (404) is refused before a single conversation is ended. Not after the
+            // delete: ending a conversation checks EDIT on its agent, which a deleted
+            // agent no longer answers.
+            requireDeletableVersion(id, version, Boolean.TRUE.equals(permanent));
+            inUseGuard.endOpenConversations(id, toEnd);
+        }
 
         Response response = restVersionInfo.delete(id, version, permanent);
 
@@ -521,7 +567,10 @@ public class RestAgentStore implements IRestAgentStore {
                     // every history row. Soft-deleting the current version keeps the two
                     // scopes in agreement; permanently removing a shared resource stays
                     // an explicit, non-cascading request against that resource.
-                    restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true);
+                    // The agent that named this workflow is gone by now, which is the
+                    // reason it is being deleted: the in-use guard has nothing to add.
+                    // stillReferencedAfterAgentDelete is this cascade's own in-use check.
+                    ResourceInUseGuard.callUnguarded(() -> restWorkflowStore.deleteWorkflow(target.getId(), target.getVersion(), false, true));
                     log.infof("Cascade-deleted package %s (v%d) for Agent %s", sanitize(target.getId()), target.getVersion(),
                             sanitize(id));
                 } catch (Exception e) {
@@ -863,6 +912,18 @@ public class RestAgentStore implements IRestAgentStore {
             throw RestUtilities.createConflictException(resourceURI, current);
         }
         return true;
+    }
+
+    /**
+     * The refusals the store delete would answer with, answered up front: 409 for a
+     * version that is not the live one, 404 for a soft delete of an agent with no
+     * live version. A permanent delete of an already soft-deleted agent is allowed,
+     * as {@code RestVersionInfo.delete} allows it.
+     */
+    private void requireDeletableVersion(String id, Integer version, boolean permanent) {
+        if (!isCurrentVersion(id, version) && !permanent) {
+            throw new NotFoundException("Agent " + sanitize(id) + " has no live version to delete");
+        }
     }
 
     @Override

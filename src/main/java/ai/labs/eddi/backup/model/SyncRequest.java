@@ -33,6 +33,11 @@ import java.util.Set;
  *            one it replaces, so running conversations follow it; null and
  *            false both mean a breaking version, which is the default. No
  *            effect when a new agent is created
+ * @param allowIncomplete
+ *            first promotion only: true creates the agent although its archive
+ *            names configurations it does not contain (the steps are dropped
+ *            and listed in the warnings); null and false both refuse it with
+ *            422, the default
  * @since 6.0.0
  */
 public record SyncRequest(
@@ -42,7 +47,14 @@ public record SyncRequest(
         Set<String> selectedResources,
         List<String> workflowOrder,
         Boolean createNew,
-        Boolean compatible) {
+        Boolean compatible,
+        Boolean allowIncomplete) {
+
+    /** A request that refuses an incomplete first promotion. */
+    public SyncRequest(String sourceAgentId, Integer sourceAgentVersion, String targetAgentId,
+            Set<String> selectedResources, List<String> workflowOrder, Boolean createNew, Boolean compatible) {
+        this(sourceAgentId, sourceAgentVersion, targetAgentId, selectedResources, workflowOrder, createNew, compatible, null);
+    }
 
     /** A breaking request. */
     public SyncRequest(String sourceAgentId, Integer sourceAgentVersion, String targetAgentId,

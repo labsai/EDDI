@@ -88,8 +88,8 @@ public class RestOutputStore implements IRestOutputStore {
     }
 
     @Override
-    public Response deleteOutputSet(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+    public Response deleteOutputSet(String id, Integer version, Boolean permanent, Boolean force) {
+        return restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
     }
 
     @Override

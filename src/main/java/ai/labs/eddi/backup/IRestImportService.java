@@ -39,6 +39,16 @@ public interface IRestImportService {
             + "chain either way, so its running conversations stay. Has no effect when a new agent is created, or when "
             + "nothing is written.";
 
+    /**
+     * Text of the {@code allowIncomplete} parameter of the endpoints that create an
+     * agent from an archive.
+     */
+    String ALLOW_INCOMPLETE_DESCRIPTION = "Create only. By default an archive whose workflow names a configuration the "
+            + "archive does not contain (a missing LLM, behavior, output ... file) is refused with 422 and nothing is "
+            + "written, because dropping the step would create an agent that deploys and then cannot answer. Set true "
+            + "to import it anyway: the steps that cannot be resolved are dropped and listed in the 201 body, and the "
+            + "result is an incomplete agent that must be completed before it is deployed. Has no effect on merge or upgrade.";
+
     @POST
     @Consumes("application/zip")
     @Operation(description = "Import an agent from a zip file. "
@@ -75,7 +85,13 @@ public interface IRestImportService {
             + "listing per-resource outcomes. All three are 2xx, so a client must branch on the status "
             + "code rather than on response.ok. "
             + "compatible (strategy=merge and strategy=upgrade; default false) declares the agent version written "
-            + "compatible with the one it replaces, so running conversations follow it.")
+            + "compatible with the one it replaces, so running conversations follow it. "
+            + "A create whose workflow names a configuration the archive does not carry is refused with 422 "
+            + "listing every missing reference, and nothing is written; allowIncomplete=true imports it anyway, "
+            + "dropping those steps, and the 201 body lists what was dropped. When the import succeeds with "
+            + "findings (a dropped step, an LLM config naming an unknown provider or a vault secret this instance "
+            + "does not have), the 201 carries X-Import-Warnings with their count and a JSON body with the "
+            + "agent's resourceUri, the warnings and the dropped references.")
     Response importAgent(InputStream zippedAgentConfigFiles,
                          @QueryParam("strategy")
                          @DefaultValue("create") String strategy,
@@ -84,14 +100,26 @@ public interface IRestImportService {
                          @QueryParam("workflowOrder") String workflowOrder,
                          @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
                          @QueryParam("compatible")
-                         @DefaultValue("false") Boolean compatible);
+                         @DefaultValue("false") Boolean compatible,
+                         @Parameter(name = "allowIncomplete", description = ALLOW_INCOMPLETE_DESCRIPTION)
+                         @QueryParam("allowIncomplete")
+                         @DefaultValue("false") Boolean allowIncomplete);
+
+    /**
+     * An import that refuses an incomplete archive: the form callers had before
+     * {@code allowIncomplete}.
+     */
+    default Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, String targetAgentId,
+                                 String workflowOrder, Boolean compatible) {
+        return importAgent(zippedAgentConfigFiles, strategy, selectedOriginIds, targetAgentId, workflowOrder, compatible, false);
+    }
 
     /**
      * A breaking import: the form callers had before {@code compatible} existed.
      */
     default Response importAgent(InputStream zippedAgentConfigFiles, String strategy, String selectedOriginIds, String targetAgentId,
                                  String workflowOrder) {
-        return importAgent(zippedAgentConfigFiles, strategy, selectedOriginIds, targetAgentId, workflowOrder, false);
+        return importAgent(zippedAgentConfigFiles, strategy, selectedOriginIds, targetAgentId, workflowOrder, false, false);
     }
 
     @POST
@@ -152,7 +180,8 @@ public interface IRestImportService {
             + "the preview. selectedResources, when present, must name at least one resource (400 otherwise); "
             + "leave it out to sync everything. A CONFLICT row is written only when named in selectedResources. "
             + "compatible (default false) declares the agent version written compatible with the one it replaces, "
-            + "so running conversations follow it.")
+            + "so running conversations follow it. A first promotion (no target on this instance) is a create: "
+            + "an archive naming a configuration it does not contain is refused with 422 unless allowIncomplete=true.")
     Response executeSync(@QueryParam("sourceUrl") String sourceUrl,
                          @QueryParam("sourceAgentId") String sourceAgentId,
                          @QueryParam("sourceAgentVersion") Integer sourceVersion,
@@ -163,7 +192,17 @@ public interface IRestImportService {
                          @QueryParam("createNew") Boolean createNew,
                          @Parameter(name = "compatible", description = COMPATIBLE_DESCRIPTION)
                          @QueryParam("compatible")
-                         @DefaultValue("false") Boolean compatible);
+                         @DefaultValue("false") Boolean compatible,
+                         @Parameter(name = "allowIncomplete", description = ALLOW_INCOMPLETE_DESCRIPTION)
+                         @QueryParam("allowIncomplete")
+                         @DefaultValue("false") Boolean allowIncomplete);
+
+    /** A sync that refuses an incomplete first promotion. */
+    default Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion, String targetAgentId,
+                                 String selectedResources, String workflowOrder, String sourceAuth, Boolean createNew, Boolean compatible) {
+        return executeSync(sourceUrl, sourceAgentId, sourceVersion, targetAgentId, selectedResources, workflowOrder, sourceAuth,
+                createNew, compatible, false);
+    }
 
     /** A breaking sync. */
     default Response executeSync(String sourceUrl, String sourceAgentId, Integer sourceVersion, String targetAgentId,

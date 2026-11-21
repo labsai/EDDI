@@ -221,8 +221,8 @@ public class RestApiCallsStore implements IRestApiCallsStore {
     }
 
     @Override
-    public Response deleteApiCalls(String id, Integer version, Boolean permanent) {
-        return restVersionInfo.delete(id, version, permanent);
+    public Response deleteApiCalls(String id, Integer version, Boolean permanent, Boolean force) {
+        return restVersionInfo.delete(id, version, permanent, Boolean.TRUE.equals(force));
     }
 
     @Override

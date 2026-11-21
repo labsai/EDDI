@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.setup;
 
+import ai.labs.eddi.configs.LenientConfigWrite;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
 import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
@@ -26,6 +27,7 @@ import ai.labs.eddi.modules.templating.TemplateEscaping;
 import ai.labs.eddi.utils.LogSanitizer;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.spi.CDI;
 import jakarta.inject.Inject;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -39,6 +41,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 
 /**
  * Re-sync of an agent created by {@code setup-api} from a newer OpenAPI spec:
@@ -342,7 +345,8 @@ public class ApiAgentSyncService {
                     }
                 }
                 if (llmChanged) {
-                    String location = locationOf(llmStore.updateLlm(idOf(entry.getKey()), versionOf(entry.getKey()), llm));
+                    String location = locationOf(rewriteStored(IRestLlmStore.class, llmStore,
+                            store -> store.updateLlm(idOf(entry.getKey()), versionOf(entry.getKey()), llm)));
                     written.add(location);
                     llmLocationByOld.put(entry.getKey(), location);
                 }
@@ -376,8 +380,10 @@ public class ApiAgentSyncService {
                 steps.add(insertAt++, step);
             }
             workflow.setWorkflowSteps(steps);
-            String workflowLocation = locationOf(
-                    workflowStore.updateWorkflow(idOf(workflowUri.toString()), versionOf(workflowUri.toString()), workflow));
+            String storedWorkflow = workflowUri.toString();
+            WorkflowConfiguration rewrittenWorkflow = workflow;
+            String workflowLocation = locationOf(rewriteStored(IRestWorkflowStore.class, workflowStore,
+                    store -> store.updateWorkflow(idOf(storedWorkflow), versionOf(storedWorkflow), rewrittenWorkflow)));
             written.add(workflowLocation);
 
             var workflows = new ArrayList<URI>();
@@ -662,6 +668,29 @@ public class ApiAgentSyncService {
 
     static int versionOf(String location) {
         return AgentSetupService.extractVersionFromLocation(location);
+    }
+
+    /**
+     * Rewrites a stored LLM config or workflow — one sync created earlier — as the
+     * write of an existing configuration: the stores' save-time checks only warn,
+     * so an agent generated before a check existed keeps syncing.
+     * <p>
+     * The write goes to the REST bean in this process, inside
+     * {@link LenientConfigWrite}: the marker is bound to this thread and cannot
+     * travel over the loopback HTTP client {@link #rest} returns, and no request
+     * parameter or header may switch a save to lenient (anyone could send it). The
+     * bean runs the same access checks as the HTTP endpoint, against the same
+     * caller. Without a container (unit tests) the loopback client is used.
+     */
+    private <S> Response rewriteStored(Class<S> type, S loopback, Function<S, Response> write) {
+        S store;
+        try {
+            store = CDI.current().select(type).get();
+        } catch (RuntimeException noContainer) {
+            store = loopback;
+        }
+        S target = store;
+        return LenientConfigWrite.call(() -> write.apply(target));
     }
 
     private <T> T rest(Class<T> type) {

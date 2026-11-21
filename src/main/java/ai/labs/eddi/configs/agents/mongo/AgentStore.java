@@ -16,13 +16,17 @@ import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
+import ai.labs.eddi.datastore.ReferringVersions;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.utils.RuntimeUtilities;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import jakarta.inject.Provider;
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -234,6 +238,19 @@ public class AgentStore extends AbstractResourceStore<AgentConfiguration> implem
         } while (includePreviousVersions && workflowVersion >= 1);
 
         return ret;
+    }
+
+    @Override
+    public ReferringVersions findAgentVersionsListing(Collection<String> workflowUris) {
+        List<IResourceStore.IResourceId> live = new ArrayList<>();
+        List<IResourceStore.IResourceId> historical = new ArrayList<>();
+        List<String> uris = new ArrayList<>(new LinkedHashSet<>(workflowUris));
+        for (int from = 0; from < uris.size(); from += REFERENCE_QUERY_CHUNK) {
+            List<String> chunk = uris.subList(from, Math.min(uris.size(), from + REFERENCE_QUERY_CHUNK));
+            live.addAll(resourceStorage.findResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
+            historical.addAll(resourceStorage.findHistoryResourceIdsContainingAny(WORKFLOWS_FIELD, chunk));
+        }
+        return new ReferringVersions(live, historical);
     }
 
     /** The workflow's live version from its own store, or null when it has none. */
