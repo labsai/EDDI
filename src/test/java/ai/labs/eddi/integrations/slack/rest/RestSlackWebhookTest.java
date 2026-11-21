@@ -129,6 +129,33 @@ class RestSlackWebhookTest {
         }
 
         @Test
+        @DisplayName("answers 503 with Retry-After when the handler is at capacity, so Slack redelivers")
+        void overloadedIsRetryable() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+            when(eventHandler.handleEventAsync(eq("evt-busy"), any(), any(), any())).thenReturn(SlackEventHandler.Admission.OVERLOADED);
+
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-busy\",\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
+
+            Response response = webhook.handleEvents(body, "sig", "ts");
+
+            assertEquals(503, response.getStatus());
+            assertEquals("1", response.getHeaderString("Retry-After"));
+        }
+
+        @Test
+        @DisplayName("a duplicate is still acknowledged with 200 — Slack must stop retrying it")
+        void duplicateIsAcknowledged() {
+            when(channelTargetRouter.getSigningSecrets("slack")).thenReturn(Set.of("secret"));
+            when(signatureVerifier.verify(any(), any(), any(), any())).thenReturn(true);
+            when(eventHandler.handleEventAsync(eq("evt-dup"), any(), any(), any())).thenReturn(SlackEventHandler.Admission.DUPLICATE);
+
+            String body = "{\"type\":\"event_callback\",\"event_id\":\"evt-dup\",\"event\":{\"type\":\"message\",\"text\":\"hello\"}}";
+
+            assertEquals(200, webhook.handleEvents(body, "sig", "ts").getStatus());
+        }
+
+        @Test
         @DisplayName("passes this app's own user id from the envelope's authorizations")
         void passesBotUserId() {
             // Slack sends it on every event_callback, so the handler can tell a

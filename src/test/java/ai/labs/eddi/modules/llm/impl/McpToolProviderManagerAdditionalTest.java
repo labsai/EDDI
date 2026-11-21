@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
+import com.github.benmanes.caffeine.cache.AsyncCache;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.mcp.client.McpClient;
 import dev.langchain4j.service.tool.ToolExecutor;
@@ -21,6 +22,7 @@ import org.mockito.Mock;
 import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -63,10 +65,16 @@ class McpToolProviderManagerAdditionalTest {
      * close/shutdown.
      */
     @SuppressWarnings("unchecked")
-    private Map<String, McpClient> getClientCache() throws Exception {
+    private ClientSeeder getClientCache() throws Exception {
         Field cacheField = McpToolProviderManager.class.getDeclaredField("clientCache");
         cacheField.setAccessible(true);
-        return (Map<String, McpClient>) cacheField.get(manager);
+        var cache = (AsyncCache<String, McpClient>) cacheField.get(manager);
+        return (key, client) -> cache.put(key, CompletableFuture.completedFuture(client));
+    }
+
+    /** Seeds an already-built client under a cache key. */
+    private interface ClientSeeder {
+        void put(String key, McpClient client);
     }
 
     // ==================== closeClient ====================
