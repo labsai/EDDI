@@ -55,7 +55,7 @@ which neither a reader nor an agent's context window could usefully hold.
 
 | Period | Entries | Size |
 |---|---|---|
-| [November 2026](changelog/2026-11.md) | 160 | 788 KB |
+| [November 2026](changelog/2026-11.md) | 165 | 838 KB |
 | [October 2026](changelog/2026-10.md) | 267 | 1236 KB |
 | [September 2026](changelog/2026-09.md) | 223 | 1217 KB |
 | [August 2026](changelog/2026-08.md) | 213 | 845 KB |
@@ -501,56 +501,17 @@ without a version on staging.
 
 ---
 
-## 🐛 test(cluster): NatsTlsHandshakeTest race that failed unrelated PRs, mutual-TLS test re-enabled (2026-11-10)
-
-**Repo:** EDDI (`fix/nats-tls-test-race`)
-
-### What changed and why
-
-`NatsTlsHandshakeTest` failed `Build & Test` intermittently on the Linux CI
-runner with `expected: <CONNECTED> but was: <CLOSED>`, on branches that touch
-neither NATS nor TLS (`acceptsACertificateWhoseOnlySanIsTheConfiguredHostName`
-most often, `presentsTheJvmDefaultClientCertificateWhenNoEddiKeyStoreIsConfigured`
-once). `presentsTheClientCertificateToABrokerThatRequiresMutualTls` had been
-quarantined with `@Disabled` for 6.7.0 for the same symptom.
-
-The cause was the test's own `connect(...)` helper. It opened the connection
-with `Nats.connect(manager.buildOptions())` and shut the manager down in a
-`finally`. `buildOptions()` installs the manager's connection listener, and
-jnats delivers CONNECTED to it on its own executor thread. Whenever that event
-arrived before `shutdown()` ran, the listener adopted the connection
-(`connection = conn`, `status = CONNECTED`), so `shutdown()` no longer took its
-"never started" early return and drained and closed the very connection the
-test was about to assert on. Faster machines usually ran `shutdown()` first,
-which is why it passed locally.
-
-- The helper keeps each manager alive and `@AfterEach` shuts the managers down
-  after the test has asserted on and closed its connection, then stops the fake
-  servers.
-- The helper now waits until the manager reports `isConnected()` before it
-  returns, so the listener has always adopted the connection by the time a test
-  asserts. The race outcome that used to fail now and then is the one every run
-  takes: putting the old `manager.shutdown()` back into the helper fails all
-  three CONNECTED tests every time (checked locally), instead of rarely. If the
-  wait fails, the helper closes the connection itself, since the manager never
-  stored it and `@AfterEach` could not reach it.
-- `presentsTheClientCertificateToABrokerThatRequiresMutualTls` is re-enabled.
-
-`NatsConnectionManager` is unchanged: in production its listener is installed
-only through `start()`, and closing the connection that listener adopted is
-exactly what `shutdown()` must do. Only a test that builds the options without
-`start()` could be surprised by it.
-
-**Files:** [`NatsTlsHandshakeTest.java`](../src/test/java/ai/labs/eddi/engine/cluster/NatsTlsHandshakeTest.java)
-
----
-
 ## Decision Log
 
 _For recording decisions that come up during implementation that aren't in the plan._
 
 | Date       | Decision                                                              | Context                               | Alternative Considered                                      |
 | ---------- | --------------------------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------- |
+| 2026-11-08 | An audit entry signed with a since-revoked agent key reports AGENT_KEY_REVOKED (unproven), whenever it was signed | Revocation had to apply to audit agent signatures | Keeping entries signed before the revocation valid by the ledger timestamp: no revocation time is recorded, and a forger holding the HMAC key writes the timestamp |
+| 2026-11-08 | Agent signatures that cannot vouch (missing, revoked key, deleted agent) count in agentSignatureUnproven, not invalid | A permanent agent delete raised tamperingSuspected; a stripped signature verified VALID | Mapping them to the HMAC status (stripped signature stays VALID) or to invalid (routine deletes alarm) |
+| 2026-11-08 | Audit verification reads key revocation from the agent's newest version, soft-deleted included (IAgentStore.getNewestVersionIncludingDeleted) | Revoke-then-soft-delete turned AGENT_KEY_REVOKED back into VALID | Probing readIncludingDeleted upward per entry; reporting every soft-deleted agent's entries unproven |
+| 2026-11-08 | A plain-Base64 audit agent signature (the form 6.7.0 and earlier wrote) is checked against the entry version's legacy identity.publicKey over the bare HMAC, whatever the agent's flags; with no legacy key it is AGENT_KEY_UNAVAILABLE | Authentic rows written by 6.7.0 and earlier (where the unversioned key was written into the vault outside the API) read AGENT_SIGNATURE_INVALID and raised tamperingSuspected forever | Unproven for every unversioned signature (honest rows lose their proof); judging them by the signing rules this change introduces (still reads as forged) |
+| 2026-11-07 | The key version of an audit agent signature is stored inside `agentSignature` (`v<n>:<sig>`), not as its own column | Making audit agent signatures verifiable needed the key version persisted | A `keyVersion` field on `AuditEntry` with a PostgreSQL column and Mongo field: a schema change on the append-only ledger for a value that is meaningless apart from the signature |
 | 2026-11-16 | A recovery or Stop read counts only when its latest step differs from the one stored before the turn | The backend stores a say turn only at completion, so a read while it runs shows READY and the previous step | Trusting the state of a current-step read; tracking a client-side step count (continuations, other tabs and the shared chat store make it drift low, which is the unsafe direction) |
 | 2026-11-16 | Cross-pod user events go over core NATS (`publishTransient`), not the JetStream invalidation stream | Hints need neither durability nor replay; on the stream they shared its message cap and the outbox with cache invalidations and could force a cluster-wide resync after an outage | The JetStream event stream with a separate outbox threshold; a second JetStream stream |
 | 2026-11-16 | Workforce toasts a schedule's first failure and its recovery, never its routine runs or repeated retries | A heartbeat schedule would otherwise toast and notify every minute | A per-schedule time throttle on every notice |
