@@ -334,6 +334,27 @@ class EffectiveDocumentsConfigTest {
         }
 
         @Test
+        @DisplayName("a fractional bound clamps a count down, never up: 0.99999999999999999 allows 0")
+        void countBoundIsFloored() {
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("split.maxUnitTokens", new BigDecimal("0.99999999999999999"))));
+            var e = EffectiveDocumentsConfig.resolve(null, settings, Set.of("split.maxUnitTokens"));
+            assertEquals(0, e.split().maxUnitTokens());
+            assertEquals(1, e.clampWarnings().size(), e.clampWarnings().toString());
+        }
+
+        @Test
+        @DisplayName("a dollar value clamped to a bound a double cannot hold does not exceed that bound")
+        void doubleClampStaysAtOrBelowBound() throws Exception {
+            BigDecimal bound = new BigDecimal("4.99999999999999999"); // the nearest double is 5.0
+            var settings = DocumentSettings.of(Map.of(), DocumentBounds.of(Map.of("large.summary.maxCostPerDocument", bound)));
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"large\":{\"summary\":{\"maxCostPerDocument\":12.5}}}"), settings,
+                    Set.of("large.summary.maxCostPerDocument"));
+            double clamped = e.large().summary().maxCostPerDocument();
+            assertTrue(new BigDecimal(clamped).compareTo(bound) <= 0, () -> "clamped to " + clamped);
+            assertEquals(Math.nextDown(5.0), clamped);
+        }
+
+        @Test
         @DisplayName("a stored blank reference to a key that is not available is reported; a live blank is unset, silently")
         void blankReference() throws Exception {
             var notLive = EffectiveDocumentsConfig.resolve(parse("{\"index\":{\"rag\":\" \"}}"), DocumentSettings.none(), Set.of());

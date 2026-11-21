@@ -311,7 +311,7 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
 
         int intValue(String path, Integer designer, int builtIn) {
             Integer v = pick(path, designer, null, Resolver::parseInteger);
-            return (int) clamp(path, v != null ? v : builtIn, builtIn);
+            return clampInt(path, v != null ? v : builtIn, builtIn);
         }
 
         Integer nullableIntValue(String path, Integer designer) {
@@ -323,7 +323,7 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
                 warnings.add("documents." + path + " must not be negative; the default applies");
                 return null;
             }
-            return (int) clamp(path, v, 0);
+            return clampInt(path, v, 0);
         }
 
         /**
@@ -442,9 +442,36 @@ public record EffectiveDocumentsConfig(Structure structure, Split split, UnitFor
             var bound = bounds.boundFor(path);
             if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
                 warnClamped(path, bound.get());
-                return bound.get().doubleValue();
+                return atOrBelow(bound.get());
             }
             return value;
+        }
+
+        /**
+         * Counts are clamped to the bound rounded down: a bound of 0.99999999999999999
+         * allows 0, not the 1 a conversion through {@code double} would give.
+         */
+        private int clampInt(String path, int value, int fallback) {
+            if (value < 0) {
+                warnings.add("documents." + path + " must not be negative; the default applies");
+                value = fallback; // and the default is bounded like any other value
+            }
+            var bound = bounds.boundFor(path);
+            if (bound.isPresent() && BigDecimal.valueOf(value).compareTo(bound.get()) > 0) {
+                warnClamped(path, bound.get());
+                // below an int value, so the floored bound fits in an int
+                return bound.get().setScale(0, RoundingMode.FLOOR).intValueExact();
+            }
+            return value;
+        }
+
+        /**
+         * The largest double that does not exceed {@code bound}: the nearest double can
+         * round up past an exact decimal bound.
+         */
+        static double atOrBelow(BigDecimal bound) {
+            double nearest = bound.doubleValue();
+            return new BigDecimal(nearest).compareTo(bound) > 0 ? Math.nextDown(nearest) : nearest;
         }
 
         private void warnClamped(String path, BigDecimal bound) {
