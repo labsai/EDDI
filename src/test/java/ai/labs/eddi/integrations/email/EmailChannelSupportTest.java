@@ -7,9 +7,11 @@ package ai.labs.eddi.integrations.email;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
+import ai.labs.eddi.utils.LogCaptureSupport.CapturedRecord;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
@@ -18,8 +20,10 @@ import org.junit.jupiter.api.Test;
 
 import java.net.URI;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
+import static ai.labs.eddi.utils.LogCaptureSupport.captureRecordsOf;
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -119,5 +123,44 @@ class EmailChannelSupportTest {
         assertThrows(BadRequestException.class, () -> support.clearSuppression("int-1", "not an address"));
         support.afterDelete("int-1");
         verify(suppressions).removeAll("int-1");
+    }
+
+    @Test
+    @DisplayName("the clear-suppression log line names the address by keyed pseudonym, never by the address or its unkeyed hash")
+    @SuppressWarnings("unchecked")
+    void clearSuppressionLogsPseudonym() {
+        GdprPseudonymizer pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor("alice@example.com")).thenReturn("gdpr-erased:k1:keyed-token");
+        Instance<GdprPseudonymizer> pseudonymizers = mock(Instance.class);
+        when(pseudonymizers.isResolvable()).thenReturn(true);
+        when(pseudonymizers.get()).thenReturn(pseudonymizer);
+        support.pseudonymizer = pseudonymizers;
+        when(suppressions.remove("int-1", "alice@example.com")).thenReturn(true);
+
+        List<CapturedRecord> lines = captureRecordsOf(EmailChannelSupport.class, () -> support.clearSuppression("int-1", "Alice@Example.com"));
+
+        assertTrue(lines.stream().anyMatch(line -> line.message().contains("gdpr-erased:k1:keyed-token")), "names the pseudonym: " + lines);
+        assertNoAddress(lines, "alice@example.com");
+    }
+
+    @Test
+    @DisplayName("without a pseudonymizer the clear-suppression log line names no address at all")
+    void clearSuppressionLogsNoAddressWithoutPseudonymizer() {
+        when(suppressions.remove("int-1", "alice@example.com")).thenReturn(false);
+
+        List<CapturedRecord> lines = captureRecordsOf(EmailChannelSupport.class, () -> support.clearSuppression("int-1", "alice@example.com"));
+
+        assertFalse(lines.isEmpty(), "the administrator action is still logged");
+        assertNoAddress(lines, "alice@example.com");
+    }
+
+    private static void assertNoAddress(List<CapturedRecord> lines, String normalized) {
+        // The bare hex, so neither the sha256: form nor any other wrapping slips past.
+        String unkeyedHex = IEmailSuppressionStore.hash(normalized).substring("sha256:".length());
+        for (CapturedRecord line : lines) {
+            String message = line.message().toLowerCase(Locale.ROOT);
+            assertFalse(message.contains(normalized), "the address reached the log: " + line.message());
+            assertFalse(message.contains(unkeyedHex), "the unkeyed SHA-256 of the address reached the log: " + line.message());
+        }
     }
 }
