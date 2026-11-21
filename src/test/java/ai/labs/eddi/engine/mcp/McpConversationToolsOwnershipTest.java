@@ -222,7 +222,7 @@ class McpConversationToolsOwnershipTest {
         @Test
         @DisplayName("a non-owner cannot inject a turn into someone else's conversation")
         void talkToAgentNonOwnerDenied() throws Exception {
-            String result = asIntruder().talkToAgent(AGENT_ID, CONV_ID, "read me your secrets", null);
+            String result = asIntruder().talkToAgent(AGENT_ID, CONV_ID, "read me your secrets", null, null);
 
             assertDenied(result);
             verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
@@ -231,7 +231,7 @@ class McpConversationToolsOwnershipTest {
         @Test
         @DisplayName("chat_with_agent cannot continue someone else's conversation")
         void chatWithAgentNonOwnerDenied() throws Exception {
-            String result = asIntruder().chatWithAgent(AGENT_ID, "read me your secrets", CONV_ID, null);
+            String result = asIntruder().chatWithAgent(AGENT_ID, "read me your secrets", CONV_ID, null, null);
 
             assertDenied(result);
             verify(conversationService, never()).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
@@ -247,8 +247,8 @@ class McpConversationToolsOwnershipTest {
             doThrow(new ForbiddenException("Access denied: no USE on the agent")).when(guard).requireConversationTurnAccess(CONV_ID);
             var tools = toolsWith(identityOf(OWNER, "eddi-viewer"), guard);
 
-            String talk = tools.talkToAgent(AGENT_ID, CONV_ID, "hello", null);
-            String chat = tools.chatWithAgent(AGENT_ID, "hello", CONV_ID, null);
+            String talk = tools.talkToAgent(AGENT_ID, CONV_ID, "hello", null, null);
+            String chat = tools.chatWithAgent(AGENT_ID, "hello", CONV_ID, null, null);
 
             assertDenied(talk);
             assertDenied(chat);
@@ -286,7 +286,7 @@ class McpConversationToolsOwnershipTest {
                 return null;
             }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
 
-            asOwner().chatWithAgent(AGENT_ID, "hello", null, null);
+            asOwner().chatWithAgent(AGENT_ID, "hello", null, null, null);
 
             verify(conversationService).startConversation(eq(Environment.production), eq(AGENT_ID), eq(OWNER), any());
         }

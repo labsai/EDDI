@@ -6,7 +6,9 @@ package ai.labs.eddi.engine.internal.groups;
 
 import ai.labs.eddi.engine.api.IRestGroupConversation;
 import ai.labs.eddi.engine.api.IRestGroupConversation.AttachmentRef;
+import ai.labs.eddi.engine.memory.model.Attachment;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -78,11 +80,24 @@ public final class GroupAttachmentLimits {
     }
 
     /**
+     * Client-safe text for a quota refusal when a discussion materializes its
+     * attachments: names the scope, never the store's message.
+     *
+     * @param scope
+     *            {@code GroupAttachmentRejectedException.getScope()}
+     */
+    public static String quotaRejection(String scope) {
+        return "user".equals(scope)
+                ? "Attachment refused: the per-user attachment quota is exhausted."
+                : "Attachment refused: the discussion's attachment quota would be exceeded.";
+    }
+
+    /**
      * The number of bytes a base64 string decodes to, computed from its length and
      * padding without decoding it. Rounds a malformed length up, which can only
      * make the check stricter; the decoder rejects such input later anyway.
      */
-    static long decodedLength(String base64) {
+    public static long decodedLength(String base64) {
         long length = base64.length();
         long padding = 0;
         if (length > 0 && base64.charAt((int) length - 1) == '=') {
@@ -92,5 +107,43 @@ public final class GroupAttachmentLimits {
             }
         }
         return (length + 3) / 4 * 3 - padding;
+    }
+
+    /**
+     * Convert request-level attachment refs into the memory model carrier the
+     * service materializes. Refs without inline data or a url are skipped. Shared
+     * by the REST discussion endpoints and the MCP {@code discuss_with_group} tool,
+     * so both hand the service the same carriers.
+     *
+     * @return the carriers, or {@code null} when none remain
+     */
+    public static List<Attachment> toAttachments(List<AttachmentRef> refs) {
+        if (refs == null || refs.isEmpty()) {
+            return null;
+        }
+        List<Attachment> out = new ArrayList<>();
+        for (AttachmentRef r : refs) {
+            if (r == null) {
+                continue;
+            }
+            Attachment a = new Attachment();
+            a.setMimeType(r.mimeType());
+            a.setFileName(r.fileName());
+            if (r.data() != null && !r.data().isBlank()) {
+                a.setBase64Data(r.data());
+            } else if (r.url() != null && !r.url().isBlank()) {
+                // A URL attachment with no mimeType is dropped later by
+                // AttachmentContextExtractor; skip it here so the loss is explicit
+                // rather than silent.
+                if (r.mimeType() == null || r.mimeType().isBlank()) {
+                    continue;
+                }
+                a.setUrl(r.url());
+            } else {
+                continue;
+            }
+            out.add(a);
+        }
+        return out.isEmpty() ? null : out;
     }
 }

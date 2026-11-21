@@ -76,6 +76,25 @@ Two ways, and the choice matters for keeping one conversation instead of many:
 
 Conversations run in the `production` environment unless the user asks for `test`.
 
+To hand the agent a file, pass `attachments` to `chat_with_agent` or `talk_to_agent`: a
+JSON array, each entry one file given inline, by URL or as an uploaded file the
+conversation can already read:
+
+```json
+[
+  { "data": "<base64>", "mimeType": "application/pdf", "fileName": "report.pdf" },
+  { "url": "https://example.com/chart.png", "mimeType": "image/png" },
+  { "storageRef": "<id of a file uploaded to this conversation>" }
+]
+```
+
+Only send a file the user gave you for this purpose, and say which one you sent. The
+agent sees at most five files per message (the deployment can change that), and a file
+it cannot read is skipped without failing the call — so if the answer ignores a file,
+say so rather than assuming the agent read it. One call's inline files must stay under
+about 15 MB together; for larger ones ask the user for a URL. A malformed entry is refused
+with `BAD_REQUEST` and the message is not sent. `read_docs("mcp-server")` has the details.
+
 When you hand an agent a task, write a self-contained message: it does not see this
 chat, your files or your earlier reasoning. Relay its answer to the user faithfully —
 quote what matters, mark what is yours, and do not present a guess as the agent's.
@@ -99,7 +118,8 @@ authoring tool.
 - `describe_discussion_styles` explains each style if the user wants to know what a group
   will do.
 - `discuss_with_group` runs the whole discussion and returns the transcript and a
-  synthesised answer. It can take minutes.
+  synthesised answer. It can take minutes. Its `attachments` argument gives every member
+  the same files, inline or by URL only — it refuses an uploaded file's reference.
 - For long discussions (always for `TASK_FORCE`), `start_group_discussion` returns at once;
   poll `read_group_conversation` sparingly and tell the user it is still running. It has
   finished at `COMPLETED`, `FAILED`, `REJECTED` or `CANCELLED`; at `AWAITING_APPROVAL` or

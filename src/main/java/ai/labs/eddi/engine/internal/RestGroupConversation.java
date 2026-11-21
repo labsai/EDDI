@@ -45,7 +45,6 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
-import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -209,9 +208,7 @@ public class RestGroupConversation implements IRestGroupConversation {
      * never the store's message.
      */
     private static String quotaRejection(IGroupConversationService.GroupAttachmentRejectedException e) {
-        return "user".equals(e.getScope())
-                ? "Attachment refused: the per-user attachment quota is exhausted."
-                : "Attachment refused: the discussion's attachment quota would be exceeded.";
+        return GroupAttachmentLimits.quotaRejection(e.getScope());
     }
 
     /**
@@ -256,7 +253,7 @@ public class RestGroupConversation implements IRestGroupConversation {
             String userId = ownershipValidator.validateAndResolveUserId(identity, request.userId());
             if (userId == null || userId.isBlank())
                 userId = "anonymous";
-            List<Attachment> attachments = toAttachments(request.attachments());
+            List<Attachment> attachments = GroupAttachmentLimits.toAttachments(request.attachments());
             GroupConversation gc = attachments == null
                     ? groupConversationService.discuss(groupId, request.question(), userId, 0)
                     : groupConversationService.discuss(groupId, request.question(), userId, 0, null, attachments);
@@ -340,7 +337,7 @@ public class RestGroupConversation implements IRestGroupConversation {
                 userId = "anonymous";
 
             var listener = createStreamingListener(eventSink, sse);
-            List<Attachment> attachments = toAttachments(request.attachments());
+            List<Attachment> attachments = GroupAttachmentLimits.toAttachments(request.attachments());
             if (attachments == null) {
                 groupConversationService.startAndDiscussAsync(groupId, request.question(), userId, listener);
             } else {
@@ -366,40 +363,6 @@ public class RestGroupConversation implements IRestGroupConversation {
             sendErrorEvent(eventSink, sse, "Group discussion could not be started.");
             closeQuietly(eventSink);
         }
-    }
-
-    /**
-     * Convert request-level attachment refs into the memory model carrier the
-     * service materializes. Refs without inline data or a url are skipped.
-     */
-    private static List<Attachment> toAttachments(List<AttachmentRef> refs) {
-        if (refs == null || refs.isEmpty()) {
-            return null;
-        }
-        List<Attachment> out = new ArrayList<>();
-        for (AttachmentRef r : refs) {
-            if (r == null) {
-                continue;
-            }
-            Attachment a = new Attachment();
-            a.setMimeType(r.mimeType());
-            a.setFileName(r.fileName());
-            if (r.data() != null && !r.data().isBlank()) {
-                a.setBase64Data(r.data());
-            } else if (r.url() != null && !r.url().isBlank()) {
-                // A URL attachment with no mimeType is dropped later by
-                // AttachmentContextExtractor; skip it here so the loss is explicit
-                // rather than silent.
-                if (r.mimeType() == null || r.mimeType().isBlank()) {
-                    continue;
-                }
-                a.setUrl(r.url());
-            } else {
-                continue;
-            }
-            out.add(a);
-        }
-        return out.isEmpty() ? null : out;
     }
 
     @Override
