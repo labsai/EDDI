@@ -197,6 +197,10 @@ spec:
             # /health/* stay disabled unless this is set, whatever port you probe.
             - name: KC_HEALTH_ENABLED
               value: "true"
+            # Java4Shell (CVE-2026-114938) interim mitigation: Keycloak decodes Base64
+            # before any login. Remove once the pinned image ships a fixed JDK.
+            - name: JAVA_OPTS_APPEND
+              value: "-XX:-UseBASE64Intrinsics"
             {{- if .Values.eddi.oidc.publicUrl }}
             # Must equal the URL the BROWSER uses for KEYCLOAK, because it is
             # what Keycloak embeds as the token issuer. (Where the Manager SPA
