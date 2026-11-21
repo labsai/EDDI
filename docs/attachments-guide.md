@@ -177,6 +177,8 @@ The returned `storageRef` can then be used in subsequent conversation turns by s
 
 The `storageRef` is a random UUID — unguessable, and only readable from the owning conversation or one it was explicitly granted to. A blob that records no owning conversation (one stored by a release that predates attachment ownership) cannot be read through a conversation unless that conversation was explicitly granted access to it, on either backend: ownership that cannot be established is refused rather than assumed, while an explicit grant still applies. It can still be deleted by its `storageRef`, because deleting discloses nothing and refusing it would leave data no erasure could remove. Deleting a conversation, and a GDPR erasure, remove the blobs that record that conversation as their owner; an ownerless blob records none, so they do not reach it (as before). The storage backend (GridFS or PostgreSQL) is selected automatically based on the configured datastore.
 
+**Grants are stored on their own**, in the `attachment_grants` collection (MongoDB) or table (PostgreSQL), one row per blob and grantee conversation. Deleting a blob deletes the grants on it. Deleting a conversation, and a GDPR erasure, also delete the grants that conversation *held* on other conversations' blobs, so grants no longer pile up on a shared file after its readers are gone. Grants used to live on the blob itself (`metadata.grants` on MongoDB, the `grants` column on PostgreSQL). For one release EDDI writes both shapes and accepts either one, so a cluster in a rolling upgrade works in both directions. On every start a background pass copies the old grants over in batches. It is a catch-up: a node of the previous release can still write an old-style grant during the upgrade. The pass skips grantees that no longer exist, removes grant rows whose blob is gone, and continues from where it stopped if a start cuts it short. When a whole pass finishes without a failed lookup, it is recorded in the migration log under `attachment-grants-backfill-complete`. That record does not prove that no old-style grant can still appear: a node of the previous release can write one afterwards. A later release may stop reading the old shape only after it has run this copy once more, with every node upgraded. Include `attachment_grants` and `attachment_grants_backfill` in backups.
+
 #### Content check
 
 The declared type is checked against the file's content. Images and PDFs must carry their signature (a "PNG" without one is refused). Text declared as a text type — `text/*`, JSON, XML, YAML, CSV — is accepted when it reads as text (no NUL bytes, almost no control characters), whatever short signature it happens to start with: a CSV whose first column is `BMI` starts with the bitmap magic `BM`, and Markdown can quote `%PDF-1.7`, and neither is an image or a PDF. A real binary declared as text is still refused.
@@ -200,6 +202,26 @@ Quotas are enforced atomically: the usage is counted and the blob stored under o
 | `400` | No file provided, file exceeds `eddi.attachments.max-size-bytes`, the content does not match the declared type, or a quota is full (`quota` names which) |
 | `413` / `411` | The request body passed the HTTP body limit, or arrived without a `Content-Length`. The limit is `eddi.http.limits.default-max-body-size`, raised automatically to fit an attachment at `eddi.attachments.max-size-bytes` base64-encoded — so raising the attachment limit raises it too, up to `quarkus.http.limits.max-body-size` (60 MB), which it cannot exceed. Above about 44 MB of attachment, raise that ceiling as well; a WARN at startup names the value needed. See [configuration-reference.md](configuration-reference.md#security--authentication) |
 | `500` | Storage or I/O error |
+
+#### Derived files
+
+The store can also hold **derived files**: views EDDI makes of an uploaded file, such as a PDF's structure, the text of a page window, an extracted image or a page-range slice. Nothing creates one yet; the document features that will are off by default and arrive in later releases. What is already true:
+
+- **A derived file belongs to the uploaded file's owner**, never to the conversation whose work produced it. When a group member reads a file shared with it and EDDI extracts a chapter, the extract belongs to the file's owner, any reader of the file can read it, and it is not deleted with the member.
+- **Access is decided on the uploaded file.** Whoever may read the file may read every view of it; a grant is always on the uploaded file. A conversation that may not read the file is told a view of it does not exist.
+- **It dies with the file.** Deleting an uploaded file, its conversation or its user (GDPR erasure) deletes every view of it.
+- **Listings and file counts see uploaded files only.** A derived file never appears in the conversation's attachment list and never counts toward `max-per-conversation` or `max-per-user`.
+- **Only media count toward the byte quotas.** Extracted images, tables, audio and embedded files count toward the owner's byte quotas (`max-total-bytes-per-conversation`, `max-total-bytes-per-user`). Text views (structure, page text, summaries, descriptions) and slices do not: reading a file, possibly as a grantee, must never use up its owner's upload quota. They are bounded per uploaded file instead:
+
+| Per uploaded file | Default | What happens at the limit |
+|---|---|---|
+| `eddi.attachments.derived.max-per-source` | 200 | Images, tables, audio and embedded files together; the next one is refused |
+| `eddi.attachments.derived.max-total-bytes-per-source` | 50 MB | The same four kinds, in bytes; refused |
+| `eddi.attachments.derived.max-text-bytes-per-source` | 200 MB | Text views together; refused |
+| `eddi.attachments.derived.max-slices-per-source` | 20 | Page-range slices, a rebuildable cache: the least recently used is deleted to make room |
+| `eddi.attachments.derived.max-slice-bytes-per-source` | 50 MB | Slices in bytes; the least recently used are deleted to make room |
+
+Identical bytes stored twice for the same owner and uploaded file are kept once; two owners with the same file share nothing. Counted on `eddi_attachment_derived_stored_total{kind}` and `eddi_attachment_derived_bytes_total{kind}`.
 
 ---
 
@@ -392,4 +414,5 @@ Granting is idempotent on both stores (MongoDB adds to a set, PostgreSQL appends
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.
 - **Transient base64**: The `base64Data` field is `transient` — it exists only during the pipeline turn. For persistence, use the upload endpoint with `IAttachmentStore`.
 - **DB-agnostic**: The `IAttachmentStore` SPI supports MongoDB (GridFS) and PostgreSQL (bytea) implementations.
-- **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted.
+- **GDPR cleanup**: `IAttachmentStore.deleteByConversation()` removes all attachments when a conversation is deleted, with every derived file of them.
+- **Lineage**: a derived file is a row (PostgreSQL) or GridFS file (MongoDB) of the same store with `root_ref` / `metadata.rootRef` naming the uploaded file, and its owner fields copied from it when it is written. The store announces every deleted uploaded file as a CDI event, `AttachmentRootDeleted`, so caches and jobs keyed by that file can clean up; `AttachmentOwnerChanged` is declared for the libraries of later releases and not fired yet. The new columns are additive (`ADD COLUMN IF NOT EXISTS` / new metadata fields, no backfill): `owner_key` empty reads as the conversation id, `page_count` empty as unknown.
