@@ -135,6 +135,9 @@ public final class FakeDrive implements DriveTransport {
     Runnable beforeRequest = () -> {
     };
 
+    /** Drive answers without capabilities, as if the field were not returned. */
+    boolean omitCapabilities;
+
     public FakeDrive unlistable(String id) {
         unlistable.add(id);
         return this;
@@ -190,7 +193,9 @@ public final class FakeDrive implements DriveTransport {
         }
         ObjectNode file = JSON.createObjectNode().put("id", id).put("name", item.name())
                 .put("mimeType", item.mimeType()).put("driveId", driveId).put("trashed", item.trashed());
-        file.putObject("capabilities").put("canListChildren", !unlistable.contains(id));
+        if (!omitCapabilities) {
+            file.putObject("capabilities").put("canListChildren", !unlistable.contains(id));
+        }
         return ok(file, maxBytes);
     }
 
@@ -229,7 +234,9 @@ public final class FakeDrive implements DriveTransport {
                     .put("mimeType", item.mimeType())
                     .put("webViewLink", "https://docs.google.com/fake/" + item.id())
                     .put("modifiedTime", "2026-11-01T10:00:00.000Z");
-            file.putObject("capabilities").put("canListChildren", !unlistable.contains(item.id()));
+            if (!omitCapabilities) {
+                file.putObject("capabilities").put("canListChildren", !unlistable.contains(item.id()));
+            }
             file.putObject("lastModifyingUser").put("displayName", "Test Author");
             if (item.size() != null) {
                 file.put("size", String.valueOf(item.size()));

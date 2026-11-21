@@ -214,10 +214,15 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     // list it: ask before an empty answer counts as coverage.
                     try {
                         JsonNode meta = api.getFile(folder.id());
-                        boolean inDrive = drive.getSharedDriveId().equals(meta.path("driveId").asText());
-                        if (inDrive && !meta.path("capabilities").path("canListChildren").asBoolean(false)) {
+                        String targetDrive = meta.path("driveId").asText("");
+                        if (targetDrive.isEmpty()) {
+                            // Where the target lives is unconfirmed: not believed.
                             complete = false;
-                            incompleteReason = "the service account cannot list " + folder.label();
+                            incompleteReason = "could not confirm where " + folder.label() + " lives";
+                        } else if (drive.getSharedDriveId().equals(targetDrive)
+                                && !meta.path("capabilities").path("canListChildren").asBoolean(false)) {
+                            complete = false;
+                            incompleteReason = "the service account cannot confirm it can list " + folder.label();
                         }
                     } catch (SourceException e) {
                         if (e.error().kind() == SourceError.Kind.AUTH) {
@@ -504,8 +509,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             throw new SourceException(new SourceError.Rejected("Folder " + folderId + " is not in Shared Drive "
                     + drive.getSharedDriveId()));
         }
-        if (folder.path("capabilities").path("canListChildren").isBoolean()
-                && !folder.path("capabilities").path("canListChildren").asBoolean()) {
+        if (!folder.path("capabilities").path("canListChildren").asBoolean(false)) {
             throw new SourceException(new SourceError.Auth("The service account cannot list the children of folder "
                     + folderId + ": Drive shows it but lists it as empty. Share the folder with the account."));
         }
@@ -627,7 +631,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             String name = file.name() == null ? file.id() : file.name();
             if (DriveFormat.FOLDER_MIME.equals(file.mimeType())) {
                 if (drive.isIncludeSubfolders() && visited.add(file.id())) {
-                    queue.add(new Folder(file.id(), folder.child(name), false, !Boolean.FALSE.equals(file.canListChildren())));
+                    queue.add(new Folder(file.id(), folder.child(name), false, Boolean.TRUE.equals(file.canListChildren())));
                 }
                 return true;
             }

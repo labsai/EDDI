@@ -243,6 +243,35 @@ class GoogleDriveSourceConnectorTest {
         }
 
         @Test
+        @DisplayName("a deadline that passes during the final access check is not reported as complete")
+        void deadlineDuringAccessCheck() throws SourceException {
+            Instant[] now = {Instant.now()};
+            connector.clock = () -> now[0];
+            Recorder recorder = new Recorder(context(false));
+            fake.beforeRequest = () -> {
+                if (fake.countRequests("/drives/") > 0) {
+                    now[0] = Instant.now().plus(Duration.ofMinutes(30));
+                }
+            };
+
+            DiscoveryResult result = connector.discover(recorder);
+
+            assertEquals(StopReason.TIME_LIMIT, result.stopReason());
+            assertEquals(Coverage.PARTIAL, result.coverage());
+        }
+
+        @Test
+        @DisplayName("a folder whose listing capability Drive does not report is not believed when empty")
+        void missingCapabilityEmptyFolder() throws SourceException {
+            fake.folder("fx", "Unknown", DRIVE);
+            fake.omitCapabilities = true;
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.PARTIAL, run.result.coverage());
+        }
+
+        @Test
         @DisplayName("a cancelled run stops before the next request")
         void cancelled() throws SourceException {
             fake.file("f1", "a.txt", "text/plain", DRIVE, "a");
