@@ -1,11 +1,10 @@
 import { memo, useState, useCallback, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "../../lib/utils";
-import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import { ConversationMarkdown, FormattedConversationMarkdown } from "@eddi/conversation/i18next";
 import type { ChatMessage as ChatMessageType, MessageAttachment } from "../../lib/api/chat";
 import type { DecisionRecord } from "../../lib/api/groups";
 import {
-  formatMarkdownText,
   parseVerdictJson,
   type VerdictJson,
 } from "@eddi/conversation/team";
@@ -71,6 +70,11 @@ interface ChatMessageProps {
    * the last message the person sent, Regenerate on the last reply.
    */
   actions?: ReactNode;
+  /**
+   * The agent's `conversationControls.rawHtml`: HTML in its replies is rendered
+   * (sanitised) only when true. Off by default; otherwise it is shown as text.
+   */
+  enableRawHtml?: boolean;
 }
 
 export const ChatMessage = memo(function ChatMessage({
@@ -80,6 +84,7 @@ export const ChatMessage = memo(function ChatMessage({
   ratingProfile,
   onRateStep,
   actions,
+  enableRawHtml = false,
 }: ChatMessageProps) {
   const isUser = message.role === "user";
   const [hovered, setHovered] = useState(false);
@@ -183,7 +188,9 @@ export const ChatMessage = memo(function ChatMessage({
                 <div className="flex flex-col gap-3" data-testid="chat-verdict">
                   <DecisionRecordCard decision={verdictToDecision(verdict)} className="not-prose" />
                   {verdict.reasoning && (
-                    <ConversationMarkdown>{formatMarkdownText(verdict.reasoning)}</ConversationMarkdown>
+                    <FormattedConversationMarkdown enableRawHtml={enableRawHtml} escapeRawHtml={!enableRawHtml}>
+                      {verdict.reasoning}
+                    </FormattedConversationMarkdown>
                   )}
                 </div>
               ) : structured && isStructuredBody(structured) ? (
@@ -194,11 +201,19 @@ export const ChatMessage = memo(function ChatMessage({
                 /* The one markdown renderer: bot/LLM output is untrusted, so raw
                    HTML only ever passes rehype-sanitize (no iframe, script,
                    handler or live image survives it), and images become links. */
-                <ConversationMarkdown>
-                  {structured?.kind === "markdown"
-                    ? structured.text
-                    : formatMarkdownText(message.content)}
-                </ConversationMarkdown>
+                structured?.kind === "markdown" ? (
+                  <ConversationMarkdown enableRawHtml={enableRawHtml} escapeRawHtml={!enableRawHtml}>
+                    {structured.text}
+                  </ConversationMarkdown>
+                ) : (
+                  <FormattedConversationMarkdown
+                    streaming={message.isStreaming}
+                    enableRawHtml={enableRawHtml}
+                    escapeRawHtml={!enableRawHtml}
+                  >
+                    {message.content}
+                  </FormattedConversationMarkdown>
+                )
               ) : message.isStreaming ? (
                 <TypingIndicator />
               ) : message.images?.length ? null : (

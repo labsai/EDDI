@@ -62,7 +62,8 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
   // The destination run is taken ATOMICALLY (a lookahead plus its backreference): a shorter run can never
   // be followed by the title or the closing paren (the next character would be one the run accepts), so
   // giving characters back only retried hopeless matches, which cost ~750 ms on 100k characters of "](".
-  /\]\((?=([^)\s]{0,2048}))\1(?:\s+"[^"]{0,512}")?\)/g,
+  // The bounded `[text` before it takes the link text along, so it is never rewritten either.
+  /(?:\[[^[\]\n]{0,512})?\]\((?=([^)\s]{0,2048}))\1(?:\s+"[^"]{0,512}")?\)/g,
   // Markdown autolink. The body stops at the next `<` and is bounded: a candidate that never closes
   // used to run to the end of the text and was retried from every later `<` (quadratic).
   /<[a-zA-Z][a-zA-Z0-9+.-]{0,31}:[^<>\s]{0,2048}>/g,
@@ -70,13 +71,61 @@ const PROTECTED_PATTERNS: readonly RegExp[] = [
 ];
 
 /**
- * Sentinel wrapping a stash index, using a Unicode Private Use Area character.
- * PUA code points carry no meaning in real text, so the placeholder can never
- * collide with agent output — unlike a space- or bracket-delimited token, which
- * would swallow ordinary numbers ("in 5 minutes").
+ * The placeholder characters of one repair: `stash` wraps a stash index
+ * (`stash + index + stash`), `math` stands in for one `$…$` span while a line's
+ * bold is repaired. Both are Unicode Private Use Area characters, chosen per
+ * input so that NEITHER occurs in it (see {@link chooseMarks}): a placeholder in
+ * the working text was then always put there by us, and a literal one in agent
+ * output — which prompt injection can shape — is ordinary text that is kept as
+ * it is. Removing such characters instead would delete user content (a JSON
+ * example in a code fence whose string holds one).
+ *
+ * A PUA character rather than a space- or bracket-delimited token, which would
+ * swallow ordinary numbers ("in 5 minutes").
  */
-const SENTINEL = String.fromCharCode(0xe000);
-const PLACEHOLDER = new RegExp(SENTINEL + "(\\d+)" + SENTINEL, "g");
+interface Marks {
+  stash: string;
+  /** `stash(\d+)stash`, global. */
+  placeholder: RegExp;
+  math: string;
+  /** `math`, global. */
+  mathAll: RegExp;
+}
+
+function makeMarks(stashCode: number, mathCode: number): Marks {
+  const stash = String.fromCharCode(stashCode);
+  const math = String.fromCharCode(mathCode);
+  return {
+    stash,
+    placeholder: new RegExp(stash + "(\\d+)" + stash, "g"),
+    math,
+    mathAll: new RegExp(math, "g"),
+  };
+}
+
+const PUA_FIRST = 0xe000;
+const PUA_LAST = 0xf8ff;
+/** Any BMP Private Use Area character. */
+const PRIVATE_USE = /[\uE000-\uF8FF]/;
+const PRIVATE_USE_ALL = /[\uE000-\uF8FF]/g;
+/** The marks of every input without a PUA character — nearly all of them. */
+const DEFAULT_MARKS = makeMarks(PUA_FIRST, PUA_FIRST + 1);
+
+/**
+ * Two PUA characters that do not occur in `text`, or null when there are none
+ * (an input holding all 6,400 of them, which no repair is worth). One `test`
+ * and no allocation when `text` has no PUA character at all.
+ */
+function chooseMarks(text: string): Marks | null {
+  if (!PRIVATE_USE.test(text)) return DEFAULT_MARKS;
+  const used = new Set<number>();
+  for (const m of text.matchAll(PRIVATE_USE_ALL)) used.add(m[0].charCodeAt(0));
+  const free: number[] = [];
+  for (let c = PUA_FIRST; c <= PUA_LAST && free.length < 2; c++) {
+    if (!used.has(c)) free.push(c);
+  }
+  return free.length === 2 ? makeMarks(free[0]!, free[1]!) : null;
+}
 
 /**
  * Replace every protected region with an opaque placeholder, returning the
@@ -161,22 +210,20 @@ function maskIndentedCode(text: string, push: (m: string) => string): string {
   });
 }
 
-function maskProtectedRegions(text: string): {
+function maskProtectedRegions(
+  text: string,
+  marks: Marks,
+): {
   masked: string;
   restore: (s: string) => string;
 } {
   const stash: string[] = [];
-  // Strip any sentinel already in the input FIRST. Agent output is
-  // attacker-influenceable via prompt injection, and a literal
-  // U+E000<digits>U+E000 would otherwise be indistinguishable from a real
-  // placeholder — restore would substitute an unrelated stashed region into the
-  // message (duplicating it) or, for an out-of-range index, delete the text.
-  // U+E000 is Private Use Area and carries no meaning in real content, so
-  // dropping it loses nothing.
-  let masked = text.split(SENTINEL).join("");
+  // `marks.stash` does not occur in `text` (chooseMarks), so every placeholder
+  // restore finds below is one `push` made; nothing is removed from the input.
+  let masked = text;
   const push = (match: string): string => {
     stash.push(match);
-    return SENTINEL + (stash.length - 1) + SENTINEL;
+    return marks.stash + (stash.length - 1) + marks.stash;
   };
   for (const pattern of PROTECTED_PATTERNS) {
     masked = masked.replace(pattern, push);
@@ -190,122 +237,136 @@ function maskProtectedRegions(text: string): {
     let out = s;
     // One pass per masking stage that can nest, plus one to settle.
     const maxPasses = PROTECTED_PATTERNS.length + 2;
-    for (let i = 0; i < maxPasses && out.includes(SENTINEL); i++) {
-      out = out.replace(PLACEHOLDER, (_m, idx: string) => stash[Number(idx)] ?? "");
+    for (let i = 0; i < maxPasses && out.includes(marks.stash); i++) {
+      out = out.replace(marks.placeholder, (m, idx: string) => stash[Number(idx)] ?? m);
     }
     return out;
   };
   return { masked, restore };
 }
 
+/** A GFM table row: optional indent, then a pipe. Repaired cell by cell. */
+const TABLE_ROW = /^[ \t]*\|/;
+/** Where a line's content starts: after indent, quote markers, a heading marker or one list marker. */
+const LINE_CONTENT_START = /^(?:[ \t]*>)*[ \t]*(?:#{1,6}[ \t]+|(?:[-*+]|\d+[.)])[ \t]+)?/;
+/** A `$…$` span: math, whose `**` is an operator. Stashed while a line is repaired. */
+const MATH_SPAN = /\$[^$\n]{1,200}\$/g;
+
+/** What may directly precede an opening `**` that is emphasis rather than an operator or a code flag. */
+const OPENER_BEFORE = /(?:^|[\s\u00a0|>[{"'])$/;
+/** What may directly follow a closing `**` that was written with a space before it. */
+const CLOSER_AFTER = /^(?:$|[\s\u00a0.,;:!?)\]}|"'([{])/;
+
 /**
- * Format and normalize markdown text to ensure proper rendering across all UI surfaces.
+ * Repair the bold delimiters of one stretch of text (a line, or one table
+ * cell). Only plausible emphasis is touched:
  *
- * Code spans, fenced blocks, link destinations and URLs are masked out first, so
- * every rule below applies to prose only.
+ * - every `**` has a partner (an even count); an unclosed `**` while streaming,
+ *   or a stray one, leaves the stretch exactly as it is;
+ * - the opener sits at a boundary (start, whitespace, `|`, a quote or bracket
+ *   opener), never directly after an identifier, `(` or `,` — so `f(**kwargs,
+ *   **opts)` is not read as bold;
+ * - a span with whitespace inside ONE edge (`**bold **(x`, `** bold**`) has it
+ *   moved outside, which CommonMark needs to see emphasis. When the whitespace
+ *   is before the closer, a letter or digit may not follow it directly
+ *   (`pass **kwargs and **opts` is code talk, not bold);
+ * - a span with whitespace inside BOTH edges is repaired only when its opener
+ *   starts the content (`** Titel **`). Anywhere else it cannot be told from
+ *   exponent notation (`x ** 2 and y ** 2`);
+ * - `$…$` math is never touched.
+ */
+function repairBoldText(text: string, contentStart: number, marks: Marks): string {
+  if (!text.includes("**")) return text;
+  // `marks.math` does not occur in the input (chooseMarks), so every mark below
+  // stands for exactly one span in `math`, in order.
+  const math: string[] = [];
+  const work = text.replace(MATH_SPAN, (m) => {
+    math.push(m);
+    return marks.math;
+  });
+  const segments = work.split("**");
+  // segments.length is odd exactly when the delimiter count is even.
+  if (segments.length < 3 || segments.length % 2 === 0) return text;
+  // Start of each segment in the ORIGINAL text (the loop below edits the array).
+  const starts: number[] = [];
+  let at = 0;
+  for (const segment of segments) {
+    starts.push(at);
+    at += segment.length + 2;
+  }
+  // The text before the opener and after the closer, as written.
+  const original = segments.slice();
+  for (let i = 1; i < segments.length; i += 2) {
+    const inner = original[i]!;
+    const trimmed = inner.trim();
+    const loose = /^[\s\u00a0]/.test(inner);
+    const trailing = /[\s\u00a0]$/.test(inner);
+    if (trimmed === "" || !(loose || trailing)) continue;
+    const openerAtStart = (starts[i] ?? 0) - 2 === contentStart;
+    if (loose && trailing && !openerAtStart) continue;
+    if (!OPENER_BEFORE.test(original[i - 1]!)) continue;
+    // `**kwargs and **opts`: the "closer" is glued to a word.
+    if (trailing && !loose && !CLOSER_AFTER.test(original[i + 1]!)) continue;
+    segments[i] = trimmed;
+    if (loose) {
+      const before = segments[i - 1]!;
+      if (before !== "" && !/[\s\u00a0([{|]$/.test(before)) segments[i - 1] = before + " ";
+    }
+    if (trailing) {
+      const after = segments[i + 1]!;
+      if (after !== "" && !/^[\s\u00a0.,;:!?)\]}|]/.test(after)) segments[i + 1] = " " + after;
+    }
+  }
+  let k = 0;
+  return segments.join("**").replace(marks.mathAll, (m) => math[k++] ?? m);
+}
+
+/** Repair ONE line; a table row cell by cell, so a `|` is never crossed. */
+function repairBoldLine(line: string, marks: Marks): string {
+  if (!line.includes("**")) return line;
+  if (TABLE_ROW.test(line)) {
+    return line
+      .split("|")
+      .map((cell) => repairBoldText(cell, /^[ \t]*/.exec(cell)?.[0].length ?? 0, marks))
+      .join("|");
+  }
+  return repairBoldText(line, LINE_CONTENT_START.exec(line)?.[0].length ?? 0, marks);
+}
+
+/**
+ * Light repair of model output before it is parsed as Markdown.
  *
- * 1. Fixes ATX headings missing space or glued to preceding words (e.g. `word## Header` -> `word\n\n## Header`)
- * 2. Fixes trailing hyphens/dashes attached to opening bold markers (e.g. `Das- **Logo` -> `Das - **Logo`)
- * 3. Removes illegal whitespace INSIDE bold delimiters so CommonMark parsers recognize bold text:
- *    (e.g. `** von der Strategie **` -> `**von der Strategie**`, `** warum**` -> `**warum**`)
- * 4. Ensures space BEFORE opening `**` if glued to preceding text (e.g. `word**bold**` -> `word **bold**`)
- * 5. Ensures space AFTER closing `**` if glued to following word (e.g. `**bold**word` -> `**bold** word`)
- * 6. Fixes list hyphens glued to colons (e.g. `bedeutet:- Zuerst` -> `bedeutet: - Zuerst`)
- * 7. Fixes missing spaces after punctuation before capitalized words (e.g. `mich,Sie` -> `mich, Sie`)
+ * Correct Markdown and ordinary prose come out UNCHANGED. The rewriter used to
+ * "repair" glued headings (`word## Title`, `#Header`), `:-`, `-**`, `**bold**word`,
+ * `,Capital` and exponent-like `**`; each of those also fired on correct text
+ * (`C#`, `Issue#12`, `www.x.com/p#sec`, `#1 priority`, `#fff`, `thanks:-)`,
+ * `pre-**trained**`, `x ** 2`, `**bold**word`) and was dropped. What remains is a
+ * single repair, the whitespace inside `**` delimiters (see {@link repairBoldLine}).
  *
- * There is deliberately NO lowercase->uppercase word splitter. It cannot tell a
- * dropped space (`SieSind`) from an identifier (`apiKey`, `PostgreSQL`,
- * `conversationId`), and in an agent-platform console the identifiers dominate.
+ * Code spans, fenced and indented code blocks, link text and destinations,
+ * autolinks and bare URLs are masked first, and a table row is repaired cell by cell, so the
+ * repair applies to prose only. Unterminated constructs while a reply streams are
+ * masked too.
+ *
+ * Nothing but whitespace next to a repaired `**` ever changes: every other
+ * character of the input comes back, in order. The placeholders the masking
+ * uses are characters the input does not contain ({@link chooseMarks}); an
+ * input for which none can be found is returned unrepaired.
  */
 export function formatMarkdownText(text: string): string {
   if (!text) return "";
-
-  const { masked, restore } = maskProtectedRegions(text);
-  let formatted = masked;
-
-  // 1. Fix ATX headings missing space after # (e.g. "#Header" -> "# Header", "###Title" -> "### Title")
-  formatted = formatted.replace(/^(#{1,6})([^\s#])/gm, "$1 $2");
-
-  // 2. Fix ATX headings glued directly to preceding text on same line (e.g. "Schließlich## 🌐" -> "Schließlich\n\n## 🌐")
-  formatted = formatted.replace(/([^\s\n#])(#{1,6}\s)/g, "$1\n\n$2");
-  formatted = formatted.replace(/([^\s\n#])(#{1,6}[^\s#])/g, "$1\n\n$2");
-
-  // 3. Fix list/dash attached to colons (e.g. "bedeutet:- Zuerst" -> "bedeutet: - Zuerst")
-  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ]):-\s*/g, "$1: - ");
-
-  // 4. Fix trailing hyphens/dashes attached to opening bold markers (e.g. "Das- **Logo" -> "Das - **Logo")
-  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ])-\s*\*\*/g, "$1 - **");
-
-  // 4b. Fix a bullet marker glued to its bold ("-** Create" -> "- ** Create",
-  // which pass B below then normalizes to "- **Create"). Without the space the
-  // line is not a list item at all AND the delimiter cannot open.
-  formatted = formatted.replace(/(^|\n)([ \t]*)-\*\*/g, "$1$2- **");
-
-  // 5. NORMALIZE WHITESPACE INSIDE DOUBLE ASTERISKS (**word ** -> **word**, ** word** -> **word**)
-  //
-  // CommonMark disallows whitespace directly inside `**`, so `**bold **` renders
-  // as literal asterisks. The whitespace is moved OUT of the delimiters rather
-  // than deleted: "**cases **(recruitment" must become "**cases** (recruitment",
-  // not "**cases**(recruitment".
-  //
-  // Done by SPLITTING on `**` rather than by regex, because a regex cannot tell
-  // an opener from a closer. Three passes of `\*\*...\*\*` used to do this, and
-  // on a line with two bold spans they matched from the CLOSER of the first to
-  // the OPENER of the second — "a.**B**: c **d** e" became "a. **B**: c** d** e",
-  // corrupting emphasis that was already correct. Splitting makes the pairing
-  // explicit: segment 0 is outside, 1 inside, 2 outside, … so a closer can never
-  // be mistaken for an opener.
-  const segments = formatted.split("**");
-  if (segments.length >= 3) {
-    // An odd delimiter count leaves the final `**` unpaired; everything from it
-    // onward is outside text and must not be trimmed as if it were emphasized.
-    const lastPaired = segments.length % 2 === 0 ? segments.length - 2 : segments.length - 1;
-    for (let i = 1; i < lastPaired; i += 2) {
-      const inner = segments[i]!;
-      const trimmed = inner.trim();
-      // An empty or whitespace-only span is not emphasis at all — leave it
-      // exactly as it is rather than inventing a pair around nothing.
-      if (trimmed === "") continue;
-      const hadLeading = /^[\s\u00a0]/.test(inner);
-      const hadTrailing = /[\s\u00a0]$/.test(inner);
-      segments[i] = trimmed;
-      // Push the removed whitespace outward, but only where its absence would
-      // glue the bold to a neighbouring word. Punctuation and existing
-      // whitespace need no separator, so "**Panel ** |" does not gain a double
-      // space and "**label**:" stays tight.
-      if (hadLeading) {
-        const before = segments[i - 1]!;
-        if (before !== "" && !/[\s\u00a0([{|]$/.test(before)) segments[i - 1] = before + " ";
-      }
-      if (hadTrailing) {
-        const after = segments[i + 1]!;
-        if (after !== "" && !/^[\s\u00a0.,;:!?)\]}|]/.test(after)) segments[i + 1] = " " + after;
-      }
-    }
-    formatted = segments.join("**");
-  }
-
-  // 6. Fix missing space BEFORE opening ** when glued to preceding word (e.g. "word**bold**" -> "word **bold**").
-  // The char AFTER the ** must be a letter/digit — evidence of an OPENER. The
-  // previous class ([^\s*]) also matched punctuation, so this fired on valid
-  // CLOSERS glued to punctuation ("**label**:" -> "**label **:"), un-pairing
-  // every bold label in a list and rendering the operator's answers as a mess
-  // of literal asterisks and misplaced bold — the whitespace-repair passes run
-  // BEFORE this rule, so the damage it did was never repaired.
-  formatted = formatted.replace(/([a-zA-Z0-9äöüßÄÖÜ,.:;!?])\*\*([\p{L}\p{N}])/gu, "$1 **$2");
-
-  // 7. Fix missing space AFTER closing ** when glued to following word (e.g. "**bold**word" -> "**bold** word")
-  formatted = formatted.replace(/\*\*([a-zA-Z0-9äöüßÄÖÜ][^*]*?)\*\*([a-zA-Z0-9äöüßÄÖÜ])/g, "**$1** $2");
-
-  // 8. Fix missing spaces after punctuation before capitalized words (e.g. "mich,Sie" -> "mich, Sie").
-  // Safe here because URLs, code and link destinations were masked out above —
-  // a query string like "?a=1,Bar" is no longer visible to this rule.
-  formatted = formatted.replace(/([,;!?])([A-ZÄÖÜ])/g, "$1 $2");
-
-  // 9. Ensure headings have a blank line before them if preceded by text on a single newline
-  formatted = formatted.replace(/([^\n])\n(#{1,6}\s)/g, "$1\n\n$2");
-
-  return restore(formatted);
+  // The only repair is of `**` delimiters: without one there is nothing to do.
+  if (!text.includes("**")) return text;
+  const marks = chooseMarks(text);
+  if (!marks) return text;
+  const { masked, restore } = maskProtectedRegions(text, marks);
+  if (!masked.includes("**")) return text;
+  return restore(
+    masked
+      .split("\n")
+      .map((line) => repairBoldLine(line, marks))
+      .join("\n"),
+  );
 }
 
 // ─── Content Parsing ─────────────────────────────────────────────

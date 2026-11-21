@@ -221,8 +221,10 @@ reload or a second tab returns to the conversation (T1.15); without it the Manag
 clears the parameters once read, as before. **`conversationControls`** (B4) are read from the
 profile by `useAgentReviewProfile` and honoured in both apps: undo, redo, attachments, ratings
 and quick replies disappear when the agent switched them off, and `streaming: false` sends
-without streaming (`agentStreaming` in the chat store). The Manager still never renders raw
-HTML. Workforce's sidebar, Home and its use of the chat are described in
+without streaming (`agentStreaming` in the chat store). Raw HTML in a reply is rendered
+(sanitised) only for an agent whose `conversationControls.rawHtml` is true (`ChatPanel` passes it
+to `ChatMessage`) and shown as text otherwise, the default; the shared `MarkdownContent` defaults
+`enableRawHtml` to off. Workforce's sidebar, Home and its use of the chat are described in
 [`ui/workforce/AGENTS.md`](../workforce/AGENTS.md).
 
 Phase 7 (Tier 1) added, in both apps: **Stop** in place of Send while a turn runs, and **Esc**
