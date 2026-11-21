@@ -107,6 +107,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
             "CREATE INDEX IF NOT EXISTS idx_alert_events_unacknowledged ON alert_events (agent_id) WHERE acknowledged_at IS NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_events_rating ON alert_events (rating_id) WHERE rating_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_events_subject ON alert_events (subject_user_id) WHERE subject_user_id IS NOT NULL",
+            // An explicit conversation delete finds the stored values of the conversation.
+            "CREATE INDEX IF NOT EXISTS idx_alert_events_conversation_value ON alert_events (conversation_id) WHERE (match->>'value') IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_alert_windows_expiry ON alert_windows (expires_at)"};
 
     /** No send claim, or an expired one (one parameter: now). */
@@ -406,7 +408,8 @@ public class PostgresAlertEventStore implements IAlertEventStore {
     @Override
     public long redactOutputValues(String userId, Instant now) {
         ensureSchema();
-        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE subject_user_id = ?" + UNCLAIMED,
+        return update(
+                "UPDATE alert_events SET match = match - 'value' - 'commentExcerpt', subject_user_id = NULL WHERE subject_user_id = ?" + UNCLAIMED,
                 Arrays.asList(userId, timestamp(now)), false);
     }
 
@@ -428,6 +431,34 @@ public class PostgresAlertEventStore implements IAlertEventStore {
         ensureSchema();
         return update("UPDATE alert_events SET match = match - 'commentExcerpt' WHERE id = ? AND match->>'commentExcerpt' IS NOT NULL" + UNCLAIMED,
                 Arrays.asList(eventId, timestamp(now)), false);
+    }
+
+    @Override
+    public long redactEventContent(String eventId, Instant now) {
+        ensureSchema();
+        return update("UPDATE alert_events SET match = match - 'value' - 'commentExcerpt', subject_user_id = NULL WHERE id = ?" + UNCLAIMED,
+                Arrays.asList(eventId, timestamp(now)), false);
+    }
+
+    @Override
+    public long redactConversationOutputValues(String conversationId, Instant now) {
+        ensureSchema();
+        return update("UPDATE alert_events SET match = match - 'value', subject_user_id = NULL WHERE conversation_id = ? "
+                + "AND (match->>'value') IS NOT NULL" + UNCLAIMED, Arrays.asList(conversationId, timestamp(now)), false);
+    }
+
+    @Override
+    public long countConversationOutputValues(String conversationId) {
+        ensureSchema();
+        return update("SELECT COUNT(*) FROM alert_events WHERE conversation_id = ? AND (match->>'value') IS NOT NULL", List.of(conversationId),
+                true);
+    }
+
+    @Override
+    public boolean holdsPersonalContent(String eventId) {
+        ensureSchema();
+        return update("SELECT COUNT(*) FROM alert_events WHERE id = ? AND ((match->>'value') IS NOT NULL OR (match->>'commentExcerpt') IS NOT NULL "
+                + "OR subject_user_id IS NOT NULL)", List.of(eventId), true) > 0;
     }
 
     static String where(AlertEventFilter f, List<Object> params) {

@@ -27,6 +27,12 @@ public interface IClusterRpc {
     String CONVERSATION_CANCEL = "conversation-cancel";
     String GROUP_CONTROL = "group-control";
     String GDPR_STOP = "gdpr-stop";
+    /**
+     * The drain barrier of an explicit conversation delete: every node waits for
+     * its async erasure writers and answers {@code drained=true} (see
+     * {@code ErasureGuard}).
+     */
+    String ERASURE_DRAIN = "erasure-drain";
     String COORDINATOR_STATUS = "coordinator-status";
 
     /**
