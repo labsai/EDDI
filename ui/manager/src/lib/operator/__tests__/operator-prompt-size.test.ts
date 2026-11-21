@@ -46,3 +46,38 @@ describe("Operator prompt size vs the setup-api cap", () => {
     }
   });
 });
+
+/**
+ * The cap above only says whether setup-api ACCEPTS the prompt. This budget is
+ * about what it COSTS: the whole prompt is resent on every round of the
+ * operator's tool loop (up to 100 per turn), next to roughly as many characters
+ * again of generated tool definitions. The source grew from 42 KB to 169 KB in
+ * five weeks of 2026, a paragraph per feature, with nothing pushing back but a
+ * cap at 200,000 characters; a trim to below this budget would have grown back
+ * the same way.
+ *
+ * When this fails, do not raise the number first. Move detail out instead:
+ * the prompt holds what the operator must not do and where to send the admin,
+ * the symptoms it should recognise with their usual cause, and which docs page
+ * to read; field lists, limits, defaults and mechanism belong on a docs page
+ * (a small dedicated one — the operator reads a page whole), with a one-line
+ * pointer here. See "Platform Operator" in ui/manager/AGENTS.md. Raising the
+ * budget is a decision to make on purpose, with the reason in the commit.
+ */
+const COST_BUDGET_CHARS = 125_000;
+
+describe("Operator prompt size vs its cost budget", () => {
+  it.each(SCOPES)("the %s prompt stays within the cost budget", (scope) => {
+    const prompt = buildOperatorSystemPrompt(defaultOperatorPromptBody(scope), scope, LONGEST_BRAND);
+
+    expect(
+      prompt.length,
+      `The ${scope} Operator prompt is ${prompt.length} characters; its cost budget is ${COST_BUDGET_CHARS}. ` +
+        `Move detail to a docs page and leave a pointer before raising it — see this block's comment.`,
+    ).toBeLessThanOrEqual(COST_BUDGET_CHARS);
+  });
+
+  it("is well below the setup-api acceptance budget, or it would guard nothing new", () => {
+    expect(COST_BUDGET_CHARS).toBeLessThan(BUDGET * 0.75);
+  });
+});

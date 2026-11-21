@@ -386,6 +386,19 @@ what it finds. Off by default. Worth knowing before touching it:
   PATCH and a workflow holds no credential references), issued in parallel; batch 2 = one
   cascade carrying both new versions plus the redeploy. The batching block names no write
   method; it defers to the editing rules, so it stays right whichever method they teach.
+- **The prompt has a cost budget, not just a size cap.** It is resent on every
+  round of the tool loop next to ~100 generated tool definitions, so every
+  paragraph is paid for many times per turn. `operator-prompt-size.test.ts`
+  holds it to `COST_BUDGET_CHARS`, well below the setup-api cap. What goes in
+  the prompt: what the operator cannot or must not do and where to send the
+  admin, the symptoms it should recognise with their usual cause, and which docs
+  page to read. What goes on a docs page with a one-line pointer: field lists,
+  limits, defaults, metrics and mechanism. Point at a **small dedicated page**
+  (the operator reads a page whole, and `langchain`, `hitl`, `security`, `rag`
+  and `group-conversations` are 100–260 KB); if none exists, write one. Raise
+  the budget only on purpose, with the reason in the commit. Activation also
+  asks setup-api for `promptCaching` (applied on `anthropic`; the OpenAI family
+  caches by itself).
 - **Config is one atomic JSON blob** in the `platform.operator` global variable.
   Activation writes several values that must land together and the variable
   store has no transaction.
