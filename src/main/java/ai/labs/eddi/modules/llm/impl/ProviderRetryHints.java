@@ -9,6 +9,9 @@ import ai.labs.eddi.configs.shared.LlmFailure;
 import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 
 import java.time.Duration;
+import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.Locale;
 import java.util.Optional;
 
@@ -21,7 +24,7 @@ import java.util.Optional;
  * langchain4j (1.23) turns an HTTP 429 into a {@code RateLimitException} whose
  * cause is an {@code HttpException} carrying the status code and the response
  * <b>body as its message</b> — {@code JdkHttpClient.execute} builds it from the
- * raw bytes, and {@code ThrottledEmbeddingModelTest} pins that against a real
+ * raw bytes, and {@code ProviderRetryHintsTest} pins that against a real
  * {@code GoogleAiEmbeddingModel}. The response headers are dropped, so an HTTP
  * {@code Retry-After} header never reaches EDDI through a langchain4j provider
  * client; what the body says is all there is:
@@ -42,11 +45,26 @@ import java.util.Optional;
  *
  * A quota id says it outright — {@code …PerMinute…} or {@code …PerDay…}.
  * Without one, a delay longer than {@link #DAILY_THRESHOLD} is treated as a
- * daily exhaustion: no per-minute window asks for that long. An OpenAI
- * {@code insufficient_quota} is a spent balance, which no wait refills, and
- * counts as daily too.
+ * daily exhaustion: no per-minute window asks for that long.
+ *
+ * <h2>Not a throttle</h2>
+ *
+ * An OpenAI {@code insufficient_quota} is a spent balance, which no wait
+ * refills: {@link #parse} does not read it as a throttle at all, and
+ * {@link #isBillingFailure} tells it apart so the run can fail with that
+ * reason.
+ *
+ * <h2>When a day comes back</h2>
+ *
+ * Gemini's requests-per-day quotas reset at midnight Pacific time, as its
+ * rate-limit documentation states; {@link #dailyReset} computes that instant.
+ * For other providers the reset is not known, and the caller uses a configured
+ * cooldown.
  */
 public final class ProviderRetryHints {
+
+    /** Where Gemini's daily quotas reset: midnight in this zone. */
+    static final ZoneId GEMINI_RESET_ZONE = ZoneId.of("America/Los_Angeles");
 
     /** The wait assumed when a provider throttles without saying for how long. */
     public static final Duration FALLBACK_DELAY = Duration.ofSeconds(30);
@@ -91,6 +109,10 @@ public final class ProviderRetryHints {
         if (verdict.cls() != FailureClass.RATE_LIMITED && verdict.cls() != FailureClass.QUOTA_EXHAUSTED) {
             return Optional.empty();
         }
+        if (LlmFailureClassifier.isBillingFailure(failure)) {
+            // A spent balance: nothing to wait for.
+            return Optional.empty();
+        }
         Duration delay = verdict.retryAfterMs() == null || verdict.retryAfterMs() < 0
                 ? null
                 : Duration.ofMillis(verdict.retryAfterMs());
@@ -98,10 +120,33 @@ public final class ProviderRetryHints {
         return Optional.of(new Hint(delay, isDaily(verdict.cls(), quotaId, delay), quotaId));
     }
 
+    /**
+     * Whether a failure is a spent balance or billing limit, which no wait refills
+     * — see {@link LlmFailureClassifier#isBillingFailure}.
+     */
+    public static boolean isBillingFailure(Throwable failure) {
+        return LlmFailureClassifier.isBillingFailure(failure);
+    }
+
+    /**
+     * When a provider's daily quota next comes back, where it is documented.
+     *
+     * @return for {@code gemini}, the next midnight in Pacific time after
+     *         {@code now}; empty for every other provider, whose reset is not known
+     */
+    public static Optional<Instant> dailyReset(String provider, Instant now) {
+        if (!"gemini".equals(provider)) {
+            // Vertex quotas are a Cloud project's, with their own windows: not assumed.
+            return Optional.empty();
+        }
+        LocalDate tomorrow = now.atZone(GEMINI_RESET_ZONE).toLocalDate().plusDays(1);
+        return Optional.of(tomorrow.atStartOfDay(GEMINI_RESET_ZONE).toInstant());
+    }
+
     private static boolean isDaily(FailureClass cls, String quotaId, Duration delay) {
         if (cls == FailureClass.QUOTA_EXHAUSTED) {
             // The classifier looked at every violation, not only the first: one per-day
-            // quota among several is enough. Or the balance is spent.
+            // quota among several is enough.
             return true;
         }
         String id = quotaId == null ? "" : quotaId.toLowerCase(Locale.ROOT);

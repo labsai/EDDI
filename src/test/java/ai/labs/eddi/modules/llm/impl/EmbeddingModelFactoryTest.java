@@ -14,12 +14,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 
+import java.lang.reflect.Field;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Consumer;
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.any;
@@ -497,6 +503,41 @@ class EmbeddingModelFactoryTest {
             assertSame(params, EmbeddingModelFactory.providerParameters("gemini", params, EmbeddingInputType.QUERY));
         }
 
+        /**
+         * The client the factory really builds, not the parameter map: the provider's
+         * own {@code maxRetries} field is 0 for ingestion, and the configured value for
+         * queries. A provider dropped from the set the decorator owns fails here.
+         */
+        @ParameterizedTest(name = "{0}")
+        @MethodSource("ai.labs.eddi.modules.llm.impl.EmbeddingModelFactoryTest#langchain4jClientProviders")
+        @DisplayName("a factory-built DOCUMENT client has its own retries off; the QUERY client keeps them")
+        void builtDocumentClientHasRetriesOff(String provider, Map<String, String> params) throws Exception {
+            var withRetries = new HashMap<>(params);
+            withRetries.put("maxRetries", "4");
+            var config = createConfig(provider, withRetries);
+
+            EmbeddingModel document = factory.getOrCreate(config, EmbeddingInputType.DOCUMENT);
+            EmbeddingModel query = factory.getOrCreate(config, EmbeddingInputType.QUERY);
+
+            assertEquals(0, providerMaxRetries(document), provider + " ingestion client retries");
+            assertEquals(4, providerMaxRetries(query), provider + " query client retries");
+            assertEquals(4, assertInstanceOf(ThrottledEmbeddingModel.class, document).maxRetries(),
+                    "the configured retries are the decorator's");
+        }
+
+        @Test
+        @DisplayName("the unbound wait and the batch size reach the decorator")
+        void configuredWaitAndBatchSize() {
+            factory.unboundMaxWait = Duration.ofSeconds(3);
+            factory.embedBatchSize = 25;
+
+            var throttled = assertInstanceOf(ThrottledEmbeddingModel.class, factory.getOrCreate(
+                    createConfig("gemini", Map.of("apiKey", "test-key")), EmbeddingInputType.DOCUMENT));
+
+            assertEquals(Duration.ofSeconds(3), throttled.unboundMaxWait());
+            assertEquals(25, throttled.batchSize());
+        }
+
         @Test
         @DisplayName("a provider whose SDK retries by itself keeps its retries, and the decorator adds none for outages")
         void sdkProvidersKeepTheirRetries() {
@@ -507,6 +548,42 @@ class EmbeddingModelFactoryTest {
                     factory.getOrCreate(createConfig("cohere", Map.of("apiKey", "test-key")), EmbeddingInputType.DOCUMENT));
             assertFalse(throttled.retriesTransientFailures());
         }
+    }
+
+    static Stream<Arguments> langchain4jClientProviders() {
+        return Stream.of(
+                Arguments.of("openai", Map.of("apiKey", "test-key", "model", "text-embedding-3-small")),
+                Arguments.of("ollama", Map.of("model", "nomic-embed-text")),
+                Arguments.of("mistral", Map.of("apiKey", "test-key")));
+    }
+
+    /**
+     * The {@code maxRetries} the provider's langchain4j client was built with, read
+     * from its private field under every EDDI decorator.
+     */
+    private static int providerMaxRetries(EmbeddingModel model) throws ReflectiveOperationException {
+        EmbeddingModel current = model;
+        while (current instanceof ThrottledEmbeddingModel || current instanceof InputTypedEmbeddingModel) {
+            current = current instanceof ThrottledEmbeddingModel throttled
+                    ? throttled.delegate()
+                    : (EmbeddingModel) readField(current, "delegate");
+        }
+        Object value = readField(current, "maxRetries");
+        assertNotNull(value, current.getClass().getSimpleName() + " carries no maxRetries");
+        return (Integer) value;
+    }
+
+    private static Object readField(Object target, String name) throws ReflectiveOperationException {
+        for (Class<?> type = target.getClass(); type != null; type = type.getSuperclass()) {
+            try {
+                Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException e) {
+                // Declared further up.
+            }
+        }
+        throw new NoSuchFieldException(name + " on " + target.getClass().getName());
     }
 
     private RagConfiguration createConfig(String provider, Map<String, String> params) {

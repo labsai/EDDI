@@ -66,6 +66,9 @@ public final class LlmFailureClassifier {
     private static final int MAX_CHAIN_DEPTH = 20;
     private static final long MAX_RETRY_AFTER_MS = 24L * 60 * 60 * 1000;
 
+    /** The reason given to a spent balance; see {@link #isBillingFailure}. */
+    private static final String BILLING_REASON = "insufficient_quota";
+
     /** Provider wording for "the prompt does not fit the model". */
     private static final Pattern CONTEXT_TOO_LONG = Pattern.compile(
             "input token count exceeds|context[_ ]length[_ ]exceeded|prompt is too long|maximum context length"
@@ -169,6 +172,21 @@ public final class LlmFailureClassifier {
     }
 
     /**
+     * Whether {@code failure} is a spent balance or billing limit — OpenAI's
+     * {@code insufficient_quota} or {@code billing_hard_limit_reached} — rather
+     * than a quota window that refills. Both classify as
+     * {@link FailureClass#QUOTA_EXHAUSTED}; only this one is fixed by the account
+     * holder, not by waiting.
+     */
+    public static boolean isBillingFailure(Throwable failure) {
+        if (failure == null) {
+            return false;
+        }
+        LlmFailure verdict = classify(failure);
+        return verdict.cls() == FailureClass.QUOTA_EXHAUSTED && BILLING_REASON.equals(verdict.reason());
+    }
+
+    /**
      * The id of the quota a provider says was violated — Gemini's
      * {@code QuotaFailure.violations[].quotaId}, such as
      * {@code EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier} —
@@ -227,7 +245,7 @@ public final class LlmFailureClassifier {
         // Quota first: it is a 429 (or a 403) that must NOT be retried.
         if (signals.contains("insufficient_quota") || lowerBody.contains("insufficient_quota")
                 || signals.contains("billing_hard_limit_reached")) {
-            return new LlmFailure(FailureClass.QUOTA_EXHAUSTED, null, "insufficient_quota");
+            return new LlmFailure(FailureClass.QUOTA_EXHAUSTED, null, BILLING_REASON);
         }
         String perDayQuota = perDayQuotaViolation(error);
         if (perDayQuota != null) {

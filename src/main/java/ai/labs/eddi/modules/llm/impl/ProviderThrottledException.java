@@ -33,8 +33,9 @@ public class ProviderThrottledException extends RuntimeException {
      * @param provider
      *            the embedding provider, as configured ({@code gemini})
      * @param retryAfter
-     *            how long the provider asked to wait, or the fallback; null for a
-     *            daily exhaustion with no delay given
+     *            how long the provider asked to wait; null when it named no time.
+     *            Never the fallback wait, which is a guess and would make an
+     *            invented resume time
      * @param daily
      *            the window that ran out does not refill within a run
      * @param quotaId
@@ -67,9 +68,22 @@ public class ProviderThrottledException extends RuntimeException {
         return provider;
     }
 
-    /** The wait the provider asked for, or the fallback; null when unknown. */
+    /** The wait the provider asked for; null when it named none. */
     public Duration retryAfter() {
         return retryAfter;
+    }
+
+    /**
+     * The value for an HTTP {@code Retry-After} header: the provider's delay in
+     * whole seconds (rounded up, at least 1), or {@code fallbackSeconds} when it
+     * named none.
+     */
+    public long retryAfterSeconds(long fallbackSeconds) {
+        if (retryAfter == null) {
+            return fallbackSeconds;
+        }
+        long seconds = retryAfter.toSeconds() + (retryAfter.toNanosPart() > 0 ? 1 : 0);
+        return Math.max(1, seconds);
     }
 
     public boolean daily() {

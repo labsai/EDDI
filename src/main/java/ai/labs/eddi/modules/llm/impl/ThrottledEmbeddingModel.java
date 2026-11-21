@@ -18,14 +18,17 @@ import dev.langchain4j.model.embedding.request.EmbeddingRequest;
 import dev.langchain4j.model.embedding.request.EmbeddingRequestParameters;
 import dev.langchain4j.model.embedding.response.EmbeddingResponse;
 import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.output.TokenUsage;
 import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 /**
@@ -65,13 +68,33 @@ import java.util.function.Supplier;
  * throttled query fails that knowledge base's retrieval, which
  * {@code RagContextProvider} already tolerates.
  *
+ * <h2>Batches</h2>
+ *
+ * {@link #embedAll} sends at most {@code batchSize} segments per provider call
+ * and throttles each batch on its own. Retrying a whole document's
+ * {@code embedAll} repaid every batch that had already succeeded — langchain4j
+ * splits a Gemini call into requests of 100 segments — so on a free tier a
+ * document of more than one quota window never finished, and every source after
+ * it starved. A retry now repeats only the batch that was refused. Nothing is
+ * returned until every batch is embedded, so a caller still stores a document
+ * whole or not at all.
+ *
  * <h2>Deadlines</h2>
  *
  * The cached instance is shared by every run of every source on the same
  * configuration, so it cannot hold a run's deadline. A run binds one with
  * {@link #boundTo}, which returns a light view over the same provider model. An
- * unbound instance — the direct-ingestion REST path — waits at most
- * {@link #UNBOUND_MAX_WAIT} in total per call.
+ * unbound instance waits at most {@code unboundMaxWait} in total per call
+ * ({@link #DEFAULT_UNBOUND_MAX_WAIT} unless configured with
+ * {@code eddi.ingestion.throttle.unbound-max-wait}): a caller with no deadline
+ * may be a request thread, which must not sleep for minutes. A background
+ * caller that can afford to wait binds its own deadline.
+ *
+ * <h2>Cancellation</h2>
+ *
+ * An interrupted wait is a cancelled run, not a provider refusal: the interrupt
+ * flag is restored and a {@link CancellationException} thrown, so the run is
+ * not recorded as paused by the provider.
  */
 public final class ThrottledEmbeddingModel implements EmbeddingModel {
 
@@ -80,8 +103,20 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
     /** Retries when the configuration sets no {@code maxRetries}. */
     public static final int DEFAULT_MAX_RETRIES = 5;
 
-    /** The total wait per call allowed to a caller that bound no deadline. */
-    static final Duration UNBOUND_MAX_WAIT = Duration.ofMinutes(2);
+    /**
+     * The total wait per call allowed to a caller that bound no deadline, unless
+     * configured otherwise.
+     */
+    public static final Duration DEFAULT_UNBOUND_MAX_WAIT = Duration.ofSeconds(10);
+
+    /** Segments per provider call, unless configured otherwise. */
+    public static final int DEFAULT_BATCH_SIZE = 100;
+
+    /**
+     * The shortest wait before repeating a throttled call. "Try again in 20ms"
+     * would otherwise be a busy loop against a provider that has just said no.
+     */
+    static final Duration MIN_WAIT = Duration.ofSeconds(1);
 
     /** The first backoff after a transient failure; doubled per attempt. */
     static final Duration TRANSIENT_BACKOFF = Duration.ofSeconds(1);
@@ -106,11 +141,14 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
     private final MeterRegistry meterRegistry;
     private final Sleeper sleeper;
     private final Supplier<Instant> clock;
+    private final Duration unboundMaxWait;
+    private final int batchSize;
     /** Null on the shared instance; set on a run's view. */
     private final Instant deadline;
 
     private ThrottledEmbeddingModel(EmbeddingModel delegate, String provider, int maxRetries, boolean retryTransient,
-            MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock, Instant deadline) {
+            MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock, Duration unboundMaxWait,
+            int batchSize, Instant deadline) {
         this.delegate = delegate;
         this.provider = provider;
         this.maxRetries = Math.max(0, maxRetries);
@@ -118,6 +156,10 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
         this.meterRegistry = meterRegistry;
         this.sleeper = sleeper;
         this.clock = clock;
+        this.unboundMaxWait = unboundMaxWait == null || unboundMaxWait.isNegative()
+                ? DEFAULT_UNBOUND_MAX_WAIT
+                : unboundMaxWait;
+        this.batchSize = batchSize > 0 ? batchSize : DEFAULT_BATCH_SIZE;
         this.deadline = deadline;
     }
 
@@ -134,20 +176,34 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
      *            the provider's own retries were switched off
      * @param meterRegistry
      *            where waits are timed; null records nothing
+     * @param unboundMaxWait
+     *            the total wait per call when no deadline is bound
+     * @param batchSize
+     *            the most segments one provider call carries
      */
     static ThrottledEmbeddingModel wrap(EmbeddingModel delegate, String provider, int maxRetries,
-                                        boolean retryTransient, MeterRegistry meterRegistry) {
-        return of(delegate, provider, maxRetries, retryTransient, meterRegistry, THREAD_SLEEPER, Instant::now);
+                                        boolean retryTransient, MeterRegistry meterRegistry, Duration unboundMaxWait, int batchSize) {
+        return new ThrottledEmbeddingModel(delegate, provider, maxRetries, retryTransient, meterRegistry,
+                THREAD_SLEEPER, Instant::now, unboundMaxWait, batchSize, null);
     }
 
     /**
      * As {@link #wrap}, with the clock and the sleep supplied — for tests, which
-     * must neither sleep nor depend on the wall clock.
+     * must neither sleep nor depend on the wall clock — and the default unbound
+     * wait and batch size.
      */
     public static ThrottledEmbeddingModel of(EmbeddingModel delegate, String provider, int maxRetries,
                                              boolean retryTransient, MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock) {
+        return of(delegate, provider, maxRetries, retryTransient, meterRegistry, sleeper, clock,
+                DEFAULT_UNBOUND_MAX_WAIT, DEFAULT_BATCH_SIZE);
+    }
+
+    /** As above, with the unbound wait and the batch size supplied. */
+    public static ThrottledEmbeddingModel of(EmbeddingModel delegate, String provider, int maxRetries,
+                                             boolean retryTransient, MeterRegistry meterRegistry, Sleeper sleeper, Supplier<Instant> clock,
+                                             Duration unboundMaxWait, int batchSize) {
         return new ThrottledEmbeddingModel(delegate, provider, maxRetries, retryTransient, meterRegistry, sleeper,
-                clock, null);
+                clock, unboundMaxWait, batchSize, null);
     }
 
     /**
@@ -159,34 +215,56 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
     public static EmbeddingModel boundTo(EmbeddingModel model, Instant deadline) {
         if (model instanceof ThrottledEmbeddingModel throttled && deadline != null) {
             return new ThrottledEmbeddingModel(throttled.delegate, throttled.provider, throttled.maxRetries,
-                    throttled.retryTransient, throttled.meterRegistry, throttled.sleeper, throttled.clock, deadline);
+                    throttled.retryTransient, throttled.meterRegistry, throttled.sleeper, throttled.clock,
+                    throttled.unboundMaxWait, throttled.batchSize, deadline);
         }
         return model;
     }
 
+    /**
+     * Embeds in batches of at most {@code batchSize} segments, each waited out on
+     * its own, and returns the embeddings in order once all are done. Token usage
+     * is summed; a batch that reports none contributes nothing.
+     */
     @Override
     public Response<List<Embedding>> embedAll(List<TextSegment> textSegments) {
-        return call(() -> delegate.embedAll(textSegments));
+        // One limit for the whole call, not per batch: an unbound caller's wait is a
+        // total, however many batches the document needs.
+        Instant limit = limit();
+        if (textSegments.size() <= batchSize) {
+            return call(() -> delegate.embedAll(textSegments), limit);
+        }
+        List<Embedding> embeddings = new ArrayList<>(textSegments.size());
+        TokenUsage usage = null;
+        for (int from = 0; from < textSegments.size(); from += batchSize) {
+            List<TextSegment> batch = textSegments.subList(from, Math.min(from + batchSize, textSegments.size()));
+            Response<List<Embedding>> response = call(() -> delegate.embedAll(batch), limit);
+            embeddings.addAll(response.content());
+            if (response.tokenUsage() != null) {
+                usage = usage == null ? response.tokenUsage() : usage.add(response.tokenUsage());
+            }
+        }
+        return Response.from(embeddings, usage);
     }
 
     @Override
     public Response<Embedding> embed(String text) {
-        return call(() -> delegate.embed(text));
+        return call(() -> delegate.embed(text), limit());
     }
 
     @Override
     public Response<Embedding> embed(TextSegment textSegment) {
-        return call(() -> delegate.embed(textSegment));
+        return call(() -> delegate.embed(textSegment), limit());
     }
 
     @Override
     public EmbeddingResponse embed(EmbeddingRequest request) {
-        return call(() -> delegate.embed(request));
+        return call(() -> delegate.embed(request), limit());
     }
 
     @Override
     public EmbeddingResponse doEmbed(EmbeddingRequest request) {
-        return call(() -> delegate.doEmbed(request));
+        return call(() -> delegate.doEmbed(request), limit());
     }
 
     /**
@@ -243,15 +321,32 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
         return retryTransient;
     }
 
-    private <T> T call(Supplier<T> action) {
-        Instant limit = deadline != null ? deadline : clock.get().plus(UNBOUND_MAX_WAIT);
+    /** Test-visible: the total wait allowed without a bound deadline. */
+    Duration unboundMaxWait() {
+        return unboundMaxWait;
+    }
+
+    /** Test-visible: the most segments per provider call. */
+    int batchSize() {
+        return batchSize;
+    }
+
+    private Instant limit() {
+        return deadline != null ? deadline : clock.get().plus(unboundMaxWait);
+    }
+
+    private <T> T call(Supplier<T> action, Instant limit) {
         int attempt = 0;
         while (true) {
             try {
                 return action.get();
-            } catch (ProviderThrottledException e) {
+            } catch (ProviderThrottledException | ProviderBillingException e) {
                 throw e;
             } catch (RuntimeException e) {
+                if (ProviderRetryHints.isBillingFailure(e)) {
+                    // A spent balance, not a window: no wait refills it.
+                    throw new ProviderBillingException(provider, e);
+                }
                 Optional<ProviderRetryHints.Hint> throttle = ProviderRetryHints.parse(e);
                 Duration wait = throttle.isPresent()
                         ? waitForThrottle(throttle.get(), attempt, limit, e)
@@ -271,11 +366,17 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
             // A day's quota does not come back within a run, whatever the run's budget.
             throw new ProviderThrottledException(provider, hint.retryAfter(), true, hint.quotaId(), cause);
         }
-        Duration wait = hint.waitOrFallback();
+        Duration wait = atLeastMinimum(hint.waitOrFallback());
         if (attempt >= maxRetries || clock.get().plus(wait).isAfter(limit)) {
-            throw new ProviderThrottledException(provider, wait, false, hint.quotaId(), cause);
+            // The provider's own delay, or none: the fallback is a guess, and a resume
+            // time built on it would be invented.
+            throw new ProviderThrottledException(provider, hint.retryAfter(), false, hint.quotaId(), cause);
         }
         return wait;
+    }
+
+    private static Duration atLeastMinimum(Duration wait) {
+        return wait.compareTo(MIN_WAIT) < 0 ? MIN_WAIT : wait;
     }
 
     /**
@@ -314,12 +415,13 @@ public final class ThrottledEmbeddingModel implements EmbeddingModel {
         try {
             sleeper.sleep(wait);
         } catch (InterruptedException e) {
+            // Someone is stopping the run — a shutdown, a cancel — so it is cancelled,
+            // not paused by the provider and not failed.
             Thread.currentThread().interrupt();
-            if (throttle != null) {
-                // Stopping, not failing: the provider's refusal is still the reason.
-                throw new ProviderThrottledException(provider, wait, false, throttle.quotaId(), cause);
-            }
-            throw cause;
+            CancellationException cancelled = new CancellationException(
+                    "The embedding call was interrupted while waiting to try again");
+            cancelled.initCause(cause);
+            throw cancelled;
         }
     }
 }

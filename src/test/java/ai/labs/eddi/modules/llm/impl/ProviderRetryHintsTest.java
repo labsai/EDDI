@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -170,16 +171,74 @@ class ProviderRetryHintsTest {
         }
 
         @Test
-        @DisplayName("OpenAI's insufficient_quota is a spent balance: daily")
-        void insufficientQuota() {
-            var hint = ProviderRetryHints.parse(rateLimited(fixture("openai-429-insufficient-quota"))).orElseThrow();
-            assertTrue(hint.daily());
+        @DisplayName("a Gemini per-day quota is still a throttle, not a billing failure")
+        void perDayIsNotBilling() {
+            assertFalse(ProviderRetryHints.isBillingFailure(rateLimited(fixture("gemini-429-embed-per-day"))));
+        }
+    }
+
+    @Nested
+    @DisplayName("when a day comes back")
+    class DailyReset {
+
+        @Test
+        @DisplayName("Gemini resets at the next midnight Pacific: PST in winter is 08:00 UTC")
+        void geminiWinter() {
+            assertEquals(Instant.parse("2026-11-22T08:00:00Z"),
+                    ProviderRetryHints.dailyReset("gemini", Instant.parse("2026-11-21T10:00:00Z")).orElseThrow());
+        }
+
+        @Test
+        @DisplayName("in summer, PDT midnight is 07:00 UTC")
+        void geminiSummer() {
+            assertEquals(Instant.parse("2026-07-02T07:00:00Z"),
+                    ProviderRetryHints.dailyReset("gemini", Instant.parse("2026-07-01T20:00:00Z")).orElseThrow());
+        }
+
+        @Test
+        @DisplayName("late in the Pacific day it is still the coming midnight, not the one after")
+        void justBeforeMidnight() {
+            // 23:59 PST on 21 November is 07:59 UTC on the 22nd.
+            assertEquals(Instant.parse("2026-11-22T08:00:00Z"),
+                    ProviderRetryHints.dailyReset("gemini", Instant.parse("2026-11-22T07:59:00Z")).orElseThrow());
+        }
+
+        @Test
+        @DisplayName("on the day the clocks go back, the 25-hour Pacific day ends at 08:00 UTC")
+        void dstChangeDay() {
+            // 1 November 2026: PDT ends at 02:00. Noon PST that day is 20:00 UTC.
+            assertEquals(Instant.parse("2026-11-02T08:00:00Z"),
+                    ProviderRetryHints.dailyReset("gemini", Instant.parse("2026-11-01T20:00:00Z")).orElseThrow());
+        }
+
+        @Test
+        @DisplayName("no other provider's reset is assumed — not even Vertex's")
+        void othersUnknown() {
+            Instant now = Instant.parse("2026-11-21T10:00:00Z");
+            assertTrue(ProviderRetryHints.dailyReset("vertex", now).isEmpty());
+            assertTrue(ProviderRetryHints.dailyReset("openai", now).isEmpty());
+            assertTrue(ProviderRetryHints.dailyReset(null, now).isEmpty());
         }
     }
 
     @Nested
     @DisplayName("not a throttle")
     class NotAThrottle {
+
+        @Test
+        @DisplayName("OpenAI's insufficient_quota is a spent balance: a billing failure, not a throttle")
+        void insufficientQuota() {
+            var failure = rateLimited(fixture("openai-429-insufficient-quota"));
+            assertTrue(ProviderRetryHints.parse(failure).isEmpty(), "no wait refills a spent balance");
+            assertTrue(ProviderRetryHints.isBillingFailure(failure));
+        }
+
+        @Test
+        @DisplayName("a rate limit is not a billing failure")
+        void rateLimitIsNotBilling() {
+            assertFalse(ProviderRetryHints.isBillingFailure(rateLimited(fixture("gemini-429-embed-per-minute"))));
+            assertFalse(ProviderRetryHints.isBillingFailure(null));
+        }
 
         @Test
         @DisplayName("an authentication failure is no hint")

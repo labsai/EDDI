@@ -29,6 +29,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.annotation.PostConstruct;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 import software.amazon.awssdk.regions.Region;
 
@@ -102,6 +103,23 @@ public class EmbeddingModelFactory {
      */
     @Inject
     MeterRegistry meterRegistry;
+
+    /**
+     * The longest an ingestion call with no deadline of its own waits on a
+     * provider's rate limit, in total. Short by default: such a caller may be a
+     * request thread. A background caller binds its own deadline instead
+     * ({@link ThrottledEmbeddingModel#boundTo}). Field-injected with its default
+     * for tests that construct the factory directly.
+     */
+    @ConfigProperty(name = "eddi.ingestion.throttle.unbound-max-wait", defaultValue = "10s")
+    Duration unboundMaxWait = ThrottledEmbeddingModel.DEFAULT_UNBOUND_MAX_WAIT;
+
+    /**
+     * The most segments one ingestion call sends to the provider. Each batch is
+     * throttled on its own, so a retry repeats only the batch the provider refused.
+     */
+    @ConfigProperty(name = "eddi.ingestion.embed-batch-size", defaultValue = "100")
+    int embedBatchSize = ThrottledEmbeddingModel.DEFAULT_BATCH_SIZE;
 
     /**
      * The providers whose client is langchain4j's own HTTP client, so a 429 reaches
@@ -254,7 +272,7 @@ public class EmbeddingModelFactory {
         // who is waiting, so retrieval never sleeps on a throttle.
         return ingestion
                 ? ThrottledEmbeddingModel.wrap(typed, provider, ingestionRetries,
-                        RETRIES_OWNED_BY_DECORATOR.contains(provider), meterRegistry)
+                        RETRIES_OWNED_BY_DECORATOR.contains(provider), meterRegistry, unboundMaxWait, embedBatchSize)
                 : typed;
     }
 

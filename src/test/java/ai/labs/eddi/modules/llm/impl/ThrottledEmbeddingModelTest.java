@@ -24,6 +24,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.List;
+import java.util.concurrent.CancellationException;
 import java.util.function.Supplier;
 
 import static ai.labs.eddi.modules.llm.impl.ProviderRetryHintsTest.PER_MINUTE_QUOTA;
@@ -142,16 +143,144 @@ class ThrottledEmbeddingModelTest {
     }
 
     @Test
-    @DisplayName("without a bound deadline, one call waits at most two minutes in total")
-    void unboundCap() {
+    @DisplayName("without a bound deadline, a call waits at most 10 s by default: a 26 s wait is not started")
+    void unboundCapDefault() {
         var provider = new Scripted();
         provider.always = rateLimited(fixture("gemini-429-embed-per-minute"));
         var model = throttled(provider, 10, true);
+
+        var e = assertThrows(ProviderThrottledException.class, () -> model.embedAll(SEGMENTS));
+
+        assertTrue(sleeps.isEmpty(), "a request thread is not put to sleep for 26 s");
+        assertEquals(1, provider.calls);
+        assertEquals(Duration.ofSeconds(26), e.retryAfter());
+    }
+
+    @Test
+    @DisplayName("a configured unbound wait is a total across retries")
+    void unboundCapConfigured() {
+        var provider = new Scripted();
+        provider.always = rateLimited(fixture("gemini-429-embed-per-minute"));
+        var model = ThrottledEmbeddingModel.of(provider, "gemini", 10, true, meters, sleeper, clock,
+                Duration.ofMinutes(2), ThrottledEmbeddingModel.DEFAULT_BATCH_SIZE);
 
         assertThrows(ProviderThrottledException.class, () -> model.embedAll(SEGMENTS));
 
         // 4 x 26 s = 104 s fits in 120 s; a fifth would end at 130 s.
         assertEquals(4, sleeps.size());
+    }
+
+    @Test
+    @DisplayName("a configured unbound wait is a total for the whole call, not per batch")
+    void unboundCapSpansBatches() {
+        // Every batch is refused once, then answered. Three batches of one segment.
+        var provider = new Scripted() {
+            boolean refuseNext = true;
+
+            @Override
+            public Response<List<Embedding>> embedAll(List<TextSegment> segments) {
+                calls++;
+                if (refuseNext) {
+                    refuseNext = false;
+                    throw rateLimited(fixture("gemini-429-embed-per-minute"));
+                }
+                refuseNext = true;
+                return Response.from(segments.stream().map(s -> Embedding.from(new float[]{1f})).toList());
+            }
+        };
+        var model = ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters, sleeper, clock,
+                Duration.ofSeconds(60), 1);
+        var three = List.of(TextSegment.from("a"), TextSegment.from("b"), TextSegment.from("c"));
+
+        assertThrows(ProviderThrottledException.class, () -> model.embedAll(three));
+
+        // 26 s + 26 s = 52 s fits in 60 s; the third batch's wait would end at 78 s.
+        assertEquals(2, sleeps.size());
+    }
+
+    @Test
+    @DisplayName("embedAll is split into batches, each sent once when nothing refuses, in order")
+    void batches() {
+        var sizes = new ArrayList<Integer>();
+        var provider = new Scripted() {
+            @Override
+            public Response<List<Embedding>> embedAll(List<TextSegment> segments) {
+                sizes.add(segments.size());
+                return Response.from(segments.stream()
+                        .map(s -> Embedding.from(new float[]{Float.parseFloat(s.text())})).toList());
+            }
+        };
+        var model = ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters, sleeper, clock,
+                ThrottledEmbeddingModel.DEFAULT_UNBOUND_MAX_WAIT, 2);
+        var five = List.of(TextSegment.from("1"), TextSegment.from("2"), TextSegment.from("3"),
+                TextSegment.from("4"), TextSegment.from("5"));
+
+        var embeddings = model.embedAll(five).content();
+
+        assertEquals(List.of(2, 2, 1), sizes);
+        assertEquals(List.of(1f, 2f, 3f, 4f, 5f), embeddings.stream().map(e -> e.vector()[0]).toList());
+    }
+
+    @Test
+    @DisplayName("a refused batch is repeated alone: the batches before it are not paid for again")
+    void retryRepeatsOnlyTheRefusedBatch() {
+        var sizes = new ArrayList<Integer>();
+        var provider = new Scripted() {
+            @Override
+            public Response<List<Embedding>> embedAll(List<TextSegment> segments) {
+                sizes.add(segments.size());
+                if (sizes.size() == 2) {
+                    throw rateLimited(fixture("gemini-429-embed-per-minute"));
+                }
+                return Response.from(segments.stream().map(s -> Embedding.from(new float[]{1f})).toList());
+            }
+        };
+        var model = ThrottledEmbeddingModel.boundTo(ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters,
+                sleeper, clock, ThrottledEmbeddingModel.DEFAULT_UNBOUND_MAX_WAIT, 2), start.plus(Duration.ofHours(1)));
+        var four = List.of(TextSegment.from("a"), TextSegment.from("b"), TextSegment.from("c"), TextSegment.from("d"));
+
+        assertEquals(4, model.embedAll(four).content().size());
+
+        assertEquals(List.of(2, 2, 2), sizes, "the first batch once, the second twice");
+        assertEquals(List.of(Duration.ofSeconds(26)), sleeps);
+    }
+
+    @Test
+    @DisplayName("a provider delay under a second is waited as one second, not as a busy loop")
+    void minimumWait() {
+        var provider = new Scripted();
+        provider.script.add(rateLimited(fixture("openai-429-rate-limit-ms")));
+
+        throttled(provider, 5, true).embedAll(SEGMENTS);
+
+        assertEquals(List.of(ThrottledEmbeddingModel.MIN_WAIT), sleeps);
+    }
+
+    @Test
+    @DisplayName("a stop with no delay named carries none: the 30 s fallback is not reported as the provider's")
+    void fallbackIsNotReported() {
+        var provider = new Scripted();
+        provider.always = rateLimited("<html>Too Many Requests</html>");
+        EmbeddingModel model = ThrottledEmbeddingModel.boundTo(throttled(provider, 5, true), start.plusSeconds(10));
+
+        var e = assertThrows(ProviderThrottledException.class, () -> model.embedAll(SEGMENTS));
+
+        assertTrue(sleeps.isEmpty(), "30 s does not fit in 10 s");
+        assertEquals(null, e.retryAfter());
+    }
+
+    @Test
+    @DisplayName("OpenAI's insufficient_quota is a billing failure: no wait, no retry, its own exception")
+    void billingFailure() {
+        var provider = new Scripted();
+        provider.always = rateLimited(fixture("openai-429-insufficient-quota"));
+        var model = ThrottledEmbeddingModel.boundTo(throttled(provider, 5, true), start.plus(Duration.ofHours(1)));
+
+        var e = assertThrows(ProviderBillingException.class, () -> model.embedAll(SEGMENTS));
+
+        assertTrue(sleeps.isEmpty());
+        assertEquals(1, provider.calls);
+        assertTrue(e.getMessage().contains("billing"));
     }
 
     @Test
@@ -194,15 +323,29 @@ class ThrottledEmbeddingModelTest {
     }
 
     @Test
-    @DisplayName("an interrupted wait stops the call as throttled and keeps the interrupt")
+    @DisplayName("an interrupted throttle wait is a cancellation, not a provider stop, and keeps the interrupt")
     void interruptedWait() {
         var provider = new Scripted();
         provider.always = rateLimited(fixture("gemini-429-embed-per-minute"));
+        var model = ThrottledEmbeddingModel.boundTo(ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters,
+                duration -> {
+                    throw new InterruptedException();
+                }, clock), start.plus(Duration.ofHours(1)));
+
+        assertThrows(CancellationException.class, () -> model.embedAll(SEGMENTS));
+        assertTrue(Thread.currentThread().isInterrupted());
+    }
+
+    @Test
+    @DisplayName("an interrupted transient backoff is a cancellation too")
+    void interruptedBackoff() {
+        var provider = new Scripted();
+        provider.always = new InternalServerException(new HttpException(503, fixture("gemini-503-unavailable")));
         var model = ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters, duration -> {
             throw new InterruptedException();
         }, clock);
 
-        assertThrows(ProviderThrottledException.class, () -> model.embedAll(SEGMENTS));
+        assertThrows(CancellationException.class, () -> model.embedAll(SEGMENTS));
         assertTrue(Thread.currentThread().isInterrupted());
     }
 
