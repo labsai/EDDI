@@ -206,6 +206,43 @@ class GoogleDriveSourceConnectorTest {
         }
 
         @Test
+        @DisplayName("an empty folder reached by a shortcut before its own entry is verified, and not believed when unlistable")
+        void shortcutToUnlistableEmptyFolder() throws SourceException {
+            fake.shortcut("s0", "alias", DRIVE, "fx", FakeDrive.FOLDER).folder("fx", "Locked", DRIVE).unlistable("fx");
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.PARTIAL, run.result.coverage());
+        }
+
+        @Test
+        @DisplayName("an accessible empty folder reached by a shortcut still counts as full coverage")
+        void shortcutToListableEmptyFolder() throws SourceException {
+            fake.file("f1", "a.txt", "text/plain", DRIVE, "a").shortcut("s0", "alias", DRIVE, "fx", FakeDrive.FOLDER)
+                    .folder("fx", "Empty", DRIVE);
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.FULL_LISTING, run.result.coverage());
+        }
+
+        @Test
+        @DisplayName("a stop that arrives during the final access check is not reported as complete")
+        void cancelledDuringAccessCheck() throws SourceException {
+            Recorder recorder = new Recorder(context(false));
+            fake.beforeRequest = () -> {
+                if (fake.countRequests("/drives/") > 0) {
+                    recorder.cancelled = true;
+                }
+            };
+
+            DiscoveryResult result = connector.discover(recorder);
+
+            assertEquals(StopReason.CANCELLED, result.stopReason());
+            assertEquals(Coverage.PARTIAL, result.coverage());
+        }
+
+        @Test
         @DisplayName("a cancelled run stops before the next request")
         void cancelled() throws SourceException {
             fake.file("f1", "a.txt", "text/plain", DRIVE, "a");
@@ -262,6 +299,9 @@ class GoogleDriveSourceConnectorTest {
             assertTrue(GoogleDriveSourceConnector.nameMatches("*?", "*a"));
             assertEquals("see ![x](a.png) and more text",
                     GoogleDriveSourceConnector.withoutEmbeddedImages("see ![x](a.png) and more text"));
+            assertEquals("[link](data:text/plain,hi)  tail",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages(
+                            "[link](data:text/plain,hi) ![image](data:image/png;base64,AAAA) tail"));
             assertEquals("pre  post",
                     GoogleDriveSourceConnector.withoutEmbeddedImages("pre ![x](data:image/png;base64,AAAA) post"));
             assertEquals("![x](a.png) keep this [data](data:text/plain,hi)",

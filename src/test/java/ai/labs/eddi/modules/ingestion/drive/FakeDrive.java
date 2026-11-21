@@ -17,8 +17,10 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -123,6 +125,21 @@ public final class FakeDrive implements DriveTransport {
         return new DriveResponse(status, headers, bytes(body), false);
     }
 
+    /**
+     * Folders the account sees but cannot list: capabilities.canListChildren is
+     * false.
+     */
+    final Set<String> unlistable = new HashSet<>();
+
+    /** Run before each request is answered, to model a stop arriving mid-run. */
+    Runnable beforeRequest = () -> {
+    };
+
+    public FakeDrive unlistable(String id) {
+        unlistable.add(id);
+        return this;
+    }
+
     public int countRequests(String fragment) {
         return (int) requests.stream().filter(uri -> uri.toString().contains(fragment)).count();
     }
@@ -130,6 +147,7 @@ public final class FakeDrive implements DriveTransport {
     @Override
     public DriveResponse get(URI uri, ResolvedCredential credential, long maxBytes) throws SourceException {
         requests.add(uri);
+        beforeRequest.run();
         authorizations.add(credential.headerValue());
         for (Map.Entry<String, Deque<DriveResponse>> entry : scripted.entrySet()) {
             if (uri.toString().contains(entry.getKey()) && !entry.getValue().isEmpty()) {
@@ -172,6 +190,7 @@ public final class FakeDrive implements DriveTransport {
         }
         ObjectNode file = JSON.createObjectNode().put("id", id).put("name", item.name())
                 .put("mimeType", item.mimeType()).put("driveId", driveId).put("trashed", item.trashed());
+        file.putObject("capabilities").put("canListChildren", !unlistable.contains(id));
         return ok(file, maxBytes);
     }
 
@@ -210,6 +229,7 @@ public final class FakeDrive implements DriveTransport {
                     .put("mimeType", item.mimeType())
                     .put("webViewLink", "https://docs.google.com/fake/" + item.id())
                     .put("modifiedTime", "2026-11-01T10:00:00.000Z");
+            file.putObject("capabilities").put("canListChildren", !unlistable.contains(item.id()));
             file.putObject("lastModifyingUser").put("displayName", "Test Author");
             if (item.size() != null) {
                 file.put("size", String.valueOf(item.size()));

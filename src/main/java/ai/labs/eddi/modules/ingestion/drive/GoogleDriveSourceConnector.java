@@ -209,6 +209,24 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     complete = false;
                     incompleteReason = "Google Drive reported an incomplete listing";
                 }
+                if (folder.verify() && folder.listable() && pageToken == null && page.files().isEmpty()) {
+                    // Reached by a shortcut, so nothing said whether this account may
+                    // list it: ask before an empty answer counts as coverage.
+                    try {
+                        JsonNode meta = api.getFile(folder.id());
+                        boolean inDrive = drive.getSharedDriveId().equals(meta.path("driveId").asText());
+                        if (inDrive && !meta.path("capabilities").path("canListChildren").asBoolean(false)) {
+                            complete = false;
+                            incompleteReason = "the service account cannot list " + folder.label();
+                        }
+                    } catch (SourceException e) {
+                        if (e.error().kind() == SourceError.Kind.AUTH) {
+                            throw e;
+                        }
+                        complete = false;
+                        incompleteReason = "could not confirm access to " + folder.label();
+                    }
+                }
                 if (!folder.listable() && pageToken == null && page.files().isEmpty()) {
                     // Shown to the account but not listable by it: empty here is a
                     // lack of access, not a lack of files.
@@ -253,6 +271,13 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                         requireFolder(api, drive, root);
                     }
                 }
+            }
+            // Those requests took time of their own: a stop that arrived during them
+            // must not be reported as complete coverage.
+            if (context.isCancelled()) {
+                stopReason = StopReason.CANCELLED;
+            } else if (clock.get().isAfter(context.deadline())) {
+                stopReason = StopReason.TIME_LIMIT;
             }
         }
 
@@ -374,8 +399,9 @@ public class GoogleDriveSourceConnector implements SourceConnector {
      */
     private static String removeInlineDataImages(String line) {
         String current = line;
+        int from = 0;
         int marker;
-        while ((marker = current.toLowerCase(Locale.ROOT).indexOf("](data:")) >= 0) {
+        while ((marker = current.toLowerCase(Locale.ROOT).indexOf("](data:", from)) >= 0) {
             int end = current.indexOf(')', marker);
             int start = current.lastIndexOf("![", marker);
             // The opener must own this destination: a "](" between it and the marker
@@ -383,10 +409,16 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             if (start >= 0 && current.indexOf("](", start) != marker) {
                 start = -1;
             }
-            if (start < 0 || end < 0) {
+            if (end < 0) {
                 break;
             }
+            if (start < 0) {
+                // A data link that is not an image: leave it, and look further on.
+                from = marker + 1;
+                continue;
+            }
             current = current.substring(0, start) + current.substring(end + 1);
+            from = start;
         }
         return current;
     }
@@ -533,7 +565,11 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     }
 
     /** A folder waiting to be listed, and the path to it from its root. */
-    private record Folder(String id, String path, boolean root, boolean listable) {
+    private record Folder(String id, String path, boolean root, boolean listable, boolean verify) {
+
+        Folder(String id, String path, boolean root, boolean listable) {
+            this(id, path, root, listable, false);
+        }
 
         Folder(String id, String path, boolean root) {
             this(id, path, root, true);
@@ -605,7 +641,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     // A shortcut back to a folder already listed is how Drive makes a
                     // cycle; the visited set is what stops the listing going round it.
                     if (visited.add(target)) {
-                        queue.add(new Folder(target, folder.child(name), false));
+                        queue.add(new Folder(target, folder.child(name), false, true, true));
                     } else {
                         repeatedFolders++;
                     }
