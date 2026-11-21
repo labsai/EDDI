@@ -1170,6 +1170,33 @@ class DynamicAgentToolsTest {
             verify(deploymentStore, never()).setDeploymentInfo(any(), eq("created-2"), any(), any());
         }
 
+        @Test
+        void teardownAgent_flipsTheRecordBeforeLeavingTheRegistry() throws Exception {
+            // The sweep deploys what is recorded deployed and not served: a sweep
+            // between a registry drop and the record write would deploy it again.
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(record("created-1", 1, Environment.production)));
+
+            tool.teardownAgent("created-1", false);
+
+            var order = inOrder(deploymentStore, agentFactory);
+            order.verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.undeployed);
+            order.verify(agentFactory).undeployAgent(Environment.production, "created-1", null);
+        }
+
+        @Test
+        void teardownAgent_failedRegistryRemovalPutsTheRecordsBack() throws Exception {
+            when(deploymentStore.readDeploymentInfos(DeploymentInfo.DeploymentStatus.deployed))
+                    .thenReturn(List.of(record("created-1", 1, Environment.production), record("created-1", 2, Environment.production)));
+            doThrow(new IllegalStateException("boom")).when(agentFactory).undeployAgent(Environment.production, "created-1", null);
+
+            String result = tool.teardownAgent("created-1", false);
+
+            assertTrue(result.contains("Failed to undeploy"), result);
+            verify(deploymentStore).setDeploymentInfo("production", "created-1", 1, DeploymentInfo.DeploymentStatus.deployed);
+            verify(deploymentStore).setDeploymentInfo("production", "created-1", 2, DeploymentInfo.DeploymentStatus.deployed);
+        }
+
         private static DeploymentInfo record(String agentId, int version, Environment environment) {
             var info = new DeploymentInfo();
             info.setAgentId(agentId);
