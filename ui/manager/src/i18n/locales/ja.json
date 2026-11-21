@@ -5928,5 +5928,20 @@
     "approved": "変更を承認して適用しました",
     "rejected": "変更を却下しました。何も適用されていません",
     "approveBlockedDirty": "先にクォータの編集を保存するか、ページを再読み込みして破棄してください。承認後に保存すると、承認されたクォータが上書きされます。"
+  },
+  "teamsChannel": {
+    "appId": "Microsoft アプリ ID",
+    "appIdHint": "必須。Azure Bot の Microsoft アプリ ID。",
+    "tenantId": "テナント ID",
+    "tenantIdHint": "必須。ボットのシングルテナント アプリ登録の Entra テナント。",
+    "connection": "接続",
+    "connectionHint": "必須。同じアプリ ID の SERVICE OAuth クライアント資格情報接続で、テナントのトークン URL とスコープ https://api.botframework.com/.default を使用します。保存時に証明のためトークンを 1 つ取得します。",
+    "allowedTenantIds": "その他の許可テナント",
+    "allowedTenantIdsHint": "任意、カンマ区切り。空の場合はボット自身のテナントのみ。",
+    "conversationId": "チャネルまたはグループ チャット ID",
+    "conversationIdHint": "任意。この統合が応答する 19:… の会話。個人チャットに対応する場合は空のままにします。",
+    "endpointHint": "この URL を Azure Bot の [構成] → [メッセージング エンドポイント] に貼り付けます。すべての Teams 統合で共有されます。",
+    "appPackageHint": "アプリ パッケージを Teams（アプリ → アプリを管理 → アプリをアップロード）または Teams 管理センターでアップロードします。",
+    "downloadAppPackage": "アプリ パッケージをダウンロード"
   }
 }

@@ -4,7 +4,7 @@ import { seg } from "@eddi/app-kit/lib/api/path-segment";
 
 // ─── Types ──────────────────────────────────────────────────────
 
-export const CHANNEL_TYPES = ["slack", "webhook", "email"] as const;
+export const CHANNEL_TYPES = ["slack", "webhook", "email", "teams"] as const;
 
 /** Signature schemes of a `webhook` channel integration (backend default: eddi-v1). */
 export const WEBHOOK_SIGNATURE_SCHEMES = ["eddi-v1", "github", "generic-hmac"] as const;
@@ -12,6 +12,31 @@ export const WEBHOOK_SIGNATURE_SCHEMES = ["eddi-v1", "github", "generic-hmac"] a
 /** The endpoint a `webhook` channel integration receives events on. */
 export function webhookEndpointUrl(origin: string, integrationId: string): string {
   return `${origin}/integrations/webhook/${integrationId}`;
+}
+
+/** The Bot Connector messaging endpoint every `teams` integration shares. */
+export function teamsMessagingEndpointUrl(origin: string): string {
+  return `${origin}/integrations/teams/messages`;
+}
+
+/**
+ * Downloads the Teams app package (manifest.json and icons) of a `teams`
+ * integration. A blob download, so a raw `fetch` with the auth header.
+ */
+export async function downloadTeamsAppPackage(id: string, version: number): Promise<void> {
+  const url = `${api.getBaseUrl()}/channelstore/teams/${seg(id)}/app-package?version=${version}`;
+  const res = await fetch(url, { headers: api.getAuthHeader() });
+  if (!res.ok) {
+    throw new Error(`Download failed: ${res.status} ${res.statusText}`);
+  }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = `teams-app-${id}.zip`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(a.href);
 }
 
 export type TargetType = "AGENT" | "GROUP";

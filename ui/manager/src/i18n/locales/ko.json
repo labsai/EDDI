@@ -5928,5 +5928,20 @@
     "approved": "변경이 승인되어 적용되었습니다",
     "rejected": "변경이 거부되었습니다. 아무것도 적용되지 않았습니다",
     "approveBlockedDirty": "먼저 할당량 편집 내용을 저장하거나 페이지를 새로 고쳐 버리세요. 승인 후에 저장하면 승인된 할당량을 덮어씁니다."
+  },
+  "teamsChannel": {
+    "appId": "Microsoft 앱 ID",
+    "appIdHint": "필수. Azure Bot의 Microsoft 앱 ID입니다.",
+    "tenantId": "테넌트 ID",
+    "tenantIdHint": "필수. 봇의 단일 테넌트 앱 등록이 속한 Entra 테넌트입니다.",
+    "connection": "연결",
+    "connectionHint": "필수. 같은 앱 ID에 대한 SERVICE OAuth 클라이언트 자격 증명 연결로, 테넌트의 토큰 URL과 범위 https://api.botframework.com/.default를 사용합니다. 저장 시 증명을 위해 토큰을 하나 받습니다.",
+    "allowedTenantIds": "추가 허용 테넌트",
+    "allowedTenantIdsHint": "선택 사항, 쉼표로 구분. 비워 두면 봇 자신의 테넌트만 허용합니다.",
+    "conversationId": "채널 또는 그룹 채팅 ID",
+    "conversationIdHint": "선택 사항. 이 통합이 응답하는 19:… 대화입니다. 개인 채팅을 처리하려면 비워 두세요.",
+    "endpointHint": "이 URL을 Azure Bot의 구성 → 메시징 엔드포인트 필드에 붙여 넣으세요. 모든 Teams 통합이 공유합니다.",
+    "appPackageHint": "Teams(앱 → 앱 관리 → 앱 업로드) 또는 Teams 관리 센터에서 앱 패키지를 업로드하세요.",
+    "downloadAppPackage": "앱 패키지 다운로드"
   }
 }

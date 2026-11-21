@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useRef, useId } from "react";
 import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
-import { parseChannelResourceUri, webhookEndpointUrl } from "@/lib/api/channels";
+import { downloadTeamsAppPackage, parseChannelResourceUri, teamsMessagingEndpointUrl, webhookEndpointUrl } from "@/lib/api/channels";
+import { TeamsPlatformFields } from "@/components/channels/teams-settings";
 import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
 import { useTranslation } from "react-i18next";
 import { ErrorState } from "@/components/shared/error-state";
@@ -285,8 +286,11 @@ export function ChannelDetailPage() {
 
   const isWebhook = draft?.channelType === "webhook";
   const isEmail = draft?.channelType === "email";
+  const isTeams = draft?.channelType === "teams";
   const webhookUrl = isWebhook && id
     ? webhookEndpointUrl(window.location.origin, id)
+    : isTeams
+    ? teamsMessagingEndpointUrl(window.location.origin)
     : `${window.location.origin}/integrations/slack/events`;
 
   const handleSave = async () => {
@@ -519,6 +523,8 @@ export function ChannelDetailPage() {
           <EmailPlatformFields advancedOpen platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+        ) : isTeams ? (
+          <TeamsPlatformFields platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (
         <div className="space-y-3">
           <div className="space-y-1">
@@ -577,7 +583,7 @@ export function ChannelDetailPage() {
       {!isEmail && (
       <section className="rounded-xl border border-primary/20 bg-primary/5 p-5 space-y-3">
         <h2 className="text-sm font-semibold flex items-center gap-2"><ExternalLink className="h-4 w-4 text-primary" />{t("channelDetail.webhookUrl", "Webhook URL")}</h2>
-        <p className="text-xs text-muted-foreground">{isWebhook ? t("webhook.endpointHint", "Send signed events to this URL with POST.") : t("channelDetail.webhookHint", "Paste this URL into your Slack App's Event Subscriptions → Request URL field.")}</p>
+        <p className="text-xs text-muted-foreground">{isWebhook ? t("webhook.endpointHint", "Send signed events to this URL with POST.") : isTeams ? t("teamsChannel.endpointHint", "Paste this URL into the Azure Bot's Configuration → Messaging endpoint field. Every Teams integration shares it.") : t("channelDetail.webhookHint", "Paste this URL into your Slack App's Event Subscriptions → Request URL field.")}</p>
         <div className="flex items-center gap-2">
           <code className="flex-1 rounded-lg bg-background border border-border px-3 py-2 text-xs font-mono truncate">{webhookUrl}</code>
           <Button size="sm" variant="outline" className="gap-1 shrink-0" onClick={copyWebhookUrl}>
@@ -587,6 +593,19 @@ export function ChannelDetailPage() {
         </div>
         {isWebhook ? (
           <WebhookSigningInstructions scheme={draft.platformConfig.signatureScheme || "eddi-v1"} platformConfig={draft.platformConfig} />
+        ) : isTeams ? (
+          <div className="text-xs text-muted-foreground space-y-2">
+            <p>{t("teamsChannel.appPackageHint", "Upload the app package in Teams (Apps → Manage your apps → Upload an app) or in the Teams admin center.")}</p>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="teams-app-package-download"
+              disabled={!id}
+              onClick={() => { if (id) downloadTeamsAppPackage(id, version).catch((err) => toast.error(getErrorMessage(err))); }}
+            >
+              {t("teamsChannel.downloadAppPackage", "Download app package")}
+            </Button>
+          </div>
         ) : (
         <div className="text-xs text-muted-foreground space-y-1">
           <p className="font-medium">{t("channelDetail.requiredScopes", "Required Bot Token Scopes:")}</p>

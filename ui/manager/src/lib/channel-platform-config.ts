@@ -21,6 +21,7 @@ const CHANNEL_PLATFORM_KEYS: Record<string, readonly string[]> = {
     "eventTypeHeader",
     "eventTypePath",
   ],
+  teams: ["appId", "tenantId", "connection", "allowedTenantIds", "conversationId", "hitlApprovalConversationId", "hitlApproverAadObjectIds"],
 };
 
 /** The keys an email integration reads (the backend refuses any other). */

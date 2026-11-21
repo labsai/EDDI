@@ -7,6 +7,7 @@ import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
 import { EmailPlatformFields } from "./email-settings";
+import { TeamsPlatformFields, teamsConfigProblems } from "./teams-settings";
 import { emailConfigProblems, initialEmailPlatformConfig, withEmailFixedKeys } from "@/lib/email-channel";
 import { toastChannelWarnings } from "@/lib/email-channel-messages";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
@@ -47,6 +48,7 @@ export function CreateChannelDialog({
   const [signingSecret, setSigningSecret] = useState("");
   const [signatureScheme, setSignatureScheme] = useState("eddi-v1");
   const [emailConfig, setEmailConfig] = useState<Record<string, string>>(initialEmailPlatformConfig);
+  const [teamsConfig, setTeamsConfig] = useState<Record<string, string>>({});
   const [targetAgentId, setTargetAgentId] = useState(defaultAgentId ?? "");
 
   const reset = useCallback(() => {
@@ -58,11 +60,13 @@ export function CreateChannelDialog({
     setSigningSecret("");
     setSignatureScheme("eddi-v1");
     setEmailConfig(initialEmailPlatformConfig());
+    setTeamsConfig({});
     setTargetAgentId(defaultAgentId ?? "");
   }, [defaultAgentId]);
 
   const isWebhook = channelType === "webhook";
   const isEmail = channelType === "email";
+  const isTeams = channelType === "teams";
   const stepIndex = STEPS.indexOf(step);
   const isFirst = stepIndex === 0;
   const isLast = stepIndex === STEPS.length - 1;
@@ -78,6 +82,7 @@ export function CreateChannelDialog({
         if (isWebhook) return signingSecret.trim().length > 0 && isEmptyOrReference(signingSecret);
         // The backend re-checks every rule; this only spares a round trip.
         if (isEmail) return emailConfigProblems(emailConfig).length === 0;
+        if (isTeams) return teamsConfigProblems(teamsConfig).length === 0;
         return channelId.trim().length > 0 && isEmptyOrReference(botToken) && isEmptyOrReference(signingSecret);
       case "target": return targetAgentId.trim().length > 0;
     }
@@ -92,6 +97,8 @@ export function CreateChannelDialog({
       channelType,
       platformConfig: isEmail
         ? withEmailFixedKeys(emailConfig)
+        : isTeams
+        ? { ...teamsConfig }
         : isWebhook
         ? { signingSecret: signingSecret.trim(), signatureScheme }
         : {
@@ -207,7 +214,10 @@ export function CreateChannelDialog({
           {step === "credentials" && isEmail && (
             <EmailPlatformFields platformConfig={emailConfig} onChange={setEmailConfig} />
           )}
-          {step === "credentials" && !isWebhook && !isEmail && (
+          {step === "credentials" && isTeams && (
+            <TeamsPlatformFields platformConfig={teamsConfig} onChange={setTeamsConfig} />
+          )}
+          {step === "credentials" && !isWebhook && !isEmail && !isTeams && (
             <>
               <div className="space-y-1.5">
                 <label className="text-sm font-medium text-foreground" htmlFor="create-channel-id">

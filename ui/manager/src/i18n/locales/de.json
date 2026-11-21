@@ -5928,5 +5928,20 @@
     "approved": "Änderung genehmigt und angewendet",
     "rejected": "Änderung abgelehnt; nichts wurde angewendet",
     "approveBlockedDirty": "Speichern Sie zuerst Ihre Quota-Änderungen oder laden Sie die Seite neu, um sie zu verwerfen: Wenn Sie sie nach einer Genehmigung speichern, überschreiben sie die genehmigte Quota."
+  },
+  "teamsChannel": {
+    "appId": "Microsoft-App-ID",
+    "appIdHint": "Erforderlich. Die Microsoft-App-ID des Azure Bots.",
+    "tenantId": "Mandanten-ID",
+    "tenantIdHint": "Erforderlich. Der Entra-Mandant der Single-Tenant-App-Registrierung des Bots.",
+    "connection": "Verbindung",
+    "connectionHint": "Erforderlich. Eine SERVICE-Verbindung mit OAuth Client Credentials für dieselbe App-ID, mit der Token-URL des Mandanten und dem Scope https://api.botframework.com/.default. Beim Speichern wird zum Nachweis ein Token abgerufen.",
+    "allowedTenantIds": "Weitere erlaubte Mandanten",
+    "allowedTenantIdsHint": "Optional, durch Kommas getrennt. Leer bedeutet: nur der eigene Mandant des Bots.",
+    "conversationId": "Kanal- oder Gruppenchat-ID",
+    "conversationIdHint": "Optional. Eine 19:…-Unterhaltung, in der diese Integration antwortet. Leer lassen, um persönliche Chats zu bedienen.",
+    "endpointHint": "Fügen Sie diese URL im Azure Bot unter Konfiguration → Messaging-Endpunkt ein. Alle Teams-Integrationen nutzen sie gemeinsam.",
+    "appPackageHint": "Laden Sie das App-Paket in Teams hoch (Apps → Apps verwalten → App hochladen) oder im Teams Admin Center.",
+    "downloadAppPackage": "App-Paket herunterladen"
   }
 }

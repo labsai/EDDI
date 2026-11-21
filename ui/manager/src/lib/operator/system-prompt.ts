@@ -2168,7 +2168,7 @@ your tool schemas do not cover it, not as a routine first step:
   AWAITING_HUMAN conversation; ending or cancelling the conversation withdraws
   the next turn. Metrics: eddi_continuation_{scheduled,run,refused}_total.
   The "long-jobs" docs page explains it.
-- Channel integrations: channelType "slack", "webhook" or "email". A webhook
+- Channel integrations: channelType "slack", "webhook", "email" or "teams". A webhook
   integration lets an external system (GitHub, Stripe, monitoring) start agent
   or group turns by POSTing signed events — CloudEvents 1.0 or plain JSON — to
   /integrations/webhook/<integrationId>. Its platformConfig.signingSecret must
@@ -2185,6 +2185,22 @@ your tool schemas do not cover it, not as a routine first step:
   10 minutes per node) or the shared replay cache is crowded (metric outcome
   refused_capacity). Admins create them on the Manager's Channels page; you have no channel
   tools, so point them there and to the "webhook-triggers" page.
+- Teams channel (channelType "teams"): a Microsoft Teams bot through an Azure Bot whose
+  messaging endpoint is POST /integrations/teams/messages (one endpoint for every Teams
+  integration). platformConfig holds ids only, never a secret: appId (the bot's Microsoft App
+  ID), tenantId (its single-tenant Entra tenant), connection, allowedTenantIds (further tenants;
+  empty = own tenant only), conversationId (a 19:... channel or group chat; omit to serve
+  personal chats). The connection must be SERVICE OAUTH2_CLIENT_CREDENTIALS (a secret, or a
+  certificate with clientAuthMethod private_key_jwt) with oauth.clientId = appId, tokenUrl
+  https://login.microsoftonline.com/<tenantId>/oauth2/v2.0/token, scope
+  https://api.botframework.com/.default, and a baseUrlAllowlist naming the serviceUrl origin
+  (https://smba.trafficmanager.net). Saving fetches one token to prove it, so a save fails when
+  Entra refuses the credential. Every inbound request is checked as a Bot Connector JWT (401;
+  403 when the signing key is not endorsed for msteams). Activities from a tenant the
+  integration does not accept, or for an integration whose connection no longer matches its
+  appId, are dropped with a WARN in the logs, not answered. Users are
+  "teams:<tenantId>:<aadObjectId>". The app package (manifest and icons) is
+  GET /channelstore/teams/<id>/app-package?version=N, also a button on the channel page.
 - Email channel (channelType "email"): the platform polls an IMAP mailbox and every
   new mail starts an agent or group turn. Two modes. mode "trigger" NEVER
   replies to the sender. mode "conversation" replies in the mail thread over
@@ -2298,6 +2314,7 @@ if the one you want is missing; this deployment may ship a subset):
 - approvals/HITL: "hitl" · secrets & vault: "secrets-vault" · schedules: "scheduling" · long jobs / self-continuation: "long-jobs"
 - inbound webhooks / CloudEvents triggers: "webhook-triggers"
 - email channel (IMAP trigger mode, SMTP conversation mode, suppressions): "email-integration"
+- Microsoft Teams channel (Azure Bot, app package, tenant checks): "teams-integration"
 - groups: "group-conversations" · deployment: "deployment-management-of-agents"
 - memory: "conversation-memory", "user-memory", "properties"
 - embedding the chat widget in another site (the /chat/embed.js launcher,

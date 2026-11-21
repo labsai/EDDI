@@ -5928,5 +5928,20 @@
     "approved": "Change approved and applied",
     "rejected": "Change rejected; nothing was applied",
     "approveBlockedDirty": "Save your quota edits first, or reload the page to discard them: saving them after an approval would overwrite the approved quota."
+  },
+  "teamsChannel": {
+    "appId": "Microsoft App ID",
+    "appIdHint": "Required. The Azure Bot's Microsoft App ID.",
+    "tenantId": "Tenant ID",
+    "tenantIdHint": "Required. The Entra tenant of the bot's single-tenant app registration.",
+    "connection": "Connection",
+    "connectionHint": "Required. A SERVICE OAuth client-credentials connection for the same app ID, with the tenant's token URL and the scope https://api.botframework.com/.default. Saving obtains one token to prove it.",
+    "allowedTenantIds": "Further allowed tenants",
+    "allowedTenantIdsHint": "Optional, comma-separated. Empty means the bot's own tenant only.",
+    "conversationId": "Channel or group chat ID",
+    "conversationIdHint": "Optional. A 19:… conversation this integration answers in. Leave empty to serve personal chats.",
+    "endpointHint": "Paste this URL into the Azure Bot's Configuration → Messaging endpoint field. Every Teams integration shares it.",
+    "appPackageHint": "Upload the app package in Teams (Apps → Manage your apps → Upload an app) or in the Teams admin center.",
+    "downloadAppPackage": "Download app package"
   }
 }

@@ -5980,5 +5980,20 @@
     "approved": "Cambio aprobado y aplicado",
     "rejected": "Cambio rechazado; no se aplicó nada",
     "approveBlockedDirty": "Guarda primero tus cambios de la cuota o recarga la página para descartarlos: guardarlos después de una aprobación sobrescribiría la cuota aprobada."
+  },
+  "teamsChannel": {
+    "appId": "ID de aplicación de Microsoft",
+    "appIdHint": "Obligatorio. El ID de aplicación de Microsoft del bot de Azure.",
+    "tenantId": "ID de inquilino",
+    "tenantIdHint": "Obligatorio. El inquilino de Entra del registro de aplicación de un solo inquilino del bot.",
+    "connection": "Conexión",
+    "connectionHint": "Obligatorio. Una conexión SERVICE OAuth client credentials para el mismo ID de aplicación, con la URL de token del inquilino y el scope https://api.botframework.com/.default. Al guardar se obtiene un token para demostrarlo.",
+    "allowedTenantIds": "Otros inquilinos permitidos",
+    "allowedTenantIdsHint": "Opcional, separados por comas. Vacío significa solo el inquilino del bot.",
+    "conversationId": "ID de canal o chat de grupo",
+    "conversationIdHint": "Opcional. Una conversación 19:… en la que responde esta integración. Déjelo vacío para chats personales.",
+    "endpointHint": "Pegue esta URL en Configuración → Punto de conexión de mensajería del bot de Azure. Todas las integraciones de Teams la comparten.",
+    "appPackageHint": "Cargue el paquete de la aplicación en Teams (Aplicaciones → Administrar sus aplicaciones → Cargar una aplicación) o en el centro de administración de Teams.",
+    "downloadAppPackage": "Descargar paquete de aplicación"
   }
 }

@@ -5928,5 +5928,20 @@
     "approved": "更改已批准并应用",
     "rejected": "更改已拒绝；未应用任何内容",
     "approveBlockedDirty": "请先保存您对配额的编辑，或重新加载页面以放弃这些编辑：在批准后再保存会覆盖已批准的配额。"
+  },
+  "teamsChannel": {
+    "appId": "Microsoft 应用 ID",
+    "appIdHint": "必填。Azure 机器人的 Microsoft 应用 ID。",
+    "tenantId": "租户 ID",
+    "tenantIdHint": "必填。机器人单租户应用注册所在的 Entra 租户。",
+    "connection": "连接",
+    "connectionHint": "必填。同一应用 ID 的 SERVICE OAuth 客户端凭据连接，使用该租户的令牌 URL 和作用域 https://api.botframework.com/.default。保存时会获取一个令牌以作证明。",
+    "allowedTenantIds": "其他允许的租户",
+    "allowedTenantIdsHint": "可选，以逗号分隔。为空表示仅限机器人自己的租户。",
+    "conversationId": "频道或群聊 ID",
+    "conversationIdHint": "可选。此集成在其中回复的 19:… 会话。留空则服务个人聊天。",
+    "endpointHint": "将此 URL 粘贴到 Azure 机器人的“配置 → 消息传递终结点”字段。所有 Teams 集成共用此地址。",
+    "appPackageHint": "在 Teams 中上传应用包（应用 → 管理你的应用 → 上传应用）或在 Teams 管理中心上传。",
+    "downloadAppPackage": "下载应用包"
   }
 }
