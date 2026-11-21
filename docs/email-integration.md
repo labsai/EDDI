@@ -336,7 +336,7 @@ anyone else editing it. The sender lists therefore have their own endpoint, MCP 
 | Manager | The integration's page: two lists of chips | Add, remove, a reason, then **Apply sender changes** |
 
 ```bash
-CHANNEL_ID=<integration id>
+CHANNEL_ID="replace-with-integration-id"
 curl "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-senders"
 # {"version": 3, "allow": ["bob@partner.com"], "block": []}
 
