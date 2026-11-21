@@ -91,7 +91,7 @@ cd EDDI
 # On Mac: brew services start mongodb-community
 # On Linux: sudo systemctl start mongod
 
-# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev)
+# Run EDDI in dev mode (API on :7070, Dev UI on /q/dev-ui)
 ./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'
 ```
 
@@ -102,7 +102,7 @@ never run npm — so `http://localhost:7070/manage` is only there if an earlier
 run it from its own dev server:
 
 ```bash
-cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the API to :7070
+cd ui && npm ci && cd manager && npm run dev    # http://localhost:3000, proxies the API to :7070
 ```
 
 > **💡 Secrets Vault:** If you plan to store API keys through the Manager UI or use `${vault:...}` references, set the vault master key first:
@@ -116,13 +116,29 @@ cd ui/manager && npm ci && npm run dev    # http://localhost:3000, proxies the A
 
 ### Configuring AI Tools
 
-If you plan to use the **Web Search** or **Weather** tools in your agents, you need to set up API keys in your environment or `application.properties`.
+If you plan to use the **Web Search** or **Weather** tools in your agents, you may need to set up API keys in your environment or `application.properties`.
 
-**Web Search (Google):**
+**Web Search** uses DuckDuckGo by default (`eddi.tools.websearch.provider=duckduckgo`), which needs no key. **For the Brave Search API:**
 
-- `eddi.tools.websearch.provider=google`
-- `eddi.tools.websearch.google.api-key=...`
-- `eddi.tools.websearch.google.cx=...`
+- `eddi.tools.websearch.provider=brave`
+- `eddi.tools.websearch.brave.api-key=...`
+
+Without a key the tool uses DuckDuckGo's Instant Answer API. The `google` provider is deprecated: Google shuts its Custom Search JSON API down on 2027-01-01.
+
+The `brave` provider first ships in the release after `6.6.0`; that image, and every earlier one, only knows Google and DuckDuckGo and ignores these settings. Once that release is on the [releases page](https://github.com/labsai/EDDI/releases), set `EDDI_VERSION` to it; until then, run from source or build the image from this repository.
+
+With Docker Compose, put the same two settings in `.env` as environment variables; `docker-compose.yml` passes them into the container:
+
+```bash
+EDDI_TOOLS_WEBSEARCH_PROVIDER=brave
+EDDI_TOOLS_WEBSEARCH_BRAVE_API_KEY=...
+```
+
+Environment is fixed when a container is created, so recreate it after editing `.env` (use the same `EDDI_VERSION` as before):
+
+```bash
+EDDI_VERSION=<the release with Brave> docker compose up -d
+```
 
 **Weather (OpenWeatherMap):**
 
@@ -400,8 +416,8 @@ curl -s -X POST \
 ```
 
 Any status other than `READY` — typically `ERROR` — means the agent's workflow
-references something that does not resolve. Check the server log, then
-re-deploy. The status can be re-read at any time:
+references something that does not resolve; the response then also carries an
+`error` field saying why. Check the server log, then re-deploy. The status can be re-read at any time:
 
 ```bash
 curl -s "$EDDI/administration/production/deploymentstatus/<AGENT_ID>?version=1" | jq
@@ -758,8 +774,9 @@ model:
 }
 ```
 
-Without `"occurrence": "currentStep"` an input matcher looks at the whole
-conversation, so a greeting from three turns ago would still match.
+`"occurrence": "currentStep"` is the default and is written out here for
+clarity; `"anyStep"` would look at the whole conversation, so a greeting from
+three turns ago would still match.
 
 ### Pattern 2: API Call Before LLM
 

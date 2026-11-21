@@ -6,7 +6,7 @@ description: How an EDDI Manager page is actually built — the app shell, the l
 # EDDI Manager screen patterns
 
 Most pages live in `src/pages/` and render inside `AppLayout` (sidebar + top bar) via its
-`<Outlet />`. The layout already supplies `p-6`, `max-w-screen-2xl`, scroll, and a
+`<Outlet />`. The layout already supplies `p-4 md:p-6`, `max-w-screen-2xl`, scroll, and a
 `@container/main` context — such a page renders its own content only, no shell, no width cap,
 no page background.
 
@@ -54,8 +54,8 @@ Reference: `src/pages/agents.tsx`.
 Rules that hold across pages:
 
 - **Do not add `p-6` to the page root.** `AppLayout`'s `<main>` already applies
-  `p-6` inside `@container/main mx-auto max-w-screen-2xl`, so a page that pads itself
-  renders at 48px. Every page currently complies; keep it that way.
+  `p-4 md:p-6` around `@container/main mx-auto max-w-screen-2xl`, so a page that pads itself
+  renders with double padding (48px from `md` up). Every page currently complies; keep it that way.
 - `h1` is `flex items-center gap-2 text-3xl font-bold text-foreground` with an
   `h-8 w-8 text-primary` Lucide icon. **Heading size is genuinely mixed** — `text-3xl` is the
   most common, `text-2xl` close behind, and `text-xl` on a few dense detail headers. `text-3xl` is the one to

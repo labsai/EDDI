@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { withOpsField, withOpsTool } from "../agent-ops";
 import { TaskAgentOpsSection } from "../task-agent-ops-section";
-import { BUILT_IN_TOOLS, type LlmTask } from "../types";
+import { BUILT_IN_TOOLS, type LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 describe("withOpsTool", () => {
   it("keeps the plain built-ins when it is the first whitelist entry", () => {

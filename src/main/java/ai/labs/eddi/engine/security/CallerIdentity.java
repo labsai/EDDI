@@ -21,9 +21,10 @@ import java.util.Map;
  * @param userId
  *            the caller's principal name, or {@code null} when anonymous
  * @param origin
- *            {@code scheme://host[:port]} of the request the caller made. A
- *            token is only ever forwarded back to this exact origin, so it
- *            cannot be leaked to a third-party host named in an agent config.
+ *            normalized {@code scheme://host:port} of the request the caller
+ *            made. A token is only ever forwarded back to this exact origin, so
+ *            it cannot be leaked to a third-party host named in an agent
+ *            config.
  * @param connectionCredentials
  *            credentials the caller supplied for connections whose binding is
  *            {@code CALLER_SUPPLIED}, keyed by connection name. Never

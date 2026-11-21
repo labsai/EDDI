@@ -2,9 +2,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { http, HttpResponse } from "msw";
 import { toast } from "sonner";
 import type { TFunction } from "i18next";
-import { server } from "@/test/mocks/server";
-import { fixGrantAndRedeploy } from "@/lib/deploy-outcome";
-import { VAULT_GRANT_MISSING, type DeploymentFailure } from "@/lib/api/agents";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { fixGrantAndRedeploy } from "@eddi/app-kit/lib/deploy-outcome";
+import { VAULT_GRANT_MISSING, type DeploymentFailure } from "@eddi/app-kit/lib/api/agents";
 
 const t = ((key: string, fallback?: unknown) => (typeof fallback === "string" ? fallback : key)) as unknown as TFunction;
 

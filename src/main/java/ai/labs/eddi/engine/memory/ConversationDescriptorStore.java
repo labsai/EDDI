@@ -12,13 +12,19 @@ import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.engine.memory.descriptor.ConversationDescriptorMemo;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
 import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor;
+import ai.labs.eddi.engine.memory.descriptor.model.ConversationDescriptor.TitleSource;
+import ai.labs.eddi.engine.memory.model.ConversationState;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
+import java.util.Collection;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
@@ -155,5 +161,80 @@ public class ConversationDescriptorStore implements IConversationDescriptorStore
     public List<ConversationDescriptor> findByOriginId(String originId)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         return descriptorStore.findByOriginId(originId);
+    }
+
+    @Override
+    public boolean writeGeneratedTitle(String conversationId, String title, TitleSource source) {
+        Objects.requireNonNull(title, "title");
+        if (source != TitleSource.AUTO && source != TitleSource.LLM) {
+            throw new IllegalArgumentException("Not a generated title source: " + source);
+        }
+        // AUTO lands only where there is no title at all; LLM also replaces AUTO.
+        List<String> replaceable = source == TitleSource.LLM ? List.of(TitleSource.AUTO.name()) : List.of();
+        Map<String, Object> fields = new LinkedHashMap<>();
+        fields.put(ConversationDescriptor.FIELD_TITLE, title);
+        fields.put(ConversationDescriptor.FIELD_TITLE_SOURCE, source.name());
+        return setFields(conversationId, fields, ConversationDescriptor.FIELD_TITLE_SOURCE, replaceable);
+    }
+
+    @Override
+    public boolean writeOwnerEdit(String conversationId, String title, Boolean pinned) {
+        if (title == null && pinned == null) {
+            throw new IllegalArgumentException("Nothing to write: neither a title nor a pin");
+        }
+        Map<String, Object> fields = new LinkedHashMap<>();
+        if (title != null) {
+            fields.put(ConversationDescriptor.FIELD_TITLE, title);
+            fields.put(ConversationDescriptor.FIELD_TITLE_SOURCE, TitleSource.USER.name());
+        }
+        if (pinned != null) {
+            fields.put(ConversationDescriptor.FIELD_PINNED, pinned);
+        }
+        return setFields(conversationId, fields, null, List.of());
+    }
+
+    @Override
+    public boolean markEnded(String conversationId) {
+        return setFields(conversationId, Map.of(ConversationDescriptor.FIELD_CONVERSATION_STATE, ConversationState.ENDED.name()), null,
+                List.of());
+    }
+
+    private boolean setFields(String conversationId, Map<String, Object> fields, String guardField, Collection<String> replaceable) {
+        ConversationDescriptorMemo.forget(descriptorMemoInstance, conversationId);
+        try {
+            return descriptorStore.setFieldsIf(conversationId, fields, guardField, replaceable);
+        } catch (UnsupportedOperationException e) {
+            return setFieldsByRewrite(conversationId, fields, guardField, replaceable);
+        }
+    }
+
+    /**
+     * For a storage backend that cannot update single fields: a read-modify-write
+     * of the whole descriptor. Not atomic — the backends EDDI ships both take the
+     * single update above.
+     */
+    private boolean setFieldsByRewrite(String conversationId, Map<String, Object> fields, String guardField, Collection<String> replaceable) {
+        try {
+            var resourceId = descriptorStore.getCurrentResourceId(conversationId);
+            var descriptor = descriptorStore.readDescriptor(conversationId, resourceId.getVersion());
+            if (guardField != null && descriptor.getTitleSource() != null && !replaceable.contains(descriptor.getTitleSource().name())) {
+                return false;
+            }
+            if (fields.containsKey(ConversationDescriptor.FIELD_TITLE)) {
+                descriptor.setTitle((String) fields.get(ConversationDescriptor.FIELD_TITLE));
+                descriptor.setTitleSource(TitleSource.valueOf((String) fields.get(ConversationDescriptor.FIELD_TITLE_SOURCE)));
+            }
+            if (fields.get(ConversationDescriptor.FIELD_PINNED) instanceof Boolean pinned) {
+                descriptor.setPinned(pinned);
+            }
+            if (fields.get(ConversationDescriptor.FIELD_CONVERSATION_STATE) instanceof String state) {
+                descriptor.setConversationState(ConversationState.valueOf(state));
+            }
+            descriptorStore.setDescriptor(conversationId, resourceId.getVersion(), descriptor);
+            return true;
+        } catch (IResourceStore.ResourceStoreException | IResourceStore.ResourceNotFoundException e) {
+            LOGGER.debugf("No live descriptor to update for conversation %s", sanitize(conversationId));
+            return false;
+        }
     }
 }

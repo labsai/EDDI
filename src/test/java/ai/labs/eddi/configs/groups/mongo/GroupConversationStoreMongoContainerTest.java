@@ -7,6 +7,9 @@ package ai.labs.eddi.configs.groups.mongo;
 import ai.labs.eddi.configs.groups.IGroupConversationStore.GroupConversationGoneException;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionRecord;
+import ai.labs.eddi.configs.groups.model.SharedTaskList.ApprovedActionStatus;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.mongo.MongoTestBase;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.time.Instant;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -132,5 +136,57 @@ class GroupConversationStoreMongoContainerTest extends MongoTestBase {
 
         assertThrows(GroupConversationGoneException.class,
                 () -> store.updateIfStateAndPause(write, GroupConversationState.AWAITING_APPROVAL, "1000"));
+    }
+    /** A running discussion owing one approved-result action, stored. */
+    private GroupConversation runningWithOwedAction() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setGroupId("g-1");
+        gc.setState(GroupConversationState.IN_PROGRESS);
+        var list = new SharedTaskList();
+        list.setApprovedActions(Map.of("t-1", new ApprovedActionRecord(ApprovedActionStatus.PENDING, "Draft", 0, "uri#post", null, "alice",
+                false, "key", Instant.ofEpochMilli(1_000L), null, null, null, null, null)));
+        gc.setTaskList(list);
+        store.create(gc);
+        return gc;
+    }
+
+    private static void cancel(GroupConversation gc) {
+        gc.setState(GroupConversationState.CANCELLED);
+        gc.setPausedAt(null);
+    }
+
+    @Test
+    @DisplayName("a cancel read before the leg's claim cannot overwrite the claim")
+    void staleSettlingCancel_isRefusedByTheClaimsRevision() throws Exception {
+        GroupConversation gc = runningWithOwedAction();
+        GroupConversation cancelsCopy = store.read(gc.getId());
+        // the leg claims: RUNNING, with a new revision, under the plain state CAS
+        GroupConversation leg = store.read(gc.getId());
+        var claimed = leg.getTaskList().getApprovedActions().get("t-1").running(Instant.ofEpochMilli(2_000L));
+        leg.getTaskList().updateApprovedAction("t-1", claimed);
+        leg.getTaskList().setApprovedActionsRevision("rev-claim");
+        store.updateIfState(leg, GroupConversationState.IN_PROGRESS);
+
+        cancel(cancelsCopy);
+        assertThrows(IResourceStore.ResourceModifiedException.class,
+                () -> store.updateIfStateAndPause(cancelsCopy, GroupConversationState.IN_PROGRESS, null));
+
+        GroupConversation after = store.read(gc.getId());
+        assertEquals(GroupConversationState.IN_PROGRESS, after.getState());
+        assertEquals(ApprovedActionStatus.RUNNING, after.getTaskList().getApprovedActions().get("t-1").status());
+    }
+
+    @Test
+    @DisplayName("a cancel that read the current revision lands and settles what is owed")
+    void currentSettlingCancel_lands() throws Exception {
+        GroupConversation gc = runningWithOwedAction();
+        GroupConversation write = store.read(gc.getId());
+        cancel(write);
+
+        store.updateIfStateAndPause(write, GroupConversationState.IN_PROGRESS, null);
+
+        GroupConversation after = store.read(gc.getId());
+        assertEquals(GroupConversationState.CANCELLED, after.getState());
+        assertEquals(ApprovedActionStatus.NOT_SENT, after.getTaskList().getApprovedActions().get("t-1").status());
     }
 }

@@ -1,7 +1,7 @@
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { Loader2, ShieldAlert } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Button } from "@eddi/ui";
 import type { OperatorTrust } from "@/lib/operator/operator-trust";
 
 interface OperatorUntrustedProps {

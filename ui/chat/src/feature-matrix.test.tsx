@@ -13,10 +13,11 @@ import { describe, expect, it } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 
 import { ChatProvider } from "@/store/chat-store";
-import { MessageBubble } from "@/components/MessageBubble";
-import { QuickReplies } from "@/components/QuickReplies";
-import { SecretInput } from "@/components/SecretInput";
-import { TRANSLATIONS, initLocale, t } from "@/i18n";
+import { CONVERSATION_LOCALE_LOADERS, Message as MessageBubble } from "@eddi/conversation";
+import { QuickReplies } from "@eddi/conversation";
+import { SecretInput } from "@eddi/conversation";
+import { SUPPORTED_LANGUAGES } from "@eddi/ui";
+import { LOCALE_LOADERS, initLocale, t } from "@/i18n";
 import type { ChatMessage } from "@/types";
 
 const agent = (content: string, extra: Partial<ChatMessage> = {}): ChatMessage => ({
@@ -94,14 +95,18 @@ const WIDGET: Record<string, Cell> = {
   },
   i18n: {
     status: "yes",
-    check: () => {
-      // Four locales today, against the Manager's eleven.
-      expect(Object.keys(TRANSLATIONS).sort()).toEqual(["de", "en", "es", "fr"]);
-      initLocale("de");
+    check: async () => {
+      // The Manager's eleven locales, each loaded on demand (phase 3a).
+      expect(["en", ...Object.keys(LOCALE_LOADERS)].sort()).toEqual([...SUPPORTED_LANGUAGES].sort());
+      await initLocale("de");
       try {
-        expect(t("speaker.you")).toBe(TRANSLATIONS.de["speaker.you"]);
+        expect(t("conversation.speaker.you")).toBe(
+          (await CONVERSATION_LOCALE_LOADERS.de!()).default["conversation.speaker.you"],
+        );
+        await initLocale("ar");
+        expect(document.documentElement.dir).toBe("rtl");
       } finally {
-        initLocale("en");
+        await initLocale("en");
       }
     },
   },

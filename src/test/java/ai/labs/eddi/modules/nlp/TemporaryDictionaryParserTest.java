@@ -79,6 +79,14 @@ public class TemporaryDictionaryParserTest {
         temporaryTestDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("tmpExp1"), "tmpExp1", 0, false));
         List<Solution> expected = Collections.singletonList(new Solution(expressionProvider.parseExpressions("tmpExp1")));
 
+        // one alternative, so the dictionary's own reading is reported behind the
+        // temporary one (parse stops at the chosen reading otherwise)
+        var config = new IInputParser.Config();
+        config.setMaxAlternatives(1);
+        TestDictionary testDictionary = new TestDictionary(true);
+        testDictionary.addWord(new Word("test1", expressionProvider.parseExpressions("expression1"), "exp1", 0, false));
+        inputParser = new InputParser(Collections.emptyList(), Collections.singletonList(testDictionary), Collections.emptyList(), config);
+
         // test
         List<RawSolution> rawSolutions = inputParser.parse("test1", DEFAULT_USER_LANGUAGE, Collections.singletonList(temporaryTestDictionary));
 

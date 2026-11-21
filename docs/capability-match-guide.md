@@ -110,11 +110,10 @@ The `skill` and `strategy` values are resolved using `IMemoryItemConverter.conve
 
 ## Agent Capability Declaration
 
-Agents declare capabilities in their `AgentConfiguration`:
+Agents declare capabilities in their `AgentConfiguration` (an agent's name lives on its descriptor, not here — the agent store rejects unknown fields such as `name` with a `400`):
 
 ```json
 {
-  "name": "Translation Agent",
   "capabilities": [
     {
       "skill": "language-translation",
@@ -230,7 +229,6 @@ Use PropertySetter to capture the user's intent, then route dynamically — see
 **property.json (PropertySetterTask):**
 ```json
 {
-  "actions": ["user_request_specialist"],
   "setOnActions": [{
     "actions": ["user_request_specialist"],
     "setProperties": [{
@@ -292,7 +290,7 @@ The `CapabilityRegistryService` exposes metrics at `/q/metrics`:
 
 ### Audit
 
-Each selection made by a `capabilitymatch` condition writes a `CAPABILITY_SELECTION` audit entry carrying the skill, the strategy, the candidate agent ids and the selected agent id, so routing decisions can be reviewed afterwards. Collection is best-effort: no entry is written when auditing is disabled for the conversation or the collector fails, so do not treat the trail as complete (see [audit-ledger.md](audit-ledger.md)).
+Each selection made by a `capabilityMatch` condition writes a `CAPABILITY_SELECTION` audit entry carrying the skill, the strategy, the candidate agent ids and the selected agent id, so routing decisions can be reviewed afterwards. Collection is best-effort: no entry is written when auditing is disabled for the conversation or the collector fails, so do not treat the trail as complete (see [audit-ledger.md](audit-ledger.md)).
 
 ### REST
 

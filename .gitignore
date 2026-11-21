@@ -158,7 +158,11 @@ ui/manager/.claude/*
 # frontend-maven-plugin installs Node into ui/node/<node.version>/node (see the
 # installDirectory comment in pom.xml; ui/*/node would NOT match it).
 ui/node/
+# ui/ is the npm workspaces root: `npm ci` there installs into ui/node_modules,
+# and a workspace keeps only the packages it cannot share in its own node_modules.
+ui/node_modules/
 ui/*/node_modules/
+ui/packages/*/node_modules/
 ui/*/dist/
 # Protective: nothing writes these any more. A stale local copy of the old
 # deploy-to-local-eddi-repo script would silently re-create them — including the

@@ -500,8 +500,8 @@ class ApiCallExecutorConnectionHeaderTest {
             // redirects off — that stronger measure is reserved for resolved secrets.
             // A literal credential written straight in the config (Authorization: Bearer
             // x, X-Api-Key, Cookie) is NOT replayed cross-origin either, because the
-            // shared Vert.x client strips OutboundHttp.SENSITIVE_HEADERS on every
-            // cross-origin redirect hop — see HttpClientModuleTest for that layer.
+            // shared Vert.x client keeps only OutboundHttp.CROSS_ORIGIN_SAFE_HEADERS on
+            // every cross-origin redirect hop — see HttpClientModuleTest for that layer.
             var headers = new LinkedHashMap<String, String>();
             headers.put("Accept", "application/json");
             headers.put("Authorization", "Bearer literal-token");

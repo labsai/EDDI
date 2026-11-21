@@ -69,6 +69,16 @@ public interface IAgentFactory {
      */
     void undeployAgent(Deployment.Environment environment, String agentId, Integer version);
 
+    /**
+     * Drops what the runtime remembers of the agent's stored versions (the
+     * configuration cache and the cached workflow traversals), deployed or not.
+     * {@link #undeployAgent} does this only for deployments that were live; a
+     * permanent delete with none live must still call it, or a cached version of
+     * the deleted agent stays readable. The default does nothing.
+     */
+    default void invalidateAgentCaches(String agentId) {
+    }
+
     interface DeploymentProcess {
         void completed(Deployment.Status status);
     }

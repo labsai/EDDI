@@ -48,7 +48,8 @@ import static com.mongodb.client.model.Updates.*;
  * This Javadoc used to claim exactly-once, which is precisely the assumption
  * that stops someone writing that idempotency.
  * <p>
- * Annotated {@code @DefaultBean} so PostgreSQL can override.
+ * {@code DataStoreProducers} picks this store or the PostgreSQL one by
+ * {@code eddi.datastore.type}.
  * <p>
  * All {@link Instant} values are stored as epoch-millisecond {@code Long} for
  * consistent BSON comparison in filter queries.

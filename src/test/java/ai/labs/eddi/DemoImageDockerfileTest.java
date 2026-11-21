@@ -211,12 +211,13 @@ class DemoImageDockerfileTest {
     /**
      * {@code mvn package} builds the Manager and the Chat UI
      * (frontend-maven-plugin, bound to {@code prepare-package}, runs {@code npm ci}
-     * in {@code ui/manager} and {@code ui/chat}). The demo ran exactly that without
-     * {@code ui/} in its build context, so {@code npm ci} failed on a missing
-     * package.json and the documented Open WebUI demo never produced an image.
-     * Either the sources are copied in before the build, or the build is told to
-     * skip the UIs; the demo needs the Manager, so it is the former — and the
-     * checkout's node_modules and downloaded Node must stay out of the context.
+     * at the {@code ui/} workspaces root, then builds {@code ui/manager} and
+     * {@code ui/chat}). The demo ran exactly that without {@code ui/} in its build
+     * context, so {@code npm ci} failed on a missing package.json and the
+     * documented Open WebUI demo never produced an image. Either the sources are
+     * copied in before the build, or the build is told to skip the UIs; the demo
+     * needs the Manager, so it is the former — and the checkout's node_modules and
+     * downloaded Node must stay out of the context.
      */
     @Test
     @DisplayName("the demo build stage has the UI sources the package build compiles")

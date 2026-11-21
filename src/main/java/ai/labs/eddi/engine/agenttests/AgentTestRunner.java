@@ -703,8 +703,8 @@ public class AgentTestRunner {
      * Gives up waiting for a turn, but not on paying for it: the engine keeps
      * running an abandoned turn, and its model and tool spend is real. It is
      * charged to the run when the turn completes, so a run whose turns keep timing
-     * out still reaches its {@code maxCostUsd} ceiling instead of spending without
-     * limit.
+     * out still reaches its {@code maxCostPerRun} ceiling instead of spending
+     * without limit.
      */
     void abandon(RunContext ctx, String conversationId, int stepIndex, CompletableFuture<SimpleConversationMemorySnapshot> outcome,
                  List<CompletableFuture<?>> abandoned) {

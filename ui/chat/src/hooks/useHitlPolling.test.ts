@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { useHitlPolling } from "./useHitlPolling";
-import { setBaseUrl } from "@/api/http";
+import { setBaseUrl } from "@eddi/core";
 
 const originalFetch = globalThis.fetch;
 afterEach(() => {

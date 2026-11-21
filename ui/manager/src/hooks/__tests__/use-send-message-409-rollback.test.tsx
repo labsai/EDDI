@@ -3,8 +3,8 @@ import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { http, HttpResponse } from "msw";
 import { type ReactNode } from "react";
-import { server } from "@/test/mocks/server";
-import { useChatStore, useSendMessage } from "@/hooks/use-chat";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { useChatStore, useSendMessage } from "@eddi/app-kit/hooks/use-chat";
 
 /**
  * A 409 means the conversation is paused awaiting approval and the send was

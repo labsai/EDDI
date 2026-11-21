@@ -11,7 +11,7 @@
  * issue carries a stable `code` (the UI maps it to a translated message, falling
  * back to the English `message`) plus interpolation `params`.
  */
-import type { LlmTask } from "../types";
+import type { LlmTask } from "@eddi/app-kit/components/editors/llm/types";
 
 export const CASCADE_STRATEGIES = ["cascade", "parallel"] as const;
 export const CASCADE_EVAL_STRATEGIES = [

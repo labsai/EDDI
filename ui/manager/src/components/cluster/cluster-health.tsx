@@ -1,8 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { AlertOctagon, AlertTriangle, CheckCircle2, Server, Split, WifiOff } from "lucide-react";
-import type { ClusterOverview } from "@/lib/api/cluster";
+import type { ClusterOverview } from "@eddi/app-kit/lib/api/cluster";
 import { formatDuration, reasonLabel, verdictExplanation, verdictLabel, verdictNextStep } from "@/lib/cluster-labels";
-import { cn } from "@/lib/utils";
+import { cn } from "@eddi/app-kit/lib/utils";
 
 /** Reason codes that need attention but do not make the cluster unhealthy. */
 const ATTENTION_ONLY = new Set(["DEAD_LETTERS_WAITING", "NODE_DRAINING", "LOCAL_DEAD_LETTERS"]);

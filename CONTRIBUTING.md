@@ -48,6 +48,10 @@ This project adheres to the [Contributor Covenant Code of Conduct](CODE_OF_CONDU
 | **Maven**      | 3.9+    | Bundled via `mvnw` wrapper — no install needed       |
 | **MongoDB**    | 6.0+    | Local instance or Docker                             |
 | **Docker**     | Latest  | For integration tests and container builds           |
+| **Node.js**    | —       | Not required: Maven downloads Node 26 into `ui/node/` to build the Manager, Workforce and Chat UIs. Install it only to run `npm run dev` in `ui/manager`, `ui/workforce` or `ui/chat`, after `npm ci` in `ui/` (one lockfile for all) |
+| **mise**       | Optional | [`mise.toml`](mise.toml) pins the exact JDK, Maven and Node versions and offers the common commands as tasks (`mise run dev`, `mise run test`) |
+
+> **Windows users:** Replace `./mvnw` with `.\mvnw.cmd` in all commands below. The commands are written for PowerShell, where the single quotes around `-Djvm.args=…` work as shown. In Command Prompt (`cmd.exe`) single quotes are literal characters, so use double quotes there: `.\mvnw.cmd compile quarkus:dev "-Djvm.args=--add-modules=jdk.incubator.vector"`.
 
 ### Getting Started
 
@@ -68,6 +72,30 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 # http://localhost:7070
 ```
 
+### Dev Mode
+
+Dev mode starts the application with **live reload** — code changes are picked up automatically without restarting. The Quarkus Dev UI is at [http://localhost:7070/q/dev-ui](http://localhost:7070/q/dev-ui), and pressing `r` in the terminal re-runs the tests.
+
+`-Djvm.args` hands the forked dev JVM the same `--add-modules=jdk.incubator.vector` flag the container image sets. Only `jlama` (in-process) agents need it — without it Jlama silently falls back to scalar tensor operations and answers far too slowly — so you may drop it if you never run one. `mise run dev` passes it for you.
+
+> **The UIs build with Maven, at packaging time.** Their sources live in `ui/manager`, `ui/workforce` and `ui/chat`. `./mvnw package` (and `verify`, `install`) builds them into the jar, a few minutes; `compile`, `test` and dev mode never touch npm, so dev mode serves `/manage` and `/workforce` only after a `package`. For frontend work run `npm ci` once in `ui/` (an npm workspace: one lockfile for every UI), then `npm run dev` in `ui/manager` (port 3000) or `ui/workforce` (port 3002), both proxying to the backend on 7070. Upgrading an older checkout? Run `./mvnw clean` once.
+
+> **Secrets Vault:** To use the secrets vault (storing API keys encrypted), set the master key before starting:
+>
+> ```bash
+> # Linux/macOS
+> export EDDI_VAULT_MASTER_KEY=my-dev-passphrase
+>
+> # Windows (PowerShell)
+> $env:EDDI_VAULT_MASTER_KEY = "my-dev-passphrase"
+> ```
+>
+> Or put it in a `.env` file in the repository root (already in `.gitignore`): open the file in an editor, saved as UTF-8, and add the line `EDDI_VAULT_MASTER_KEY=my-dev-passphrase` on a line of its own. Editing is deliberate. A shell redirect can replace the file, join the new entry onto a last line that has no newline, or, with `>>` in Windows PowerShell 5.1, append UTF-16 to a UTF-8 file.
+>
+> If `.env` already sets `EDDI_VAULT_MASTER_KEY`, leave it alone: secrets already in the vault are encrypted with a key derived from it, and a different value cannot decrypt them.
+>
+> Without this, the vault is disabled and secret management returns HTTP 503. Any passphrase works for local development, where a weak one only logs a warning; a production boot refuses a key shorter than 16 characters or a known placeholder. See [Secrets Vault](docs/secrets-vault.md) for production setup.
+
 ### IDE Setup
 
 **IntelliJ IDEA** (recommended):
@@ -82,29 +110,43 @@ docker run -d --name mongodb -p 27017:27017 mongo:7
 
 ## Building & Testing
 
-```bash
-# Compile only
-./mvnw clean compile
+### Maven Command Reference
 
-# Run unit tests
-./mvnw test
+| Command                                                       | What It Does                                                                |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | **Start dev mode** with live reload (port 7070). The flag is for `jlama` agents — see [Dev Mode](#dev-mode) |
+| `./mvnw compile`                                              | Compile sources only (fast feedback). Also runs the two `validate`-phase style gates, so it **fails** on an unused import (Checkstyle) or an unformatted file (`formatter:validate`) — neither edits your sources; run `./mvnw formatter:format` to fix formatting |
+| `./mvnw clean compile`                                        | Clean build — delete `target/` and recompile from scratch                   |
+| `./mvnw test`                                                 | Run **unit tests** (excludes `*IT.java` integration tests)                  |
+| `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager, Workforce and Chat UIs (`compile` and `test` never build them) |
+| `./mvnw verify`                                               | Compile + unit tests + package. **Integration tests are skipped** — `skipITs` defaults to `true` in `pom.xml` |
+| `./mvnw verify -DskipITs=false`                               | **Full build** — adds the `*IT.java` integration tests (requires Docker). This is what CI runs |
+| `./mvnw validate`                                             | Run the **blocking style gates** — Checkstyle (`UnusedImports`/`RedundantImport` fail the build; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which reports unformatted files without touching them |
+| `./mvnw formatter:format`                                     | **Auto-format** Java sources using the project Eclipse formatter — the fix for a `formatter:validate` failure |
+| `./mvnw package -DskipTests`                                  | Build the JAR without running tests (for `install.sh --local`)              |
+| `./mvnw clean package -DskipTests` then `docker build -f src/main/docker/Dockerfile -t labsai/eddi:local .` | Build the app **+ Docker image** (the same Dockerfile CI builds; it copies `target/quarkus-app`) |
+| `./mvnw package -Plicense-gen -DskipTests`                    | Generate **third-party licenses** (Red Hat certification)                   |
+| `./mvnw quarkus:dev -Dsuspend '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode and **wait for debugger** on port 5005 |
+| `./mvnw quarkus:dev -Ddebug=false '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode **without** the debug agent |
 
-# compile and test never build the UIs; package and verify do (~2 min) unless told not to
-./mvnw package -DskipTests -DskipUi=true
+JaCoCo runs during `./mvnw test`; the coverage report is at `target/site/jacoco/index.html`.
 
-# Full build: compile + unit tests + package
-./mvnw clean verify -DskipITs
+### Useful System Properties
 
-# Integration tests (requires Docker)
-./mvnw verify -DskipITs=false
+| Property                                    | Default                     | Description                                    |
+| ------------------------------------------- | --------------------------- | ---------------------------------------------- |
+| `-Dquarkus.http.port=<port>`                | `7070`                      | Override the HTTP port                         |
+| `-Dmongodb.connectionString=<uri>`          | dev: `mongodb://localhost:27017/eddi`  | MongoDB connection, read by `PersistenceModule`. `quarkus.mongodb.connection-string` is a different key that only the health check reads |
+| `-Dmongodb.database=<name>`                 | `eddi`                      | MongoDB database name                          |
+| `-Dquarkus.profile=<profile>`               | by launch mode              | Active Quarkus profile. The default is `dev` under `quarkus:dev`, `test` while tests run, and `prod` for the packaged application and the container image |
+| `-DskipTests`                               | `false`                     | Skip all tests                                 |
+| `-DskipITs`                                 | `true`                      | Skip integration tests only                    |
+| `-DskipUi` | `false` | Skip the npm build of `ui/manager`, `ui/workforce` and `ui/chat` (the jar then serves no UI) |
 
-# Build Docker image
-./mvnw clean package -DskipTests '-Dquarkus.container-image.build=true'
-```
-
-The Manager (`ui/manager`) and the Chat UI (`ui/chat`) are part of this repository and have their own
-contributor notes in `ui/manager/AGENTS.md` and `ui/chat/AGENTS.md`. Frontend work runs from those
-directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
+The Manager (`ui/manager`), Workforce (`ui/workforce`) and the Chat UI (`ui/chat`) are part of this
+repository and have their own contributor notes in `ui/manager/AGENTS.md`, `ui/workforce/AGENTS.md` and
+`ui/chat/AGENTS.md`. `ui/` is an npm workspaces root with one lockfile: run `npm ci` once in `ui/`, then
+`npm run dev` (or `test`, `build`) in the app's own directory; Maven builds all three into the jar.
 
 ## Code Style
 
@@ -113,7 +155,8 @@ directories with `npm ci` and `npm run dev`; Maven builds them into the jar.
 - **Language**: Java 25 — use modern Java features (records, sealed classes, pattern matching)
 - **Framework**: Quarkus + CDI — prefer `@Inject` over manual instantiation
 - **Line length**: 150 characters max (the Eclipse formatter wraps at 150; Checkstyle `LineLength` is advisory at 150)
-- **Checkstyle**: Run `./mvnw validate` to check style before submitting
+- **Checkstyle**: Run `./mvnw validate` to check style before submitting — an unused or redundant import in `src/main/java` fails the build
+- **Formatting**: `formatter:validate` fails the build on unformatted Java (main and test sources) and never rewrites it; run `./mvnw formatter:format` to fix
 - **No `@author` tags** in new code — Git history tracks authorship
 - **No `System.out.println`** — use the JBoss `Logger`
 
@@ -188,7 +231,7 @@ chore(deps): bump Quarkus to 3.33.0
    ./mvnw clean verify -DskipITs
    ```
 
-   Once per clone, activate the pre-push hook with `git config core.hooksPath .githooks`. Add a changelog fragment as a new file under `docs/changelog.d/` (`YYYY-MM-DD-<slug>.md`, see its README); never edit `docs/changelog.md` by hand.
+   Once per clone, activate the pre-push hook with `git config core.hooksPath .githooks`. Add a changelog fragment as a new file under `docs/changelog.d/` (`YYYY-MM-DD-<slug>.md`, see [its README](docs/changelog.d/README.md)); never edit `docs/changelog.md` by hand.
 
 5. **Push** and open a Pull Request against `main`
 
@@ -209,17 +252,20 @@ Every PR runs through these automated gates:
 
 | Check                 | What It Does                                         | Must Pass?     |
 | --------------------- | ---------------------------------------------------- | -------------- |
-| **Build + Tests**     | `mvnw clean test` plus packaging with Java 25                   | ✅ Yes         |
+| **Build + Tests**     | `mvnw clean test -DskipUi=true` (unit tests) with Java 25; the image is packaged separately in **Build Image** | ✅ Yes         |
+| **Integration Tests** | `mvnw verify -DskipITs=false` (Testcontainers) and the JaCoCo 90% instruction / 80% branch coverage gate — on backend changes | Blocks publishing |
+| **Trivy Filesystem Scan** · **Secret Scanning** | Dependency CVE scan and Gitleaks | Blocks publishing |
 | **CodeQL**            | Security scanning (injection, hardcoded creds, etc.) | ✅ Yes         |
 | **UI Manager Checks** | Manager audit, lint, i18n, typecheck, Vitest with coverage — when `ui/` changes | Blocks publishing |
 | **UI Manager E2E (MSW)** | Manager Playwright tier against mocked API — when `ui/` changes | Blocks publishing |
 | **UI Chat**           | Chat UI typecheck and tests — when `ui/` changes | Blocks publishing |
 | **Backend E2E**       | The Manager's Playwright API and full-stack tiers against the image built from the PR | Blocks publishing |
 | **Auth E2E (Keycloak)** | The same image with OIDC **enforced**, behind Keycloak: which token is accepted, and which role opens which door. The only job where `@RolesAllowed` is not a no-op | Blocks publishing |
+| **Operator Activation E2E** | The same image beside a deterministic model stub: the Platform Operator is activated through the shipped Manager (spec check, `setup-api` with the real prompt, gate read-back, both canaries, one real tool call) | Blocks publishing |
 | **Dependency Review** | Blocks vulnerable or incompatibly-licensed deps      | ✅ Yes         |
 | **CodeRabbit**        | AI code review with line-by-line feedback            | Advisory       |
 | **Checkstyle**        | Import rules (unused/redundant imports) fail the build; length rules are advisory | ✅ Yes (imports) |
-| **JaCoCo**            | Code coverage report                                 | 📊 Report only |
+| **JaCoCo**            | Coverage report on every build; the threshold is enforced only in **Integration Tests** | 📊 Report (gate in ITs) |
 
 ## Security
 

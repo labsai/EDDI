@@ -148,6 +148,9 @@ explanations of a change are useful.
   task summary read — and is noted in `SharedTaskList.reviewerEdits`. The agent's original stays in its signed
   `TASK_RESULT` transcript entry.
 - A per-task `note` is that task's feedback under `onTaskRejection: RETRY` / `FAIL`.
+- When the paused EXECUTE phase has an `onApproved` action, the edited result is what that action sends — verbatim,
+  with no member turn in between — and the action's record and audit entry say `edited: true`. See [Group
+  Approved-Result Actions](group-approved-result-actions.md).
 - `decision.editedAnswer` on a PHASE pause is valid only when the paused phase is a `SYNTHESIS` phase ("phase outputs
   other than a synthesis cannot be edited"). It is appended as an **unsigned** `SYNTHESIS` transcript entry (speaker
   `hitl:<decidedBy>`, display name "Reviewer", `errorReason: "reviewer-edit"`) and becomes the "last synthesis" every

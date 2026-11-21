@@ -2,15 +2,15 @@
 
 > **This file is automatically loaded by AI coding assistants. Follow ALL rules below.**
 >
-> **New here?** Read the [README](README.md) first — it has setup, the quick start, and a feature tour. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
+> **New here?** Read the [README](README.md) first — it has the quick start, a feature overview and the short version of the development setup; [CONTRIBUTING.md](CONTRIBUTING.md) has the long one. This file is the working guide for building *in* the codebase: architecture, code patterns, and conventions.
 >
-> **Working under `ui/`?** This file still applies (branching, pushing, commits, changelog). Also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md) or [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md).
+> **Working under `ui/`?** This file still applies (branching, pushing, commits, changelog). Also read [`ui/manager/AGENTS.md`](ui/manager/AGENTS.md), [`ui/workforce/AGENTS.md`](ui/workforce/AGENTS.md) or [`ui/chat/AGENTS.md`](ui/chat/AGENTS.md), and [`ui/packages/README.md`](ui/packages/README.md) for the shared packages the apps compile as source (`@eddi/core`, `@eddi/ui`, `@eddi/conversation`, `@eddi/app-kit`).
 
 **Contents:** [1. Project Context](#1-project-context) · [2. Workflow Protocol](#2-mandatory-workflow-protocol) · [3. Roadmap](#3-development-roadmap) · [4. Backend Java Guidelines](#4-backend-java-guidelines) · [5. Agent Config Authoring](#5-agent-config-authoring) · [6. Session Protocol](#6-session-protocol)
 
 ## 1. Project Context
 
-**EDDI** (Enhanced Dialog Driven Interface) is a multi-agent orchestration middleware for conversational AI. This repo is the **Java/Quarkus backend** plus the two web UIs under `ui/`.
+**EDDI** (Enhanced Dialog Driven Interface) is a multi-agent orchestration middleware for conversational AI. This repo is the **Java/Quarkus backend** plus the three web UIs under `ui/`.
 
 EDDI is a **config-driven engine**, not a monolithic application. Agent behavior lives in JSON configurations; Java code builds the _components_ and _infrastructure_ (the "engine") that reads and executes those configurations.
 
@@ -20,11 +20,12 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 | --- | --- | --- |
 | **EDDI** (this repo) | Java 25, Quarkus, MongoDB or PostgreSQL | Backend engine, REST API, lifecycle pipeline |
 | **[quarkus-eddi](https://github.com/quarkiverse/quarkus-eddi)** | Java 21, Quarkus Extension | Quarkus SDK — `@Inject EddiClient`, Dev Services, MCP bridge |
-| **Manager** — [`ui/manager/`](ui/manager/) in this repo | React 19, Vite, Tailwind | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, `/workforce` is the group-conversation workspace) |
+| **Manager** — [`ui/manager/`](ui/manager/) in this repo | React 19, Vite, Tailwind | Admin dashboard (served from EDDI at `/manage`; `/` redirects to the `/welcome` chooser, which is part of it) |
+| **Workforce** — [`ui/workforce/`](ui/workforce/) in this repo | React 19, Vite, Tailwind | The end-user app — chats and agent teams, role-aware — served at `/workforce`. Its own app since phase 5 of the frontend unification plan; it shares code with the Manager only through [`@eddi/app-kit`](ui/packages/app-kit/README.md) |
 | **Chat UI** — [`ui/chat/`](ui/chat/) in this repo | React, TypeScript | Standalone chat widget, served at `/chat` |
 | **eddi-website** (`labsai/EDDI-LABS-AI-Website`) | Astro, Tailwind, on Vercel | Marketing site at eddi.technology (eddi.labs.ai redirects there). The documentation is not in it: it is this repo's `docs/`, built by [`docs-site/`](docs-site/README.md) |
 
-> **The Manager and the Chat UI are directories of this repository** (`ui/manager`, `ui/chat`), not separate repos. They were `labsai/EDDI-Manager` and `labsai/EDDI-Chat-UI` until 2026-09-15; both histories were imported with their commits intact (`git log -- ui/manager`). Maven builds both into the jar — see Build & Test Commands.
+> **The UIs are directories of this repository** (`ui/manager`, `ui/workforce`, `ui/chat`), not separate repos. The Manager and the Chat UI were `labsai/EDDI-Manager` and `labsai/EDDI-Chat-UI` until 2026-09-15; both histories were imported with their commits intact (`git log -- ui/manager`). Workforce was split out of the Manager in 2026-11 (`git log --follow` traces its files back). Maven builds all three into the jar — see Build & Test Commands.
 
 > **Versions live in `pom.xml`** (Java, Quarkus, every dependency) — treat it as the single source of truth. This file names the Java baseline for context but deliberately does not restate specific Quarkus/library versions, which drift. See §2 rule 7.
 
@@ -37,17 +38,17 @@ EDDI is a **config-driven engine**, not a monolithic application. Agent behavior
 
 ### Build & Test Commands
 
-**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [README → Development](README.md#️-development); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev`; the flag gives `jlama` agents the Vector API the container image enables — see README).
+**Prerequisites & first run:** you need **JDK 25**, **Docker**, and a **MongoDB** instance. Full setup is in [CONTRIBUTING → Development Setup](CONTRIBUTING.md#development-setup) (the short version is [README → Development](README.md#development)); the quickest path is `docker run -d -p 27017:27017 mongo:7`, then `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` (app on port **7070**, Dev UI at `/q/dev-ui`; the flag gives `jlama` agents the Vector API the container image enables — see README).
 
 **Toolchain:** commands use the bundled Maven wrapper — no local Maven needed. **On Windows, substitute `.\mvnw.cmd` for `./mvnw` below.** If you use [mise](https://mise.jdx.dev), `mise.toml` pins the exact JDK 25 + Maven and mirrors these as tasks (`mise run dev`, `mise run test` — which runs `mvn verify -DskipUi=true`, a superset of `./mvnw test` — …) that auto-install the toolchain — the lowest-friction path; treat `mise.toml` as canonical for tool *versions*.
 
 **Once per clone:** run `git config core.hooksPath .githooks` to activate the pre-push safety hook (§2 rule 4) — a fresh clone does not enable it automatically.
 
-The [README "Maven Command Reference"](README.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
+The [CONTRIBUTING "Maven Command Reference"](CONTRIBUTING.md#maven-command-reference) is the canonical full command list (verify against it if a command changes); the essentials:
 
 | Command | What it does |
 | --- | --- |
-| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
+| `./mvnw compile quarkus:dev '-Djvm.args=--add-modules=jdk.incubator.vector'` | Start dev mode with live reload — app on port **7070**, Dev UI at `/q/dev-ui`. The flag is only needed for `jlama` agents, and `mise run dev` passes it |
 | `./mvnw package -DskipTests -DskipUi=true` | Build the jar **without** the Manager and Chat UIs (the jar then serves no UI). `compile` and `test` never build the UIs anyway — see the note below the table |
 | `./mvnw compile` | Compile only (fast feedback) — run before every commit per §2 rule 6. It is also where the style gates fire: Checkstyle's import rules and `formatter:validate` are both bound to the `validate` phase, which `compile` runs through, so an unused import or an unformatted file **fails the build here** rather than being silently rewritten. Fix with `./mvnw formatter:format` (formatting) or by deleting the import (Checkstyle) |
 | `./mvnw test` | Unit tests (excludes `*IT.java`); JaCoCo report at `target/site/jacoco/index.html` |
@@ -56,7 +57,7 @@ The [README "Maven Command Reference"](README.md#maven-command-reference) is the
 | `./mvnw verify -DskipITs=false` | Full build **including** integration tests — requires Docker. The command CI runs |
 | `./mvnw validate` · `./mvnw formatter:format` | The two blocking style gates — Checkstyle (`UnusedImports`/`RedundantImport` are `severity="error"`; `FileLength`/`LineLength` stay advisory) and `formatter:validate`, which **reports** drift and never edits your files · auto-format with the project Eclipse formatter, i.e. the fix for a `formatter:validate` failure |
 
-> **The UIs build with Maven, at packaging time.** `ui/manager` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` and `npm run build` for both, about two minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` only if an earlier `./mvnw package` left the UI in `target/classes`; for frontend work run `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070) or `ui/chat` (port 5174). Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
+> **The UIs build with Maven, at packaging time.** `ui/manager`, `ui/workforce` and `ui/chat` are built in `prepare-package` and copied into the jar just before it is assembled (`frontend-maven-plugin` + `maven-resources-plugin` in `pom.xml`). So `compile`, `test` and `quarkus:dev` never run npm, while `package`, `verify` and `install` run `npm ci` once at `ui/` and `npm run build` for all three, a few minutes, unless you pass `-DskipUi=true`. No local Node is needed: Maven downloads Node 26 into `ui/node/` (gitignored). Dev mode serves `/manage` and `/workforce` only if an earlier `./mvnw package` left the UIs in `target/classes`; for frontend work run `npm ci` once in `ui/`, then `npm run dev` in `ui/manager` (port 3000, proxies the API to :7070), `ui/workforce` (port 3002) or `ui/chat` (port 5174). The Manager and Workforce are two apps with two routers: a link from one to the other is a page load, so under `npm run dev` it reaches the other app only when that app's dev server answers on the same origin — run each on its own port and open it directly. `ui/` is an **npm workspaces root** (`ui/package.json`): the three apps and the shared packages under `ui/packages/` install from one `ui/package-lock.json` into `ui/node_modules`, while each app keeps its own scripts. Generated output is never committed any more — `src/main/resources/META-INF/resources` holds only `index.html`, `robots.txt` and `scripts/js/landing-redirect.js`. **Once, after pulling the migration into an older checkout, run `./mvnw clean`**: its fileset deletes the formerly committed bundles still on disk, which `quarkus:dev` would otherwise serve from the source tree.
 
 > **Targeted runs skip the repo-wide guards.** `-Dtest=…` runs only what you name, so the tests that grade the whole repository — `ImportStyleTest`, `BuildQualityGatesTest`, the `Documentation*Test`s, `ChangelogFragmentTest` — do not run. Before pushing, run the plain `./mvnw test` or add them to the list; `.claude/skills/ship-pr/SKILL.md` groups them by what each one reads. And redirect Maven output to a file rather than piping it through `grep`/`head`: the pipe returns the filter's exit code, not Maven's, and can cut off the `BUILD FAILURE` lines.
 
@@ -162,7 +163,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Persistent user memory, Dream consolidation, visibility scoping | [`docs/user-memory.md`](docs/user-memory.md) |
 | LLM providers (19, incl. 8 named OpenAI-compatible), multi-model cascading, prompt snippets, template preview | [`docs/langchain.md`](docs/langchain.md), [`docs/model-cascade.md`](docs/model-cascade.md), [`docs/prompt-snippets-guide.md`](docs/prompt-snippets-guide.md) |
 | RAG (config-driven retrieval, pgvector, httpCall RAG) | [`docs/rag.md`](docs/rag.md) |
-| MCP server (96 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
+| MCP server (120 tools) and MCP client; A2A peer protocol | [`docs/mcp-server.md`](docs/mcp-server.md), [`docs/mcp-client.md`](docs/mcp-client.md), [`docs/a2a-protocol.md`](docs/a2a-protocol.md) |
 | Group conversations — 7 preset discussion styles plus `CUSTOM`, votes, negotiation, facilitator, humans as members, shared artifacts, bid-based tasks, standing teams, dynamic agents | [`docs/group-conversations.md`](docs/group-conversations.md) |
 | Human-in-the-loop — turn-level and per-tool-call approval gates | [`docs/hitl.md`](docs/hitl.md) |
 | OpenAI-compatible `/v1` API (Open WebUI, OpenAI SDKs) | [`docs/open-webui-integration.md`](docs/open-webui-integration.md) |
@@ -172,7 +173,7 @@ Most "new" capabilities have a foundation already. Search for it, and read its p
 | Agent sync (export/import, instance-to-instance), attachments, capability registry | [`docs/agent-sync-guide.md`](docs/agent-sync-guide.md), [`docs/attachments-guide.md`](docs/attachments-guide.md), [`docs/capability-match-guide.md`](docs/capability-match-guide.md) |
 | Tracing and metrics — per-task OpenTelemetry spans, Micrometer | [`docs/monitoring/monitoring-guide.md`](docs/monitoring/monitoring-guide.md), [`docs/metrics.md`](docs/metrics.md) |
 
-Tests: more than 20,000 JUnit test methods (unit and integration — `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts them; the Manager and Chat UI suites come on top), with >90% instruction / >80% branch coverage enforced (OpenSSF Gold).
+Tests: more than 50,000 run in CI: about 38,400 JUnit (unit and integration), 11,300 Vitest across the Manager, Workforce, Chat UI and the shared packages, and 500 Playwright end-to-end. `grep -rE '^\s*@(Test|ParameterizedTest)\b' src/test/java | wc -l` counts about 29,800 JUnit methods, fewer than the 38,400 that run because a parameterized test runs once per case. The backend enforces >90% instruction / >80% branch coverage (OpenSSF Gold).
 
 ### In Progress / Upcoming
 
@@ -295,7 +296,8 @@ LlmTask.execute(memory)
   └─→ AgentOrchestrator.buildToolSetup(task, memory)
       └─→ every ToolSourceProvider.contribute(ToolAssemblyContext)
           (the modules/llm/impl/*ToolsProvider classes — builtin, http, mcp, a2a, dynamic,
-           contextual, artifact, attachment, group-task; the context carries the memory)
+           contextual, artifact, attachment, group-task, agent-ops, team-handoff; the context
+           carries the memory)
   └─→ LLM invokes tool
   └─→ ToolExecutionService.executeToolWrapped()
       └─→ Rate Limiter → Cache Check → Execute → Cost Tracker → Result
@@ -330,7 +332,7 @@ Several infrastructure components are already built and should be reused, not du
 | **`ToolCostTracker`** (via ToolExecutionService) | Dollar-based LLM cost tracking per conversation | Cost ceilings for background LLM jobs (use `maxCostPerRun` instead of `maxLlmCallsPerRun` — dollar amounts are more meaningful than call counts because different operations cost vastly different amounts). |
 | **`SecretResolver`** | Vault-based secret resolution for API keys and credentials | Any feature that needs secrets (LLM providers, external APIs). |
 | **Micrometer `MeterRegistry`** | Metrics collection (counters, timers, gauges) exposed at `/q/metrics` | Always add metrics to new features for observability. |
-| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin stripping of credential and `${caller:...}`-derived headers, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
+| **`OutboundHttp`** (`engine/httpclient/outbound`) | The outbound HTTP facade — SSRF policy per request, hop-by-hop redirects with per-caller method rules, cross-origin redirect hops keep only a fixed allow-list of non-credential headers (`CROSS_ORIGIN_SAFE_HEADERS`) and strip every other header, one whole-exchange deadline, in-flight body caps (`BodyMode`), proxy and named TLS config | ALL outbound HTTP from LLM tools and integrations. Never create `HttpClient.newBuilder()` in EDDI code. `httpcalls.json` and the langchain4j model builders still have their own clients, pending consolidation onto it. |
 | **`UrlValidationUtils`** | Blocks private IPs, loopback, link-local, cloud metadata, non-HTTP schemes | Always call before fetching user-controlled URLs. |
 | **`AuthStartupGuard`** | Fails startup if OIDC disabled in prod without explicit opt-out | Automatic — operators only need `QUARKUS_OIDC_TENANT_ENABLED=true`. |
 | **`VaultSaltManager`** | Per-deployment PBKDF2 salt for KEK derivation | Managed by `VaultSecretProvider` — no direct usage needed. |
@@ -541,7 +543,7 @@ When designing any new feature, always consider these before finalizing the desi
 | `src/main/resources/application.properties` | Quarkus config (CORS, health, OpenAPI, datastore) |
 | `.github/workflows/ci.yml` | CI/CD pipeline (build, test, Docker push, smoke test) |
 | `docs/` | Markdown documentation. `docs/SUMMARY.md` decides what is published; [`docs-site/`](docs-site/README.md) builds it (Astro + Starlight) for docs.eddi.technology, which replaces GitBook at docs.labs.ai — that domain then redirects permanently |
-| `ui/manager/`, `ui/chat/` | The Manager and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Chat`, `Backend E2E` and `Auth E2E (Keycloak)` |
+| `ui/manager/`, `ui/workforce/`, `ui/chat/` | The Manager, Workforce and Chat UI sources (React, Vite, TypeScript). Each has its own `AGENTS.md`; CI runs them in `UI Manager Checks`, `UI Manager E2E (MSW)`, `UI Workforce`, `UI Chat`, `Backend E2E`, `Auth E2E (Keycloak)` and `Operator Activation E2E` |
 | `docker-compose.yml` | EDDI + MongoDB local setup |
 | `mise.toml` | Optional [mise](https://mise.jdx.dev) toolchain (pinned JDK 25 + Maven) + task shortcuts |
 | `docs/agent-configs/` | Worked agent config sources — reference for AI; partially swept by two unit tests (scope in [`docs/agent-config-authoring.md`](docs/agent-config-authoring.md#reference-implementation)) |

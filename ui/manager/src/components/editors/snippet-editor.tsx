@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { isImeComposing } from "@/lib/ime";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
 import { useTranslation } from "react-i18next";
 import {
   Plus,
@@ -9,8 +9,8 @@ import {
   FileText,
   Braces,
 } from "lucide-react";
-import { ContentEditor } from "./content-editor";
-import { EditorSection } from "./editor-section";
+import { ContentEditor } from "@eddi/app-kit/components/editors/content-editor";
+import { EditorSection } from "@eddi/app-kit/components/editors/editor-section";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 

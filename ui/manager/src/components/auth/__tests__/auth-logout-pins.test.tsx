@@ -1,8 +1,8 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { AuthProvider } from "../auth-provider";
-import { useAuth } from "@/hooks/use-auth";
+import { AuthProvider } from "@eddi/app-kit/components/auth/auth-provider";
+import { useAuth } from "@eddi/app-kit/hooks/use-auth";
 
 const kc = vi.hoisted(() => ({
   init: vi.fn(),

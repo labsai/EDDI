@@ -94,6 +94,12 @@ public class AgentCascadeService {
         public enum Kind {
             BAD_REQUEST, NOT_FOUND, CONFLICT,
             /**
+             * A store the cascade writes through could not answer (503) — for example the
+             * secrets vault, which the agent save asks about a signing agent's key.
+             * Retrying later may work.
+             */
+            UNAVAILABLE,
+            /**
              * Something failed after the apply phase began; the message says what was and
              * was not written.
              */
@@ -324,20 +330,70 @@ public class AgentCascadeService {
     /**
      * A failure in the apply phase. The agent was NOT changed, so the caller can
      * retry from the same agent version; any workflow versions written first are
-     * harmless orphans. A 409 from a store (a concurrent edit that slipped in after
-     * the version pre-check) stays a conflict.
+     * harmless orphans. A store's refusal keeps its status: a 409 (a concurrent
+     * edit that slipped in after the version pre-check) stays a conflict, a 400 a
+     * bad request and a 503 unavailable — the agent save refuses a signing agent
+     * whose key is unusable with a 400, and answers 503 when the secrets vault
+     * cannot be asked — so the caller is told why rather than handed a 500.
      */
     private static CascadeException partialFailure(String agentId, int agentVersion, List<String> written, String doing, Throwable cause) {
-        boolean conflict = cause instanceof WebApplicationException web && web.getResponse() != null
-                && web.getResponse().getStatus() == Response.Status.CONFLICT.getStatusCode();
-        String why = cause == null ? "" : ": " + (cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage());
+        int status = cause instanceof WebApplicationException web && web.getResponse() != null ? web.getResponse().getStatus() : 0;
+        CascadeException.Kind kind = switch (status) {
+            case 400 -> CascadeException.Kind.BAD_REQUEST;
+            case 409 -> CascadeException.Kind.CONFLICT;
+            case 503 -> CascadeException.Kind.UNAVAILABLE;
+            default -> CascadeException.Kind.FAILED;
+        };
+        String why = cause == null ? "" : ": " + describe(cause);
         String message = "Cascade stopped while " + doing + why + ". Agent " + agentId + " was NOT changed (still at version " + agentVersion
                 + ")." + writtenNote(written) + " Retry the cascade from the agent's current version; unreferenced workflow versions are harmless.";
-        CascadeException result = new CascadeException(conflict ? CascadeException.Kind.CONFLICT : CascadeException.Kind.FAILED, message);
+        CascadeException result = new CascadeException(kind, message);
         if (cause != null) {
             result.initCause(cause);
         }
         return result;
+    }
+
+    /**
+     * The cause's message, plus the body of the response it carries when that says
+     * more. The stores are called through the loopback REST client, whose exception
+     * message is the bare status line; the store's reason is in the body.
+     */
+    private static String describe(Throwable cause) {
+        String message = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
+        if (cause instanceof WebApplicationException web && web.getResponse() != null) {
+            String body = responseBody(web.getResponse());
+            if (body != null && !message.contains(body)) {
+                message += " (" + body + ")";
+            }
+        }
+        return message;
+    }
+
+    /**
+     * At most this many characters of a store's response body go into a message.
+     */
+    private static final int MAX_BODY_IN_MESSAGE = 500;
+
+    private static String responseBody(Response response) {
+        try {
+            if (!response.hasEntity()) {
+                return null;
+            }
+            Object entity;
+            try {
+                entity = response.readEntity(String.class);
+            } catch (IllegalStateException notAnInboundResponse) {
+                entity = response.getEntity();
+            }
+            String text = entity == null ? "" : entity.toString().strip();
+            if (text.isEmpty()) {
+                return null;
+            }
+            return text.length() > MAX_BODY_IN_MESSAGE ? text.substring(0, MAX_BODY_IN_MESSAGE) + "…" : text;
+        } catch (RuntimeException unreadable) {
+            return null;
+        }
     }
 
     /**

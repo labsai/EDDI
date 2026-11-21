@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.agenttests.IRestAgentTestRuns;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
+import ai.labs.eddi.configs.groups.IRestGroupLessons;
 import ai.labs.eddi.configs.groups.IRestGroupTemplates;
 import ai.labs.eddi.configs.groups.IRestGroupWorkspace;
 import ai.labs.eddi.configs.groups.IRestTeamHandoffs;
@@ -30,6 +31,9 @@ import ai.labs.eddi.engine.hitl.oversight.rest.IRestAuditSamples;
 import ai.labs.eddi.engine.hitl.oversight.rest.IRestAutonomy;
 import ai.labs.eddi.engine.pricing.rest.IRestModelPriceCatalog;
 import ai.labs.eddi.engine.schedule.IRestScheduleStore;
+import ai.labs.eddi.engine.spendcontrol.rest.IRestSpendControlChanges;
+import ai.labs.eddi.engine.tenancy.rest.IRestTenantQuota;
+import ai.labs.eddi.secrets.rest.IRestSecretStore;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkus.security.ForbiddenException;
@@ -85,7 +89,8 @@ class McpRoleTierParityTest {
     private static final Class<?>[] TOOL_CLASSES = {McpAdminTools.class, McpConversationTools.class, McpSetupTools.class,
             McpGroupTools.class, McpHitlTools.class, McpMemoryTools.class, McpGdprTools.class, McpDocTools.class,
             McpAgentTestTools.class, McpRatingTools.class, McpAlertTools.class,
-            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class};
+            McpPricingTools.class, McpTeamHandoffTools.class, McpOversightTools.class, McpTeamBudgetTools.class,
+            McpSpendControlTools.class, McpTeamCadenceTools.class, McpVaultTools.class};
 
     /**
      * The HITL tools: the REST HITL tier first (L5 — they used to carry no role
@@ -103,7 +108,13 @@ class McpRoleTierParityTest {
             "read_agent_logs",
             // a team's cap is a spending lever (IRestGroupBudget#setCurrentMonthCap,
             // IRestTeamBudgets#transfer)
-            "adjust_team_budget", "transfer_team_budget");
+            "adjust_team_budget", "transfer_team_budget",
+            // spending controls: the quota resource and the catalog write are
+            // admin-only; a loosening write only files a proposal an admin approves
+            "read_tenant_quota", "update_model_prices", "update_tenant_quota", "list_spend_control_changes",
+            "withdraw_spend_control_change",
+            // vault key names (IRestSecretStore is admin-only)
+            "list_vault_keys");
 
     private static final Set<String> CONVERSE_TOOLS = Set.of("create_conversation", "talk_to_agent", "chat_with_agent", "chat_managed",
             "read_conversation", "read_conversation_log", "list_conversations", "discover_agents",
@@ -232,7 +243,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(107, measured.size());
+        assertEquals(119, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -321,6 +332,10 @@ class McpRoleTierParityTest {
         mirrors.put(IRestConversationRatingAdmin.class, McpRoles.AUTHOR); // *_conversation_ratings, review_conversation_rating
         mirrors.put(IRestAlertEvents.class, McpRoles.AUTHOR); // list_alert_events, acknowledge_alert_event
         mirrors.put(IRestTeamHandoffs.class, McpRoles.AUTHOR); // list/accept/decline_team_handoff
+        mirrors.put(IRestGroupLessons.class, McpRoles.AUTHOR); // *_lesson_consolidation
+        mirrors.put(IRestTenantQuota.class, McpRoles.ADMIN_ONLY); // read_tenant_quota, update_tenant_quota
+        mirrors.put(IRestSpendControlChanges.class, McpRoles.ADMIN_ONLY); // list/withdraw_spend_control_change
+        mirrors.put(IRestSecretStore.class, McpRoles.ADMIN_ONLY); // list_vault_keys
         mirrors.put(IRestApprovalAnalytics.class, McpRoles.OVERSIGHT); // summarize_approvals
         mirrors.put(IRestAutonomy.class, McpRoles.OVERSIGHT); // list_autonomy_recommendations, get_autonomy_state
         mirrors.put(IRestAuditSamples.class, McpRoles.OVERSIGHT); // count_pending_audit_samples
@@ -364,7 +379,8 @@ class McpRoleTierParityTest {
                 new MethodTier(IRestGroupBudget.class, "readHistory", McpRoles.BUDGET_READ),
                 new MethodTier(IRestTeamBudgets.class, "listBudgets", McpRoles.BUDGET_READ), // list_team_budgets
                 new MethodTier(IRestGroupBudget.class, "setCurrentMonthCap", McpRoles.ADMIN_ONLY), // adjust_team_budget
-                new MethodTier(IRestTeamBudgets.class, "transfer", McpRoles.ADMIN_ONLY))) { // transfer_team_budget
+                new MethodTier(IRestTeamBudgets.class, "transfer", McpRoles.ADMIN_ONLY), // transfer_team_budget
+                new MethodTier(IRestModelPriceCatalog.class, "replaceCatalog", McpRoles.ADMIN_ONLY))) { // update_model_prices
             Method rest = Arrays.stream(mt.rest().getMethods()).filter(x -> x.getName().equals(mt.method())).findFirst().orElseThrow();
             RolesAllowed annotation = rest.getAnnotation(RolesAllowed.class);
             assertTrue(annotation != null, mt.method() + " carries no @RolesAllowed of its own");

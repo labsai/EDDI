@@ -1,0 +1,16 @@
+{
+  // @eddi/core is compiled as part of each app that imports it (it is consumed
+  // as source), so it must satisfy the strictest of them: the Manager's
+  // noUncheckedIndexedAccess and its ES2020 target. `lib` carries DOM only for
+  // the types of fetch, Response, Headers, FormData and TextDecoder — the lint
+  // config forbids the DOM globals themselves (eslint.config.js).
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "lib": ["ES2020", "ES2022.Error", "DOM", "DOM.Iterable"],
+    "noUncheckedIndexedAccess": true,
+    "noEmit": true,
+    "types": ["node"]
+  },
+  "include": ["src", "vitest.config.ts"]
+}

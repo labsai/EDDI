@@ -9,8 +9,10 @@ AGENTS.md is the authority; this is the working summary for building a screen.
 
 ## Routing
 
-React Router v7, declarative mode (no data router). Routes are declared in `src/app.tsx`;
-pages render through `AppLayout`'s `<Outlet />`. Resource detail routes carry the version as
+React Router v7 under a data router (`createAppRouter()` in `src/app-router.tsx`, needed for
+`useBlocker`): one catch-all route renders `<App />`, which declares the real table with
+`<Routes>` in `src/app.tsx`. Pages render through `AppLayout`'s `<SuspendedOutlet />`; add a
+page with `lazyPage()` and its label in `src/lib/route-registry.ts` (AGENTS.md §3, 4b and 5). Resource detail routes carry the version as
 a query param: `/manage/channels/:id?version=2`. `src/__tests__/route-integrity.test.ts`
 asserts every nav target resolves — add the route and the sidebar entry together.
 
@@ -38,7 +40,7 @@ justified for SSE, binary/blob and `text/plain` bodies, and **must** spread
 
 ## UI state
 
-Zustand for chat/debug stores; `useState`/`useCallback` everywhere else. No Redux.
+Zustand for cross-component UI stores (chat, debug events, drawers, command palette, onboarding); `useState`/`useCallback` everywhere else. No Redux.
 
 ## i18n — blocking requirement
 

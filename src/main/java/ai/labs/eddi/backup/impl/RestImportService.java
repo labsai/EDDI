@@ -153,6 +153,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * refused the document. Absent when every one landed.
      */
     static final String HEADER_CONNECTIONS_SKIPPED = "X-Connections-Skipped";
+    /**
+     * Why the imported agent was written with {@code signInterAgentMessages} off
+     * although the archive had it on: the agent it was written to cannot sign — a
+     * new agent has no key yet, and a merged one keeps its own identity, whose
+     * newest key is not usable. Absent when the flag was written as archived.
+     */
+    static final String HEADER_SIGNING_TURNED_OFF = "X-Agent-Signing-Turned-Off";
 
     private final Path tmpPath = Paths.get(FileUtilities.buildPath(System.getProperty("user.dir"), "tmp", "import"));
     private final IZipArchive zipArchive;
@@ -550,25 +557,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * Lists the archive's scheduled triggers.
-     * <p>
-     * A schedule id belongs to the store that issued it, so it cannot be matched
-     * on. What a merge does match on is the <b>name</b>, against the schedules of
-     * the agent it writes into ({@link #existingScheduleIdsByName}), and it
-     * overwrites what it finds — so a row promising CREATE told the operator a
-     * nightly job would be added while the import was about to replace theirs. Rows
-     * are therefore UPDATE where that same name lookup finds a target, with the
-     * target's id, and CREATE where it does not.
-     * <p>
-     * Matches are consumed exactly as the import consumes them, so a second
-     * archived schedule of the same name is previewed as the CREATE it will be
-     * rather than as a second UPDATE onto the one target.
-     *
-     * @param targetAgentId
-     *            the agent a merge would write into, or null when nothing on this
-     *            instance matches the archived agent — then every schedule is new
-     */
-    /**
      * The archive's schedule files, in a stable order.
      * <p>
      * {@link Files#newDirectoryStream} yields entries in whatever order the
@@ -593,6 +581,25 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return files;
     }
 
+    /**
+     * Lists the archive's scheduled triggers.
+     * <p>
+     * A schedule id belongs to the store that issued it, so it cannot be matched
+     * on. What a merge does match on is the <b>name</b>, against the schedules of
+     * the agent it writes into ({@link #existingScheduleIdsByName}), and it
+     * overwrites what it finds — so a row promising CREATE told the operator a
+     * nightly job would be added while the import was about to replace theirs. Rows
+     * are therefore UPDATE where that same name lookup finds a target, with the
+     * target's id, and CREATE where it does not.
+     * <p>
+     * Matches are consumed exactly as the import consumes them, so a second
+     * archived schedule of the same name is previewed as the CREATE it will be
+     * rather than as a second UPDATE onto the one target.
+     *
+     * @param targetAgentId
+     *            the agent a merge would write into, or null when nothing on this
+     *            instance matches the archived agent — then every schedule is new
+     */
     private void addScheduleDiffs(List<ResourceDiff> diffs, Path targetDirPath, String targetAgentId) {
         Path schedulesDir = findArchiveDir(targetDirPath, SCHEDULES_DIR);
         if (schedulesDir == null) {
@@ -957,6 +964,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
                 // answer rather than from the server log.
                 created.header(HEADER_CONNECTIONS_SKIPPED, connectionsNotImported);
             }
+            if (transaction.signingTurnedOff != null) {
+                // And so is a security setting the import could not carry over.
+                created.header(HEADER_SIGNING_TURNED_OFF, transaction.signingTurnedOff.replaceAll("[\\r\\n]+", " "));
+            }
             return created.build();
         }
         // Nothing was imported. Answering 200 with an empty resourceUri is how a
@@ -964,11 +975,7 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         throw noAgentFileFound();
     }
 
-    /**
-     * The compatibility generation of the agent version at {@code agentUri}, or
-     * null when it cannot be read — reporting it is best effort and never fails the
-     * import.
-     */
+    /** Whether both URIs name the same agent, whatever their versions. */
     private static boolean sameAgent(URI a, URI b) {
         if (a == null || b == null) {
             return false;
@@ -978,6 +985,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return left != null && right != null && left.getId() != null && left.getId().equals(right.getId());
     }
 
+    /**
+     * The compatibility generation of the agent version at {@code agentUri}, or
+     * null when it cannot be read — reporting it is best effort and never fails the
+     * import.
+     */
     private Integer generationOf(URI agentUri) {
         try {
             IResourceId id = RestUtilities.extractResourceId(agentUri);
@@ -1426,6 +1438,18 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             IResourceId localResId = RestUtilities.extractResourceId(existingUri);
             if (localResId != null) {
                 IRestAgentStore restAgentStore = getRestResourceStore(IRestAgentStore.class);
+                // The local agent keeps its own identity (updateAgent never takes one from
+                // the body), so the archive's signing flag is only carried over when THAT
+                // identity can sign. Otherwise the save would be refused and the whole
+                // import rolled back over a setting this instance cannot honour.
+                var security = agentConfiguration.getSecurity();
+                if (security != null && security.isSignInterAgentMessages()) {
+                    String problem = restAgentStore.signingKeyProblem(localResId.getId());
+                    if (problem != null) {
+                        security.setSignInterAgentMessages(false);
+                        turnedSigningOff(transaction, problem);
+                    }
+                }
                 // Breaking unless the operator declared the import compatible: an imported
                 // configuration comes from elsewhere, and nobody has judged it against the
                 // conversations running here until they say so.
@@ -1731,12 +1755,33 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return (IResourceStore<T>) CDI.current().select(storeClass).get();
     }
 
+    /**
+     * Records that the agent is written with {@code signInterAgentMessages} off
+     * although the archive had it on, and why — for the response header and the
+     * log.
+     */
+    private static void turnedSigningOff(ImportTransaction transaction, String why) {
+        transaction.signingTurnedOff = "signInterAgentMessages was turned off: " + why;
+        LOGGER.warnf("Import: %s", LogSanitizer.sanitize(transaction.signingTurnedOff));
+    }
+
     private URI createNewAgent(AgentConfiguration agentConfiguration, ImportTransaction transaction) {
         // dynamicOrigin names a conversation on the instance the ZIP came from; the
         // imported agent gets a fresh id and was provisioned by an import, not by
         // create_sub_agent here. (A merge that updates an existing agent goes
         // through RestAgentStore.updateAgent, which keeps the local marker.)
         agentConfiguration.setDynamicOrigin(null);
+        // Nor does it keep the archive's identity, which is bound to the agent it was
+        // exported from: the private keys are vault entries under THAT agent's id, so
+        // the new agent could never sign with them, and every later save of it would
+        // be refused for signing with a key it does not hold. It signs once an admin
+        // generates it a key of its own and turns signing back on — as a duplicate.
+        agentConfiguration.setIdentity(null);
+        if (agentConfiguration.getSecurity() != null && agentConfiguration.getSecurity().isSignInterAgentMessages()) {
+            agentConfiguration.getSecurity().setSignInterAgentMessages(false);
+            turnedSigningOff(transaction, "the imported agent is new and has no signing key yet. Generate one with POST "
+                    + "/agentstore/agents/{id}/signing-keys (eddi-admin), then turn signInterAgentMessages on.");
+        }
         URI createdAgentUri = createResourceDirect(IAgentStore.class, agentConfiguration, IRestAgentStore.resourceURI, transaction);
         registerCapabilities(createdAgentUri, agentConfiguration);
         return createdAgentUri;
@@ -2989,6 +3034,13 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         }
 
         /**
+         * Why this import wrote the agent with {@code signInterAgentMessages} off
+         * although the archive had it on, or {@code null} when it did not. Reported in
+         * {@link #HEADER_SIGNING_TURNED_OFF}.
+         */
+        private String signingTurnedOff;
+
+        /**
          * Undo actions for things this import created that are not
          * {@code IResourceStore} resources — a schedule, for instance, lives in
          * {@link IScheduleStore} and has no version or descriptor.
@@ -3378,19 +3430,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
-     * Loads every config a workflow references from the unzipped archive.
-     * <p>
-     * A config that cannot be read fails the import with a 400 naming the file.
-     * Returning null instead put that null straight into the list handed to
-     * {@code store.create(...)}, so a selectively-exported ZIP — whose workflow
-     * still carries the URIs of the files the export left out — died with a bare
-     * NullPointerException surfaced as a 500 whose message was literally "null".
-     *
-     * @param isMerge
-     *            whether this is a merge import, where a resource the archive does
-     *            not carry is answered from the local deployment instead
-     */
-    /**
      * The LLM references a workflow still spells with the 5.x authority, in their
      * normalized (v6) form. Read from the raw text, before normalization erases the
      * difference.
@@ -3405,6 +3444,19 @@ public class RestImportService extends AbstractBackupService implements IRestImp
         return found;
     }
 
+    /**
+     * Loads every config a workflow references from the unzipped archive.
+     * <p>
+     * A config that cannot be read fails the import with a 400 naming the file.
+     * Returning null instead put that null straight into the list handed to
+     * {@code store.create(...)}, so a selectively-exported ZIP — whose workflow
+     * still carries the URIs of the files the export left out — died with a bare
+     * NullPointerException surfaced as a 500 whose message was literally "null".
+     *
+     * @param isMerge
+     *            whether this is a merge import, where a resource the archive does
+     *            not carry is answered from the local deployment instead
+     */
     private <T> List<T> readResources(List<URI> uris, Path workflowPath, String extension, Class<T> clazz,
                                       boolean isMerge) {
         return readResources(uris, workflowPath, extension, clazz, isMerge, Set.of());
@@ -3689,8 +3741,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     // ==================== Live Sync Endpoints ====================
 
     /**
-     * In development mode, allow HTTP for remote sync (easier local testing). In
-     * production, enforce HTTPS to prevent credential leakage.
+     * In development and test mode, allow HTTP for remote sync (easier local
+     * testing). Elsewhere HTTPS is required unless the deployment's
+     * {@link SyncSourcePolicy} relaxes it.
      * <p>
      * Read from the launch mode, not from the {@code quarkus.profile} <em>system
      * property</em>: that property is only set when someone passed
@@ -3893,7 +3946,10 @@ public class RestImportService extends AbstractBackupService implements IRestImp
             // A create writes every document in the archive, so there is nothing to
             // report as updated or skipped — and no per-resource failures either: the
             // importer rolls the whole archive back rather than leaving part of it.
-            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of());
+            // What the import wrote differently from the source is still worth saying.
+            String signingTurnedOff = imported.getHeaderString(HEADER_SIGNING_TURNED_OFF);
+            UpgradeResult result = new UpgradeResult(createdAgentUri, true, 0, countImportedDocuments(archive), 0, List.of(), null, null,
+                    signingTurnedOff == null ? List.of() : List.of(signingTurnedOff));
             metrics.upgradeCompleted(result.updated(), result.created(), result.skipped(), 0);
             return result;
         } catch (WebApplicationException e) {
@@ -3920,8 +3976,9 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * <p>
      * A {@link RemoteApiResourceSource.RemoteReadException} anywhere in the cause
      * chain means the source could not be read: {@code 502 Bad Gateway}, because
-     * this deployment is fine and the one it was told to read is not. Anything else
-     * is this deployment's own failure and stays a {@code 500} — with a body.
+     * this deployment is fine and the one it was told to read is not. Otherwise an
+     * access refusal anywhere in the chain is a {@code 403}, and anything else is
+     * this deployment's own failure and stays a {@code 500} — with a body.
      */
     private WebApplicationException syncFailure(String what, Exception cause) {
         String reason = cause.getMessage() == null || cause.getMessage().isBlank()
@@ -4086,6 +4143,11 @@ public class RestImportService extends AbstractBackupService implements IRestImp
     }
 
     /**
+     * Row types an import writes on their own, without creating an agent version.
+     */
+    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
+
+    /**
      * {@code preview} with what writing the next version of its target would do to
      * the conversations running on it, whether the operator declares it compatible
      * or not — the preview is read before that choice, so it carries both answers.
@@ -4096,8 +4158,6 @@ public class RestImportService extends AbstractBackupService implements IRestImp
      * SKIP (nothing would be written, so no version is created), and when the
      * caller may not see the counts.
      */
-    private static final Set<String> STANDALONE_TYPES = Set.of(SNIPPET_EXT, SCHEDULE_EXT, CONNECTION_EXT);
-
     private ImportPreview withConversationImpact(ImportPreview preview) {
         if (promotionImpactReader == null || preview == null || preview.targetAgentId() == null) {
             return preview;

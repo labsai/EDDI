@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { findGateCarryingCalls, uriTargetsLlmStore } from "../gate-guard";
-import type { PendingToolCallView, ResolvedRequestPreview } from "@/lib/api/hitl";
+import type { PendingToolCallView, ResolvedRequestPreview } from "@eddi/app-kit/lib/api/hitl";
 
 function call(
   callId: string,

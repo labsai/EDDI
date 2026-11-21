@@ -192,9 +192,12 @@ public interface IRestAgentEngine {
     @Consumes(MediaType.APPLICATION_JSON)
     @RolesAllowed("eddi-admin")
     @Operation(summary = "Reset conversation state",
-               description = "Resets a stuck conversation (ERROR or EXECUTION_INTERRUPTED) to READY. Admin-only.")
-    @APIResponse(responseCode = "200", description = "State reset successful.")
-    @APIResponse(responseCode = "409", description = "Cannot reset from current state.")
+               description = "Resets a stuck conversation (ERROR, EXECUTION_INTERRUPTED or AWAITING_HUMAN) to READY. "
+                       + "Only state=READY is accepted; a conversation already READY is answered 200 unchanged. Admin-only.")
+    @APIResponse(responseCode = "200", description = "State reset successful, or already READY.")
+    @APIResponse(responseCode = "400", description = "Target state other than READY.")
+    @APIResponse(responseCode = "404", description = "Conversation not found.")
+    @APIResponse(responseCode = "409", description = "Conversation is IN_PROGRESS or ENDED, or its state changed during the reset.")
     Response resetState(@PathParam("conversationId") String conversationId,
                         @QueryParam("state")
                         @DefaultValue("READY") String targetState);

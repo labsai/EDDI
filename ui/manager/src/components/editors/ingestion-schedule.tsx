@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertCircle, CalendarClock, CheckCircle2, Clock, Loader2 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Input } from "@/components/ui/input";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { Input } from "@eddi/app-kit/components/ui/input";
 import { useCronPreview, useSourceSchedule } from "@/hooks/use-ingestion-sources";
 import { CRON_PRESETS } from "@/lib/ingestion-schedule";
 import type { ScheduleFire } from "@/lib/api/ingestion-sources";

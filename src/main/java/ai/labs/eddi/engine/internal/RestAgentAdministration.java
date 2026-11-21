@@ -537,11 +537,11 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             final boolean agentLeavesEnvironment = deployedVersions(environment, agentId).stream()
                     .allMatch(deployed -> deployed >= lowestUndeployed && deployed <= highestUndeployed);
             // With undeployThisAndAllPreviousAgentVersions one failing version used to
-            // abort
-            // the loop and leave every lower version deployed — and the caller with a 500
-            // that said nothing of the versions it never reached. Each version is now
-            // attempted, and the failures and refusals are reported together at the end. A
-            // single-version call has nothing to continue to, and fails as it always did.
+            // abort the loop and leave every lower version deployed — and the caller with
+            // a 500 that said nothing of the versions it never reached. Each version is
+            // now attempted, and the failures and refusals are reported together at the
+            // end. A single-version call has nothing to continue to, and fails as it
+            // always did.
             final boolean continueOnFailure = lowestUndeployed < highestUndeployed;
             final List<String> failures = new ArrayList<>();
             final List<String> refusals = new ArrayList<>();
@@ -604,8 +604,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
             var deployed = lookup.versions();
             if (deployed.isEmpty() && !lookup.complete()) {
                 // "None found" and "could not look" are different answers: a 404 here would
-                // tell
-                // the operator the agent has nothing deployed while versions may still be.
+                // tell the operator the agent has nothing deployed while versions may still
+                // be.
                 throw new InternalServerErrorException("Could not read the deployed versions of Agent " + sanitize(agentId)
                         + "; retry once the deployment records are readable");
             }
@@ -618,8 +618,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         }
         if (version > currentVersion && !ceilingIsAuthoritative) {
             // A partial lookup can only have missed versions: the requested one may exist,
-            // so this is the
-            // lookup's failure to report, not a 400 about the caller's input.
+            // so this is the lookup's failure to report, not a 400 about the caller's
+            // input.
             throw new InternalServerErrorException("Could not read every deployed version of Agent " + sanitize(agentId)
                     + "; retry once the deployment records are readable");
         }
@@ -962,8 +962,8 @@ public class RestAgentAdministration implements IRestAgentAdministration, IDeplo
         var body = new LinkedHashMap<String, Object>();
         body.put("status", status);
         // The failure names secrets (never values) and the agent's grant situation, so
-        // it goes only to someone who may edit, and so deploy, the agent. This
-        // endpoint itself is open to any editor, for any agent id.
+        // it goes only to someone who may edit, and so deploy, the agent. The endpoint
+        // itself needs only USE on the agent (checked above).
         if ("detailed".equalsIgnoreCase(format) && deployed != null && deployed.getDeploymentStatus() == ERROR
                 && deployed.getDeploymentFailure() != null && resourceAccessGuard.hasAccess(agentId, AccessLevel.EDIT)) {
             body.put("failure", deployed.getDeploymentFailure());

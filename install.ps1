@@ -93,7 +93,7 @@
     Remote install: download, unblock, run.
 
 .LINK
-    https://eddi.labs.ai
+    https://eddi.technology
 #>
 
 [CmdletBinding(SupportsShouldProcess)]
@@ -302,7 +302,7 @@ function Write-Banner {
     Write-Information -MessageData " /_____/  /_____/ /_____/ /___/    "
     Write-Information -MessageData ""
     Write-Information -MessageData "   Multi-Agent Orchestration Middleware"
-    Write-Information -MessageData "   https://eddi.labs.ai"
+    Write-Information -MessageData "   https://eddi.technology"
     Write-Information -MessageData ""
 }
 

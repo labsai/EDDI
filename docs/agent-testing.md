@@ -195,7 +195,7 @@ Matching: `tool` is the name the agent calls — an httpcall's `name`, an MCP to
 name, a built-in tool name. `argsSubset` narrows a mock to calls whose JSON
 arguments contain those key/values; the first matching mock wins. Rule-triggered
 calls have no model-chosen arguments, so only mocks *without* `argsSubset` match
-them.
+them. A mock's `response` is `{httpCode, body}`; `httpCode` defaults to `200`.
 
 Exceptions:
 
@@ -269,7 +269,7 @@ agent, because a run deploys to `test`.
 | `POST /testsuitestore/testsuites` | Create a suite (201, `Location` carries id and version) |
 | `GET /testsuitestore/testsuites/{id}?version=N` | Read a suite |
 | `PUT /testsuitestore/testsuites/{id}?version=N` | Update (creates version N+1) |
-| `DELETE /testsuitestore/testsuites/{id}?version=N` | Delete |
+| `DELETE /testsuitestore/testsuites/{id}?version=N` | Delete (`&permanent=true` removes it instead of marking it deleted) |
 | `GET /testsuitestore/testsuites/descriptors` | List suites |
 | `POST /agenttests/runs` | Start a run — body `{"suiteId", "agentId", "suiteVersion"?, "agentVersion"?, "keepConversations"?}`; 202 with the `RUNNING` record |
 | `POST /agenttests/runs/{runId}/cancel` | Cancel a `RUNNING` run — see [Cancelling a run](#cancelling-a-run); 202 |

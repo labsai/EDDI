@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.api;
 
+import ai.labs.eddi.configs.agents.model.AgentAppearance;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration.RatingConfig;
+import ai.labs.eddi.configs.agents.model.ConversationControls;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.ratings.RatingLimits;
 import jakarta.annotation.security.RolesAllowed;
@@ -20,6 +22,7 @@ import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
 import java.util.List;
+import java.util.Objects;
 
 /**
  * What a chat window needs to know about an agent before the first message: its
@@ -50,8 +53,73 @@ public interface IRestAgentProfile {
      * @param rating
      *            how the deployed version asks for ratings; null when ratings are
      *            off, and then a client shows no rating controls
+     * @param appearance
+     *            the deployed version's {@code appearance}; null when it sets none
+     * @param conversationControls
+     *            the controls a client offers for the deployed version, resolved —
+     *            never null
      */
-    record AgentProfile(String agentId, String name, String description, String reviewNotice, RatingProfile rating) {
+    record AgentProfile(String agentId, String name, String description, String reviewNotice, RatingProfile rating,
+            AppearanceProfile appearance, ControlsProfile conversationControls) {
+
+        public AgentProfile {
+            conversationControls = conversationControls == null ? ControlsProfile.of(null) : conversationControls;
+        }
+
+        /** A profile without appearance and with the default controls. */
+        public AgentProfile(String agentId, String name, String description, String reviewNotice, RatingProfile rating) {
+            this(agentId, name, description, reviewNotice, rating, null, null);
+        }
+    }
+
+    /**
+     * The agent's {@code appearance}, as a chat client renders it: validated when
+     * the agent was saved.
+     *
+     * @param displayName
+     *            the name to show, or null for the profile's {@code name}
+     * @param avatar
+     *            an {@code https} URL or a {@code data:image} URI, or null
+     * @param accentColor
+     *            {@code #rgb} or {@code #rrggbb}, or null for the theme's
+     * @param starters
+     *            conversation starters, in order; empty when none
+     */
+    record AppearanceProfile(String displayName, String avatar, String accentColor, List<String> starters) {
+
+        public AppearanceProfile {
+            starters = starters == null ? List.of() : starters.stream().filter(Objects::nonNull).toList();
+        }
+
+        /** The client view of an {@code appearance}; null for none. */
+        public static AppearanceProfile of(AgentAppearance appearance) {
+            return appearance == null
+                    ? null
+                    : new AppearanceProfile(appearance.getDisplayName(), appearance.getAvatar(), appearance.getAccentColor(),
+                            appearance.getStarters());
+        }
+    }
+
+    /**
+     * Which controls to offer, with every default applied: {@code true} unless the
+     * agent switched the control off, except {@code rawHtml}, which is
+     * {@code false} unless the agent switched it on. {@code rating} only says the
+     * controls may be shown — whether ratings are on at all is the profile's
+     * {@code rating}.
+     */
+    record ControlsProfile(boolean undo, boolean redo, boolean attachments, boolean rating, boolean quickReplies, boolean streaming,
+            boolean rawHtml) {
+
+        /** Resolves {@code controls}, which may be null. */
+        public static ControlsProfile of(ConversationControls controls) {
+            if (controls == null) {
+                return new ControlsProfile(true, true, true, true, true, true, false);
+            }
+            return new ControlsProfile(!Boolean.FALSE.equals(controls.getUndo()), !Boolean.FALSE.equals(controls.getRedo()),
+                    !Boolean.FALSE.equals(controls.getAttachments()), !Boolean.FALSE.equals(controls.getRating()),
+                    !Boolean.FALSE.equals(controls.getQuickReplies()), !Boolean.FALSE.equals(controls.getStreaming()),
+                    Boolean.TRUE.equals(controls.getRawHtml()));
+        }
     }
 
     /**
@@ -110,7 +178,9 @@ public interface IRestAgentProfile {
     @GET
     @Produces(MediaType.APPLICATION_JSON)
     @Operation(summary = "What a chat window shows about an agent",
-               description = "Name, description, and the conversation-review notice for the deployed version. Requires USE.")
+               description = "Name, description, the conversation-review notice, the rating controls, the appearance "
+                       + "(display name, avatar, accent colour, starters) and the conversation controls of the deployed version. "
+                       + "rawHtml is false unless the agent enables it. Requires USE.")
     @APIResponse(responseCode = "200", description = "The profile.")
     @APIResponse(responseCode = "403", description = "The caller may not use this agent.")
     AgentProfile readProfile(@PathParam("agentId") String agentId,

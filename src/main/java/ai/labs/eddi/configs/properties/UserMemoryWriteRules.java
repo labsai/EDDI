@@ -84,13 +84,30 @@ public final class UserMemoryWriteRules {
         return null;
     }
 
-    /** The entry with an absent category set to {@code fact}. */
+    /**
+     * The entry with an absent category set to {@code fact} and an absent last
+     * writer set to its owner (a body that names no writer is recorded as the agent
+     * it names wrote it, as before writers were recorded), as a new statement of
+     * its fact ({@link UserMemoryEntry#asStatement()}): a client that read a
+     * contested entry and writes it back edited must not keep the old verdict. The
+     * stores apply the same rule; doing it here too keeps the contract visible at
+     * the external boundary.
+     * <p>
+     * {@code sourceEntryIds} is cleared as well. Only a Dream consolidation records
+     * provenance, and a value a client writes is not derived from the entries it
+     * names. The stores keep sources ({@code asStatement} is a verdict rule only),
+     * so this boundary is the one place that rule can live.
+     */
     public static UserMemoryEntry withDefaults(UserMemoryEntry entry) {
-        if (entry.category() != null) {
-            return entry;
+        UserMemoryEntry statement = entry.asStatement().withSourceEntryIds(List.of());
+        if (statement.category() != null && statement.lastWriterAgentId() != null) {
+            return statement;
         }
-        return new UserMemoryEntry(entry.id(), entry.userId(), entry.key(), entry.value(), "fact", entry.visibility(), entry.sourceAgentId(),
-                entry.groupIds(), entry.sourceConversationId(), entry.conflicted(), entry.accessCount(), entry.createdAt(), entry.updatedAt());
+        return new UserMemoryEntry(statement.id(), statement.userId(), statement.key(), statement.value(),
+                statement.category() != null ? statement.category() : "fact", statement.visibility(), statement.sourceAgentId(),
+                statement.groupIds(), statement.sourceConversationId(), false, statement.accessCount(), statement.createdAt(),
+                statement.updatedAt(), UserMemoryEntry.Assessment.ACCEPTED, null, List.of(),
+                statement.lastWriterAgentId() != null ? statement.lastWriterAgentId() : statement.sourceAgentId());
     }
 
     private static int valueLength(Object value) {

@@ -168,5 +168,8 @@ An output set may carry a top-level `lang` (for example `"lang": "de"`). It is c
 | `image` | `uri`, `alt` |
 | `button` | `buttonType`, `label`, `onPress` |
 | `inputField` | `subType`, `placeholder`, `label`, `defaultValue`, `validation` (`minLength`, `maxLength`, `validationErrorMessage`) |
-| `quickReply` | becomes a quick reply of the turn instead of a bubble |
+| `agentFace` | `uri`, `alt`, `delay` (the legacy id `botFace` is still read) |
+| `applicationLink` | `path`, `label`, `delay` |
+| `quickReply` | `value`, `expressions`, `isDefault` — becomes a quick reply of the turn instead of a bubble |
+| `other` | any string key/value pairs, passed through to the client |
 

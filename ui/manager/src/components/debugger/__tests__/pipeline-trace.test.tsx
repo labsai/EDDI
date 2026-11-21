@@ -3,13 +3,13 @@ import { screen, waitFor } from "@testing-library/react";
 import { render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { ThemeProvider } from "@/components/layout/theme-provider";
-import { PipelineTrace } from "@/components/debugger/pipeline-trace";
-import { useDebugStore, type PipelineEvent, type PipelineTurn } from "@/hooks/use-debug-events";
-import { server } from "@/test/mocks/server";
+import { ThemeProvider } from "@eddi/ui";
+import { PipelineTrace } from "@eddi/app-kit/components/debugger/pipeline-trace";
+import { useDebugStore, type PipelineEvent, type PipelineTurn } from "@eddi/app-kit/hooks/use-debug-events";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
-import { userEvent } from "@/test/test-utils";
-import { formatUsd } from "@/lib/utils";
+import { userEvent } from "@eddi/app-kit/test/test-utils";
+import { formatUsd } from "@eddi/app-kit/lib/utils";
 
 function renderTrace(conversationId: string | null = "conv-1") {
   const queryClient = new QueryClient({

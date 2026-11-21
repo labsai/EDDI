@@ -150,7 +150,7 @@ To trigger a managed agent you will have to call the following API endpoints.
 | HTTP Method | API Endpoint                                          | Request Body | Response           |
 | ----------- | ----------------------------------------------------- | ------------ | ------------------ |
 | GET         | `/agents/managed/{intent}/{userId}`                   | N/A          | Conversation model |
-| POST        | `/agents/managed/{intent}/{userId}`                   | Input model  | N/A                |
+| POST        | `/agents/managed/{intent}/{userId}`                   | Input model  | Conversation model (query params `returnDetailed`, default `false`, and `returnCurrentStepOnly`, default `true`, as on `POST /agents/{conversationId}`) |
 | POST        | `/agents/managed/{intent}/{userId}/endConversation`   | N/A          | N/A                |
 | GET         | `/agents/managed/{intent}/{userId}/undo`              | N/A          | Boolean            |
 | POST        | `/agents/managed/{intent}/{userId}/undo`              | N/A          | N/A                |

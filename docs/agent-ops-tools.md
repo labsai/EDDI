@@ -28,7 +28,10 @@ spend or move money, and the third books future work.
 ```
 
 `agentOps` is optional and every field has the default shown. It is validated at save time: every bound is refused
-with the field path rather than clamped. In the Manager it is the **Agent Operations Tools** section of the LLM
+with the field path rather than clamped. The accepted ranges: `scorecard.weeks` 1–12, `scorecard.maxLessons` 0–20,
+`scorecard.groupIds` at most 20 distinct, non-blank ids; `budgetProposal.maxPerTurn` 1–5, `budgetProposal.maxPerDay`
+1–50; `followUp.maxPending` 1–50, `followUp.maxPerTurn` 1–10, `followUp.maxHorizonDays` 1–90; the two dollar
+amounts must be positive. In the Manager it is the **Agent Operations Tools** section of the LLM
 editor. Ticking a tool there keeps the agent's other built-ins (an empty whitelist is converted to the full list plus
 the new slug, so it never narrows the agent to one tool).
 

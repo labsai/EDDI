@@ -70,6 +70,7 @@ class CryptoInventoryTest {
             "MessageDigest", Set.of("SHA-256"),
             "Signature", Set.of("Ed25519", "SHA256withRSA"),
             "KeyFactory", Set.of("Ed25519", "RSA"),
+            "KeyPairGenerator", Set.of("Ed25519"),
             "SSLContext", Set.of("TLS"));
 
     /**

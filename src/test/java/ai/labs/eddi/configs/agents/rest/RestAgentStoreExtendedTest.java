@@ -551,21 +551,22 @@ class RestAgentStoreExtendedTest {
             identity.setKeys(List.of()); // empty
             config.setIdentity(identity);
 
-            assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+            var e = assertThrows(BadRequestException.class,
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
+            assertTrue(e.getMessage().contains("declares none"), e.getMessage());
         }
 
         @Test
-        @DisplayName("null identity with crypto enabled throws BadRequestException")
+        @DisplayName("null identity with signing enabled throws BadRequestException")
         void nullIdentity() {
             var config = new AgentConfiguration();
             var security = new AgentConfiguration.SecurityConfig();
-            security.setRequirePeerVerification(true);
+            security.setSignInterAgentMessages(true);
             config.setSecurity(security);
             config.setIdentity(null);
 
             assertThrows(BadRequestException.class,
-                    () -> restAgentStore.createAgent(config));
+                    () -> restAgentStore.updateAgent(AGENT_ID, 1, config, false));
         }
     }
 

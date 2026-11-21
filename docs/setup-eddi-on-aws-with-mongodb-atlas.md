@@ -67,7 +67,7 @@ aws secretsmanager create-secret --name eddi/vault-master-key \
   is disabled: secret-scoped properties and `${vault:...}` references cannot be stored or resolved, and the
   [audit ledger](audit-ledger.md) is written without an HMAC signature unless the independent audit key
   `EDDI_AUDIT_HMAC_KEY` (`eddi.audit.hmac-key`) is set. In production EDDI refuses to start on a weak
-  key (shorter than 16 characters or a known default). Keep the key: the vault's data keys are wrapped with it, so
+  key (shorter than 16 characters, fewer than 6 distinct characters, or a known default). Keep the key: the vault's data keys are wrapped with it, so
   replacing it later requires a key rotation, not just a new value.
 
 `valueFrom` takes the secret's name when the secret is in the task's region; otherwise use the secret's **complete** ARN as

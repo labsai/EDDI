@@ -68,4 +68,47 @@ class UserMemoryWriteRulesTest {
     void categoryDefault() {
         assertEquals("fact", UserMemoryWriteRules.withDefaults(entry("k", "v", null, Visibility.global, null, List.of())).category());
     }
+
+    /**
+     * The stores record the writer an entry names. A REST body binds through the
+     * record's canonical constructor, so one that leaves the field out names no
+     * writer at all and would be stored as written by no agent, which a reader that
+     * requires peer verification trusts.
+     */
+    @Test
+    @DisplayName("a body that names no writer is recorded as its agent's, one that names a writer keeps it")
+    void writerDefault() {
+        var unnamed = new UserMemoryEntry(null, "user-1", "k", "v", "fact", Visibility.global, "agent-1", List.of(), null, false, 0, null, null,
+                null);
+        assertEquals("agent-1", UserMemoryWriteRules.withDefaults(unnamed).lastWriterAgentId());
+        var named = new UserMemoryEntry(null, "user-1", "k", "v", "fact", Visibility.global, "agent-1", List.of(), null, false, 0, null, null,
+                "agent-2");
+        assertEquals("agent-2", UserMemoryWriteRules.withDefaults(named).lastWriterAgentId());
+    }
+
+    @Test
+    @DisplayName("withDefaults stores an edited contested or superseded entry as ACCEPTED, with or without a category")
+    void withDefaultsClearsTheVerdict() {
+        var contested = entry("k", "new value", "fact", Visibility.self, "a", List.of()).withAssessment(UserMemoryEntry.Assessment.CONTESTED,
+                null);
+        var normalized = UserMemoryWriteRules.withDefaults(contested);
+        assertEquals(UserMemoryEntry.Assessment.ACCEPTED, normalized.assessment());
+        assertFalse(normalized.conflicted());
+
+        var superseded = entry("k", "v", null, Visibility.self, "a", List.of()).withAssessment(UserMemoryEntry.Assessment.SUPERSEDED, "x");
+        var defaulted = UserMemoryWriteRules.withDefaults(superseded);
+        assertEquals("fact", defaulted.category());
+        assertEquals(UserMemoryEntry.Assessment.ACCEPTED, defaulted.assessment());
+        assertNull(defaulted.supersededBy());
+    }
+
+    @Test
+    @DisplayName("withDefaults clears sourceEntryIds, with or without a category: only Dream records provenance")
+    void withDefaultsClearsSourceEntryIds() {
+        var withCategory = entry("k", "v", "fact", Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1", "e2"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withCategory).sourceEntryIds());
+
+        var withoutCategory = entry("k", "v", null, Visibility.self, "a", List.of()).withSourceEntryIds(List.of("e1"));
+        assertEquals(List.of(), UserMemoryWriteRules.withDefaults(withoutCategory).sourceEntryIds());
+    }
 }

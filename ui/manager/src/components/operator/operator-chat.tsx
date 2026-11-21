@@ -1,37 +1,36 @@
 import { useState, useRef, useLayoutEffect, type ReactNode } from "react";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { markdownImageAsLink } from "@/lib/markdown-safe";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
-import { formatMarkdownText } from "@/components/groups/group-utils";
+import { formatMarkdownText } from "@eddi/conversation/team";
 import { Send, Square, RotateCcw, AlertTriangle, ArrowDown, Bot, User, PauseCircle, Loader2, Paperclip, CheckCircle2, XCircle, Wrench } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { ChatActivity } from "@/components/chat/chat-activity";
-import { InputHint } from "@/components/chat/input-hint";
+import { Button } from "@eddi/ui";
+import { ChatActivity } from "@eddi/app-kit/components/chat/chat-activity";
+import { InputHint } from "@eddi/app-kit/components/chat/input-hint";
 import { ApprovalCard } from "@/components/hitl/approval-card";
-import { FileDropOverlay, PendingAttachmentChip } from "@/components/chat/attachment-chip";
-import { MessageAttachments } from "@/components/chat/chat-message";
+import { FileDropOverlay, PendingAttachmentChip } from "@eddi/app-kit/components/chat/attachment-chip";
+import { MessageAttachments } from "@eddi/app-kit/components/chat/chat-message";
 import {
   filesFromClipboard,
   useAttachmentStaging,
   useFileDrop,
   type ReadyAttachment,
-} from "@/hooks/use-attachment-staging";
-import { useSmartAutoScroll } from "@/hooks/use-smart-auto-scroll";
+} from "@eddi/app-kit/hooks/use-attachment-staging";
+import { useSmartAutoScroll } from "@eddi/app-kit/hooks/use-smart-auto-scroll";
 import { OPERATOR_STARTER_PROMPTS } from "@/lib/operator/system-prompt";
-import type { ChatMessage } from "@/lib/api/chat";
-import type { SentAttachment } from "@/hooks/use-chat";
-import type { PipelineEvent } from "@/hooks/use-debug-events";
-import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@/lib/api/hitl";
-import { cn } from "@/lib/utils";
-import { isImeComposing } from "@/lib/ime";
+import type { ChatMessage } from "@eddi/app-kit/lib/api/chat";
+import type { SentAttachment } from "@eddi/app-kit/hooks/use-chat";
+import type { PipelineEvent } from "@eddi/app-kit/hooks/use-debug-events";
+import type { HitlVerdict, PauseDetails, ToolCallDecision, PendingToolCallView } from "@eddi/app-kit/lib/api/hitl";
+import { cn } from "@eddi/app-kit/lib/utils";
+import { isImeComposing } from "@eddi/app-kit/lib/ime";
+import { ConversationMarkdown } from "@eddi/conversation/i18next";
+import type { ToolActivity } from "@eddi/app-kit/lib/tool-labels";
 
 export interface OperatorChatProps {
   messages: ChatMessage[];
   events: PipelineEvent[];
   /** Live tool_call names for the turn in flight — drives "Using {tool}…". */
-  liveToolCalls?: string[];
+  liveToolCalls?: ToolActivity[];
   /** True once the model resumed writing after its last tool call. */
   liveToolsSettled?: boolean;
   /** Completed turns' traces, keyed by the agent message they belong to. */
@@ -407,9 +406,9 @@ export function OperatorChat({
                    untrusted, so raw HTML stays escaped. Previously plain text,
                    which showed status reports as literal ## and ** markers. */
                 <div className="prose prose-sm dark:prose-invert max-w-none overflow-hidden [&_pre]:rounded-lg [&_pre]:bg-background/60 [&_pre]:p-3 [&_code]:rounded [&_code]:bg-background/60 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-xs">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownImageAsLink}>
+                  <ConversationMarkdown escapeRawHtml>
                     {formatMarkdownText(message.content)}
-                  </ReactMarkdown>
+                  </ConversationMarkdown>
                 </div>
               ) : (
                 message.content

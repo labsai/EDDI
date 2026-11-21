@@ -15,12 +15,19 @@ import java.util.List;
 import java.util.regex.Pattern;
 
 /**
+ * Recognises a whole token that is an email address (case-insensitive,
+ * top-level domain of 2 to 4 letters) and emits an {@code email} expression.
+ *
  * @author ginccc
  */
 public class EmailDictionary implements IDictionary {
     private static final String ID = "EmailDictionary";
     private final IExpressionProvider expressionProvider;
-    private static final Pattern emailPattern = Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,4}\\b",
+    /**
+     * Top-level domains run up to 63 letters. This allowed 2 to 4, so an address at
+     * .technology, .online or .museum was not an email.
+     */
+    private static final Pattern emailPattern = Pattern.compile("\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,63}\\b",
             Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
 
     public EmailDictionary(IExpressionProvider expressionProvider) {

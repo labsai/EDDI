@@ -13,7 +13,7 @@
 - **Per-target `allowedSenders` (F4)**: checked for the routed target and for a continued conversation's own target; refused `blocked:target_not_allowed`, never rerouted to the default.
 - **Thread reply cap (F2)**: `LedgerEntry.threadKey` (`sha256(integrationId + "\n" + threadRoot)`, via the new shared `EmailThreads`) on reply rows, in MongoDB (field + index) and PostgreSQL (`ADD COLUMN IF NOT EXISTS thread_key`, index `(integration_id, thread_key, kind, created_at)`); `maxRepliesPerThreadPerHour` counts the thread across its conversations, and the conversation's own count still applies. Upgrade note in [`upgrading-from-6.5.md`](../upgrading-from-6.5.md#email-maxrepliesperthreadperhour-counts-the-mail-thread).
 - Every addressing, routing and `mail` context read uses #1394's signed view (`InboundMail.signedView()`); tests replay a signed mail with an unsigned `To`, `Cc` or `Subject` added.
-- Docs: [`email-integration.md`](../email-integration.md) (Addressing EDDI, Mentions, Routing order, Per-target senders, keys and context tables), [`metrics.md`](../metrics.md). MCP `create_channel_integration` description, Manager (Addressing section, target rules editor, 23 new strings in all 11 locales), Platform Operator prompt (revision 63).
+- Docs: [`email-integration.md`](../email-integration.md) (Addressing EDDI, Mentions, Routing order, Per-target senders, keys and context tables), [`metrics.md`](../metrics.md). MCP `create_channel_integration` description, Manager (Addressing section, target rules editor, 23 new strings in all 11 locales), Platform Operator prompt (revision 82).
 
 **Design decisions:**
 

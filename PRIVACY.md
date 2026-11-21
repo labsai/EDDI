@@ -9,7 +9,7 @@
 | Data Category | Storage | Contains PII? | Retention |
 |---|---|---|---|
 | **Conversation Memory** | MongoDB / PostgreSQL | Yes (userId, chat content) | 365 days default (configurable) |
-| **User Memory** | MongoDB / PostgreSQL | Yes (userId, structured facts) | Until explicitly deleted |
+| **User Memory** | MongoDB / PostgreSQL | Yes (userId, structured facts) | Until deleted, or `eddi.usermemories.deleteOlderThanDays` (default: off) |
 | **Audit Ledger** | MongoDB / PostgreSQL | Yes (userId, prompts, responses, tool calls) | Indefinite (EU AI Act record-keeping); content redacted on erasure |
 | **Database Logs** | MongoDB / PostgreSQL | Yes (userId, log messages) | `eddi.logs.db-retention-days` (default: kept until deleted) |
 | **Managed Conversations** | MongoDB / PostgreSQL | Yes (userId, intent) | Until explicitly deleted |
@@ -31,7 +31,8 @@ This cascades across all stores:
 4. **Database logs** — userId pseudonymized with a keyed (`gdpr-erased:k1:`) or
    per-deployment-salted (`gdpr-erased:s1:`) value; the log message text is kept
 5. **Audit ledger** — rows kept; recorded content (prompt, response, LLM detail,
-   tool calls) redacted and userId pseudonymized
+   tool calls) redacted and userId pseudonymized. `eddi.audit.erasure-mode=pseudonymize`
+   (default `redact`) keeps the content and pseudonymizes the userId only
 
 This is the short list; the full cascade is in
 [gdpr-compliance.md](docs/gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105).
@@ -52,10 +53,25 @@ GET /admin/gdpr/{userId}/export
 ```
 
 Returns user data as JSON: memories, conversations (with chat history),
-managed conversation mappings, audit processing records, attachment metadata
-and linked accounts. Some categories are not exported yet and are named in
-`omittedCategories` — see
+managed conversation mappings, audit processing records, attachment metadata,
+linked (OAuth) accounts, and the group discussions the user started with their shared
+artifacts. Schedules and HITL tool-journal entries are not exported yet (the
+erasure does delete them); they are named in `omittedCategories`, so the
+response is currently always `207 Multi-Status` with `complete: false` — see
 [gdpr-compliance.md](docs/gdpr-compliance.md#2-right-of-access-gdpr-art-15--data-portability-art-20--right-to-know-ccpa-1798100).
+
+### Right to Restriction (Art. 18)
+
+```
+POST   /admin/gdpr/{userId}/restrict
+GET    /admin/gdpr/{userId}/restrict
+DELETE /admin/gdpr/{userId}/restrict
+```
+
+Restricts, checks (`true`/`false`) and lifts a restriction. While restricted, new
+conversations and new turns for the user are refused with `403`; stored data is
+kept. See
+[gdpr-compliance.md](docs/gdpr-compliance.md#3-right-to-restriction-of-processing-gdpr-art-18--lgpd-art-18).
 
 ### MCP Tools
 
@@ -89,6 +105,7 @@ deployer.
 |---|---|---|---|
 | **Ollama** | Your infrastructure | ✅ Yes | N/A (local) |
 | **jlama** | Your infrastructure | ✅ Yes | N/A (local) |
+| **Self-hosted OpenAI-compatible** (`openai-compatible`: vLLM, llama-server, TGI, …) | Wherever you run the server | ✅ Yes | N/A (your server) |
 | **Anthropic** | US/EU (varies) | ❌ No | [anthropic.com/policies](https://www.anthropic.com/policies) |
 | **OpenAI** | US | ❌ No | [openai.com/policies](https://openai.com/policies) |
 | **Google Gemini** | US/EU (varies) | ❌ No | [cloud.google.com/terms](https://cloud.google.com/terms) |
@@ -152,8 +169,10 @@ Deployers should:
 1. Obtain appropriate consent before enabling conversational AI
 2. Inform users about data processing via their privacy policy
 3. Provide clear opt-out mechanisms in their application
-4. Consider disabling `enableMemoryTools` unless users are explicitly informed
-   that their interactions are remembered across sessions
+4. Leave `enableMemoryTools` off (the default) unless users are explicitly informed
+   that their interactions are remembered across sessions — and note that
+   `longTerm` properties set by a property setter persist across sessions
+   whatever that flag says
 5. Document the legal basis for each processing activity in your Article 30
    register
 
@@ -181,9 +200,9 @@ keeps the audit ledger (redacted) and database logs (pseudonymized). See
 
 | Category | Default | Configuration |
 |---|---|---|
-| Ended conversations | 365 days | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` |
-| Idle conversations | 90 days | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` |
-| User memories | No auto-delete | Use GDPR API or MCP tools |
+| Ended conversations | Deleted after 365 days | `eddi.conversations.deleteEndedConversationsOnceOlderThanDays` (a database migrated from EDDI 5 holds this sweep until `eddi.migration.v6-rename.retention-confirmed=true`) |
+| Idle conversations | Ended (not deleted) after 90 days idle | `eddi.conversations.maximumLifeTimeOfIdleConversationsInDays` |
+| User memories | No auto-delete | `eddi.usermemories.deleteOlderThanDays`, or the GDPR API / MCP tools |
 | Audit ledger | No auto-delete | Retained for EU AI Act record-keeping; content redacted on erasure |
 | Database logs | No auto-delete | `eddi.logs.db-retention-days` |
 
@@ -254,7 +273,7 @@ their personal data.
 | Data portability (Art. 18, V) | JSON export, machine-readable; partial (it names the categories it omits) | ✅ Built-in |
 | Deletion of unnecessary data (Art. 18, VI) | Configurable retention (`eddi.conversations.deleteEndedConversationsOnceOlderThanDays`) + idle conversation auto-end | ✅ Built-in |
 | Information about sharing (Art. 18, VII) | LLM provider data flows documented; audit trail records model name per invocation | ✅ Built-in |
-| Consent revocation (Art. 18, IX) | `POST /{conversationId}/endConversation` + `DELETE /admin/gdpr/{userId}` provide the technical mechanism; consent state tracking is your application layer | ✅ + 🏢 |
+| Consent revocation (Art. 18, IX) | `POST /agents/{conversationId}/endConversation` + `DELETE /admin/gdpr/{userId}` provide the technical mechanism; consent state tracking is your application layer | ✅ + 🏢 |
 
 **Deployer checklist**:
 
@@ -281,13 +300,13 @@ two regions.
 | Purpose of use specification (Art. 17) | Agent configuration documents processing purpose via system prompts and behavior rules | ✅ + 🏢 |
 | Accurate and up-to-date data (Art. 19) | Conversation state is timestamped and versioned; user memories are updatable via REST API | ✅ Built-in |
 | Security control measures (Art. 23) | AES-256-GCM vault encryption, HMAC-SHA256 audit integrity, Keycloak OIDC, RBAC, SSRF protection, sandboxed evaluation | ✅ Built-in |
-| Supervision of employees (Art. 24) | Keycloak OIDC + role-based access (eddi-admin, eddi-editor, eddi-viewer) | ✅ Built-in |
+| Supervision of employees (Art. 24) | Keycloak OIDC + role-based access (eddi-admin, eddi-editor, eddi-user, eddi-approver, eddi-viewer) | ✅ Built-in |
 | Supervision of contractors (Art. 25) | LLM provider data flows documented in PRIVACY.md; audit trail records which model/provider processed each turn | ✅ Built-in |
 | Disclosure to data subjects (Art. 33) | `GET /admin/gdpr/{userId}/export` — full data bundle | ✅ Built-in |
 | Correction and deletion (Art. 34-35) | `PUT /usermemorystore/memories` for correction; `DELETE /admin/gdpr/{userId}` for deletion | ✅ Built-in |
 | Breach notification (Art. 26) | Incident response runbook (`docs/incident-response.md`) | ✅ Built-in |
 | Cross-border transfer (Art. 28) | EDDI documents provider data flows; deployer verifies recipient country protections and obtains consent where required | ✅ + 🏢 |
-| Pseudonymized information (2022 amendment) | GDPR erasure pseudonymizes the identifiers it keeps (a keyed HMAC in the audit ledger; a keyed or salted pseudonym in the database logs) — satisfies APPI's pseudonymized information category | ✅ Built-in |
+| Pseudonymized information (2022 amendment) | GDPR erasure pseudonymizes the identifiers it keeps (a keyed HMAC in the audit ledger when it signs, an unkeyed SHA-256 otherwise; a keyed or salted pseudonym in the database logs) — satisfies APPI's pseudonymized information category | ✅ Built-in |
 
 **Deployer checklist**:
 

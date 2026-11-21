@@ -25,14 +25,16 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Meta-tool for lazy/dynamic tool loading. When the tool loading strategy is
- * {@code lazy} or {@code dynamic}, only this tool is initially presented to the
- * LLM. The LLM calls it to discover available tools by category or keyword, and
- * the matching tool schemas are then injected into the context for subsequent
- * turns.
+ * Meta-tool for lazy tool loading. When the tool loading strategy is
+ * {@code LAZY}, the tools of the sources in {@code lazySources} are presented
+ * to the LLM only through this tool. The LLM calls it to discover available
+ * tools by category or keyword, and the matching tool schemas are then injected
+ * into the request for the following iterations (and, with
+ * {@code lazyRetention: conversation}, later turns).
  * <p>
  * This tool is NOT CDI-managed — it is constructed per-invocation by
- * {@code AgentOrchestrator} with the available tool specifications.
+ * {@code AgentOrchestrator} or {@code LazyToolCatalog} with the available tool
+ * specifications.
  *
  * @since 6.0.0
  */

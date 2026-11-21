@@ -1,8 +1,8 @@
 import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { useConnectionDescriptors } from "@/hooks/use-connections";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { useConnectionDescriptors } from "@eddi/app-kit/hooks/use-connections";
 import {
   EMAIL_ACT_WHEN,
   EMAIL_ATTACHMENT_MODES,
@@ -33,7 +33,7 @@ const hintClass = "text-[10px] text-muted-foreground";
 const labelClass = "text-xs font-medium";
 
 /** The connection auth types an IMAP login can use. */
-const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS"]);
+const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_JWT_BEARER"]);
 
 /**
  * Platform settings of an `email` channel integration: EDDI polls the mailbox

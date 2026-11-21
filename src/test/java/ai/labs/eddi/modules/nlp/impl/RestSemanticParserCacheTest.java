@@ -88,6 +88,7 @@ class RestSemanticParserCacheTest {
         doReturn(parserTask).when(parserProvider).get();
         doReturn(inputParser).when(parserTask).configure(any(), any());
         doReturn(List.of()).when(inputParser).parse(anyString());
+        doAnswer(invocation -> invocation.getArgument(0)).when(inputParser).normalize(anyString(), any());
         doReturn(mock(Future.class)).when(runtime).submitCallable(any(Callable.class), any());
     }
 
@@ -148,8 +149,8 @@ class RestSemanticParserCacheTest {
         // Both callers still get a successful result, served by the single instance.
         assertResumedWithSolutionList(asyncResponse);
         assertResumedWithSolutionList(secondResponse);
-        verify(inputParser).parse("first");
-        verify(inputParser).parse("second");
+        verify(inputParser).parseAllReadings("first", null);
+        verify(inputParser).parseAllReadings("second", null);
     }
 
     private void assertResumedWithSolutionList(AsyncResponse response) {

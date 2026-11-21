@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.nlp.model.Word;
 import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
+import java.util.Locale;
 import java.util.stream.Collectors;
 
 /**
@@ -58,7 +59,7 @@ public class DamerauLevenshteinCorrection implements ICorrection {
             return IDictionary.NO_WORDS_FOUND;
         }
         List<WordDistanceWrapper> foundWords = new LinkedList<>();
-        var lowerCaseLookup = lookup.toLowerCase();
+        var lowerCaseLookup = lookup.toLowerCase(Locale.ROOT);
 
         collectCandidates(lowerCaseLookup, temporaryDictionaries, userLanguage, foundWords);
         collectCandidates(lowerCaseLookup, dictionaries, userLanguage, foundWords);
@@ -86,8 +87,19 @@ public class DamerauLevenshteinCorrection implements ICorrection {
                 continue;
             }
 
+            int lookupLength = lowerCaseLookup.length();
             for (IDictionary.IWord word : dictionary.getWords()) {
-                final int distance = calculateDistance(lowerCaseLookup, word.getValue().toLowerCase());
+                String value = word.getValue();
+                // A cheap length bound first: it rules out most of a dictionary without
+                // lower-casing (allocating) every word of it for every unknown token.
+                // Lower-casing never shortens a word but can lengthen it ('İ' becomes
+                // two chars), so a word is ruled out here only if it is too long as typed,
+                // or too short even at twice its length; calculateDistance applies the
+                // exact bound to the lower-cased word.
+                if (value == null || value.length() - lookupLength > maxDistance || 2L * value.length() < lookupLength - maxDistance) {
+                    continue;
+                }
+                final int distance = calculateDistance(lowerCaseLookup, value.toLowerCase(Locale.ROOT));
 
                 if (distance > -1) {
                     Word entry = new Word(word.getValue(), word.getExpressions(), word.getLanguageCode(), word.getFrequency(), word.isPartOfPhrase());

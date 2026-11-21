@@ -2,8 +2,9 @@
 prettier = "latest"
 
 [tasks.install]
-description = "Install dependencies"
-run = "npm install"
+description = "Install dependencies (at ui/, the npm workspaces root with the one lockfile)"
+dir = "{{config_root}}/.."
+run = "npm ci"
 
 [tasks.dev]
 description = "Start Vite dev server on http://localhost:5173"
