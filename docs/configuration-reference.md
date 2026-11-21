@@ -560,6 +560,10 @@ Bounds on designer values: a value above its bound is refused when the configura
 | `eddi.documents.sharing.max-shares-per-turn` | `10` | Bound on `documents.sharing.maxSharesPerTurn`: most files a conversation may hand on in one turn, across every call |
 | `eddi.documents.sharing.max-depth` | `3` | Bound on `documents.sharing.maxDepth`: how many hops a file may travel from the conversation it was uploaded to (A→B→C→D is three) |
 
+| Property | Default | Description |
+| --- | --- | --- |
+| `eddi.documents.index.default-rag` | unset | The deployment's default **document index**: a RAG configuration flagged `"documentIndex": true`, given by id or as `eddi://ai.labs.rag/ragstore/rags/<id>` (`?version=<n>` optional; without it, the current version). Validated when EDDI starts: a missing configuration, an ordinary knowledge base or one that cannot be a document index ([rag.md](rag.md#document-index)) fails startup with the reason. Nothing is written to a document index in this version |
+
 ---
 
 ## Backup, export & import
