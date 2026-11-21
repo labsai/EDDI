@@ -344,6 +344,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (config.getName() != null && !config.getName().isBlank()) {
             config.setName(deriveUniqueDuplicateName(config.getName(), config.getChannelType()));
         }
+        refuseApplicationTakeoverByDuplicate(id, config);
         validateConfiguration(config);
         // A copy is a new standing route, so its targets need the same USE check a
         // create runs: duplicating an old version used to restore a route to an
@@ -361,6 +362,30 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             Response response = restVersionInfo.create(config);
             publishNewIntegration(response, config);
             return withEmailFollowUp(createdId(response), config, response);
+        }
+    }
+
+    /**
+     * A copy of a connection-backed integration acts with the source's connection,
+     * so it needs edit access to the source, not the view access a duplicate of a
+     * legacy integration has always needed. And a copy that has lost its
+     * {@code channelId} but keeps its application id would be indexed under the
+     * application's key and silently start answering that application's direct
+     * messages; that is refused: a channel-less integration is created on purpose,
+     * not by copying a channel-bound one.
+     */
+    private void refuseApplicationTakeoverByDuplicate(String sourceId, ChannelIntegrationConfiguration copy) {
+        var descriptor = channelTypes.find(copy.getChannelType()).filter(ChannelTypeDescriptor::connectionBacked);
+        if (descriptor.isEmpty()) {
+            return;
+        }
+        restVersionInfo.requireEditAccess(sourceId);
+        boolean claimsApplication = descriptor.get().routingKeys(null, copy.getPlatformConfig()).stream()
+                .anyMatch(key -> key != null && key.startsWith(ChannelTypeDescriptor.APPLICATION_KEY_PREFIX));
+        if (claimsApplication) {
+            channelTypes.recordRejected(descriptor.get().id(), "duplicate_claims_application");
+            throw new BadRequestException("A copy of this integration would answer its application's direct messages, because it has no "
+                    + "channel. Create a channel-less integration explicitly instead, or set a channel on the copy's source first.");
         }
     }
 
@@ -562,6 +587,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         // the allow-list of non-secret keys and the named connection.
         List<String> platformErrors = ChannelTypeRegistry.validatePlatformConfig(descriptor, config.getPlatformConfig());
         if (!platformErrors.isEmpty()) {
+            channelTypes.recordRejected(descriptor.id(), "platform_config");
             throw new BadRequestException(String.join(" ", platformErrors));
         }
         if (WebhookChannelSettings.CHANNEL_TYPE.equals(descriptor.id())) {
@@ -723,7 +749,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (keys.isEmpty())
             return;
 
-        forEachOtherIntegration(excludeId, "channelId", existing -> {
+        forEachOtherIntegration(excludeId, "routing key", existing -> {
             if (existing.getPlatformConfig() == null || !channelType.equalsIgnoreCase(existing.getChannelType())) {
                 return;
             }
@@ -736,6 +762,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     // other's messages. What the message must NOT do is name the conflicting
                     // integration — that would turn a uniqueness check into an enumeration
                     // oracle for other people's channel integrations.
+                    channelTypes.recordRejected(channelType, "routing_key_taken");
                     throw new BadRequestException(
                             "Another channel integration already uses " + ChannelTypeDescriptor.describeRoutingKey(key)
                                     + " for type '" + channelType + "'.");

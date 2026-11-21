@@ -406,7 +406,16 @@ public class ChannelTargetRouter {
             return null;
         }
         if (origin.integrationName() != null) {
-            return resolveDefaultForDm(origin.channelType(), messageText, origin.integrationName());
+            if (origin.verifiedApplicationId() == null) {
+                return resolveDefaultForDm(origin.channelType(), messageText, origin.integrationName());
+            }
+            // A name and a verified application: the name may come from a request body
+            // (a card action), the application from the verified token. The named
+            // integration counts only when it is that application's.
+            return getIntegrationByName(origin.channelType(), origin.integrationName())
+                    .filter(integration -> belongsTo(integration, origin))
+                    .map(integration -> resolveFromIntegration(integration, messageText))
+                    .orElse(null);
         }
         if (origin.verifiedApplicationId() != null) {
             return getIntegrationForApplication(origin.channelType(), origin.verifiedApplicationId())
@@ -1119,20 +1128,22 @@ public class ChannelTargetRouter {
                         // the resource id for a webhook (POST /integrations/webhook/{id},
                         // unique by construction), an application key for a channel-less
                         // integration of a type that declares one, none for email.
+                        var typeDescriptor = channelTypes.find(config.getChannelType());
+                        boolean connectionBacked = typeDescriptor.isPresent() && typeDescriptor.get().connectionBacked();
+                        var copy = deepCopyConfig(config);
+                        String integrationKey = resId.getId() + ":" + resId.getVersion();
+                        if (connectionBacked) {
+                            // Holds no secret: its credential is resolved per send from the
+                            // connection it names. Nothing is resolved from the vault, and keys
+                            // outside the type's allow-list are dropped BEFORE the routing keys
+                            // are read — save validation refuses them, but a direct store write
+                            // never ran it, and an undeclared key must not route either.
+                            keepAllowedKeysOnly(integrationKey, typeDescriptor.get(), copy);
+                        }
                         List<String> routingKeys = channelTypes.routingKeys(config.getChannelType(), resId.getId(),
-                                config.getPlatformConfig());
+                                copy.getPlatformConfig());
                         if (!routingKeys.isEmpty()) {
-                            var copy = deepCopyConfig(config);
-                            String integrationKey = resId.getId() + ":" + resId.getVersion();
-                            var typeDescriptor = channelTypes.find(config.getChannelType());
-                            if (typeDescriptor.isPresent() && typeDescriptor.get().connectionBacked()) {
-                                // Holds no secret: its credential is resolved per send from
-                                // the connection it names. Nothing is resolved from the vault,
-                                // and keys outside the type's allow-list are dropped — save
-                                // validation refuses them, but a ZIP import or a direct store
-                                // write never ran it.
-                                keepAllowedKeysOnly(integrationKey, typeDescriptor.get(), copy);
-                            } else {
+                            if (!connectionBacked) {
                                 resolvePlatformSecrets(integrationKey, copy);
                                 if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
                                     vetWebhookSigningSecret(integrationKey, config, copy);
@@ -1252,8 +1263,13 @@ public class ChannelTargetRouter {
         lowestKey.entrySet().stream()
                 .sorted(Map.Entry.comparingByValue())
                 .forEach(entry -> {
+                    // The integration's own type, not a parse of the key: a stored type may
+                    // itself contain ':' (a fork's adapter), and splitting at the first one
+                    // would file it under the wrong type and hide it from every scan.
                     String key = entry.getValue();
-                    String type = key.substring(0, key.indexOf(':'));
+                    String type = entry.getKey().getChannelType() != null
+                            ? entry.getKey().getChannelType().toLowerCase(Locale.ROOT)
+                            : key.substring(0, key.indexOf(':'));
                     byType.computeIfAbsent(type, k -> new ArrayList<>()).add(entry.getKey());
                 });
         var frozen = new HashMap<String, List<ChannelIntegrationConfiguration>>();
@@ -1338,6 +1354,7 @@ public class ChannelTargetRouter {
         for (String key : new TreeSet<>(kept.keySet())) {
             if (!allowed.contains(key)) {
                 kept.remove(key);
+                channelTypes.recordDroppedKey(descriptor.id());
                 warnUnusable(integrationKey, key, "is not a " + descriptor.id() + " setting (" + descriptor.id()
                         + " credentials come from the named connection)", false);
             }

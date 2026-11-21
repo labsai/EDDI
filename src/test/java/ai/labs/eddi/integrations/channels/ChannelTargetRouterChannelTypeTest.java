@@ -264,4 +264,37 @@ class ChannelTargetRouterChannelTypeTest {
         assertTrue(origin.isVerified());
         assertFalse(new InboundOrigin("slack", null, null, null).isVerified());
     }
+
+    @Test
+    @DisplayName("a name in the origin counts only when that integration is the verified application's")
+    void namedOriginMustBelongToApplication() throws Exception {
+        store(FakeChatChannelType.ID, "app-one", pc("connection", "bot", "appId", "app-1"));
+        store(FakeChatChannelType.ID, "app-two", pc("connection", "bot", "appId", "app-2"));
+        assertNotNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "app-one", "app-1", null), "hi"));
+        assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, "app-two", "app-1", null), "hi"),
+                "a name taken from a request body must not reach another application's integration");
+    }
+
+    @Test
+    @DisplayName("an integration of a stored type containing ':' is still found by the scans")
+    void typeWithColon() throws Exception {
+        store("acme:chat", "forked", pc("channelId", "C1"));
+        assertTrue(router.getIntegrationByName("acme:chat", "forked").isPresent());
+        assertTrue(router.hasAnyChannels("acme:chat"));
+    }
+
+    @Test
+    @DisplayName("an undeclared key cannot route a connection-backed integration that bypassed save validation")
+    void undeclaredKeyDoesNotRoute() throws Exception {
+        ChannelTypeDescriptor routedByUndeclared = new FakeChatChannelType() {
+            @Override
+            public List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
+                String guild = platformConfig.get("guildId");
+                return guild == null ? List.of() : List.of(guild);
+            }
+        };
+        var strict = routerWith(new ChannelTypeRegistry(List.of(routedByUndeclared)));
+        store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1", "guildId", "G1"));
+        assertTrue(strict.getIntegration(FakeChatChannelType.ID, "G1").isEmpty(), "guildId is not an allowed key, so it is dropped first");
+    }
 }

@@ -7,6 +7,7 @@ package ai.labs.eddi.connections;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
+import ai.labs.eddi.configs.connections.model.OAuthConfig;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
 import ai.labs.eddi.connections.model.ConnectionReference;
 import ai.labs.eddi.engine.security.CallerIdentity;
@@ -325,7 +326,10 @@ public class ConnectionResolver {
      * so a per-user grant could never be used and a caller-supplied one has no
      * caller), uses one of {@code acceptedAuthTypes} (empty: any), and, when
      * {@code targetUrl} is given, its {@code baseUrlAllowlist} names that origin.
-     * The same allowlist rule is applied again on every send by {@link #resolve}.
+     * Without a fixed origin the allowlist must still be non-empty and list https
+     * origins only, so a connection that could never be sent anywhere is refused
+     * where the author is waiting rather than on every send. The same allowlist
+     * rule is applied again on every send by {@link #resolveService}.
      *
      * @param targetUrl
      *            the channel type's API origin; {@code null} when it is not fixed
@@ -334,20 +338,85 @@ public class ConnectionResolver {
      *             naming the rule that failed
      */
     public void requireServiceTarget(String reference, URI targetUrl, Set<AuthType> acceptedAuthTypes) {
+        ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        requireServiceBinding(connection, acceptedAuthTypes);
+        if (targetUrl != null) {
+            requireTargetAllowed(connection, targetUrl);
+            return;
+        }
+        List<String> allowlist = connection.getBaseUrlAllowlist();
+        if (allowlist == null || allowlist.isEmpty()) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' has an empty baseUrlAllowlist, so it may not be sent anywhere.");
+        }
+        for (String allowed : allowlist) {
+            if (allowed == null || !allowed.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connection '" + connection.getName() + "' lists a non-https origin in its baseUrlAllowlist; a channel "
+                                + "credential is only ever sent over https.");
+            }
+        }
+    }
+
+    /**
+     * Resolves a channel integration's credential for one send, re-applying the
+     * rules {@link #requireServiceTarget} checked at save time: the connection may
+     * have been edited since (bound {@code PER_USER}, given another auth type), and
+     * a {@code PER_USER} connection resolved here would hand the token of whichever
+     * user's turn is bound to this thread to the chat platform.
+     *
+     * @throws ConnectionException
+     *             when the connection is no longer {@code SERVICE}-bound or of an
+     *             accepted auth type, or as {@link #resolve} does
+     */
+    public ResolvedCredential resolveService(String reference, URI targetUrl, Set<AuthType> acceptedAuthTypes) {
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        requireServiceBinding(connection, acceptedAuthTypes);
+        return resolve(reference, targetUrl, null);
+    }
+
+    /**
+     * The OAuth client id of the connection a reference names, without resolving
+     * anything — so a channel type whose application id is its Entra client id (a
+     * Teams bot) can check at save time that the connection is that application's.
+     *
+     * @return the client id, or empty when the connection does not exist or has no
+     *         OAuth client id
+     */
+    public Optional<String> oauthClientIdOf(String reference) {
         ConnectionReference parsed = ConnectionReference.parse(reference);
-        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        try {
+            return connectionRegistry.find(parsed)
+                    .map(ConnectionConfiguration::getOauth)
+                    .map(OAuthConfig::getClientId)
+                    .filter(clientId -> !clientId.isBlank());
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+    }
+
+    private static void requireServiceBinding(ConnectionConfiguration connection, Set<AuthType> acceptedAuthTypes) {
         if (connection.getBinding() != Binding.SERVICE) {
             throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
                     "Connection '" + connection.getName() + "' is bound " + connection.getBinding()
                             + ", but a channel integration acts as no verified user. Use a SERVICE-bound connection.");
         }
-        if (acceptedAuthTypes != null && !acceptedAuthTypes.isEmpty() && !acceptedAuthTypes.contains(connection.getAuthType())) {
-            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
-                    "Connection '" + connection.getName() + "' is " + connection.getAuthType() + "; this channel type needs one of "
-                            + new TreeSet<>(acceptedAuthTypes.stream().map(Enum::name).toList()) + ".");
+        AuthType authType = connection.getAuthType();
+        if (authType == null) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + connection.getName() + "' has no authType.");
         }
-        if (targetUrl != null) {
-            requireTargetAllowed(connection, targetUrl);
+        if (acceptedAuthTypes != null && !acceptedAuthTypes.isEmpty() && !acceptedAuthTypes.contains(authType)) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is " + authType + "; this channel type needs one of "
+                            + new TreeSet<>(acceptedAuthTypes.stream().map(Enum::name).toList()) + ".");
         }
     }
 

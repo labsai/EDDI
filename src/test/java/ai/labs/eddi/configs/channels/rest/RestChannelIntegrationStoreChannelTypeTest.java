@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
 import ai.labs.eddi.integrations.channels.FakeChatChannelType;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.ForbiddenException;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -31,6 +33,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -50,6 +53,7 @@ class RestChannelIntegrationStoreChannelTypeTest {
     private IChannelIntegrationStore channelStore;
     private IDocumentDescriptorStore descriptorStore;
     private ChannelConnectionCredentials credentials;
+    private ResourceAccessGuard accessGuard;
     private RestChannelIntegrationStore sut;
 
     @BeforeEach
@@ -60,7 +64,8 @@ class RestChannelIntegrationStoreChannelTypeTest {
         when(credentials.validateForSave(any(), anyMap())).thenReturn(List.of());
         lenient().when(descriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
                 .thenReturn(List.of());
-        sut = new RestChannelIntegrationStore(channelStore, descriptorStore, mock(ResourceAccessGuard.class), null, null, null,
+        accessGuard = mock(ResourceAccessGuard.class);
+        sut = new RestChannelIntegrationStore(channelStore, descriptorStore, accessGuard, null, null, null,
                 FakeChatChannelType.registry(), credentials);
     }
 
@@ -191,19 +196,26 @@ class RestChannelIntegrationStoreChannelTypeTest {
     }
 
     @Test
-    @DisplayName("duplicating a channel-less integration is refused instead of colliding on its application id")
-    void duplicateCollides() throws Exception {
+    @DisplayName("duplicating a channel-bound integration is refused: the copy would take over the application's DMs")
+    void duplicateWouldClaimApplication() throws Exception {
         String sourceId = "ddeeff00112233445566aabb";
-        var source = fakeConfig(pc());
-        when(channelStore.read(sourceId, 1)).thenReturn(source);
+        when(channelStore.read(sourceId, 1)).thenReturn(fakeConfig(pc("channelId", "C1")));
         when(channelStore.getCurrentResourceId(sourceId)).thenReturn(resourceId(sourceId, 1));
-        var descriptor = new DocumentDescriptor();
-        descriptor.setResource(URI.create("eddi://ai.labs.channel/channelstore/channels/" + sourceId + "?version=1"));
-        when(descriptorStore.readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false)))
-                .thenReturn(List.of(descriptor));
 
         var ex = assertThrows(BadRequestException.class, () -> sut.duplicateChannel(sourceId, 1));
-        assertTrue(ex.getMessage().contains("application id 'app-1'"), ex.getMessage());
+        assertTrue(ex.getMessage().contains("direct messages"), ex.getMessage());
+        verify(channelStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("duplicating a connection-backed integration needs edit access to the source, not just view access")
+    void duplicateNeedsEditAccess() throws Exception {
+        String sourceId = "ddeeff00112233445566aabb";
+        when(channelStore.read(sourceId, 1)).thenReturn(fakeConfig(pc("channelId", "C1")));
+        when(channelStore.getCurrentResourceId(sourceId)).thenReturn(resourceId(sourceId, 1));
+        doThrow(new ForbiddenException("view only")).when(accessGuard).requireAccess(eq(sourceId), eq(AccessLevel.EDIT), any());
+
+        assertThrows(ForbiddenException.class, () -> sut.duplicateChannel(sourceId, 1));
         verify(channelStore, never()).create(any());
     }
 
