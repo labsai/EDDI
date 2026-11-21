@@ -1007,6 +1007,134 @@ class BuildQualityGatesTest {
     }
 
     /**
+     * The checks branch protection requires on {@code main}. A merge queue merges
+     * an entry only once every one of them has reported on the queue's temporary
+     * {@code gh-readonly-queue/main/...} ref.
+     */
+    private static final List<String> REQUIRED_CHECKS = List.of("Build & Test", "CodeQL Analysis");
+
+    /**
+     * {@code main} is meant to sit behind a merge queue: #1352 renamed a method and
+     * #1345 added a test calling the old name, each was green alone, and merged
+     * minutes apart they left main's test sources uncompilable. The queue tests the
+     * combination first, but only if {@code ci.yml} answers its {@code merge_group}
+     * event the right way round on both sides:
+     * <ul>
+     * <li>the required checks, and every job they {@code need}, must run on it — a
+     * required check that never reports holds the entry until the queue's timeout
+     * fails it, and one gated on {@code pull_request} or {@code push} never starts
+     * there;</li>
+     * <li>change detection must not narrow it: the entry is the last look at the
+     * combined code before main moves, so detect-changes forces every filter true
+     * exactly as it does for a tag;</li>
+     * <li>nothing publishes or notifies from it: every job that pushes an image,
+     * cuts a release, uploads an SBOM or posts to Slack is reachable only from a
+     * push or a tag, or excludes {@code merge_group} by name.</li>
+     * </ul>
+     */
+    @Test
+    @DisplayName("ci.yml runs the required checks for merge-queue entries and publishes nothing from them")
+    void mergeQueueEntriesRunTheRequiredChecksAndPublishNothing() throws IOException {
+        JsonNode workflow = new YAMLMapper().readTree(CI_WORKFLOW.toFile());
+        // YAML 1.1 reads a bare `on` as the boolean true; Jackson keeps the key text.
+        JsonNode on = workflow.has("on") ? workflow.path("on") : workflow.path("true");
+        assertTrue(on.has("merge_group"), CI_WORKFLOW + " no longer triggers on merge_group, so a merge queue on main"
+                + " would wait for its required checks forever");
+        List<String> types = new ArrayList<>();
+        on.path("merge_group").path("types").forEach(type -> types.add(type.asText()));
+        assertTrue(types.isEmpty() || types.contains("checks_requested"),
+                CI_WORKFLOW + "'s merge_group trigger must include checks_requested, the only activity type: " + types);
+
+        Map<String, String> jobs = ciJobBlocks();
+        Map<String, String> idByName = new LinkedHashMap<>();
+        for (Map.Entry<String, String> job : jobs.entrySet()) {
+            for (String line : job.getValue().split(LINE_FEED, -1)) {
+                if (line.startsWith("    name: ")) {
+                    idByName.put(line.substring("    name: ".length()).strip(), job.getKey());
+                    break;
+                }
+            }
+        }
+
+        List<String> pending = new ArrayList<>();
+        for (String check : REQUIRED_CHECKS) {
+            String id = idByName.get(check);
+            assertNotNull(id, CI_WORKFLOW + " has no job named `" + check + "`, a required status check on main");
+            pending.add(id);
+        }
+        List<String> excluded = new ArrayList<>();
+        TreeSet<String> seen = new TreeSet<>();
+        while (!pending.isEmpty()) {
+            String id = pending.removeLast();
+            if (!seen.add(id)) {
+                continue;
+            }
+            String block = jobs.get(id);
+            assertNotNull(block, "a required check needs `" + id + "`, which " + CI_WORKFLOW + " does not declare");
+            String condition = ciJobCondition(block);
+            if (condition.contains("github.event_name == 'pull_request'") || condition.contains("github.event_name == 'push'")
+                    || condition.contains("'merge_group'") || condition.contains("refs/tags/")) {
+                excluded.add(id + ": " + condition.strip());
+            }
+            pending.addAll(ciJobNeeds(block));
+        }
+        assertEquals(List.of(), excluded, "these jobs are, or are needed by, a required check, and their condition"
+                + " names an event or a ref, which can keep them from running on a merge-queue entry");
+
+        JsonNode detect = workflow.path("jobs").path("detect-changes");
+        String checkPaths = "";
+        String resolve = "";
+        for (JsonNode step : detect.path("steps")) {
+            if (step.path("with").has("filters")) {
+                checkPaths = step.path("if").asText();
+            }
+            if ("result".equals(step.path("id").asText())) {
+                resolve = step.path("run").asText();
+            }
+        }
+        assertTrue(checkPaths.contains("github.event_name != 'merge_group'"),
+                "detect-changes' path filter must be skipped on merge_group, where every filter is forced: " + checkPaths);
+        String forcingBranch = resolve.lines().map(String::strip).filter(line -> line.startsWith("if [[ \"$GITHUB_REF\""))
+                .findFirst().orElse("");
+        assertTrue(forcingBranch.contains("merge_group"),
+                "detect-changes' Resolve step must force every filter true on merge_group in the same branch as tags,"
+                        + " so a queue entry runs every test path rather than what one diff suggests: " + forcingBranch);
+
+        List<String> publishing = List.of("sbom", "docker", "release", "smoke-test", "preflight-push", "redhat-publish",
+                "post-release", "notify-slack");
+        List<String> reachable = new ArrayList<>();
+        for (String id : publishing) {
+            String block = jobs.get(id);
+            assertNotNull(block, CI_WORKFLOW + " no longer has a `" + id + "` job; update this list");
+            if (!unreachableOnMergeGroup(jobs, id, new TreeSet<>())) {
+                reachable.add(id + ": " + ciJobCondition(block).strip());
+            }
+        }
+        assertEquals(List.of(), reachable, "these jobs publish or notify, and nothing keeps them off a merge-queue entry."
+                + " Gate them on `github.event_name == 'push'`, a tag, or `github.event_name != 'merge_group'`");
+    }
+
+    /**
+     * Whether a job cannot run on {@code merge_group}: its own condition says push,
+     * a tag, or not-merge_group, or it needs a job that cannot.
+     */
+    private static boolean unreachableOnMergeGroup(Map<String, String> jobs, String id, TreeSet<String> visiting) {
+        String block = jobs.get(id);
+        if (block == null || !visiting.add(id)) {
+            return false;
+        }
+        String condition = ciJobCondition(block);
+        if (condition.contains("github.event_name == 'push'") || condition.contains("github.event_name != 'merge_group'")
+                || condition.strip().startsWith("startsWith(github.ref, 'refs/tags/')")) {
+            return true;
+        }
+        if (condition.contains("always()")) {
+            return false;
+        }
+        return ciJobNeeds(block).stream().anyMatch(need -> unreachableOnMergeGroup(jobs, need, visiting));
+    }
+
+    /**
      * Every job in the workflow, name to raw block. A job header is the only line
      * indented by exactly two spaces that is a bare key.
      */
