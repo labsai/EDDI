@@ -141,7 +141,7 @@ Revision 1 called this "disclosure, not enforcement". That was wrong. In quarkus
 ### Clients that see a different list
 
 - `/mcp` cannot be opened selectively. An authenticated EDDI already refuses an unauthenticated `tools/list` ([`docs/mcp-server.md`](../docs/mcp-server.md):898), so nothing changes there.
-- What does change: EDDI's own MCP client lists tools with the config's static key and calls them as the caller ([`docs/mcp-server.md`](../docs/mcp-server.md):1046-1049). With role filtering, a static key held by a low-tier service account lists fewer tools than the caller may use. Document that **the listing key determines the tool set**.
+- What does change: EDDI's own MCP client lists tools with the config's static key and calls them as the caller ([`docs/mcp-server.md`](../docs/mcp-server.md):1046-1049). With role filtering, a static key held by a low-tier service account lists fewer tools than the caller may use. Document that **the listing key determines the tool set**. *Fact-check:* without a static key, the client sends `initialize` and `tools/list` unauthenticated (deliberately, because the client is cached across callers), so against an authenticated EDDI it lists nothing at all, with or without role filtering.
 - Platform Operator: `tool-scopes.ts` allows REST endpoints and does not use EDDI's MCP surface (verified in review). No operator change and no revision bump.
 
 ### Auth off
@@ -199,7 +199,7 @@ With exchange, EDDI sends the user's inbound token, with its own client credenti
 | --- | --- |
 | Synchronous turn from an authenticated caller | Exchange the caller's token |
 | Scheduled fire, continuation, async group turn | `ConnectionException` (no subject). The same posture as `PER_USER` with `SELF_ASSERTED` provenance |
-| `/v1` OpenAI-compatible API | Under the default `eddi.openai-compat.http-policy=permit`, kept off OIDC (`application.properties:651-655`), so there is no subject: refused at resolve time with a clear message. *Fact-check:* under `http-policy=authenticated` Quarkus OIDC validates the bearer token, so there is a subject and the exchange can run as on a synchronous turn |
+| `/v1` OpenAI-compatible API | Under the default `eddi.openai-compat.http-policy=permit`, kept off OIDC (`application.properties:651-655`), so there is no subject: refused at resolve time with a clear message. *Fact-check:* under `http-policy=authenticated` Quarkus OIDC validates the bearer token, so a subject does exist there. Whether to allow the exchange under that policy is an open decision |
 | HITL resume | **Fail closed by default.** Exchanging the approver's token would run the requester's call with the approver's (often admin) rights downstream: a confused deputy. The only exception is when the decider is the conversation owner, which is the same principal. This is stricter than [`saas-connectors-plan.md`](saas-connectors-plan.md) `:621-650` for `CALLER_SUPPLIED` (*fact-check:* its decision at `:642` is "C, with A as the failure mode": the integrator re-supplies the credential on resume, and only failing that does the call fail) and the existing fail-closed resumes in [`docs/hitl.md`](../docs/hitl.md):218 |
 | Group member turn on the caller's thread | Exchange only when the member conversation's provenance is `VERIFIED` for that user. Otherwise refuse. The open group-binding question in [`docs/connections.md`](../docs/connections.md) Limitations applies unchanged |
 
