@@ -30,7 +30,7 @@ class ContentModelTest {
             // Pinned: the hash keys stored manifests, so a change to it — the canonical
             // string, the digest, the length — orphans every manifest already stored.
             // Raise RULES_VERSION on purpose instead, and update this value with it.
-            assertEquals("fcf0e74eca24f85b", SplitConfig.defaults().hash());
+            assertEquals("05cf4ba08e506c77", SplitConfig.defaults().hash());
         }
 
         @Test

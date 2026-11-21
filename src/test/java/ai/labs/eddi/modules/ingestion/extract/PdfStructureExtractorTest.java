@@ -4,10 +4,13 @@
  */
 package ai.labs.eddi.modules.ingestion.extract;
 
+import ai.labs.eddi.modules.ingestion.extract.document.Block;
+import ai.labs.eddi.modules.ingestion.extract.document.BlockOptions;
 import ai.labs.eddi.modules.ingestion.extract.document.DocumentManifest;
 import ai.labs.eddi.modules.ingestion.extract.document.DocumentUnit;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitStrategy;
+import ai.labs.eddi.modules.ingestion.extract.document.TextBlock;
 import org.apache.pdfbox.Loader;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -21,6 +24,7 @@ import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.IntStream;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -153,7 +157,7 @@ class PdfStructureExtractorTest {
             DocumentManifest manifest = manifest(PdfFixtures.chapterOnPageThree(), unfitted(SplitStrategy.AUTO));
 
             assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
-            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE), manifest.warnings());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE_OR_HEADINGS), manifest.warnings());
         }
 
         @Test
@@ -187,16 +191,17 @@ class PdfStructureExtractorTest {
             DocumentManifest manifest = manifest(PdfFixtures.chapters(5), unfitted(SplitStrategy.AUTO));
 
             assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
-            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE), manifest.warnings());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE_OR_HEADINGS), manifest.warnings());
         }
 
         @Test
-        @DisplayName("handles headings as AUTO until heading detection exists, and says so")
-        void headingsNotYet() {
+        @DisplayName("ignores the outline when asked for headings")
+        void headingsRequestedIgnoreTheOutline() {
+            // The outlined fixture's text is all one size: no headings.
             DocumentManifest manifest = manifest(PdfFixtures.outlined(2, 2), unfitted(SplitStrategy.HEADINGS));
 
-            assertEquals(SplitStrategy.OUTLINE, manifest.splitUsed());
-            assertEquals(List.of(PdfStructureExtractor.WARNING_HEADINGS), manifest.warnings());
+            assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_HEADINGS), manifest.warnings());
         }
     }
 
@@ -205,14 +210,14 @@ class PdfStructureExtractorTest {
     class Pages {
 
         @Test
-        @DisplayName("cuts a document with no outline into windows, and says why")
+        @DisplayName("cuts a document with neither outline nor headings into windows, and says why")
         void autoWithoutOutline() {
             DocumentManifest manifest = manifest(PdfFixtures.plain(25), SplitConfig.defaults());
 
             assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
             assertEquals("u1:1-10 u2:11-20 u3:21-25", shape(manifest));
             assertEquals(List.of("Pages 1–10", "Pages 11–20", "Pages 21–25"), titles(manifest));
-            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE), manifest.warnings());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE_OR_HEADINGS), manifest.warnings());
         }
 
         @Test
@@ -403,6 +408,8 @@ class PdfStructureExtractorTest {
             fixtures.put("named", PdfFixtures::namedDestinations);
             fixtures.put("untidy", PdfFixtures::untidyOutline);
             fixtures.put("blank", () -> PdfFixtures.blank(7));
+            fixtures.put("headings", PdfFixtures::headingsOnly);
+            fixtures.put("columns", PdfFixtures::twoColumn);
             List<SplitConfig> splits = List.of(SplitConfig.defaults(), unfitted(SplitStrategy.OUTLINE),
                     new SplitConfig(SplitStrategy.AUTO, 3, 700, 400, 4),
                     new SplitConfig(SplitStrategy.OUTLINE, 5, 1_000, 0, 100),
@@ -663,9 +670,281 @@ class PdfStructureExtractorTest {
             // a lone Flate content stream with a decoder of its own.)
             assertDoesNotThrow(() -> {
                 try (var document = Loader.loadPDF(PdfFixtures.flateBomb(8 * 1024 * 1024))) {
-                    PdfTextExtractor.chargePageContents(document.getPage(0));
+                    BoundedTextStripper.chargePageContents(document.getPage(0));
                 }
             });
+        }
+    }
+
+    // --- WP-2b.1: headings, columns, blocks
+
+    @Nested
+    @DisplayName("cutting by headings")
+    class Headings {
+
+        @Test
+        @DisplayName("makes a unit of each chapter heading and a part of each heading one level below")
+        void headingsRequested() {
+            DocumentManifest manifest = manifest(PdfFixtures.headingsOnly(), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals("u1:1-2 u2:3-4 u2.1:3-3 u2.2:4-4 u3:5-6", shape(manifest));
+            assertEquals(List.of("1 Introduction", "2 Market overview", "2.1 Europe", "2.2 Asia", "3 Outlook"),
+                    titles(manifest));
+            assertTrue(manifest.warnings().isEmpty(), manifest.warnings().toString());
+        }
+
+        @Test
+        @DisplayName("is what AUTO falls back to without an outline, and says so")
+        void autoFallsBackToHeadings() {
+            DocumentManifest manifest = manifest(PdfFixtures.headingsOnly(), unfitted(SplitStrategy.AUTO));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals("u1:1-2 u2:3-4 u2.1:3-3 u2.2:4-4 u3:5-6", shape(manifest));
+            assertEquals(List.of(PdfStructureExtractor.WARNING_CUT_BY_HEADINGS), manifest.warnings());
+        }
+
+        @Test
+        @DisplayName("cuts by pages when no heading is found, and says so")
+        void noHeadings() {
+            DocumentManifest manifest = manifest(PdfFixtures.plain(12), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
+            assertEquals("u1:1-10 u2:11-12", shape(manifest));
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_HEADINGS), manifest.warnings());
+        }
+
+        @Test
+        @DisplayName("does not search pages past the measured ones for headings")
+        void onlyMeasuredPages() {
+            // Pages 1 and 2 hold one chapter heading only; the others are not read.
+            var twoPages = new ExtractionLimits(200_000, 2, 5_000, 64, 64L * 1024 * 1024);
+            DocumentManifest manifest = extractor.manifest(PdfFixtures.headingsOnly(), "ref-1",
+                    unfitted(SplitStrategy.HEADINGS), twoPages);
+
+            assertEquals(SplitStrategy.PAGES, manifest.splitUsed());
+        }
+
+        @Test
+        @DisplayName("takes headings whose sizes differ by less than 5 % for one level")
+        void nearlyEqualSizes() {
+            DocumentManifest manifest = manifest(PdfFixtures.nearlyEqualHeadings(), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals("u1:1-1 u2:2-3", shape(manifest));
+        }
+
+        @Test
+        @Timeout(120)
+        @DisplayName("uses at most 2,000 headings, and says so")
+        void headingsTruncated() {
+            DocumentManifest manifest = manifest(PdfFixtures.manyHeadings(160, 13), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_HEADINGS_TRUNCATED), manifest.warnings());
+            assertTrue(manifest.units().getLast().lastPage() == 160);
+            assertTrue(manifest.units().stream().noneMatch(unit -> unit.firstPage() > 154),
+                    "no chapter starts past the 2,000th heading");
+        }
+
+        @Test
+        @DisplayName("gives a part of a chapter no mid-page note: its pages start where the chapter does")
+        void noNoteForParts() {
+            byte[] pdf = PdfFixtures.headingsOnly();
+            DocumentUnit firstPart = manifest(pdf, unfitted(SplitStrategy.HEADINGS)).units().stream()
+                    .filter(unit -> unit.id().equals("u2.1")).findFirst().orElseThrow();
+
+            List<Block> blocks = extractor.blocks(pdf, firstPart, BlockOptions.textOnly(), limits);
+
+            TextBlock first = (TextBlock) blocks.getFirst();
+            assertTrue(first.text().startsWith("Body line 25:"), first.text());
+        }
+
+        @Test
+        @DisplayName("numbers the same document the same way every time, and a re-saved copy too")
+        void deterministic() {
+            byte[] pdf = PdfFixtures.headingsOnly();
+            SplitConfig split = SplitConfig.defaults();
+
+            DocumentManifest first = manifest(pdf, split);
+            assertEquals(first.units(), manifest(pdf, split).units());
+            assertEquals(first.units(), manifest(PdfFixtures.resaved(pdf), split).units());
+        }
+
+        @Test
+        @DisplayName("keeps headings as data: hostile text becomes a cleaned title, never a warning")
+        void headingTitlesAreCleaned() {
+            assertEquals("2 Market overview", PdfStructureExtractor.cleanTitle("2\tMarket\noverview "));
+        }
+    }
+
+    @Nested
+    @DisplayName("text in columns")
+    class Columns {
+
+        @Test
+        @DisplayName("names the pages whose text stands in columns, and no others")
+        void warning() {
+            DocumentManifest manifest = manifest(PdfFixtures.twoColumn(), SplitConfig.defaults());
+
+            assertEquals(List.of(PdfStructureExtractor.WARNING_NO_OUTLINE_OR_HEADINGS,
+                    PdfStructureExtractor.multiColumnWarning(List.of(1))), manifest.warnings());
+            assertTrue(manifest.warnings().get(1).contains("on page 1;"), manifest.warnings().get(1));
+        }
+
+        @Test
+        @DisplayName("lists runs of pages as ranges and stops naming them after twenty")
+        void warningText() {
+            assertEquals("Text in columns was found on pages 2–4, 7; it is read top to bottom across the columns, "
+                    + "so their lines alternate.", PdfStructureExtractor.multiColumnWarning(List.of(2, 3, 4, 7)));
+
+            List<Integer> many = IntStream.rangeClosed(1, 25).boxed().toList();
+            String warning = PdfStructureExtractor.multiColumnWarning(many);
+            assertTrue(warning.contains("pages 1–20 and 5 more;"), warning);
+        }
+    }
+
+    @Nested
+    @DisplayName("blocks of a unit")
+    class Blocks {
+
+        private DocumentUnit unit(byte[] pdf, String id) {
+            return manifest(pdf, unfitted(SplitStrategy.HEADINGS)).units().stream()
+                    .filter(unit -> unit.id().equals(id)).findFirst().orElseThrow();
+        }
+
+        private List<Block> blocks(byte[] pdf, DocumentUnit unit, ExtractionLimits bounds) {
+            return extractor.blocks(pdf, unit, BlockOptions.textOnly(), bounds);
+        }
+
+        /** {@code page:H|T:first line} per block. */
+        private static List<String> outline(List<Block> blocks) {
+            return blocks.stream().map(block -> (TextBlock) block)
+                    .map(block -> block.page() + ":" + (block.heading() ? "H" : "T") + ":"
+                            + block.text().lines().findFirst().orElse(""))
+                    .toList();
+        }
+
+        @Test
+        @DisplayName("gives a unit's text in reading order, a heading a block of its own")
+        void readingOrder() {
+            byte[] pdf = PdfFixtures.headingsOnly();
+
+            List<Block> blocks = blocks(pdf, unit(pdf, "u2"), limits);
+
+            assertEquals(List.of(
+                    "3:T:[Page 3 begins with the end of the part before; this part starts at the heading \"2 Market overview\".]",
+                    "3:T:Body line 25: the quick brown fox jumps over the lazy dog.",
+                    "3:H:2 Market overview",
+                    "3:T:Body line 30: the quick brown fox jumps over the lazy dog.",
+                    "3:H:2.1 Europe",
+                    "3:T:Body line 34: the quick brown fox jumps over the lazy dog.",
+                    "4:H:2.2 Asia",
+                    "4:T:Body line 37: the quick brown fox jumps over the lazy dog."), outline(blocks));
+            List<Block> sorted = blocks.stream().sorted(Block.READING_ORDER).toList();
+            assertEquals(blocks, sorted, "the order of the list is the reading order");
+            assertEquals(5, ((TextBlock) blocks.get(1)).text().lines().count(), "body lines are one block");
+        }
+
+        @Test
+        @DisplayName("adds no note for a unit that starts at the top of its page, or on page 1")
+        void noNote() {
+            byte[] pdf = PdfFixtures.headingsOnly();
+
+            assertEquals("5:H:3 Outlook", outline(blocks(pdf, unit(pdf, "u3"), limits)).getFirst());
+            assertEquals("1:H:Annual Report 2026", outline(blocks(pdf, unit(pdf, "u1"), limits)).getFirst());
+        }
+
+        @Test
+        @DisplayName("reads lines at the same height left to right, whatever order the file wrote them in")
+        void columnsLeftToRight() {
+            byte[] pdf = PdfFixtures.twoColumn();
+            var page = new DocumentUnit("u1", null, 1, null, 1, 1, 0, 0, 0, 0);
+
+            List<Block> blocks = blocks(pdf, page, limits);
+
+            assertEquals("1:H:Two columns", outline(blocks).getFirst());
+            List<String> lines = ((TextBlock) blocks.get(1)).text().lines().toList();
+            assertEquals(List.of("Left 1 short column text here", "Right 1 short column text here",
+                    "Left 2 short column text here", "Right 2 short column text here"), lines.subList(0, 4));
+        }
+
+        @Test
+        @DisplayName("holds the same text the text extractor gives, block by block")
+        void sameTextAsTheExtractor() {
+            byte[] pdf = PdfFixtures.plain(3);
+            var all = new DocumentUnit("u1", null, 1, null, 1, 3, 0, 0, 0, 0);
+
+            String blocks = blocks(pdf, all, limits).stream().map(block -> ((TextBlock) block).text())
+                    .collect(Collectors.joining(" "));
+            String text = new PdfTextExtractor().extract(pdf, limits);
+
+            assertEquals(text.replaceAll("\\s+", " ").strip(), blocks.replaceAll("\\s+", " ").strip());
+        }
+
+        @Test
+        @DisplayName("stops at the character cap and says so in a closing note")
+        void characterCap() {
+            byte[] pdf = PdfFixtures.plain(5);
+            var all = new DocumentUnit("u1", null, 1, null, 1, 5, 0, 0, 0, 0);
+
+            List<Block> blocks = blocks(pdf, all, limits.withMaxCharacters(1_500));
+
+            TextBlock last = (TextBlock) blocks.getLast();
+            assertTrue(last.text().startsWith("[The text of this part stops here"), last.text());
+            assertTrue(blocks.stream().allMatch(block -> block.page() <= 2), outline(blocks).toString());
+        }
+
+        @Test
+        @DisplayName("reads at most maxParts pages and names the ones left out")
+        void pageCap() {
+            byte[] pdf = PdfFixtures.plain(5);
+            var all = new DocumentUnit("u1", null, 1, null, 1, 5, 0, 0, 0, 0);
+            var twoPages = new ExtractionLimits(200_000, 2, 5_000, 64, 64L * 1024 * 1024);
+
+            List<Block> blocks = blocks(pdf, all, twoPages);
+
+            assertEquals("[Only the first 2 pages of this part were read; pages 3–5 are not included.]",
+                    ((TextBlock) blocks.getLast()).text());
+        }
+
+        @Test
+        @DisplayName("refuses a unit whose pages are not in the file")
+        void foreignUnit() {
+            var beyond = new DocumentUnit("u9", null, 1, null, 2, 9, 0, 0, 0, 0);
+
+            var failure = assertThrows(UnreadableDocumentException.class,
+                    () -> blocks(PdfFixtures.plain(3), beyond, limits));
+            assertTrue(failure.getMessage().contains("has 3 pages"), failure.getMessage());
+            assertThrows(IllegalArgumentException.class, () -> blocks(PdfFixtures.plain(3),
+                    new DocumentUnit("u0", null, 1, null, 0, 1, 0, 0, 0, 0), limits));
+        }
+
+        @Test
+        @DisplayName("reads under the same bounds as the manifest: the decode budget and the deadline")
+        void bounded() {
+            var page = new DocumentUnit("u1", null, 1, null, 1, 1, 0, 0, 0, 0);
+            var oneMegabyte = new ExtractionLimits(200_000, 500, 5_000, 64, 1024L * 1024);
+
+            var bomb = assertThrows(UnreadableDocumentException.class, () -> extractor.blocks(
+                    PdfFixtures.flateBomb(8 * 1024 * 1024), page, null, oneMegabyte, false));
+            assertTrue(bomb.getMessage().contains("expands to more than"), bomb.getMessage());
+
+            // Many pages, so the read outlasts one tick of a coarse wall clock.
+            var allPages = new DocumentUnit("u1", null, 1, null, 1, 300, 0, 0, 0, 0);
+            var late = assertThrows(UnreadableDocumentException.class, () -> extractor.blocks(
+                    PdfFixtures.plain(300), allPages, null, limits.withMaxDuration(Duration.ofNanos(1)), false));
+            assertTrue(late.getMessage().contains("too long"), late.getMessage());
+        }
+
+        @Test
+        @DisplayName("matches a unit's title to its heading: exact, the first of merged titles, or cut to length")
+        void namesUnit() {
+            assertTrue(PdfStructureExtractor.namesUnit("2 Market overview", "2 Market overview"));
+            assertTrue(PdfStructureExtractor.namesUnit("2 Market\toverview", "2 Market overview – 3 Outlook"));
+            assertTrue(PdfStructureExtractor.namesUnit("A very long heading indeed", "A very long head…"));
+            assertFalse(PdfStructureExtractor.namesUnit("2 Market", "2 Market overview"));
+            assertFalse(PdfStructureExtractor.namesUnit("Other", null));
         }
     }
 }

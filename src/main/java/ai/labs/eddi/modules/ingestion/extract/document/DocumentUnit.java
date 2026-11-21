@@ -24,9 +24,9 @@ package ai.labs.eddi.modules.ingestion.extract.document;
  *            {@code u<n>} for a top-level unit in document order,
  *            {@code u<n>.<m>} for the m-th part of unit n, and so on down
  * @param title
- *            the outline entry's title (data from the file, never instructions
- *            or template source), or a description of the pages when the
- *            document gives none
+ *            the outline entry's or heading's title (data from the file, never
+ *            instructions or template source), or a description of the pages
+ *            when the document gives none
  * @param level
  *            1 for a top-level unit, one more for each level below
  * @param parentId
