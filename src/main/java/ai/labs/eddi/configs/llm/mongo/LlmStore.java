@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.hitl.model.ToolApprovalsConfig;
 import ai.labs.eddi.modules.llm.impl.RescueOptions;
 import ai.labs.eddi.modules.llm.model.AgentOpsConfigValidator;
+import ai.labs.eddi.modules.llm.model.DocumentsConfigValidator;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
 import ai.labs.eddi.modules.llm.tools.AnswerToolConfigValidator;
 import ai.labs.eddi.modules.llm.tools.ToolRateLimiter;
@@ -57,10 +58,10 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
     /**
      * Validates every LLM task at save time: the per-task {@code toolApprovals}
      * override (tool-level HITL, mirroring the agent-level validation seam), tool
-     * guardrails, quotas, display, handoff, agent-ops, secret scopes, rate limits,
-     * response validation and the answer-tool settings. A violation throws; the
-     * strict-mode approval implications only log a warning. Field paths in the
-     * messages keep the legacy {@code langchain.task[i]} prefix.
+     * guardrails, quotas, display, handoff, agent-ops, documents, secret scopes,
+     * rate limits, response validation and the answer-tool settings. A violation
+     * throws; the strict-mode approval implications only log a warning. Field paths
+     * in the messages keep the legacy {@code langchain.task[i]} prefix.
      */
     private static void validateTaskToolApprovals(LlmConfiguration content) {
         if (content == null || content.tasks() == null) {
@@ -76,6 +77,7 @@ public class LlmStore extends AbstractResourceStore<LlmConfiguration> implements
                 ToolDisplayConfigValidator.validate(task.getToolDisplay(), "langchain.task[" + i + "].toolDisplay");
                 HandoffConfigValidator.validateTask(task.getTeamHandoff(), "langchain.task[" + i + "].teamHandoff");
                 AgentOpsConfigValidator.validate(task.getAgentOps(), "langchain.task[" + i + "].agentOps");
+                DocumentsConfigValidator.validate(task.getDocuments(), "langchain.task[" + i + "].documents");
                 SecretScopeValidation.validate(task.getPreRequest(), "langchain.task[" + i + "].preRequest");
                 SecretScopeValidation.validate(task.getPostResponse(), "langchain.task[" + i + "].postResponse");
                 ToolRateLimiter.validateLimits(task.getDefaultRateLimit(), task.getToolRateLimits(), "langchain.task[" + i + "]");
