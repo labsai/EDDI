@@ -608,7 +608,25 @@ source's content is removed again, and a renamed knowledge base's state is clear
 frees the source, so a new run may already hold it by then and may have read a row the old run wrote
 as "unchanged"; the state cannot be purged from under that run, so every document's content hash and
 validators are forgotten instead, and the next run embeds each page into the store the new name
-addresses.
+addresses. A source that was removed or **changed type** (a crawl switched to Google Drive, say) is
+settled the same careful way: the cleanup takes the source's run slot first and removes only the
+chunks tagged with the old run's id — everything under the source's key only when the old run is still
+the newest in the history, which means the save's own removal failed and is being retried. When no
+other run is listed, the state goes too; when one is — the new type's first run is writing, or has
+finished — the state is left to it, with every document's content forgotten so that nothing the old run
+wrote can be called "unchanged". The new run's chunks, state and run row are never touched.
+
+**A rename that leaves the content alone updates the citation, not the vectors.** A Drive file renamed
+without a byte change keeps its checksum, and a Google Doc whose `version` moved only for a rename
+exports the same text, so neither is embedded again — and their chunks used to keep the old title and
+link as their citation. Each document's state now records a fingerprint of the title and URL its chunks
+carry. When what the source reports differs, the chunks' `title` and `url` are rewritten in place,
+vectors, `runId` and everything else untouched. Every source type gets this where the new title is
+known: an upload source and a Drive stored file from the listing (so the file is not downloaded), a Google
+Doc and a crawled page whose `<title>` changed from the fetched content. On a vector store that cannot
+update metadata in place (see [Store support](#store-support-for-replacement)) the renamed document is
+embedded again instead, once. Rows written before the fingerprint existed adopt the current one on the
+next run rather than counting as renamed, so an upgrade rewrites nothing.
 
 **A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
 Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
@@ -882,12 +900,15 @@ Drive's listing query; the connection name is held to the connections framework'
 6. Allow the token endpoint for the deployment (an empty list resolves no OAuth connection at all) —
    `credentialEndpointAllowlist` in the [connection settings](connections.md#enabling-connections):
 
-   ```bash
-   curl -X PUT "$EDDI/connectionstore/settings" -H 'Content-Type: application/json' \
-     -d '{"credentialEndpointAllowlist": ["https://oauth2.googleapis.com"]}'
-   ```
+   Read the current settings first and send **all** of them back with the allowlist extended. A field
+   left out is unset: that would switch `enabled` off, clear `publicBaseUrl` (account linking), and a
+   shorter `credentialEndpointAllowlist` would stop existing OAuth connections resolving.
 
-   A `null` field unsets a stored value, so send the settings you already have along with it.
+   ```bash
+   curl "$EDDI/connectionstore/settings" > settings.json
+   # add "https://oauth2.googleapis.com" to credentialEndpointAllowlist, keep every other field
+   curl -X PUT "$EDDI/connectionstore/settings" -H 'Content-Type: application/json' -d @settings.json
+   ```
 7. Create the [`OAUTH2_JWT_BEARER` connection](connections.md#a-service-account-that-signs-instead-of-sending-a-secret).
    Its `baseUrlAllowlist` must list `https://www.googleapis.com`, or every request is refused before
    it is sent:
@@ -926,7 +947,9 @@ Drive's listing query; the connection name is held to the connections framework'
   checksum), known from the listing, so an unchanged file is not downloaded. A Google Doc, Sheet or
   Slides file has no checksum: an unchanged `version` skips the export, and a changed one is exported
   and the hash of the export decides whether to embed — `version` also moves on a rename or a sharing
-  change, which must not re-embed a document.
+  change, which must not re-embed a document. A rename still reaches the citation: the chunks get the
+  file's new name and link without being embedded again (see
+  [A rename that leaves the content alone](#ingestion-sources)).
 - **Content.** A Doc is exported as **Markdown** (HTML when the Markdown export is refused), with the
   base64 images Google inlines removed. A Sheet is exported as **XLSX**, not CSV: the CSV export
   carries only the first sheet, and the spreadsheet extractor renders every sheet as a table with its
@@ -1089,6 +1112,12 @@ The same `removeAll(Filter)` serves `replace=true` and
 [deleting a document](#deleting-a-document) on `/ingest`'s documents; where it is missing, both answer
 with a `warning` instead.
 
+Updating a renamed document's citation in place needs more than langchain4j offers, so it exists only
+on the two stores EDDI extends: `in-memory` (the chunks are replaced under the same ids and vectors) and
+`pgvector` (one `UPDATE` merging `title` and `url` into the metadata, on both the `json` and the `jsonb`
+table layout — verified by `PgVectorMetadataUpdateIT`). On `mongodb-atlas`, `elasticsearch`, `qdrant`
+and `chroma` a renamed document is embedded again instead, which costs what a content change costs.
+
 ## Evaluating retrieval
 
 `POST /ragstore/rags/{id}/search` shows what one query retrieves. To tell whether a change — a new
@@ -1235,7 +1264,7 @@ refuses two beans for one type at startup.
 | `discover(DiscoveryContext)` | Lists one partition from its cursor and hands each document to `context.accept(WorkItem)` as it is found, streamed rather than returned. Downloads nothing it does not have to. Returns a `DiscoveryResult`: the stop reason, the `Coverage`, and the next cursor |
 | `fetch(WorkItem, SourceContext)` | Reads one document as a `SourceDocument`. Not called for an item that arrived `prefetched`, which is what a crawler does, since it reads the page to find the next link |
 | `listPartitions` / `verifyAccess` | Drives, sites, mailboxes. The default is one implicit partition that is always accessible. **This version runs exactly one partition per source** |
-| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, and an optional prefetched document. When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched |
+| `WorkItem` | `documentId`, `versionToken`, `action` (`UPSERT`, `UNCHANGED` meaning the provider confirmed the stored version, e.g. an HTTP 304, or `DELETE`), `partitionId`, connector-private `hints`, an optional prefetched document, and an optional `citation` (the title and URL `fetch` will put on the document). When a not-yet-fetched item carries a `versionToken` equal to the stored one, it is unchanged and never fetched; when it also carries a `citation` that differs from the one its chunks carry, their title and URL are updated without fetching |
 | `SourceDocument` | `content`, which is one of three kinds: `HtmlPage` (page converter; blank text means navigation and is skipped), `FileBytes` (extracted by MIME type; no text means a definitive failure that retires older chunks) or `Text`. It also carries `versionToken` (the change key when present, otherwise the text hash), HTTP `validators`, `truncated` and `metadata` under `SourceMetadataKeys` |
 | `Coverage` | `FULL_LISTING`: an authoritative listing, where absence means deletion, even when the listing is empty. `FULL_TRAVERSAL`: a crawl; absence means deletion only if the run learned something definitive. `INCREMENTAL`: a change feed; absence means nothing, and deletions arrive as `DELETE` items. `PARTIAL`: nothing is concluded |
 | `SourceError` | `TRANSIENT`, `THROTTLED` (each with an optional retry-after), `AUTH`, `NOT_FOUND`, `PERMANENT`, `REJECTED`, `CURSOR_INVALID`. Only `NOT_FOUND` and `PERMANENT` count as evidence about a document. Use `PERMANENT` only when the answer concerns the document itself, such as a format that cannot be exported. A request the provider refuses as you made it (malformed, an unknown field) is `REJECTED`: it is a fault in the connector, and counting it would delete every document it touched. The others mean "could not look", and the document is kept. A failure reported without a document id is never evidence. Per-document failures go to `context.reportFailure` or are thrown from `fetch` as `SourceException`. A whole-source failure thrown from `discover` fails the run |

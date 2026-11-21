@@ -64,6 +64,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 tombstoned BOOLEAN NOT NULL DEFAULT FALSE,
                 fencing_run_id VARCHAR(64),
                 fencing_generation BIGINT,
+                citation_hash TEXT,
                 PRIMARY KEY (source_id, document_id)
             )
             """;
@@ -111,6 +112,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
     private static final String[] ADD_FENCING_COLUMNS = {
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_run_id VARCHAR(64)",
             "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS fencing_generation BIGINT",
+            // What a document's chunks carry as their citation, so a rename is noticed.
+            "ALTER TABLE rag_ingestion_documents ADD COLUMN IF NOT EXISTS citation_hash TEXT",
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS generation BIGINT NOT NULL DEFAULT 0",
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stale_after TIMESTAMP",
             // Run detail the Manager shows; added the same way so an existing table
@@ -185,7 +188,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public void recordIngested(String sourceId, String documentId, String contentHash,
-                               String etag, String lastModified, String runId) {
+                               String etag, String lastModified, String runId, String citationHash) {
 
         // first_ingested_at is only written on insert, so re-ingesting a changed
         // page keeps the date it first entered the knowledge base.
@@ -198,8 +201,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 INSERT INTO rag_ingestion_documents
                     (source_id, document_id, content_hash, etag, last_modified,
                      first_ingested_at, last_ingested_at, last_run_id, missed_runs, tombstoned,
-                     fencing_run_id)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, FALSE, ?)
+                     fencing_run_id, citation_hash)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, FALSE, ?, ?)
                 ON CONFLICT (source_id, document_id) DO UPDATE SET
                     content_hash = EXCLUDED.content_hash,
                     etag = EXCLUDED.etag,
@@ -207,7 +210,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                     last_ingested_at = EXCLUDED.last_ingested_at,
                     last_run_id = EXCLUDED.last_run_id,
                     missed_runs = 0,
-                    tombstoned = FALSE
+                    tombstoned = FALSE,
+                    citation_hash = EXCLUDED.citation_hash
                 WHERE rag_ingestion_documents.fencing_run_id = EXCLUDED.fencing_run_id
                 """;
         Timestamp now = Timestamp.from(Instant.now());
@@ -221,6 +225,7 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.setTimestamp(7, now);
             statement.setString(8, runId);
             statement.setString(9, runId);
+            statement.setString(10, citationHash);
             if (statement.executeUpdate() == 0) {
                 fenced("record an ingested document", sourceId, documentId, runId);
             }
@@ -228,6 +233,24 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // Losing this write means the document is embedded again next run, and
             // the run after that, for as long as the failure lasts.
             throw new IngestionStateStoreException("Failed to record an ingested document", e);
+        }
+    }
+
+    @Override
+    public void recordCitation(String sourceId, String documentId, String runId, String citationHash) {
+        String sql = """
+                UPDATE rag_ingestion_documents
+                   SET citation_hash = ?
+                 WHERE source_id = ? AND document_id = ? AND fencing_run_id = ?
+                """;
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, citationHash);
+            statement.setString(2, sourceId);
+            statement.setString(3, documentId);
+            statement.setString(4, runId);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a document's citation", e);
         }
     }
 
@@ -683,7 +706,8 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
                 toInstant(resultSet.getTimestamp("last_ingested_at")),
                 resultSet.getString("last_run_id"),
                 resultSet.getInt("missed_runs"),
-                resultSet.getBoolean("tombstoned"));
+                resultSet.getBoolean("tombstoned"),
+                resultSet.getString("citation_hash"));
     }
 
     private static IngestionRun toRun(ResultSet resultSet) throws SQLException {

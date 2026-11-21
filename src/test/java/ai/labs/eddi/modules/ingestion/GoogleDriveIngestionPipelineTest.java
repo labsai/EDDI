@@ -142,9 +142,50 @@ class GoogleDriveIngestionPipelineTest {
         assertEquals(0, bumped.documentsIngested());
         assertEquals(segments, embeddingStore.segments().size());
 
+        assertEquals("Leave policy (renamed)", titleOf("d1"), "the rename reached the citation");
+
         IngestionReport after = run(Mode.INGEST);
         assertEquals(exports + 1, drive.countRequests("/export"), "the new version was recorded");
         assertEquals(2, after.documentsUnchanged());
+    }
+
+    @Test
+    @DisplayName("a stored file renamed without a byte change gets its new title, and is neither downloaded nor embedded")
+    void renamedStoredFileGetsItsNewTitle() {
+        run(Mode.INGEST);
+        int segments = embeddingStore.segments().size();
+        int downloads = drive.countRequests("alt=media");
+        drive.file("f1", "travel-policy.txt", "text/plain", DRIVE, "Travel is booked through the portal.");
+
+        IngestionReport renamed = run(Mode.INGEST);
+
+        assertEquals(0, renamed.documentsIngested());
+        assertEquals(downloads, drive.countRequests("alt=media"), "the checksum still says unchanged");
+        assertEquals(segments, embeddingStore.segments().size());
+        assertEquals("travel-policy.txt", titleOf("f1"));
+    }
+
+    @Test
+    @DisplayName("a Google Doc rename whose citation update fails is exported and updated again next run")
+    void failedCitationUpdateIsRetried() {
+        run(Mode.INGEST);
+        drive.nativeFile("d1", "Leave policy (renamed)", FakeDrive.DOC, DRIVE, 5,
+                Map.of("text/markdown", utf8("# Leave\n\nTwenty-five days a year.")));
+        embeddingStore.failNextMetadataUpdate();
+
+        run(Mode.INGEST);
+        assertEquals("Leave policy", titleOf("d1"), "the update failed");
+        int exports = drive.countRequests("/export");
+
+        IngestionReport retried = run(Mode.INGEST);
+
+        assertEquals(exports + 1, drive.countRequests("/export"), "the new version was not recorded as seen");
+        assertEquals(0, retried.documentsIngested());
+        assertEquals("Leave policy (renamed)", titleOf("d1"));
+    }
+
+    private String titleOf(String documentId) {
+        return embeddingStore.segmentsOf(documentId).getFirst().metadata().getString(IngestionPipeline.METADATA_TITLE);
     }
 
     @Test

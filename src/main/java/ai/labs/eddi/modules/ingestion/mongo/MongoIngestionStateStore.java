@@ -86,6 +86,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
     private static final String FIELD_LAST_RUN_ID = "lastRunId";
     private static final String FIELD_MISSED_RUNS = "missedRuns";
     private static final String FIELD_TOMBSTONED = "tombstoned";
+    private static final String FIELD_CITATION_HASH = "citationHash";
     /** The run that currently owns this document row — see the class comment. */
     private static final String FIELD_FENCING_RUN_ID = "fencingRunId";
     /** The claim sequence number that stamped {@link #FIELD_FENCING_RUN_ID}. */
@@ -179,7 +180,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public void recordIngested(String sourceId, String documentId, String contentHash,
-                               String etag, String lastModified, String runId) {
+                               String etag, String lastModified, String runId, String citationHash) {
 
         Instant now = Instant.now();
         Bson update = Updates.combine(
@@ -190,6 +191,7 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 Updates.set(FIELD_LAST_RUN_ID, runId),
                 Updates.set(FIELD_MISSED_RUNS, 0),
                 Updates.set(FIELD_TOMBSTONED, false),
+                Updates.set(FIELD_CITATION_HASH, citationHash),
                 // setOnInsert, so re-ingesting a changed page keeps the date it first
                 // entered the knowledge base rather than resetting its history.
                 Updates.setOnInsert(FIELD_FIRST_INGESTED_AT, Date.from(now)));
@@ -212,6 +214,14 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 throw e;
             }
         });
+    }
+
+    @Override
+    public void recordCitation(String sourceId, String documentId, String runId, String citationHash) {
+        translating("record a document's citation",
+                () -> documents.updateOne(ownedDocument(sourceId, documentId, runId),
+                        Updates.set(FIELD_CITATION_HASH, citationHash),
+                        new UpdateOptions().upsert(false)));
     }
 
     @Override
@@ -582,7 +592,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 toInstant(document.getDate(FIELD_LAST_INGESTED_AT)),
                 document.getString(FIELD_LAST_RUN_ID),
                 document.get(FIELD_MISSED_RUNS) == null ? 0 : document.getInteger(FIELD_MISSED_RUNS),
-                Boolean.TRUE.equals(document.getBoolean(FIELD_TOMBSTONED)));
+                Boolean.TRUE.equals(document.getBoolean(FIELD_TOMBSTONED)),
+                document.getString(FIELD_CITATION_HASH));
     }
 
     private static IngestionRun toRun(Document document) {

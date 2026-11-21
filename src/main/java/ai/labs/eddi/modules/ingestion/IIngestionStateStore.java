@@ -115,8 +115,39 @@ public interface IIngestionStateStore {
      * @param lastModified
      *            the source's Last-Modified, same purpose; may be null
      */
+    default void recordIngested(String sourceId, String documentId, String contentHash,
+                                String etag, String lastModified, String runId) {
+        recordIngested(sourceId, documentId, contentHash, etag, lastModified, runId, null);
+    }
+
+    /**
+     * {@link #recordIngested(String, String, String, String, String, String)}, also
+     * recording what the chunks were written with as citation metadata — see
+     * {@link #recordCitation}.
+     *
+     * @param citationHash
+     *            from {@link ContentHashes#citation}; null when not known
+     */
     void recordIngested(String sourceId, String documentId, String contentHash,
-                        String etag, String lastModified, String runId);
+                        String etag, String lastModified, String runId, String citationHash);
+
+    /**
+     * Records the citation metadata — title and URL — a document's chunks now
+     * carry, after a metadata-only update of those chunks.
+     *
+     * <p>
+     * A document renamed at its source keeps its bytes, so its change key does not
+     * move and it is not embedded again; its chunks kept the old title as their
+     * citation. The pipeline compares this value with what the source reports now
+     * and, when they differ, rewrites the chunks' metadata in place. Only this
+     * field changes: not the content hash, the validators, the miss counter or the
+     * tombstone.
+     *
+     * <p>
+     * Fenced on {@code runId}, and ignored for a document with no row, like
+     * {@link #recordSeen}.
+     */
+    void recordCitation(String sourceId, String documentId, String runId, String citationHash);
 
     /**
      * Records that a document still exists and has not changed, so it keeps its
@@ -376,6 +407,11 @@ public interface IIngestionStateStore {
      *            consecutive completed runs that did not see this document
      * @param tombstoned
      *            whether the document is considered gone from the source
+     * @param citationHash
+     *            what the document's chunks carry as citation metadata, from
+     *            {@link ContentHashes#citation}; null on a row written before it
+     *            was recorded, which the pipeline adopts rather than treating as a
+     *            change
      */
     record DocumentState(
             String sourceId,
@@ -387,7 +423,16 @@ public interface IIngestionStateStore {
             Instant lastIngestedAt,
             String lastRunId,
             int missedRuns,
-            boolean tombstoned) {
+            boolean tombstoned,
+            String citationHash) {
+
+        /** A row with no citation recorded. */
+        public DocumentState(String sourceId, String documentId, String contentHash, String etag,
+                String lastModified, Instant firstIngestedAt, Instant lastIngestedAt, String lastRunId,
+                int missedRuns, boolean tombstoned) {
+            this(sourceId, documentId, contentHash, etag, lastModified, firstIngestedAt, lastIngestedAt,
+                    lastRunId, missedRuns, tombstoned, null);
+        }
 
         /**
          * Whether this document needs embedding again.
@@ -408,7 +453,7 @@ public interface IIngestionStateStore {
             return tombstoned
                     ? this
                     : new DocumentState(sourceId, documentId, contentHash, etag, lastModified,
-                            firstIngestedAt, lastIngestedAt, lastRunId, missedRuns, true);
+                            firstIngestedAt, lastIngestedAt, lastRunId, missedRuns, true, citationHash);
         }
     }
 

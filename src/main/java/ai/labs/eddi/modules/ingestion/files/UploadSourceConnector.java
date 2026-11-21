@@ -17,6 +17,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceException;
 import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.StopReason;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
+import ai.labs.eddi.modules.ingestion.connector.WorkItem.Citation;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.IngestedFileStoreException;
 import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore.StoredFile;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -92,7 +93,9 @@ public class UploadSourceConnector implements SourceConnector {
                 break;
             }
             read++;
-            context.accept(WorkItem.upsert(file.fileId(), file.contentHash(), context.partition(), hintsOf(file)));
+            Map<String, String> hints = hintsOf(file);
+            context.accept(WorkItem.upsert(file.fileId(), file.contentHash(), context.partition(), hints,
+                    citationOf(hints.getOrDefault(HINT_FILE_NAME, file.fileId()))));
         }
         return DiscoveryResult.of(stopReason,
                 stopReason == StopReason.COMPLETED ? Coverage.FULL_LISTING : Coverage.PARTIAL);
@@ -117,8 +120,9 @@ public class UploadSourceConnector implements SourceConnector {
         String mimeType = item.hints().get(HINT_MIME_TYPE);
 
         Map<String, Object> metadata = new LinkedHashMap<>();
-        metadata.put(SourceMetadataKeys.TITLE, titleOf(fileName));
-        metadata.put(SourceMetadataKeys.CITATION_URL, "file:" + fileName);
+        Citation citation = citationOf(fileName);
+        metadata.put(SourceMetadataKeys.TITLE, citation.title());
+        metadata.put(SourceMetadataKeys.CITATION_URL, citation.url());
         metadata.put(SourceMetadataKeys.PATH, fileName);
         metadata.put(SourceMetadataKeys.MIME_TYPE, mimeType);
         metadata.put(SourceMetadataKeys.PROVIDER, IngestionSource.TYPE_UPLOAD);
@@ -134,6 +138,15 @@ public class UploadSourceConnector implements SourceConnector {
         int dot = fileName.lastIndexOf('.');
         String stem = dot > 0 ? fileName.substring(0, dot) : fileName;
         return stem.isBlank() ? fileName : stem;
+    }
+
+    /**
+     * What a file's chunks are cited as, known from the listing — one rule for
+     * discovery and fetch, so a file stored again under another name gets its new
+     * citation without being read.
+     */
+    private static Citation citationOf(String fileName) {
+        return new Citation(titleOf(fileName), "file:" + fileName);
     }
 
     private static Map<String, String> hintsOf(StoredFile file) {

@@ -59,7 +59,7 @@ final class DriveApi {
 
     private static final String LIST_FIELDS = "nextPageToken,incompleteSearch,files(id,name,mimeType,size,"
             + "md5Checksum,headRevisionId,version,modifiedTime,webViewLink,lastModifyingUser(displayName),"
-            + "shortcutDetails(targetId,targetMimeType))";
+            + "shortcutDetails(targetId,targetMimeType),capabilities(canListChildren))";
 
     private static final Set<String> THROTTLE_REASONS = Set.of("rateLimitExceeded", "userRateLimitExceeded",
             "dailyLimitExceeded", "sharingRateLimitExceeded", "quotaExceeded");
@@ -113,7 +113,7 @@ final class DriveApi {
     /** {@code files.get} for metadata only. */
     JsonNode getFile(String fileId) throws SourceException {
         return json(call(BASE + "/files/" + fileId + "?supportsAllDrives=true&fields="
-                + encode("id,name,mimeType,driveId,trashed"), MAX_JSON_BYTES));
+                + encode("id,name,mimeType,driveId,trashed,capabilities(canListChildren)"), MAX_JSON_BYTES));
     }
 
     /**
@@ -185,6 +185,12 @@ final class DriveApi {
             if (!retryable || attempt >= MAX_RETRIES) {
                 throw failure;
             }
+            Duration hinted = error.retryAfter().filter(hint -> !hint.isNegative()).orElse(null);
+            if (hinted != null && hinted.compareTo(MAX_BACKOFF) > 0) {
+                // The provider asked for longer than this run will wait: retrying
+                // sooner only hears the same answer.
+                throw failure;
+            }
             Duration wait = backoff(error, attempt);
             if (clock.get().plus(wait).isAfter(deadline)) {
                 // Waiting would outlive the run; the next run starts fresh.
@@ -194,6 +200,10 @@ final class DriveApi {
                 sleeper.sleep(wait);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
+                throw failure;
+            }
+            if (!clock.get().isBefore(deadline)) {
+                // The sleep overran: no budget is left for another request.
                 throw failure;
             }
         }
@@ -315,7 +325,14 @@ final class DriveApi {
      */
     record DriveFile(String id, String name, String mimeType, Long size, String md5Checksum, String headRevisionId,
             Long version, String modifiedTime, String webViewLink, String author, String shortcutTargetId,
-            String shortcutTargetMimeType) {
+            String shortcutTargetMimeType, Boolean canListChildren) {
+
+        DriveFile(String id, String name, String mimeType, Long size, String md5Checksum, String headRevisionId,
+                Long version, String modifiedTime, String webViewLink, String author, String shortcutTargetId,
+                String shortcutTargetMimeType) {
+            this(id, name, mimeType, size, md5Checksum, headRevisionId, version, modifiedTime, webViewLink, author,
+                    shortcutTargetId, shortcutTargetMimeType, null);
+        }
 
         static DriveFile of(JsonNode node) {
             JsonNode shortcut = node.path("shortcutDetails");
@@ -323,7 +340,12 @@ final class DriveApi {
                     number(node, "size"), text(node, "md5Checksum"), text(node, "headRevisionId"),
                     number(node, "version"), text(node, "modifiedTime"), text(node, "webViewLink"),
                     text(node.path("lastModifyingUser"), "displayName"), text(shortcut, "targetId"),
-                    text(shortcut, "targetMimeType"));
+                    text(shortcut, "targetMimeType"), flag(node.path("capabilities"), "canListChildren"));
+        }
+
+        private static Boolean flag(JsonNode node, String field) {
+            JsonNode value = node.path(field);
+            return value.isBoolean() ? value.asBoolean() : null;
         }
 
         private static String text(JsonNode node, String field) {

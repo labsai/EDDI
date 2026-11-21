@@ -206,6 +206,72 @@ class GoogleDriveSourceConnectorTest {
         }
 
         @Test
+        @DisplayName("an empty folder reached by a shortcut before its own entry is verified, and not believed when unlistable")
+        void shortcutToUnlistableEmptyFolder() throws SourceException {
+            fake.shortcut("s0", "alias", DRIVE, "fx", FakeDrive.FOLDER).folder("fx", "Locked", DRIVE).unlistable("fx");
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.PARTIAL, run.result.coverage());
+        }
+
+        @Test
+        @DisplayName("an accessible empty folder reached by a shortcut still counts as full coverage")
+        void shortcutToListableEmptyFolder() throws SourceException {
+            fake.file("f1", "a.txt", "text/plain", DRIVE, "a").shortcut("s0", "alias", DRIVE, "fx", FakeDrive.FOLDER)
+                    .folder("fx", "Empty", DRIVE);
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.FULL_LISTING, run.result.coverage());
+        }
+
+        @Test
+        @DisplayName("a stop that arrives during the final access check is not reported as complete")
+        void cancelledDuringAccessCheck() throws SourceException {
+            Recorder recorder = new Recorder(context(false));
+            fake.beforeRequest = () -> {
+                if (fake.countRequests("/drives/") > 0) {
+                    recorder.cancelled = true;
+                }
+            };
+
+            DiscoveryResult result = connector.discover(recorder);
+
+            assertEquals(StopReason.CANCELLED, result.stopReason());
+            assertEquals(Coverage.PARTIAL, result.coverage());
+        }
+
+        @Test
+        @DisplayName("a deadline that passes during the final access check is not reported as complete")
+        void deadlineDuringAccessCheck() throws SourceException {
+            Instant[] now = {Instant.now()};
+            connector.clock = () -> now[0];
+            Recorder recorder = new Recorder(context(false));
+            fake.beforeRequest = () -> {
+                if (fake.countRequests("/drives/") > 0) {
+                    now[0] = Instant.now().plus(Duration.ofMinutes(30));
+                }
+            };
+
+            DiscoveryResult result = connector.discover(recorder);
+
+            assertEquals(StopReason.TIME_LIMIT, result.stopReason());
+            assertEquals(Coverage.PARTIAL, result.coverage());
+        }
+
+        @Test
+        @DisplayName("a folder whose listing capability Drive does not report is not believed when empty")
+        void missingCapabilityEmptyFolder() throws SourceException {
+            fake.folder("fx", "Unknown", DRIVE);
+            fake.omitCapabilities = true;
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.PARTIAL, run.result.coverage());
+        }
+
+        @Test
         @DisplayName("a cancelled run stops before the next request")
         void cancelled() throws SourceException {
             fake.file("f1", "a.txt", "text/plain", DRIVE, "a");
@@ -256,6 +322,19 @@ class GoogleDriveSourceConnectorTest {
             assertTrue(GoogleDriveSourceConnector.nameMatches("*", "2026/11 notes"));
             assertFalse(GoogleDriveSourceConnector.nameMatches("*.tmp", "a.tmp.txt"));
             assertFalse(GoogleDriveSourceConnector.nameMatches("draft", "draft.txt"));
+            // A literal "*" in the name must not be consumed as an ordinary character.
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*.tmp", "*draft.tmp"));
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*.tmp", "draft.tmp"));
+            assertTrue(GoogleDriveSourceConnector.nameMatches("*?", "*a"));
+            assertEquals("see ![x](a.png) and more text",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("see ![x](a.png) and more text"));
+            assertEquals("[link](data:text/plain,hi)  tail",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages(
+                            "[link](data:text/plain,hi) ![image](data:image/png;base64,AAAA) tail"));
+            assertEquals("pre  post",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("pre ![x](data:image/png;base64,AAAA) post"));
+            assertEquals("![x](a.png) keep this [data](data:text/plain,hi)",
+                    GoogleDriveSourceConnector.withoutEmbeddedImages("![x](a.png) keep this [data](data:text/plain,hi)"));
         }
     }
 
@@ -279,11 +358,23 @@ class GoogleDriveSourceConnectorTest {
         void nativeUnchanged() throws SourceException {
             fake.nativeFile("d1", "Handbook", FakeDrive.DOC, DRIVE, 7, Map.of("text/markdown", utf8("# H")));
             Recorder recorder = new Recorder(context(false));
-            recorder.known.put("d1", new KnownVersion("hash", "v:7", null));
+            recorder.known.put("d1", new KnownVersion("hash", "v:7@26214400", null));
 
             connector.discover(recorder);
 
             assertEquals(WorkItem.Action.UNCHANGED, recorder.accepted.get(0).action());
+        }
+
+        @Test
+        @DisplayName("a changed maxFileBytes makes an unchanged native version be rechecked")
+        void nativeLimitChanged() throws SourceException {
+            fake.nativeFile("d1", "Handbook", FakeDrive.DOC, DRIVE, 7, Map.of("text/markdown", utf8("# H")));
+            Recorder recorder = new Recorder(context(false));
+            recorder.known.put("d1", new KnownVersion("hash", "v:7@1", null));
+
+            connector.discover(recorder);
+
+            assertEquals(WorkItem.Action.UPSERT, recorder.accepted.get(0).action());
         }
 
         @Test
@@ -300,7 +391,7 @@ class GoogleDriveSourceConnectorTest {
             assertEquals(WorkItem.Action.UPSERT, item.action());
             assertNull(item.versionToken());
             assertNull(document.versionToken(), "the hash of the export is the change key");
-            assertEquals("v:8", document.validators().etag());
+            assertEquals("v:8@26214400", document.validators().etag());
         }
     }
 
