@@ -554,6 +554,51 @@ public class PostgresScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        if (limit <= 0) {
+            return new ArrayList<>(); // at most `limit` rows; PostgreSQL rejects a negative LIMIT
+        }
+        ensureSchema();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT * FROM eddi_schedules WHERE name = ? LIMIT ?")) {
+            int rawLimit = (int) Math.min((long) limit + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
+            ps.setString(1, name);
+            ps.setInt(2, rawLimit);
+            List<ScheduleConfiguration> result = new ArrayList<>();
+            int scanned = 0;
+            try (ResultSet rs = ps.executeQuery()) {
+                while (result.size() < limit && rs.next()) {
+                    scanned++;
+                    try {
+                        result.add(fromResultSet(rs));
+                    } catch (IResourceStore.ResourceStoreException | RuntimeException e) {
+                        // One undecodable row (unreadable metadata, say) must not hide its
+                        // readable siblings (see the interface): it is left in place, and
+                        // named so it can be removed.
+                        LOGGER.warnf("Schedule %s named '%s' cannot be decoded — skipped: %s", sanitize(rs.getString("id")),
+                                sanitize(name), sanitize(e.getMessage()));
+                    }
+                }
+            }
+            if (result.size() < limit && scanned >= rawLimit) {
+                // Fewer than `limit` decodable rows, but the scan stopped at its cap: rows
+                // may remain unseen, so a short result would falsely look complete.
+                throw new IResourceStore.ResourceStoreException("Too many undecodable schedules under one name to read them completely");
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules by name: " + name, e);
+        }
+    }
+
+    /**
+     * How many undecodable rows {@link #readSchedulesByName} reads past before it
+     * gives up: it keeps reading until it has {@code limit} decodable rows, so a
+     * result shorter than {@code limit} is complete, and fails beyond this.
+     */
+    private static final int UNDECODABLE_ALLOWANCE = 100;
+
+    @Override
     public int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException {
         ensureSchema();
         try (Connection conn = dataSourceInstance.get().getConnection();

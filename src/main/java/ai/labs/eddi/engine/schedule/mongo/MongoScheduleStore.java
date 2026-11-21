@@ -484,6 +484,52 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public List<ScheduleConfiguration> readSchedulesByName(String name, int limit) throws IResourceStore.ResourceStoreException {
+        if (limit <= 0) {
+            return new ArrayList<>(); // Mongo's limit(0) means "no limit"; PostgreSQL returns nothing
+        }
+        // The primary: the HITL recovery sweep deletes and re-creates rows on what this
+        // returns, and a lagging secondary that misses the armed row (or shows a stale
+        // enabled flag) would have it treated as missing.
+        int rawLimit = rawRowsToScan(limit);
+        List<ScheduleConfiguration> result = new ArrayList<>();
+        int scanned = 0;
+        try (var cursor = schedulePrimaryReadCollection.find(eq(NAME, name)).limit(rawLimit).iterator()) {
+            while (result.size() < limit && cursor.hasNext()) {
+                Document doc = cursor.next();
+                scanned++;
+                try {
+                    result.add(fromDocument(doc));
+                } catch (Exception e) {
+                    // One undecodable row must not hide its readable siblings (see the
+                    // interface): it is left in place, and named so it can be removed.
+                    LOGGER.warnf("Schedule %s named '%s' cannot be decoded — skipped: %s", sanitize(String.valueOf(doc.get(ID))),
+                            sanitize(name), sanitize(e.getMessage()));
+                }
+            }
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to read schedules by name", e);
+        }
+        if (result.size() < limit && scanned >= rawLimit) {
+            // Fewer than `limit` decodable rows, but the scan stopped at its cap: rows
+            // may remain unseen, so a short result would falsely look complete.
+            throw new IResourceStore.ResourceStoreException("Too many undecodable schedules under one name to read them completely");
+        }
+        return result;
+    }
+
+    /**
+     * How many undecodable rows {@link #readSchedulesByName} reads past before it
+     * gives up: it keeps reading until it has {@code limit} decodable rows, so a
+     * result shorter than {@code limit} is complete, and fails beyond this.
+     */
+    private static final int UNDECODABLE_ALLOWANCE = 100;
+
+    private static int rawRowsToScan(int limit) {
+        return (int) Math.min((long) limit + UNDECODABLE_ALLOWANCE, Integer.MAX_VALUE);
+    }
+
+    @Override
     public List<ScheduleConfiguration> readAllSchedules(int limit) throws IResourceStore.ResourceStoreException {
         // Fix #12: bounded result set
         return readSchedulesWithFilter(new Document(), limit);
@@ -900,10 +946,10 @@ public class MongoScheduleStore implements IScheduleStore {
     // ========================= Helpers =========================
 
     private List<ScheduleConfiguration> readSchedulesWithFilter(Bson filter, int limit) throws IResourceStore.ResourceStoreException {
-        try {
+        try (var cursor = scheduleCollection.find(filter).limit(limit).iterator()) {
             List<ScheduleConfiguration> result = new ArrayList<>();
-            for (var doc : scheduleCollection.find(filter).limit(limit)) {
-                result.add(fromDocument(doc));
+            while (cursor.hasNext()) {
+                result.add(fromDocument(cursor.next()));
             }
             return result;
         } catch (Exception e) {

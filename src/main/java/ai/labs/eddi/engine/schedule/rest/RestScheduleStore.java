@@ -1166,12 +1166,12 @@ public class RestScheduleStore implements IRestScheduleStore {
      *         HITL timeout schedule; {@code null} when the operation may proceed
      */
     private Response rejectHitlTimeoutBody(ScheduleConfiguration schedule, String operation) {
-        if (isHitlSchedule(schedule)) {
-            LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s — "
+        if (isHitlSchedule(schedule) || (schedule != null && HitlSchedules.isReservedTimeoutName(schedule.getName()))) {
+            LOGGER.warnf("Refused %s of a schedule whose body declares hitlType=%s or a reserved hitl-timeout-* name — "
                     + "HITL timeout schedules are minted internally only", operation, HITL_TYPE_TIMEOUT);
             return Response.status(Response.Status.BAD_REQUEST)
                     .entity("Schedules marked as human-in-the-loop approval timeouts (metadata hitlType="
-                            + HITL_TYPE_TIMEOUT + ") cannot be created or updated via this API. "
+                            + HITL_TYPE_TIMEOUT + ", or a name starting with hitl-timeout-) cannot be created or updated via this API. "
                             + "They are managed automatically by the HITL framework. "
                             + "Resolve a pending approval via POST /agents/{conversationId}/resume or .../cancel.")
                     .build();

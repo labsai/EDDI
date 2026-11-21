@@ -23,6 +23,7 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 import org.bson.BsonArray;
 import org.bson.BsonDocument;
+import org.bson.BsonString;
 import org.bson.BsonValue;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -34,7 +35,9 @@ import org.mockito.ArgumentCaptor;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -563,6 +566,133 @@ class MongoScheduleStoreTest {
         String rendered = filter.getValue().toString();
         assertTrue(rendered.contains("continuation-conv-1") && rendered.contains("enabled")
                 && rendered.contains(ScheduleConfiguration.DISABLED_BY_UNDEPLOY), rendered);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — every row of the name, bounded")
+    void readSchedulesByNameReadsEveryRowOfTheName() throws Exception {
+        FindIterable<Document> found = findingDocs(new Document("_id", "sched-1"));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(found);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenReturn(new ScheduleConfiguration());
+
+        assertEquals(1, store.readSchedulesByName("hitl-timeout-conv-1", 100).size());
+
+        ArgumentCaptor<Bson> filter = ArgumentCaptor.forClass(Bson.class);
+        verify(scheduleCollection).find(filter.capture());
+        assertEquals(new BsonDocument("name", new BsonString("hitl-timeout-conv-1")), encodedFilter(filter.getValue()),
+                "an equality on the name and nothing else");
+        // the limit plus the allowance for undecodable rows the read may skip
+        verify(found).limit(200);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — reads the PRIMARY, not a lagging replica")
+    void readSchedulesByName_readsThePrimary() throws Exception {
+        MongoDatabase database = mock(MongoDatabase.class);
+        MongoCollection<Document> nearestView = mock(MongoCollection.class);
+        MongoCollection<Document> primaryView = mock(MongoCollection.class);
+        when(database.getCollection("eddi_schedules")).thenReturn(nearestView);
+        when(database.getCollection("eddi_schedule_fire_logs")).thenReturn(mock(MongoCollection.class));
+        when(nearestView.withReadPreference(ReadPreference.primary())).thenReturn(primaryView);
+
+        // A secondary that has not seen the armed row yet answers with nothing; the
+        // primary holds it. Built before the when(...) calls, never inside them.
+        FindIterable<Document> stale = findingDocs();
+        FindIterable<Document> current = findingDocs(new Document("_id", "armed-row"));
+        when(nearestView.find(any(Bson.class))).thenReturn(stale);
+        when(primaryView.find(any(Bson.class))).thenReturn(current);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenReturn(new ScheduleConfiguration());
+
+        var replicaSetStore = new MongoScheduleStore(database, jsonSerialization, documentBuilder, 100);
+
+        assertEquals(1, replicaSetStore.readSchedulesByName("hitl-timeout-conv-1", 100).size());
+        verify(primaryView).find(any(Bson.class));
+        verify(nearestView, never()).find(any(Bson.class));
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — a row that cannot be decoded is skipped, its readable siblings are returned")
+    void readSchedulesByName_skipsAnUndecodableRow() throws Exception {
+        Document broken = new Document("_id", "broken-row");
+        Document readable = new Document("_id", "readable-row");
+        FindIterable<Document> both = findingDocs(broken, readable);
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(both);
+        var decoded = new ScheduleConfiguration();
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenAnswer(invocation -> {
+            Document doc = invocation.getArgument(0);
+            if ("broken-row".equals(doc.get("_id"))) {
+                throw new IOException("unexpected field type");
+            }
+            return decoded;
+        });
+
+        List<ScheduleConfiguration> result = store.readSchedulesByName("hitl-timeout-conv-1", 100);
+
+        assertEquals(List.of(decoded), result);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — reads past an undecodable row, so a protected row beyond the limit is still returned")
+    void readSchedulesByName_readsPastSkippedRowsToTheLimit() throws Exception {
+        // One undecodable row in the first page of 100, then 99 stale rows, then the
+        // row that matters (a hand-disabled timeout of the current pause) at raw #101.
+        List<Document> docs = new ArrayList<>();
+        docs.add(new Document("_id", "broken-row"));
+        for (int i = 0; i < 99; i++) {
+            docs.add(new Document("_id", "stale-" + i));
+        }
+        docs.add(new Document("_id", "protected-row"));
+        FindIterable<Document> found = findingDocs(docs.toArray(new Document[0]));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(found);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenAnswer(invocation -> {
+            Document doc = invocation.getArgument(0);
+            if ("broken-row".equals(doc.get("_id"))) {
+                throw new IOException("unexpected field type");
+            }
+            var config = new ScheduleConfiguration();
+            config.setName(String.valueOf(doc.get("_id")));
+            return config;
+        });
+
+        List<ScheduleConfiguration> result = store.readSchedulesByName("hitl-timeout-conv-1", 100);
+
+        assertEquals(100, result.size(), "100 decodable rows: the result is capped, and the caller sees it is");
+        assertEquals("protected-row", result.get(99).getName());
+        verify(found).limit(200);
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — too many undecodable rows to read completely: the read fails instead of looking complete")
+    void readSchedulesByName_failsWhenTheSkipAllowanceIsUsedUp() throws Exception {
+        List<Document> docs = new ArrayList<>();
+        for (int i = 0; i < 101; i++) {
+            docs.add(new Document("_id", "broken-" + i));
+        }
+        FindIterable<Document> found = findingDocs(docs.toArray(new Document[0]));
+        when(scheduleCollection.find(any(Bson.class))).thenReturn(found);
+        when(documentBuilder.build(any(Document.class), eq(ScheduleConfiguration.class))).thenThrow(new IOException("unreadable"));
+
+        assertThrows(IResourceStore.ResourceStoreException.class, () -> store.readSchedulesByName("hitl-timeout-conv-1", 1));
+    }
+
+    /** A find whose cursor yields {@code docs}, accepting any limit. */
+    private static FindIterable<Document> findingDocs(Document... docs) {
+        FindIterable<Document> iterable = mock(FindIterable.class);
+        MongoCursor<Document> cursor = mock(MongoCursor.class);
+        Iterator<Document> source = List.of(docs).iterator();
+        when(iterable.limit(anyInt())).thenReturn(iterable);
+        doReturn(cursor).when(iterable).iterator();
+        when(cursor.hasNext()).thenAnswer(invocation -> source.hasNext());
+        when(cursor.next()).thenAnswer(invocation -> source.next());
+        return iterable;
+    }
+
+    @Test
+    @DisplayName("readSchedulesByName — a limit of zero reads nothing (Mongo's limit(0) would mean no limit)")
+    void readSchedulesByNameZeroLimitIsEmpty() throws Exception {
+        assertTrue(store.readSchedulesByName("hitl-timeout-conv-1", 0).isEmpty());
+
+        verify(scheduleCollection, never()).find(any(Bson.class));
     }
 
     @Test

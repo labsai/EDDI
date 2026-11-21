@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.GroupConversationState;
+import ai.labs.eddi.datastore.IResourceStore.ResourceStoreException;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
@@ -17,6 +18,7 @@ import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.runtime.StartupEvent;
 import io.quarkus.scheduler.Scheduled;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,6 +31,7 @@ import java.lang.management.ManagementFactory;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.BooleanSupplier;
 import java.util.function.Predicate;
@@ -42,10 +45,11 @@ import java.util.function.Predicate;
  * <ul>
  * <li><b>Paused conversations with a finite timeout policy</b>
  * (AUTO_APPROVE/AUTO_REJECT/ABORT): the one-shot timeout schedule may have been
- * lost in a crash window. The schedule is idempotently re-armed at the original
- * due time ({@code pausedAt + approvalTimeout}), or shortly after startup if
- * that time has already passed — the configured policy then applies through the
- * normal {@code HitlTimeoutHandler} machinery.</li>
+ * lost in a crash window. A missing schedule is re-created at the original due
+ * time ({@code pausedAt + approvalTimeout}), or shortly after startup if that
+ * time has already passed — the configured policy then applies through the
+ * normal {@code HitlTimeoutHandler} machinery. A schedule that is still armed
+ * is left untouched.</li>
  * <li><b>Paused conversations with WAIT_INDEFINITELY (or no) policy</b>: left
  * untouched. Waiting is exactly what the designer asked for.</li>
  * <li><b>Regular conversations stuck IN_PROGRESS with an intact HITL
@@ -93,8 +97,18 @@ public class HitlCrashRecoveryObserver {
 
     private static final Logger LOGGER = Logger.getLogger("ai.labs.eddi.HITL_RECOVERY");
 
-    /** Minimum delay before a re-armed, already-overdue timeout fires. */
+    /**
+     * Startup pass: minimum delay before a re-armed, already-overdue timeout fires,
+     * so a node coming up does not decide pauses before it is ready.
+     */
     private static final Duration REARM_GRACE = Duration.ofMinutes(2);
+
+    /**
+     * Cluster sweep: an overdue pause whose schedule is missing fires on the next
+     * poll. The sweep runs on a live leader, so there is nothing to wait for — and
+     * a grace applied on every sweep is what kept pushing deadlines out (C1).
+     */
+    private static final Duration CLUSTER_REARM_GRACE = Duration.ZERO;
 
     private final IConversationMemoryStore conversationMemoryStore;
     private final IGroupConversationStore groupConversationStore;
@@ -182,11 +196,11 @@ public class HitlCrashRecoveryObserver {
      */
     void runRecovery(Instant processStart) {
         LOGGER.info("HITL crash recovery running...");
-        int rearmedRegular = repairRegularPaused();
+        int rearmedRegular = repairRegularPaused(REARM_GRACE);
         int recoveredInProgress = recoverRegularInProgress();
         // Two independent sweeps: a failing AWAITING_APPROVAL query must not
         // silently skip the AWAITING_HUMAN_INPUT re-arm (I6), or vice versa.
-        int rearmedGroup = repairGroupPaused() + repairGroupHumanPaused();
+        int rearmedGroup = repairGroupPaused(REARM_GRACE) + repairGroupHumanPaused(REARM_GRACE);
         int cancelledGroups = cancelInterruptedGroups(processStart);
 
         if (rearmedRegular > 0 || recoveredInProgress > 0 || rearmedGroup > 0 || cancelledGroups > 0) {
@@ -294,7 +308,7 @@ public class HitlCrashRecoveryObserver {
         }
     }
 
-    private int repairRegularPaused() {
+    private int repairRegularPaused(Duration overdueGrace) {
         try {
             // Projected summaries — policy, timeout, pausedAt, and agentId come
             // from the bounded projection query; the (potentially multi-MB) full
@@ -319,8 +333,8 @@ public class HitlCrashRecoveryObserver {
                     Instant scannedPausedAt = summary.getPausedAt();
                     if (rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
                             HitlSchedules.SURFACE_REGULAR, conversationId,
-                            summary.getAgentId(), policy, summary.getApprovalTimeout(),
-                            scannedPausedAt,
+                            summary.getAgentId(), policy.name(), summary.getApprovalTimeout(),
+                            scannedPausedAt, overdueGrace, false,
                             () -> regularStillPaused(conversationId, scannedPausedAt))) {
                         count++;
                     }
@@ -342,6 +356,12 @@ public class HitlCrashRecoveryObserver {
     /**
      * Cluster mode: one pass of the leader's sweep — re-arm lost timeout schedules
      * and recover the stuck IN_PROGRESS conversations {@code eligible} accepts.
+     * <p>
+     * Runs every {@code eddi.cluster.hitl-recovery.interval}, so the re-arm must be
+     * a no-op for a pause whose timeout is still armed: it only creates a schedule
+     * that is missing (see {@link #rearmSchedule}). Replacing it on every pass
+     * pushed any deadline within the grace window out again each time, and no
+     * finite timeout ever fired in a cluster (C1).
      *
      * @return the number of conversations repaired or recovered
      */
@@ -349,7 +369,8 @@ public class HitlCrashRecoveryObserver {
         if (!enabled) {
             return 0;
         }
-        int repaired = repairRegularPaused() + repairGroupPaused() + repairGroupHumanPaused();
+        int repaired = repairRegularPaused(CLUSTER_REARM_GRACE) + repairGroupPaused(CLUSTER_REARM_GRACE)
+                + repairGroupHumanPaused(CLUSTER_REARM_GRACE);
         int recovered = recoverRegularInProgress(eligible);
         if (repaired > 0 || recovered > 0) {
             LOGGER.warnf("HITL cluster recovery: re-armed %d schedule(s), recovered %d stuck IN_PROGRESS conversation(s).", repaired,
@@ -388,10 +409,14 @@ public class HitlCrashRecoveryObserver {
                                     : HitlTimeoutPolicy.WAIT_INDEFINITELY;
                             if (policy != HitlTimeoutPolicy.WAIT_INDEFINITELY) {
                                 Instant scannedPausedAt = snapshot.getHitlPausedAt();
+                                // This pause was just restored, so a row its earlier timeout
+                                // fire left behind (the fire that started the lost resume) is
+                                // not a timeout still to come: replaced without the backoff.
+                                // A row that can still fire, or one a person disabled, stays.
                                 rearmSchedule(HitlSchedules.regularTimeoutScheduleName(conversationId),
                                         HitlSchedules.SURFACE_REGULAR, conversationId,
-                                        snapshot.getAgentId(), policy, snapshot.getHitlApprovalTimeout(),
-                                        scannedPausedAt,
+                                        snapshot.getAgentId(), policy.name(), snapshot.getHitlApprovalTimeout(),
+                                        scannedPausedAt, REARM_GRACE, true,
                                         () -> regularStillPaused(conversationId, scannedPausedAt));
                             }
                         }
@@ -479,7 +504,7 @@ public class HitlCrashRecoveryObserver {
         return count;
     }
 
-    private int repairGroupPaused() {
+    private int repairGroupPaused(Duration overdueGrace) {
         try {
             List<GroupConversation> pausedGcs = groupConversationStore.findByState(GroupConversationState.AWAITING_APPROVAL);
             int count = 0;
@@ -500,7 +525,7 @@ public class HitlCrashRecoveryObserver {
                     Instant scannedPausedAt = gc.getPausedAt();
                     if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(groupConversationId),
                             HitlSchedules.SURFACE_GROUP, groupConversationId,
-                            null, policy, gc.getHitlApprovalTimeout(), scannedPausedAt,
+                            null, policy.name(), gc.getHitlApprovalTimeout(), scannedPausedAt, overdueGrace, false,
                             () -> groupStillPaused(groupConversationId, scannedPausedAt))) {
                         count++;
                     }
@@ -521,7 +546,7 @@ public class HitlCrashRecoveryObserver {
      * {@code HitlTimeoutPolicy}), the duration on the shared bookmark field, and
      * the schedule's surface routes the fire to the human-turn handler.
      */
-    private int repairGroupHumanPaused() {
+    private int repairGroupHumanPaused(Duration overdueGrace) {
         try {
             List<GroupConversation> pausedGcs = groupConversationStore.findByState(GroupConversationState.AWAITING_HUMAN_INPUT);
             int count = 0;
@@ -536,7 +561,7 @@ public class HitlCrashRecoveryObserver {
                     if (rearmSchedule(HitlSchedules.groupTimeoutScheduleName(groupConversationId),
                             HitlSchedules.SURFACE_GROUP_HUMAN, groupConversationId,
                             null, pending.onTimeout() != null ? pending.onTimeout() : "SKIP_TURN",
-                            gc.getHitlApprovalTimeout(), scannedPausedAt,
+                            gc.getHitlApprovalTimeout(), scannedPausedAt, overdueGrace, false,
                             () -> groupStillHumanPaused(groupConversationId, scannedPausedAt))) {
                         count++;
                     }
@@ -568,33 +593,176 @@ public class HitlCrashRecoveryObserver {
         }
     }
 
-    /**
-     * Idempotently replaces the one-shot HITL timeout schedule: deletes any
-     * existing schedule of that name and creates a fresh one at the original due
-     * time (pausedAt + timeout), or {@link #REARM_GRACE} after startup if the due
-     * time already passed. Safe against both lost and still-intact schedules.
-     *
-     * @param stillPaused
-     *            re-checked AFTER the schedule is created — a resume/cancel may
-     *            land between the sweep read and the create; the freshly created
-     *            schedule is withdrawn if the pause is gone
-     * @return true if a schedule was (re-)created and kept
-     */
-    private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
-                                  String agentId, HitlTimeoutPolicy policy, String approvalTimeout,
-                                  Instant pausedAt, BooleanSupplier stillPaused) {
-        return rearmSchedule(scheduleName, surface, conversationId, agentId, policy.name(), approvalTimeout,
-                pausedAt, stillPaused);
+    /** What the schedule store holds for the timeout of one pause. */
+    enum TimeoutArming {
+        /**
+         * A row of this pause that can still fire exists — leave it exactly as it is.
+         */
+        ARMED,
+        /** A row of this pause was switched off by a person — respect that. */
+        DISABLED,
+        /**
+         * Nothing of this pause can fire, but its timeout already fired and completed
+         * while the pause still waits — re-armed after {@link #SPENT_REARM_BACKOFF}.
+         */
+        SPENT,
+        /**
+         * Nothing of this pause can fire: no row, rows of earlier pauses only, rows
+         * that can never fire again (dead-lettered, out of retries, disabled by an
+         * undeploy), rows that are not HITL timeouts, or rows the store could not
+         * decode — the schedule is (re-)created.
+         */
+        MISSING
     }
 
     /**
-     * String-policy variant (I6): human-turn schedules carry {@code OnHumanTimeout}
-     * names (SKIP_TURN/ABORT), which are not {@code HitlTimeoutPolicy} values — the
-     * fire handler branches on the surface before parsing.
+     * How long after a completed fire a pause that is still waiting gets its
+     * timeout again. The fire handler completes only when the decision was applied
+     * or has nothing left to apply to, and ends the pause itself when a decision
+     * can never apply; this is the safety net for anything else (a row whose
+     * metadata names no usable policy, say) — slow enough that a decision which
+     * keeps failing is not retried in a loop.
+     */
+    static final Duration SPENT_REARM_BACKOFF = Duration.ofHours(1);
+
+    /** Counter: a spent timeout re-armed for a pause that still waits. */
+    static final String METRIC_REARMED_SPENT = "eddi_hitl_timeout_rearmed_spent";
+
+    /** Field-injected; null in tests built with {@code new} (nothing counted). */
+    @Inject
+    MeterRegistry meterRegistry;
+
+    /** Upper bound of rows read per schedule name — normally one or two. */
+    private static final int ROWS_PER_NAME = 100;
+
+    /**
+     * The scheduler's {@code eddi.schedule.max-retries}: a FAILED row that has used
+     * them is never due again. Field-injected; the default in tests built with
+     * {@code new}.
+     */
+    @Inject
+    @ConfigProperty(name = "eddi.schedule.max-retries", defaultValue = "5")
+    int scheduleMaxRetries = 5;
+
+    /**
+     * The arming of the pause {@code pauseId} (paused at {@code pausedAt}), judged
+     * over every row stored under the schedule name, so the answer does not depend
+     * on which of several rows a store returns first.
+     */
+    TimeoutArming timeoutArming(List<ScheduleConfiguration> rows, String pauseId, Instant pausedAt) {
+        boolean disabled = false;
+        boolean spent = false;
+        for (ScheduleConfiguration row : rows) {
+            if (!HitlSchedules.isHitlTimeout(row.getMetadata())) {
+                continue; // not a timeout row at all: it must not pass for this pause's timeout
+            }
+            if (!ofThisPause(row, pauseId, pausedAt)) {
+                continue; // a row of an earlier pause: never armed for this one
+            }
+            if (canFire(row)) {
+                return TimeoutArming.ARMED;
+            }
+            if (completed(row)) {
+                spent = true;
+            } else if (!row.isEnabled() && row.getDisabledReason() == null) {
+                disabled = true;
+            }
+        }
+        if (disabled) {
+            return TimeoutArming.DISABLED;
+        }
+        return spent ? TimeoutArming.SPENT : TimeoutArming.MISSING;
+    }
+
+    /**
+     * Whether the poller can still fire the row: enabled — pending, claimed by a
+     * fire in progress (on any node; a dead claimer's lease expires and the row is
+     * claimed again) or FAILED with retries left — and not dead-lettered. A row an
+     * undeploy switched off cannot fire (an older build disabled HITL timeouts with
+     * their agent; current builds leave them armed, as the timeout of a pause must
+     * apply whatever the deployment does), so it is replaced by an enabled one.
+     */
+    boolean canFire(ScheduleConfiguration row) {
+        if (!row.isEnabled()) {
+            return false;
+        }
+        var status = row.getFireStatus();
+        if (status == ScheduleConfiguration.FireStatus.DEAD_LETTERED) {
+            return false;
+        }
+        return status != ScheduleConfiguration.FireStatus.FAILED || row.getFailCount() < scheduleMaxRetries;
+    }
+
+    /** What {@code markCompleted} leaves behind for a one-shot that fired. */
+    private static boolean completed(ScheduleConfiguration row) {
+        return !row.isEnabled() && row.getNextFire() == null && row.getLastFired() != null && row.getDisabledReason() == null;
+    }
+
+    /**
+     * A row is this pause's when it carries its pause id. A row from an older build
+     * carries none: it counts as this pause's while it can fire (it decides
+     * whatever pause is current), when it was created after this pause began (the
+     * row of an earlier pause was created before that pause ended — so a row a
+     * person disabled during this pause stays disabled), and once it fired, if it
+     * fired after this pause began.
+     */
+    private boolean ofThisPause(ScheduleConfiguration row, String pauseId, Instant pausedAt) {
+        Object value = row.getMetadata() != null ? row.getMetadata().get(HitlSchedules.METADATA_PAUSE_ID_KEY) : null;
+        if (value != null) {
+            return value.toString().equals(pauseId);
+        }
+        if (canFire(row)) {
+            return true;
+        }
+        if (row.getCreatedAt() != null && !row.getCreatedAt().isBefore(pausedAt)) {
+            return true;
+        }
+        return row.getLastFired() != null && !row.getLastFired().isBefore(pausedAt);
+    }
+
+    /** The latest fire among the completed timeout rows of THIS pause. */
+    private Instant lastFire(List<ScheduleConfiguration> rows, String pauseId, Instant pausedAt) {
+        return rows.stream().filter(r -> HitlSchedules.isHitlTimeout(r.getMetadata()) && ofThisPause(r, pauseId, pausedAt) && completed(r))
+                .map(ScheduleConfiguration::getLastFired).filter(Objects::nonNull).max(Instant::compareTo).orElse(null);
+    }
+
+    /**
+     * Makes sure the pause has a one-shot HITL timeout schedule, creating it only
+     * when none that can fire exists (C1). An armed schedule — pending, being
+     * fired, or waiting for a retry after a failed fire — is never deleted, moved
+     * or re-created, so repeated sweeps cannot push a deadline out. A missing
+     * schedule is created at the original due time (pausedAt + timeout), or
+     * {@code overdueGrace} from now if that time already passed; the next sweep
+     * then finds it armed. A row of this pause a person disabled is left alone; a
+     * spent one (its timeout fired and completed while the pause still waits) is
+     * re-armed {@link #SPENT_REARM_BACKOFF} after that fire. Only the timeout rows
+     * that were read and judged are deleted, one by one by id — never every row
+     * under the name, which could take a newer pause's timeout or a row that is not
+     * a timeout at all.
+     *
+     * @param policyName
+     *            a {@code HitlTimeoutPolicy} name, or for human-turn schedules (I6)
+     *            an {@code OnHumanTimeout} name (SKIP_TURN/ABORT) — the fire
+     *            handler branches on the surface before parsing
+     * @param overdueGrace
+     *            minimum delay before a re-created, already-overdue timeout fires
+     * @param replace
+     *            for a pause that was just restored after a lost resume: a spent
+     *            row is replaced at once (no backoff — the fire that started the
+     *            lost resume is not a timeout still to come); an armed or
+     *            hand-disabled row of the pause is kept, and a read that keeps
+     *            failing writes nothing, as on every other path
+     * @param stillPaused
+     *            whether the scanned pause is still the current one — checked
+     *            before anything is deleted or created, and again after the create
+     *            (a resume/cancel may land in between; the freshly created schedule
+     *            is then withdrawn)
+     * @return true if a schedule was created and kept
      */
     private boolean rearmSchedule(String scheduleName, String surface, String conversationId,
                                   String agentId, String policyName, String approvalTimeout,
-                                  Instant pausedAt, BooleanSupplier stillPaused) {
+                                  Instant pausedAt, Duration overdueGrace, boolean replace,
+                                  BooleanSupplier stillPaused) {
         if (approvalTimeout == null || approvalTimeout.isBlank() || pausedAt == null) {
             LOGGER.warnf("Cannot re-arm HITL timeout for %s: missing approvalTimeout/pausedAt in bookmark",
                     conversationId);
@@ -609,14 +777,72 @@ public class HitlCrashRecoveryObserver {
             return false;
         }
 
-        Instant earliest = Instant.now().plus(REARM_GRACE);
+        String pauseId = HitlDecision.pauseIdOf(pausedAt);
+        Instant earliest = Instant.now().plus(overdueGrace);
         Instant fireAt = pausedAt.plus(timeout);
         if (fireAt.isBefore(earliest)) {
             fireAt = earliest;
         }
 
+        boolean spentRearm = false;
         try {
-            scheduleStore.deleteSchedulesByName(scheduleName);
+            List<ScheduleConfiguration> rows;
+            TimeoutArming arming;
+            try {
+                // The store skips a row it cannot decode (and logs it): such a row cannot
+                // be fired by the poller either, so it is no timeout of this pause.
+                rows = readTimeoutRows(scheduleName);
+                arming = timeoutArming(rows, pauseId, pausedAt);
+            } catch (Exception e) {
+                // A failed read says nothing about the rows — on the restore path too: an
+                // armed one must not be joined or replaced on a transient error, and one a
+                // person disabled (no automatic decision on this pause) must not get an
+                // enabled twin. For an approval gate the safe failure is the pause waiting
+                // for a human, so nothing is written.
+                readFailed(scheduleName, surface, conversationId, e);
+                return false;
+            }
+            if (arming == TimeoutArming.ARMED || arming == TimeoutArming.DISABLED) {
+                LOGGER.debugf("HITL timeout for %s (%s) left as it is: %s", conversationId, surface, arming);
+                return false;
+            }
+
+            // Re-check BEFORE writing anything: if the scanned pause ended since the scan,
+            // a row read above may already be the timeout of a newer pause (a pause is
+            // committed before its timeout row is created, so a newer pause's row can only
+            // be among the rows read when that pause was already current at this check).
+            if (stillPaused != null && !stillPaused.getAsBoolean()) {
+                LOGGER.debugf("HITL timeout for %s (%s) not re-armed — no longer paused on the scanned pause", conversationId,
+                        surface);
+                return false;
+            }
+
+            // Exactly the timeout rows read and judged above, by id — rows of earlier
+            // pauses, rows that can never fire again, spent ones. None of them can fire for
+            // this pause (else the pause would be ARMED or DISABLED). A row created after
+            // the read is not among them, and a row that is not a HITL timeout at all (a
+            // foreign row under the name) is not ours to remove.
+            int deleted = deleteReadTimeoutRows(rows);
+
+            if (rows.size() >= ROWS_PER_NAME) {
+                // The read stopped at its bound: an armed or hand-disabled row of this pause
+                // may be among the rows not seen, so nothing is created yet. The rows read
+                // were removed above; the next pass reads the rest.
+                LOGGER.warnf("HITL timeout schedule(s) %s: %d or more rows, none armed for the pause in the part read — "
+                        + "removed %d stale timeout row(s); the next recovery pass reads the rest", scheduleName, rows.size(),
+                        deleted);
+                return false;
+            }
+            if (!replace && arming == TimeoutArming.SPENT) {
+                Instant lastFired = lastFire(rows, pauseId, pausedAt);
+                Instant retryAt = (lastFired != null ? lastFired : Instant.now()).plus(SPENT_REARM_BACKOFF);
+                if (retryAt.isAfter(fireAt)) {
+                    fireAt = retryAt;
+                }
+                LOGGER.warnf("HITL timeout for %s (%s) fired at %s but the pause is still waiting — re-arming it for %s",
+                        conversationId, surface, lastFired, fireAt);
+                spentRearm = true;
+            }
 
             var schedule = new ScheduleConfiguration();
             schedule.setName(scheduleName);
@@ -625,31 +851,132 @@ public class HitlCrashRecoveryObserver {
             schedule.setEnabled(true);
             schedule.setNextFire(fireAt);
             schedule.setCreatedAt(Instant.now());
-            schedule.setMetadata(HitlSchedules.timeoutMetadata(policyName, surface, conversationId, HitlDecision.pauseIdOf(pausedAt)));
-            scheduleStore.createSchedule(schedule);
+            schedule.setMetadata(HitlSchedules.timeoutMetadata(policyName, surface, conversationId, pauseId));
+            String createdId = scheduleStore.createSchedule(schedule);
 
-            // Re-check AFTER creating: a resume/cancel landing between the sweep
-            // read and the create would otherwise leave an armed timeout on a
-            // conversation that is no longer paused.
-            try {
-                if (stillPaused != null && !stillPaused.getAsBoolean()) {
-                    scheduleStore.deleteSchedulesByName(scheduleName);
-                    LOGGER.infof("Withdrew re-armed HITL timeout for %s — no longer paused", conversationId);
-                    return false;
-                }
-            } catch (Exception e) {
-                // Cannot verify — keep the schedule; the timeout handler's
-                // resume/cancel is CAS-guarded and no-ops on a non-paused state.
-                LOGGER.debugf("Post-rearm state re-check failed for %s: %s (keeping schedule)",
-                        conversationId, e.getMessage());
+            // Re-check AFTER creating: a resume/cancel landing between the check above
+            // and the create would otherwise leave an armed timeout on a conversation that
+            // is no longer paused on this pause. The suppliers answer "still paused" when
+            // they cannot read the state, so the row is then kept.
+            if (stillPaused != null && !stillPaused.getAsBoolean()) {
+                withdraw(createdId, scheduleName, conversationId);
+                return false;
             }
 
             LOGGER.infof("Re-armed HITL timeout for %s (%s) at %s (policy: %s)",
                     conversationId, surface, fireAt, policyName);
+            if (spentRearm && meterRegistry != null) {
+                // A pause re-armed this way every hour, forever, shows up here.
+                meterRegistry.counter(METRIC_REARMED_SPENT, "surface", surface).increment();
+            }
             return true;
         } catch (Exception e) {
             LOGGER.warnf("Failed to re-arm HITL timeout for %s: %s", conversationId, e.getMessage());
             return false;
+        }
+    }
+
+    /**
+     * Pauses between the attempts to read a pause's timeout rows: a failed read
+     * writes nothing, and a single node has no later sweep to try again (its
+     * recovery runs only at startup), so a short blip is ridden out here. Bounded —
+     * the pass runs on a background thread, but one pause must not hold it for
+     * long. Package-private so tests can run without waiting.
+     */
+    List<Duration> readRetryDelays = List.of(Duration.ofSeconds(1), Duration.ofSeconds(4));
+
+    /**
+     * Reads the rows under {@code scheduleName}, retried per
+     * {@link #readRetryDelays}.
+     */
+    private List<ScheduleConfiguration> readTimeoutRows(String scheduleName) throws ResourceStoreException {
+        ResourceStoreException last = null;
+        for (int attempt = 0; attempt <= readRetryDelays.size(); attempt++) {
+            if (attempt > 0) {
+                try {
+                    Thread.sleep(readRetryDelays.get(attempt - 1).toMillis());
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            try {
+                return scheduleStore.readSchedulesByName(scheduleName, ROWS_PER_NAME);
+            } catch (ResourceStoreException e) {
+                last = e;
+            } catch (RuntimeException e) {
+                last = new ResourceStoreException("Failed to read schedules by name", e);
+            }
+        }
+        throw last != null ? last : new ResourceStoreException("Interrupted while reading schedules by name");
+    }
+
+    /**
+     * Every read of a pause's timeout rows failed: nothing was written and the
+     * pause waits for a human. In a cluster the next sweep reads again (WARN);
+     * without one — a single node, whose recovery runs only at startup — the pause
+     * keeps waiting until the next start or a person's decision (ERROR). Counted as
+     * an arm failure either way.
+     */
+    private void readFailed(String scheduleName, String surface, String conversationId, Exception e) {
+        boolean sweepFollows = clusterConfig != null && clusterConfig.isNats();
+        if (sweepFollows) {
+            LOGGER.warnf("HITL timeout schedule(s) %s could not be read (%s) — nothing written; the next recovery sweep "
+                    + "reads again", scheduleName, e.getMessage());
+        } else {
+            LOGGER.errorf("HITL timeout schedule(s) %s could not be read after %d attempt(s) (%s) — nothing written: the pause "
+                    + "of %s waits for a person's decision without a re-armed timeout until the next start", scheduleName,
+                    readRetryDelays.size() + 1, e.getMessage(), conversationId);
+        }
+        if (meterRegistry != null) {
+            meterRegistry.counter(METRIC_ARM_FAILURES, "surface", surface).increment();
+        }
+    }
+
+    /**
+     * The arm-failure counter {@code ConversationHitlService} and
+     * {@code GroupHitlCoordinator} count at pause time — here: recovery could not
+     * read a pause's timeout rows, so it could not re-arm it.
+     */
+    static final String METRIC_ARM_FAILURES = "eddi_hitl_timeout_arm_failures";
+
+    /**
+     * Deletes, by id, the HITL timeout rows among {@code rows} — the rows a sweep
+     * read and judged unable to fire for its pause.
+     *
+     * @return how many were deleted
+     */
+    private int deleteReadTimeoutRows(List<ScheduleConfiguration> rows) throws ResourceStoreException {
+        int deleted = 0;
+        for (ScheduleConfiguration row : rows) {
+            if (row.getId() != null && HitlSchedules.isHitlTimeout(row.getMetadata())) {
+                scheduleStore.deleteSchedule(row.getId());
+                deleted++;
+            }
+        }
+        return deleted;
+    }
+
+    /**
+     * Withdraws the row a sweep created for a pause that ended meanwhile — only
+     * that row: a newer pause may already have its own timeout under the same name.
+     * A row that cannot be withdrawn stays armed but is harmless: it is bound to
+     * the ended pause, so its fire is refused (pause mismatch, or nothing paused to
+     * decide) and completes.
+     */
+    private void withdraw(String createdId, String scheduleName, String conversationId) {
+        if (createdId == null) {
+            LOGGER.warnf("Could not withdraw the re-armed HITL timeout %s for %s (the store returned no id) — "
+                    + "its fire will be refused, it names a pause that is no longer current", scheduleName, conversationId);
+            return;
+        }
+        try {
+            scheduleStore.deleteSchedule(createdId);
+            LOGGER.infof("Withdrew re-armed HITL timeout for %s — no longer paused", conversationId);
+        } catch (Exception e) {
+            LOGGER.warnf("Could not withdraw the re-armed HITL timeout %s (%s) for %s: %s — "
+                    + "its fire will be refused, it names a pause that is no longer current", scheduleName, createdId, conversationId,
+                    e.getMessage());
         }
     }
 

@@ -43,6 +43,7 @@ import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -139,6 +140,28 @@ public class GroupHitlCoordinator {
      */
     public void setTieBreakPauses(GroupTieBreakPauses tieBreakPauses) {
         this.tieBreakPauses = tieBreakPauses;
+    }
+
+    /**
+     * Set by the facade; null in tests built without one (nothing is counted then).
+     */
+    private MeterRegistry meterRegistry;
+
+    public void setMeterRegistry(MeterRegistry meterRegistry) {
+        this.meterRegistry = meterRegistry;
+    }
+
+    /**
+     * A pause whose timeout could not be scheduled waits without one until crash
+     * recovery re-creates it: logged at ERROR and counted, as on the regular
+     * surface.
+     */
+    private void timeoutArmFailed(String surface, GroupConversation gc, Exception e) {
+        LOGGER.errorf("Failed to schedule the %s timeout for %s — the pause waits without it until crash recovery re-arms it: %s",
+                surface, LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi_hitl_timeout_arm_failures", "surface", surface).increment();
+        }
     }
 
     /**
@@ -498,8 +521,7 @@ public class GroupHitlCoordinator {
             LOGGER.infof("Scheduled group HITL timeout for %s at %s (policy: %s)",
                     LogSanitizer.sanitize(gc.getId()), fireAt, policy);
         } catch (Exception e) {
-            LOGGER.warnf("Failed to schedule group HITL timeout for %s: %s",
-                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+            timeoutArmFailed(HitlSchedules.SURFACE_GROUP, gc, e);
         }
     }
 
@@ -1458,8 +1480,7 @@ public class GroupHitlCoordinator {
             LOGGER.infof("Scheduled human-turn timeout for %s at %s (policy: %s)",
                     LogSanitizer.sanitize(gc.getId()), fireAt, LogSanitizer.sanitize(pending.onTimeout()));
         } catch (Exception e) {
-            LOGGER.warnf("Failed to schedule human-turn timeout for %s: %s",
-                    LogSanitizer.sanitize(gc.getId()), LogSanitizer.sanitize(e.getMessage()));
+            timeoutArmFailed(HitlSchedules.SURFACE_GROUP_HUMAN, gc, e);
         }
     }
 
