@@ -22,7 +22,10 @@ repository pinned builds with a vulnerable JDK and relied on the interim `-XX:-U
   `admin/admin` account through `kcadm` `reset-password`, verified the configured login and wrote its marker, and
   passed again on a rerun.
 - **Helm chart 2.14.3 → 2.14.4**, with `EXPECTED_CHART_VERSION`. `keycloak.image` gains a `digest` field, rendered as
-  `tag@digest` the way `nats.image` already is, and `ThirdPartyImagePinsTest` now requires the same Keycloak
+  `tag@digest` the way `nats.image` already is. The digest selects the image, so an operator who overrides
+  `keycloak.image.tag` must also set `keycloak.image.digest` to the matching digest, or clear it with
+  `--set keycloak.image.digest=""`; a tag-only override still runs the pinned 26.8.2 build. `ThirdPartyImagePinsTest`
+  now requires the same Keycloak
   `MAJOR.MINOR.PATCH@sha256` reference on every delivery path (compose, `ui/*` compose, Kustomize, Helm).
 - **Confirmed inside the images:** `java -version` in each pinned image (amd64) prints `25.0.5.1`
   (Red_Hat-25.0.5.1.2-1), `25.0.5.1+2` (Temurin) and `21.0.13.1` (Red_Hat-21.0.13.1.2-1).
