@@ -313,7 +313,29 @@ public class RagConfiguration {
      */
     private List<IngestionSource> sources = new ArrayList<>();
 
+    // --- Document index ---
+
+    /**
+     * Whether this RAG configuration is a <em>document index</em>: the store of
+     * users' and conversations' document chunks, never an agent's knowledge base.
+     * {@code null} (the default, not serialized) means {@code false}. A flagged
+     * configuration must be eligible
+     * ({@code ai.labs.eddi.engine.documents.index.DocumentIndexEligibility}), may
+     * not be a workflow's RAG step, and is skipped by retrieval; once set, it
+     * cannot be switched off and its storage cannot be moved. See
+     * {@code docs/rag.md}, "Document index".
+     */
+    private Boolean documentIndex;
+
     // --- Getters and Setters ---
+
+    public Boolean getDocumentIndex() {
+        return documentIndex;
+    }
+
+    public void setDocumentIndex(Boolean documentIndex) {
+        this.documentIndex = documentIndex;
+    }
 
     public List<IngestionSource> getSources() {
         return sources;

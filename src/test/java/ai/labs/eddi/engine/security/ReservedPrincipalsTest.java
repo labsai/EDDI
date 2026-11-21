@@ -65,6 +65,8 @@ class ReservedPrincipalsTest {
             Map.entry("openai:", "token-estimator cache key"),
             Map.entry("mandatory:",
                     "gateReason prefix of a call a mandatory-approval rule gated (MandatoryApprovals.GATE_REASON_PREFIX), never a principal"),
+            Map.entry("doclib:",
+                    "kbId chunk tag of a document index (KnowledgeBaseStorage.DOCLIB_KB_ID_PREFIX + RAG configuration id), never a principal"),
             Map.entry("s:", "hash input tag"),
             Map.entry("c:", "hash input tag"),
             Map.entry("h:", "hash input tag"),
