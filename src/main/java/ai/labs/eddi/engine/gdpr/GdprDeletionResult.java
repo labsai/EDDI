@@ -66,6 +66,13 @@ import java.util.Map;
  *            audit ledger entries whose recorded content (prompt, response, LLM
  *            detail, tool calls) was replaced by a redaction marker; 0 under
  *            {@code eddi.audit.erasure-mode=pseudonymize}, which keeps it
+ * @param notices
+ *            what the caller must act on although no step failed — data a
+ *            participant deliberately did not reach (an unverified directory
+ *            e-mail address, say) and the remedy, each prefixed with the
+ *            participant's name; never an identifier. Does not affect
+ *            {@link #complete()}, which says whether every step ran; empty on
+ *            most runs
  *
  * @author ginccc
  * @since 6.0.0
@@ -88,7 +95,23 @@ public record GdprDeletionResult(
         List<String> failedSteps,
         Instant completedAt,
         Map<String, Long> additionalDeleted,
-        long auditEntriesRedacted) {
+        long auditEntriesRedacted,
+        List<String> notices) {
+
+    /**
+     * Compatibility constructor for the shape that predates {@code notices},
+     * reported as none.
+     */
+    public GdprDeletionResult(String userId, long memoriesDeleted, long conversationsDeleted, long conversationMappingsDeleted,
+            long logsPseudonymized, long auditEntriesPseudonymized, long attachmentsDeleted, long journalEntriesDeleted,
+            long checkpointsDeleted, long groupConversationsDeleted, long sharedArtifactsDeleted, long schedulesDeleted,
+            long connectionGrantsDeleted, long autoVaultedSecretsDeleted, List<String> failedSteps, Instant completedAt,
+            Map<String, Long> additionalDeleted, long auditEntriesRedacted) {
+        this(userId, memoriesDeleted, conversationsDeleted, conversationMappingsDeleted, logsPseudonymized, auditEntriesPseudonymized,
+                attachmentsDeleted, journalEntriesDeleted, checkpointsDeleted, groupConversationsDeleted, sharedArtifactsDeleted,
+                schedulesDeleted, connectionGrantsDeleted, autoVaultedSecretsDeleted, failedSteps, completedAt, additionalDeleted,
+                auditEntriesRedacted, List.of());
+    }
 
     /**
      * Compatibility constructor for the shape that predates
@@ -158,6 +181,7 @@ public record GdprDeletionResult(
     public GdprDeletionResult {
         failedSteps = failedSteps == null ? List.of() : List.copyOf(failedSteps);
         additionalDeleted = additionalDeleted == null ? Map.of() : Map.copyOf(additionalDeleted);
+        notices = notices == null ? List.of() : List.copyOf(notices);
     }
 
     /**
