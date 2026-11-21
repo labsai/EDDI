@@ -8,11 +8,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.Month;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.ZonedDateTime;
 import java.time.zone.ZoneRules;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -42,6 +44,34 @@ public final class CronParser {
     static final Map<String, String> MONTH_NAMES = Map.ofEntries(Map.entry("JAN", "1"), Map.entry("FEB", "2"), Map.entry("MAR", "3"),
             Map.entry("APR", "4"), Map.entry("MAY", "5"), Map.entry("JUN", "6"), Map.entry("JUL", "7"), Map.entry("AUG", "8"), Map.entry("SEP", "9"),
             Map.entry("OCT", "10"), Map.entry("NOV", "11"), Map.entry("DEC", "12"));
+
+    /**
+     * The longest gap, in years, between two successive matching days of any
+     * expression this parser accepts: 40, for 29 February combined with one weekday
+     * ({@code 0 9 29 2 *}{@code /7} — a Sunday 29 February — matches in 2088 and
+     * next in 2128). Within 1901-2099 such a date recurs every 28 years; a century
+     * year that is not a leap year (2100) stretches the cycle to 40. Every other
+     * date on a given weekday recurs within 12 years, a lone 29 February within 8,
+     * and anything else within a year. (The grammar has no {@code L}, {@code W} or
+     * {@code #}.) {@code CronParserTest} measures it over a full 400-year Gregorian
+     * cycle.
+     */
+    static final int LONGEST_GAP_YEARS = 40;
+
+    /**
+     * How far {@link #computeNextFire} looks ahead: twice
+     * {@link #LONGEST_GAP_YEARS} and a year, so a satisfiable expression always
+     * finds its successor inside the window — even when the clocks skip the only
+     * matching times of one matching day (a spring-forward gap), and the match
+     * after it is another gap away. Whether an expression can match at all is
+     * decided BEFORE the scan, from its fields ({@link #canEverMatch}), so an
+     * expression that never matches (30 February) is refused at once rather than by
+     * walking the window — the scan's cost is bounded by the real gap, never by the
+     * window. The old nine-year window found {@code 0 9 29 2 *}{@code /7}'s fire in
+     * 2032 and then failed to find 2060's, and the two-year one before it made
+     * {@code 0 9 29 2 *} fire once and stop.
+     */
+    static final int MAX_SCAN_YEARS = 2 * LONGEST_GAP_YEARS + 1;
 
     private CronParser() {
     }
@@ -83,8 +113,9 @@ public final class CronParser {
      *             if the expression does not have exactly 5 fields or a field is
      *             invalid
      * @throws IllegalStateException
-     *             if the expression has no fire within two years after
-     *             {@code after}
+     *             if the expression can never match a date (e.g.
+     *             {@code 0 0 30 2 *}, 30 February) — decided from the fields, see
+     *             {@link #canEverMatch}; every other expression has a next fire
      */
     public static Instant computeNextFire(String cronExpression, Instant after, ZoneId zoneId) {
         String[] parts = cronExpression.trim().split("\\s+");
@@ -105,6 +136,12 @@ public final class CronParser {
         // field is always true, so the AND below reduces to the restricted field.
         boolean bothDayFieldsRestricted = !parts[2].trim().startsWith("*") && !parts[4].trim().startsWith("*");
 
+        // Before the scan, so an expression that can never fire costs nothing to refuse
+        // and the scan below is only ever bounded by a real gap (LONGEST_GAP_YEARS).
+        if (!canEverMatch(daysOfMonth, months, daysOfWeek, bothDayFieldsRestricted)) {
+            throw new IllegalStateException("Cron expression matches no calendar day: " + cronExpression);
+        }
+
         if (isFixedTime(parts)) {
             return nextFixedTimeFire(after, zoneId, minutes, hours, daysOfMonth, months, daysOfWeek, bothDayFieldsRestricted, cronExpression);
         }
@@ -116,8 +153,7 @@ public final class CronParser {
         // minutes to match.
         ZonedDateTime candidate = after.atZone(zoneId).withSecond(0).withNano(0).plusMinutes(1);
 
-        // Safety: max 2 years of scanning (covers leap years + DST)
-        ZonedDateTime limit = candidate.plusYears(2);
+        ZonedDateTime limit = candidate.plusYears(MAX_SCAN_YEARS);
 
         while (candidate.isBefore(limit)) {
             boolean dayMatches = dayMatches(candidate.toLocalDate(), daysOfMonth, daysOfWeek, bothDayFieldsRestricted);
@@ -145,7 +181,7 @@ public final class CronParser {
             candidate = candidate.plusMinutes(1);
         }
 
-        throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+        throw new IllegalStateException("Could not compute next fire within " + MAX_SCAN_YEARS + " years for: " + cronExpression);
     }
 
     /**
@@ -176,7 +212,7 @@ public final class CronParser {
                                              Set<Integer> months, Set<Integer> daysOfWeek, boolean bothDayFieldsRestricted, String cronExpression) {
         ZoneRules rules = zoneId.getRules();
         LocalDateTime candidate = LocalDateTime.ofInstant(after, zoneId).withSecond(0).withNano(0).plusMinutes(1);
-        LocalDateTime limit = candidate.plusYears(2);
+        LocalDateTime limit = candidate.plusYears(MAX_SCAN_YEARS);
 
         while (candidate.isBefore(limit)) {
             if (!months.contains(candidate.getMonthValue())) {
@@ -199,7 +235,7 @@ public final class CronParser {
             }
             candidate = candidate.plusMinutes(1);
         }
-        throw new IllegalStateException("Could not compute next fire within 2 years for: " + cronExpression);
+        throw new IllegalStateException("Could not compute next fire within " + MAX_SCAN_YEARS + " years for: " + cronExpression);
     }
 
     /**
@@ -431,6 +467,37 @@ public final class CronParser {
         } catch (NumberFormatException e) {
             throw new IllegalArgumentException("Invalid number '" + token + "' in field: " + field, e);
         }
+    }
+
+    /**
+     * Whether any calendar day can ever match, decided from the fields alone.
+     * <ul>
+     * <li>Both day fields restricted (OR): every month has every weekday, so any
+     * month in the set matches.</li>
+     * <li>Otherwise (AND): some listed day of month must exist in some listed month
+     * — 29 February counts, it exists in leap years. Across the Gregorian cycle
+     * every existing date falls on every weekday, so the weekday field cannot rule
+     * it out (it is never empty).</li>
+     * </ul>
+     * So the expressions that never match are exactly those naming only dates that
+     * do not exist: {@code 30 2}, {@code 31 4}, {@code 30,31 2},
+     * {@code 31 2,4,6,9,11}.
+     */
+    static boolean canEverMatch(Set<Integer> daysOfMonth, Set<Integer> months, Set<Integer> daysOfWeek, boolean bothRestricted) {
+        if (months.isEmpty() || daysOfWeek.isEmpty() || daysOfMonth.isEmpty()) {
+            return false;
+        }
+        if (bothRestricted) {
+            return true;
+        }
+        int smallestDay = Collections.min(daysOfMonth);
+        for (int month : months) {
+            // Month.maxLength(): the longest the month can be, 29 for February.
+            if (smallestDay <= Month.of(month).maxLength()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

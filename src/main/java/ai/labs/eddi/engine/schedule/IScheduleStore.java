@@ -122,6 +122,31 @@ public interface IScheduleStore {
      */
     void setPersistentConversationId(String scheduleId, String conversationId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Records the conversation an attempt of one due occurrence started
+     * ({@code conversationStrategy=new}), so every later attempt of that occurrence
+     * continues it instead of starting another. Writes those two fields and nothing
+     * else, for the reason {@link #setPersistentConversationId} gives.
+     * <p>
+     * Conditional: it is written only while the row records no conversation for
+     * {@code runId} yet, or still records {@code replacedConversationId} for it. So
+     * when two attempts of one occurrence race (a stolen lease), the first record
+     * wins, and the loser adopts it rather than running the turn in a second
+     * conversation.
+     *
+     * @param runId
+     *            the occurrence ({@code ScheduleFireExecutor.runIdOf})
+     * @param conversationId
+     *            the conversation this attempt started
+     * @param replacedConversationId
+     *            the conversation recorded for {@code runId} that this attempt
+     *            found unusable and replaces; {@code null} when it found none
+     * @return whether this call recorded it; {@code false} when the row records
+     *         another conversation for {@code runId} (or no longer exists)
+     */
+    boolean recordOccurrenceConversation(String scheduleId, String runId, String conversationId, String replacedConversationId)
+            throws IResourceStore.ResourceStoreException;
+
     void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException;
 
     /**
@@ -149,6 +174,18 @@ public interface IScheduleStore {
      * @return number of pending schedules with that name
      */
     int countPendingSchedulesByName(String name) throws IResourceStore.ResourceStoreException;
+
+    /**
+     * How many enabled schedules were created by an authenticated caller
+     * ({@code createdBy} set) — the figure the per-owner and the overall schedule
+     * caps are judged on. Schedules the engine minted itself carry no
+     * {@code createdBy} and are not counted.
+     *
+     * @param createdBy
+     *            count only this creator's schedules; {@code null} for every
+     *            creator
+     */
+    int countEnabledSchedulesCreatedBy(String createdBy) throws IResourceStore.ResourceStoreException;
 
     /**
      * Deletes the used-up one-shots with the given name, with their fire logs:
@@ -408,7 +445,25 @@ public interface IScheduleStore {
      *            makes the stale write land nowhere, which is the correct outcome —
      *            B owns the row and will report its own result.
      */
-    void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException;
+    default void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+        markCompleted(scheduleId, expectedFireId, nextFire, null);
+    }
+
+    /**
+     * {@link #markCompleted(String, String, Instant)} that, when {@code nextFire}
+     * is null, also records why the schedule is disabled — in the same fenced
+     * write. A cron with no further match is completed and disabled with
+     * {@code disabledReason=no-next-fire} as ONE operation that applies only while
+     * this fire still holds the claim: a second, unfenced write by id would
+     * overwrite an operator who re-enabled the schedule, or changed its cron, in
+     * between.
+     *
+     * @param disabledReason
+     *            stored with the disable when {@code nextFire} is null;
+     *            {@code null} leaves the reason as it is (a used-up one-shot)
+     */
+    void markCompleted(String scheduleId, String expectedFireId, Instant nextFire, String disabledReason)
+            throws IResourceStore.ResourceStoreException;
 
     /** @see #markCompleted(String, String, Instant) */
     default void markCompleted(String scheduleId, Instant nextFire) throws IResourceStore.ResourceStoreException {

@@ -198,4 +198,24 @@ class ConversationStepRunnerTurnOutcomeTest {
         otherRunner.reportTurnOutcome(memory(ConversationState.READY, false, null), TurnWait.TIMED_OUT);
         verify(other, never()).reportCleanTurn(any());
     }
+
+    @Test
+    @DisplayName("turns of an agent-test conversation raise neither a failure outcome nor a clean-turn hook call")
+    void agentTestTurnsRaiseNoAlerts() {
+        for (ConversationState state : List.of(ConversationState.ERROR, ConversationState.READY)) {
+            IConversationMemory test = memory(state, false, null);
+            when(test.getUserId()).thenReturn("agent-test:run1:0:0");
+            runner.reportTurnOutcome(test, TurnWait.COMPLETED);
+        }
+        IConversationMemory timedOut = memory(ConversationState.READY, false, null);
+        when(timedOut.getUserId()).thenReturn("agent-test:run1:1:0");
+        runner.reportTurnOutcome(timedOut, TurnWait.TIMED_OUT);
+        verify(service, never()).reportTurnOutcome(any());
+        verify(service, never()).reportCleanTurn(any());
+
+        IConversationMemory real = memory(ConversationState.ERROR, false, null);
+        when(real.getUserId()).thenReturn("alice");
+        runner.reportTurnOutcome(real, TurnWait.COMPLETED);
+        verify(service).reportTurnOutcome(any());
+    }
 }

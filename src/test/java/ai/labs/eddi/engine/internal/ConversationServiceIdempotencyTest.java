@@ -376,6 +376,68 @@ class ConversationServiceIdempotencyTest {
         verify(retry, never()).onSkipped(any());
     }
 
+    // ---- the environment-qualified overload (the scheduler's) admits a key the
+    // same way ----
+
+    /**
+     * A scheduled fire's retry: its first attempt's turn committed after the fire
+     * gave up, and the retry loads the conversation AFTER that commit. The
+     * qualified overload used to skip admission entirely — the stored-key check ran
+     * only when a queued turn was rebuilt over a newer document, which a fresh load
+     * never needs — so the retry ran the same input a second time.
+     */
+    @Test
+    @DisplayName("qualified say: a key already stored in the conversation is answered from it, not run again — also on another node")
+    void qualifiedSay_aStoredKeyIsServedNotRunAgain() throws Exception {
+        sayQualified("schedule:s@1", mock(ConversationResponseHandler.class));
+        runQueuedTurns(1);
+        ConversationMemorySnapshot persisted = persistedSnapshot();
+        assertTrue(hasStoredKey(persisted, "schedule:s@1"), "the qualified path records its key too");
+
+        // The retry, on another node or after a restart: only the store knows.
+        conversationService.turnIdempotency = service(600);
+        doReturn(persisted).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+        ConversationResponseHandler retry = mock(ConversationResponseHandler.class);
+        sayQualified("schedule:s@1", retry);
+
+        verify(retry, timeout(2000)).onComplete(any());
+        verify(retry, never()).onSkipped(any());
+        verify(conversation, times(1)).say(anyString(), any());
+        verify(conversationCoordinator, times(1)).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    @Test
+    @DisplayName("qualified say: a duplicate while the turn runs on this node gets that turn's answer; the pipeline runs once")
+    void qualifiedSay_aDuplicateDuringTheTurnWaitsForIt() throws Exception {
+        ConversationResponseHandler first = mock(ConversationResponseHandler.class);
+        ConversationResponseHandler duplicate = mock(ConversationResponseHandler.class);
+
+        sayQualified("schedule:s@2", first);
+        sayQualified("schedule:s@2", duplicate);
+        runQueuedTurns(1);
+
+        verify(conversation, times(1)).say(anyString(), any());
+        verify(duplicate, timeout(2000)).onComplete(any());
+    }
+
+    @Test
+    @DisplayName("qualified say: the agent check still applies to a keyed turn, and the refused key is released")
+    void qualifiedSay_aKeyedTurnForAnotherAgentIsRefused() throws Exception {
+        var input = new InputData("hello", new HashMap<>());
+        input.setIdempotencyKey("schedule:s@3");
+        assertThrows(Exception.class, () -> conversationService.say(ENV, "another-agent", CONVERSATION_ID, false, true, List.of(), input, false,
+                mock(ConversationResponseHandler.class)));
+
+        sayQualified("schedule:s@3", mock(ConversationResponseHandler.class));
+        verify(conversationCoordinator, times(1)).submitInOrder(eq(CONVERSATION_ID), any());
+    }
+
+    private void sayQualified(String key, ConversationResponseHandler handler) throws Exception {
+        var input = new InputData("hello", new HashMap<>());
+        input.setIdempotencyKey(key);
+        conversationService.say(ENV, AGENT_ID, CONVERSATION_ID, false, true, List.of(), input, false, handler);
+    }
+
     private void say(String key, ConversationResponseHandler handler) throws Exception {
         var input = new InputData("hello", new HashMap<>());
         input.setIdempotencyKey(key);

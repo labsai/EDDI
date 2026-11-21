@@ -157,26 +157,28 @@ class ScheduleFireExecutorAuthorityTest {
         }
 
         @Test
-        void retriesOfOneDueFireShareTheRunAndACompletionStartsANewOne() {
+        void retriesOfOneDueFireShareTheRunAndAnyOtherOutcomeStartsANewOne() {
             var s = schedule(List.of());
             s.setId("sched-1");
-            String firstEver = ScheduleFireExecutor.runIdOf(s);
-
-            // a failed attempt and its retry: new claim (fireId), new nextFire, same
-            // lastFired
-            s.setFireId("sched-1:1000");
             s.setNextFire(Instant.ofEpochMilli(5_000));
-            String retry = ScheduleFireExecutor.runIdOf(s);
-            assertEquals(firstEver, retry);
+            String firstAttempt = ScheduleFireExecutor.runIdOf(s);
 
-            s.setLastFired(Instant.ofEpochMilli(9_000)); // markCompleted
+            // a failed attempt and its retry: a new claim (fireId), the same due time
+            s.setFireId("sched-1:1000");
+            s.setLastFired(Instant.ofEpochMilli(3_000));
+            String retry = ScheduleFireExecutor.runIdOf(s);
+            assertEquals(firstAttempt, retry);
+
+            // completed OR skipped: the schedule is re-armed at a new due time (a skip
+            // does not move lastFired, which is why that is not the run's identity)
+            s.setNextFire(Instant.ofEpochMilli(9_000));
             String next = ScheduleFireExecutor.runIdOf(s);
             assertFalse(next.equals(retry));
             assertEquals("sched-1@9000", next);
 
             var other = schedule(List.of());
             other.setId("sched-2");
-            other.setLastFired(Instant.ofEpochMilli(9_000));
+            other.setNextFire(Instant.ofEpochMilli(9_000));
             assertFalse(ScheduleFireExecutor.runIdOf(other).equals(next));
         }
 

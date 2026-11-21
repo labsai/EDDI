@@ -88,6 +88,8 @@ public class MongoScheduleStore implements IScheduleStore {
     private static final String METADATA = "metadata";
     private static final String PERSISTENT_CONVERSATION_ID = "persistentConversationId";
     private static final String DISABLED_REASON = "disabledReason";
+    private static final String OCCURRENCE_RUN_ID = "occurrenceRunId";
+    private static final String OCCURRENCE_CONVERSATION_ID = "occurrenceConversationId";
 
     private final MongoCollection<Document> scheduleCollection;
     /**
@@ -135,6 +137,13 @@ public class MongoScheduleStore implements IScheduleStore {
         scheduleCollection.createIndex(
                 Indexes.compoundIndex(Indexes.ascending(ENABLED), Indexes.ascending(NEXT_FIRE), Indexes.ascending(FIRE_STATUS)),
                 new IndexOptions().name("idx_schedules_due"));
+        // The due query asks for three fireStatus values (never DEAD_LETTERED). With
+        // fireStatus ahead of nextFire each of them is its own index range, so the
+        // dead-lettered rows — which keep their old nextFire and sort first in the
+        // index above — are never walked.
+        scheduleCollection.createIndex(
+                Indexes.compoundIndex(Indexes.ascending(ENABLED), Indexes.ascending(FIRE_STATUS), Indexes.ascending(NEXT_FIRE)),
+                new IndexOptions().name("idx_schedules_due_by_status"));
         scheduleCollection.createIndex(Indexes.ascending(AGENT_ID), new IndexOptions().name("idx_schedules_agentId"));
         scheduleCollection.createIndex(Indexes.ascending(TENANT_ID), new IndexOptions().name("idx_schedules_tenantId"));
         // HITL timeout schedules are deleted/re-armed by name on every pause,
@@ -175,6 +184,7 @@ public class MongoScheduleStore implements IScheduleStore {
             // marker does not stop Jackson (PROPAGATE_TRANSIENT_MARKER is off), so a PUT
             // that echoed a GET body used to persist a stale description here.
             doc.remove("cronDescription");
+            doc.remove("warnings");
             // Store every Instant field as an epoch-millis Long read straight from
             // the getters — never trusting whatever numeric format the shared mapper
             // produced (see writeScheduleInstants).
@@ -294,6 +304,25 @@ public class MongoScheduleStore implements IScheduleStore {
                     combine(set(PERSISTENT_CONVERSATION_ID, conversationId), set(UPDATED_AT, nowMs)));
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to set persistent conversation id for " + scheduleId, e);
+        }
+    }
+
+    /**
+     * Two-field {@code $set}, conditional in the filter — see
+     * {@link IScheduleStore#recordOccurrenceConversation}. {@code ne} also matches
+     * a row that has no such field yet (written before it existed).
+     */
+    @Override
+    public boolean recordOccurrenceConversation(String scheduleId, String runId, String conversationId, String replacedConversationId)
+            throws IResourceStore.ResourceStoreException {
+        try {
+            UpdateResult result = scheduleCollection.updateOne(
+                    and(eq(ID, scheduleId), or(ne(OCCURRENCE_RUN_ID, runId), eq(OCCURRENCE_CONVERSATION_ID, replacedConversationId))),
+                    combine(set(OCCURRENCE_RUN_ID, runId), set(OCCURRENCE_CONVERSATION_ID, conversationId),
+                            set(UPDATED_AT, epochMillis(Instant.now()))));
+            return result.getMatchedCount() == 1;
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to record the occurrence conversation of " + scheduleId, e);
         }
     }
 
@@ -472,6 +501,16 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
+    public int countEnabledSchedulesCreatedBy(String createdBy) throws IResourceStore.ResourceStoreException {
+        try {
+            Bson creator = createdBy != null ? eq(CREATED_BY, createdBy) : ne(CREATED_BY, null);
+            return (int) scheduleCollection.countDocuments(and(eq(ENABLED, true), creator));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to count enabled schedules", e);
+        }
+    }
+
+    @Override
     public Optional<ScheduleConfiguration> readScheduleByName(String name) throws IResourceStore.ResourceStoreException {
         try {
             Document doc = scheduleCollection.find(eq(NAME, name)).first();
@@ -603,8 +642,10 @@ public class MongoScheduleStore implements IScheduleStore {
             // Most overdue first, _id breaking ties. With more due rows than one poll
             // batch, an unsorted limit hands back whichever rows the storage engine
             // meets first — the same subset every poll — so the rest wait for that
-            // subset to drain regardless of how long they have been due. The
-            // (enabled, nextFire, fireStatus) index serves this sort.
+            // subset to drain regardless of how long they have been due. The sort has
+            // _id as its tie-break, which no index carries, so MongoDB sorts the due rows
+            // in memory (bounded by the limit); the index only narrows which rows those
+            // are — see idx_schedules_due_by_status.
             List<ScheduleConfiguration> result = new ArrayList<>();
             for (var doc : scheduleCollection.find(filter).sort(new Document(NEXT_FIRE, 1).append(ID, 1)).limit(pollBatchSize)) {
                 result.add(fromDocument(doc));
@@ -688,7 +729,8 @@ public class MongoScheduleStore implements IScheduleStore {
     }
 
     @Override
-    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire) throws IResourceStore.ResourceStoreException {
+    public void markCompleted(String scheduleId, String expectedFireId, Instant nextFire, String disabledReason)
+            throws IResourceStore.ResourceStoreException {
         try {
             long nowMs = epochMillis(Instant.now());
             var updates = new ArrayList<Bson>();
@@ -707,6 +749,10 @@ public class MongoScheduleStore implements IScheduleStore {
             } else {
                 updates.add(set(ENABLED, false));
                 updates.add(set(NEXT_FIRE, null));
+                if (disabledReason != null) {
+                    // In the same fenced update: see IScheduleStore#markCompleted.
+                    updates.add(set(DISABLED_REASON, disabledReason));
+                }
             }
 
             scheduleCollection.updateOne(claimedBy(scheduleId, expectedFireId), combine(updates));
@@ -1093,8 +1139,15 @@ public class MongoScheduleStore implements IScheduleStore {
             Instant createdAt = readEpochMillis(doc, "createdAt");
             Instant updatedAt = readEpochMillis(doc, "updatedAt");
             stripFields(doc, "nextFire", "lastFired", "claimedAt", "nextRetryAt", "createdAt", "updatedAt");
+            // Fire-path state the model keeps out of JSON (so a client can neither see
+            // nor set it): read here, not by the Jackson build.
+            String occurrenceRunId = doc.get(OCCURRENCE_RUN_ID) instanceof String s ? s : null;
+            String occurrenceConversationId = doc.get(OCCURRENCE_CONVERSATION_ID) instanceof String s ? s : null;
+            stripFields(doc, OCCURRENCE_RUN_ID, OCCURRENCE_CONVERSATION_ID);
 
             ScheduleConfiguration config = documentBuilder.build(doc, ScheduleConfiguration.class);
+            config.setOccurrenceRunId(occurrenceRunId);
+            config.setOccurrenceConversationId(occurrenceConversationId);
             config.setNextFire(nextFire);
             config.setLastFired(lastFired);
             config.setClaimedAt(claimedAt);

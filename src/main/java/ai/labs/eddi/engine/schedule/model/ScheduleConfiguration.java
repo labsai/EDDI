@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.engine.schedule.model;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
+import com.fasterxml.jackson.annotation.JsonInclude;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Map;
@@ -176,6 +179,11 @@ public class ScheduleConfiguration {
      * agent.
      */
     public static final String DISABLED_ACCESS_REVOKED = "access-revoked";
+    /**
+     * {@link #disabledReason}: the fire completed but its cron has no further
+     * match, so there is nothing left to arm.
+     */
+    public static final String DISABLED_NO_NEXT_FIRE = "no-next-fire";
 
     // -- Metadata --
     private Map<String, Object> metadata;
@@ -193,6 +201,37 @@ public class ScheduleConfiguration {
     // it also meant a PUT echoing a GET body stored a stale description; the stores
     // therefore strip it explicitly on write.
     private transient String cronDescription;
+    // Warnings the create response carries (a recurring schedule with no cost cap,
+    // for one). Response-only like cronDescription: the stores never write it.
+    private transient List<String> warnings;
+    // Set on the in-memory copy a manual "fire now" claimed; never serialized or
+    // stored.
+    @JsonIgnore
+    private transient boolean manualFire;
+    // When the poller (or a manual fire) handed this copy to the fire executor: the
+    // origin of the watchdog that interrupts the fire, and so of the give-up time
+    // of
+    // its turn. Never serialized or stored.
+    @JsonIgnore
+    private transient Instant dispatchedAt;
+
+    /**
+     * The conversation the first attempt of a due occurrence started, for
+     * {@code conversationStrategy=new}, and the run it belongs to
+     * ({@code ScheduleFireExecutor.runIdOf}). A retry of the same occurrence
+     * continues that conversation instead of starting another, so the occurrence's
+     * idempotency key — which is scoped to one conversation — finds a turn that
+     * committed late. Written by the fire path alone
+     * ({@link ai.labs.eddi.engine.schedule.IScheduleStore#recordOccurrenceConversation});
+     * never read from or written to JSON, so a client can neither see nor set it.
+     * Absent on rows written before it existed, which reads as "none".
+     */
+    @JsonIgnore
+    private String occurrenceRunId;
+
+    /** @see #occurrenceRunId */
+    @JsonIgnore
+    private String occurrenceConversationId;
 
     public ScheduleConfiguration() {
     }
@@ -500,6 +539,55 @@ public class ScheduleConfiguration {
 
     public String getCronDescription() {
         return cronDescription;
+    }
+
+    @JsonIgnore
+    public boolean isManualFire() {
+        return manualFire;
+    }
+
+    @JsonIgnore
+    public void setManualFire(boolean manualFire) {
+        this.manualFire = manualFire;
+    }
+
+    @JsonIgnore
+    public Instant getDispatchedAt() {
+        return dispatchedAt;
+    }
+
+    @JsonIgnore
+    public void setDispatchedAt(Instant dispatchedAt) {
+        this.dispatchedAt = dispatchedAt;
+    }
+
+    @JsonIgnore
+    public String getOccurrenceRunId() {
+        return occurrenceRunId;
+    }
+
+    @JsonIgnore
+    public void setOccurrenceRunId(String occurrenceRunId) {
+        this.occurrenceRunId = occurrenceRunId;
+    }
+
+    @JsonIgnore
+    public String getOccurrenceConversationId() {
+        return occurrenceConversationId;
+    }
+
+    @JsonIgnore
+    public void setOccurrenceConversationId(String occurrenceConversationId) {
+        this.occurrenceConversationId = occurrenceConversationId;
+    }
+
+    @JsonInclude(JsonInclude.Include.NON_EMPTY)
+    public List<String> getWarnings() {
+        return warnings;
+    }
+
+    public void setWarnings(List<String> warnings) {
+        this.warnings = warnings;
     }
 
     public void setCronDescription(String cronDescription) {

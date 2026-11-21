@@ -447,6 +447,7 @@
     "POST /schedulestore/schedules/{scheduleId}/dismiss",
     "POST /schedulestore/schedules/{scheduleId}/enable",
     "POST /schedulestore/schedules/{scheduleId}/fire",
+    "POST /schedulestore/schedules/{scheduleId}/reset-conversation",
     "POST /schedulestore/schedules/{scheduleId}/retry",
     "POST /secretstore/secrets/admin/adopt-master-key",
     "POST /secretstore/secrets/admin/rotate-kek",

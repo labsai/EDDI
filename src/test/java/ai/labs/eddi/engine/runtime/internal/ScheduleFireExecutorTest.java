@@ -20,6 +20,8 @@ import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.continuation.ConversationContinuations;
 import ai.labs.eddi.engine.internal.HitlTimeoutHandler;
+import ai.labs.eddi.engine.internal.TurnIdempotencyService;
+import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.configs.properties.model.Property;
@@ -45,7 +47,10 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -68,9 +73,12 @@ class ScheduleFireExecutorTest {
     private ScheduleFireExecutor executor;
 
     @BeforeEach
-    void setUp() {
+    void setUp() throws Exception {
         conversationService = mock(IConversationService.class);
         scheduleStore = mock(IScheduleStore.class);
+        // A conversationStrategy=new fire records its conversation before it sends the
+        // turn; by default the record succeeds.
+        when(scheduleStore.recordOccurrenceConversation(any(), any(), any(), any())).thenReturn(true);
         hitlTimeoutHandler = mock(HitlTimeoutHandler.class);
         dreamService = mock(DreamService.class);
         teamCadenceService = mock(TeamCadenceService.class);
@@ -268,7 +276,10 @@ class ScheduleFireExecutorTest {
      */
     @Test
     void fire_turnSkippedBecauseTheConversationWasBusy_isRecordedSkipped() throws Exception {
-        var schedule = makeCronSchedule("sched-skip", "new");
+        // persistent: a conversation shared with people, where busy is someone else's
+        // turn. (In a conversation of its own occurrence busy means an earlier attempt
+        // — see fire_newStrategy_busyWithAnEarlierAttempt_isFailedAndRetried.)
+        var schedule = makeCronSchedule("sched-skip", "persistent");
         when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
                 .thenReturn(new IConversationService.ConversationResult("conv-skip", null));
 
@@ -517,6 +528,395 @@ class ScheduleFireExecutorTest {
         assertNotNull(result.errorMessage());
         assertTrue(result.errorMessage().contains("PT0.05S"),
                 "the configured bound must be the one enforced, and the message must name it: " + result.errorMessage());
+    }
+
+    /**
+     * A turn that outlives the fire timeout is recorded FAILED and retried after 15
+     * s while it still runs. The fire now cancels it through the conversation
+     * layer, and every turn of one due fire carries the same Idempotency-Key, so a
+     * retry queued behind a first turn that committed anyway is not run again.
+     */
+    @Test
+    @Timeout(30)
+    void fire_timeout_cancelsTheRunningTurn_andRetriesCarryTheSameIdempotencyKey() throws Exception {
+        var schedule = makeCronSchedule("sched-slow", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-slow", null));
+        var keys = new ArrayList<String>();
+        doAnswer(inv -> {
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            return null; // the handler is never called: the turn outlives the timeout
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 2).status());
+
+        verify(conversationService, times(2)).cancelConversation("conv-slow", ControlSignal.CANCEL_GRACEFUL, "system:scheduler");
+        assertEquals(2, keys.size());
+        assertNotNull(keys.get(0));
+        assertTrue(keys.get(0).startsWith("schedule:sched-slow@"), keys.get(0));
+        assertEquals(keys.get(0), keys.get(1), "the retries of one due fire must share one key");
+    }
+
+    /**
+     * A persistent conversation is shared with humans, other channels and
+     * continuations: the cancel names only the turn carrying this fire's run id,
+     * and never runs the conversation-wide cancel (AWAITING_HUMAN CAS, continuation
+     * disarm, approval audit).
+     */
+    @Test
+    @Timeout(30)
+    void fire_timeout_persistent_signalsOnlyThisFiresTurn_neverTheConversationWideCancel() throws Exception {
+        var schedule = makeCronSchedule("sched-p", "persistent");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-p", null));
+        var sent = new ArrayList<InputData>();
+        doAnswer(inv -> {
+            sent.add(inv.getArgument(6));
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        long before = System.currentTimeMillis();
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        verify(conversationService).cancelInFlightTurn("conv-p", ScheduleConfiguration.CONTEXT_FIRE_ID, runId);
+        verify(conversationService, never()).cancelConversation(any(), any(), any());
+        verify(conversationService, never()).cancelPausedConversation(any(), any());
+        // the turn is stamped with the run id the cancel looks for, and, if it is still
+        // queued behind another turn, with a give-up time that drops it
+        assertEquals(runId, sent.get(0).getContext().get(ScheduleConfiguration.CONTEXT_FIRE_ID).getValue());
+        assertNotNull(sent.get(0).getCallerGivesUpAtEpochMs());
+        assertTrue(sent.get(0).getCallerGivesUpAtEpochMs() >= before, "a queued fire turn must be droppable once the fire gave up");
+    }
+
+    /**
+     * The poller's watchdog interrupt is a give-up too; a shutdown drain is not.
+     */
+    @Test
+    @Timeout(30)
+    void fire_interruptedAfterDispatch_cancelsItsTurn_butNotDuringShutdownDrain() throws Exception {
+        for (boolean draining : new boolean[]{false, true}) {
+            reset(conversationService);
+            var schedule = makeCronSchedule("sched-i" + draining, "persistent");
+            when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-i", null));
+            var dispatched = new CountDownLatch(1);
+            doAnswer(inv -> {
+                dispatched.countDown();
+                return null;
+            }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+            if (draining) {
+                executor.beginShutdown();
+            }
+            var result = new AtomicReference<ScheduleFireLog>();
+            var thread = new Thread(() -> result.set(executor.fire(schedule, "instance-1", 1)));
+            thread.start();
+            assertTrue(dispatched.await(10, TimeUnit.SECONDS));
+            thread.interrupt();
+            thread.join(10_000);
+
+            assertEquals(FireStatus.FAILED.name(), result.get().status());
+            verify(conversationService, draining ? never() : times(1)).cancelInFlightTurn(eq("conv-i"), any(), any());
+        }
+    }
+
+    /**
+     * An occurrence whose first attempt timed out but committed late: the retry is
+     * answered "skipped" by the idempotency check, and that finishes the
+     * occurrence. The next regular occurrence has a different key and runs.
+     */
+    @Test
+    @Timeout(30)
+    void fire_skippedBecauseTheTurnAlreadyCommitted_completesTheOccurrence_andTheNextOneRuns() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeCronSchedule("sched-late", "persistent");
+        schedule.setPersistentConversationId("conv-late");
+        storedConversation("conv-late", ConversationState.READY, 3);
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(true);
+        var keys = new ArrayList<String>();
+        doAnswer(inv -> {
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onSkipped(snapshot);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 2).status(),
+                "the message was delivered by the first attempt: the retry's skip completes the occurrence");
+
+        // the poller advanced nextFire (markCompleted): the next regular fire is a new
+        // occurrence
+        schedule.setNextFire(schedule.getNextFire().plusSeconds(86_400));
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(false);
+        assertEquals(FireStatus.SKIPPED.name(), executor.fire(schedule, "instance-1", 1).status(),
+                "a genuine skip (busy conversation) stays SKIPPED");
+        assertEquals(2, keys.size());
+        assertNotEquals(keys.get(0), keys.get(1), "two consecutive occurrences must not share a key");
+    }
+
+    @Test
+    void runId_isStableAcrossRetriesOfOneOccurrence_differsPerOccurrence_andPerManualFire() {
+        var s = makeCronSchedule("sched-r", "new");
+        s.setNextFire(Instant.ofEpochMilli(5_000));
+        s.setFireId("sched-r_1");
+        String firstAttempt = ScheduleFireExecutor.runIdOf(s);
+        s.setFireId("sched-r_2"); // a retry claims again, nextFire unchanged
+        assertEquals(firstAttempt, ScheduleFireExecutor.runIdOf(s));
+        s.setNextFire(Instant.ofEpochMilli(9_000)); // completed or skipped: re-armed
+        assertNotEquals(firstAttempt, ScheduleFireExecutor.runIdOf(s));
+
+        s.setManualFire(true);
+        s.setFireId("sched-r_10");
+        String click1 = ScheduleFireExecutor.runIdOf(s);
+        s.setFireId("sched-r_11");
+        assertNotEquals(click1, ScheduleFireExecutor.runIdOf(s));
+    }
+
+    // ---- conversationStrategy=new: one conversation per occurrence, across
+    // retries ----
+
+    /**
+     * Each retry used to start ANOTHER conversation, and the occurrence's
+     * idempotency key is scoped to one conversation — so a first turn that
+     * committed late (its cancel came too late) could not be found and the message
+     * ran twice. The first attempt now records its conversation before sending the
+     * turn, and the retry of the same occurrence continues it, with the same key,
+     * even though a new start would have returned a different conversation.
+     */
+    @Test
+    @Timeout(30)
+    void fire_newStrategy_retryContinuesTheConversationTheFirstAttemptRecorded() throws Exception {
+        var schedule = makeCronSchedule("sched-occ", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(50));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-first", null),
+                        new IConversationService.ConversationResult("conv-second", null));
+        var sentTo = new ArrayList<String>();
+        var keys = new ArrayList<String>();
+        doAnswer(inv -> {
+            sentTo.add(inv.getArgument(2));
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            return null; // attempt 1: the turn outlives the fire
+        }).doAnswer(inv -> {
+            sentTo.add(inv.getArgument(2));
+            keys.add(((InputData) inv.getArgument(6)).getIdempotencyKey());
+            var done = new SimpleConversationMemorySnapshot();
+            done.setConversationState(ConversationState.READY);
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        verify(scheduleStore).recordOccurrenceConversation("sched-occ", runId, "conv-first", null);
+
+        // The retry reads the row again: it carries the record of attempt 1.
+        schedule.setOccurrenceRunId(runId);
+        schedule.setOccurrenceConversationId("conv-first");
+        storedConversation("conv-first", ConversationState.EXECUTION_INTERRUPTED, 1);
+        setField(executor, "fireTimeout", Duration.ofSeconds(5));
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 2).status());
+
+        verify(conversationService, times(1)).startConversation(any(), any(), any(), any());
+        assertEquals(List.of("conv-first", "conv-first"), sentTo, "both attempts of one occurrence go to one conversation");
+        assertEquals(keys.get(0), keys.get(1));
+    }
+
+    /** A record of an EARLIER occurrence is not this one's: a new conversation. */
+    @Test
+    void fire_newStrategy_aRecordOfAnotherOccurrenceIsNotContinued() throws Exception {
+        var schedule = makeCronSchedule("sched-next", "new");
+        schedule.setOccurrenceRunId("sched-next@1000");
+        schedule.setOccurrenceConversationId("conv-yesterday");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-today", null));
+        sayCompletes("conv-today");
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+
+        verify(scheduleStore).recordOccurrenceConversation("sched-next", ScheduleFireExecutor.runIdOf(schedule), "conv-today", null);
+        verify(conversationMemoryStore, never()).loadConversationMemorySnapshot("conv-yesterday");
+    }
+
+    /**
+     * The recorded conversation ended without storing this occurrence's turn (or is
+     * gone): it cannot take the turn, so a new one replaces it in the record.
+     */
+    @Test
+    void fire_newStrategy_aRecordedConversationThatEndedWithoutTheTurn_isReplaced() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeCronSchedule("sched-ended", "new");
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        schedule.setOccurrenceRunId(runId);
+        schedule.setOccurrenceConversationId("conv-ended");
+        storedConversation("conv-ended", ConversationState.ENDED, 1);
+        when(idempotency.isRecordedIn(any(), anyString())).thenReturn(false);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-fresh", null));
+        sayCompletes("conv-fresh");
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 2).status());
+
+        verify(scheduleStore).recordOccurrenceConversation("sched-ended", runId, "conv-fresh", "conv-ended");
+    }
+
+    /**
+     * Ended AFTER storing the turn (the agent ended the conversation in that very
+     * turn): it is continued, and admission answers the retry with that turn.
+     */
+    @Test
+    void fire_newStrategy_aRecordedConversationThatEndedAfterStoringTheTurn_isContinued() throws Exception {
+        var idempotency = mock(TurnIdempotencyService.class);
+        setField(executor, "turnIdempotency", idempotency);
+        var schedule = makeCronSchedule("sched-ended2", "new");
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        schedule.setOccurrenceRunId(runId);
+        schedule.setOccurrenceConversationId("conv-done");
+        storedConversation("conv-done", ConversationState.ENDED, 2);
+        when(idempotency.isRecordedIn(any(), eq(ScheduleFireExecutor.idempotencyKeyOf(runId)))).thenReturn(true);
+        sayCompletes("conv-done");
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 2).status());
+
+        verify(conversationService, never()).startConversation(any(), any(), any(), any());
+        verify(scheduleStore, never()).recordOccurrenceConversation(any(), any(), any(), any());
+    }
+
+    /**
+     * Two attempts of one occurrence racing (a stolen lease): the one whose record
+     * lost adopts the winner's conversation instead of running the turn in its own.
+     */
+    @Test
+    void fire_newStrategy_losingTheRecordRace_adoptsTheWinnersConversation() throws Exception {
+        var schedule = makeCronSchedule("sched-race", "new");
+        String runId = ScheduleFireExecutor.runIdOf(schedule);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-loser", null));
+        when(scheduleStore.recordOccurrenceConversation("sched-race", runId, "conv-loser", null)).thenReturn(false);
+        var stored = makeCronSchedule("sched-race", "new");
+        stored.setOccurrenceRunId(runId);
+        stored.setOccurrenceConversationId("conv-winner");
+        when(scheduleStore.readSchedule("sched-race")).thenReturn(stored);
+        sayCompletes("conv-winner");
+
+        assertEquals(FireStatus.COMPLETED.name(), executor.fire(schedule, "instance-1", 1).status());
+
+        verify(conversationService, never()).say(any(), any(), eq("conv-loser"), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * A conversation a retry could not find again must not receive the turn: when
+     * the record cannot be written, the attempt fails before sending anything.
+     */
+    @Test
+    void fire_newStrategy_aRecordThatCannotBeWritten_sendsNothing() throws Exception {
+        var schedule = makeCronSchedule("sched-norecord", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-x", null));
+        when(scheduleStore.recordOccurrenceConversation(any(), any(), any(), any()))
+                .thenThrow(new IResourceStore.ResourceStoreException("store down"));
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+
+        verify(conversationService, never()).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+    }
+
+    /**
+     * Busy in a conversation of its own occurrence means an earlier attempt's turn
+     * is still running there. SKIPPED would re-arm the next cadence and lose this
+     * occurrence if that turn then failed; it is FAILED, so it is retried.
+     */
+    @Test
+    void fire_newStrategy_busyWithAnEarlierAttempt_isFailedAndRetried() throws Exception {
+        var schedule = makeCronSchedule("sched-busy-own", "new");
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-own", null));
+        sayIsSkipped("conv-own", ConversationState.IN_PROGRESS);
+
+        ScheduleFireLog result = executor.fire(schedule, "instance-1", 2);
+
+        assertEquals(FireStatus.FAILED.name(), result.status());
+        assertTrue(result.errorMessage().contains("conv-own"), result.errorMessage());
+    }
+
+    // ---- the give-up time counts from the poller's dispatch ----
+
+    /**
+     * The watchdog interrupts at dispatch + fire timeout + grace. The turn's
+     * give-up time counted from a later origin (after startup) could fall after the
+     * interrupt, and a turn still queued then ran after its fire had been recorded
+     * FAILED. It is counted from the dispatch now.
+     */
+    @Test
+    void fire_givesUpAtDispatchPlusFireTimeout_notAtStartupPlusFireTimeout() throws Exception {
+        var schedule = makeCronSchedule("sched-origin", "persistent");
+        setField(executor, "fireTimeout", Duration.ofMinutes(5));
+        Instant dispatchedAt = Instant.now().minusSeconds(120); // startup took two minutes
+        schedule.setDispatchedAt(dispatchedAt);
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-origin", null));
+        var sent = new AtomicReference<InputData>();
+        doAnswer(inv -> {
+            sent.set(inv.getArgument(6));
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(null);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        assertEquals(dispatchedAt.toEpochMilli() + Duration.ofMinutes(5).toMillis(), sent.get().getCallerGivesUpAtEpochMs());
+    }
+
+    /**
+     * The fire stops waiting at that same moment: a fire whose budget the startup
+     * already spent gives up at once instead of waiting a full fire timeout more.
+     */
+    @Test
+    @Timeout(30)
+    void fire_whoseBudgetStartupAlreadySpent_givesUpAtOnce() throws Exception {
+        var schedule = makeCronSchedule("sched-spent", "persistent");
+        setField(executor, "fireTimeout", Duration.ofMinutes(5));
+        schedule.setDispatchedAt(Instant.now().minus(Duration.ofMinutes(6)));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-spent", null));
+        doNothing().when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+        verify(conversationService).cancelInFlightTurn(eq("conv-spent"), any(), any());
+    }
+
+    @Test
+    void giveUpOrigin_isTheDispatch_orTheStartWhenNoneWasStamped() {
+        var schedule = makeCronSchedule("sched-o", "new");
+        Instant started = Instant.parse("2026-11-18T10:00:30Z");
+        assertEquals(started, ScheduleFireExecutor.giveUpOrigin(schedule, started));
+        schedule.setDispatchedAt(Instant.parse("2026-11-18T10:00:00Z"));
+        assertEquals(Instant.parse("2026-11-18T10:00:00Z"), ScheduleFireExecutor.giveUpOrigin(schedule, started));
+    }
+
+    @Test
+    void fire_timeout_aFailingCancelDoesNotChangeTheOutcome() throws Exception {
+        var schedule = makeCronSchedule("sched-slow2", "new");
+        setField(executor, "fireTimeout", Duration.ofMillis(20));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-slow2", null));
+        when(conversationService.cancelConversation(any(), any(), any())).thenThrow(new IllegalStateException("store down"));
+
+        assertEquals(FireStatus.FAILED.name(), executor.fire(schedule, "instance-1", 1).status());
+    }
+
+    @Test
+    void idempotencyKeyOf_staysWithinTheKeyLimit() {
+        assertEquals("schedule:abc@first", ScheduleFireExecutor.idempotencyKeyOf("abc@first"));
+        String key = ScheduleFireExecutor.idempotencyKeyOf("x".repeat(300));
+        assertTrue(key.length() <= TurnIdempotencyService.MAX_KEY_LENGTH, key);
+        assertEquals(key, ScheduleFireExecutor.idempotencyKeyOf("x".repeat(300)), "the hashed key must be deterministic");
     }
 
     /**
