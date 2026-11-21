@@ -4,9 +4,14 @@
  */
 package ai.labs.eddi.modules.ingestion.extract;
 
+import ai.labs.eddi.modules.ingestion.extract.PageLayout.Line;
+import ai.labs.eddi.modules.ingestion.extract.document.Block;
+import ai.labs.eddi.modules.ingestion.extract.document.BlockOptions;
 import ai.labs.eddi.modules.ingestion.extract.document.DocumentManifest;
+import ai.labs.eddi.modules.ingestion.extract.document.DocumentUnit;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitStrategy;
+import ai.labs.eddi.modules.ingestion.extract.document.TextBlock;
 import ai.labs.eddi.modules.ingestion.extract.document.UnitBudgetFitter;
 import ai.labs.eddi.modules.ingestion.extract.document.UnitBudgetFitter.Section;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -37,6 +42,7 @@ import java.util.IdentityHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /**
@@ -90,22 +96,45 @@ import java.util.Set;
  * when two or more top-level entries point to different pages of the document —
  * the front-matter unit does not count; otherwise the document is cut by
  * pages.</li>
+ * <li>{@link SplitStrategy#HEADINGS}: headings found by font size
+ * ({@link PageLayout}): on each page, a short line set at least
+ * {@value PageLayout#HEADING_RATIO} times the page's body size. Heading sizes
+ * are grouped into levels, a level holding sizes within 5 % of its largest; the
+ * first level — largest first — with headings on two or more pages makes the
+ * chapters, and the level below it their parts. A larger heading that occurs on
+ * one page only, a title page's title say, starts nothing. The chapters are
+ * then placed exactly as outline entries are. Fewer than two chapters: cut by
+ * pages.</li>
  * <li>{@link SplitStrategy#PAGES}: windows of
  * {@link SplitConfig#pagesPerUnit()} pages.</li>
- * <li>{@link SplitStrategy#AUTO}: the outline when usable, else pages. A
- * document with no text in the pages measured is cut by pages: a scan has no
- * estimates to fit, and pages are what its reader can name.</li>
- * <li>{@link SplitStrategy#HEADINGS}: not available yet, handled as AUTO.</li>
+ * <li>{@link SplitStrategy#AUTO}: the outline when usable, else the headings,
+ * else pages. A document with no text in the pages measured is cut by pages: a
+ * scan has no estimates to fit, and pages are what its reader can name.</li>
  * </ul>
  * Then {@link UnitBudgetFitter} fits the units to the budget. The estimate for
  * a page is its laid-out characters divided by four; pages past
- * {@link ExtractionLimits#maxParts()} are not read and get the average of those
- * that were.
+ * {@link ExtractionLimits#maxParts()} are not read, get the average of those
+ * that were, and are not searched for headings.
+ *
+ * <p>
+ * A page whose body text stands in columns is read top to bottom all the same,
+ * so lines of different columns alternate; the manifest names such pages in a
+ * warning.
+ *
+ * <h2>Blocks</h2>
+ * <p>
+ * {@link #blocks} reads one unit's pages again, under the same bounds, as
+ * {@link TextBlock}s in reading order — page, then top to bottom, then left to
+ * right — a heading a block of its own, consecutive body lines one block. When
+ * the unit's title heading stands below other text on its first page, the unit
+ * started mid-page: a note block first says that the text above the heading
+ * belongs to the unit before.
  *
  * <p>
  * Images, tables and audio are not counted yet; their counts are zero. Warnings
- * never quote the document: outline titles are data and go only into the units'
- * titles, cleaned of control characters and cut to length.
+ * never quote the document: outline titles and headings are data and go only
+ * into the units' titles and the blocks, cleaned of control characters and cut
+ * to length.
  */
 @ApplicationScoped
 public class PdfStructureExtractor {
@@ -136,9 +165,36 @@ public class PdfStructureExtractor {
 
     private static final COSName GO_TO = COSName.getPDFName("GoTo");
 
-    static final String WARNING_HEADINGS = "Cutting by headings is not available yet; the outline or page windows "
-            + "were used instead.";
+    /** Headings collected at most; later ones are ignored, with a warning. */
+    static final int MAX_HEADINGS = MAX_OUTLINE_ITEMS;
+
+    /** Sizes within this fraction of a level's largest belong to that level. */
+    private static final float SAME_LEVEL = 0.95f;
+
+    /** Pages a warning lists by number at most. */
+    private static final int MAX_PAGES_NAMED = 20;
+
+    /**
+     * Glyphs one page may lay out beyond the characters still wanted, as in
+     * {@link PdfTextExtractor}.
+     */
+    private static final int GLYPH_SLACK = 20_000;
+
+    /**
+     * Two body lines belong to one block when the second's top is at most this many
+     * font sizes below the first's: ordinary leading, not a blank line.
+     */
+    private static final float PARAGRAPH_LEADING = 2f;
+
     static final String WARNING_NO_OUTLINE = "This PDF has no usable outline, so it was cut into page windows.";
+    static final String WARNING_NO_HEADINGS = "No headings were found on two or more pages of this PDF, so it was "
+            + "cut into page windows.";
+    static final String WARNING_NO_OUTLINE_OR_HEADINGS = "This PDF has no usable outline and no headings were "
+            + "found on two or more pages, so it was cut into page windows.";
+    static final String WARNING_CUT_BY_HEADINGS = "This PDF has no usable outline, so it was cut at headings found "
+            + "by their font size; a heading set like body text is not found.";
+    static final String WARNING_HEADINGS_TRUNCATED = "More than " + MAX_HEADINGS + " headings were found; only the "
+            + "first " + MAX_HEADINGS + " were used.";
     static final String WARNING_OUTLINE_LOOP = "The outline refers back to itself; entries were read once each.";
     static final String WARNING_OUTLINE_TRUNCATED = "The outline has more than " + MAX_OUTLINE_ITEMS
             + " entries; only the first " + MAX_OUTLINE_ITEMS + " were read.";
@@ -155,6 +211,30 @@ public class PdfStructureExtractor {
         String where = measured < pageCount ? "in the first " + measured + " of its " + pageCount + " pages" : "";
         return "This PDF has no text layer" + (where.isEmpty() ? "" : " " + where)
                 + " (a scan, perhaps), so it was cut into page windows and its estimates are zero.";
+    }
+
+    /**
+     * The warning for pages whose text stands in columns, naming at most
+     * {@value #MAX_PAGES_NAMED} pages, runs of them as ranges.
+     */
+    static String multiColumnWarning(List<Integer> pages) {
+        List<Integer> shown = pages.subList(0, Math.min(pages.size(), MAX_PAGES_NAMED));
+        var named = new StringBuilder();
+        for (int i = 0; i < shown.size(); i++) {
+            int first = shown.get(i);
+            while (i + 1 < shown.size() && shown.get(i + 1) == shown.get(i) + 1) {
+                i++;
+            }
+            int last = shown.get(i);
+            if (!named.isEmpty()) {
+                named.append(", ");
+            }
+            named.append(first == last ? String.valueOf(first) : first + "–" + last);
+        }
+        int more = pages.size() - shown.size();
+        return "Text in columns was found on " + (pages.size() == 1 ? "page " : "pages ") + named
+                + (more > 0 ? " and " + more + " more" : "") + "; it is read top to bottom across the columns, "
+                + "so their lines alternate.";
     }
 
     /**
@@ -188,14 +268,92 @@ public class PdfStructureExtractor {
         }
         SplitConfig config = split == null ? SplitConfig.defaults() : split;
         ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
+        Structure structure = guarded(pdf, bounds, preFilter,
+                (document, pageNumbers, deadline) -> structure(document, pageNumbers, config, bounds, deadline));
+        // Outside the read, with the document closed: the fitting is pure, and a fault
+        // in it is this code's, not the file's — it must not be reported as an
+        // unreadable PDF.
+        UnitBudgetFitter.Result fitted = UnitBudgetFitter.fit(structure.sections(), structure.tokens(), config);
+        Set<String> warnings = new LinkedHashSet<>(structure.warnings());
+        warnings.addAll(fitted.warnings());
+        return new DocumentManifest(rootRef, sha256(pdf), structure.tokens().length, structure.used(),
+                fitted.units(), List.of(), List.copyOf(warnings));
+    }
+
+    /**
+     * One unit's content in reading order: its pages' text as {@link TextBlock}s,
+     * headings as blocks of their own. Read under the same bounds as
+     * {@link #manifest}.
+     *
+     * <p>
+     * At most {@link ExtractionLimits#maxParts()} pages and about
+     * {@link ExtractionLimits#maxCharacters()} characters are read — a page is kept
+     * whole, so the last one may run a little past it; when either stops the read
+     * before the unit's last page, a note block at the end says so. A note block is
+     * not a heading and quotes nothing but the document's own headings.
+     *
+     * @param unit
+     *            a unit of this file's manifest; its pages are what is read
+     * @param options
+     *            what to extract beyond text; null for
+     *            {@link BlockOptions#textOnly()}
+     * @param limits
+     *            what reading it may cost; null for
+     *            {@link ExtractionLimits#defaults()}
+     * @throws UnreadableDocumentException
+     *             as {@link #manifest} does, and when the unit's pages are not in
+     *             this file
+     */
+    public List<Block> blocks(byte[] pdf, DocumentUnit unit, BlockOptions options, ExtractionLimits limits) {
+        return blocks(pdf, unit, options, limits, true);
+    }
+
+    /**
+     * @param preFilter
+     *            whether to run the raw-byte scan first. Off only in tests that
+     *            show the decode budget holds on its own
+     */
+    List<Block> blocks(byte[] pdf, DocumentUnit unit, BlockOptions options, ExtractionLimits limits,
+                       boolean preFilter) {
+        Objects.requireNonNull(unit, "unit");
+        if (unit.firstPage() < 1 || unit.lastPage() < unit.firstPage()) {
+            throw new IllegalArgumentException("A unit covers pages first..last, first >= 1");
+        }
+        if (pdf == null) {
+            throw new UnreadableDocumentException("This file could not be read as a PDF.");
+        }
+        ExtractionLimits bounds = limits == null ? ExtractionLimits.defaults() : limits;
+        return guarded(pdf, bounds, preFilter,
+                (document, pageNumbers, deadline) -> readBlocks(document, pageNumbers.size(), unit, bounds, deadline));
+    }
+
+    /**
+     * What reading the document found: the sections to fit and the page estimates.
+     */
+    private record Structure(List<Section> sections, int[] tokens, SplitStrategy used, Set<String> warnings) {
+    }
+
+    /** Work on an opened, checked document. */
+    @FunctionalInterface
+    private interface DocumentWork<T> {
+        T run(PDDocument document, Map<COSDictionary, Integer> pageNumbers, Instant deadline) throws IOException;
+    }
+
+    /**
+     * The defences every read goes through, in order: the raw-byte scan, the decode
+     * budget armed on this thread for the whole read and checked again however it
+     * ended, the parser's scratch space capped, encryption refused, the page tree
+     * walked ahead of PDFBox and its pages numbered.
+     */
+    private static <T> T guarded(byte[] pdf, ExtractionLimits bounds, boolean preFilter, DocumentWork<T> work) {
         Instant deadline = Instant.now().plus(bounds.maxDuration());
         if (preFilter) {
             PdfStreamBudget.requireWithin(pdf, bounds.maxUncompressedBytes(), deadline);
         }
-        Structure structure;
+        T result;
         try (var budget = PdfDecodeBudget.open(bounds.maxDecodedBytes())) {
             try {
-                structure = read(pdf, config, bounds, deadline);
+                result = open(pdf, bounds, deadline, work);
             } catch (StackOverflowError e) {
                 // Last resort, for the one recursion this code cannot walk ahead of: the
                 // parser's own page-tree check while it rebuilds a broken cross-reference
@@ -211,20 +369,7 @@ public class PdfStructureExtractor {
                 throw tooMuchToDecode(budget);
             }
         }
-        // Outside the read, with the document closed: the fitting is pure, and a fault
-        // in it is this code's, not the file's — it must not be reported as an
-        // unreadable PDF.
-        UnitBudgetFitter.Result fitted = UnitBudgetFitter.fit(structure.sections(), structure.tokens(), config);
-        Set<String> warnings = new LinkedHashSet<>(structure.warnings());
-        warnings.addAll(fitted.warnings());
-        return new DocumentManifest(rootRef, sha256(pdf), structure.tokens().length, structure.used(),
-                fitted.units(), List.of(), List.copyOf(warnings));
-    }
-
-    /**
-     * What reading the document found: the sections to fit and the page estimates.
-     */
-    private record Structure(List<Section> sections, int[] tokens, SplitStrategy used, Set<String> warnings) {
+        return result;
     }
 
     private static UnreadableDocumentException tooMuchToDecode(PdfDecodeBudget.Budget budget) {
@@ -233,7 +378,7 @@ public class PdfStructureExtractor {
                 + "split it, or save a copy without embedded attachments.");
     }
 
-    private Structure read(byte[] pdf, SplitConfig split, ExtractionLimits limits, Instant deadline) {
+    private static <T> T open(byte[] pdf, ExtractionLimits limits, Instant deadline, DocumentWork<T> work) {
         try (PDDocument document = Loader.loadPDF(pdf, "", null, null,
                 MemoryUsageSetting.setupMainMemoryOnly(limits.maxUncompressedBytes()).streamCache)) {
             if (document.isEncrypted()) {
@@ -241,32 +386,10 @@ public class PdfStructureExtractor {
             }
             requireReadablePageTree(document, deadline);
             Map<COSDictionary, Integer> pageNumbers = numberPages(document, deadline);
-            int pageCount = pageNumbers.size();
-            if (pageCount == 0) {
+            if (pageNumbers.isEmpty()) {
                 throw new UnreadableDocumentException("This PDF has no pages.");
             }
-            Set<String> warnings = new LinkedHashSet<>();
-            int[] tokens = estimateTokens(document, pageCount, limits, deadline, warnings);
-
-            SplitStrategy wanted = split.strategy();
-            if (wanted == SplitStrategy.HEADINGS) {
-                warnings.add(WARNING_HEADINGS);
-                wanted = SplitStrategy.AUTO;
-            }
-            List<Section> sections = null;
-            if (wanted == SplitStrategy.AUTO && hasNoText(tokens)) {
-                warnings.add(noTextWarning(Math.min(pageCount, limits.maxParts()), pageCount));
-            } else if (wanted != SplitStrategy.PAGES) {
-                sections = new OutlineReader(document, pageNumbers, pageCount, deadline, warnings).sections();
-                if (sections == null) {
-                    warnings.add(WARNING_NO_OUTLINE);
-                }
-            }
-            SplitStrategy used = sections == null ? SplitStrategy.PAGES : SplitStrategy.OUTLINE;
-            if (sections == null) {
-                sections = pageWindows(pageCount, split.pagesPerUnit());
-            }
-            return new Structure(sections, tokens, used, warnings);
+            return work.run(document, pageNumbers, deadline);
         } catch (InvalidPasswordException e) {
             throw new UnreadableDocumentException("This PDF is encrypted. Upload a copy without a password.", e);
         } catch (UnreadableDocumentException e) {
@@ -274,6 +397,51 @@ public class PdfStructureExtractor {
         } catch (IOException | RuntimeException e) {
             throw new UnreadableDocumentException("This file could not be read as a PDF.", e);
         }
+    }
+
+    private static Structure structure(PDDocument document, Map<COSDictionary, Integer> pageNumbers,
+                                       SplitConfig split, ExtractionLimits limits, Instant deadline)
+            throws IOException {
+        int pageCount = pageNumbers.size();
+        Set<String> warnings = new LinkedHashSet<>();
+        PageScan scan = scanPages(document, pageCount, limits, deadline, warnings);
+
+        SplitStrategy wanted = split.strategy();
+        List<Section> sections = null;
+        SplitStrategy used = SplitStrategy.PAGES;
+        if (wanted == SplitStrategy.AUTO && hasNoText(scan.tokens())) {
+            warnings.add(noTextWarning(Math.min(pageCount, limits.maxParts()), pageCount));
+        } else if (wanted != SplitStrategy.PAGES) {
+            if (wanted != SplitStrategy.HEADINGS) {
+                sections = new OutlineReader(document, pageNumbers, pageCount, deadline, warnings).sections();
+                used = sections == null ? used : SplitStrategy.OUTLINE;
+            }
+            if (sections == null && wanted != SplitStrategy.OUTLINE) {
+                sections = headingSections(scan.headings(), pageCount);
+                if (sections != null) {
+                    used = SplitStrategy.HEADINGS;
+                    if (scan.headingsTruncated()) {
+                        warnings.add(WARNING_HEADINGS_TRUNCATED);
+                    }
+                }
+            }
+            if (sections == null) {
+                warnings.add(switch (wanted) {
+                    case OUTLINE -> WARNING_NO_OUTLINE;
+                    case HEADINGS -> WARNING_NO_HEADINGS;
+                    default -> WARNING_NO_OUTLINE_OR_HEADINGS;
+                });
+            } else if (wanted == SplitStrategy.AUTO && used == SplitStrategy.HEADINGS) {
+                warnings.add(WARNING_CUT_BY_HEADINGS);
+            }
+        }
+        if (!scan.columnPages().isEmpty()) {
+            warnings.add(multiColumnWarning(scan.columnPages()));
+        }
+        if (sections == null) {
+            sections = pageWindows(pageCount, split.pagesPerUnit());
+        }
+        return new Structure(sections, scan.tokens(), used, warnings);
     }
 
     /**
@@ -364,25 +532,67 @@ public class PdfStructureExtractor {
     }
 
     /**
-     * Characters laid out per page, divided by four. Bounded as text extraction is:
-     * the page's content charged to the decode budget, its glyphs capped at
-     * {@link ExtractionLimits#maxCharacters()}, the deadline checked.
+     * A heading as the page scan found it: its page, cleaned text and font size.
      */
-    private static int[] estimateTokens(PDDocument document, int pageCount, ExtractionLimits limits,
-                                        Instant deadline, Set<String> warnings)
+    private record Heading(int page, String title, float fontSize) {
+    }
+
+    /**
+     * One pass over the measured pages: the estimate for every page, the headings
+     * in reading order, and the pages whose text stands in columns.
+     */
+    private record PageScan(int[] tokens, List<Heading> headings, boolean headingsTruncated,
+            List<Integer> columnPages) {
+    }
+
+    /**
+     * Characters laid out per page, divided by four, and — from the same layout, so
+     * no page is read twice — each page's headings and columns. Bounded as text
+     * extraction is: the page's content charged to the decode budget, its glyphs
+     * capped at {@link ExtractionLimits#maxCharacters()}, the deadline checked.
+     * Only one page's lines are held at a time.
+     */
+    private static PageScan scanPages(PDDocument document, int pageCount, ExtractionLimits limits,
+                                      Instant deadline, Set<String> warnings)
             throws IOException {
         int[] tokens = new int[pageCount];
         int measured = Math.min(pageCount, limits.maxParts());
         var stripper = new BoundedTextStripper(deadline);
+        List<Line> lines = new ArrayList<>();
+        stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
+                fontSize)));
+        List<Heading> headings = new ArrayList<>();
+        List<Integer> columnPages = new ArrayList<>();
+        boolean headingsTruncated = false;
         long total = 0;
         for (int page = 1; page <= measured; page++) {
             requireBefore(deadline);
+            lines.clear();
             stripper.setStartPage(page);
             stripper.setEndPage(page);
             stripper.allowGlyphs(limits.maxCharacters());
             int characters = stripper.getText(document).strip().length();
             tokens[page - 1] = (characters + 3) / 4;
             total += tokens[page - 1];
+
+            float bodySize = PageLayout.bodySize(lines);
+            if (PageLayout.multiColumn(lines, bodySize)) {
+                columnPages.add(page);
+            }
+            for (Line line : PageLayout.readingOrder(lines)) {
+                if (headingsTruncated || !PageLayout.isHeading(line, bodySize)) {
+                    continue;
+                }
+                String title = cleanTitle(line.text());
+                if (title == null) {
+                    continue;
+                }
+                if (headings.size() >= MAX_HEADINGS) {
+                    headingsTruncated = true;
+                    continue;
+                }
+                headings.add(new Heading(page, title, line.fontSize()));
+            }
         }
         if (measured < pageCount) {
             int average = (int) Math.round((double) total / measured);
@@ -392,7 +602,197 @@ public class PdfStructureExtractor {
             warnings.add("Only the first " + measured + " of " + pageCount + " pages were measured; the "
                     + "estimates for the rest are the average of those.");
         }
-        return tokens;
+        return new PageScan(tokens, headings, headingsTruncated, columnPages);
+    }
+
+    /**
+     * The chapters the headings make, placed as outline entries are, or null when
+     * no level of them is found on two or more pages.
+     */
+    private static List<Section> headingSections(List<Heading> headings, int pageCount) {
+        // Levels, largest size first; a level holds the sizes within 5 % of its own
+        // largest.
+        List<Float> sizes = headings.stream().map(Heading::fontSize).distinct()
+                .sorted(Comparator.reverseOrder()).toList();
+        List<Float> levels = new ArrayList<>();
+        for (float size : sizes) {
+            if (levels.isEmpty() || size < levels.getLast() * SAME_LEVEL) {
+                levels.add(size);
+            }
+        }
+        int chapterLevel = -1;
+        for (int level = 0; level < levels.size() && chapterLevel < 0; level++) {
+            int current = level;
+            long pages = headings.stream().filter(heading -> levelOf(heading, levels) == current)
+                    .mapToInt(Heading::page).distinct().count();
+            if (pages >= 2) {
+                chapterLevel = level;
+            }
+        }
+        if (chapterLevel < 0) {
+            return null;
+        }
+        List<Entry> chapters = new ArrayList<>();
+        for (Heading heading : headings) {
+            int level = levelOf(heading, levels);
+            if (level == chapterLevel) {
+                chapters.add(new Entry(heading.title(), heading.page()));
+            } else if (level == chapterLevel + 1 && !chapters.isEmpty()) {
+                chapters.getLast().children.add(new Entry(heading.title(), heading.page()));
+            }
+        }
+        return OutlineReader.place(chapters, 1, pageCount, true);
+    }
+
+    private static int levelOf(Heading heading, List<Float> levels) {
+        for (int level = 0; level < levels.size(); level++) {
+            if (heading.fontSize() >= levels.get(level) * SAME_LEVEL) {
+                return level;
+            }
+        }
+        return levels.size() - 1;
+    }
+
+    private static List<Block> readBlocks(PDDocument document, int pageCount, DocumentUnit unit,
+                                          ExtractionLimits limits, Instant deadline)
+            throws IOException {
+        if (unit.lastPage() > pageCount) {
+            throw new UnreadableDocumentException("This part runs to page " + unit.lastPage() + ", but the PDF has "
+                    + pageCount + (pageCount == 1 ? " page" : " pages") + ": it belongs to another file.");
+        }
+        int last = (int) Math.min(unit.lastPage(), (long) unit.firstPage() + limits.maxParts() - 1);
+        var stripper = new BoundedTextStripper(deadline);
+        List<Line> lines = new ArrayList<>();
+        stripper.setLineListener((page, text, x, xEnd, top, fontSize) -> lines.add(new Line(text, x, xEnd, top,
+                fontSize)));
+        List<Block> blocks = new ArrayList<>();
+        long characters = 0;
+        int read = unit.firstPage() - 1;
+        boolean cut = false;
+        for (int page = unit.firstPage(); page <= last; page++) {
+            requireBefore(deadline);
+            lines.clear();
+            stripper.setStartPage(page);
+            stripper.setEndPage(page);
+            stripper.allowGlyphs(limits.maxCharacters() - characters + GLYPH_SLACK);
+            stripper.getText(document);
+            List<TextBlock> pageBlocks = pageBlocks(page, lines, page == unit.firstPage() ? unit.title() : null);
+            for (TextBlock block : pageBlocks) {
+                characters += block.text().length();
+            }
+            blocks.addAll(pageBlocks);
+            read = page;
+            if (stripper.pageWasCut() || characters >= limits.maxCharacters()) {
+                cut = stripper.pageWasCut() || page < unit.lastPage();
+                break;
+            }
+        }
+        if (cut) {
+            blocks.add(endNote(blocks, read, "[The text of this part stops here: it is longer than the "
+                    + limits.maxCharacters() + " characters one read may take. Ask for fewer pages to read the rest.]"));
+        } else if (read < unit.lastPage()) {
+            blocks.add(endNote(blocks, read, "[Only the first " + (read - unit.firstPage() + 1) + " pages of this "
+                    + "part were read; pages " + (read + 1) + "–" + unit.lastPage() + " are not included.]"));
+        }
+        return List.copyOf(blocks);
+    }
+
+    /** A note after every block read, on the last page read. */
+    private static TextBlock endNote(List<Block> blocks, int page, String text) {
+        if (blocks.isEmpty() || blocks.getLast().page() != page) {
+            return new TextBlock(page, 0f, 0, text, false);
+        }
+        Block last = blocks.getLast();
+        return new TextBlock(page, last.y(), last.order() + 1, text, false);
+    }
+
+    /**
+     * One page's lines as blocks in reading order: a heading alone, consecutive
+     * body lines together, {@code order} counting up from 0. On a unit's first page
+     * ({@code unitTitle} set), a note goes first when the unit's heading stands
+     * below other text.
+     */
+    private static List<TextBlock> pageBlocks(int page, List<Line> lines, String unitTitle) {
+        float bodySize = PageLayout.bodySize(lines);
+        List<TextBlock> blocks = new ArrayList<>();
+        StringBuilder paragraph = null;
+        float paragraphTop = 0f;
+        Line previous = null;
+        for (Line line : PageLayout.readingOrder(lines)) {
+            String text = line.text().strip();
+            if (text.isEmpty()) {
+                continue;
+            }
+            if (PageLayout.isHeading(line, bodySize)) {
+                if (paragraph != null) {
+                    blocks.add(new TextBlock(page, paragraphTop, blocks.size(), paragraph.toString(), false));
+                    paragraph = null;
+                }
+                blocks.add(new TextBlock(page, line.top(), blocks.size(), text, true));
+                previous = null;
+                continue;
+            }
+            if (paragraph != null && previous != null
+                    && line.top() - previous.top() <= PARAGRAPH_LEADING * Math.max(previous.fontSize(), line.fontSize())) {
+                paragraph.append('\n').append(text);
+            } else {
+                if (paragraph != null) {
+                    blocks.add(new TextBlock(page, paragraphTop, blocks.size(), paragraph.toString(), false));
+                }
+                paragraph = new StringBuilder(text);
+                paragraphTop = line.top();
+            }
+            previous = line;
+        }
+        if (paragraph != null) {
+            blocks.add(new TextBlock(page, paragraphTop, blocks.size(), paragraph.toString(), false));
+        }
+        // Page 1 has no part before it: text above the first heading there is the
+        // unit's own.
+        TextBlock note = unitTitle == null || page == 1 ? null : midPageNote(page, blocks, unitTitle);
+        if (note != null) {
+            blocks.addFirst(note);
+        }
+        return blocks;
+    }
+
+    /**
+     * The note for a unit that starts below other text on its first page, or null:
+     * which heading the unit starts at, and which heading on that page — if any —
+     * the text above belongs to.
+     */
+    private static TextBlock midPageNote(int page, List<TextBlock> blocks, String unitTitle) {
+        for (int i = 1; i < blocks.size(); i++) {
+            TextBlock block = blocks.get(i);
+            if (block.heading() && namesUnit(block.text(), unitTitle)) {
+                String before = null;
+                for (int j = i - 1; j >= 0 && before == null; j--) {
+                    before = blocks.get(j).heading() ? blocks.get(j).text() : null;
+                }
+                String text = "[Page " + page + " begins with the end of the part before"
+                        + (before == null ? "" : " (under the heading \"" + before + "\")")
+                        + "; this part starts at the heading \"" + block.text() + "\".]";
+                TextBlock first = blocks.getFirst();
+                return new TextBlock(page, first.y(), first.order() - 1, text, false);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Whether a heading's text is the start of a unit with this title: the title
+     * itself, the first of two merged titles ({@code "A – B"}), or the start of a
+     * title cut to length ({@code "A long titl…"}).
+     */
+    static boolean namesUnit(String headingText, String unitTitle) {
+        String heading = cleanTitle(headingText);
+        if (heading == null || unitTitle == null) {
+            return false;
+        }
+        if (unitTitle.equals(heading) || unitTitle.startsWith(heading + " – ")) {
+            return true;
+        }
+        return unitTitle.endsWith("…") && heading.startsWith(unitTitle.substring(0, unitTitle.length() - 1));
     }
 
     private static boolean hasNoText(int[] tokens) {
@@ -462,7 +862,7 @@ public class PdfStructureExtractor {
         return cleaned.isEmpty() ? null : cleaned.toString();
     }
 
-    /** One outline entry as read, before it is placed. */
+    /** One outline entry or heading as read, before it is placed. */
     private static final class Entry {
         final String title;
         final int page;
@@ -573,7 +973,7 @@ public class PdfStructureExtractor {
          * before the next. At the top level the pages before the first entry are a
          * section of their own; below it they join the first part.
          */
-        private List<Section> place(List<Entry> entries, int from, int to, boolean topLevel) {
+        static List<Section> place(List<Entry> entries, int from, int to, boolean topLevel) {
             List<Entry> starts = new ArrayList<>();
             int lastStart = 0;
             List<Entry> ordered = new ArrayList<>(entries);

@@ -15,15 +15,17 @@ package ai.labs.eddi.modules.ingestion.extract.document;
 public enum SplitStrategy {
     /**
      * The outline when it is usable (two or more chapters whose pages can be
-     * found), otherwise fixed page windows. A document with no text layer at all is
-     * cut into page windows whatever its outline says.
+     * found), else the headings when there are chapters among them, otherwise fixed
+     * page windows. A document with no text layer at all is cut into page windows
+     * whatever its outline says.
      */
     AUTO,
     /** The document's outline (bookmarks); page windows when it has none usable. */
     OUTLINE,
     /**
-     * Headings found by font size. Not available yet: until it is, a request for it
-     * is handled as {@link #AUTO}, and the manifest says so in a warning.
+     * Headings found by font size, whatever the outline says: short lines set
+     * clearly larger than the page's body text. Page windows when no level of
+     * headings is found on two or more pages.
      */
     HEADINGS,
     /** Fixed windows of {@link SplitConfig#pagesPerUnit()} pages. */
