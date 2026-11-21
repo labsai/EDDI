@@ -102,7 +102,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
 
     @Override
     public synchronized void recordIngested(String sourceId, String documentId, String contentHash,
-                                            String etag, String lastModified, String runId) {
+                                            String etag, String lastModified, String runId,
+                                            String citationHash) {
 
         Instant now = Instant.now();
         String documentKey = key(sourceId, documentId);
@@ -122,7 +123,18 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
                 : existing.firstIngestedAt();
 
         documents.put(documentKey, new DocumentState(sourceId, documentId, contentHash,
-                etag, lastModified, firstIngestedAt, now, runId, 0, false));
+                etag, lastModified, firstIngestedAt, now, runId, 0, false, citationHash));
+    }
+
+    @Override
+    public synchronized void recordCitation(String sourceId, String documentId, String runId, String citationHash) {
+        DocumentState existing = documents.get(key(sourceId, documentId));
+        if (existing == null || !owns(key(sourceId, documentId), runId)) {
+            return;
+        }
+        documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
+                existing.etag(), existing.lastModified(), existing.firstIngestedAt(), existing.lastIngestedAt(),
+                existing.lastRunId(), existing.missedRuns(), existing.tombstoned(), citationHash));
     }
 
     @Override
@@ -133,7 +145,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         }
         documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
                 existing.etag(), existing.lastModified(), existing.firstIngestedAt(), existing.lastIngestedAt(),
-                runId, 0, false));
+                runId, 0, false, existing.citationHash()));
     }
 
     @Override
@@ -144,7 +156,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             return;
         }
         documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
-                etag, lastModified, existing.firstIngestedAt(), existing.lastIngestedAt(), runId, 0, false));
+                etag, lastModified, existing.firstIngestedAt(), existing.lastIngestedAt(), runId, 0, false,
+                existing.citationHash()));
     }
 
     @Override
@@ -156,7 +169,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         // Not recordSeen: the miss counter and the tombstone flag stay as they are.
         documents.put(key(sourceId, documentId), new DocumentState(sourceId, documentId, existing.contentHash(),
                 existing.etag(), existing.lastModified(), existing.firstIngestedAt(), existing.lastIngestedAt(),
-                runId, existing.missedRuns(), existing.tombstoned()));
+                runId, existing.missedRuns(), existing.tombstoned(), existing.citationHash()));
     }
 
     @Override
@@ -181,7 +194,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             }
             DocumentState updated = new DocumentState(state.sourceId(), state.documentId(), state.contentHash(),
                     state.etag(), state.lastModified(), state.firstIngestedAt(), state.lastIngestedAt(),
-                    state.lastRunId(), missed, false);
+                    state.lastRunId(), missed, false, state.citationHash());
             entry.setValue(updated);
             if (missed >= threshold) {
                 missing.add(updated);
@@ -199,7 +212,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             }
             documents.put(key(sourceId, documentId), new DocumentState(state.sourceId(), state.documentId(),
                     state.contentHash(), state.etag(), state.lastModified(), state.firstIngestedAt(),
-                    state.lastIngestedAt(), state.lastRunId(), state.missedRuns(), true));
+                    state.lastIngestedAt(), state.lastRunId(), state.missedRuns(), true, state.citationHash()));
         }
     }
 
@@ -210,7 +223,7 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
             if (state.sourceId().equals(sourceId)) {
                 entry.setValue(new DocumentState(state.sourceId(), state.documentId(), null, null, null,
                         state.firstIngestedAt(), state.lastIngestedAt(), state.lastRunId(), state.missedRuns(),
-                        state.tombstoned()));
+                        state.tombstoned(), state.citationHash()));
             }
         }
     }

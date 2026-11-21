@@ -34,6 +34,7 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
+import ai.labs.eddi.modules.llm.impl.SegmentMetadataUpdates;
 import ai.labs.eddi.utils.LogSanitizer;
 import dev.langchain4j.data.document.Document;
 import dev.langchain4j.data.document.Metadata;
@@ -52,8 +53,10 @@ import org.jboss.logging.Logger;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
@@ -712,6 +715,41 @@ public class IngestionPipeline {
     }
 
     /**
+     * Removes the chunks one run wrote for a source, and nothing else.
+     *
+     * <p>
+     * For a run that outlived its source — removed, or changed into another type —
+     * while another run may already be writing under the same source key. Removing
+     * by the key alone deleted that run's chunks too: a source switched from a
+     * crawl to Google Drive had the first Drive run's chunks taken away by the
+     * cleanup of the crawl that was still finishing. Every chunk carries the run
+     * that wrote it, so the filter is the fence; nothing in the ingestion state is
+     * touched.
+     *
+     * @return false when the vector store cannot delete by metadata, or the delete
+     *         failed, so the run's chunks may still be there
+     */
+    public boolean forgetRun(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, String runId) {
+        String sourceKey = stateKey(ragConfigId, source);
+        try {
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+                    .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)
+                            .and(metadataKey(METADATA_RUN_ID).isEqualTo(runId)));
+            return true;
+        } catch (UnsupportedFeatureException e) {
+            LOGGER.warnf("The vector store of knowledge base '%s' cannot delete by metadata, so the chunks run %s "
+                    + "wrote for source '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
+                    LogSanitizer.sanitize(runId), LogSanitizer.sanitize(source.getName()));
+            return false;
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove the chunks run %s wrote for source '%s' of knowledge base '%s'; they "
+                    + "stay retrievable", LogSanitizer.sanitize(runId), LogSanitizer.sanitize(source.getName()),
+                    LogSanitizer.sanitize(knowledgeBase.getName()));
+            return false;
+        }
+    }
+
+    /**
      * Claims the source's run slot for something other than a run.
      *
      * <p>
@@ -998,6 +1036,24 @@ public class IngestionPipeline {
     }
 
     /**
+     * What became of an unchanged document's citation — see
+     * {@code refreshCitation}.
+     */
+    private enum CitationCheck {
+        /** It already matched, or was adopted. */
+        CURRENT,
+        /** The chunks' metadata was rewritten in place. */
+        UPDATED,
+        /**
+         * It differs and could not be written this time — the store failed, or the run
+         * no longer owns its source. Unchanged for this run, retried by the next.
+         */
+        PENDING,
+        /** The store cannot rewrite it, so the document is embedded again. */
+        REEMBED
+    }
+
+    /**
      * Receives what a connector discovers and does the per-document work: fetch,
      * convert, compare, embed, record.
      */
@@ -1214,8 +1270,14 @@ public class IngestionPipeline {
             SourceDocument document = item.prefetched();
             if (document == null) {
                 // Asked before the content is fetched: an unchanged document needs
-                // neither the download nor the extraction.
-                if (item.versionToken() != null && unchangedVersion(item.documentId(), item.versionToken())) {
+                // neither the download nor the extraction — unless it was renamed and
+                // its chunks cannot be given the new citation in place, in which case it
+                // is fetched and embedded again.
+                Optional<DocumentState> unchanged = item.versionToken() == null
+                        ? Optional.empty()
+                        : unchangedVersion(item.documentId(), item.versionToken());
+                if (unchanged.isPresent() && (item.citation() == null
+                        || refreshCitation(unchanged.get(), item.citation().title(), item.citation().url()) != CitationCheck.REEMBED)) {
                     onUnchanged(item.documentId());
                     return;
                 }
@@ -1246,12 +1308,76 @@ public class IngestionPipeline {
          * Whether a version token the source reported matches what was embedded — known
          * without the content, so the document is neither fetched nor parsed.
          */
-        private boolean unchangedVersion(String documentId, String versionToken) {
+        private Optional<DocumentState> unchangedVersion(String documentId, String versionToken) {
             if (reembedAll) {
-                return false;
+                return Optional.empty();
             }
-            var known = stateStore.lookup(sourceKey, documentId);
-            return known.isPresent() && !known.get().tombstoned() && !known.get().hasChanged(versionToken);
+            return stateStore.lookup(sourceKey, documentId)
+                    .filter(known -> !known.tombstoned() && !known.hasChanged(versionToken));
+        }
+
+        /**
+         * Brings the citation of an unchanged document up to date.
+         *
+         * <p>
+         * A document renamed at its source keeps its bytes — the same checksum for a
+         * Drive file, the same export for a Google Doc — so its change key does not
+         * move and it is not embedded again. Its chunks used to keep the old title and
+         * link as their citation for good. The title and URL the chunks carry are
+         * fingerprinted in the document's state; when what the source reports now
+         * differs, the chunks' metadata is rewritten in place, vectors untouched, on a
+         * store that can ({@link SegmentMetadataUpdates}). On one that cannot, the
+         * document is embedded again — the same cost as a content change, once.
+         *
+         * <p>
+         * A row with no fingerprint, which is every row written before it was recorded,
+         * adopts the current one: treating it as a change would rewrite, or on most
+         * stores re-embed, every document of every source on the first run after an
+         * upgrade. A preview writes nothing.
+         *
+         * @return whether the document can be treated as unchanged
+         *         ({@link CitationCheck#CURRENT}, {@link CitationCheck#UPDATED},
+         *         {@link CitationCheck#PENDING}) or has to be embedded again
+         */
+        private CitationCheck refreshCitation(DocumentState known, String title, String url) {
+            String chunkTitle = cap(title, MAX_TITLE_LENGTH);
+            String current = ContentHashes.citation(chunkTitle, url);
+            if (mode != Mode.INGEST || current.equals(known.citationHash())) {
+                return CitationCheck.CURRENT;
+            }
+            String documentId = known.documentId();
+            if (known.citationHash() == null) {
+                stateStore.recordCitation(sourceKey, documentId, runId, current);
+                return CitationCheck.CURRENT;
+            }
+            if (!(store() instanceof SegmentMetadataUpdates updates)) {
+                return CitationCheck.REEMBED;
+            }
+            if (!stillOwnsRun(true)) {
+                // Nothing written for a source that is no longer this run's.
+                return CitationCheck.PENDING;
+            }
+            Map<String, String> values = new HashMap<>();
+            values.put(METADATA_TITLE, chunkTitle);
+            values.put(METADATA_URL, url);
+            int updated;
+            try {
+                updated = updates.updateMetadata(
+                        Map.of(METADATA_SOURCE_KEY, sourceKey, METADATA_DOCUMENT_ID, documentId), values);
+            } catch (UnsupportedFeatureException e) {
+                return CitationCheck.REEMBED;
+            } catch (RuntimeException e) {
+                // The old citation stays until the next run, which tries again: the new
+                // fingerprint is recorded only once the chunks carry it.
+                LOGGER.warnf(e, "Could not update the citation of document '%s' of source '%s'; it keeps its "
+                        + "previous title until the next run", LogSanitizer.sanitize(documentId),
+                        LogSanitizer.sanitize(source.getName()));
+                return CitationCheck.PENDING;
+            }
+            stateStore.recordCitation(sourceKey, documentId, runId, current);
+            LOGGER.debugf("Updated the citation of %d chunk(s) of document '%s' of source '%s' without embedding",
+                    updated, LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(source.getName()));
+            return CitationCheck.UPDATED;
         }
 
         /**
@@ -1526,11 +1652,17 @@ public class IngestionPipeline {
             }
 
             var existing = stateStore.lookup(sourceKey, documentId);
-            if (!reembedAll && existing.isPresent() && !existing.get().hasChanged(changeKey)) {
+            CitationCheck citation = !reembedAll && existing.isPresent() && !existing.get().hasChanged(changeKey)
+                    ? refreshCitation(existing.get(), title, url)
+                    : CitationCheck.REEMBED;
+            if (citation != CitationCheck.REEMBED) {
                 unchanged++;
-                if (mode == Mode.INGEST && fromResponse) {
+                if (mode == Mode.INGEST && fromResponse && citation != CitationCheck.PENDING) {
                     // The page was downloaded again, so the validators the server sent
-                    // this time are the ones worth sending back next time.
+                    // this time are the ones worth sending back next time — unless the
+                    // new citation did not land. For a Google Doc the validator is its
+                    // version: recording the new one would let the next listing skip the
+                    // export, and with it the only chance to see the new title again.
                     stateStore.recordSeen(sourceKey, documentId, runId, etag, lastModified);
                 } else if (mode == Mode.INGEST) {
                     stateStore.recordSeen(sourceKey, documentId, runId);
@@ -1573,7 +1705,8 @@ public class IngestionPipeline {
             // Only now, with the vectors safely stored. Recording before this — or
             // while deciding whether to ingest, as the draft did — means one
             // provider timeout marks a page done forever.
-            stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId);
+            stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId,
+                    ContentHashes.citation(cap(title, MAX_TITLE_LENGTH), url));
 
             if (segments + discardedSegments >= source.settings().maxSegmentsPerRunOrDefault()) {
                 budgetExhausted = true;

@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceException;
 import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.StopReason;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
+import ai.labs.eddi.modules.ingestion.connector.WorkItem.Citation;
 import ai.labs.eddi.modules.ingestion.drive.DriveApi.DriveApiException;
 import ai.labs.eddi.modules.ingestion.drive.DriveApi.DriveFile;
 import ai.labs.eddi.modules.ingestion.drive.DriveApi.Page;
@@ -455,16 +456,30 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         return new SourceDocument(item.documentId(), new Content.Text(""), null, null, false, metadata);
     }
 
+    /**
+     * What a file's chunks are cited as — the same two values {@link #metadata}
+     * writes, so discovery can hand them to the framework and a renamed file with
+     * an unchanged checksum gets its new name without being downloaded.
+     */
+    static Citation citationOf(String documentId, Map<String, String> hints) {
+        return new Citation(hints.getOrDefault(HINT_NAME, documentId), citationUrl(documentId, hints));
+    }
+
+    /**
+     * The provider's own page, opened under the reader's own permissions — never an
+     * EDDI URL that would serve the content to whoever holds the link.
+     */
+    private static String citationUrl(String documentId, Map<String, String> hints) {
+        String link = hints.get(HINT_LINK);
+        return link != null ? link : "https://drive.google.com/open?id=" + documentId;
+    }
+
     private static Map<String, Object> metadata(WorkItem item, GoogleDriveSource drive, DriveFormat format,
                                                 String name, String driveMime) {
         Map<String, String> hints = item.hints();
         Map<String, Object> metadata = new LinkedHashMap<>();
         metadata.put(SourceMetadataKeys.TITLE, name);
-        String link = hints.get(HINT_LINK);
-        // The provider's own page, opened under the reader's own permissions — never
-        // an EDDI URL that would serve the content to whoever holds the link.
-        metadata.put(SourceMetadataKeys.CITATION_URL,
-                link != null ? link : "https://drive.google.com/open?id=" + item.documentId());
+        metadata.put(SourceMetadataKeys.CITATION_URL, citationUrl(item.documentId(), hints));
         metadata.put(SourceMetadataKeys.PATH, hints.get(HINT_PATH));
         metadata.put(SourceMetadataKeys.MIME_TYPE, driveMime);
         metadata.put(SourceMetadataKeys.FORMAT, format.formatClass());
@@ -700,7 +715,10 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     context.accept(WorkItem.upsert(file.id(), null, partition, hints));
                 }
             } else {
-                context.accept(WorkItem.upsert(file.id(), storedVersion(file), partition, hints));
+                // With its citation: a file renamed without a byte change keeps its
+                // checksum and is not downloaded, and only the listing knows its new name.
+                context.accept(WorkItem.upsert(file.id(), storedVersion(file), partition, hints,
+                        citationOf(file.id(), hints)));
             }
             return true;
         }

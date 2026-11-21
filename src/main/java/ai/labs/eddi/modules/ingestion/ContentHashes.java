@@ -36,6 +36,22 @@ public final class ContentHashes {
     }
 
     /**
+     * The fingerprint of a document's citation metadata — the title and URL its
+     * chunks carry — so a rename that leaves the content alone can be told from no
+     * change at all. Pass exactly the values written to the chunks (the title after
+     * its length cap): a fingerprint of anything else differs on every run.
+     */
+    public static String citation(String title, String url) {
+        // Length-prefixed, so ("ab", "c") and ("a", "bc") differ, and null differs
+        // from the empty string.
+        return sha256(part(title) + part(url));
+    }
+
+    private static String part(String value) {
+        return value == null ? "-;" : value.length() + ":" + value + ";";
+    }
+
+    /**
      * SHA-256 of raw bytes, lowercase hex — for content that is not text, such as
      * an uploaded file, where hashing a decoded form would depend on the decoder.
      *
