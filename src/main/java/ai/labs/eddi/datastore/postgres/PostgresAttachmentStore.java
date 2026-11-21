@@ -550,6 +550,17 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             // The blob, its lineage (a root's; a derived blob has none of its own) and
             // the grants on it in one transaction: neither outlives the root.
             deleted = inTransaction(conn, () -> {
+                if (rootRef == null) {
+                    // A root: lock its row first. A storeDerived holding it FOR SHARE has
+                    // its view committed before this returns, and the DELETE below, a new
+                    // statement, sees that view; one starting now finds the root gone.
+                    // Without it the DELETE would wait on the root row and then work from
+                    // its old snapshot, leaving a view inserted meanwhile behind.
+                    try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM attachments WHERE storage_ref = ? FOR UPDATE")) {
+                        ps.setString(1, storageRef);
+                        ps.executeQuery().close();
+                    }
+                }
                 boolean removed;
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachments WHERE storage_ref = ? OR root_ref = ?")) {
@@ -613,6 +624,15 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                                 roots.add(rootDeleted(ref, rs.getString(3), rs.getString(4), conversationId, rs.getString(5)));
                             }
                         }
+                    }
+                }
+                if (!roots.isEmpty()) {
+                    // The lineage once more, as a new statement: the DELETE above may have
+                    // waited on a root a storeDerived held FOR SHARE, and then worked from
+                    // a snapshot without the view that storeDerived committed.
+                    try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE root_ref = ANY(?)")) {
+                        ps.setArray(1, conn.createArrayOf("text", roots.stream().map(AttachmentRootDeleted::rootRef).toArray()));
+                        ps.executeUpdate();
                     }
                 }
                 try (PreparedStatement ps = conn.prepareStatement(
@@ -811,7 +831,9 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 advisoryLock(conn, SOURCE_LOCK_KEY_PREFIX + rootRef);
                 // The root again, under the lock and held FOR SHARE: a delete that
                 // committed meanwhile reads as gone, one that starts now waits for this
-                // insert and then deletes it with the lineage.
+                // insert and then deletes it with the lineage (delete() locks the root
+                // FOR UPDATE before it deletes; deleteByConversation() deletes the
+                // lineage again in a statement after its wait).
                 String ownerKey = lockRoot(conn, rootRef, from);
                 Attachment existing = findByContent(conn, ownerKey, rootRef, sha256);
                 if (existing != null) {

@@ -660,6 +660,15 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 roots.add(rootDeleted(file, ref));
             }
         }
+        // The lineage once more: a view uploaded while the cursor above ran may not be
+        // in it. storeDerived re-checks its root after the upload, so a view is either
+        // seen here or deleted by its own writer.
+        if (!roots.isEmpty()) {
+            for (GridFSFile derived : primaryReadBucket.find(
+                    Filters.in("metadata." + META_ROOT_REF, roots.stream().map(AttachmentRootDeleted::rootRef).toList()))) {
+                gridFSBucket.delete(derived.getObjectId());
+            }
+        }
         // The grants on the blobs just deleted, and the grants this conversation held
         // on other blobs — in both shapes, or they would grow without bound.
         if (!deletedRefs.isEmpty()) {

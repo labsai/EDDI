@@ -102,6 +102,12 @@ public interface AttachmentStoreContract {
     /** Rows (files) whose lineage root is {@code rootRef}, read under the store. */
     long lineageRows(String rootRef);
 
+    /**
+     * Rewrites a root to the shape every blob had before this release: no owner key
+     * and no owner scope recorded.
+     */
+    void makePreUpgradeRoot(String storageRef);
+
     /** Realistic ids: 24-hex, the shape the ids take in production. */
     String OWNER = "6aba70011a25f8be7920e001";
     String GRANTEE = "6aba70011a25f8be7920e002";
@@ -756,6 +762,45 @@ public interface AttachmentStoreContract {
 
         assertEquals(42, store().pageCount(root, OWNER));
         assertEquals(42, store().pageCount(view, OWNER));
+    }
+
+    @Test
+    default void aRootStoredBeforeThisReleaseReadsItsConversationAsOwner() throws Exception {
+        Attachment rootBlob = store().store(text("uploaded by an old node"), "text/plain", "old.txt", OWNER, "default", USER);
+        String root = rootBlob.storageRef();
+        makePreUpgradeRoot(root);
+        store().grantAccess(root, GRANTEE);
+
+        Attachment view = deriveText(root, "u1", "a view of an old file", GRANTEE);
+        Attachment again = deriveText(root, "u1", "a view of an old file", OWNER);
+
+        assertEquals(OWNER, view.conversationId());
+        assertEquals(view.storageRef(), again.storageRef(), "dedup works with the resolved owner key");
+        assertEquals(new IAttachmentStore.OwnerRef(OwnerScope.CONVERSATION, OWNER, USER), store().ownerOf(root, OWNER));
+        assertEquals(new IAttachmentStore.OwnerRef(OwnerScope.CONVERSATION, OWNER, USER), store().ownerOf(view.storageRef(), GRANTEE));
+
+        assertEquals(1, store().deleteByConversation(OWNER));
+
+        assertEquals(0, lineageRows(root));
+        assertEquals(List.of(new AttachmentRootDeleted(root, OwnerScope.CONVERSATION, OWNER, USER)), rootDeletions());
+    }
+
+    @Test
+    default void aMediaViewCountsTowardTheOwningUsersBytesToo() throws Exception {
+        String root = store().store(text("12345"), "text/plain", "a.txt", OWNER, "default", USER).storageRef();
+        store().grantAccess(root, GRANTEE);
+        byte[] image = png("img"); // 11 bytes
+        setQuotas(0, 0, 0, 5 + image.length);
+
+        derive(root, Derivation.Kind.IMAGE, "i1", image, "image/png", GRANTEE);
+        deriveText(root, "u1", "text is exempt " + "z".repeat(100), GRANTEE);
+
+        var refused = assertThrows(AttachmentQuotaExceededException.class,
+                () -> store().store(text("1"), "text/plain", "b.txt", OTHER_OWNER, "default", USER));
+        assertEquals(AttachmentQuotaExceededException.SCOPE_USER, refused.getScope(), "the image filled the root owner's user quota");
+        var refusedView = assertThrows(AttachmentQuotaExceededException.class,
+                () -> derive(root, Derivation.Kind.IMAGE, "i2", png("two"), "image/png", GRANTEE));
+        assertEquals(AttachmentQuotaExceededException.SCOPE_USER, refusedView.getScope());
     }
 
     @Test
