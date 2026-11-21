@@ -1932,7 +1932,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Engine-owned, set after the configured headers so no config can drop it — and
         // only
-        // on a call to this deployment, so no EDDI header reaches a third-party API.
+        // on a call to this deployment, so this marker never reaches a third-party API.
         AgentCallMarker.apply(agentCallMarker, request, targetUri);
         // The origin taint (email plan v3 §5.3), engine-owned the same way: set last,
         // so
