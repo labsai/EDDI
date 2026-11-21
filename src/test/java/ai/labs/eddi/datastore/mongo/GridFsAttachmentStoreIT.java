@@ -9,7 +9,12 @@ import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.Derivation;
+import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
@@ -51,7 +56,10 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store = new GridFsAttachmentStore(getDatabase());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
+        rootDeleted = new RecordingEvent<>();
+        store.rootDeletedEvent = rootDeleted;
         store.ensureIndexes();
+        store.ensureLineageIndexes();
         // Production reads MigrationLog through its POJO codec; the bare test client
         // has none.
         migrationLog = new MigrationLogStore(getDatabase().withCodecRegistry(CodecRegistries.fromRegistries(getDatabase().getCodecRegistry(),
@@ -61,6 +69,7 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
 
     private MigrationLogStore migrationLog;
     private GroupConversationStore groupConversations;
+    private RecordingEvent<AttachmentRootDeleted> rootDeleted;
 
     @Override
     public IMigrationLogStore migrationLog() {
@@ -101,6 +110,25 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store.maxTotalBytesPerConversation = bytesPerConversation;
         store.maxPerUser = perUser;
         store.maxTotalBytesPerUser = bytesPerUser;
+    }
+
+    @Override
+    public void setDerivedLimits(DerivedCaps.Limits limits) {
+        store.derivedMaxPerSource = limits.maxPerSource();
+        store.derivedMaxTotalBytesPerSource = limits.maxTotalBytesPerSource();
+        store.derivedMaxSlicesPerSource = limits.maxSlicesPerSource();
+        store.derivedMaxSliceBytesPerSource = limits.maxSliceBytesPerSource();
+        store.derivedMaxTextBytesPerSource = limits.maxTextBytesPerSource();
+    }
+
+    @Override
+    public List<AttachmentRootDeleted> rootDeletions() {
+        return rootDeleted.fired();
+    }
+
+    @Override
+    public long lineageRows(String rootRef) {
+        return files().countDocuments(Filters.eq("metadata.rootRef", rootRef));
     }
 
     private static MongoCollection<Document> grants() {
@@ -188,5 +216,30 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
 
         assertEquals(1, store.deleteByConversation(OWNER));
         assertEquals(0, grantRowsOn(hex));
+    }
+
+    @Test
+    void aViewOfABlobKnownOnlyByItsObjectIdKeepsThatAsItsRootAndDiesWithIt() throws Exception {
+        IAttachmentStore.Attachment stored = store.store("old pdf".getBytes(StandardCharsets.UTF_8), "text/plain", "old.txt", OWNER, "default",
+                null);
+        files().updateOne(Filters.eq("metadata.storageRef", stored.storageRef()),
+                Updates.combine(Updates.unset("metadata.storageRef"), Updates.unset("metadata.ownerKey"), Updates.unset("metadata.ownerScope")));
+        String hex = files().find(Filters.eq("metadata.conversationId", OWNER)).first().getObjectId("_id").toHexString();
+        store.grantAccess(hex, GRANTEE);
+
+        IAttachmentStore.Attachment view = store.storeDerived("text".getBytes(StandardCharsets.UTF_8), "text/plain", "u1.txt",
+                Derivation.of(hex, Derivation.Kind.TEXT_PART, "u1"), GRANTEE);
+
+        assertEquals(hex, store.rootOf(view.storageRef(), GRANTEE));
+        assertEquals(1, lineageRows(hex));
+        assertTrue(store.delete(hex, OWNER));
+        assertEquals(0, lineageRows(hex));
+        assertEquals(List.of(new AttachmentRootDeleted(hex, OwnerScope.CONVERSATION, OWNER, null)), rootDeletions());
+    }
+
+    @Override
+    public void makePreUpgradeRoot(String storageRef) {
+        files().updateOne(Filters.eq("metadata.storageRef", storageRef),
+                Updates.combine(Updates.unset("metadata.ownerKey"), Updates.unset("metadata.ownerScope")));
     }
 }

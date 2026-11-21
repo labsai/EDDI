@@ -5,9 +5,15 @@
 package ai.labs.eddi.datastore.mongo;
 
 import ai.labs.eddi.engine.attachments.AttachmentQuotas;
+import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
+import ai.labs.eddi.engine.attachments.Derivation;
+import ai.labs.eddi.engine.attachments.Derivation.Kind;
+import ai.labs.eddi.engine.attachments.DerivedBlobs;
+import ai.labs.eddi.engine.attachments.DerivedCaps;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
+import ai.labs.eddi.engine.attachments.OwnerScope;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.MongoWriteException;
@@ -27,8 +33,10 @@ import com.mongodb.client.model.ReplaceOptions;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.UpdateOptions;
 import com.mongodb.client.model.Updates;
+import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.event.Event;
 import jakarta.inject.Inject;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -46,6 +54,7 @@ import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
@@ -71,12 +80,21 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * attachments also deletes the grants that conversation <em>held</em> on other
  * blobs, in both shapes.
  * <p>
+ * <b>Lineage.</b> A derived blob is a file of the same bucket whose
+ * {@code metadata.rootRef} names its root; its {@code conversationId},
+ * {@code userId}, {@code tenantId}, {@code ownerScope} and {@code ownerKey} are
+ * copied from the root when it is written, so the conversation cascade reaches
+ * it and a grantee's erasure does not. A derived file is authorized on its
+ * root's file. {@code ownerKey} absent (every file stored before it existed)
+ * reads as {@code conversationId}.
+ * <p>
  * <b>Quotas.</b> A GridFS upload is not one atomic write, so the quota check
  * and the upload run under a lease lock per quota scope — a document in
  * {@code attachments.quota_locks} keyed by conversation or user, inserted to
  * take the lock (a duplicate key means it is held) and deleted to release it. A
  * lock whose holder died is taken over once its lease has expired. The usage
- * itself is always counted from the blobs, so nothing can drift.
+ * itself is always counted from the blobs, so nothing can drift. A derived
+ * write takes the root's source lock, from the same collection, after them.
  *
  * @since 6.0.0
  */
@@ -91,6 +109,17 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     private static final String META_MIME_TYPE = "mimeType";
     private static final String META_GRANTS = "grants";
     private static final String META_USER_ID = "userId";
+    private static final String META_TENANT_ID = "tenantId";
+    static final String META_OWNER_SCOPE = "ownerScope";
+    static final String META_OWNER_KEY = "ownerKey";
+    static final String META_ROOT_REF = "rootRef";
+    static final String META_PARENT_REF = "parentRef";
+    static final String META_KIND = "kind";
+    static final String META_UNIT_ID = "unitId";
+    static final String META_PAGE = "page";
+    static final String META_SHA256 = "sha256";
+    static final String META_PAGE_COUNT = "pageCount";
+    static final String META_LAST_ACCESSED_AT = "lastAccessedAt";
     static final String LOCKS_COLLECTION = BUCKET_NAME + ".quota_locks";
     static final String GRANTS_COLLECTION = "attachment_grants";
     static final String GRANT_STORAGE_REF = "storageRef";
@@ -106,6 +135,8 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     static final long LOCK_WAIT_MILLIS = 15_000;
     private static final long LOCK_POLL_MILLIS = 25;
     static final long INDEX_TIMEOUT_SECONDS = 10;
+    /** Matches roots only: a file with no {@code metadata.rootRef}. */
+    private static final Bson ROOTS_ONLY = Filters.eq("metadata." + META_ROOT_REF, null);
 
     private final GridFSBucket gridFSBucket;
     /**
@@ -142,6 +173,32 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     @ConfigProperty(name = "eddi.attachments.max-total-bytes-per-user", defaultValue = "1073741824")
     long maxTotalBytesPerUser;
 
+    @ConfigProperty(name = "eddi.attachments.derived.max-per-source", defaultValue = "" + DerivedCaps.DEFAULT_MAX_PER_SOURCE)
+    long derivedMaxPerSource = DerivedCaps.DEFAULT_MAX_PER_SOURCE;
+
+    @ConfigProperty(name = "eddi.attachments.derived.max-total-bytes-per-source",
+                    defaultValue = "" + DerivedCaps.DEFAULT_MAX_TOTAL_BYTES_PER_SOURCE)
+    long derivedMaxTotalBytesPerSource = DerivedCaps.DEFAULT_MAX_TOTAL_BYTES_PER_SOURCE;
+
+    @ConfigProperty(name = "eddi.attachments.derived.max-slices-per-source", defaultValue = "" + DerivedCaps.DEFAULT_MAX_SLICES_PER_SOURCE)
+    long derivedMaxSlicesPerSource = DerivedCaps.DEFAULT_MAX_SLICES_PER_SOURCE;
+
+    @ConfigProperty(name = "eddi.attachments.derived.max-slice-bytes-per-source",
+                    defaultValue = "" + DerivedCaps.DEFAULT_MAX_SLICE_BYTES_PER_SOURCE)
+    long derivedMaxSliceBytesPerSource = DerivedCaps.DEFAULT_MAX_SLICE_BYTES_PER_SOURCE;
+
+    @ConfigProperty(name = "eddi.attachments.derived.max-text-bytes-per-source",
+                    defaultValue = "" + DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE)
+    long derivedMaxTextBytesPerSource = DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE;
+
+    /** Announces deleted roots; {@code null} outside CDI (tests). */
+    @Inject
+    Event<AttachmentRootDeleted> rootDeletedEvent;
+
+    /** {@code null} outside CDI (tests). */
+    @Inject
+    MeterRegistry meterRegistry;
+
     @Inject
     public GridFsAttachmentStore(MongoDatabase database) {
         this.gridFSBucket = GridFSBuckets.create(database, BUCKET_NAME);
@@ -164,6 +221,44 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS);
         ensureIndexes(filesCollection, deadline, System::nanoTime);
         ensureGrantIndexes(grantsCollection, deadline, System::nanoTime);
+    }
+
+    /**
+     * The lineage indexes, within a budget of their own; called at startup by
+     * {@link GridFsIndexInitializer} after {@link #ensureIndexes()}.
+     */
+    public void ensureLineageIndexes() {
+        ensureLineageIndexes(filesCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+    }
+
+    /**
+     * The lineage lookups ({@code findDerived}, {@code listDerived}, the cascade)
+     * on {@code (rootRef, kind, unitId)}, and the dedup backstop: unique on
+     * {@code (ownerKey, rootRef, sha256)} for derived files only. Dedup itself runs
+     * under the source lock and does not rely on the unique index. A failure is
+     * logged, as for the metadata indexes.
+     */
+    static void ensureLineageIndexes(MongoCollection<Document> filesCollection, long deadlineNanos, LongSupplier nanoClock) {
+        String root = "metadata." + META_ROOT_REF;
+        List<Map.Entry<Bson, IndexOptions>> indexes = List.of(
+                Map.entry(Indexes.ascending(root, "metadata." + META_KIND, "metadata." + META_UNIT_ID), new IndexOptions()),
+                Map.entry(Indexes.ascending("metadata." + META_OWNER_KEY, root, "metadata." + META_SHA256),
+                        new IndexOptions().unique(true).partialFilterExpression(Filters.exists(root))));
+        for (Map.Entry<Bson, IndexOptions> index : indexes) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - nanoClock.getAsLong());
+            if (remainingMillis <= 0) {
+                LOGGER.warn("Ran out of time creating the attachment lineage indexes; lineage lookups fall back to a scan");
+                return;
+            }
+            try {
+                filesCollection.withTimeout(remainingMillis, TimeUnit.MILLISECONDS).createIndex(index.getKey(), index.getValue());
+            } catch (MongoTimeoutException e) {
+                LOGGER.warnf("Timed out creating an attachment lineage index; lineage lookups fall back to a scan: %s", sanitize(e.getMessage()));
+                return;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment lineage index; lineage lookups fall back to a scan: %s", sanitize(e.getMessage()));
+            }
+        }
     }
 
     /**
@@ -261,11 +356,13 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
 
         Document metadata = new Document()
                 .append(META_CONVERSATION_ID, conversationId)
-                .append("tenantId", tenantId)
+                .append(META_TENANT_ID, tenantId)
                 .append(META_MIME_TYPE, resolvedMime)
                 .append("sizeBytes", (long) bytes.length)
                 .append(META_STORAGE_REF, storageRef)
-                .append(META_GRANTS, new ArrayList<String>());
+                .append(META_GRANTS, new ArrayList<String>())
+                .append(META_OWNER_SCOPE, OwnerScope.CONVERSATION.name())
+                .append(META_OWNER_KEY, conversationId);
         if (userId != null) {
             metadata.append(META_USER_ID, userId);
         }
@@ -302,9 +399,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     new ByteArrayInputStream(bytes),
                     options);
         } finally {
-            for (int i = held.size() - 1; i >= 0; i--) {
-                releaseLock(held.get(i)[0], held.get(i)[1]);
-            }
+            releaseAll(held);
         }
 
         LOGGER.debugf("Stored attachment '%s' (%s, %d bytes) for conversation '%s' → GridFS %s",
@@ -313,16 +408,27 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         return new Attachment(storageRef, filename, resolvedMime, bytes.length, conversationId);
     }
 
+    private void releaseAll(List<String[]> held) {
+        for (int i = held.size() - 1; i >= 0; i--) {
+            releaseLock(held.get(i)[0], held.get(i)[1]);
+        }
+    }
+
     @Override
     public byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException {
         GridFSFile file = findFileByRef(storageRef);
         if (file == null) {
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
-        authorize(file, requestingConversationId);
+        authorize(file, storageRef, requestingConversationId);
 
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         gridFSBucket.downloadToStream(file.getObjectId(), out);
+        if (Kind.PDF_SLICE.name().equals(meta(file, META_KIND))) {
+            // Slices are a least-recently-used cache; nothing else is touched, so an
+            // ordinary load stays a read.
+            filesCollection.updateOne(Filters.eq("_id", file.getObjectId()), Updates.set("metadata." + META_LAST_ACCESSED_AT, new Date()));
+        }
         return out.toByteArray();
     }
 
@@ -332,14 +438,17 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         if (file == null) {
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
         }
-        authorize(file, requestingConversationId);
+        authorize(file, storageRef, requestingConversationId);
+        return toAttachment(file, storageRef);
+    }
 
+    private static Attachment toAttachment(GridFSFile file, String fallbackRef) {
         Document metadata = file.getMetadata();
         String mime = metadata != null ? metadata.getString(META_MIME_TYPE) : null;
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
         String ref = metadata != null && metadata.getString(META_STORAGE_REF) != null
                 ? metadata.getString(META_STORAGE_REF)
-                : storageRef;
+                : fallbackRef;
         return new Attachment(ref, file.getFilename(),
                 mime != null ? mime : "application/octet-stream", file.getLength(), owner);
     }
@@ -351,6 +460,14 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         GridFSFile file = primaryReadBucket.find(refFilter(storageRef)).first();
         if (file == null) {
             throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        // Always on the root: a derived ref grants its root.
+        String rootRef = meta(file, META_ROOT_REF);
+        if (rootRef != null) {
+            file = primaryReadBucket.find(Filters.and(refFilter(rootRef), ROOTS_ONLY)).first();
+            if (file == null) {
+                throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+            }
         }
         String canonicalRef = canonicalRef(file);
         upsertGrant(canonicalRef, conversationId);
@@ -504,19 +621,53 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                     "Delete denied: attachment belongs to '%s', requested from '%s'"
                             .formatted(owner, requestingConversationId));
         }
+        String canonicalRef = canonicalRef(file);
         gridFSBucket.delete(file.getObjectId());
-        grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef(file)));
+        grantsCollection.deleteMany(Filters.eq(GRANT_STORAGE_REF, canonicalRef));
+        if (meta(file, META_ROOT_REF) == null) {
+            // The root's lineage: every view of it, whatever stored it.
+            for (GridFSFile derived : primaryReadBucket.find(Filters.eq("metadata." + META_ROOT_REF, canonicalRef))) {
+                gridFSBucket.delete(derived.getObjectId());
+            }
+            DerivedBlobs.fireRootDeleted(rootDeletedEvent, List.of(rootDeleted(file, canonicalRef)));
+        }
         return true;
     }
 
+    private static AttachmentRootDeleted rootDeleted(GridFSFile root, String canonicalRef) {
+        String conversationId = meta(root, META_CONVERSATION_ID);
+        String ownerKey = meta(root, META_OWNER_KEY);
+        return new AttachmentRootDeleted(canonicalRef, OwnerScope.fromStored(meta(root, META_OWNER_SCOPE)),
+                ownerKey != null ? ownerKey : conversationId, meta(root, META_USER_ID));
+    }
+
+    /**
+     * Deletes the conversation's files — its roots and the lineage stored under
+     * them (a derived file carries its root owner's {@code conversationId}) — and
+     * the grants on them and held by it, then announces each root.
+     *
+     * @return the number of roots deleted
+     */
     @Override
     public long deleteByConversation(String conversationId) {
-        long count = 0;
         List<String> deletedRefs = new ArrayList<>();
+        List<AttachmentRootDeleted> roots = new ArrayList<>();
         for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
             gridFSBucket.delete(file.getObjectId());
-            deletedRefs.add(canonicalRef(file));
-            count++;
+            String ref = canonicalRef(file);
+            deletedRefs.add(ref);
+            if (meta(file, META_ROOT_REF) == null) {
+                roots.add(rootDeleted(file, ref));
+            }
+        }
+        // The lineage once more: a view uploaded while the cursor above ran may not be
+        // in it. storeDerived re-checks its root after the upload, so a view is either
+        // seen here or deleted by its own writer.
+        if (!roots.isEmpty()) {
+            for (GridFSFile derived : primaryReadBucket.find(
+                    Filters.in("metadata." + META_ROOT_REF, roots.stream().map(AttachmentRootDeleted::rootRef).toList()))) {
+                gridFSBucket.delete(derived.getObjectId());
+            }
         }
         // The grants on the blobs just deleted, and the grants this conversation held
         // on other blobs — in both shapes, or they would grow without bound.
@@ -525,15 +676,17 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         }
         long held = grantsCollection.deleteMany(Filters.eq(GRANT_CONVERSATION_ID, conversationId)).getDeletedCount();
         filesCollection.updateMany(Filters.eq("metadata." + META_GRANTS, conversationId), Updates.pull("metadata." + META_GRANTS, conversationId));
-        if (count > 0 || held > 0) {
-            LOGGER.debugf("Deleted %d attachments and %d held grants for conversation '%s'", count, held, sanitize(conversationId));
+        if (!deletedRefs.isEmpty() || held > 0) {
+            LOGGER.debugf("Deleted %d attachments (%d roots) and %d held grants for conversation '%s'", deletedRefs.size(), roots.size(), held,
+                    sanitize(conversationId));
         }
-        return count;
+        DerivedBlobs.fireRootDeleted(rootDeletedEvent, roots);
+        return roots.size();
     }
 
     @Override
     public List<Attachment> listByConversation(String conversationId) {
-        return listMatching(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId));
+        return listMatching(Filters.and(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId), ROOTS_ONLY));
     }
 
     @Override
@@ -542,7 +695,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         // query for owned OR legacy-granted OR granted — so a blob granted in both
         // shapes is listed once, and a grant row whose blob is gone lists nothing.
         // Filters.eq on the array field matches documents whose grants array
-        // contains the value (Mongo semantics).
+        // contains the value (Mongo semantics). Roots only.
         Set<String> grantedRefs = new LinkedHashSet<>();
         for (Document grant : grantsCollection.find(Filters.eq(GRANT_CONVERSATION_ID, conversationId))
                 .projection(Projections.include(GRANT_STORAGE_REF))) {
@@ -562,7 +715,7 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
                 clauses.add(Filters.in("_id", legacyIds));
             }
         }
-        return listMatching(Filters.or(clauses));
+        return listMatching(Filters.and(Filters.or(clauses), ROOTS_ONLY));
     }
 
     private List<Attachment> listMatching(Bson filter) {
@@ -584,15 +737,294 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         return results;
     }
 
-    /** {count, totalBytes} of the blobs matching {@code filter}. */
+    /**
+     * {count, totalBytes} of the files matching {@code filter}: the count is of
+     * uploads (roots) only, the bytes are the uploads' plus their media views' —
+     * the only derived bytes that count toward an owner's quota.
+     */
     private long[] usage(Bson filter) {
         long count = 0;
         long totalBytes = 0;
         for (GridFSFile file : primaryReadBucket.find(filter)) {
-            count++;
-            totalBytes += file.getLength();
+            if (meta(file, META_ROOT_REF) == null) {
+                count++;
+                totalBytes += file.getLength();
+            } else if (DerivedCaps.countsTowardOwnerQuota(kindOf(file))) {
+                totalBytes += file.getLength();
+            }
         }
         return new long[]{count, totalBytes};
+    }
+
+    // ------------------------------------------------------------------ lineage
+
+    @Override
+    public Attachment storeDerived(byte[] bytes, String mimeType, String filename, Derivation derivation,
+                                   String requestingConversationId)
+            throws AttachmentStoreException {
+        if (derivation == null) {
+            throw new AttachmentStoreException("A derived blob needs its derivation");
+        }
+        if (bytes == null || bytes.length == 0) {
+            throw new AttachmentStoreException("Attachment data is empty");
+        }
+        if (bytes.length > maxSizeBytes) {
+            throw new AttachmentStoreException(
+                    "Attachment exceeds max size: %d bytes (limit: %d)".formatted(bytes.length, maxSizeBytes));
+        }
+        if (!MimeValidator.isCompatibleContent(mimeType, bytes)) {
+            throw new AttachmentStoreException(
+                    "MIME type mismatch: declared='%s', detected='%s'".formatted(mimeType, MimeValidator.detectMime(bytes)));
+        }
+        String resolvedMime = MimeValidator.normalize(mimeType != null ? mimeType : MimeValidator.detectMime(bytes));
+        String sha256 = DerivedBlobs.sha256Hex(bytes);
+        Kind kind = derivation.kind();
+
+        GridFSFile source = resolveSource(derivation, requestingConversationId);
+        GridFSFile root = readableRootOf(source, requestingConversationId,
+                derivation.parentRef() != null ? derivation.parentRef() : derivation.rootRef());
+        String rootRef = canonicalRef(root);
+        String parentRef = meta(source, META_ROOT_REF) != null ? canonicalRef(source) : null;
+        String conversationId = meta(root, META_CONVERSATION_ID);
+        String userId = meta(root, META_USER_ID);
+        String ownerKey = meta(root, META_OWNER_KEY) != null ? meta(root, META_OWNER_KEY) : conversationId;
+
+        boolean media = DerivedCaps.countsTowardOwnerQuota(kind);
+        boolean conversationQuota = media && maxTotalBytesPerConversation > 0;
+        boolean userQuota = media && userId != null && maxTotalBytesPerUser > 0;
+        // Lock order: conversation → user → source, as every writer takes them.
+        List<String> lockKeys = new ArrayList<>();
+        if (conversationQuota) {
+            lockKeys.add("conversation:" + conversationId);
+        }
+        if (userQuota) {
+            lockKeys.add("user:" + userId);
+        }
+        lockKeys.add("source:" + rootRef);
+        List<String[]> held = new ArrayList<>();
+        ObjectId uploaded;
+        try {
+            for (String key : lockKeys) {
+                held.add(new String[]{key, acquireLock(key)});
+            }
+            // The root again, under the lock and from the primary: it may have been
+            // deleted, or have changed owner, since it was read.
+            GridFSFile current = primaryReadBucket.find(Filters.eq("_id", root.getObjectId())).first();
+            if (current == null) {
+                throw new AttachmentNotFoundException("Attachment not found: " + rootRef);
+            }
+            String currentKey = meta(current, META_OWNER_KEY) != null ? meta(current, META_OWNER_KEY) : meta(current, META_CONVERSATION_ID);
+            if (!ownerKey.equals(currentKey) || !conversationId.equals(meta(current, META_CONVERSATION_ID))) {
+                throw new AttachmentStoreException("The owner of this file changed while a view of it was being stored. Please retry.");
+            }
+            GridFSFile duplicate = primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_OWNER_KEY, ownerKey),
+                    Filters.eq("metadata." + META_ROOT_REF, rootRef), Filters.eq("metadata." + META_SHA256, sha256)))
+                    .sort(Sorts.ascending("uploadDate", "_id")).first();
+            if (duplicate != null) {
+                return toAttachment(duplicate, canonicalRef(duplicate));
+            }
+            List<DerivedCaps.Existing> lineage = new ArrayList<>();
+            for (GridFSFile existing : primaryReadBucket.find(Filters.eq("metadata." + META_ROOT_REF, rootRef))) {
+                Document metadata = existing.getMetadata();
+                Date accessed = metadata != null ? metadata.getDate(META_LAST_ACCESSED_AT) : null;
+                lineage.add(new DerivedCaps.Existing(canonicalRef(existing), kindOf(existing), existing.getLength(),
+                        accessed != null ? accessed.toInstant() : null));
+            }
+            List<String> evict = DerivedCaps.check(kind, bytes.length, lineage, derivedLimits());
+            if (conversationQuota) {
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, 0,
+                        usage(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))[1], bytes.length, 0, maxTotalBytesPerConversation);
+            }
+            if (userQuota) {
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(Filters.eq("metadata." + META_USER_ID, userId))[1],
+                        bytes.length, 0, maxTotalBytesPerUser);
+            }
+            for (String ref : evict) {
+                for (GridFSFile slice : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_STORAGE_REF, ref),
+                        Filters.eq("metadata." + META_ROOT_REF, rootRef)))) {
+                    gridFSBucket.delete(slice.getObjectId());
+                }
+            }
+            String storageRef = UUID.randomUUID().toString();
+            Document metadata = new Document()
+                    .append(META_CONVERSATION_ID, conversationId)
+                    .append(META_TENANT_ID, meta(root, META_TENANT_ID))
+                    .append(META_MIME_TYPE, resolvedMime)
+                    .append("sizeBytes", (long) bytes.length)
+                    .append(META_STORAGE_REF, storageRef)
+                    .append(META_OWNER_SCOPE, OwnerScope.fromStored(meta(root, META_OWNER_SCOPE)).name())
+                    .append(META_OWNER_KEY, ownerKey)
+                    .append(META_ROOT_REF, rootRef)
+                    .append(META_PARENT_REF, parentRef)
+                    .append(META_KIND, kind.name())
+                    .append(META_UNIT_ID, derivation.unitId())
+                    .append(META_PAGE, derivation.page())
+                    .append(META_SHA256, sha256)
+                    .append(META_LAST_ACCESSED_AT, new Date());
+            if (userId != null) {
+                metadata.append(META_USER_ID, userId);
+            }
+            uploaded = gridFSBucket.uploadFromStream(filename != null ? filename : "unnamed", new ByteArrayInputStream(bytes),
+                    new GridFSUploadOptions().metadata(metadata));
+            // A root deleted while this upload ran (a delete takes no source lock)
+            // must not leave an orphan view: take it back.
+            if (primaryReadBucket.find(Filters.eq("_id", root.getObjectId())).first() == null) {
+                gridFSBucket.delete(uploaded);
+                throw new AttachmentNotFoundException("Attachment not found: " + rootRef);
+            }
+            DerivedBlobs.recordStored(meterRegistry, kind, bytes.length);
+            LOGGER.debugf("Stored derived %s (%d bytes) of attachment %s", kind, bytes.length, rootRef);
+            return new Attachment(storageRef, filename, resolvedMime, bytes.length, conversationId);
+        } finally {
+            releaseAll(held);
+        }
+    }
+
+    /**
+     * What the new view is taken from: its parent when one is named, else the named
+     * root; either may itself be derived. A root and a parent of different lineages
+     * are refused.
+     */
+    private GridFSFile resolveSource(Derivation derivation, String requester) throws AttachmentStoreException {
+        String named = derivation.parentRef() != null ? derivation.parentRef() : derivation.rootRef();
+        if (named == null) {
+            throw new AttachmentStoreException("A derived blob needs its root");
+        }
+        GridFSFile source = primaryReadBucket.find(refFilter(named)).first();
+        if (source == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + named);
+        }
+        if (derivation.parentRef() != null && derivation.rootRef() != null) {
+            GridFSFile parentRoot = readableRootOf(source, requester, named);
+            GridFSFile named2 = primaryReadBucket.find(refFilter(derivation.rootRef())).first();
+            if (named2 == null) {
+                throw new AttachmentNotFoundException("Attachment not found: " + derivation.rootRef());
+            }
+            if (!canonicalRef(parentRoot).equals(canonicalRef(readableRootOf(named2, requester, derivation.rootRef())))) {
+                throw new AttachmentStoreException("The parent of a derived blob belongs to another root");
+            }
+        }
+        return source;
+    }
+
+    /**
+     * The root of {@code file}'s lineage (the file itself for a root), if the
+     * requester may read it; "not found" otherwise — a missing root, a missing blob
+     * and a forbidden one are the same answer, so it is no oracle.
+     */
+    private GridFSFile readableRootOf(GridFSFile file, String requester, String askedFor) throws AttachmentStoreException {
+        GridFSFile root = rootFileOf(file);
+        if (root == null || !mayRead(root, requester)) {
+            throw new AttachmentNotFoundException("Attachment not found: " + askedFor);
+        }
+        return root;
+    }
+
+    /** The root file of {@code file}'s lineage, or {@code null} if it is gone. */
+    private GridFSFile rootFileOf(GridFSFile file) {
+        String rootRef = meta(file, META_ROOT_REF);
+        if (rootRef == null) {
+            return file;
+        }
+        return primaryReadBucket.find(Filters.and(refFilter(rootRef), ROOTS_ONLY)).first();
+    }
+
+    private GridFSFile readable(String storageRef, String requester) throws AttachmentStoreException {
+        GridFSFile file = findFileByRef(storageRef);
+        if (file == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        readableRootOf(file, requester, storageRef);
+        return file;
+    }
+
+    /** The readable root of {@code storageRef}'s lineage. */
+    private GridFSFile readableRoot(String storageRef, String requester) throws AttachmentStoreException {
+        GridFSFile file = findFileByRef(storageRef);
+        if (file == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        return readableRootOf(file, requester, storageRef);
+    }
+
+    private DerivedCaps.Limits derivedLimits() {
+        return new DerivedCaps.Limits(derivedMaxPerSource, derivedMaxTotalBytesPerSource, derivedMaxSlicesPerSource, derivedMaxSliceBytesPerSource,
+                derivedMaxTextBytesPerSource);
+    }
+
+    @Override
+    public Optional<Derivation> getDerivation(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile file = readable(storageRef, requestingConversationId);
+        String rootRef = meta(file, META_ROOT_REF);
+        if (rootRef == null) {
+            return Optional.empty();
+        }
+        Document metadata = file.getMetadata();
+        return Optional.of(new Derivation(rootRef, metadata.getString(META_PARENT_REF), kindOf(file), metadata.getString(META_UNIT_ID),
+                metadata.getInteger(META_PAGE), metadata.getString(META_SHA256)));
+    }
+
+    @Override
+    public List<Attachment> listDerived(String rootRef, Kind kind, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile root = readableRoot(rootRef, requestingConversationId);
+        Bson filter = Filters.eq("metadata." + META_ROOT_REF, canonicalRef(root));
+        if (kind != null) {
+            filter = Filters.and(filter, Filters.eq("metadata." + META_KIND, kind.name()));
+        }
+        List<Attachment> results = new ArrayList<>();
+        for (GridFSFile file : primaryReadBucket.find(filter).sort(Sorts.ascending("uploadDate", "_id"))) {
+            results.add(toAttachment(file, canonicalRef(file)));
+        }
+        return results;
+    }
+
+    @Override
+    public Optional<Attachment> findDerived(String rootRef, Kind kind, String unitId, String requestingConversationId)
+            throws AttachmentStoreException {
+        GridFSFile root = readableRoot(rootRef, requestingConversationId);
+        GridFSFile match = primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_ROOT_REF, canonicalRef(root)),
+                Filters.eq("metadata." + META_KIND, kind.name()), Filters.eq("metadata." + META_UNIT_ID, unitId)))
+                .sort(Sorts.descending("uploadDate", "_id")).first();
+        return match == null ? Optional.empty() : Optional.of(toAttachment(match, canonicalRef(match)));
+    }
+
+    @Override
+    public String rootOf(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile file = findFileByRef(storageRef);
+        if (file == null) {
+            throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+        }
+        return canonicalRef(readableRootOf(file, requestingConversationId, storageRef));
+    }
+
+    @Override
+    public OwnerRef ownerOf(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile root = readableRoot(storageRef, requestingConversationId);
+        String conversationId = meta(root, META_CONVERSATION_ID);
+        String ownerKey = meta(root, META_OWNER_KEY);
+        return new OwnerRef(OwnerScope.fromStored(meta(root, META_OWNER_SCOPE)), ownerKey != null ? ownerKey : conversationId,
+                meta(root, META_USER_ID));
+    }
+
+    @Override
+    public Integer pageCount(String rootRef, String requestingConversationId) throws AttachmentStoreException {
+        GridFSFile root = readableRoot(rootRef, requestingConversationId);
+        Document metadata = root.getMetadata();
+        return metadata != null ? metadata.getInteger(META_PAGE_COUNT) : null;
+    }
+
+    @Override
+    public void setPageCount(String rootRef, int pages) {
+        filesCollection.updateOne(Filters.and(refFilter(rootRef), ROOTS_ONLY), Updates.set("metadata." + META_PAGE_COUNT, pages));
+    }
+
+    private static String meta(GridFSFile file, String field) {
+        Document metadata = file.getMetadata();
+        return metadata != null ? metadata.getString(field) : null;
+    }
+
+    private static Kind kindOf(GridFSFile file) {
+        return Kind.fromStored(meta(file, META_KIND));
     }
 
     /**
@@ -675,26 +1107,40 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         return file.getObjectId() != null ? file.getObjectId().toHexString() : null;
     }
 
-    private void authorize(GridFSFile file, String requester) throws AttachmentStoreException {
-        Document metadata = file.getMetadata();
+    /**
+     * Owner-or-grant on the root. A stranger asking for a root is denied (the
+     * established answer); one asking for a derived blob — or for a blob whose root
+     * is gone — is told it does not exist, so a view's reference is no oracle.
+     */
+    private void authorize(GridFSFile file, String storageRef, String requester) throws AttachmentStoreException {
+        if (meta(file, META_ROOT_REF) != null) {
+            readableRootOf(file, requester, storageRef);
+            return;
+        }
+        if (mayRead(file, requester)) {
+            return;
+        }
+        throw new AttachmentAccessDeniedException(
+                "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
+                        .formatted(meta(file, META_CONVERSATION_ID), requester));
+    }
+
+    /** Owner or grantee of a root file, in either grant shape. */
+    private boolean mayRead(GridFSFile root, String requester) {
+        Document metadata = root.getMetadata();
         // Fails closed, as the PostgreSQL store does: a blob with no recorded owner
         // (a pre-ownership legacy blob) used to be readable by any conversation that
         // knew its reference. Ownership that cannot be established is not ownership.
         String owner = metadata != null ? metadata.getString(META_CONVERSATION_ID) : null;
         if (owner != null && owner.equals(requester)) {
-            return;
+            return true;
         }
         List<String> grants = metadata != null ? metadata.getList(META_GRANTS, String.class) : null;
         if (grants != null && grants.contains(requester)) {
-            return;
+            return true;
         }
-        String ref = canonicalRef(file);
-        if (requester != null && ref != null && grantsCollection.countDocuments(
-                Filters.and(Filters.eq(GRANT_STORAGE_REF, ref), Filters.eq(GRANT_CONVERSATION_ID, requester))) > 0) {
-            return;
-        }
-        throw new AttachmentAccessDeniedException(
-                "Cross-conversation access denied: attachment belongs to '%s', requested from '%s'"
-                        .formatted(owner, requester));
+        String ref = canonicalRef(root);
+        return requester != null && ref != null && grantsCollection.countDocuments(
+                Filters.and(Filters.eq(GRANT_STORAGE_REF, ref), Filters.eq(GRANT_CONVERSATION_ID, requester))) > 0;
     }
 }
