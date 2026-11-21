@@ -36,6 +36,12 @@ The new `attachment_grants` collection or table (and `attachment_grants_backfill
 
 During the upgrade, a blob deleted by an old node leaves its `attachment_grants` rows behind. They authorize nothing and are removed on the next start of an upgraded node.
 
+Two cases have no automatic cleanup, so a row keeps an erased conversation's id until its blob is deleted:
+- a conversation erased by an old node, whose rows stay in `attachment_grants`;
+- a grant racing the erasure on an upgraded node, including a backfill copy whose re-check of the grantee failed.
+
+`docs/gdpr-compliance.md` lists all three cases and the manual cleanup.
+
 ### Next
 
 WP-2a.2 (`Derivation`, owner scope and key, lineage cascade, lifecycle events) is next in the attachment-store chain.

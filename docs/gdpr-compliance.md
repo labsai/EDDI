@@ -120,10 +120,23 @@ principal, not a user: erasing or exporting it is refused with 400.
    The same per-conversation delete removes the read grants on those blobs, and the
    grants those conversations held on other users' blobs (in `attachment_grants`
    and in the legacy per-blob list), so no grant keeps the erased conversation's id.
-   One window remains while a cluster is being upgraded: a node of the previous
-   release deletes a blob without its `attachment_grants` rows. Those rows authorize
-   nothing, but they keep the grantee's conversation id until the next start of an
-   upgraded node removes every grant row whose blob is gone
+   Grant rows can still keep an erased conversation's id in these cases:
+   - **A node of the previous release deletes a blob** during a rolling upgrade,
+     without its `attachment_grants` rows. The next start of an upgraded node removes
+     every grant row whose blob is gone.
+   - **A node of the previous release erases a conversation** during a rolling
+     upgrade. It removes the id from the legacy per-blob lists but not from
+     `attachment_grants`.
+   - **A grant races the erasure** on an upgraded node: a grant to the conversation
+     written while its erasure runs, or a backfill copy whose re-check of the grantee
+     fails (the backfill keeps a row it cannot prove dead, and later starts skip a
+     grant already copied).
+
+   In the last two cases nothing removes the row automatically: it stays until its
+   blob is deleted, which removes every grant on it. Such a row authorizes nothing,
+   because no conversation has that id any more. To clear the id sooner, delete the
+   rows whose `conversationId` (`conversation_id` on PostgreSQL) is the erased id from
+   `attachment_grants`
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
