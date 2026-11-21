@@ -351,6 +351,87 @@ public class ConnectionResolver {
         }
     }
 
+    /**
+     * Checks, without any network call, that a {@link Binding#SERVICE} OAuth
+     * service-account connection is the identity a channel type demands: its
+     * {@code oauth.clientId} is {@code clientId} (compared case-insensitively, the
+     * ids being GUIDs), its {@code oauth.tokenUrl} is exactly {@code tokenUrl} (a
+     * discovered or substituted endpoint would let a connection "mint" for any
+     * client id), and its scopes contain {@code scope}.
+     * <p>
+     * Run on every inbound activity as well as at save time, because a ZIP import
+     * or a direct store write skips save validation and a connection can be edited
+     * after the integration was saved.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireServiceIdentity(String reference, String clientId, String tokenUrl, String scope) {
+        ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        requireServiceIdentity(connection, clientId, tokenUrl, scope);
+    }
+
+    /**
+     * {@link #requireServiceIdentity} and then proof of possession: one access
+     * token is obtained from the pinned token endpoint with the connection's own
+     * secret or certificate, and dropped. A connection that names someone else's
+     * client id with a made-up secret fails here, because the identity provider
+     * refuses it. The token may come from the connection's live service grant
+     * rather than a fresh exchange; that grant was itself issued by the same pinned
+     * endpoint for the same client.
+     *
+     * @throws ConnectionException
+     *             naming the rule that failed, or the reason no token was issued
+     */
+    public void proveServiceIdentity(String reference, String clientId, String tokenUrl, String scope) {
+        ConnectionConfiguration connection = connectionRegistry.require(ConnectionReference.parse(reference));
+        requireServiceIdentity(connection, clientId, tokenUrl, scope);
+        String token = accessTokenSupplier.accessToken(connection, SERVICE_PRINCIPAL);
+        if (token == null || token.isBlank()) {
+            throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
+                    "Connection '" + connection.getName() + "' produced an empty access token.");
+        }
+    }
+
+    private static void requireServiceIdentity(ConnectionConfiguration connection, String clientId, String tokenUrl, String scope) {
+        String name = connection.getName();
+        if (connection.getBinding() != Binding.SERVICE || connection.getAuthType() == null || !connection.getAuthType().isServiceAccount()
+                || connection.getOauth() == null) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + name + "' must be a SERVICE-bound OAUTH2_CLIENT_CREDENTIALS or OAUTH2_JWT_BEARER connection.");
+        }
+        String actualClientId = connection.getOauth().getClientId();
+        if (clientId == null || actualClientId == null || !clientId.trim().equalsIgnoreCase(actualClientId.trim())) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + name + "' has oauth.clientId '" + actualClientId + "', but the integration declares application id '"
+                            + clientId + "'. They must be the same app registration.");
+        }
+        if (tokenUrl != null && !sameEndpoint(tokenUrl, connection.getOauth().getTokenUrl())) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + name + "' must have oauth.tokenUrl " + tokenUrl + " (found " + connection.getOauth().getTokenUrl() + ").");
+        }
+        List<String> scopes = connection.getOauth().getScopes();
+        if (scope != null && (scopes == null || !scopes.contains(scope))) {
+            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                    "Connection '" + name + "' must request the scope " + scope + ".");
+        }
+    }
+
+    private static boolean sameEndpoint(String expected, String actual) {
+        if (actual == null) {
+            return false;
+        }
+        String a = expected.trim();
+        String b = actual.trim();
+        while (a.endsWith("/")) {
+            a = a.substring(0, a.length() - 1);
+        }
+        while (b.endsWith("/")) {
+            b = b.substring(0, b.length() - 1);
+        }
+        return a.equalsIgnoreCase(b);
+    }
+
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
         AuthType authType = connection.getAuthType();
         boolean oauth = authType != null && authType.isOAuth();

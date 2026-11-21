@@ -111,6 +111,9 @@ import ai.labs.eddi.integrations.email.ledger.PostgresEmailMessageLedger;
 import ai.labs.eddi.integrations.slack.hitl.ISlackApprovalRecordStore;
 import ai.labs.eddi.integrations.slack.hitl.MongoSlackApprovalRecordStore;
 import ai.labs.eddi.integrations.slack.hitl.PostgresSlackApprovalRecordStore;
+import ai.labs.eddi.integrations.teams.refs.ITeamsConversationReferenceStore;
+import ai.labs.eddi.integrations.teams.refs.MongoTeamsConversationReferenceStore;
+import ai.labs.eddi.integrations.teams.refs.PostgresTeamsConversationReferenceStore;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.oauth.IOAuthStateStore;
 import ai.labs.eddi.connections.oauth.MongoOAuthStateStore;
@@ -300,6 +303,13 @@ public class DataStoreProducers {
     @ApplicationScoped
     public ISlackApprovalRecordStore slackApprovalRecordStore(Instance<MongoSlackApprovalRecordStore> mongo,
                                                               Instance<PostgresSlackApprovalRecordStore> postgres) {
+        return isPostgres() ? postgres.get() : mongo.get();
+    }
+
+    @Produces
+    @ApplicationScoped
+    public ITeamsConversationReferenceStore teamsConversationReferenceStore(Instance<MongoTeamsConversationReferenceStore> mongo,
+                                                                            Instance<PostgresTeamsConversationReferenceStore> postgres) {
         return isPostgres() ? postgres.get() : mongo.get();
     }
 

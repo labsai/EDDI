@@ -35,6 +35,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 @ApplicationScoped
 public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Announcer {
+
+    /**
+     * Bot Connector activity de-duplication (Teams retries a delivery it saw no 2xx
+     * for).
+     */
+    public static final String TEAMS_ACTIVITY_DEDUP = "teams-activity-dedup";
+
     private final ConcurrentHashMap<String, Cache<?, ?>> caches = new ConcurrentHashMap<>();
 
     // ---- cluster mode (eddi.messaging.type=nats) ----
@@ -46,21 +53,22 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
     /**
      * Caches that hold state rather than copies, and are therefore shared by every
      * node through a KV bucket (name → bucket): replay nonces, A2A task mappings,
-     * paginated tool responses, Slack and webhook event de-duplication, channel
-     * thread locks, and knowledge-base ingestion statuses, which a poll may ask any
-     * node for.
+     * paginated tool responses, Slack, webhook and Teams event de-duplication,
+     * channel thread locks, and knowledge-base ingestion statuses, which a poll may
+     * ask any node for.
      */
-    static final Map<String, String> SHARED_BUCKETS = Map.of(
-            "nonce-replay-protection", "NONCES",
-            "a2aTaskMapping", "A2A_TASKS",
-            "a2aTaskMapping:context", "A2A_CONTEXTS",
-            "a2aTaskMapping:erasing", "A2A_ERASING",
-            "a2aTaskMapping:index", "A2A_INDEX",
-            "paginated-tool-responses", "TOOL_PAGES",
-            "slack-event-dedup", "DEDUP",
-            "webhook-event-dedup", "DEDUP",
-            "channel-thread-locks", "CHANNEL",
-            "rag-ingestion-status", "RAG_INGESTION");
+    static final Map<String, String> SHARED_BUCKETS = Map.ofEntries(
+            Map.entry("nonce-replay-protection", "NONCES"),
+            Map.entry("a2aTaskMapping", "A2A_TASKS"),
+            Map.entry("a2aTaskMapping:context", "A2A_CONTEXTS"),
+            Map.entry("a2aTaskMapping:erasing", "A2A_ERASING"),
+            Map.entry("a2aTaskMapping:index", "A2A_INDEX"),
+            Map.entry("paginated-tool-responses", "TOOL_PAGES"),
+            Map.entry("slack-event-dedup", "DEDUP"),
+            Map.entry("webhook-event-dedup", "DEDUP"),
+            Map.entry(TEAMS_ACTIVITY_DEDUP, "DEDUP"),
+            Map.entry("channel-thread-locks", "CHANNEL"),
+            Map.entry("rag-ingestion-status", "RAG_INGESTION"));
 
     /**
      * Node-local copies of database state that the other nodes must drop when this
@@ -292,7 +300,11 @@ public class CacheFactory implements ICacheFactory, ClusterInvalidatingCache.Ann
             // schemes the only replay protection there is: at the 1_000 default ~500
             // deliveries in the 10-minute window from one tenant's integration
             // evicted another's keys, and a captured request then ran again.
-            Map.entry("webhook-event-dedup", 10_000L));
+            Map.entry("webhook-event-dedup", 10_000L),
+
+            // One key per verified Teams activity for its 10-minute window, shared by every
+            // Teams integration of the deployment.
+            Map.entry(TEAMS_ACTIVITY_DEDUP, 10_000L));
 
     private static final long DEFAULT_MAX_SIZE = 1_000L;
 

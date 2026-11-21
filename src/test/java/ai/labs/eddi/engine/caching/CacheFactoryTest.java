@@ -453,6 +453,13 @@ class CacheFactoryTest {
     }
 
     @Test
+    @DisplayName("the Teams activity dedup cache is shared through the DEDUP bucket and sized like the webhook one")
+    void teamsDedupCacheIsShared() {
+        assertEquals("DEDUP", CacheFactory.SHARED_BUCKETS.get(CacheFactory.TEAMS_ACTIVITY_DEDUP));
+        assertEquals("teams-activity-dedup", CacheFactory.TEAMS_ACTIVITY_DEDUP);
+    }
+
+    @Test
     @DisplayName("in cluster mode the webhook dedup cache is shared through the DEDUP bucket, like Slack's")
     void webhookDedupCacheIsSharedInAClusterThroughTheDedupBucket() {
         assertEquals("DEDUP", CacheFactory.SHARED_BUCKETS.get("webhook-event-dedup"));

@@ -1330,7 +1330,15 @@ public class McpAdminTools {
             + "Conversation mode only: smtpHost (required), smtpPort (587 STARTTLS | 465 TLS), fromName, replyTemplate ('{output}'), "
             + "aiDisclosure (a default sentence; empty switches it off and warns), threadParticipants (originalSenderOnly | "
             + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5), honorReplyTo (false; warns). For email, "
-            + "targets[].triggers match the address plus-tag or a subject word. Returns the new resource ID and URI, for a webhook "
+            + "targets[].triggers match the address plus-tag or a subject word. "
+            + "Or 'teams': a Microsoft Teams bot (Azure Bot, messaging endpoint POST /integrations/teams/messages). platformConfig "
+            + "holds no secret: appId (required, the bot's Microsoft App ID), tenantId (required, the Entra tenant of the "
+            + "single-tenant app), connection (required: a SERVICE OAUTH2_CLIENT_CREDENTIALS connection whose oauth.clientId is the "
+            + "appId, tokenUrl https://login.microsoftonline.com/<tenantId>/oauth2/v2.0/token, scope "
+            + "https://api.botframework.com/.default, and baseUrlAllowlist the Bot Connector serviceUrl origin such as "
+            + "https://smba.trafficmanager.net; saving obtains one token to prove it), allowedTenantIds (further tenants, "
+            + "comma-separated; empty = own tenant only), conversationId (a 19:… channel or group chat; omit for personal chats). "
+            + "Returns the new resource ID and URI, for a webhook "
             + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
             + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
     public String createChannelIntegration(

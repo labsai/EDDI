@@ -76,6 +76,11 @@ public class ChannelConnectionCredentials {
         URI origin = descriptor.apiOrigin().orElse(null);
         try {
             connectionResolver.get().requireServiceTarget(reference, origin, descriptor.acceptedConnectionAuthTypes());
+            var identity = descriptor.requiredConnectionIdentity(platformConfig);
+            if (identity.isPresent()) {
+                ConnectionIdentityRequirement required = identity.get();
+                connectionResolver.get().proveServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
+            }
             return List.of();
         } catch (ConnectionException e) {
             if (e.getReason() == ConnectionException.Reason.TARGET_NOT_ALLOWED && origin != null) {
@@ -83,6 +88,35 @@ public class ChannelConnectionCredentials {
                         + ".");
             }
             return List.of("platformConfig.connection: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Whether {@code integration}'s connection still holds the identity its type
+     * demands ({@link ChannelTypeDescriptor#requiredConnectionIdentity}), checked
+     * without a network call. An inbound adapter calls this before trusting the
+     * integration with a verified application's traffic: save validation is skipped
+     * by a ZIP import or a direct store write, and the connection can be edited
+     * after the save. {@code true} for a type that demands no identity.
+     */
+    public boolean holdsRequiredIdentity(ChannelTypeDescriptor descriptor, ChannelIntegrationConfiguration integration) {
+        if (descriptor == null || integration == null) {
+            return false;
+        }
+        var identity = descriptor.requiredConnectionIdentity(integration.getPlatformConfig());
+        if (identity.isEmpty()) {
+            return true;
+        }
+        String reference = connectionReference(integration.getPlatformConfig());
+        if (reference == null || connectionResolver == null || !connectionResolver.isResolvable()) {
+            return false;
+        }
+        ConnectionIdentityRequirement required = identity.get();
+        try {
+            connectionResolver.get().requireServiceIdentity(reference, required.clientId(), required.tokenUrl(), required.scope());
+            return true;
+        } catch (ConnectionException e) {
+            return false;
         }
     }
 

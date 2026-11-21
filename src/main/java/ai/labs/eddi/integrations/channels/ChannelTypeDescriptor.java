@@ -125,6 +125,17 @@ public interface ChannelTypeDescriptor {
     }
 
     /**
+     * The OAuth identity the named connection must hold for this configuration —
+     * for a type that trusts an {@link #applicationId} verified on inbound
+     * requests, the proof that whoever saved the integration controls that
+     * application. Without it the first integration to name an application would
+     * own its channel-less messages. Empty for a type that binds no identity.
+     */
+    default Optional<ConnectionIdentityRequirement> requiredConnectionIdentity(Map<String, String> platformConfig) {
+        return Optional.empty();
+    }
+
+    /**
      * The keys the router indexes an integration under, and the keys the save-time
      * uniqueness check compares: no two integrations of one type may share one.
      * <p>

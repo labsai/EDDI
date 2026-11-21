@@ -490,6 +490,25 @@ public class ChannelTargetRouter {
     }
 
     /** The distinct indexed integrations of a type, lowest routing key first. */
+    /**
+     * Whether any integration of {@code channelType}, channel-bound or not,
+     * declares {@code applicationId}. Lets an adapter refuse a token whose audience
+     * no integration names before doing any work for it.
+     */
+    public boolean declaresApplication(String channelType, String applicationId) {
+        refreshIfNeeded();
+        if (applicationId == null || applicationId.isBlank()) {
+            return false;
+        }
+        String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
+        Optional<ChannelTypeDescriptor> descriptor = channelTypes.find(normalizedType);
+        if (descriptor.isEmpty()) {
+            return false;
+        }
+        return integrationsOf(normalizedType).stream()
+                .anyMatch(cfg -> descriptor.get().applicationId(cfg.getPlatformConfig()).filter(applicationId::equals).isPresent());
+    }
+
     private List<ChannelIntegrationConfiguration> integrationsOf(String channelType) {
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         Map<String, ChannelIntegrationConfiguration> current = integrationMap;
