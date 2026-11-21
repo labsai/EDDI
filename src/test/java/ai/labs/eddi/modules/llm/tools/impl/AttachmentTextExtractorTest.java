@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import ai.labs.eddi.modules.ingestion.extract.BoundedTextStripper;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.PdfInfo;
 import org.apache.pdfbox.Loader;
@@ -285,7 +286,7 @@ class AttachmentTextExtractorTest {
             // Repeated references to an unfiltered form spend no decode budget; the
             // stripper's own operator count is what bounds the interpretation work.
             try (PDDocument document = Loader.loadPDF(createMultiPagePdf("one", "two", "three"))) {
-                var stripper = new AttachmentTextExtractor.BoundedTextStripper(5, Duration.ofMinutes(1));
+                var stripper = new BoundedTextStripper(5, Duration.ofMinutes(1));
 
                 var e = assertThrows(IOException.class, () -> stripper.getText(document));
                 assertTrue(e.getMessage().contains("content operators"), e.getMessage());
@@ -295,7 +296,7 @@ class AttachmentTextExtractorTest {
         @Test
         void interruptedExtractionStops() throws Exception {
             try (PDDocument document = Loader.loadPDF(createPdf("hello"))) {
-                var stripper = new AttachmentTextExtractor.BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1));
+                var stripper = new BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1));
                 Thread.currentThread().interrupt();
                 try {
                     var e = assertThrows(IOException.class, () -> stripper.getText(document));
@@ -331,7 +332,7 @@ class AttachmentTextExtractorTest {
         @Test
         void glyphAllowanceStopsLayoutAndKeepsWhatWasLaidOut() throws Exception {
             try (PDDocument document = Loader.loadPDF(createMultiPagePdf("Alpha page", "Bravo page"))) {
-                var stripper = new AttachmentTextExtractor.BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1), 3);
+                var stripper = new BoundedTextStripper(Long.MAX_VALUE, Duration.ofMinutes(1), 3);
 
                 String text = stripper.getText(document);
 

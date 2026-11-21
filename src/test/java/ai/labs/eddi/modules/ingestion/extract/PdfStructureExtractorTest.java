@@ -663,7 +663,7 @@ class PdfStructureExtractorTest {
             // a lone Flate content stream with a decoder of its own.)
             assertDoesNotThrow(() -> {
                 try (var document = Loader.loadPDF(PdfFixtures.flateBomb(8 * 1024 * 1024))) {
-                    PdfTextExtractor.chargePageContents(document.getPage(0));
+                    BoundedTextStripper.chargePageContents(document.getPage(0));
                 }
             });
         }

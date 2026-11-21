@@ -4,7 +4,6 @@
  */
 package ai.labs.eddi.modules.ingestion.extract;
 
-import ai.labs.eddi.modules.ingestion.extract.PdfTextExtractor.BoundedTextStripper;
 import ai.labs.eddi.modules.ingestion.extract.document.DocumentManifest;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import ai.labs.eddi.modules.ingestion.extract.document.SplitStrategy;
@@ -136,8 +135,6 @@ public class PdfStructureExtractor {
     private static final int OBJECTS_PER_DEADLINE_CHECK = 64;
 
     private static final COSName GO_TO = COSName.getPDFName("GoTo");
-
-    private static final String TOO_LONG = "This PDF took too long to read. Split it into smaller files and upload those.";
 
     static final String WARNING_HEADINGS = "Cutting by headings is not available yet; the outline or page windows "
             + "were used instead.";
@@ -418,7 +415,7 @@ public class PdfStructureExtractor {
 
     private static void requireBefore(Instant deadline) {
         if (Instant.now().isAfter(deadline) || Thread.currentThread().isInterrupted()) {
-            throw new UnreadableDocumentException(TOO_LONG);
+            throw new UnreadableDocumentException(BoundedTextStripper.TOO_LONG);
         }
     }
 
