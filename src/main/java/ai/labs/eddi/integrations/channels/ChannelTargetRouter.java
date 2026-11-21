@@ -236,7 +236,7 @@ public class ChannelTargetRouter {
 
         // 1. Try new-style ChannelIntegrationConfiguration
         String key = normalizedType + ":" + platformChannelId;
-        ChannelIntegrationConfiguration integration = integrationMap.get(key);
+        ChannelIntegrationConfiguration integration = byChannel(key);
         if (integration != null) {
             return resolveFromIntegration(integration, messageText);
         }
@@ -265,9 +265,10 @@ public class ChannelTargetRouter {
      * D-prefixed IDs unique to each user-bot pair).
      * <p>
      * Resolves against the first available integration of the given channel type
-     * (arbitrary map order; the trigger syntax of {@link #resolveFromIntegration}
-     * applies), falling back to the first legacy Slack connector. Returns
-     * {@code null} if no integrations exist or the message is blank or "help".
+     * (lowest routing key first; the trigger syntax of
+     * {@link #resolveFromIntegration} applies), falling back to the first legacy
+     * Slack connector. Returns {@code null} if no integrations exist or the message
+     * is blank or "help".
      */
     public ResolvedTarget resolveDefaultForDm(String channelType, String messageText) {
         refreshIfNeeded();
@@ -395,8 +396,8 @@ public class ChannelTargetRouter {
      * integration its verified origin names: by integration name when the adapter
      * knows it, else by verified application id, else (Slack) by the legacy
      * connector holding the verifying secret. Fails closed: an application id no
-     * integration declares resolves to nothing, never to some other integration of
-     * the type.
+     * integration answers for, or an origin with no verified identity, resolves to
+     * nothing, never to some other integration of the type.
      *
      * @return the target, or {@code null} for help, a blank message or no owner
      */
@@ -415,15 +416,22 @@ public class ChannelTargetRouter {
         if (origin.verifiedSigningSecret() != null && CHANNEL_TYPE_SLACK.equalsIgnoreCase(origin.channelType())) {
             return resolveLegacyDefaultForDm(messageText, origin.verifiedSigningSecret());
         }
-        return resolveDefaultForDm(origin.channelType(), messageText);
+        // No verified identity this method can map to an owner: never "the first
+        // integration of the type".
+        return null;
     }
 
     /**
      * The integration that answers for {@code applicationId} without a channel —
      * the one indexed under its application key (a Teams bot serving personal
-     * chats). Falls back to the lowest-keyed integration of the type that declares
-     * the application, so a channel-bound integration still owns its application's
-     * DMs when there is no channel-less one.
+     * chats), and only when it still declares that application.
+     * <p>
+     * Deliberately no fallback to a channel-bound integration that declares the
+     * application: several integrations may declare one application (one per
+     * Discord channel), and nothing proves which of them owns its DMs, so "the
+     * lowest-keyed one" could hand one tenant's DM to another tenant's agent and
+     * connection. Without a channel-less integration the application has no DM
+     * route.
      */
     public Optional<ChannelIntegrationConfiguration> getIntegrationForApplication(String channelType, String applicationId) {
         refreshIfNeeded();
@@ -432,16 +440,16 @@ public class ChannelTargetRouter {
         }
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         var direct = integrationMap.get(normalizedType + ":" + ChannelTypeDescriptor.applicationKey(applicationId));
-        if (direct != null) {
-            return Optional.of(direct);
-        }
-        var descriptor = channelTypes.find(normalizedType);
-        if (descriptor.isEmpty()) {
+        if (direct == null) {
             return Optional.empty();
         }
-        return integrationsOf(normalizedType).stream()
-                .filter(cfg -> descriptor.get().applicationId(cfg.getPlatformConfig()).filter(applicationId::equals).isPresent())
-                .findFirst();
+        // Re-checked rather than trusted from the key, so the answer is the
+        // integration that declares this application and nothing else.
+        boolean declares = channelTypes.find(normalizedType)
+                .flatMap(descriptor -> descriptor.applicationId(direct.getPlatformConfig()))
+                .filter(applicationId::equals)
+                .isPresent();
+        return declares ? Optional.of(direct) : Optional.empty();
     }
 
     /**
@@ -465,6 +473,20 @@ public class ChannelTargetRouter {
                 .flatMap(descriptor -> descriptor.applicationId(platformConfig))
                 .filter(applicationId::equals)
                 .isPresent();
+    }
+
+    /**
+     * The integration indexed under a {@code type:channelId} key, or {@code null}.
+     * Never answers an application key: a channel id read from a request body that
+     * happens to start with {@code @app:} must not reach the integration that
+     * answers for that application.
+     */
+    private ChannelIntegrationConfiguration byChannel(String typeAndChannel) {
+        int colon = typeAndChannel.indexOf(':');
+        if (colon >= 0 && typeAndChannel.startsWith(ChannelTypeDescriptor.APPLICATION_KEY_PREFIX, colon + 1)) {
+            return null;
+        }
+        return integrationMap.get(typeAndChannel);
     }
 
     /** The distinct indexed integrations of a type, lowest routing key first. */
@@ -515,7 +537,7 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        ChannelIntegrationConfiguration integration = byChannel(normalizedType + ":" + platformChannelId);
         if (integration != null) {
             return nonBlank(integration.getPlatformConfig().get("signingSecret"));
         }
@@ -598,7 +620,7 @@ public class ChannelTargetRouter {
             return false;
         }
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        if (integrationMap.containsKey(normalizedType + ":" + platformChannelId)) {
+        if (byChannel(normalizedType + ":" + platformChannelId) != null) {
             return true;
         }
         return CHANNEL_TYPE_SLACK.equals(normalizedType) && legacyMap.containsKey(platformChannelId);
@@ -646,7 +668,7 @@ public class ChannelTargetRouter {
 
         refreshIfNeeded();
         String key = normalizedType + ":" + platformChannelId;
-        ChannelIntegrationConfiguration integration = integrationMap.get(key);
+        ChannelIntegrationConfiguration integration = byChannel(key);
 
         // Attach legacy credentials when no new-style integration exists
         String legacyBotToken = null;
@@ -699,7 +721,7 @@ public class ChannelTargetRouter {
                                                                     String platformChannelId) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        return Optional.ofNullable(integrationMap.get(normalizedType + ":" + platformChannelId));
+        return Optional.ofNullable(byChannel(normalizedType + ":" + platformChannelId));
     }
 
     /**
@@ -861,7 +883,7 @@ public class ChannelTargetRouter {
     public List<ChannelTarget> observeCandidates(String channelType, String platformChannelId) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        ChannelIntegrationConfiguration integration = integrationMap.get(normalizedType + ":" + platformChannelId);
+        ChannelIntegrationConfiguration integration = byChannel(normalizedType + ":" + platformChannelId);
         if (integration == null || integration.getTargets() == null) {
             return List.of();
         }
@@ -877,7 +899,7 @@ public class ChannelTargetRouter {
     public ChannelIntegrationConfiguration integrationFor(String channelType, String platformChannelId) {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
-        return integrationMap.get(normalizedType + ":" + platformChannelId);
+        return byChannel(normalizedType + ":" + platformChannelId);
     }
 
     /**
@@ -888,7 +910,7 @@ public class ChannelTargetRouter {
         refreshIfNeeded();
         String normalizedType = channelType != null ? channelType.toLowerCase(Locale.ROOT) : "";
         String key = normalizedType + ":" + platformChannelId;
-        ChannelIntegrationConfiguration integration = integrationMap.get(key);
+        ChannelIntegrationConfiguration integration = byChannel(key);
         if (integration != null) {
             String token = integration.getPlatformConfig().get("botToken");
             if (token != null && !token.isBlank()) {

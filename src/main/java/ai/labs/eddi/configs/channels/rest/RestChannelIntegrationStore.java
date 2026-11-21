@@ -716,7 +716,10 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         String channelType = config.getChannelType();
         if (channelType == null)
             return;
-        List<String> keys = channelTypes.routingKeys(channelType, excludeId, config.getPlatformConfig());
+        // Without the resource id, on both sides: a type routed by its own resource id
+        // (webhook) cannot collide, and must not pay for a scan of every integration —
+        // or fail its update with a 503 when that scan hiccups.
+        List<String> keys = channelTypes.routingKeys(channelType, null, config.getPlatformConfig());
         if (keys.isEmpty())
             return;
 
@@ -724,8 +727,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             if (existing.getPlatformConfig() == null || !channelType.equalsIgnoreCase(existing.getChannelType())) {
                 return;
             }
-            // The other integration's resource id is not at hand here; a type routed
-            // by its resource id (webhook) cannot collide anyway, so null is fine.
             List<String> theirs = channelTypes.routingKeys(existing.getChannelType(), null, existing.getPlatformConfig());
             for (String key : keys) {
                 if (theirs.contains(key)) {

@@ -168,12 +168,34 @@ class ChannelTargetRouterChannelTypeTest {
     }
 
     @Test
-    @DisplayName("without a channel-less integration, the channel-bound one of the application owns its DMs")
-    void channelBoundOwnsApplication() throws Exception {
-        var stored = store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1", "channelId", "C1"));
-        assertSame(router.getIntegration(FakeChatChannelType.ID, "C1").orElseThrow(),
-                router.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").orElseThrow());
-        assertEquals(stored.getName(), router.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").orElseThrow().getName());
+    @DisplayName("a channel-bound integration does not answer its application's DMs: several may declare one application")
+    void channelBoundDoesNotOwnApplication() throws Exception {
+        store(FakeChatChannelType.ID, "tenant-a", pc("connection", "bot", "appId", "app-1", "channelId", "C1"));
+        store(FakeChatChannelType.ID, "tenant-b", pc("connection", "bot", "appId", "app-1", "channelId", "C2"));
+        assertTrue(router.getIntegration(FakeChatChannelType.ID, "C1").isPresent());
+        assertTrue(router.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").isEmpty());
+        assertNull(router.resolveDefaultForOrigin(InboundOrigin.application(FakeChatChannelType.ID, "app-1"), "hello"));
+    }
+
+    @Test
+    @DisplayName("a channel lookup never answers with an application key")
+    void channelLookupIgnoresApplicationKeys() throws Exception {
+        store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1"));
+        String bodyChannelId = ChannelTypeDescriptor.applicationKey("app-1");
+        assertTrue(router.getIntegration(FakeChatChannelType.ID, bodyChannelId).isEmpty());
+        assertNull(router.integrationFor(FakeChatChannelType.ID, bodyChannelId));
+        assertTrue(router.observeCandidates(FakeChatChannelType.ID, bodyChannelId).isEmpty());
+        assertFalse(router.isChannelOwned(FakeChatChannelType.ID, bodyChannelId));
+        assertNull(router.resolveTarget(FakeChatChannelType.ID, bodyChannelId, "hello"));
+    }
+
+    @Test
+    @DisplayName("an origin with no verified identity resolves to nothing")
+    void unverifiedOriginFailsClosed() throws Exception {
+        store(FakeChatChannelType.ID, "fake", pc("connection", "bot", "appId", "app-1"));
+        assertNull(router.resolveDefaultForOrigin(new InboundOrigin(FakeChatChannelType.ID, null, null, null), "hello"));
+        assertNull(router.resolveDefaultForOrigin(InboundOrigin.signedBy(FakeChatChannelType.ID, null, "a-secret"), "hello"));
+        assertNull(router.resolveDefaultForOrigin(null, "hello"));
     }
 
     @Test

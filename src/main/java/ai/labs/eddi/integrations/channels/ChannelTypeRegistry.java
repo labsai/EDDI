@@ -77,7 +77,9 @@ public class ChannelTypeRegistry {
         if (channelType == null) {
             return Optional.empty();
         }
-        return Optional.ofNullable(byId.get(channelType.trim().toLowerCase(Locale.ROOT)));
+        // Not trimmed: everything downstream compares the stored string, so " email"
+        // must be refused here rather than validated as email and then never polled.
+        return Optional.ofNullable(byId.get(channelType.toLowerCase(Locale.ROOT)));
     }
 
     /** The registered type ids, sorted. */
@@ -125,6 +127,12 @@ public class ChannelTypeRegistry {
                             + ". Credentials never go into platformConfig: they live in the EDDI connection named by "
                             + "platformConfig.connection.");
                 }
+            }
+            String channelId = pc.get(ChannelTypeDescriptor.KEY_CHANNEL_ID);
+            if (channelId != null && channelId.startsWith("@")) {
+                // '@' starts the router's application keys; a channel id that looked
+                // like one could take over an application's DM route.
+                errors.add("platformConfig.channelId must not start with '@'.");
             }
             String connection = pc.get(ChannelTypeDescriptor.KEY_CONNECTION);
             if (connection == null || connection.isBlank()) {

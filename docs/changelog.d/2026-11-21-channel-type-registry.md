@@ -38,10 +38,22 @@ Phase 0.4–0.5 of the same plan.
 
 - **Additive for Slack.** `SlackEventHandler.EventOrigin` and every Slack call site are unchanged. Slack's tests pin those signatures, and the shared comparison now lives in the router. Teams and Discord construct `InboundOrigin.application(...)` from their verified JWT `aud` and endpoint path.
 - **The per-type list is derived, not maintained.** It is rebuilt whenever `integrationMap` is swapped, so it cannot disagree with the index, including in tests that set the map by reflection.
+- **An application's DMs belong only to its channel-less integration.** `getIntegrationForApplication` answers only from the `@app:` key, and re-checks that the integration still declares that id. It never falls back to a channel-bound integration that declares the same application. Several may do that (one per Discord channel), and "the lowest-keyed one" could hand one tenant's DM to another tenant's agent and connection. `resolveDefaultForOrigin` returns `null` for an origin it cannot map to an owner.
+- **`@app:` keys cannot be reached as channels.** A connection-backed type refuses a `channelId` that starts with `@`. Every channel lookup in the router (`resolveTarget`, `getIntegration`, `integrationFor`, `observeCandidates`, `isChannelOwned`, …) refuses a key in the application namespace, so a channel id read from a request body cannot land on an application's integration.
+- **Fixes from the pre-push review.** The uniqueness check computes routing keys without the resource id, so a webhook update no longer runs a scan that could never match and could fail it with a 503. `ChannelTypeRegistry.find` no longer trims, so `" email"` is refused as unknown instead of being validated as email and then never polled.
+- **Open for Teams T1:** who may declare an application id. Two tenants' channel-bound integrations can both name app A today, and `requireServiceTarget` does not check who owns the named connection (the same as email). Decide this before an adapter trusts an application id across tenants.
 
 ### Tests
 
-`ChannelTargetRouterChannelTypeTest` covers channel-less routing by DM fallback, name and application; fail-closed unknown application; multi-key indexing that is not ambiguous; application-scoped thread credentials; Slack secret equivalence; and redaction. Three mutants were checked: application matching ignored, an unknown application falling back to any integration, and scans seeing one entry per key. Each fails a test. The 965 channel, Slack, webhook, email, connection and alert tests all pass.
+`ChannelTargetRouterChannelTypeTest` covers:
+- channel-less routing by DM fallback, by name and by application;
+- fail-closed handling of an unknown application, an unverified origin, and a channel-bound application;
+- channel lookups that ignore application keys;
+- multi-key indexing that is not ambiguous;
+- application-scoped thread credentials;
+- Slack secret equivalence and redaction.
+
+Eight mutants were checked, and each one fails a test. The 970 channel, Slack, webhook, email, connection and alert tests all pass, as do the repo-wide guards (431 tests).
 
 ### What's next
 

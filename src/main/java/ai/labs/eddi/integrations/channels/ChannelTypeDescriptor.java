@@ -54,8 +54,9 @@ public interface ChannelTypeDescriptor {
 
     /**
      * Prefix of an application-level routing key. Channel ids of the supported
-     * platforms never start with {@code @}, so an application key cannot collide
-     * with a channel key of the same type.
+     * platforms never start with {@code @}; a connection-backed type refuses one
+     * that does at save time, and the router never answers a channel lookup with an
+     * application key, so the two cannot collide.
      */
     String APPLICATION_KEY_PREFIX = "@app:";
 

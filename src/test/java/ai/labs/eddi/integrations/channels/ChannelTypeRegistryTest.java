@@ -42,6 +42,7 @@ class ChannelTypeRegistryTest {
             assertTrue(registry.find("SLACK").isPresent());
             assertTrue(registry.find("teams").isEmpty());
             assertTrue(registry.find(null).isEmpty());
+            assertTrue(registry.find(" email").isEmpty(), "not trimmed: the stored string is what everything downstream compares");
         }
 
         @Test
@@ -128,6 +129,14 @@ class ChannelTypeRegistryTest {
             assertFalse(ChannelTypeRegistry.validatePlatformConfig(fake, pc).isEmpty());
             pc.put("connection", "${connection:fakechat-bot}");
             assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(fake, pc));
+        }
+
+        @Test
+        @DisplayName("a channelId that looks like an application key is refused")
+        void channelIdLikeApplicationKey() {
+            var pc = fakeConfig();
+            pc.put("channelId", "@app:someone-elses-app");
+            assertEquals(List.of("platformConfig.channelId must not start with '@'."), ChannelTypeRegistry.validatePlatformConfig(fake, pc));
         }
 
         @Test

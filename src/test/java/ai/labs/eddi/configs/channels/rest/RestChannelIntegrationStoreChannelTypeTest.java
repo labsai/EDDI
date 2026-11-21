@@ -34,6 +34,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -100,6 +101,33 @@ class RestChannelIntegrationStoreChannelTypeTest {
         cfg.setChannelType("teams");
         var ex = assertThrows(BadRequestException.class, () -> sut.validateConfiguration(cfg));
         assertTrue(ex.getMessage().contains("[email, fakechat, slack, webhook]"), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("a type with surrounding whitespace is unknown, not silently a different integration")
+    void paddedTypeRefused() {
+        var cfg = fakeConfig(pc());
+        cfg.setChannelType(" slack");
+        assertThrows(BadRequestException.class, () -> sut.validateConfiguration(cfg));
+    }
+
+    @Test
+    @DisplayName("updating a webhook does not scan every integration for routing keys it cannot share")
+    void webhookUpdateNoRoutingScan() throws Exception {
+        String id = "ccddee00112233445566aabb";
+        var webhook = fakeConfig(Map.of("signingSecret", "${vault:hook}"));
+        webhook.setChannelType("webhook");
+        when(channelStore.read(id, 1)).thenReturn(webhook);
+        when(channelStore.update(eq(id), eq(1), any())).thenReturn(2);
+        when(channelStore.getCurrentResourceId(id)).thenReturn(resourceId(id, 2));
+        when(descriptorStore.readDescriptor(id, 2)).thenReturn(new DocumentDescriptor());
+
+        sut.updateChannel(id, 1, webhook);
+
+        // One scan: the name check. A routing-key scan could never find a match for a
+        // type routed by its own resource id, and a store hiccup in it used to 503
+        // the update.
+        verify(descriptorStore, times(1)).readDescriptors(eq("ai.labs.channel"), eq(""), eq(0), eq(IDescriptorStore.NO_LIMIT), eq(false));
     }
 
     @Test
