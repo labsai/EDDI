@@ -454,12 +454,20 @@ describe("ChannelDetailPage — email integration", () => {
   });
 
   it("blocks Save while the version a sender change wrote has not loaded, so the old lists are not written back", async () => {
+    let failedVersionReads = 0;
+    let updates = 0;
     server.use(
-      http.get("*/channelstore/channels/:id", ({ request }) =>
-        new URL(request.url).searchParams.get("version") === "2"
-          ? HttpResponse.json({ error: "down" }, { status: 500 })
-          : HttpResponse.json(emailChannel),
-      ),
+      http.get("*/channelstore/channels/:id", ({ request }) => {
+        if (new URL(request.url).searchParams.get("version") === "2") {
+          failedVersionReads += 1;
+          return HttpResponse.json({ error: "down" }, { status: 500 });
+        }
+        return HttpResponse.json(emailChannel);
+      }),
+      http.put("*/channelstore/channels/:id", () => {
+        updates += 1;
+        return new HttpResponse(null, { status: 200, headers: { Location: "/channelstore/channels/mail1?version=3" } });
+      }),
     );
     renderChannelDetail("mail1", 1);
     const user = userEvent.setup();
@@ -469,7 +477,40 @@ describe("ChannelDetailPage — email integration", () => {
     await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
     await user.click(screen.getByTestId("email-senders-apply"));
 
+    await waitFor(() => expect(failedVersionReads).toBeGreaterThan(0));
     await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeDisabled());
+    await user.click(screen.getByTestId("save-channel-btn"));
+    expect(updates).toBe(0);
+  });
+
+  it("adopts the stored version after a sender change, so the next save carries the stored host and the new lists", async () => {
+    let saved: { platformConfig?: Record<string, string> } | undefined;
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) =>
+        HttpResponse.json(
+          new URL(request.url).searchParams.get("version") === "2"
+            ? { ...emailChannel, platformConfig: { ...emailChannel.platformConfig, host: "stored-host.example.com", senderAllowlist: "alice@partner.com" } }
+            : emailChannel,
+        ),
+      ),
+      http.put("*/channelstore/channels/:id", async ({ request }) => {
+        saved = (await request.json()) as typeof saved;
+        return new HttpResponse(null, { status: 200, headers: { Location: "/channelstore/channels/mail1?version=3" } });
+      }),
+    );
+    renderChannelDetail("mail1", 1);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-allow-input")).toBeInTheDocument());
+
+    await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
+    await user.click(screen.getByTestId("email-senders-apply"));
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("email-host")).toHaveValue("stored-host.example.com"));
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(saved).toBeDefined());
+    expect(saved?.platformConfig?.host).toBe("stored-host.example.com");
+    expect(saved?.platformConfig?.senderAllowlist).toBe("alice@partner.com");
   });
 
   it("shows the email form and setup notes instead of a webhook URL", async () => {
