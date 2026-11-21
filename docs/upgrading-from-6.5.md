@@ -294,3 +294,22 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 ### Java4Shell (CVE-2026-114938): the images start the JVM with `-XX:-UseBASE64Intrinsics`
 
 From 6.7.1, the EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak service in the compose `auth` overlay, Helm (chart 2.14.1) and the kustomize `auth` overlay sets it on `JAVA_OPTS_APPEND`. This is an interim mitigation for a pre-authentication code-execution flaw in the JDK's Base64 decoder, until the base images ship a fixed JDK. If you set `JDK_JAVA_OPTIONS` yourself, add the flag to your value. If you run 6.7.0 or earlier and cannot upgrade yet, add it by hand. [Security → Java4Shell](security.md#jvm-advisory-java4shell-cve-2026-114938) has the details and how to check that the running JVM has it.
+
+### Behaviour changes in 6.7.1
+
+Besides the Java4Shell flag above, 6.7.1 changes four things a working 6.7.0 deployment can notice:
+
+- **Tools generated from an OpenAPI spec.** A query parameter the spec does not mark as required is now an
+  optional tool argument, and an empty value is left off the request instead of being sent as `?name=`. An operation
+  whose tool name would repeat another one's is renamed to a unique name, and its response is stored under
+  `<new name>_response`. After re-syncing such an API agent, update any `{memory.current.httpCalls.<old name>_response}`
+  reference and any tool whitelist that names the old tool. EDDI's own spec names two operations it left unnamed:
+  `listGroupLessons` and `listGroupOutcomes`.
+- **`chat_managed` (MCP) picks a random deployment** of the intent's trigger for a new conversation, as the REST
+  managed-conversation endpoint already did, instead of always the first. A trigger with one deployment is unaffected.
+- **Unknown words in the expression string.** Input the parser does not recognise is stored as `unknown(...)` with
+  the characters `(`, `)` and `,` removed, so a message with stray parentheses no longer fails the turn. A behavior
+  rule that matched those characters inside `unknown(...)` no longer sees them.
+- **Platform Operator.** Activation works again on a fresh install or upgrade (the `setup-api` prompt cap is
+  250,000 characters, up from 100,000), and the operator revision becomes 61, so the Manager reports that existing
+  operators should be upgraded.

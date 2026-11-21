@@ -8,9 +8,9 @@ CVE-2026-114938 ("Java4Shell", Red Hat [RHSB-2026-018](https://access.redhat.com
 
 - `src/main/docker/Dockerfile`: `-XX:-UseBASE64Intrinsics` added to `JDK_JAVA_OPTIONS`, which survives an operator's `JAVA_OPTS` / `JAVA_OPTS_APPEND`.
 - `src/main/docker/Dockerfile.demo`: the same flag on the bare `java` ENTRYPOINT (Temurin 25.0.5).
-- Keycloak 26.8.0 (bundles OpenJDK 21.0.12.1): `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` in `docker-compose.auth.yml`, `helm/eddi/templates/keycloak.yaml` (chart 2.14.2 → 2.14.3, `EXPECTED_CHART_VERSION` with it) and `k8s/overlays/auth/keycloak-statefulset.yaml`.
+- Keycloak 26.8.0 (bundles OpenJDK 21.0.12.1): `JAVA_OPTS_APPEND=-XX:-UseBASE64Intrinsics` in `docker-compose.auth.yml`, `helm/eddi/templates/keycloak.yaml` (on `main`: chart 2.14.2 → 2.14.3, `EXPECTED_CHART_VERSION` with it; on the 6.7 line it ships in chart 2.14.1, see the 6.7.1 release entry) and `k8s/overlays/auth/keycloak-statefulset.yaml`.
 - New `Java4ShellMitigationTest` pins the flag in all five places.
-- `docs/security.md`: new "JVM Advisory: Java4Shell" section, covering who is affected, what ships, the manual mitigation for older images, and how to check the running JVM. `docs/upgrading-from-6.5.md`: a note under "Changes after 6.7.0".
+- `docs/security.md`: new "JVM Advisory: Java4Shell" section, covering who is affected, what ships, the manual mitigation for older images, and how to check the running JVM. `docs/upgrading-from-6.5.md`: a note under "Changes after 6.7.0" (on the 6.7 line, under "Changes in 6.7").
 
 ### Design decisions
 
