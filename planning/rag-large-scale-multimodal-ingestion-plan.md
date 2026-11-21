@@ -581,10 +581,17 @@ returns `{ folders: [{id, name}], nextPageToken }`.
   `tombstoneAfterMissedRuns` runs.
 - **Effective at once, not at the end of a listing.** A throttled or otherwise incomplete
   listing never reaches that reconciliation, so removal alone would leave the vectors of a
-  removed folder searchable. Retrieval therefore also filters by the current `scope_signature`:
-  every entry carries the signature it was ingested under, and a search drops entries whose
-  signature is not the source's current one or whose folder is outside the current roots.
+  removed folder searchable. Retrieval therefore also filters on **folder membership**, not on
+  the signature: every entry carries the ancestor folder ids of its document (`folder_ids`,
+  from the `parent_id` chain the listing records). A search keeps an entry only if one of its
+  ancestors is in the source's current roots and none is in `excludeFolders`. A document that
+  stays in scope keeps matching, because its ancestors have not changed, so unchanged
+  documents need no re-stamping when the scope changes (the work table only updates
+  `last_run_id` for them). A moved document is re-evaluated when its `parent_id` changes.
   Reconciliation then physically deletes what retrieval already hides.
+  Test: remove one folder and keep another, then search during an incomplete listing and again
+  after a completed one; the removed folder's entries are hidden in both, the kept folder's
+  entries are found in both. Stores without list-metadata filters fall back to a scan (§15).
 
 **Phase L (with the folder index):**
 
