@@ -19,6 +19,9 @@ import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDescriptorStore;
+import ai.labs.eddi.integrations.channels.ChannelConnectionCredentials;
+import ai.labs.eddi.integrations.channels.ChannelTypeDescriptor;
+import ai.labs.eddi.integrations.channels.ChannelTypeRegistry;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -58,20 +61,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private static final Logger LOG = Logger.getLogger(RestChannelIntegrationStore.class);
 
     /**
-     * Currently registered channel type adapters. Future: make this discoverable
-     * via CDI so forks can register custom adapters.
-     * <p>
-     * {@code webhook} is the signed inbound webhook channel ({@code POST
-     * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
-     * {@link WebhookChannelSettings#validate}. {@code email} is the mailbox channel
-     * (a polled mailbox starts turns; in conversation mode the agent also replies
-     * over SMTP), validated by {@link EmailChannelSettings#validate} and, against
-     * the deployment, by {@link EmailChannelSupport}.
-     */
-    private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE,
-            EmailChannelSettings.CHANNEL_TYPE);
-
-    /**
      * Response header carrying save-time warnings: comma-separated stable codes
      * (see {@link EmailChannelSettings#WARNING_OPEN_TRIGGER}), absent when there
      * are none. A warning never refuses a save.
@@ -90,6 +79,21 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final Instance<EmailChannelSupport> emailSupport;
     private final SecretResolver secretResolver;
     private final ChannelTargetRouter channelTargetRouter;
+
+    /**
+     * The registered channel types ({@link ChannelTypeDescriptor} beans), which
+     * replace the hard-coded set of type names this class used to validate against.
+     * {@code webhook} is validated by {@link WebhookChannelSettings#validate};
+     * {@code email} by {@link EmailChannelSettings#validate} and, against the
+     * deployment, by {@link EmailChannelSupport}.
+     */
+    private final ChannelTypeRegistry channelTypes;
+
+    /**
+     * Checks the connection a connection-backed type names; {@code null} (the
+     * shorter constructors, used by tests) skips only that deployment check.
+     */
+    private final ChannelConnectionCredentials channelCredentials;
 
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
@@ -132,13 +136,27 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      *            consulted for legacy connectors serving a channel; {@code null}
      *            (the shorter constructors, used by tests) skips only that check
      */
-    @Inject
     public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
             IDocumentDescriptorStore documentDescriptorStore,
             ResourceAccessGuard resourceAccessGuard,
             Instance<EmailChannelSupport> emailSupport,
             SecretResolver secretResolver,
             ChannelTargetRouter channelTargetRouter) {
+        this(channelStore, documentDescriptorStore, resourceAccessGuard, emailSupport, secretResolver, channelTargetRouter,
+                ChannelTypeRegistry.builtIns(), null);
+    }
+
+    @Inject
+    public RestChannelIntegrationStore(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore documentDescriptorStore,
+            ResourceAccessGuard resourceAccessGuard,
+            Instance<EmailChannelSupport> emailSupport,
+            SecretResolver secretResolver,
+            ChannelTargetRouter channelTargetRouter,
+            ChannelTypeRegistry channelTypes,
+            ChannelConnectionCredentials channelCredentials) {
+        this.channelTypes = channelTypes != null ? channelTypes : ChannelTypeRegistry.builtIns();
+        this.channelCredentials = channelCredentials;
         this.secretResolver = secretResolver;
         this.channelTargetRouter = channelTargetRouter;
         restVersionInfo = new RestVersionInfo<>(resourceURI, channelStore, documentDescriptorStore, resourceAccessGuard);
@@ -281,7 +299,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
-            validateUniqueChannelId(channelConfiguration, id);
+            validateUniqueRoutingKeys(channelConfiguration, id);
             refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
             validateUniqueName(channelConfiguration, id);
             if (isEmail(channelConfiguration)) {
@@ -298,7 +316,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
-            validateUniqueChannelId(channelConfiguration, null);
+            validateUniqueRoutingKeys(channelConfiguration, null);
             refuseLegacyConnectorTakeover(channelConfiguration, null);
             validateUniqueName(channelConfiguration, null);
             if (isEmail(channelConfiguration)) {
@@ -332,6 +350,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         // agent the caller may not use.
         requireUseOnTargets(config);
         synchronized (uniquenessLock) {
+            // channelId was cleared above, but a type routed by another key (an
+            // application id) would otherwise duplicate straight into a collision.
+            validateUniqueRoutingKeys(config, null);
             validateUniqueName(config, null);
             if (isEmail(config)) {
                 // Refused for an email integration: the copy would poll the same mailbox.
@@ -526,11 +547,10 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (channelType == null || channelType.isBlank()) {
             throw new BadRequestException("Channel type is required.");
         }
-        if (!REGISTERED_CHANNEL_TYPES.contains(channelType.toLowerCase(Locale.ROOT))) {
-            throw new BadRequestException(
-                    "Unknown channel type: '" + channelType + "'. Registered types: "
-                            + REGISTERED_CHANNEL_TYPES);
-        }
+        ChannelTypeDescriptor descriptor = channelTypes.find(channelType)
+                .orElseThrow(() -> new BadRequestException(
+                        "Unknown channel type: '" + channelType + "'. Registered types: "
+                                + channelTypes.ids()));
 
         // At least one target
         List<ChannelTarget> targets = config.getTargets();
@@ -538,19 +558,19 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             throw new BadRequestException("At least one target is required.");
         }
 
-        boolean webhook = WebhookChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(channelType);
-        if (webhook) {
-            List<String> webhookErrors = WebhookChannelSettings.validate(config.getPlatformConfig());
-            if (!webhookErrors.isEmpty()) {
-                throw new BadRequestException(String.join(" ", webhookErrors));
-            }
+        // The type's own rules (webhook, email) and, for a connection-backed type,
+        // the allow-list of non-secret keys and the named connection.
+        List<String> platformErrors = ChannelTypeRegistry.validatePlatformConfig(descriptor, config.getPlatformConfig());
+        if (!platformErrors.isEmpty()) {
+            throw new BadRequestException(String.join(" ", platformErrors));
+        }
+        if (WebhookChannelSettings.CHANNEL_TYPE.equals(descriptor.id())) {
             requireUsableWebhookSecret(config.getPlatformConfig());
         }
-        boolean email = EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(channelType);
-        if (email) {
-            List<String> emailErrors = EmailChannelSettings.validate(config.getPlatformConfig());
-            if (!emailErrors.isEmpty()) {
-                throw new BadRequestException(String.join(" ", emailErrors));
+        if (channelCredentials != null) {
+            List<String> connectionErrors = channelCredentials.validateForSave(descriptor, config.getPlatformConfig());
+            if (!connectionErrors.isEmpty()) {
+                throw new BadRequestException(String.join(" ", connectionErrors));
             }
         }
 
@@ -584,17 +604,13 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }
-            if (email && target.isObserveMode()) {
-                // Every mail is addressed to the mailbox; there is no traffic to observe.
+            if (!descriptor.supportsObserveMode() && target.isObserveMode()) {
+                // An observer watches chat traffic it was not addressed in. A mailbox or
+                // a webhook has no such traffic — every mail and event is addressed to
+                // the integration — so the flag could only ever be a mistake.
                 throw new BadRequestException(
-                        "Target '" + target.getName() + "': observeMode is not supported for email integrations.");
-            }
-            if (webhook && target.isObserveMode()) {
-                // An observer watches chat traffic it was not addressed in. A webhook
-                // has no such traffic — every event is addressed to the integration —
-                // so the flag could only ever be a mistake.
-                throw new BadRequestException(
-                        "Target '" + target.getName() + "': observeMode is not supported for webhook integrations.");
+                        "Target '" + target.getName() + "': observeMode is not supported for " + descriptor.id()
+                                + " integrations.");
             }
             if (target.isObserveMode()) {
                 // An observer answers channel traffic it was never addressed in, and
@@ -682,41 +698,47 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
     }
 
-    // ─── Channel ID uniqueness ─────────────────────────────────────────────────
+    // ─── Routing key uniqueness ────────────────────────────────────────────────
 
     /**
-     * Reject create/update if another non-deleted config already claims the same
-     * {@code channelType:channelId}. Prevents silent overwrites in the router's
-     * integrationMap. Fails closed like {@link #validateUniqueName}: a scan that
-     * cannot read the integration holding the channelId refuses the save (503)
-     * rather than store a second route for the same channel.
+     * Reject create/update if another non-deleted integration of the same type
+     * already claims one of this integration's routing keys — the keys its
+     * {@link ChannelTypeDescriptor} indexes it under in the router: the
+     * {@code channelId} for Slack, an application id for a channel-less type.
+     * Prevents silent overwrites in the router's index. Fails closed like
+     * {@link #validateUniqueName}: a scan that cannot read the integration holding
+     * the key refuses the save (503) rather than store a second route for it.
      *
      * @param excludeId
      *            the resource ID of the config being updated (null on create)
      */
-    private void validateUniqueChannelId(ChannelIntegrationConfiguration config, String excludeId) {
-        if (config.getPlatformConfig() == null)
-            return;
-        String channelId = config.getPlatformConfig().get("channelId");
-        if (channelId == null || channelId.isBlank())
-            return;
+    private void validateUniqueRoutingKeys(ChannelIntegrationConfiguration config, String excludeId) {
         String channelType = config.getChannelType();
         if (channelType == null)
             return;
+        List<String> keys = channelTypes.routingKeys(channelType, excludeId, config.getPlatformConfig());
+        if (keys.isEmpty())
+            return;
 
         forEachOtherIntegration(excludeId, "channelId", existing -> {
-            if (existing.getPlatformConfig() != null
-                    && channelType.equalsIgnoreCase(existing.getChannelType())
-                    && channelId.equals(existing.getPlatformConfig().get("channelId"))) {
-                // The sweep is deliberately unscoped: a channelId collides with every
-                // integration in the deployment, not only the caller's own, so scoping it
-                // would let two workspaces both bind the same Slack channel and route each
-                // other's messages. What the message must NOT do is name the conflicting
-                // integration — that would turn a uniqueness check into an enumeration
-                // oracle for other people's channel integrations.
-                throw new BadRequestException(
-                        "Another channel integration already uses channelId '" + channelId
-                                + "' for type '" + channelType + "'.");
+            if (existing.getPlatformConfig() == null || !channelType.equalsIgnoreCase(existing.getChannelType())) {
+                return;
+            }
+            // The other integration's resource id is not at hand here; a type routed
+            // by its resource id (webhook) cannot collide anyway, so null is fine.
+            List<String> theirs = channelTypes.routingKeys(existing.getChannelType(), null, existing.getPlatformConfig());
+            for (String key : keys) {
+                if (theirs.contains(key)) {
+                    // The sweep is deliberately unscoped: a channelId collides with every
+                    // integration in the deployment, not only the caller's own, so scoping it
+                    // would let two workspaces both bind the same Slack channel and route each
+                    // other's messages. What the message must NOT do is name the conflicting
+                    // integration — that would turn a uniqueness check into an enumeration
+                    // oracle for other people's channel integrations.
+                    throw new BadRequestException(
+                            "Another channel integration already uses " + ChannelTypeDescriptor.describeRoutingKey(key)
+                                    + " for type '" + channelType + "'.");
+                }
             }
         });
     }

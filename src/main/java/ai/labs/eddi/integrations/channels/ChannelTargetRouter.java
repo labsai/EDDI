@@ -87,6 +87,7 @@ public class ChannelTargetRouter {
     private final IAgentStore agentStore;
     private final SecretResolver secretResolver;
     private final VaultHostAllowlist vaultHostAllowlist;
+    private final ChannelTypeRegistry channelTypes;
 
     // ─── Cached state (atomic reference swap) ──────────────────────────────────
 
@@ -161,7 +162,9 @@ public class ChannelTargetRouter {
             IAgentStore agentStore,
             SecretResolver secretResolver,
             VaultHostAllowlist vaultHostAllowlist,
-            ICacheFactory cacheFactory) {
+            ICacheFactory cacheFactory,
+            ChannelTypeRegistry channelTypes) {
+        this.channelTypes = channelTypes != null ? channelTypes : ChannelTypeRegistry.builtIns();
         this.channelStore = channelStore;
         this.descriptorStore = descriptorStore;
         this.agentAdmin = agentAdmin;
@@ -169,6 +172,18 @@ public class ChannelTargetRouter {
         this.secretResolver = secretResolver;
         this.vaultHostAllowlist = vaultHostAllowlist;
         this.threadTargetLock = cacheFactory.getCache("channel-thread-locks", Duration.ofHours(24));
+    }
+
+    /** With the built-in channel types only — for tests. */
+    public ChannelTargetRouter(IChannelIntegrationStore channelStore,
+            IDocumentDescriptorStore descriptorStore,
+            IDeploymentStatusReader agentAdmin,
+            IAgentStore agentStore,
+            SecretResolver secretResolver,
+            VaultHostAllowlist vaultHostAllowlist,
+            ICacheFactory cacheFactory) {
+        this(channelStore, descriptorStore, agentAdmin, agentStore, secretResolver, vaultHostAllowlist, cacheFactory,
+                ChannelTypeRegistry.builtIns());
     }
 
     /** Without the destination check — for tests that do not exercise it. */
@@ -984,11 +999,21 @@ public class ChannelTargetRouter {
                         if (channelId != null && !channelId.isBlank()) {
                             var copy = deepCopyConfig(config);
                             String integrationKey = resId.getId() + ":" + resId.getVersion();
-                            resolvePlatformSecrets(integrationKey, copy);
-                            if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
-                                vetWebhookSigningSecret(integrationKey, config, copy);
+                            var typeDescriptor = channelTypes.find(config.getChannelType());
+                            if (typeDescriptor.isPresent() && typeDescriptor.get().connectionBacked()) {
+                                // Holds no secret: its credential is resolved per send from
+                                // the connection it names. Nothing is resolved from the vault,
+                                // and keys outside the type's allow-list are dropped — save
+                                // validation refuses them, but a ZIP import or a direct store
+                                // write never ran it.
+                                keepAllowedKeysOnly(integrationKey, typeDescriptor.get(), copy);
+                            } else {
+                                resolvePlatformSecrets(integrationKey, copy);
+                                if (CHANNEL_TYPE_WEBHOOK.equalsIgnoreCase(config.getChannelType())) {
+                                    vetWebhookSigningSecret(integrationKey, config, copy);
+                                }
+                                dropUnresolvedCredentials(integrationKey, copy);
                             }
-                            dropUnresolvedCredentials(integrationKey, copy);
                             String key = copy.getChannelType().toLowerCase(Locale.ROOT) + ":" + channelId;
                             newIntegrationMap.put(key, copy);
                             coveredChannelKeys.add(key); // type:channelId — scoped to prevent cross-type suppression
@@ -1145,6 +1170,25 @@ public class ChannelTargetRouter {
             }
         }
         config.setPlatformConfig(resolved);
+    }
+
+    /**
+     * Removes every {@code platformConfig} key a connection-backed type does not
+     * declare, warning once per integration version and key. Values are never
+     * resolved, so whatever such a key held stays out of the router's cache.
+     */
+    private void keepAllowedKeysOnly(String integrationKey, ChannelTypeDescriptor descriptor,
+                                     ChannelIntegrationConfiguration config) {
+        Set<String> allowed = descriptor.allowedPlatformConfigKeys().orElse(Set.of());
+        Map<String, String> kept = config.getPlatformConfig();
+        for (String key : new TreeSet<>(kept.keySet())) {
+            if (!allowed.contains(key)) {
+                kept.remove(key);
+                warnUnusable(integrationKey, key, "is not a " + descriptor.id() + " setting (" + descriptor.id()
+                        + " credentials come from the named connection)", false);
+            }
+        }
+        config.setPlatformConfig(kept);
     }
 
     /**

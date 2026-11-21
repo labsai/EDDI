@@ -634,7 +634,7 @@ public record EmailChannelSettings(
      * The bare connection name of {@code name} or {@code ${connection:name}}; null
      * when invalid.
      */
-    static String connectionName(String value) {
+    public static String connectionName(String value) {
         if (value == null) {
             return null;
         }

@@ -26,6 +26,8 @@ import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.Set;
+import java.util.TreeSet;
 
 /**
  * Turns a {@code ${connection:name}} reference into a credential for
@@ -314,6 +316,39 @@ public class ConnectionResolver {
                             + "SERVICE-bound connection for a mailbox.");
         }
         requireTargetAllowed(connection, targetUrl);
+    }
+
+    /**
+     * Save-time check of a connection a channel integration names, without
+     * resolving any credential: the connection exists, is bound
+     * {@link Binding#SERVICE} (an inbound chat event runs as no verified EDDI user,
+     * so a per-user grant could never be used and a caller-supplied one has no
+     * caller), uses one of {@code acceptedAuthTypes} (empty: any), and, when
+     * {@code targetUrl} is given, its {@code baseUrlAllowlist} names that origin.
+     * The same allowlist rule is applied again on every send by {@link #resolve}.
+     *
+     * @param targetUrl
+     *            the channel type's API origin; {@code null} when it is not fixed
+     *            and is only known per send
+     * @throws ConnectionException
+     *             naming the rule that failed
+     */
+    public void requireServiceTarget(String reference, URI targetUrl, Set<AuthType> acceptedAuthTypes) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection = connectionRegistry.require(parsed);
+        if (connection.getBinding() != Binding.SERVICE) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is bound " + connection.getBinding()
+                            + ", but a channel integration acts as no verified user. Use a SERVICE-bound connection.");
+        }
+        if (acceptedAuthTypes != null && !acceptedAuthTypes.isEmpty() && !acceptedAuthTypes.contains(connection.getAuthType())) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is " + connection.getAuthType() + "; this channel type needs one of "
+                            + new TreeSet<>(acceptedAuthTypes.stream().map(Enum::name).toList()) + ".");
+        }
+        if (targetUrl != null) {
+            requireTargetAllowed(connection, targetUrl);
+        }
     }
 
     private static void requireBareTokenAvailable(ConnectionConfiguration connection) {
