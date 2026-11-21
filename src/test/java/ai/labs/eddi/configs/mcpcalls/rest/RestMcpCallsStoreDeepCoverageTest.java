@@ -61,7 +61,7 @@ class RestMcpCallsStoreDeepCoverageTest {
                     .build();
 
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec1, spec2), Map.of());
-            doReturn(result).when(mcpToolProviderManager).discoverTools(any());
+            doReturn(result).when(mcpToolProviderManager).probeTools(any());
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());
@@ -83,7 +83,7 @@ class RestMcpCallsStoreDeepCoverageTest {
         void successWithApiKey() throws Exception {
             var spec = ToolSpecification.builder().name("t").description("d").build();
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
-            doReturn(result).when(mcpToolProviderManager).discoverTools(any());
+            doReturn(result).when(mcpToolProviderManager).probeTools(any());
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "sse"), "my-api-key");
             assertEquals(200, response.getStatus());
@@ -94,7 +94,7 @@ class RestMcpCallsStoreDeepCoverageTest {
         void successNullTransport() throws Exception {
             var spec = ToolSpecification.builder().name("t").description("d").build();
             var result = new McpToolProviderManager.McpToolsResult(List.of(spec), Map.of());
-            doReturn(result).when(mcpToolProviderManager).discoverTools(any());
+            doReturn(result).when(mcpToolProviderManager).probeTools(any());
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", null), null);
             assertEquals(200, response.getStatus());
@@ -104,7 +104,7 @@ class RestMcpCallsStoreDeepCoverageTest {
         @DisplayName("with empty tools list — returns count 0")
         void emptyToolsList() throws Exception {
             var result = new McpToolProviderManager.McpToolsResult(List.of(), Map.of());
-            doReturn(result).when(mcpToolProviderManager).discoverTools(any());
+            doReturn(result).when(mcpToolProviderManager).probeTools(any());
 
             Response response = restStore.discoverTools(new McpToolDiscoveryRequest("http://remote:8080", "http"), null);
             assertEquals(200, response.getStatus());

@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.llm.impl;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
+import ai.labs.eddi.modules.llm.governance.ToolResultProvenance;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrail;
 import ai.labs.eddi.modules.llm.guardrails.ToolResultGuardrailConfig;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration;
@@ -34,6 +35,7 @@ import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -369,6 +371,28 @@ class ToolLoopRunnerGuardrailWiringTest {
         execute("short", Map.of("get_order", "mcp"), new ArrayList<>());
 
         assertEquals(2_000, budgets.get(0), "reserving room for an envelope that is never added would shrink the ceiling for nothing");
+    }
+
+    @Test
+    @DisplayName("no toolResponseLimits: the built-in default is used, with room left for the envelope")
+    void reservesAgainstTheBuiltInDefaultWhenUnset() {
+        task.setToolResponseLimits(null);
+
+        var budgets = new ArrayList<Integer>();
+        var truncator = mock(ToolResponseTruncator.class);
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(3);
+            budgets.add(applied == null ? null : applied.getDefaultMaxChars());
+            return invocation.getArgument(2);
+        });
+        runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
+                new ToolResultGuardrail(new SimpleMeterRegistry()));
+
+        execute("short", Map.of("get_order", "mcp"), new ArrayList<>());
+
+        int builtIn = new LlmConfiguration.ToolResponseLimits().getDefaultMaxChars();
+        assertEquals(builtIn - ToolResultProvenance.MAX_ENVELOPE_CHARS, budgets.get(0));
+        assertNull(task.getToolResponseLimits(), "the shared task configuration is not filled in");
     }
 
     @Test

@@ -193,6 +193,15 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
                             OpenAiUserIdentity.PREFIX);
                     return null;
                 }
+                if (isDefaultUser(name)) {
+                    // The anonymous default is the owner of every unauthenticated /v1
+                    // conversation (allow-anonymous=true). An OIDC account that happens
+                    // to carry exactly that name would own all of them — and their
+                    // memory. Refused, like the reserved prefix above.
+                    LOGGER.warn("Refusing an OIDC principal whose name equals the /v1 anonymous default user "
+                            + "(eddi.openai-compat.default-user)");
+                    return null;
+                }
                 if (name != null && !name.isBlank()) {
                     return name;
                 }
@@ -209,6 +218,15 @@ public class OpenAiAuthFilter implements ContainerRequestFilter {
         }
 
         return config.isAllowAnonymous() ? config.getDefaultUser() : null;
+    }
+
+    /**
+     * Whether {@code name} is the configured anonymous default user, ignoring case
+     * and padding.
+     */
+    private boolean isDefaultUser(String name) {
+        String defaultUser = config.getDefaultUser();
+        return name != null && defaultUser != null && !defaultUser.isBlank() && name.strip().equalsIgnoreCase(defaultUser.strip());
     }
 
     /**
