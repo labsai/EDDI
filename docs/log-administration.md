@@ -54,9 +54,25 @@ curl "http://localhost:7070/administration/logs?agentId=my-agent&level=WARN&limi
     "conversationId": "conv-abc123",
     "userId": "user-42",
     "instanceId": "eddi-host-a1b2"
+  },
+  {
+    "timestamp": 1711900801000,
+    "level": "ERROR",
+    "loggerName": "ai.labs.eddi.engine.internal.RestAgentSync",
+    "message": "API agent sync failed",
+    "instanceId": "eddi-host-a1b2",
+    "exception": "java.net.ConnectException: Connection refused\n\tat java.base/sun.nio.ch.Net.pollConnect(Native Method)\n\t... 31 more\nCaused by: java.io.IOException: socket closed\n\tat java.base/sun.nio.ch.SocketChannelImpl.finishConnect(SocketChannelImpl.java:672)\n\t... 12 more"
   }
 ]
 ```
+
+### The `exception` field
+
+When a record carries a throwable, the entry has an `exception` string; otherwise the field is **absent** (not `null`), as it is for every entry stored before the field existed. The same field appears in the ring buffer, the SSE `log` events and the persisted history (`/administration/logs/history`; the MongoDB `logs` documents and the PostgreSQL `database_logs.exception` column, which EDDI adds to an existing table on first use).
+
+The text is the throwable's type and message, its first stack frames, then `Caused by: <type>: <message>` and that throwable's first frames, down the cause chain. It is bounded: `eddi.logs.exception-max-frames` frames per throwable (default `10`, the rest summarised as `... N more`) and 8 KB in all, with a truncation marker. It is redacted exactly like the message — see [What the filter rewrites](#what-the-filter-rewrites-on-the-way-out): credential-shaped text in any message is replaced, and CR, LF and other record-boundary characters inside a message or frame are escaped. The only real newlines in the field are the ones separating its own lines. A raw exception message is never stored; if rendering itself fails the field reads `[exception text unavailable]`.
+
+Records logged before the log store has started are replayed with their exception text too, rendered with the default frame cap because the configured one is not yet known. The Manager's Logs page shows the field behind the same collapsed *Show stacktrace* toggle it uses for stack traces embedded in a message.
 
 ---
 
@@ -148,6 +164,7 @@ All logging configuration lives in `application.properties`:
 | `eddi.logs.db-enabled` | `true` | Enable/disable database persistence |
 | `eddi.logs.db-flush-interval-seconds` | `5` | How often the async writer flushes to the database |
 | `eddi.logs.db-persist-min-level` | `WARN` | Minimum level to persist to the database (`TRACE`, `DEBUG`, `INFO`, `WARN`, `ERROR`) |
+| `eddi.logs.exception-max-frames` | `10` | Stack frames kept per throwable in an entry's `exception` field (the exception type, message and `Caused by:` chain are always kept, within an 8 KB total). `0` keeps no frames |
 | `eddi.logs.db-retention-days` | `-1` | Delete persisted entries older than this many days; `-1` (or `0`) keeps them |
 | `eddi.logs.db-retention-interval` | `24h` | How often the retention sweep runs |
 | `eddi.logs.db-retention-initial-delay` | `4m` | Delay before the first sweep after startup |
@@ -166,6 +183,10 @@ erasure only pseudonymizes that id — the message text stays. If a retention
 policy applies to your deployment, this is the setting that enforces it for the
 logs. (Earlier releases described this retention as configurable without any
 code that applied it.)
+
+The `exception` field is personal data in the same way as the message: an exception message can name the person (`user not found: someone@example.com`), and erasure leaves it exactly as it leaves the message. Any erasure of log entries that rewrites or removes `message` must cover `exception` as well.
+
+Each persisted entry can now carry up to 8 KB of exception text on top of its message, and with `eddi.logs.db-retention-days=-1` (the default) WARN+ entries are kept forever. On a deployment that logs many errors, lower `eddi.logs.exception-max-frames` and set `eddi.logs.db-retention-days`.
 
 ---
 

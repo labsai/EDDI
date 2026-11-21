@@ -17,6 +17,7 @@ export function logEntryKey(e: LogEntry): string {
     e.loggerName ?? "",
     e.conversationId ?? "",
     e.message ?? "",
+    e.exception ?? "",
   ].join("\u0001");
 }
 
@@ -97,6 +98,7 @@ export function historyEntryKey(e: DatabaseLogEntry): string {
     e.loggerName ?? "",
     e.conversationId ?? "",
     e.message ?? "",
+    e.exception ?? "",
   ].join("\u0001");
 }
 
