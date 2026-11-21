@@ -42,6 +42,9 @@ public final class AddressNormalizer {
     private static final int MAX_DOMAIN_LENGTH = 253;
     private static final int MAX_DISPLAY_NAME_LENGTH = 256;
 
+    /** Characters of a raw display name read at all, before decoding. */
+    static final int MAX_RAW_DISPLAY_NAME_LENGTH = MAX_DISPLAY_NAME_LENGTH * 8;
+
     /**
      * RFC 5322 atext, plus any non-ASCII code point (RFC 6532 UTF8-non-ascii).
      * Controls are excluded separately.
@@ -171,7 +174,7 @@ public final class AddressNormalizer {
         }
         InternetAddress[] parsed;
         try {
-            parsed = InternetAddress.parseHeader(headerValue, false);
+            parsed = InternetAddress.parseHeader(boundEncodedWords(headerValue), false);
         } catch (AddressException e) {
             return new Parsed(addresses, 1);
         }
@@ -180,6 +183,35 @@ public final class AddressNormalizer {
             invalid += collect(entry, addresses);
         }
         return new Parsed(addresses, invalid);
+    }
+
+    /**
+     * Encoded words decoded per address header at most. {@code getPersonal()}
+     * decodes a display name with the mail library's own decoder, which looks the
+     * charset up for every word; an unknown name costs about a millisecond, and a
+     * header can carry tens of thousands of words.
+     */
+    static final int MAX_ENCODED_WORDS_PER_HEADER = 100;
+
+    /**
+     * The header with every encoded word past {@link #MAX_ENCODED_WORDS_PER_HEADER}
+     * broken (its {@code =?} becomes {@code = ?}), so no decoder ever treats it as
+     * one. Real headers stay far below the bound: a display name is capped at 256
+     * characters, a handful of words.
+     */
+    static String boundEncodedWords(String headerValue) {
+        int index = headerValue.indexOf("=?");
+        int seen = 0;
+        while (index >= 0 && ++seen <= MAX_ENCODED_WORDS_PER_HEADER) {
+            index = headerValue.indexOf("=?", index + 2);
+        }
+        if (index < 0) {
+            return headerValue;
+        }
+        StringBuilder out = new StringBuilder(headerValue.length() + 64);
+        out.append(headerValue, 0, index);
+        out.append(headerValue.substring(index).replace("=?", "= ?"));
+        return out.toString();
     }
 
     private static int collect(InternetAddress entry, List<MailAddress> into) {
@@ -216,7 +248,10 @@ public final class AddressNormalizer {
         if (personal == null) {
             return null;
         }
-        String decoded = personal.contains("=?") ? EncodedWords.decode(personal) : personal;
+        // Capped before decoding, so the decoder's work is bounded: decoding never
+        // lengthens text, so nothing past this could survive the cap below.
+        String bounded = personal.length() > MAX_RAW_DISPLAY_NAME_LENGTH ? personal.substring(0, MAX_RAW_DISPLAY_NAME_LENGTH) : personal;
+        String decoded = bounded.contains("=?") ? EncodedWords.decode(bounded) : bounded;
         StringBuilder cleaned = new StringBuilder(Math.min(decoded.length(), MAX_DISPLAY_NAME_LENGTH));
         for (int i = 0; i < decoded.length() && cleaned.length() < MAX_DISPLAY_NAME_LENGTH; i++) {
             char c = decoded.charAt(i);

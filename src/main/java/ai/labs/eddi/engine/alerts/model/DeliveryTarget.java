@@ -58,34 +58,54 @@ import java.util.Locale;
  *            never stored
  * @param targetId
  *            the target's identity within its rule, assigned by the server
+ * @param adminAdmitted
+ *            SLACK: set by the server when the rule is saved — {@code true}
+ *            when an administrator saved it (any channel may be named),
+ *            {@code false} when an editor did (the channel must be served by an
+ *            integration that targets the rule's agent, which is checked again
+ *            at every delivery). Never taken from a request body and never
+ *            shown on a read; {@code null} on a rule saved before it existed
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured, String targetId) {
+public record DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured, String targetId,
+        Boolean adminAdmitted) {
 
     /** What replaces the path and query of a webhook URL on every read. */
     public static final String MASK_SUFFIX = "/***";
 
     public DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret) {
-        this(type, channelId, url, signingSecret, null, null);
+        this(type, channelId, url, signingSecret, null, null, null);
     }
 
     public DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured) {
-        this(type, channelId, url, signingSecret, urlConfigured, null);
+        this(type, channelId, url, signingSecret, urlConfigured, null, null);
+    }
+
+    public DeliveryTarget(DeliveryType type, String channelId, String url, String signingSecret, Boolean urlConfigured, String targetId) {
+        this(type, channelId, url, signingSecret, urlConfigured, targetId, null);
     }
 
     /** The same target under another id ({@code null} to have one assigned). */
     public DeliveryTarget withTargetId(String newTargetId) {
-        return new DeliveryTarget(type, channelId, url, signingSecret, urlConfigured, newTargetId);
+        return new DeliveryTarget(type, channelId, url, signingSecret, urlConfigured, newTargetId, adminAdmitted);
     }
 
     /** The same target with another URL, id kept. */
     public DeliveryTarget withUrl(String newUrl) {
-        return new DeliveryTarget(type, channelId, newUrl, signingSecret, urlConfigured, targetId);
+        return new DeliveryTarget(type, channelId, newUrl, signingSecret, urlConfigured, targetId, adminAdmitted);
     }
 
-    /** Without the read-only {@code urlConfigured} flag, which is never stored. */
+    /**
+     * Without the read-only {@code urlConfigured} flag, which is never stored, and
+     * without {@code adminAdmitted}, which only the server sets.
+     */
     public DeliveryTarget forStorage() {
-        return new DeliveryTarget(type, channelId, url, signingSecret, null, targetId);
+        return new DeliveryTarget(type, channelId, url, signingSecret, null, targetId, null);
+    }
+
+    /** The same target, admitted by an administrator or not. */
+    public DeliveryTarget withAdminAdmitted(Boolean admitted) {
+        return new DeliveryTarget(type, channelId, url, signingSecret, urlConfigured, targetId, admitted);
     }
 
     /**

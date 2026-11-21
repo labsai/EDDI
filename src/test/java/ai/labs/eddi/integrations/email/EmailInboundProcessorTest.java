@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
+import ai.labs.eddi.engine.mail.SignedHeaders;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
@@ -346,6 +347,100 @@ class EmailInboundProcessorTest {
             assertNotEquals(users.getAllValues().get(0), users.getAllValues().get(1), "one-off ids");
             assertTrue(userConversations.mappings.isEmpty(), "an unauthenticated mail never maps a thread");
         }
+
+        /** An aligned pass whose signature covers these headers only. */
+        private MailAuthentication passCovering(String digest, String... covered) {
+            return new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of(covered), List.of(), List.of(), digest));
+        }
+
+        @Test
+        @DisplayName("a signed mail delivered again under a new, unsigned Message-ID is refused as a replay")
+        void replayUnderNewMessageId() throws Exception {
+            verdict = passCovering("d1", "from", "subject", "date");
+            EmailTestMail original = EmailTestMail.mail();
+            EmailTestMail replay = EmailTestMail.mail().messageId("<fresh-id@attacker.example>");
+
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), original.polled(1), Instant.now()));
+            assertEquals(Disposition.SETTLED, processor.process(context(Map.of()), replay.polled(2), Instant.now()));
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals(State.REFUSED, row(replay).state());
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+        }
+
+        @Test
+        @DisplayName("a signed mail without a usable Message-ID is deduplicated on its signature: an added header or Message-ID does not make a new mail")
+        void replayWithoutMessageId() throws Exception {
+            // The signature "covers" message-id only in the sense that there is none:
+            // both counts are zero. The ledger key is a hash of the raw bytes.
+            verdict = passCovering("d5", "from", "subject", "date", "message-id");
+            EmailTestMail original = EmailTestMail.mail().messageId("not an id");
+            EmailTestMail withHeader = EmailTestMail.mail().messageId("not an id").header("X-Added: replay");
+            EmailTestMail withId = EmailTestMail.mail().messageId("<added@attacker.example>");
+
+            processor.process(context(Map.of()), original.polled(1), Instant.now());
+            processor.process(context(Map.of()), withHeader.polled(2), Instant.now());
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertTrue(ledger.findByRecipient("alice@supplier.com").stream()
+                    .anyMatch(r -> "duplicate:replayed_signature".equals(r.lastError())), "the copy is refused as a replay");
+
+            // The first delivery recorded its signature even though its id was not a signed
+            // one.
+            assertTrue(ledger.findByMessage(INTEGRATION, Direction.IN, EmailInboundProcessor.signatureKey("d5")).isPresent());
+            // Adding a Message-ID the signature does not list leaves it uncovered.
+            verdict = passCovering("d5", "from", "subject", "date");
+            processor.process(context(Map.of()), withId.polled(3), Instant.now());
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("a replay that drops one of two aligned signatures is still refused")
+        void replayDroppingASignature() throws Exception {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("from", "subject", "date"), List.of(), List.of(), List.of("k2", "k1")));
+            processor.process(context(Map.of()), EmailTestMail.mail().polled(1), Instant.now());
+
+            verdict = passCovering("k2", "from", "subject", "date");
+            EmailTestMail replay = EmailTestMail.mail().messageId("<other@attacker.example>");
+            processor.process(context(Map.of()), replay.polled(2), Instant.now());
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+            assertEquals("duplicate:replayed_signature", row(replay).lastError());
+            assertTrue(ledger.findByMessage(INTEGRATION, Direction.IN, EmailInboundProcessor.signatureKey("k1")).isPresent());
+        }
+
+        @Test
+        @DisplayName("the same mail processed again after a deferral finds its own signature marker and runs")
+        void ownMarkerAfterDeferral() throws Exception {
+            verdict = passCovering("d2", "from", "subject", "date");
+            var ctx = context(Map.of("dailyCostBudgetUsd", "1"));
+            Instant now = Instant.parse("2026-11-11T10:00:00Z");
+            stateStore.addSpend(INTEGRATION, "2026-11-11", 5.0, now);
+            EmailTestMail mail = EmailTestMail.mail();
+
+            assertEquals(Disposition.STOP, processor.process(ctx, mail.polled(1), now));
+            assertEquals(Disposition.SETTLED, processor.process(ctx, mail.polled(1), now.plus(Duration.ofDays(1))));
+
+            verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
+        }
+
+        @Test
+        @DisplayName("headers the signature does not cover neither route nor reach the agent")
+        void uncoveredHeadersIgnored() throws Exception {
+            verdict = passCovering("d3", "from", "date", "message-id");
+            String urgent = "0c0c0c0c0c0c0c0c0c0c0c0c";
+            var ctx = context(Map.of(), target("intake", AGENT), target("urgent", urgent, "urgent"));
+
+            processor.process(ctx, EmailTestMail.mail().subject("urgent").to("invoices+urgent@contoso.com").polled(1), Instant.now());
+
+            verify(conversations).startConversation(any(), eq(AGENT), anyString(), any());
+            @SuppressWarnings("unchecked")
+            Map<String, Object> mailMap = (Map<String, Object>) inputs.get(0).getContext().get("mail").getValue();
+            assertEquals("", mailMap.get("subject"));
+            assertEquals(List.of(), mailMap.get("to"));
+        }
     }
 
     @Nested
@@ -585,6 +680,23 @@ class EmailInboundProcessorTest {
             processor.process(ctx, EmailTestMail.mail().header("In-Reply-To: " + root).header("References: " + root).polled(3), Instant.now());
 
             assertEquals(List.of("conv-1", "conv-2", "conv-1"), sayConversations);
+        }
+
+        @Test
+        @DisplayName("a Gmail-shaped reply (In-Reply-To/References not signed) still continues its sender's conversation")
+        void gmailReplyContinues() throws Exception {
+            // Gmail's h=: no in-reply-to, no references, no content-type.
+            verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),
+                    new SignedHeaders(true, Set.of("mime-version", "date", "message-id", "subject", "from", "to", "cc", "reply-to"), List.of(),
+                            List.of(), "g1"));
+            var ctx = context(Map.of("correlateThreads", "true"));
+            String root = "<root-gmail@supplier.com>";
+            processor.process(ctx, EmailTestMail.mail().messageId(root).polled(1), Instant.now());
+            handlers.get(0).onComplete(snapshot(ConversationState.READY, 0));
+
+            processor.process(ctx, EmailTestMail.mail().header("In-Reply-To: " + root).header("References: " + root).polled(2), Instant.now());
+
+            assertEquals(List.of("conv-1", "conv-1"), sayConversations);
         }
 
         @Test

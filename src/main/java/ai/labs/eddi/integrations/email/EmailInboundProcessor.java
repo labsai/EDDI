@@ -172,6 +172,14 @@ public class EmailInboundProcessor {
     private final ITemplatingEngine templatingEngine;
     private final Instance<IAttachmentStore> attachmentStore;
     private final EmailOwnerNotifier ownerNotifier;
+    /**
+     * Characters of a mail's HTML handed to the HTML parser
+     * ({@link MailLimits#maxHtmlCharacters()}). Field-injected so the constructor
+     * stays the one the tests use.
+     */
+    @ConfigProperty(name = "eddi.email.max-html-characters", defaultValue = "2097152")
+    int maxHtmlCharacters = MailLimits.DEFAULT_MAX_HTML_CHARACTERS;
+
     /** Conversation mode's replies, and the delivery reports for them. */
     private final EmailReplySender replies;
     /** Records refused mail by reason category (email plan §17). */
@@ -251,7 +259,8 @@ public class EmailInboundProcessor {
         // 3. Parse. A refusal is recorded under the parser's own synthetic key.
         InboundMail parsed;
         try {
-            parsed = parser.parse(raw, MailLimits.defaults().withMaxRawBytes(settings.maxMessageBytes()), settings.stripQuotedHistory());
+            parsed = parser.parse(raw, MailLimits.defaults().withMaxRawBytes(settings.maxMessageBytes()).withMaxHtmlCharacters(maxHtmlCharacters),
+                    settings.stripQuotedHistory());
         } catch (MailParseException e) {
             boolean tooLarge = e.getReason() == MailParseException.Reason.TOO_LARGE || e.getReason() == MailParseException.Reason.HEADERS_TOO_LARGE;
             // Keyed by the envelope's Message-ID when there is one, so a re-poll settles
@@ -298,17 +307,24 @@ public class EmailInboundProcessor {
         if (authentication.temporary() && !authentication.isAuthenticated() && row.createdAt().plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
             return defer(ctx, row, now.plus(RETRY_SHORT), "auth_temporary", EmailMetrics.DEFERRED, now);
         }
-        parsed = parsed.withAuthentication(authentication);
+        InboundMail asReceived = parsed.withAuthentication(authentication);
         boolean authenticated = authentication.isAuthenticated();
 
         // 6. Delivery reports for replies this integration sent, then loops, lists,
         // authentication requirement. A report is still refused as a loop: it is
-        // feedback for the ledger, never input for a turn.
-        boolean bounce = parsed.deliveryReport() != null && applyDeliveryReport(id, parsed, now);
-        Optional<String> loop = EmailLoopGuard.check(parsed, id, settings.address(), ctx.otherIntegrationAddresses(), ledger);
+        // feedback for the ledger, never input for a turn. Both read the mail as
+        // received: a header that only makes it refused is safe to believe unsigned.
+        boolean bounce = asReceived.deliveryReport() != null && applyDeliveryReport(id, asReceived, now);
+        Optional<String> loop = EmailLoopGuard.check(asReceived, id, settings.address(), ctx.otherIntegrationAddresses(), ledger);
         if (loop.isPresent()) {
             return refuse(ctx, row, loop.get(), bounce ? EmailMetrics.BOUNCE : EmailMetrics.LOOP, now);
         }
+        // From here on, what routes, answers or is shown to the agent comes from the
+        // signed view: an unsigned Subject, To/Cc plus-tag or Reply-To added to
+        // someone's genuine signed mail falls back to the default target and the
+        // authenticated From (InboundMail#signedView). Thread headers are kept: a
+        // continuation is bound to the conversation's own sender anyway.
+        parsed = asReceived.signedView();
         if (sender == null) {
             return refuse(ctx, row, "blocked:no_single_sender", EmailMetrics.BLOCKED, now);
         }
@@ -320,6 +336,18 @@ public class EmailInboundProcessor {
         }
         if (!authenticated && settings.requireAuthentication()) {
             return refuse(ctx, row, "unauthenticated:" + verdictId(authentication), EmailMetrics.UNAUTHENTICATED, now);
+        }
+        if (authenticated && (parsed.syntheticMessageId() || !authentication.signedHeaders().covers("message-id"))) {
+            // The row is keyed on something a holder of this signed mail can change: an
+            // unsigned Message-ID, or — when the mail has no usable Message-ID — a hash
+            // of the raw bytes (an added unsigned header changes it, and so does adding
+            // a Message-ID, whose absence the signature need not cover). A copy would
+            // get a row of its own and run again as its author, so the signature
+            // itself is the key too.
+            Disposition replayed = claimSignatures(ctx, row, authentication.signedHeaders().signatureDigests(), sender, now);
+            if (replayed != null) {
+                return replayed;
+            }
         }
 
         // 7. Budgets. Over one, the mail waits in the mailbox; no sender hears
@@ -969,6 +997,71 @@ public class EmailInboundProcessor {
         } catch (RuntimeException e) {
             LOGGER.warnf("Could not end orphaned email conversation %s", sanitize(conversationId));
         }
+    }
+
+    /**
+     * Records that the mail's aligned signatures have run here, keyed by the
+     * signatures rather than the (unsigned) Message-ID: one marker row per
+     * signature, terminal ({@code REFUSED}, so it never counts as a turn), naming
+     * the mail's own row. A mail carrying any signature another row already holds
+     * is a replay and is refused — whatever order its signature fields are in, and
+     * with some of them dropped; the same mail processed again (a deferral, a
+     * retry) finds its own markers and goes on. All are checked before any is
+     * written, so a replay leaves no marker behind.
+     *
+     * @return null to go on, else what to do with the mail
+     */
+    private Disposition claimSignatures(IntegrationContext ctx, LedgerEntry row, List<String> digests, String sender, Instant now) {
+        if (digests == null || digests.isEmpty()) {
+            // No signature to key on: the replay cannot be told apart, so the mail is
+            // not run as its author.
+            return refuse(ctx, row, "unauthenticated:unsigned_message_id", EmailMetrics.UNAUTHENTICATED, now);
+        }
+        String owner = SIGNATURE_OWNER_PREFIX + row.id();
+        for (String digest : digests) {
+            Optional<LedgerEntry> held = ledger.findByMessage(ctx.integrationId(), Direction.IN, signatureKey(digest));
+            if (held.isPresent() && !owner.equals(held.get().sourceRef())) {
+                return refuse(ctx, row, "duplicate:replayed_signature", EmailMetrics.DUPLICATE, now);
+            }
+        }
+        for (String digest : digests) {
+            Disposition claimed = claimSignature(ctx, row, digest, sender, now);
+            if (claimed != null) {
+                return claimed;
+            }
+        }
+        return null;
+    }
+
+    /** One signature's marker; see {@link #claimSignatures}. */
+    private Disposition claimSignature(IntegrationContext ctx, LedgerEntry row, String digest, String sender, Instant now) {
+        String key = signatureKey(digest);
+        String owner = SIGNATURE_OWNER_PREFIX + row.id();
+        LedgerEntry marker = new LedgerEntry(UUID.randomUUID().toString(), ctx.integrationId(), Kind.TRIGGER, Direction.IN, key, null, owner,
+                inboundKey(ctx.integrationId(), key), sender, State.REFUSED, 0, null, null, null, "signature_seen", now, now, now.plus(retention));
+        if (ledger.insertIfAbsent(marker)) {
+            return null;
+        }
+        Optional<LedgerEntry> existing = ledger.findByMessage(ctx.integrationId(), Direction.IN, key);
+        if (existing.isEmpty()) {
+            count(ctx, EmailMetrics.DEFERRED);
+            return Disposition.DEFERRED;
+        }
+        if (owner.equals(existing.get().sourceRef())) {
+            return null;
+        }
+        return refuse(ctx, row, "duplicate:replayed_signature", EmailMetrics.DUPLICATE, now);
+    }
+
+    /** What a marker row's {@code sourceRef} starts with. */
+    static final String SIGNATURE_OWNER_PREFIX = "signature-of:";
+
+    /**
+     * The ledger key of a DKIM signature: an id that no mail can carry (the
+     * {@code .invalid} TLD), derived from the signature.
+     */
+    static String signatureKey(String digest) {
+        return "<dkim." + digest + "@eddi.invalid>";
     }
 
     private Disposition refuseUnread(IntegrationContext ctx, String key, MailboxMessage message, String reason, String outcome, Instant now) {

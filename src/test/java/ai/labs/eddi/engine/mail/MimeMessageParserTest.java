@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -654,6 +655,151 @@ class MimeMessageParserTest {
             byte[] content = "--x\r\na\r\n--x\r\nb\r\n--x--\r\n".getBytes();
             assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "x", 100));
             assertEquals(2, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "x", 2));
+        }
+
+        @Test
+        @DisplayName("a bare CR starts a delimiter line for the counter, as it does for the mail library")
+        void delimiterCountBareCr() throws Exception {
+            byte[] content = "--b\r\r".repeat(50).concat("--b--\r\n").getBytes(StandardCharsets.ISO_8859_1);
+            assertEquals(51, MimeMessageParser.countDelimiters(new ByteArrayInputStream(content), "b", 1000));
+        }
+
+        @Test
+        @DisplayName("near-matches of the boundary are body text, with LF or bare CR line ends; real and closing delimiters count")
+        void delimiterNearMatches() throws Exception {
+            byte[] lf = "--b\n".concat("--b-extra\n".repeat(50)).concat("--b10\n--b -x\n--b---\n--b\n--b--\n").getBytes(StandardCharsets.ISO_8859_1);
+            byte[] cr = "--b\r".concat("--b-extra\r".repeat(50)).concat("--b  \r--b-- \r").getBytes(StandardCharsets.ISO_8859_1);
+
+            assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(lf), "b", 1000));
+            assertEquals(3, MimeMessageParser.countDelimiters(new ByteArrayInputStream(cr), "b", 1000));
+            assertEquals(1, MimeMessageParser.countDelimiters(new ByteArrayInputStream("--b--".getBytes(StandardCharsets.ISO_8859_1)), "b", 9),
+                    "a closing delimiter on the last line, without a line end");
+
+            // A one-part multipart full of near-matches is not refused as a part bomb.
+            StringBuilder body = new StringBuilder("--b\nContent-Type: text/plain\n\nhello\n");
+            for (int i = 0; i < 5000; i++) {
+                body.append("--b-extra\n");
+            }
+            body.append("--b--\n");
+            InboundMail mail = parser()
+                    .parse(message("From: a@example.com\nMessage-ID: <nm@example.com>\nContent-Type: multipart/mixed; boundary=b\n\n"
+                            + body), MailLimits.defaults(), true);
+            assertTrue(mail.text().startsWith("hello"), mail.text().substring(0, 20));
+        }
+
+        @Test
+        @DisplayName("bare-CR delimiters declaring thousands of parts are refused within a time budget")
+        void bareCrPartBomb() {
+            String body = "--b\r\r".repeat(200_000) + "--b--\r\n";
+            byte[] raw = ("From: a@example.com\r\nMessage-ID: <cr@example.com>\r\nContent-Type: multipart/mixed; boundary=b\r\n\r\n" + body)
+                    .getBytes(StandardCharsets.ISO_8859_1);
+
+            var error = assertThrows(MailParseException.class,
+                    () -> assertTimeoutPreemptively(Duration.ofSeconds(10), () -> parser().parse(raw, MailLimits.defaults(), true)));
+            assertEquals(MailParseException.Reason.TOO_MANY_PARTS, error.getReason());
+        }
+
+        @Test
+        @DisplayName("the part budget holds by construction, whatever a delimiter count would have said")
+        void partBudgetByConstruction() throws Exception {
+            byte[] content = "--b\r\r".repeat(100_000).concat("--b--\r\n").getBytes(StandardCharsets.ISO_8859_1);
+
+            var error = assertThrows(MailParseException.class, () -> assertTimeoutPreemptively(Duration.ofSeconds(10),
+                    () -> MimeMessageParser.buildPartsUnderBudget(content, "multipart/mixed; boundary=b", MailLimits.defaults())));
+            assertEquals(MailParseException.Reason.TOO_MANY_PARTS, error.getReason());
+
+            byte[] small = "--b\r\nContent-Type: text/plain\r\n\r\none\r\n--b\r\n\r\ntwo\r\n--b--\r\n".getBytes(StandardCharsets.ISO_8859_1);
+            assertEquals(2, MimeMessageParser.buildPartsUnderBudget(small, "multipart/mixed; boundary=b", MailLimits.defaults()));
+        }
+
+        @Test
+        @DisplayName("an over-long Content-Type is refused, not cut to a header the mail library does not read")
+        void overlongContentTypeRefused() {
+            // EDDI used to cut the header at 16,000 characters and count the "fake"
+            // boundary, while the library read the whole header and split on "real".
+            String contentType = "multipart/mixed; boundary=fake; x=\"" + "a".repeat(17_000) + "\"; boundary=real";
+            StringBuilder body = new StringBuilder();
+            for (int i = 0; i < 5000; i++) {
+                body.append("--real\n\n");
+            }
+            body.append("--real--\n");
+            byte[] raw = message("From: a@example.com\nMessage-ID: <long@example.com>\nContent-Type: " + contentType + "\n\n" + body);
+
+            var error = assertThrows(MailParseException.class, () -> parser().parse(raw, MailLimits.defaults(), true));
+            assertEquals(MailParseException.Reason.MALFORMED, error.getReason());
+        }
+
+        @Test
+        @DisplayName("a repeated boundary parameter is read the same way by the count and the library")
+        void repeatedBoundaryParameter() {
+            StringBuilder body = new StringBuilder();
+            for (int i = 0; i < 5000; i++) {
+                body.append("--real\n\n");
+            }
+            body.append("--real--\n");
+            byte[] raw = message("From: a@example.com\nMessage-ID: <dup@example.com>\nContent-Type: multipart/mixed; boundary=fake; boundary=real\n\n"
+                    + body);
+
+            // The library takes the last boundary parameter; so does the count, which
+            // reads the same header text — 5000 "real" parts are refused.
+            var error = assertThrows(MailParseException.class,
+                    () -> assertTimeoutPreemptively(Duration.ofSeconds(10), () -> parser().parse(raw, MailLimits.defaults(), true)));
+            assertEquals(MailParseException.Reason.TOO_MANY_PARTS, error.getReason());
+        }
+
+        @Test
+        @DisplayName("HTML over the cap is cut before it is parsed, and flagged")
+        void htmlCapped() throws Exception {
+            String html = "<html><body><p>" + "x".repeat(5000) + "</p></body></html>";
+            byte[] raw = message("From: a@example.com\nMessage-ID: <h@example.com>\nContent-Type: text/html; charset=utf-8\n\n" + html);
+
+            InboundMail mail = parser().parse(raw, MailLimits.defaults().withMaxHtmlCharacters(1000), true);
+
+            assertTrue(mail.anomalies().contains(MailAnomaly.HTML_TRUNCATED));
+            assertTrue(mail.text().length() <= 1000, String.valueOf(mail.text().length()));
+            assertFalse(parser().parse(raw, MailLimits.defaults(), true).anomalies().contains(MailAnomaly.HTML_TRUNCATED));
+        }
+
+        private InboundMail withAttachmentNamed(String filename) throws MailParseException {
+            return parser().parse(message("From: a@example.com\nMessage-ID: <fn@example.com>\nContent-Type: multipart/mixed; boundary=b\n\n"
+                    + "--b\nContent-Type: text/plain\n\nhello\n--b\nContent-Type: text/plain\nContent-Disposition: attachment; filename=\""
+                    + filename + "\"\n\nalert('x')\n--b--\n"), MailLimits.defaults(), true);
+        }
+
+        @Test
+        @DisplayName("an over-long file name whose path hides an executable basename is withheld, never stored")
+        void overlongPathFilenameWithheld() throws Exception {
+            MailAttachment attachment = withAttachmentNamed("a".repeat(2040) + "/payload.js").attachments().get(0);
+
+            assertTrue(attachment.executable());
+            assertEquals(MailAttachment.SkipReason.EXECUTABLE, attachment.skipReason());
+            assertFalse(attachment.hasContent());
+            assertEquals("payload.js", MimeMessageParser.cleanFilename("a".repeat(2040) + "/payload.js"), "the tail survives the cap");
+        }
+
+        @Test
+        @DisplayName("a long basename keeps its extension when it is cut, so the executable check still sees it")
+        void longBasenameKeepsExtension() throws Exception {
+            String cleaned = MimeMessageParser.cleanFilename("a".repeat(400) + ".js");
+            assertEquals(255, cleaned.length());
+            assertTrue(cleaned.endsWith(".js"), cleaned);
+            assertTrue(MimeMessageParser.cleanFilename("b".repeat(400) + ".exe. ").endsWith(".exe."));
+
+            MailAttachment attachment = withAttachmentNamed("a".repeat(400) + ".js").attachments().get(0);
+            assertTrue(attachment.executable());
+            assertFalse(attachment.hasContent());
+        }
+
+        @Test
+        @DisplayName("a file name is capped before its encoded words are decoded")
+        void filenameCappedBeforeDecoding() {
+            String word = "=?x-unknown-" + "q" + "?Q?a?=";
+            String name = (word + " ").repeat(10_000);
+
+            String cleaned = assertTimeoutPreemptively(Duration.ofSeconds(5), () -> MimeMessageParser.cleanFilename(name));
+
+            assertNotNull(cleaned);
+            assertTrue(cleaned.length() <= 255);
         }
     }
 

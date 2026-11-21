@@ -278,7 +278,8 @@ never sent unsigned). The body:
 
 **Send test alert** (`POST /alerts/rules/test`, body: the rule, saved or not) sends a
 clearly marked test message to every target now and reports each outcome. Nothing is
-stored.
+stored. One caller may send at most `eddi.alerts.test-max-per-minute` tests a minute
+(default 6, per node); over it, `429 TEST_THROTTLED`.
 
 ## The inbox
 
@@ -310,7 +311,20 @@ Roles `eddi-admin` and `eddi-editor`, enumerated (REST has no role hierarchy;
   inbox (`WEBHOOK_ADMIN_ONLY`), and access is re-checked against the **stored** rule
   on update and delete. Webhook targets, their signing-secret references and rules
   over several or every agent need the `eddi-admin` **role** — also while workspaces
-  are not enforced, when an editor otherwise sees every agent's rules and events. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
+  are not enforced, when an editor otherwise sees every agent's rules and events. A
+  Slack target posts with the bot token of whichever integration serves the channel, so
+  an editor may name only a channel served by an integration that has a target pointing
+  at the rule's agent (`SLACK_CHANNEL_NOT_PERMITTED` otherwise — the same answer whether
+  the channel is served by another integration or by none); this is checked when a rule
+  is created, updated or tested, not when it is deleted, and an existing rule can always
+  be disabled. It is checked again at **every delivery**, since a channel can change hands
+  after the rule was saved: a Slack target an editor saved is then not posted to, and the
+  event records `FAILED` with the reason. The server marks each Slack target with who
+  admitted it (never from the request, never shown on a read); a target an administrator
+  saved posts anywhere. Rules saved before this mark existed count as an administrator's
+  when they cover several or every agent (only an administrator can save those); a
+  single-agent one is checked like an editor's — a channel that no longer belongs to its
+  agent shows up as a failed delivery with that reason, never as a silently dropped alert. Lists and counts need `agentId` (`AGENT_ID_REQUIRED`). A
   webhook target appears to them by scheme and host only, without the secret
   reference. A rule over several agents produces one digest per originating agent; each
   digest carries that agent and is readable by editors with access to it, and administrators
@@ -400,6 +414,7 @@ most 10,000 of each, without naming anybody else.
 | `eddi.alerts.event-retention` | `90d` | Events older than this are deleted |
 | `eddi.alerts.webhook-timeout` | `10s` | Whole-exchange deadline of a webhook call (kept between 1 s and 60 s) |
 | `eddi.alerts.manager-url` | — | The Manager's base URL, for links in delivered alerts |
+| `eddi.alerts.test-max-per-minute` | `6` | Test sends one caller may make per minute (per node); `0` turns the bound off |
 | `eddi.alerts.max-rules-per-agent` | `50` | Most rules that may list one agent, and most rules over every agent (at least 1) |
 
 - **Rule limit.** Every rule watching an agent is evaluated on each of its ratings
