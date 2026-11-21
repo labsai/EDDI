@@ -1,6 +1,8 @@
 import type { TFunction } from "i18next";
 import { toast } from "sonner";
 import {
+  EMAIL_MAX_ALIASES,
+  EMAIL_MAX_MENTIONS_PER_TARGET,
   EMAIL_MAX_AI_DISCLOSURE_CHARS,
   EMAIL_MAX_FROM_NAME_CHARS,
   EMAIL_MAX_OWNER_ADDRESSES,
@@ -86,6 +88,35 @@ export function emailProblemMessage(problem: EmailProblem, t: TFunction): string
       });
     case "maxRepliesPerThreadPerHour":
       return t("emailChannel.problem.maxRepliesPerThreadPerHour", "The reply limit must be a whole number from 1 to 1000.");
+    case "aliasesTooMany":
+      return t("emailChannel.problem.aliasesTooMany", {
+        max: EMAIL_MAX_ALIASES,
+        defaultValue: "Name at most {{max}} aliases.",
+      });
+    case "aliasesInvalid":
+      return t("emailChannel.problem.aliasesInvalid", "Each alias must be a valid email address.");
+    case "aliasIsAddress":
+      return t("emailChannel.problem.aliasIsAddress", "The mailbox address itself is not an alias; list only additional addresses.");
+    case "mentionInvalid":
+      return t("emailChannel.problem.mentionInvalid", "A mention is 1–40 letters, digits, _ or -, starting with a letter or digit, written without the @.");
+    case "mentionsTooMany":
+      return t("emailChannel.problem.mentionsTooMany", {
+        max: EMAIL_MAX_MENTIONS_PER_TARGET,
+        defaultValue: "A target can have at most {{max}} mentions.",
+      });
+    case "mentionDuplicate":
+      return t("emailChannel.problem.mentionDuplicate", "Each mention can address one target only.");
+    case "targetAddressInvalid":
+      return t("emailChannel.problem.targetAddressInvalid", "Each target address must be a valid email address.");
+    case "targetAddressNotReceived":
+      return t(
+        "emailChannel.problem.targetAddressNotReceived",
+        "A target address must be one of the aliases or a plus-address of the mailbox address, so the mailbox receives it.",
+      );
+    case "targetAddressDuplicate":
+      return t("emailChannel.problem.targetAddressDuplicate", "Each target address can address one target only.");
+    case "targetAllowedSendersInvalid":
+      return t("emailChannel.problem.targetAllowedSendersInvalid", "Each allowed sender of a target must be user@domain, *@domain or *@*.domain.");
   }
 }
 

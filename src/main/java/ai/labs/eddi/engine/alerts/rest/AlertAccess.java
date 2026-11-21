@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.alerts.model.AlertScope;
 import ai.labs.eddi.engine.alerts.model.DeliveryTarget;
 import ai.labs.eddi.engine.security.ConversationAccessGuard;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 
@@ -42,11 +43,22 @@ public class AlertAccess {
 
     private final ResourceAccessGuard accessGuard;
     private final ConversationAccessGuard conversationAccessGuard;
+    private final ChannelTargetRouter channelTargetRouter;
 
     @Inject
-    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard) {
+    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard,
+            ChannelTargetRouter channelTargetRouter) {
         this.accessGuard = accessGuard;
         this.conversationAccessGuard = conversationAccessGuard;
+        this.channelTargetRouter = channelTargetRouter;
+    }
+
+    /**
+     * Without a channel router: no non-administrator can name a Slack target
+     * ({@link #requireDeliverable}).
+     */
+    public AlertAccess(ResourceAccessGuard accessGuard, ConversationAccessGuard conversationAccessGuard) {
+        this(accessGuard, conversationAccessGuard, null);
     }
 
     /** Unrestricted visibility: every agent's rules and events. */
@@ -133,6 +145,51 @@ public class AlertAccess {
         requireAgent(agentId);
     }
 
+    /**
+     * May the caller send this rule's alerts where it says? A Slack target posts
+     * with the bot token of whichever integration serves the channel, so an editor
+     * of one agent could otherwise post into any channel of any integration —
+     * another team's included. Editors may name only a channel whose serving
+     * integration targets the rule's agent; administrators (the role) any.
+     * <p>
+     * The refusal reads the same whether the channel is served by another
+     * integration or by none, so it does not tell a caller which channels exist.
+     * Checked on what is being stored or tested, not on a stored rule being
+     * deleted, so a rule whose channel changed hands can still be removed.
+     */
+    public void requireDeliverable(AlertRule rule) {
+        if (hasAdminRole() || rule == null) {
+            return;
+        }
+        String agentId = rule.scope() == null ? null : rule.scope().singleAgent();
+        for (DeliveryTarget target : rule.delivery()) {
+            if (target == null || target.type() != DeliveryTarget.DeliveryType.SLACK) {
+                continue;
+            }
+            if (channelTargetRouter == null || agentId == null
+                    || !channelTargetRouter.channelTargetsAgent("slack", target.channelId(), agentId)) {
+                throw AlertErrors.forbidden(AlertErrors.SLACK_CHANNEL_NOT_PERMITTED,
+                        "Slack channel " + target.channelId() + " is not served by a Slack integration that targets this agent");
+            }
+        }
+    }
+
+    /**
+     * The rule with each Slack target marked as admitted by an administrator or not
+     * ({@link DeliveryTarget#adminAdmitted()}), as the caller saves it. Delivery
+     * reads the mark: the caller's role is not known then.
+     */
+    public AlertRule withAdmission(AlertRule rule) {
+        if (rule == null) {
+            return null;
+        }
+        boolean admin = hasAdminRole();
+        List<DeliveryTarget> targets = rule.delivery().stream()
+                .map(t -> t != null && t.type() == DeliveryTarget.DeliveryType.SLACK ? t.withAdminAdmitted(admin) : t).toList();
+        return new AlertRule(rule.id(), rule.name(), rule.enabled(), rule.scope(), rule.source(), rule.condition(), targets, rule.throttle(),
+                rule.digest(), rule.createdBy(), rule.createdAt(), rule.updatedBy(), rule.updatedAt());
+    }
+
     /** May the caller see or act on this event? */
     public void requireEvent(AlertEvent event) {
         requireAgent(event.agentId());
@@ -149,8 +206,12 @@ public class AlertAccess {
         // Every read shows each target's id; a rule stored before ids existed gets
         // the derived ones, the same on every read until its next save stores them.
         List<DeliveryTarget> targets = rule.withTargetIds().delivery().stream().map(t -> {
-            if (t == null || t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
-                return t;
+            if (t == null) {
+                return null;
+            }
+            if (t.type() != DeliveryTarget.DeliveryType.WEBHOOK) {
+                // The admission mark is the server's bookkeeping, not part of the rule.
+                return t.withAdminAdmitted(null);
             }
             DeliveryTarget masked = t.masked();
             return admin

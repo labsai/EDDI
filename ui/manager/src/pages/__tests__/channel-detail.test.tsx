@@ -461,6 +461,55 @@ describe("ChannelDetailPage — email integration", () => {
     await waitFor(() => expect(screen.getByText(/has tools and no tool approvals/)).toBeInTheDocument());
   });
 
+  it("edits a target's mentions, addresses and allowed senders, saves them, and keeps an existing integration on actWhen always", async () => {
+    let saved: { platformConfig?: Record<string, string>; targets?: Record<string, unknown>[] } | undefined;
+    useEmailChannel();
+    server.use(
+      http.put("*/channelstore/channels/:id", async ({ request }) => {
+        saved = (await request.json()) as typeof saved;
+        return new HttpResponse(null, { status: 200, headers: { Location: "/channelstore/channels/mail1?version=2" } });
+      }),
+    );
+    renderChannelDetail("mail1", 1, true);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-target-rules-1")).toBeInTheDocument());
+    expect(screen.getByTestId("email-act-when")).toHaveValue("always");
+
+    await user.type(screen.getByTestId("email-target-mentions-1"), "@urgent");
+    await user.type(screen.getByTestId("email-target-addresses-1"), "invoices+urgent@example.com");
+    await user.type(screen.getByTestId("email-target-allowed-senders-1"), "*@supplier.com");
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(saved?.targets).toBeDefined());
+    expect(saved?.platformConfig?.actWhen).toBeUndefined();
+    expect(saved?.targets?.[1]).toMatchObject({
+      name: "urgent",
+      mentions: ["urgent"],
+      addresses: ["invoices+urgent@example.com"],
+      allowedSenders: ["*@supplier.com"],
+    });
+    expect(saved?.targets?.[0]).not.toHaveProperty("mentions");
+  });
+
+  it("refuses a target address the mailbox does not receive, without a request", async () => {
+    let requests = 0;
+    useEmailChannel();
+    server.use(
+      http.put("*/channelstore/channels/:id", () => {
+        requests += 1;
+        return new HttpResponse(null, { status: 200 });
+      }),
+    );
+    renderChannelDetail("mail1", 1, true);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-target-addresses-1")).toBeInTheDocument());
+    await user.type(screen.getByTestId("email-target-addresses-1"), "finance@example.com");
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(screen.getAllByText(/so the mailbox receives it/).length).toBeGreaterThan(0));
+    expect(requests).toBe(0);
+  });
+
   it("refuses to save an email integration the backend would reject, without a request", async () => {
     let requests = 0;
     useEmailChannel();
@@ -492,7 +541,7 @@ describe("ChannelDetailPage — switching the channel type", () => {
     expect(screen.getByTestId("email-platform-fields")).toBeInTheDocument();
     await user.click(screen.getByText("Raw Configuration"));
     const raw = () => JSON.parse(screen.getByText(/"channelType"/).textContent ?? "{}") as { platformConfig: Record<string, string> };
-    expect(raw().platformConfig).toEqual({ mode: "trigger", transport: "imap" });
+    expect(raw().platformConfig).toEqual({ mode: "trigger", actWhen: "addressed", transport: "imap" });
 
     await user.selectOptions(screen.getByTestId("channel-type-select"), "webhook");
     expect(raw().platformConfig).toEqual({});

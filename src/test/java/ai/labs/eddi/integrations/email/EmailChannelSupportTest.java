@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
@@ -43,6 +44,7 @@ class EmailChannelSupportTest {
 
     private SafeSocketConnector connector;
     private ConnectionResolver resolver;
+    private EmailIntegrationDirectory directory;
     private EmailChannelSupport support;
     private IEmailSuppressionStore suppressions;
 
@@ -54,7 +56,7 @@ class EmailChannelSupportTest {
         Instance<ConnectionResolver> resolvers = mock(Instance.class);
         when(resolvers.isResolvable()).thenReturn(true);
         when(resolvers.get()).thenReturn(resolver);
-        EmailIntegrationDirectory directory = mock(EmailIntegrationDirectory.class);
+        directory = mock(EmailIntegrationDirectory.class);
         when(directory.scan()).thenReturn(List.of());
         support = new EmailChannelSupport(connector, resolvers, directory, mock(EmailPollScheduler.class), mock(EmailAgentToolsInspector.class));
         suppressions = mock(IEmailSuppressionStore.class);
@@ -107,6 +109,30 @@ class EmailChannelSupportTest {
 
         verify(connector, never()).resolve(anyString(), anyInt(), eq(SafeSocketConnector.Protocol.SMTP));
         verify(resolver, never()).requireMailLoginTarget(anyString(), eq(URI.create("smtp://null:587")));
+    }
+
+    private static EmailIntegrationDirectory.EmailIntegration other(Map<String, String> platformConfig) {
+        var configuration = EmailInboundProcessorTest.integration(platformConfig);
+        return new EmailIntegrationDirectory.EmailIntegration("ffffffffffffffffffffffff", configuration,
+                EmailChannelSettings.from(configuration.getPlatformConfig()));
+    }
+
+    @Test
+    @DisplayName("an alias that is another integration's address or alias, or an address that is another's alias, refuses the save")
+    void aliasClash() {
+        when(directory.scan()).thenReturn(List.of(other(Map.of("address", "orders@contoso.com", "aliases", "sales@contoso.com"))));
+
+        for (String aliases : List.of("orders@contoso.com", "Sales@contoso.com")) {
+            var error = assertThrows(BadRequestException.class,
+                    () -> support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of("aliases", aliases)), null));
+            assertTrue(error.getMessage().contains("already the address or an alias of another email integration"), error.getMessage());
+        }
+        var ownIsAlias = assertThrows(BadRequestException.class,
+                () -> support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of("address", "sales@contoso.com")), null));
+        assertTrue(ownIsAlias.getMessage().contains("already the address or an alias"), ownIsAlias.getMessage());
+        assertDoesNotThrow(() -> support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of("aliases", "ap@contoso.com")), null));
+        assertDoesNotThrow(() -> support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of("aliases", "sales@contoso.com")),
+                "ffffffffffffffffffffffff"), "an integration never clashes with itself");
     }
 
     @Test
