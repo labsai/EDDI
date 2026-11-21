@@ -13,7 +13,7 @@ import dev.langchain4j.store.embedding.filter.Filter;
 import dev.langchain4j.store.embedding.inmemory.InMemoryEmbeddingStore;
 
 import java.util.ArrayList;
-import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -146,8 +146,10 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
             if (dimension == 0 || isEmpty()) {
                 return 0;
             }
+            // A zero vector is orthogonal to every stored one, which langchain4j
+            // scores 0.5: no stored vector can round outside [-1, 1] and fall under
+            // the minimum score, as a probe of ones does against its opposite.
             float[] probe = new float[dimension];
-            Arrays.fill(probe, 1f);
             List<EmbeddingMatch<TextSegment>> found = search(EmbeddingSearchRequest.builder()
                     .queryEmbedding(Embedding.from(probe))
                     .filter(filter)
@@ -225,6 +227,32 @@ final class CappedInMemoryEmbeddingStore extends InMemoryEmbeddingStore<TextSegm
             admit(embeddings == null ? 0 : embeddings.size());
             learnDimension(embeddings);
             return super.addAll(embeddings);
+        }
+    }
+
+    /*
+     * Removals take the same lock as updateMetadata, so a removal happens entirely
+     * before or after a rewrite: otherwise it could delete chunks the rewrite is
+     * about to add back.
+     */
+    @Override
+    public void removeAll(Collection<String> ids) {
+        synchronized (guard.lock()) {
+            super.removeAll(ids);
+        }
+    }
+
+    @Override
+    public void removeAll(Filter filter) {
+        synchronized (guard.lock()) {
+            super.removeAll(filter);
+        }
+    }
+
+    @Override
+    public void removeAll() {
+        synchronized (guard.lock()) {
+            super.removeAll();
         }
     }
 

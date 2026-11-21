@@ -94,6 +94,15 @@ class CappedInMemoryMetadataUpdateTest {
     }
 
     @Test
+    @DisplayName("a chunk whose vector is the opposite of all ones is still found")
+    void oppositeVectorIsFound() {
+        chunk("n1", "doc-n", "src", "Old", new float[]{-1f, -1f});
+
+        assertEquals(1, store.updateMetadata(Map.of("documentId", "doc-n"), Map.of("title", "New")));
+        assertEquals("New", byId("n1").embedded().metadata().getString("title"));
+    }
+
+    @Test
     @DisplayName("an empty store, or no match, changes nothing")
     void nothingToChange() {
         assertEquals(0, store.updateMetadata(Map.of("documentId", "doc-a"), Map.of("title", "New")));
