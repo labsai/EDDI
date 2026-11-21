@@ -4,14 +4,19 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.store.embedding.pgvector.PgVectorEmbeddingStore;
 
 import java.sql.Connection;
+import java.sql.PreparedStatement;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * langchain4j's pgvector store with two additions it has no option for.
@@ -30,7 +35,9 @@ import java.util.List;
  * transaction holds its locks and WAL for the whole document.</li>
  * </ul>
  */
-final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore {
+final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore implements SegmentMetadataUpdates {
+
+    private static final ObjectMapper JSON = new ObjectMapper();
 
     /**
      * {@code null} leaves the session default. Also {@code null} while the
@@ -78,6 +85,42 @@ final class EddiPgVectorEmbeddingStore extends PgVectorEmbeddingStore {
         for (int from = 0; from < ids.size(); from += insertBatchSize) {
             int to = Math.min(from + insertBatchSize, ids.size());
             super.addAll(ids.subList(from, to), embeddings.subList(from, to), embedded == null ? null : embedded.subList(from, to));
+        }
+    }
+
+    /**
+     * One {@code UPDATE}, merging the new values into each matching row's metadata
+     * — the vectors are not touched.
+     *
+     * <p>
+     * Works on both layouts: the merge is computed as {@code jsonb}, and assigning
+     * it to a {@code json} column (the earlier layout) goes through PostgreSQL's
+     * assignment cast. The match is written as {@code (metadata->>'key')::text},
+     * the expression the metadata indexes are built on, so a document's rows are
+     * found by index. Keys are spliced into the statement and therefore held to
+     * {@link SegmentMetadataUpdates#METADATA_KEY}; values are bound. A null value
+     * is written as JSON {@code null}, which reads back as absent.
+     */
+    @Override
+    public int updateMetadata(Map<String, String> match, Map<String, String> values) {
+        SegmentMetadataUpdates.requireValid(match, values);
+        List<String> keys = new ArrayList<>(match.keySet());
+        StringBuilder sql = new StringBuilder("UPDATE ").append(table)
+                .append(" SET metadata = COALESCE(metadata::jsonb, '{}'::jsonb) || ?::jsonb WHERE ");
+        for (int i = 0; i < keys.size(); i++) {
+            if (i > 0) {
+                sql.append(" AND ");
+            }
+            sql.append("(metadata->>'").append(keys.get(i)).append("')::text = ?");
+        }
+        try (Connection connection = getConnection(); PreparedStatement statement = connection.prepareStatement(sql.toString())) {
+            statement.setString(1, JSON.writeValueAsString(values));
+            for (int i = 0; i < keys.size(); i++) {
+                statement.setString(i + 2, match.get(keys.get(i)));
+            }
+            return statement.executeUpdate();
+        } catch (SQLException | JsonProcessingException e) {
+            throw new IllegalStateException("Could not update chunk metadata in " + table + ": " + e.getMessage(), e);
         }
     }
 

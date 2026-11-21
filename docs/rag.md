@@ -608,7 +608,25 @@ source's content is removed again, and a renamed knowledge base's state is clear
 frees the source, so a new run may already hold it by then and may have read a row the old run wrote
 as "unchanged"; the state cannot be purged from under that run, so every document's content hash and
 validators are forgotten instead, and the next run embeds each page into the store the new name
-addresses.
+addresses. A source that was removed or **changed type** (a crawl switched to Google Drive, say) is
+settled the same careful way: the cleanup takes the source's run slot first, and only when it gets it
+and no run has had the source since does it forget everything under the source's key. Otherwise — the
+new type's first run is already writing, or has finished — it removes only the chunks tagged with the
+old run's id and leaves the state to the run that owns it, with every document's content forgotten so
+that nothing the old run wrote can be called "unchanged". The new run's chunks, state and run row are
+never touched.
+
+**A rename that leaves the content alone updates the citation, not the vectors.** A Drive file renamed
+without a byte change keeps its checksum, and a Google Doc whose `version` moved only for a rename
+exports the same text, so neither is embedded again — and their chunks used to keep the old title and
+link as their citation. Each document's state now records a fingerprint of the title and URL its chunks
+carry. When what the source reports differs, the chunks' `title` and `url` are rewritten in place,
+vectors, `runId` and everything else untouched. Every source type gets this where the new title is
+known: an upload source and a Drive stored file from the listing (so the file is not downloaded), a Google
+Doc and a crawled page whose `<title>` changed from the fetched content. On a vector store that cannot
+update metadata in place (see [Store support](#store-support-for-replacement)) the renamed document is
+embedded again instead, once. Rows written before the fingerprint existed adopt the current one on the
+next run rather than counting as renamed, so an upgrade rewrites nothing.
 
 **A purge forgets what a source ingested, and later complete runs remove what it no longer has.**
 Chunks stay retrievable after a purge, so there is no gap while the next run re-embeds everything it
@@ -929,7 +947,9 @@ Drive's listing query; the connection name is held to the connections framework'
   checksum), known from the listing, so an unchanged file is not downloaded. A Google Doc, Sheet or
   Slides file has no checksum: an unchanged `version` skips the export, and a changed one is exported
   and the hash of the export decides whether to embed — `version` also moves on a rename or a sharing
-  change, which must not re-embed a document.
+  change, which must not re-embed a document. A rename still reaches the citation: the chunks get the
+  file's new name and link without being embedded again (see
+  [A rename that leaves the content alone](#ingestion-sources)).
 - **Content.** A Doc is exported as **Markdown** (HTML when the Markdown export is refused), with the
   base64 images Google inlines removed. A Sheet is exported as **XLSX**, not CSV: the CSV export
   carries only the first sheet, and the spreadsheet extractor renders every sheet as a table with its
@@ -1051,6 +1071,12 @@ covered by these tests. Where a store does not, the run still succeeds and repor
 The same `removeAll(Filter)` serves `replace=true` and
 [deleting a document](#deleting-a-document) on `/ingest`'s documents; where it is missing, both answer
 with a `warning` instead.
+
+Updating a renamed document's citation in place needs more than langchain4j offers, so it exists only
+on the two stores EDDI extends: `in-memory` (the chunks are replaced under the same ids and vectors) and
+`pgvector` (one `UPDATE` merging `title` and `url` into the metadata, on both the `json` and the `jsonb`
+table layout — verified by `PgVectorMetadataUpdateIT`). On `mongodb-atlas`, `elasticsearch`, `qdrant`
+and `chroma` a renamed document is embedded again instead, which costs what a content change costs.
 
 ## Evaluating retrieval
 

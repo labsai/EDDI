@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.ingestion;
 
+import ai.labs.eddi.modules.llm.impl.SegmentMetadataUpdates;
+import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.exception.UnsupportedFeatureException;
@@ -15,6 +17,7 @@ import dev.langchain4j.store.embedding.filter.Filter;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -25,13 +28,20 @@ import java.util.UUID;
  * correctness — {@code removeAll(Filter)} on a metadata key actually removes
  * the matching segments — so a test can assert that re-ingesting a document
  * <em>replaced</em> its chunks rather than appending a second copy beside them.
+ *
+ * <p>
+ * Updates metadata in place like the in-memory and pgvector stores do, unless
+ * {@link #withoutMetadataUpdates()} makes it refuse the way every other store
+ * would.
  */
-public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment> {
+public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment>, SegmentMetadataUpdates {
 
     private final List<TextSegment> segments = new ArrayList<>();
     private final List<Filter> removeFilters = new ArrayList<>();
     private boolean removalSupported = true;
     private boolean removalFails;
+    private boolean metadataUpdatesSupported = true;
+    private int metadataUpdates;
 
     /** Simulates a backend whose driver cannot delete by metadata. */
     public RecordingEmbeddingStore withoutRemovalSupport() {
@@ -43,6 +53,47 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
     public RecordingEmbeddingStore withFailingRemoval() {
         this.removalFails = true;
         return this;
+    }
+
+    /** Simulates a store that cannot change metadata in place. */
+    public RecordingEmbeddingStore withoutMetadataUpdates() {
+        this.metadataUpdatesSupported = false;
+        return this;
+    }
+
+    /** How many metadata updates were applied. */
+    public int metadataUpdates() {
+        return metadataUpdates;
+    }
+
+    @Override
+    public int updateMetadata(Map<String, String> match, Map<String, String> values) {
+        if (!metadataUpdatesSupported) {
+            throw new UnsupportedFeatureException("Not supported yet.");
+        }
+        SegmentMetadataUpdates.requireValid(match, values);
+        metadataUpdates++;
+        int changed = 0;
+        for (int i = 0; i < segments.size(); i++) {
+            TextSegment segment = segments.get(i);
+            Metadata metadata = segment.metadata();
+            boolean matches = match.entrySet().stream()
+                    .allMatch(condition -> condition.getValue().equals(metadata.getString(condition.getKey())));
+            if (!matches) {
+                continue;
+            }
+            Metadata copy = metadata.copy();
+            values.forEach((key, value) -> {
+                if (value == null) {
+                    copy.remove(key);
+                } else {
+                    copy.put(key, value);
+                }
+            });
+            segments.set(i, TextSegment.from(segment.text(), copy));
+            changed++;
+        }
+        return changed;
     }
 
     public List<TextSegment> segments() {

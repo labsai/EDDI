@@ -188,6 +188,58 @@ public interface IngestionStateStoreContract {
     }
 
     @Test
+    @DisplayName("a document's citation fingerprint is stored with it, and survives being seen")
+    default void citationIsStoredAndKept() {
+        String runId = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", "\"etag-1\"", null, runId, "cite-1");
+        assertEquals("cite-1", store().lookup(SOURCE, DOC).orElseThrow().citationHash());
+
+        store().recordSeen(SOURCE, DOC, runId);
+        store().recordSeen(SOURCE, DOC, runId, "\"etag-2\"", null);
+        store().recordUnreachable(SOURCE, DOC, runId);
+        assertEquals("cite-1", store().lookup(SOURCE, DOC).orElseThrow().citationHash());
+
+        store().recordCitation(SOURCE, DOC, runId, "cite-2");
+        DocumentState state = store().lookup(SOURCE, DOC).orElseThrow();
+        assertEquals("cite-2", state.citationHash());
+        assertEquals("hash-1", state.contentHash(), "only the citation changes");
+        assertEquals("\"etag-2\"", state.etag());
+        assertFalse(state.tombstoned());
+    }
+
+    @Test
+    @DisplayName("a document recorded without a citation reads back with none")
+    default void citationIsNullWhenNotRecorded() {
+        String runId = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, runId);
+        assertNull(store().lookup(SOURCE, DOC).orElseThrow().citationHash());
+
+        // Re-ingesting replaces it, like every other column of the row.
+        store().recordIngested(SOURCE, DOC, "hash-2", null, null, runId, "cite-1");
+        store().recordIngested(SOURCE, DOC, "hash-3", null, null, runId);
+        assertNull(store().lookup(SOURCE, DOC).orElseThrow().citationHash());
+    }
+
+    @Test
+    @DisplayName("recording a citation is fenced, ignores unknown documents, and is purged with the source")
+    default void citationIsFencedAndPurged() {
+        String oldRun = openRun(SOURCE);
+        store().recordIngested(SOURCE, DOC, "hash-1", null, null, oldRun, "cite-1");
+        closeRun(oldRun, SOURCE, IngestionRun.Status.COMPLETED);
+        String newRun = openRun(SOURCE);
+
+        store().recordCitation(SOURCE, DOC, oldRun, "stale");
+        assertEquals("cite-1", store().lookup(SOURCE, DOC).orElseThrow().citationHash(),
+                "a superseded run's write lands nowhere");
+
+        store().recordCitation(SOURCE, "https://example.com/never-ingested", newRun, "cite-x");
+        assertTrue(store().lookup(SOURCE, "https://example.com/never-ingested").isEmpty());
+
+        store().purgeSource(SOURCE);
+        assertTrue(store().lookup(SOURCE, DOC).isEmpty());
+    }
+
+    @Test
     @DisplayName("hasChanged compares against the stored hash")
     default void hasChangedComparesHash() {
         String runId = openRun(SOURCE);

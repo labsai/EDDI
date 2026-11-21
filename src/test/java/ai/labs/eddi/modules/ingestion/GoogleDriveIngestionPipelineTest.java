@@ -142,9 +142,31 @@ class GoogleDriveIngestionPipelineTest {
         assertEquals(0, bumped.documentsIngested());
         assertEquals(segments, embeddingStore.segments().size());
 
+        assertEquals("Leave policy (renamed)", titleOf("d1"), "the rename reached the citation");
+
         IngestionReport after = run(Mode.INGEST);
         assertEquals(exports + 1, drive.countRequests("/export"), "the new version was recorded");
         assertEquals(2, after.documentsUnchanged());
+    }
+
+    @Test
+    @DisplayName("a stored file renamed without a byte change gets its new title, and is neither downloaded nor embedded")
+    void renamedStoredFileGetsItsNewTitle() {
+        run(Mode.INGEST);
+        int segments = embeddingStore.segments().size();
+        int downloads = drive.countRequests("alt=media");
+        drive.file("f1", "travel-policy.txt", "text/plain", DRIVE, "Travel is booked through the portal.");
+
+        IngestionReport renamed = run(Mode.INGEST);
+
+        assertEquals(0, renamed.documentsIngested());
+        assertEquals(downloads, drive.countRequests("alt=media"), "the checksum still says unchanged");
+        assertEquals(segments, embeddingStore.segments().size());
+        assertEquals("travel-policy.txt", titleOf("f1"));
+    }
+
+    private String titleOf(String documentId) {
+        return embeddingStore.segmentsOf(documentId).getFirst().metadata().getString(IngestionPipeline.METADATA_TITLE);
     }
 
     @Test
