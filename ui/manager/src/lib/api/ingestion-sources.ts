@@ -120,13 +120,27 @@ export interface IngestionRun {
   stopReason?: string | null;
   /** What started the run; absent on runs recorded before it was. */
   trigger?: "MANUAL" | "SCHEDULED" | null;
+  /**
+   * Documents left for a later run because the embedding provider's rate limit
+   * stopped this one — neither failed nor removed. Absent from older servers.
+   */
+  documentsThrottled?: number;
+  /** When the provider said it takes calls again, on a run with stop reason `THROTTLED`. */
+  resumeAfter?: string | null;
 }
 
 /** What a preview says a run would do. */
 export interface IngestionReport {
   runId?: string;
   sourceId?: string;
-  outcome: "COMPLETED" | "PREVIEW" | "FAILED" | "SKIPPED" | "ALREADY_RUNNING";
+  outcome:
+    | "COMPLETED"
+    | "PREVIEW"
+    | "FAILED"
+    | "SKIPPED"
+    | "ALREADY_RUNNING"
+    | "STARTED"
+    | "THROTTLED";
   documentsSeen: number;
   documentsIngested: number;
   documentsUnchanged: number;
@@ -139,6 +153,9 @@ export interface IngestionReport {
   tombstoningSkipped: boolean;
   stopReason?: string | null;
   message?: string | null;
+  /** Documents the embedding provider's rate limit left for a later run. */
+  documentsThrottled?: number;
+  resumeAfter?: string | null;
 }
 
 /** A file stored on an upload source. */

@@ -2587,6 +2587,10 @@
       "stopByteLimit": "在大小上限处停止——未将任何内容视为已删除",
       "stopTimeLimit": "在时间预算处停止——未将任何内容视为已删除",
       "stopCancelled": "提前停止——已取消、被取代或达到分块预算",
+      "throttled": "等待中（速率限制）",
+      "throttledCount": "{{waiting}} 个等待中",
+      "stopThrottled": "因提供商配额而暂停。下一次运行会处理其余部分；没有任何内容被视为失败或已删除",
+      "stopThrottledUntil": "因提供商速率限制而暂停——从 {{time}} 起再次接受请求。下一次运行会处理其余部分；没有任何内容被视为失败或已删除",
       "hoursMinutes": "{{hours}} 小时 {{minutes}} 分钟",
       "minutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
       "seconds": "{{seconds}} 秒"

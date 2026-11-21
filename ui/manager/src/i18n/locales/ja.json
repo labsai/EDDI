@@ -2587,6 +2587,10 @@
       "stopByteLimit": "サイズ上限で停止 — 削除扱いになったものはありません",
       "stopTimeLimit": "時間予算で停止 — 削除扱いになったものはありません",
       "stopCancelled": "早期に停止 — キャンセル、置き換え、またはチャンク予算に到達",
+      "throttled": "待機中（レート制限）",
+      "throttledCount": "{{waiting}} 件待機中",
+      "stopThrottled": "プロバイダーのクォータにより一時停止しました。残りは次回の実行で処理されます。失敗や削除として扱われたものはありません",
+      "stopThrottledUntil": "プロバイダーのレート制限により一時停止しました — {{time}} から再びリクエストを受け付けます。残りは次回の実行で処理されます。失敗や削除として扱われたものはありません",
       "hoursMinutes": "{{hours}} 時間 {{minutes}} 分",
       "minutesSeconds": "{{minutes}} 分 {{seconds}} 秒",
       "seconds": "{{seconds}} 秒"

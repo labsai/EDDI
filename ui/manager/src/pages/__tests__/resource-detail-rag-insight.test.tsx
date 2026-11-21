@@ -102,6 +102,40 @@ describe("RAG ingestion — while and after a run", () => {
     );
   });
 
+  it("shows a run the provider's rate limit stopped as paused, not failed", async () => {
+    const resumeAfter = "2026-10-14T02:05:00Z";
+    server.use(
+      http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () =>
+        HttpResponse.json([
+          {
+            ...COMPLETED_RUN,
+            runId: "run-3",
+            documentsFailed: 0,
+            documentsTombstoned: 0,
+            documentsThrottled: 49,
+            stopReason: "THROTTLED",
+            resumeAfter,
+          },
+        ]),
+      ),
+    );
+    const user = userEvent.setup();
+    renderRagPage();
+    await openFirstSource(user);
+
+    const row = await screen.findByTestId("ingestion-source-0-run-run-3");
+    expect(row).toHaveTextContent("49 waiting");
+    expect(row).not.toHaveTextContent("failed");
+
+    await user.click(screen.getByTestId("ingestion-source-0-run-run-3-toggle"));
+    const time = new Date(resumeAfter).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    const stopReason = screen.getByTestId("ingestion-source-0-run-run-3-stop-reason");
+    expect(stopReason).toHaveTextContent("Paused by the provider's rate limit");
+    expect(stopReason).toHaveTextContent(time);
+    expect(screen.getByTestId("ingestion-source-0-run-run-3-details")).toHaveTextContent("Waiting (rate limit)");
+    expect(screen.queryByTestId("ingestion-source-0-run-run-3-error")).not.toBeInTheDocument();
+  });
+
   it("says what the server answered when a run cannot start", async () => {
     server.use(
       http.get("*/ragstore/rags/:id/sources/:sourceId/runs", () => HttpResponse.json([])),

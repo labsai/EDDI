@@ -278,8 +278,10 @@ function SourceCard({
   useRefreshAfterRun(kbId, source.id, version, lastRun ? `${lastRun.runId}:${lastRun.status}` : undefined);
   // The newest finished run that covered the whole source: what it saw is the
   // best estimate of what this one will.
+  // A run the provider's rate limit stopped saw only part of it, like a cancelled one.
   const previousRun = runs.data?.find(
-    (run) => run.status === "COMPLETED" && run.stopReason !== "CANCELLED",
+    (run) =>
+      run.status === "COMPLETED" && run.stopReason !== "CANCELLED" && run.stopReason !== "THROTTLED",
   );
 
   return (

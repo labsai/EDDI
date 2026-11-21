@@ -2587,6 +2587,10 @@
       "stopByteLimit": "Am Größenlimit gestoppt – nichts wurde als gelöscht gewertet",
       "stopTimeLimit": "Am Zeitbudget gestoppt – nichts wurde als gelöscht gewertet",
       "stopCancelled": "Vorzeitig gestoppt – abgebrochen, abgelöst oder Chunk-Budget erreicht",
+      "throttled": "Wartend (Ratenlimit)",
+      "throttledCount": "{{waiting}} wartend",
+      "stopThrottled": "Vom Kontingent des Anbieters pausiert. Der nächste Lauf übernimmt den Rest; nichts wurde als fehlgeschlagen oder gelöscht behandelt",
+      "stopThrottledUntil": "Vom Ratenlimit des Anbieters pausiert – Anfragen werden ab {{time}} wieder angenommen. Der nächste Lauf übernimmt den Rest; nichts wurde als fehlgeschlagen oder gelöscht behandelt",
       "hoursMinutes": "{{hours}} Std. {{minutes}} Min.",
       "minutesSeconds": "{{minutes}} Min. {{seconds}} Sek.",
       "seconds": "{{seconds}} Sek."

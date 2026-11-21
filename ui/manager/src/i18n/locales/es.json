@@ -2615,6 +2615,10 @@
       "stopByteLimit": "Se detuvo en el límite de tamaño: nada se consideró eliminado",
       "stopTimeLimit": "Se detuvo en su presupuesto de tiempo: nada se consideró eliminado",
       "stopCancelled": "Se detuvo antes: cancelada, reemplazada o alcanzó su presupuesto de fragmentos",
+      "throttled": "En espera (límite de frecuencia)",
+      "throttledCount": "{{waiting}} en espera",
+      "stopThrottled": "En pausa por la cuota del proveedor. La próxima ejecución procesa el resto; nada se trató como fallido ni eliminado",
+      "stopThrottledUntil": "En pausa por el límite de frecuencia del proveedor: vuelve a aceptar solicitudes a partir de las {{time}}. La próxima ejecución procesa el resto; nada se trató como fallido ni eliminado",
       "hoursMinutes": "{{hours}} h {{minutes}} min",
       "minutesSeconds": "{{minutes}} min {{seconds}} s",
       "seconds": "{{seconds}} s"

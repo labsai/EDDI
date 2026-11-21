@@ -2587,6 +2587,10 @@
       "stopByteLimit": "크기 한도에서 중지 — 삭제된 것으로 처리된 항목 없음",
       "stopTimeLimit": "시간 예산에서 중지 — 삭제된 것으로 처리된 항목 없음",
       "stopCancelled": "일찍 중지 — 취소되었거나, 대체되었거나, 청크 예산에 도달함",
+      "throttled": "대기 중(속도 제한)",
+      "throttledCount": "{{waiting}}개 대기 중",
+      "stopThrottled": "공급자의 할당량 때문에 일시 중지되었습니다. 나머지는 다음 실행에서 처리하며, 실패하거나 삭제된 것으로 처리된 항목은 없습니다",
+      "stopThrottledUntil": "공급자의 속도 제한 때문에 일시 중지되었습니다 — {{time}}부터 다시 요청을 받습니다. 나머지는 다음 실행에서 처리하며, 실패하거나 삭제된 것으로 처리된 항목은 없습니다",
       "hoursMinutes": "{{hours}}시간 {{minutes}}분",
       "minutesSeconds": "{{minutes}}분 {{seconds}}초",
       "seconds": "{{seconds}}초"
