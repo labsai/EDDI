@@ -195,7 +195,13 @@ class MentionExtractorTest {
         @DisplayName("text and HTML that say different things: no mentions at all")
         void divergentAlternatives() {
             assertEquals(List.of(), handles("@finance please", Set.of(MailAnomaly.ALTERNATIVES_DIVERGE)));
-            assertEquals(List.of("finance"), handles("@finance please", Set.of(MailAnomaly.HTML_TRUNCATED)));
+            assertEquals(List.of("finance"), handles("@finance please", Set.of(MailAnomaly.MALFORMED_PART)));
+        }
+
+        @Test
+        @DisplayName("HTML cut at the size limit: no mentions, the cut can shorten @financeX into @finance")
+        void truncatedHtml() {
+            assertEquals(List.of(), handles("@finance please", Set.of(MailAnomaly.HTML_TRUNCATED)));
         }
 
         @Test

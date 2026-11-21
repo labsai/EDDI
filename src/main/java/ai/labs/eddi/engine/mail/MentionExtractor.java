@@ -92,14 +92,17 @@ public final class MentionExtractor {
      * appearance, each handle once. Handles not in {@code known} are ignored — they
      * may be people. None at all when the text and HTML alternatives of the mail
      * say different things ({@link MailAnomaly#ALTERNATIVES_DIVERGE}): which one
-     * the sender meant is unknown.
+     * the sender meant is unknown. None either when the HTML was cut
+     * ({@link MailAnomaly#HTML_TRUNCATED}): the cut can shorten a handle into
+     * another one ({@code @financeX} into {@code @finance}), and the divergence
+     * check compared only part of the HTML.
      *
      * @param known
      *            lower-case handle to what it stands for
      */
     public static List<MentionHit> extract(String text, Set<MailAnomaly> anomalies, Map<String, String> known) {
         if (text == null || text.isEmpty() || known == null || known.isEmpty()
-                || (anomalies != null && anomalies.contains(MailAnomaly.ALTERNATIVES_DIVERGE))) {
+                || (anomalies != null && (anomalies.contains(MailAnomaly.ALTERNATIVES_DIVERGE) || anomalies.contains(MailAnomaly.HTML_TRUNCATED)))) {
             return List.of();
         }
         Map<String, MentionHit> hits = new LinkedHashMap<>();

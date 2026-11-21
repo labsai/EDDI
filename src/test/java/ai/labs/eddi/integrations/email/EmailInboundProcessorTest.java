@@ -1031,6 +1031,21 @@ class EmailInboundProcessorTest {
             }
 
             @Test
+            @DisplayName("with two targets for the owner agent, the continuation runs when either admits the sender")
+            void ownerAnyTargetAdmits() throws Exception {
+                existingConversation();
+                var first = target("first", AGENT);
+                first.setAllowedSenders(List.of("boss@supplier.com"));
+                var second = target("second", AGENT);
+                second.setAllowedSenders(List.of("alice@supplier.com"));
+                EmailTestMail mail = EmailTestMail.mail().header("In-Reply-To: " + REPLY_ID).body("@legal please");
+
+                assertEquals(Disposition.SETTLED, processor.process(conversationContext(first, second, legal), mail.polled(1), Instant.now()));
+
+                assertEquals(List.of("conv-A"), sayConversations);
+            }
+
+            @Test
             @DisplayName("an owner that cannot be read defers the mail instead of skipping the check")
             void unreadableOwnerDefers() throws Exception {
                 existingConversation();

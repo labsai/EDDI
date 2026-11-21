@@ -354,6 +354,29 @@ class EmailReplySenderTest {
             String key = EmailThreads.threadKey(INTEGRATION, "<root@supplier.com>");
             assertTrue(replies().stream().allMatch(r -> key.equals(r.threadKey())), "every reply row carries the thread key");
         }
+
+        @Test
+        @DisplayName("the conversation's own count still caps it when each reply names another thread root, legacy rows included")
+        void conversationBudgetIndependentOfThread() {
+            integration(Map.of("maxRepliesPerThreadPerHour", "2"));
+            var settings = settings(Map.of("maxRepliesPerThreadPerHour", "2"));
+            // A reply written before thread keys existed: it counts for its conversation.
+            ledger.put(new LedgerEntry("legacy-out", INTEGRATION, Kind.REPLY, Direction.OUT, "<legacy@contoso.com>", CONVERSATION, "src-legacy",
+                    "k-legacy", SENDER, State.SENT, 1, null, null, null, null, NOW.minusSeconds(30), NOW.minusSeconds(30),
+                    NOW.plus(Duration.ofDays(30))));
+            for (int i = 0; i < 2; i++) {
+                LedgerEntry inbound = inbound("in-r" + i, "<r" + i + "@supplier.com>", SENDER, State.TURN_SUBMITTED);
+                ledger.put(inbound);
+                Map<String, Object> mail = mail("<r" + i + "@supplier.com>", SENDER);
+                mail.put("references", List.of("<root-" + i + "@supplier.com>"));
+                var snapshot = snapshot(ConversationState.READY, EmailUserIdentity.perSender(INTEGRATION, SENDER), output("answer " + i, mail));
+                sender.onTurnCompleted(INTEGRATION, settings, inbound, CONVERSATION, snapshot, NOW.plusSeconds(i));
+            }
+
+            assertEquals(1, transport.recipients.size(), "the legacy row and the first reply fill the conversation's cap of 2");
+            LedgerEntry held = replies().stream().filter(r -> r.state() == State.SUPPRESSED).findFirst().orElseThrow();
+            assertEquals(EmailReplySender.THREAD_BUDGET, held.lastError());
+        }
     }
 
     @Nested

@@ -250,7 +250,8 @@ mail to an agent nobody asked:
   becomes `[@Name](mailto:…)`), then the handle, ending at anything that is not a letter, digit, `_` or `-`.
   `bob@finance.com`, `@finance.com` and URLs never match. Handles no target uses are ignored — they may be people.
 - When the plain-text and HTML parts of a mail say different things (`mail.anomalies` holds
-  `alternatives_diverge`), no mention counts at all.
+  `alternatives_diverge`), no mention counts at all. The same holds when the HTML was cut at the size limit
+  (`html_truncated`): the cut could shorten one handle into another.
 
 A missed mention costs the sender a re-send; a false one would route their mail elsewhere, so when in doubt the
 extractor stops early. It never changes the text the agent reads. The Workforce chat composer also uses `@` to pick an

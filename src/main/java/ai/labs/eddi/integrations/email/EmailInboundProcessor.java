@@ -480,8 +480,7 @@ public class EmailInboundProcessor {
             if (owner.unreadable() || (owner.agentId() == null && anyTargetRestrictsSenders(ctx.integration()))) {
                 return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
             }
-            ChannelTarget ownerTarget = targetOfAgent(ctx.integration(), owner.agentId(), target);
-            if (ownerTarget != null && !mayReach(ownerTarget, sender, authenticated)) {
+            if (!ownerAdmits(ctx.integration(), owner.agentId(), target, sender, authenticated)) {
                 return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
             }
             if (owner.agentId() != null && route.source().explicit() && !owner.agentId().equals(target.getTargetId())) {
@@ -960,27 +959,37 @@ public class EmailInboundProcessor {
     }
 
     /**
-     * The integration's target for {@code agentId}: {@code preferred} when it is
-     * that agent's, else the first addressable agent target that is; null when none
-     * is (the conversation outlived its target).
+     * Whether the sender may reach the conversation's owner agent {@code agentId}:
+     * through {@code preferred} when it is that agent's target, else through any
+     * addressable agent target of the integration that is that agent's. Several
+     * targets can name one agent with different {@code allowedSenders}, and which
+     * of them started the conversation is not recorded, so the sender passes when
+     * one of them admits it — they could reach the agent through that target
+     * directly. True when no target is that agent's (the conversation outlived its
+     * target) or the owner is unknown.
      */
-    static ChannelTarget targetOfAgent(ChannelIntegrationConfiguration integration, String agentId, ChannelTarget preferred) {
+    static boolean ownerAdmits(ChannelIntegrationConfiguration integration, String agentId, ChannelTarget preferred, String sender,
+                               boolean authenticated) {
         if (agentId == null) {
-            return null;
+            return true;
         }
         if (preferred != null && agentId.equals(preferred.getTargetId())) {
-            return preferred;
+            return mayReach(preferred, sender, authenticated);
         }
         if (integration == null || integration.getTargets() == null) {
-            return null;
+            return true;
         }
+        boolean any = false;
         for (ChannelTarget candidate : integration.getTargets()) {
             if (candidate != null && !candidate.isObserveMode() && candidate.getType() != ChannelTarget.TargetType.GROUP
                     && agentId.equals(candidate.getTargetId())) {
-                return candidate;
+                if (mayReach(candidate, sender, authenticated)) {
+                    return true;
+                }
+                any = true;
             }
         }
-        return null;
+        return !any;
     }
 
     static String verdictId(MailAuthentication authentication) {
