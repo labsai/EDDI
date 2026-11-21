@@ -5,7 +5,7 @@ on:
     branches: [main]
     tags: ["[0-9]*"]
   pull_request:
-    branches: [main]
+    branches: [main, "release/**"]
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
 # three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
