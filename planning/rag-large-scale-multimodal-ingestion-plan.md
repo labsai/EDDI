@@ -212,6 +212,12 @@ No new tables and no queue.
    - the source's next scheduled run; or
    - a **one-shot schedule** at `resumeAfter` (`IScheduleStore.java:145–164, 395`).
 
+   **Both** check `resumeAfter` before they list the source or call the embedding provider, and
+   skip the run until that time. The one-shot schedule stays the wake-up trigger. Without that
+   check, a scheduled run firing a minute into a ten-minute `retryAfter` would call the
+   provider again and stop as `THROTTLED` once more. The shared cooldown row (§3.3) is phase Q
+   and is not part of T1-min, so `resumeAfter` on the run record is the only gate here.
+
    Either one lists the source again. Today every Drive run is a full listing, so the deferred
    documents are found again as new or changed.
 6. **Reporting:**
@@ -334,7 +340,12 @@ step inside a slice (§4.4), so a crash mid-listing resumes from the stored fron
    - Mongo: a `findOneAndUpdate` loop.
 3. processes each claimed row with today's `Collector` logic: fetch, extract or segment,
    embed, write, record;
-4. marks the row `DONE` and clears the `work_*` columns.
+4. completes the row **conditionally on the work generation it claimed**. Each time discovery
+   queues new work for a document it increments a `work_version`; the claim records the
+   version it read. The worker's `DONE` update (and the clearing of the `work_*` columns)
+   matches only `WHERE work_version = <claimed>`. If discovery queued version 2 while the
+   worker held version 1, the update matches nothing for the newer work: the row goes back to
+   `PENDING` with version 2 intact, so the change is not lost.
 
 **Continuation.** When due rows remain, the slice writes a **one-shot schedule**
 `rag-ingestion:{kb}:{source}:cont` at the earliest `not_before`. It is de-duplicated with
@@ -568,6 +579,12 @@ returns `{ folders: [{id, name}], nextPageToken }`.
 - A changed `scope_signature` sets `missed_runs` to the threshold for documents outside the new
   roots. Their vectors therefore go at the end of the next completed listing, not after
   `tombstoneAfterMissedRuns` runs.
+- **Effective at once, not at the end of a listing.** A throttled or otherwise incomplete
+  listing never reaches that reconciliation, so removal alone would leave the vectors of a
+  removed folder searchable. Retrieval therefore also filters by the current `scope_signature`:
+  every entry carries the signature it was ingested under, and a search drops entries whose
+  signature is not the source's current one or whose folder is outside the current roots.
+  Reconciliation then physically deletes what retrieval already hides.
 
 **Phase L (with the folder index):**
 
@@ -804,7 +821,12 @@ and the query vector comes from the same model.
 `/search` handler and `/evaluate`:
 
 1. Search with threshold `min(minScore, mediaMinScore)` and `maxResults × 2`, the factor making
-   room for pairs.
+   room for pairs. A fixed over-fetch can still fill with hits that the next step drops (with
+   `maxResults=2`, `minScore=0.9`, `mediaMinScore=0.2`, four text hits at 0.8 would crowd out
+   a native hit at 0.7). So the search **continues fetching** (a larger `maxResults` for the
+   store call, up to a configured cap) until `maxResults` qualifying groups exist or the store
+   has no more hits above the lower threshold. Stores that can filter on the entry kind may
+   instead run one search per threshold and merge.
 2. Drop each hit below its own entry's threshold.
 3. Group the hits by `mediaSegmentId`; a hit without one is its own group. **Keep one hit per
    group, the one with the higher score.** Ties go to the text entry. The surviving hit's text
@@ -932,6 +954,14 @@ The preview shows all three.
 
 - every embedding batch and every companion call is priced **before** it is sent;
 - crossing a ceiling ends the slice and sets `not_before` on the rows left (§4.5);
+- **a budget stop never throws away paid work.** A media row's pipeline has several priced
+  steps (companion call, then embedding). Each finished step is persisted on the row (the
+  companion text, or its stored result id) before the next is priced, and a retry resumes from
+  the first unfinished step. A row also needs its whole remaining cost to fit, or at least
+  one step, in the slice's budget before it is claimed; a ceiling smaller than one row's
+  cheapest unit is refused at configuration time. Without this, a $0.50 slice paying $0.30 for
+  a companion call and then failing to afford the $0.30 embedding would repeat the companion
+  cost on every attempt and never finish;
 - ingestion is recorded as **`SpendEvent.Kind.INGESTION`** (`detail = "rag:{kbId}:{sourceId}"`);
 - `TenantQuotaService.recordCost` runs after each batch and `checkCostBudget` before the next,
   as `DreamService` does (`:1178`).
@@ -1221,8 +1251,12 @@ ClusterFuzzLite target:
    `max-workers` needs a slot table (§4.4).
 7. Does the langchain4j pgvector store write a `halfvec` column unchanged (§5.4)?
 8. **Erasure by data subject for transcripts.**
-   - **Proposal:** an opt-in `companionText.namedSpeakers`, off by default, is the only way
-     names enter transcripts.
+   - **Proposal:** an opt-in `companionText.namedSpeakers`, off by default, controls whether
+     the generator attributes speech to named speakers. It does **not** keep names out of
+     transcripts: the default instruction asks for a verbatim transcript, so a name that is
+     spoken ("My name is Alex") is stored as text whether or not the option is on. The
+     erasure lookup therefore cannot rely on `speakers` metadata alone; it also searches the
+     stored transcript text for the subject's name.
    - When it is on, the generator emits `speakers` metadata. An admin endpoint,
      `DELETE /ragstore/rags/{id}/subjects?name=…`, removes every entry naming the subject (both
      entries of each segment, by `mediaSegmentId`) and re-processes those windows with the
