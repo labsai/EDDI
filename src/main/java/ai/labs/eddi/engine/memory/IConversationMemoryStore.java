@@ -488,6 +488,25 @@ public interface IConversationMemoryStore {
             throws IResourceStore.ResourceStoreException;
 
     /**
+     * The ids of at most {@code limit} conversations currently in {@code state}, in
+     * no particular order — a bounded {@link #findConversationIdsByState}.
+     * <p>
+     * The conversation listing asks for one more id than it can use, so a result of
+     * exactly {@code limit} ids tells it the set is larger than it will push into a
+     * query. Implementations answer from the state index alone where the backend
+     * can (MongoDB's {@code {conversationState: 1, _id: 1}} makes it a covered
+     * query), never by loading conversation documents.
+     *
+     * @param state
+     *            the state to filter by; required
+     * @param limit
+     *            the most ids to return; at least 1
+     * @return matching ids (never null)
+     */
+    List<String> findConversationIdsByState(ConversationState state, int limit)
+            throws IResourceStore.ResourceStoreException;
+
+    /**
      * Bounded, projection-friendly listing of conversations awaiting human
      * approval. Implementations must NOT load the full conversation documents where
      * the backend supports field projection — this method backs a potentially
