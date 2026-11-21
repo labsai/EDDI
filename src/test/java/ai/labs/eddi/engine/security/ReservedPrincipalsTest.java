@@ -155,6 +155,10 @@ class ReservedPrincipalsTest {
         assertTrue(ReservedPrincipals.isReserved("SLACK:T1:U2"));
         assertTrue(ReservedPrincipals.isReserved("anonymous"));
         assertTrue(ReservedPrincipals.isReserved("Unverified:alice"));
+        // A dedicated mailbox's grant principal: no signed-in user may carry it, or
+        // they could list, overwrite or resolve that mailbox's grant as their own.
+        assertTrue(ReservedPrincipals.isReserved("mailbox:support@company.example"));
+        assertTrue(ReservedPrincipals.isReserved("MAILBOX:support@company.example"));
         assertTrue(!ReservedPrincipals.isReserved("alice"));
         assertTrue(!ReservedPrincipals.isReserved("anonymous.user"));
         assertTrue(!ReservedPrincipals.isReserved(null));

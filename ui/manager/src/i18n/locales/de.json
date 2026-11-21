@@ -4515,7 +4515,10 @@
       "missingCode": "Der Anbieter hat keinen Autorisierungscode zurückgeschickt. Es wurde nichts verknüpft — bitte neu beginnen.",
       "connectionRemoved": "Diese Verbindung existiert nicht mehr — sie wurde während der Verknüpfung von einer Administratorin oder einem Administrator entfernt.",
       "exchangeFailed": "Der Anbieter hat die Verknüpfung nicht abgeschlossen. Versuchen Sie es erneut; bleibt es dabei, muss jemand mit Administrationsrechten die Einstellungen dieser Verbindung prüfen.",
-      "unknown": "Die Verknüpfung wurde nicht abgeschlossen. Es wurde nichts geändert — bitte neu beginnen."
+      "unknown": "Die Verknüpfung wurde nicht abgeschlossen. Es wurde nichts geändert — bitte neu beginnen.",
+      "mailboxAccountMismatch": "Sie haben sich mit einem Konto angemeldet, das nicht das Postfach ist, daher wurde nichts verknüpft. Beginnen Sie erneut und melden Sie sich als das Postfach selbst an.",
+      "mailboxAccountUnverified": "Das Konto des Postfachs konnte nicht geprüft werden (die Gmail-API antwortete nicht), daher wurde nichts verknüpft. Versuchen Sie es gleich noch einmal.",
+      "mailboxIsOwn": "Das ist Ihr eigenes Postfach. Nur ein dediziertes Postfach, nicht das einer Person, kann verknüpft werden."
     },
     "validation": {
       "nameRequired": "Ein Name ist erforderlich — darauf verweist ${connection:name}.",
@@ -4546,7 +4549,9 @@
       "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
       "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter.",
       "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url.",
-      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben."
+      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben.",
+      "accountCheckRequired": "Eine Verbindung für dedizierte Postfächer muss angeben, wie geprüft wird, dass das verknüpfte Konto das Postfach ist.",
+      "accountCheckOriginRequired": "Fügen Sie https://gmail.googleapis.com zu den erlaubten Origins hinzu: Das Konto des Postfachs wird über die Gmail-API gelesen."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -4558,7 +4563,9 @@
     "bindingChooser": "Woher der Schlüssel kommt",
     "bindingChoice": {
       "serviceBody": "Ein Schlüssel im Tresor, der für alle gesendet wird. Einfach – aber der Agent erreicht alles, was dieser Schlüssel erreicht.",
-      "callerSuppliedBody": "{{productName}} speichert nichts. Das System, das {{productName}} aufruft, sendet mit jeder Anfrage die Zugangsdaten des jeweiligen Nutzers, sodass der Agent nur tun kann, was dieser Nutzer tun darf – die Berechtigungen des Zielsystems sind die Grenze."
+      "callerSuppliedBody": "{{productName}} speichert nichts. Das System, das {{productName}} aufruft, sendet mit jeder Anfrage die Zugangsdaten des jeweiligen Nutzers, sodass der Agent nur tun kann, was dieser Nutzer tun darf – die Berechtigungen des Zielsystems sind die Grenze.",
+      "perUserBody": "Jede Person verbindet ihr eigenes Konto, und der Agent handelt in ihrem Namen.",
+      "mailboxBody": "Ein Administrator verknüpft dedizierte Postfächer (Google Workspace) für E-Mail-Integrationen. Nur zum Lesen und Beantworten der E-Mails dieses Postfachs nutzbar – nie von Tools."
     },
     "callerSuppliedHeaderTitle": "Was das aufrufende System sendet",
     "callerSuppliedHeaderBody": "Ein Header pro Anfrage: der Verbindungsname, ein Leerzeichen, dann der vollständige Wert, der als {{header}} gesendet wird – inklusive Schema, sodass „Bearer abc“ kein Escaping braucht. Die Zugangsdaten gelten nur für diese Anfrage und werden nie gespeichert.",
@@ -4592,6 +4599,30 @@
         "label": "Google-Dienstkonto (JSON-Schlüssel)",
         "description": "Google-APIs als Dienstkonto, signiert mit dessen privatem Schlüssel (RFC 7523 JWT Bearer). Legen Sie die heruntergeladene JSON-Schlüsseldatei als EINEN Vault-Eintrag ab und referenzieren Sie ihn als privaten Schlüssel; Aussteller und Schlüssel-ID werden daraus gelesen. Fügen Sie https://oauth2.googleapis.com zur Allowlist der Credential-Endpunkte hinzu. Ohne domainweite Delegierung sieht das Konto nur, was mit ihm geteilt wurde."
       }
+    },
+    "bindingChooserOAuth": "Wessen Konto verknüpft wird",
+    "bindingMailboxTitle": "Wird als dediziertes Postfach aufgelöst",
+    "bindingMailboxBody": "Ein Administrator verknüpft jedes dedizierte Postfach, indem er sich als dieses anmeldet. Nur die IMAP- und SMTP-Anmeldung des E-Mail-Kanals kann diese Berechtigungen nutzen – httpcalls, MCP, A2A und Tools werden abgewiesen.",
+    "accountCheck": "Kontoprüfung",
+    "accountCheckNone": "Wählen Sie, wie das Postfach geprüft wird",
+    "accountCheckGoogle": "google-gmail-profile – das Gmail-Profil muss das Postfach sein",
+    "accountCheckHint": "Beim Verknüpfen eines Postfachs und nach jeder Token-Erneuerung liest {{productName}} das Konto über die Gmail-API und weist eine Berechtigung ab, deren Konto nicht das Postfach ist. Fügen Sie https://gmail.googleapis.com zu den erlaubten Origins hinzu.",
+    "mailbox": {
+      "title": "Postfach-Berechtigungen",
+      "description": "Jedes dedizierte Postfach, das eine E-Mail-Integration über diese Verbindung liest, muss einmal verknüpft werden: Melden Sie sich bei Google als das Postfach selbst an, nicht als Sie. Die Berechtigung wird abgewiesen, wenn das Konto nicht die Adresse ist.",
+      "loadFailed": "Die verknüpften Postfächer konnten nicht geladen werden.",
+      "empty": "Noch kein Postfach verknüpft.",
+      "relink": "Der Anbieter hat diese Berechtigung abgelehnt. Verknüpfen Sie das Postfach erneut.",
+      "unlink": "Trennen",
+      "address": "Postfachadresse",
+      "link": "Postfach verknüpfen",
+      "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre Änderungen: Das Verknüpfen verlässt diese Seite.",
+      "linkStartFailed": "Das Verknüpfen des Postfachs konnte nicht gestartet werden.",
+      "unlinkFailed": "Das Postfach konnte nicht getrennt werden.",
+      "unlinked": "{{address}} ist nicht mehr verknüpft. Seine E-Mail-Integration liest keine E-Mails mehr, bis es erneut verknüpft wird.",
+      "unlinkTitle": "Dieses Postfach trennen?",
+      "unlinkBody": "{{address}} ist über diese Verbindung nicht mehr lesbar, und seine E-Mail-Integration schlägt als nicht verbunden fehl, bis das Postfach erneut verknüpft wird.",
+      "linked": "Postfach mit „{{name}}“ verknüpft. Seine E-Mail-Integration liest ab der nächsten Abfrage E-Mails."
     }
   },
   "workspaces": {
@@ -5581,7 +5612,8 @@
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
-      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
+      "mailboxNotLinked": "Gespeichert, aber das Postfach ist noch nicht mit seiner Verbindung für dedizierte Postfächer verknüpft und kann daher nicht gelesen werden. Ein Administrator verknüpft es unter Verbindungen → Postfach-Berechtigungen."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5614,7 +5646,9 @@
     "replyTemplate": "Antwortvorlage",
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
-    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "mailboxLinked": "Dieses Postfach ist mit der Verbindung verknüpft.",
+    "mailboxNotLinked": "Dieses Postfach ist noch nicht mit der Verbindung verknüpft und kann daher nicht gelesen werden. Verknüpfen Sie es unter Verbindungen → Postfach-Berechtigungen."
   },
   "feedback": {
     "title": "Feedback",

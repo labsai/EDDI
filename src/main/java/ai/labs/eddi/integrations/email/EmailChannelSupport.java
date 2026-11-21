@@ -7,7 +7,9 @@ package ai.labs.eddi.integrations.email;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionException;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
@@ -49,6 +51,14 @@ public class EmailChannelSupport {
      */
     @Inject
     Instance<IEmailSuppressionStore> suppressions;
+
+    /**
+     * The grants of {@code MAILBOX} connections, read for the
+     * {@link EmailChannelSettings#WARNING_MAILBOX_NOT_LINKED} warning.
+     * Field-injected for the same reason as {@link #suppressions}.
+     */
+    @Inject
+    Instance<MailboxGrants> mailboxGrants;
 
     @Inject
     public EmailChannelSupport(SafeSocketConnector connector, Instance<ConnectionResolver> connectionResolver, EmailIntegrationDirectory directory,
@@ -132,6 +142,11 @@ public class EmailChannelSupport {
             LOGGER.warnf("Email integration '%s' accepts unauthenticated mail from any sender: anyone on the internet can make its agent "
                     + "run. Set a senderAllowlist, or requireAuthentication: true.", sanitize(configuration.getName()));
         }
+        if (mailboxNotLinked(settings)) {
+            warnings.add(EmailChannelSettings.WARNING_MAILBOX_NOT_LINKED);
+            LOGGER.warnf("Email integration '%s' uses a MAILBOX connection, and its mailbox is not linked yet: polling fails as not "
+                    + "connected until an administrator links it under Connections → Mailbox grants.", sanitize(configuration.getName()));
+        }
         List<String> ungated = toolsInspector.targetsWithUngatedTools(configuration.getTargets());
         if (!ungated.isEmpty()) {
             warnings.add(EmailChannelSettings.WARNING_TOOLS_WITHOUT_APPROVALS);
@@ -140,6 +155,30 @@ public class EmailChannelSupport {
                     sanitize(String.join(", ", ungated)));
         }
         return warnings;
+    }
+
+    /**
+     * Whether the integration's connection is {@code MAILBOX}-bound and holds no
+     * usable grant for its address. A save is never refused for it — the connection
+     * may be saved before the mailbox is linked, and polling backs off as
+     * {@code NOT_CONNECTED} until it is — so the answer is a warning, and any
+     * failure to tell is no warning rather than a failed save.
+     */
+    private boolean mailboxNotLinked(EmailChannelSettings settings) {
+        if (connectionResolver == null || !connectionResolver.isResolvable() || mailboxGrants == null || !mailboxGrants.isResolvable()
+                || settings.connection() == null) {
+            return false;
+        }
+        try {
+            if (connectionResolver.get().bindingOf("${connection:" + settings.connection() + "}").orElse(null) != Binding.MAILBOX) {
+                return false;
+            }
+            return !mailboxGrants.get().isLinked(settings.connection(), settings.address());
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not tell whether the mailbox of connection '%s' is linked: %s", sanitize(settings.connection()),
+                    e.getClass().getSimpleName());
+            return false;
+        }
     }
 
     /**

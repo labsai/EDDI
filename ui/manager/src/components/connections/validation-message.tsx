@@ -90,6 +90,16 @@ function messageFor(
         "connections.validation.paramValueCredentialShaped",
         "One of these values looks like a key or a token. This map is stored in plain text and sent in a URL — only non-secret protocol parameters belong here.",
       );
+    case "accountCheckRequired":
+      return t(
+        "connections.validation.accountCheckRequired",
+        "A dedicated-mailbox connection must say how the linked account is verified to be the mailbox.",
+      );
+    case "accountCheckOriginRequired":
+      return t(
+        "connections.validation.accountCheckOriginRequired",
+        "Add https://gmail.googleapis.com to the allowed origins: the mailbox's account is read from the Gmail API.",
+      );
     case "bindingMismatch":
       return t(
         "connections.validation.bindingMismatch",

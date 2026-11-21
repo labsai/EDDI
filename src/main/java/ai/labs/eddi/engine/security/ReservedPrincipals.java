@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.security;
 
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.engine.audit.AuditHmac;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.openai.OpenAiUserIdentity;
@@ -58,6 +59,8 @@ public final class ReservedPrincipals {
             EmailUserIdentity.ANONYMOUS_PREFIX,
             // Agent test-harness conversations (PR #1065), which switch tool mocking on
             "agent-test:",
+            // Dedicated-mailbox grants of MAILBOX connections: mailbox:<address>
+            MailboxGrants.PRINCIPAL_PREFIX,
             // A group's shared (team) memory owner: group:<groupId>
             IUserMemoryStore.TEAM_OWNER_PREFIX,
             // Engine actors: system:scheduler, system:timeout, system:retention, …

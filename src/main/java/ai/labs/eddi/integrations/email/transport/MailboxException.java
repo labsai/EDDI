@@ -16,6 +16,12 @@ public class MailboxException extends Exception {
         POLICY,
         /** The connection's credential could not be resolved. */
         CREDENTIAL,
+        /**
+         * The mailbox has no usable grant on its {@code MAILBOX}-bound connection —
+         * never linked, unlinked, or rejected by the provider. An administrator must
+         * link it (again); nothing a retry does fixes it.
+         */
+        NOT_CONNECTED,
         /** The server refused the login. */
         AUTHENTICATION,
         /** Connecting, TLS or the protocol exchange failed. */

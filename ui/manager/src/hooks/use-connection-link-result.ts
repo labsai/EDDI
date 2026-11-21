@@ -9,6 +9,7 @@ import {
   type ConnectionErrorCode,
 } from "@eddi/app-kit/lib/api/connections";
 import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
+import { mailboxGrantsKey } from "@/hooks/use-mailbox-grants";
 
 /**
  * What the browser came back from the provider carrying.
@@ -18,6 +19,7 @@ import { MINE_KEY } from "@eddi/app-kit/hooks/use-connections";
  */
 export type LinkOutcome =
   | { kind: "connected"; connection: string }
+  | { kind: "mailboxLinked"; connection: string }
   | { kind: "error"; code: ConnectionErrorCode | "unknown" }
   | null;
 
@@ -47,16 +49,33 @@ export function useConnectionLinkResult(): LinkOutcome {
   const handled = useRef<string | null>(null);
 
   const connected = searchParams.get("connected");
+  const mailboxLinked = searchParams.get("mailboxLinked");
   const error = searchParams.get("error");
 
   useEffect(() => {
-    if (connected === null && error === null) return;
+    if (connected === null && error === null && mailboxLinked === null) return;
 
-    const token = connected !== null ? `connected:${connected}` : `error:${error}`;
+    const token =
+      connected !== null
+        ? `connected:${connected}`
+        : mailboxLinked !== null
+          ? `mailboxLinked:${mailboxLinked}`
+          : `error:${error}`;
     if (handled.current === token) return;
     handled.current = token;
 
-    if (connected !== null) {
+    if (mailboxLinked !== null) {
+      // An administrator's mailbox link. The list is refetched rather than
+      // trusted: the parameter is a plain URL anyone can hand out.
+      setOutcome({ kind: "mailboxLinked", connection: mailboxLinked });
+      void queryClient.invalidateQueries({ queryKey: mailboxGrantsKey(mailboxLinked) });
+      toast.success(
+        t("connections.mailbox.linked", {
+          name: mailboxLinked,
+          defaultValue: 'Mailbox linked to "{{name}}". Its email integration reads mail from the next poll on.',
+        }),
+      );
+    } else if (connected !== null) {
       setOutcome({ kind: "connected", connection: connected });
 
       // The list on screen predates the round trip. Status, scopes and expiry
@@ -98,9 +117,10 @@ export function useConnectionLinkResult(): LinkOutcome {
     // (a version, a tab) belongs to the page and must survive.
     const next = new URLSearchParams(searchParams);
     next.delete("connected");
+    next.delete("mailboxLinked");
     next.delete("error");
     setSearchParams(next, { replace: true });
-  }, [connected, error, searchParams, setSearchParams, queryClient, t]);
+  }, [connected, mailboxLinked, error, searchParams, setSearchParams, queryClient, t]);
 
   return outcome;
 }
@@ -149,6 +169,21 @@ function linkErrorMessage(
       return t(
         "connections.error.exchangeFailed",
         "The provider would not complete the link. Try again; if it keeps failing, an administrator needs to check this connection's settings.",
+      );
+    case "mailbox_account_mismatch":
+      return t(
+        "connections.error.mailboxAccountMismatch",
+        "You signed in with an account that is not the mailbox, so nothing was linked. Start again and sign in as the mailbox itself.",
+      );
+    case "mailbox_account_unverified":
+      return t(
+        "connections.error.mailboxAccountUnverified",
+        "The mailbox's account could not be verified (the Gmail API did not answer), so nothing was linked. Try again shortly.",
+      );
+    case "mailbox_is_own":
+      return t(
+        "connections.error.mailboxIsOwn",
+        "That is your own mailbox. Only a dedicated mailbox, not a person's, can be linked.",
       );
     default:
       return t(

@@ -5,8 +5,11 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
@@ -19,6 +22,7 @@ import org.junit.jupiter.api.Test;
 import java.net.URI;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -119,5 +123,40 @@ class EmailChannelSupportTest {
         assertThrows(BadRequestException.class, () -> support.clearSuppression("int-1", "not an address"));
         support.afterDelete("int-1");
         verify(suppressions).removeAll("int-1");
+    }
+
+    @SuppressWarnings("unchecked")
+    private MailboxGrants mailboxGrants() {
+        MailboxGrants grants = mock(MailboxGrants.class);
+        Instance<MailboxGrants> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(grants);
+        support.mailboxGrants = instance;
+        return grants;
+    }
+
+    @Test
+    @DisplayName("a MAILBOX connection whose mailbox is not linked saves with email.mailbox-not-linked")
+    void mailboxNotLinkedWarning() {
+        MailboxGrants grants = mailboxGrants();
+        when(resolver.bindingOf("${connection:mailbox}")).thenReturn(Optional.of(Binding.MAILBOX));
+        when(grants.isLinked("mailbox", "invoices@contoso.com")).thenReturn(false);
+
+        assertTrue(support.warnings(EmailInboundProcessorTest.integration(Map.of())).contains(EmailChannelSettings.WARNING_MAILBOX_NOT_LINKED));
+        assertDoesNotThrow(() -> support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of()), null),
+                "an unlinked mailbox is a warning, never a refused save");
+    }
+
+    @Test
+    @DisplayName("a linked mailbox, or a connection of any other binding, gets no such warning")
+    void noWarningWhenLinkedOrNotMailbox() {
+        MailboxGrants grants = mailboxGrants();
+        when(resolver.bindingOf("${connection:mailbox}")).thenReturn(Optional.of(Binding.MAILBOX));
+        when(grants.isLinked("mailbox", "invoices@contoso.com")).thenReturn(true);
+        assertFalse(support.warnings(EmailInboundProcessorTest.integration(Map.of())).contains(EmailChannelSettings.WARNING_MAILBOX_NOT_LINKED));
+
+        when(resolver.bindingOf("${connection:mailbox}")).thenReturn(Optional.of(Binding.SERVICE));
+        assertFalse(support.warnings(EmailInboundProcessorTest.integration(Map.of())).contains(EmailChannelSettings.WARNING_MAILBOX_NOT_LINKED));
+        verify(grants, never()).isLinked("other", "invoices@contoso.com");
     }
 }

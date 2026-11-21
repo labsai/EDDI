@@ -972,7 +972,8 @@
     "binding": {
       "perUser": "ユーザーごと",
       "service": "共有",
-      "callerSupplied": "呼び出し元が提供"
+      "callerSupplied": "呼び出し元が提供",
+      "mailbox": "専用メールボックス"
     },
     "status": {
       "active": "連携済み",

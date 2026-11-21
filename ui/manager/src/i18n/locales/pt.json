@@ -4557,7 +4557,10 @@
       "missingCode": "O provedor não devolveu um código de autorização. Nada foi associado — comece de novo, por favor.",
       "connectionRemoved": "Essa conexão não existe mais — um administrador a removeu enquanto você associava.",
       "exchangeFailed": "O provedor não concluiu a associação. Tente de novo; se continuar falhando, um administrador precisa revisar as configurações desta conexão.",
-      "unknown": "A associação não foi concluída. Nada foi alterado — comece de novo, por favor."
+      "unknown": "A associação não foi concluída. Nada foi alterado — comece de novo, por favor.",
+      "mailboxAccountMismatch": "Você entrou com uma conta que não é a caixa, então nada foi vinculado. Comece de novo e entre como a própria caixa.",
+      "mailboxAccountUnverified": "Não foi possível verificar a conta da caixa (a API do Gmail não respondeu), então nada foi vinculado. Tente novamente em instantes.",
+      "mailboxIsOwn": "Essa é a sua própria caixa de correio. Só uma caixa dedicada, não a de uma pessoa, pode ser vinculada."
     },
     "validation": {
       "nameRequired": "Um nome é obrigatório — é a ele que ${connection:name} se refere.",
@@ -4588,7 +4591,9 @@
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
       "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
       "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url.",
-      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação."
+      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação.",
+      "accountCheckRequired": "Uma conexão de caixa dedicada deve indicar como a conta vinculada é verificada como sendo a caixa.",
+      "accountCheckOriginRequired": "Adicione https://gmail.googleapis.com às origens permitidas: a conta da caixa é lida pela API do Gmail."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -4600,7 +4605,9 @@
     "bindingChooser": "De onde vem a chave",
     "bindingChoice": {
       "serviceBody": "Uma chave no cofre, enviada para todos. Simples — mas o agente alcança tudo o que essa chave alcança.",
-      "callerSuppliedBody": "O {{productName}} não armazena nada. O sistema que chama o {{productName}} envia a credencial de cada utilizador com cada pedido, por isso o agente só pode fazer o que esse utilizador pode fazer — as permissões do destino são o limite."
+      "callerSuppliedBody": "O {{productName}} não armazena nada. O sistema que chama o {{productName}} envia a credencial de cada utilizador com cada pedido, por isso o agente só pode fazer o que esse utilizador pode fazer — as permissões do destino são o limite.",
+      "perUserBody": "Cada pessoa conecta a própria conta e o agente age em nome dela.",
+      "mailboxBody": "Um administrador vincula caixas de correio dedicadas (Google Workspace) para integrações de e-mail. Usável apenas para ler e responder o e-mail dessa caixa — nunca por ferramentas."
     },
     "callerSuppliedHeaderTitle": "O que o sistema chamador envia",
     "callerSuppliedHeaderBody": "Um cabeçalho por pedido: o nome da ligação, um espaço e depois o valor completo a enviar como {{header}} — esquema incluído, por isso “Bearer abc” não precisa de escape. A credencial existe apenas durante esse pedido e nunca é armazenada.",
@@ -4634,6 +4641,30 @@
         "label": "Conta de serviço do Google (chave JSON)",
         "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
       }
+    },
+    "bindingChooserOAuth": "Qual conta é vinculada",
+    "bindingMailboxTitle": "Resolve como uma caixa de correio dedicada",
+    "bindingMailboxBody": "Um administrador vincula cada caixa dedicada entrando como ela. Somente o login IMAP e SMTP do canal de e-mail pode usar essas concessões — httpcalls, MCP, A2A e ferramentas são recusados.",
+    "accountCheck": "Verificação da conta",
+    "accountCheckNone": "Escolha como a caixa é verificada",
+    "accountCheckGoogle": "google-gmail-profile — o perfil do Gmail deve ser a caixa de correio",
+    "accountCheckHint": "Ao vincular uma caixa, e após cada renovação de token, o {{productName}} lê a conta pela API do Gmail e recusa uma concessão cuja conta não seja a caixa. Adicione https://gmail.googleapis.com às origens permitidas.",
+    "mailbox": {
+      "title": "Concessões de caixa de correio",
+      "description": "Cada caixa dedicada que uma integração de e-mail lê por esta conexão deve ser vinculada uma vez: entre no Google como a própria caixa, não como você. A concessão é recusada se a conta não for o endereço.",
+      "loadFailed": "Não foi possível carregar as caixas vinculadas.",
+      "empty": "Nenhuma caixa vinculada ainda.",
+      "relink": "O provedor rejeitou esta concessão. Vincule a caixa novamente.",
+      "unlink": "Desvincular",
+      "address": "Endereço da caixa",
+      "link": "Vincular caixa",
+      "saveFirst": "Salve ou descarte suas alterações primeiro: vincular sai desta página.",
+      "linkStartFailed": "Não foi possível iniciar a vinculação da caixa.",
+      "unlinkFailed": "Não foi possível desvincular a caixa.",
+      "unlinked": "{{address}} não está mais vinculada. Sua integração de e-mail para de ler mensagens até ser vinculada de novo.",
+      "unlinkTitle": "Desvincular esta caixa?",
+      "unlinkBody": "{{address}} não poderá mais ser lida por esta conexão, e sua integração de e-mail falhará como não conectada até a caixa ser vinculada de novo.",
+      "linked": "Caixa vinculada a \"{{name}}\". Sua integração de e-mail lê mensagens a partir da próxima verificação."
     }
   },
   "workspaces": {
@@ -5633,7 +5664,8 @@
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
       "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
       "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
-      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta."
+      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta.",
+      "mailboxNotLinked": "Salvo, mas a caixa ainda não está vinculada à sua conexão de caixa dedicada, então não pode ser lida. Um administrador a vincula em Conexões → Concessões de caixa de correio."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5666,7 +5698,9 @@
     "replyTemplate": "Modelo de resposta",
     "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
     "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o {{productName}} não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
-    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "mailboxLinked": "Esta caixa está vinculada à conexão.",
+    "mailboxNotLinked": "Esta caixa ainda não está vinculada à conexão, então não pode ser lida. Vincule-a em Conexões → Concessões de caixa de correio."
   },
   "feedback": {
     "title": "Avaliações",

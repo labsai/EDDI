@@ -661,8 +661,12 @@ public class RestConnectionStore implements IRestConnectionStore {
         throw new ClientErrorException("Connection '" + current.getName() + "' has " + linked + " linked account(s) whose grants were "
                 + "produced under authType " + current.getAuthType() + " / binding " + current.getBinding() + ". Changing it to "
                 + target.getAuthType() + " / " + target.getBinding() + " would leave their refresh tokens at rest under a name the "
-                + "resolver never reads them for. Have each user unlink with DELETE /connections/" + current.getName()
-                + "/grant, or delete the connection — which deletes its grants with it — and create the new one.",
+                + "resolver never reads them for. "
+                + (current.getBinding() == Binding.MAILBOX
+                        ? "Unlink each mailbox with POST /connections/" + current.getName() + "/mailbox-grants/unlink (Manager: the "
+                                + "connection's Mailbox grants panel)"
+                        : "Have each user unlink with DELETE /connections/" + current.getName() + "/grant")
+                + ", or delete the connection — which deletes its grants with it — and create the new one.",
                 Response.Status.CONFLICT);
     }
 
@@ -884,6 +888,14 @@ public class RestConnectionStore implements IRestConnectionStore {
             throw new BadRequestException("A PER_USER connection requires authorization.enabled=true. Without a verified identity any caller "
                     + "could claim any userId and resolve that user's tokens, so resolution refuses outright — the connection would save "
                     + "and then fail every call. Enable OIDC, or use SERVICE binding.");
+        }
+        if (connectionConfiguration.getBinding() == Binding.MAILBOX && !authorizationEnabled) {
+            // A mailbox is linked by an authenticated eddi-admin (the link endpoints
+            // refuse an anonymous caller), so with OIDC off the connection would save
+            // and no mailbox could ever be linked to it.
+            throw new BadRequestException("A MAILBOX connection requires authorization.enabled=true. A dedicated mailbox is linked by an "
+                    + "authenticated eddi-admin signing in as that mailbox, and with OIDC off every caller is anonymous — the connection "
+                    + "would save and no mailbox could ever be linked to it. Enable OIDC.");
         }
         if (connectionConfiguration.getBinding() == Binding.CALLER_SUPPLIED && !authorizationEnabled) {
             // The credential arrives in a request header, and CallerIdentityContext

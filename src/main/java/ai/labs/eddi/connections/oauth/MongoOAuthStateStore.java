@@ -47,6 +47,8 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
     private static final String FIELD_EXPIRES = "expiresAt";
     private static final String FIELD_CONSUMED = "consumedAt";
     private static final String FIELD_NONCE_HASH = "nonceHash";
+    private static final String FIELD_MAILBOX_ADDRESS = "mailboxAddress";
+    private static final String FIELD_LINKER_EMAIL_HASH = "linkerEmailHash";
 
     private final MongoCollection<Document> states;
 
@@ -66,6 +68,7 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
                 .append(FIELD_PRINCIPAL, state.getPrincipal())
                 .append(FIELD_VERIFIER, state.getCodeVerifier()).append(FIELD_REDIRECT_URI, state.getRedirectUri())
                 .append(FIELD_RETURN_TO, state.getReturnTo()).append(FIELD_NONCE_HASH, state.getNonceHash())
+                .append(FIELD_MAILBOX_ADDRESS, state.getMailboxAddress()).append(FIELD_LINKER_EMAIL_HASH, state.getLinkerEmailHash())
                 .append(FIELD_CREATED, Date.from(state.getCreatedAt()))
                 .append(FIELD_EXPIRES, Date.from(state.getExpiresAt())));
     }
@@ -116,6 +119,8 @@ public class MongoOAuthStateStore implements IOAuthStateStore {
         state.setRedirectUri(document.getString(FIELD_REDIRECT_URI));
         state.setReturnTo(document.getString(FIELD_RETURN_TO));
         state.setNonceHash(document.getString(FIELD_NONCE_HASH));
+        state.setMailboxAddress(document.getString(FIELD_MAILBOX_ADDRESS));
+        state.setLinkerEmailHash(document.getString(FIELD_LINKER_EMAIL_HASH));
         state.setCreatedAt(document.getDate(FIELD_CREATED) == null ? null : document.getDate(FIELD_CREATED).toInstant());
         state.setExpiresAt(document.getDate(FIELD_EXPIRES) == null ? null : document.getDate(FIELD_EXPIRES).toInstant());
         state.setConsumedAt(document.getDate(FIELD_CONSUMED) == null ? null : document.getDate(FIELD_CONSUMED).toInstant());

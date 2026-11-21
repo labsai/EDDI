@@ -17,6 +17,7 @@ import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.UserMemoryEntry;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.connections.MailboxGrants;
 import ai.labs.eddi.connections.grants.ConnectionGrant;
 import ai.labs.eddi.connections.grants.IConnectionGrantStore;
 import ai.labs.eddi.connections.oauth.IOAuthStateStore;
@@ -1065,9 +1066,16 @@ public class GdprComplianceService {
      * service-bound connection grants: "erasing" it would delete them all and
      * disconnect every agent that uses a service connection, and exporting it would
      * hand out the list of them. Refused as a caller error.
+     * <p>
+     * {@code mailbox:<address>} owns a dedicated mailbox's grant on a
+     * {@code MAILBOX} connection. A dedicated mailbox is not a person, and erasing
+     * it would silently unlink the mailbox and stop its email integration; an
+     * administrator unlinks it deliberately with {@code POST
+     * /connections/{name}/mailbox-grants/unlink} instead.
      */
     public static boolean isReservedPrincipal(String userId) {
-        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId);
+        return ConnectionResolver.SERVICE_PRINCIPAL.equals(userId)
+                || (userId != null && userId.regionMatches(true, 0, MailboxGrants.PRINCIPAL_PREFIX, 0, MailboxGrants.PRINCIPAL_PREFIX.length()));
     }
 
     private static void rejectReservedPrincipal(String userId) {

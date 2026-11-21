@@ -147,6 +147,7 @@ public class ConnectionResolver {
         }
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
+            refuseMailbox(connection, "an HTTP header (httpcalls, MCP, A2A, ingestion)");
             requireTargetAllowed(connection, targetUrl);
             ResolvedCredential credential = resolveCredential(connection, principalOverride, targetUrl);
             record(connection, "success", sample);
@@ -204,6 +205,7 @@ public class ConnectionResolver {
         }
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
+            refuseMailbox(connection, "a bare access token outside the email channel (for example the system mailer)");
             requireBareTokenAvailable(connection);
             requireTargetAllowed(connection, targetUrl);
             String accessToken = accessTokenSupplier.accessToken(connection, resolvePrincipal(connection, principalOverride));
@@ -219,6 +221,101 @@ public class ConnectionResolver {
         } catch (ConnectionException e) {
             record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
             throw e;
+        }
+    }
+
+    /**
+     * Resolves the access token of one dedicated mailbox, for the email channel's
+     * IMAP and SMTP {@code XOAUTH2} login — the one place a {@link Binding#MAILBOX}
+     * grant may be spent.
+     * <p>
+     * The grant is the one filed under {@code mailbox:<address>}
+     * ({@link MailboxGrants#principalOf}); no conversation principal is consulted,
+     * because a poll runs as nobody and the mailbox, not a person, owns the grant.
+     * The target must be on the connection's {@code baseUrlAllowlist} exactly as
+     * for every other credential. A missing grant, and one the provider rejected
+     * ({@code invalid_grant}, so the grant reads {@code REFRESH_FAILED}), are both
+     * {@link ConnectionException.Reason#NOT_CONNECTED}: either way an administrator
+     * has to link the mailbox again, and the poll reports exactly that.
+     *
+     * @param reference
+     *            a value containing {@code ${connection:name}}
+     * @param targetUrl
+     *            the mail origin the token is for ({@code imaps://imap.gmail.com},
+     *            {@code smtps://smtp.gmail.com})
+     * @param mailboxAddress
+     *            the integration's mailbox address
+     * @return the live access token, never null or blank
+     * @throws ConnectionException
+     *             {@link ConnectionException.Reason#UNSUPPORTED_PLACEMENT} for a
+     *             connection that is not {@code MAILBOX}-bound, and on every other
+     *             failure
+     */
+    public String resolveMailboxAccessToken(String reference, URI targetUrl, String mailboxAddress) {
+        ConnectionReference parsed = ConnectionReference.parse(reference);
+        ConnectionConfiguration connection;
+        try {
+            connection = connectionRegistry.require(parsed);
+        } catch (ConnectionException e) {
+            countLookupFailure(e);
+            throw e;
+        }
+        Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
+        try {
+            if (connection.getBinding() != Binding.MAILBOX || connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE) {
+                throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                        "Connection '" + connection.getName() + "' is " + connection.getAuthType() + " / " + connection.getBinding()
+                                + ", not an OAUTH2_AUTHORIZATION_CODE connection bound MAILBOX, so it holds no mailbox grants.");
+            }
+            String principal;
+            try {
+                principal = MailboxGrants.principalOf(mailboxAddress);
+            } catch (IllegalArgumentException e) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "The mailbox address given for connection '" + connection.getName() + "' is not a plain email address: " + e.getMessage());
+            }
+            requireTargetAllowed(connection, targetUrl);
+            String accessToken;
+            try {
+                accessToken = accessTokenSupplier.accessToken(connection, principal);
+            } catch (ConnectionException e) {
+                if (e.getReason() != ConnectionException.Reason.NOT_CONNECTED && e.getReason() != ConnectionException.Reason.GRANT_UNUSABLE) {
+                    throw e;
+                }
+                throw new ConnectionException(ConnectionException.Reason.NOT_CONNECTED,
+                        "The mailbox is not linked to connection '" + connection.getName() + "'"
+                                + (e.getReason() == ConnectionException.Reason.GRANT_UNUSABLE ? " any more (the provider rejected its grant)" : "")
+                                + ". An administrator must link it: POST /connections/" + connection.getName()
+                                + "/mailbox-grants/authorize, or Manager → Connections → Mailbox grants.",
+                        e);
+            }
+            if (accessToken == null || accessToken.isBlank()) {
+                throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE,
+                        "Connection '" + connection.getName() + "' produced an empty access token.");
+            }
+            record(connection, "success", sample);
+            return accessToken;
+        } catch (ConnectionException e) {
+            record(connection, e.getReason().name().toLowerCase(Locale.ROOT), sample);
+            throw e;
+        }
+    }
+
+    /**
+     * Refuses a {@link Binding#MAILBOX} connection on an entry point other than
+     * {@link #resolveMailboxAccessToken}.
+     * <p>
+     * Checked first, before the allowlist: a mailbox grant reads and sends a whole
+     * mailbox, and the answer must name that rule rather than an allowlist the
+     * author could "fix" by adding an origin. Without it the binding would fall
+     * through to {@link #resolvePrincipal}, which maps every non-PER_USER binding
+     * to the service principal and would report a misleading "not connected".
+     */
+    private static void refuseMailbox(ConnectionConfiguration connection, String placement) {
+        if (connection.getBinding() == Binding.MAILBOX) {
+            throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
+                    "Connection '" + connection.getName() + "' is bound MAILBOX: its grants belong to dedicated mailboxes and are used only "
+                            + "by the email channel's IMAP/SMTP login, never as " + placement + ". Use a separate connection for anything else.");
         }
     }
 
@@ -260,6 +357,7 @@ public class ConnectionResolver {
         }
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
+            refuseMailbox(connection, "a username and password login");
             if (connection.getAuthType() != AuthType.BASIC || connection.getBinding() == Binding.CALLER_SUPPLIED) {
                 throw new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
                         "Connection '" + connection.getName() + "' is " + connection.getAuthType()
@@ -289,9 +387,10 @@ public class ConnectionResolver {
     /**
      * Save-time check of a mail login, without resolving any credential: the
      * connection exists, can log in to a mailbox ({@code BASIC} for an app
-     * password, an OAuth type for {@code XOAUTH2}; never {@code CALLER_SUPPLIED})
-     * and its {@code baseUrlAllowlist} names {@code targetUrl} (a mail origin such
-     * as {@code imaps://outlook.office365.com}). The same rules
+     * password, an OAuth type for {@code XOAUTH2} — a {@code MAILBOX}-bound one
+     * included; never {@code CALLER_SUPPLIED}) and its {@code baseUrlAllowlist}
+     * names {@code targetUrl} (a mail origin such as
+     * {@code imaps://outlook.office365.com}). The same rules
      * {@link #resolveBasicLogin} and {@link #resolveAccessToken} apply when the
      * login happens, checked where the author is waiting for an answer.
      *
@@ -583,6 +682,9 @@ public class ConnectionResolver {
      * config document. This is where the refusal actually happens.
      */
     private String resolvePrincipal(ConnectionConfiguration connection, String principalOverride) {
+        // Every public entry point refuses MAILBOX first; this is the backstop for one
+        // added later that forgets to, so it can never resolve the service principal.
+        refuseMailbox(connection, "a conversation or service credential");
         if (connection.getBinding() != Binding.PER_USER) {
             return SERVICE_PRINCIPAL;
         }

@@ -4515,7 +4515,10 @@
       "missingCode": "공급자가 인가 코드를 돌려주지 않았습니다. 아무것도 연결되지 않았습니다 — 다시 시작해 주세요.",
       "connectionRemoved": "그 연결은 더 이상 존재하지 않습니다 — 연결하는 동안 관리자가 삭제했습니다.",
       "exchangeFailed": "공급자가 연결을 완료하지 못했습니다. 다시 시도해 보세요. 계속 실패하면 관리자가 이 연결의 설정을 확인해야 합니다.",
-      "unknown": "연결이 완료되지 않았습니다. 바뀐 것은 없습니다 — 다시 시작해 주세요."
+      "unknown": "연결이 완료되지 않았습니다. 바뀐 것은 없습니다 — 다시 시작해 주세요.",
+      "mailboxAccountMismatch": "메일함이 아닌 계정으로 로그인하여 아무것도 연결되지 않았습니다. 다시 시작하여 메일함 자체로 로그인하세요.",
+      "mailboxAccountUnverified": "메일함 계정을 확인할 수 없어(Gmail API가 응답하지 않음) 아무것도 연결되지 않았습니다. 잠시 후 다시 시도하세요.",
+      "mailboxIsOwn": "본인의 메일함입니다. 개인의 메일함이 아닌 전용 메일함만 연결할 수 있습니다."
     },
     "validation": {
       "nameRequired": "이름은 필수입니다 — ${connection:name}이 가리키는 대상이 바로 이 이름입니다.",
@@ -4546,7 +4549,9 @@
       "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
       "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다.",
       "thumbprintFormat": "올바른 길이의 지문이 아닙니다. x5t#S256에는 SHA-256 지문, x5t에는 SHA-1 지문이 필요합니다 — 16진수 또는 base64url로 입력하세요.",
-      "thumbprintRequiredEntra": "Microsoft Entra는 인증서 지문으로만 키를 식별합니다. 앱 등록에 업로드한 인증서의 지문을 붙여 넣으세요."
+      "thumbprintRequiredEntra": "Microsoft Entra는 인증서 지문으로만 키를 식별합니다. 앱 등록에 업로드한 인증서의 지문을 붙여 넣으세요.",
+      "accountCheckRequired": "전용 메일함 연결은 연결된 계정이 해당 메일함인지 확인하는 방법을 지정해야 합니다.",
+      "accountCheckOriginRequired": "허용 출처에 https://gmail.googleapis.com을 추가하세요. 메일함의 계정은 Gmail API에서 읽습니다."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -4558,7 +4563,9 @@
     "bindingChooser": "키의 출처",
     "bindingChoice": {
       "serviceBody": "볼트의 키 하나를 모두에게 보냅니다. 간단하지만 에이전트는 그 키가 닿는 모든 것에 접근할 수 있습니다.",
-      "callerSuppliedBody": "{{productName}}은(는) 아무것도 저장하지 않습니다. {{productName}}을(를) 호출하는 시스템이 요청마다 각 사용자의 자격 증명을 보내므로 에이전트는 그 사용자가 할 수 있는 일만 할 수 있습니다. 대상 시스템의 권한이 경계입니다."
+      "callerSuppliedBody": "{{productName}}은(는) 아무것도 저장하지 않습니다. {{productName}}을(를) 호출하는 시스템이 요청마다 각 사용자의 자격 증명을 보내므로 에이전트는 그 사용자가 할 수 있는 일만 할 수 있습니다. 대상 시스템의 권한이 경계입니다.",
+      "perUserBody": "각 사용자가 자신의 계정을 연결하고 에이전트가 그 사용자로서 동작합니다.",
+      "mailboxBody": "관리자가 이메일 통합용 전용 메일함(Google Workspace)을 연결합니다. 해당 메일함의 메일을 읽고 답장하는 데만 사용되며 도구는 절대 사용할 수 없습니다."
     },
     "callerSuppliedHeaderTitle": "호출 시스템이 보내는 것",
     "callerSuppliedHeaderBody": "요청당 헤더 하나: 연결 이름, 공백, 그리고 {{header}}로 보낼 전체 값입니다. 스킴도 포함하므로 “Bearer abc”에는 이스케이프가 필요 없습니다. 자격 증명은 해당 요청 동안만 존재하며 절대 저장되지 않습니다.",
@@ -4592,6 +4599,30 @@
         "label": "Google 서비스 계정(JSON 키)",
         "description": "서비스 계정으로 Google API를 사용하며, 해당 계정의 개인 키로 서명합니다(RFC 7523 JWT 베어러). 다운로드한 JSON 키 파일을 볼트의 항목 하나로 저장하고 개인 키로 참조하세요. 발급자와 키 ID는 그 파일에서 읽습니다. https://oauth2.googleapis.com을 자격 증명 엔드포인트 허용 목록에 추가하세요. 도메인 전체 위임이 없으면 계정은 자신과 공유된 항목만 볼 수 있습니다."
       }
+    },
+    "bindingChooserOAuth": "누구의 계정을 연결할지",
+    "bindingMailboxTitle": "전용 메일함으로 확인됨",
+    "bindingMailboxBody": "관리자가 각 전용 메일함으로 로그인하여 연결합니다. 이 권한은 이메일 채널의 IMAP 및 SMTP 로그인만 사용할 수 있으며 httpcalls, MCP, A2A, 도구는 거부됩니다.",
+    "accountCheck": "계정 확인",
+    "accountCheckNone": "메일함 확인 방법 선택",
+    "accountCheckGoogle": "google-gmail-profile — Gmail 프로필이 해당 메일함이어야 함",
+    "accountCheckHint": "메일함을 연결할 때와 토큰을 갱신할 때마다 {{productName}}은 Gmail API에서 계정을 읽고, 계정이 해당 메일함이 아닌 권한을 거부합니다. 허용 출처에 https://gmail.googleapis.com을 추가하세요.",
+    "mailbox": {
+      "title": "메일함 권한",
+      "description": "이메일 통합이 이 연결로 읽는 각 전용 메일함은 한 번 연결해야 합니다. 본인이 아닌 메일함 자체로 Google에 로그인하세요. 계정이 해당 주소가 아니면 권한이 거부됩니다.",
+      "loadFailed": "연결된 메일함을 불러올 수 없습니다.",
+      "empty": "아직 연결된 메일함이 없습니다.",
+      "relink": "공급자가 이 권한을 거부했습니다. 메일함을 다시 연결하세요.",
+      "unlink": "연결 해제",
+      "address": "메일함 주소",
+      "link": "메일함 연결",
+      "saveFirst": "먼저 변경 사항을 저장하거나 취소하세요. 연결하면 이 페이지를 벗어납니다.",
+      "linkStartFailed": "메일함 연결을 시작할 수 없습니다.",
+      "unlinkFailed": "메일함 연결을 해제할 수 없습니다.",
+      "unlinked": "{{address}}의 연결이 해제되었습니다. 다시 연결할 때까지 해당 이메일 통합은 메일을 읽지 않습니다.",
+      "unlinkTitle": "이 메일함의 연결을 해제할까요?",
+      "unlinkBody": "{{address}}은(는) 더 이상 이 연결로 읽을 수 없으며, 메일함을 다시 연결할 때까지 해당 이메일 통합은 연결되지 않음으로 실패합니다.",
+      "linked": "메일함이 \"{{name}}\"에 연결되었습니다. 해당 이메일 통합은 다음 폴링부터 메일을 읽습니다."
     }
   },
   "workspaces": {
@@ -5581,7 +5612,8 @@
       "openTrigger": "저장했지만 인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 인증되지 않은 메일도 처리됩니다.",
       "toolsWithoutApprovals": "저장했지만 이 통합이 대상으로 하는 에이전트에 도구가 있고 도구 승인이 없습니다. 메일 내용은 신뢰할 수 없는 입력이므로, 무언가를 변경하는 도구에 hitlConfig.toolApprovals를 추가하세요.",
       "aiDisclosureDisabled": "저장했지만 답장에 더 이상 AI가 작성했다는 내용이 표시되지 않습니다. EU AI 법과 같은 투명성 규정은 사람들이 AI와 대화하고 있음을 알아야 한다고 요구합니다.",
-      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다."
+      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다.",
+      "mailboxNotLinked": "저장되었지만 메일함이 아직 전용 메일함 연결에 연결되지 않아 읽을 수 없습니다. 관리자가 연결 → 메일함 권한에서 연결합니다."
     },
     "defaultTargetHint": "기본 대상은 플러스 태그(invoices+urgent@…)나 제목이 다른 대상의 트리거와 일치하지 않는 모든 메일을 받습니다. 생성 후 대상을 더 추가할 수 있습니다.",
     "triggerLabel": "플러스 태그 또는 제목 단어",
@@ -5614,7 +5646,9 @@
     "replyTemplate": "답장 템플릿",
     "replyTemplateHint": "에이전트의 답변을 감쌉니다. 답변은 텍스트로 삽입되며 템플릿으로 실행되지 않습니다. 변수:",
     "noteDkim": "답장에는 메일함 도메인에 대해 발신 메일에 DKIM 서명을 하는 메일 서버와 해당 도메인의 DMARC 레코드가 필요합니다. {{productName}}은(는) 서명하지 않습니다. 이것이 없으면 답장이 스팸으로 분류되거나 거부됩니다. Exchange Online과 대부분의 호스팅 업체는 도메인에 DKIM을 활성화하면 제출된 메일에 서명합니다.",
-    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "mailboxLinked": "이 메일함은 연결에 연결되어 있습니다.",
+    "mailboxNotLinked": "이 메일함은 아직 연결에 연결되지 않아 읽을 수 없습니다. 연결 → 메일함 권한에서 연결하세요."
   },
   "feedback": {
     "title": "피드백",

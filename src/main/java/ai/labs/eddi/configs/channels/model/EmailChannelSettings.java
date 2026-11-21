@@ -629,6 +629,13 @@ public record EmailChannelSettings(
     public static final String WARNING_OPEN_TRIGGER = "email.open-trigger";
     /** An agent the integration targets has tools and no tool approvals. */
     public static final String WARNING_TOOLS_WITHOUT_APPROVALS = "email.tools-without-approvals";
+    /**
+     * The integration's connection is bound {@code MAILBOX} and the mailbox address
+     * has no usable grant yet: polling fails as not connected until an
+     * administrator links it ({@code POST
+     * /connections/{name}/mailbox-grants/authorize}).
+     */
+    public static final String WARNING_MAILBOX_NOT_LINKED = "email.mailbox-not-linked";
 
     /**
      * The bare connection name of {@code name} or {@code ${connection:name}}; null

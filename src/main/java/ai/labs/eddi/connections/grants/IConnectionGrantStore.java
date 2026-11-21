@@ -135,11 +135,13 @@ public interface IConnectionGrantStore {
     int deleteAllByPrincipal(String principal);
 
     /**
-     * Every grant in a tenant, for DEK rotation.
+     * Every grant in a tenant, for DEK rotation and for listing a connection's
+     * mailbox grants ({@code MailboxGrants.list}).
      * <p>
      * Deliberately not exposed over REST: this returns token ciphertext for the
-     * whole tenant. Its one caller re-seals the ciphertext and never decrypts it
-     * into anything that outlives the call.
+     * whole tenant. The rotation re-seals the ciphertext and never decrypts it into
+     * anything that outlives the call; the mailbox listing reads only names, status
+     * and timestamps.
      */
     List<ConnectionGrant> findByTenant(String tenantId);
 

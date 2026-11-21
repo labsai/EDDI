@@ -239,6 +239,7 @@ public class ConnectionConfiguration {
             case STATIC, BASIC -> validateStaticAuth();
             case OAUTH2_CLIENT_CREDENTIALS, OAUTH2_AUTHORIZATION_CODE, OAUTH2_JWT_BEARER -> validateOAuth();
         }
+        validateAccountCheck();
     }
 
     /**
@@ -269,12 +270,82 @@ public class ConnectionConfiguration {
                     + "value, so there is nothing for EDDI to encode, exchange or refresh — a BASIC username or an oauth block on such a "
                     + "connection would read as load-bearing and be silently ignored.");
         }
-        if (authType == AuthType.OAUTH2_AUTHORIZATION_CODE && binding != Binding.PER_USER) {
-            throw new IllegalArgumentException("authType OAUTH2_AUTHORIZATION_CODE requires binding PER_USER. The flow files its grant under "
-                    + "the user who completed the consent screen, so a SERVICE-bound one would look for a grant under the service principal "
-                    + "that nothing can ever create — it would save and deploy and then fail every call as 'not connected'. Use "
-                    + "OAUTH2_CLIENT_CREDENTIALS for a service account.");
+        if (binding == Binding.MAILBOX && authType != AuthType.OAUTH2_AUTHORIZATION_CODE) {
+            throw new IllegalArgumentException("MAILBOX binding requires authType OAUTH2_AUTHORIZATION_CODE. A mailbox grant is obtained by "
+                    + "an administrator signing in as the dedicated mailbox once; a mailbox reachable with a static password or a "
+                    + "client-credentials token uses a SERVICE-bound BASIC or OAuth connection instead.");
         }
+        if (authType == AuthType.OAUTH2_AUTHORIZATION_CODE && binding != Binding.PER_USER && binding != Binding.MAILBOX) {
+            throw new IllegalArgumentException("authType OAUTH2_AUTHORIZATION_CODE requires binding PER_USER (or MAILBOX for a dedicated "
+                    + "mailbox of an email integration). The flow files its grant under the user who completed the consent screen, so a "
+                    + "SERVICE-bound one would look for a grant under the service principal that nothing can ever create — it would save "
+                    + "and deploy and then fail every call as 'not connected'. Use OAUTH2_CLIENT_CREDENTIALS for a service account.");
+        }
+    }
+
+    /**
+     * The account check a {@link Binding#MAILBOX} connection must name, and that
+     * every other binding must not.
+     * <p>
+     * Required because linking a mailbox is an administrator signing in to
+     * somebody's mail on EDDI's behalf: without a check that the provider account
+     * IS the requested address, the admin could sign in as themselves (or as any
+     * account they control) and EDDI would read that mailbox under the dedicated
+     * address's name. Refused elsewhere rather than ignored, for the reason
+     * {@code allowUnverifiedPrincipal} is: a field that reads as a safeguard on a
+     * document where nothing runs it is a posture nobody actually has.
+     */
+    private void validateAccountCheck() {
+        String accountCheck = oauth == null ? null : oauth.getAccountCheck();
+        boolean set = accountCheck != null && !accountCheck.isBlank();
+        if (binding != Binding.MAILBOX) {
+            if (set) {
+                throw new IllegalArgumentException("oauth.accountCheck applies only to binding MAILBOX: it verifies that a linked mailbox's "
+                        + "provider account is the mailbox address. Remove it, or set binding MAILBOX.");
+            }
+            return;
+        }
+        if (!set) {
+            throw new IllegalArgumentException("binding MAILBOX requires oauth.accountCheck (one of " + OAuthConfig.ACCOUNT_CHECKS
+                    + "): it is how EDDI proves the account an administrator signed in with really is the mailbox being linked.");
+        }
+        if (!OAuthConfig.ACCOUNT_CHECKS.contains(accountCheck)) {
+            throw new IllegalArgumentException("oauth.accountCheck must be one of " + OAuthConfig.ACCOUNT_CHECKS + ", got: '"
+                    + quoteName(accountCheck) + "'.");
+        }
+        if (OAuthConfig.ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE.equals(accountCheck)
+                && !allowlistNames(GMAIL_API_ORIGIN)) {
+            throw new IllegalArgumentException("oauth.accountCheck " + OAuthConfig.ACCOUNT_CHECK_GOOGLE_GMAIL_PROFILE + " reads the account "
+                    + "from the Gmail API with the mailbox's own access token, so baseUrlAllowlist must contain " + GMAIL_API_ORIGIN
+                    + " beside the mail origins (imaps://imap.gmail.com, smtps://smtp.gmail.com).");
+        }
+    }
+
+    /**
+     * The origin of the Gmail API, where the google-gmail-profile check is sent.
+     */
+    public static final String GMAIL_API_ORIGIN = "https://gmail.googleapis.com";
+
+    /**
+     * Whether the allowlist names {@code origin}, compared canonically. A malformed
+     * entry counts as no match here: {@link #validateAllowlist} has already refused
+     * it with its own message.
+     */
+    public boolean allowlistNames(String origin) {
+        if (baseUrlAllowlist == null) {
+            return false;
+        }
+        String wanted = canonicalOrigin(URI.create(origin));
+        for (String entry : baseUrlAllowlist) {
+            try {
+                if (wanted.equals(requireCanonicalAllowlistOrigin(entry, "baseUrlAllowlist"))) {
+                    return true;
+                }
+            } catch (IllegalArgumentException e) {
+                // not a match; see the method comment
+            }
+        }
+        return false;
     }
 
     /**

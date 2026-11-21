@@ -207,12 +207,27 @@ public class ConnectionStartupGuard {
         // ever produce a grant for, so it fails every call as "not connected" with
         // nothing naming the cause.
         for (ConnectionConfiguration connection : connections) {
-            if (connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() != Binding.PER_USER) {
+            if (connection.getBinding() == Binding.MAILBOX && connection.getAuthType() != AuthType.OAUTH2_AUTHORIZATION_CODE) {
+                // Only reachable by a document that skipped validation (an import of a
+                // hand-edited archive, a direct database write): no mailbox can ever be
+                // linked to it, so every poll through it fails as not connected.
+                LOGGER.errorf("[CONNECTIONS] Connection '%s' is bound MAILBOX with authType %s, which the model does not accept: a mailbox "
+                        + "grant is obtained only by the authorization-code flow. No mailbox can be linked to it. Re-save it as "
+                        + "OAUTH2_AUTHORIZATION_CODE, or bind it SERVICE.", sanitize(connection.getName()), connection.getAuthType());
+            }
+            if (connection.getAuthType() == AuthType.OAUTH2_AUTHORIZATION_CODE && connection.getBinding() != Binding.PER_USER
+                    && connection.getBinding() != Binding.MAILBOX) {
                 LOGGER.errorf("[CONNECTIONS] Connection '%s' pairs authType OAUTH2_AUTHORIZATION_CODE with binding %s, which the model no "
                         + "longer accepts. It will fail every call as not connected: the flow files its grant under the user who consented, "
                         + "and a %s-bound resolution looks under a principal nothing can ever create a grant for. Re-save it as PER_USER.",
                         sanitize(connection.getName()), connection.getBinding(), connection.getBinding());
             }
+        }
+        boolean anyMailbox = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.MAILBOX);
+        if (anyMailbox && !authorizationEnabled) {
+            LOGGER.error("[CONNECTIONS] A MAILBOX connection is stored, but authorization.enabled=false. Linking a mailbox needs an "
+                    + "authenticated eddi-admin, and with OIDC off every caller is anonymous, so no mailbox can be linked to it; mailboxes "
+                    + "linked before keep working. Enable OIDC to link mailboxes.");
         }
         boolean anyCallerSupplied = connections.stream().anyMatch(connection -> connection.getBinding() == Binding.CALLER_SUPPLIED);
         if (anyCallerSupplied && !authorizationEnabled) {
