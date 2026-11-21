@@ -55,7 +55,13 @@ policy), EDDI → IdP (verified access token only).
   allow-listed, and covered by conformance and mutation tests.
 - **SQL injection on Postgres.** The app role can run `set_config('eddi.platform','on')`. RLS
   stops missed filters, not injection. Parameterised statements and the build guards are the
-  control.
+  control. If the per-connection memo proposed in ADR DV-2 is adopted, an injected change to
+  `eddi.*` GUCs also **persists** for later borrowers of that connection in the same org, until
+  the binding changes. Always overwriting would reset it on every borrow. A build guard forbids
+  any SQL other than the interceptor's from naming these GUCs.
+- **Mongo writes that move data between orgs.** The guard refuses update operators that change,
+  unset or rename onto `orgId` (ADR DV-12). It also refuses a `FindIterable.filter()` that drops
+  the org equality (DV-13).
 
 ## 4. STRIDE per entry point
 

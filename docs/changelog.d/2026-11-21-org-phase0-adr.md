@@ -11,7 +11,8 @@ and waits for approval. This branch also carries the rewritten plan itself (the
 
 - **[`docs/adr/0001-organizations.md`](../adr/0001-organizations.md)** (new; `docs/adr/` is new)
   records the spike evidence. It locks plan decisions 1–8, the org bundle format (decision 9)
-  and the MongoDB second-layer design (decision 12), and lists 11 deviations from the plan.
+  and the MongoDB second-layer design (decision 12), and lists 13 deviations from the plan. DV-2 (memoising the RLS GUCs) and decision 9 (the
+  bundle's record rules) are left for the user to decide.
 - **[`docs/multi-org-security.md`](../multi-org-security.md)** (new) is the draft STRIDE threat
   model per entry point.
 - Both pages are added to `docs/SUMMARY.md`, and the plan's §16 Deviations log is filled in.

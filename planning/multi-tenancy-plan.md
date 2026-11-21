@@ -1377,13 +1377,17 @@ change later.
 Phase 0, 2026-11-21. Each entry is detailed in
 [ADR 0001 §4](../docs/adr/0001-organizations.md#4-deviations-from-the-plan):
 
-- **DV-1 (§8.4, §5.1).** The Postgres role split is **required** in multi mode. Startup refuses
-  if the connected role has `rolsuper` or `rolbypassrls`. *Why:* Spike A showed that
-  superusers ignore `FORCE`d RLS, and the stock compose/Helm `POSTGRES_USER` is a superuser.
-- **DV-2 (§8.4).** The RLS interceptor memoises per physical connection
-  (`unwrap(PGConnection.class)`) and skips `set_config` when the values are unchanged.
-  *Why:* the naive interceptor adds a round trip to every acquire (about +100 %). The wrapper
-  object the caller gets differs from the interceptor's.
+- **DV-1 (§8.4, §5.1, §5.3).** The Postgres role split is **required** in multi mode. A role
+  with `rolsuper` or `rolbypassrls` is refused as an enablement precondition, before
+  `SWITCHING`, and again at every multi-mode startup. *Why:* Spike A showed that superusers
+  ignore `FORCE`d RLS, and the stock compose/Helm `POSTGRES_USER` is a superuser.
+- **DV-2 (§8.4), proposed and awaiting the user's decision.** The RLS interceptor would memoise
+  per physical connection (`unwrap(PGConnection.class)`) and skip `set_config` when the values
+  are unchanged. The memo is recorded only in autocommit, the epoch on every acquire, and a
+  guard forbids other SQL from naming `eddi.*` GUCs. The alternative is the plan's "always
+  overwrite". *Why:* the naive interceptor adds a round trip to every acquire. Either way the
+  key is the physical connection, because the caller's wrapper differs from the
+  interceptor's.
 - **DV-3 (§6.1, §14.2).** No `@Transactional` on org data paths (new guard). *Why:* Agroal
   reuses a JTA-enlisted connection without calling the interceptor.
 - **DV-4 (§8.5a).** The read verifier is installed per collection through
@@ -1404,8 +1408,16 @@ Phase 0, 2026-11-21. Each entry is detailed in
 - **DV-10 (§6.1).** `callAs` adapts `Callable` to `ScopedValue.CallableOp`. *Why:* the Java 25
   API.
 - **DV-11 (§5.4).** `DataLayoutGuard` is a `StartupEvent` observer at
-  `@Priority(Integer.MIN_VALUE)` and reads before the schema lock. *Why:* Spike C (exit 1
-  before any write, on both datastores).
+  `@Priority(Integer.MIN_VALUE)` and reads before the schema lock. *Why:* Spike C: exit 1
+  before any write, on both datastores, with the HTTP listener not yet open.
+- **DV-12 (§8.5a).** The Mongo guard also checks **update documents**: no `$set`, `$unset` or
+  `$rename` of `orgId` except to the bound org, and no pipeline updates on org collections.
+  *Why:* a filter-only check let `$set orgId=b` move a document into another org.
+- **DV-13 (§8.5a).** `FindIterable.filter()` must carry the org equality. *Why:* it replaces
+  the `find(...)` filter, and returned a foreign document with the verifier off.
+- **Decision 9 (§13.1).** Only the bundle *container* and its compatibility rules are locked.
+  The record-level rewrite rules (re-derive anything derived from the org id or from a key)
+  are a proposal for Phase 6 to settle.
 
 ---
 
