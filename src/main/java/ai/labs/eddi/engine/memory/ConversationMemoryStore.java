@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.memory.model.ConversationGenerationCandidate;
 import ai.labs.eddi.engine.memory.model.GenerationUpgradeOutcome;
 import ai.labs.eddi.engine.memory.model.ConversationListingSummary;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.PendingContinuation;
+import ai.labs.eddi.engine.memory.model.PendingContinuationCandidate;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import com.mongodb.client.MongoCollection;
@@ -22,8 +24,11 @@ import com.mongodb.client.MongoDatabase;
 import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.FindOneAndUpdateOptions;
+import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
 import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
 import io.quarkus.arc.DefaultBean;
@@ -52,6 +57,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 import com.mongodb.client.FindIterable;
 import static ai.labs.eddi.engine.model.Context.ContextType.valueOf;
@@ -103,6 +110,9 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
      */
     private static final String KEY_FENCE = "_fence";
     private static final String KEY_CONVERSATION_STEPS = "conversationSteps";
+    /** The self-continuation outbox record — see {@link PendingContinuation}. */
+    private static final String KEY_PENDING_CONTINUATION = "pendingContinuation";
+    private static final String KEY_PENDING_CONTINUATION_DECIDED_AT = KEY_PENDING_CONTINUATION + ".decidedAt";
     private static final String KEY_CONVERSATION_OUTPUTS = "conversationOutputs";
     private static final String KEY_REDO_CACHE = "redoCache";
     /**
@@ -155,6 +165,37 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_AGENT_VERSION));
         // owner-scoped pending-approvals inbox: filter by (state, userId) in-query
         conversationCollectionDocument.createIndex(Indexes.ascending(KEY_CONVERSATION_STATE, "userId"));
+    }
+
+    /**
+     * Where the sweep's index is built: a virtual thread, started by the first
+     * sweep read, so neither the first boot of an upgrade nor anything that merely
+     * constructs the store waits for a scan of the whole collection.
+     */
+    Consumer<Runnable> indexBuildLauncher = task -> Thread.ofVirtual().name("mongo-pending-continuation-index").start(task);
+    private final AtomicBoolean pendingContinuationIndexBuildStarted = new AtomicBoolean();
+    private volatile boolean pendingContinuationIndexReady;
+
+    /**
+     * The continuation recovery sweep's index (#1180). Sparse: only a conversation
+     * whose latest step decided to continue — and whose record no sweep has handled
+     * yet — carries {@code pendingContinuation.decidedAt}, so the index holds the
+     * jobs in flight and nothing else, and the sweep's range read never touches the
+     * rest of the collection. Built after the constructor returns: it arrived after
+     * the collection held production data, and the build scans all of it once.
+     * Until it exists the sweep reads nothing.
+     */
+    void buildPendingContinuationIndex() {
+        try {
+            conversationCollectionDocument.createIndex(Indexes.ascending(KEY_PENDING_CONTINUATION_DECIDED_AT),
+                    new IndexOptions().sparse(true).name("idx_pending_continuation"));
+            pendingContinuationIndexReady = true;
+        } catch (RuntimeException e) {
+            // The next sweep tries again.
+            pendingContinuationIndexBuildStarted.set(false);
+            LOGGER.warnf("Could not build the index idx_pending_continuation (%s); continuation crash recovery waits for it and "
+                    + "the next sweep retries (docs/long-jobs.md#crash-recovery).", e.getMessage());
+        }
     }
 
     @Override
@@ -1348,6 +1389,95 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         conversationCollectionDocument.updateOne(
                 new Document(OBJECT_ID, new ObjectId(conversationId)),
                 new Document("$unset", unset));
+    }
+
+    @Override
+    public List<PendingContinuationCandidate> findPendingContinuations(long decidedBefore, int limit) {
+        List<PendingContinuationCandidate> out = new ArrayList<>();
+        if (!pendingContinuationIndexReady) {
+            // Never a collection scan every minute: nothing is swept until the index is
+            // built. The records wait in the documents meanwhile.
+            if (pendingContinuationIndexBuildStarted.compareAndSet(false, true)) {
+                indexBuildLauncher.accept(this::buildPendingContinuationIndex);
+            }
+            return out;
+        }
+        conversationCollectionDocument.find(Filters.lt(KEY_PENDING_CONTINUATION_DECIDED_AT, decidedBefore))
+                .sort(Sorts.ascending(KEY_PENDING_CONTINUATION_DECIDED_AT))
+                .projection(Projections.include(KEY_AGENT_ID, KEY_USER_ID, KEY_CONVERSATION_STATE, KEY_PENDING_CONTINUATION))
+                .limit(Math.max(1, limit))
+                .forEach(document -> {
+                    PendingContinuation pending = pendingContinuationOf(document.get(KEY_PENDING_CONTINUATION));
+                    if (pending != null) {
+                        out.add(new PendingContinuationCandidate(document.get(OBJECT_ID).toString(), document.getString(KEY_AGENT_ID),
+                                document.getString(KEY_USER_ID), conversationStateOf(document.get(KEY_CONVERSATION_STATE)), pending));
+                    }
+                });
+        return out;
+    }
+
+    @Override
+    public boolean markPendingContinuationHandled(String conversationId, int number, String decisionId) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
+        // Narrow on purpose: neither _rev nor _fence moves, so a turn in flight is not
+        // refused for it. MATCHED, not modified: a record another sweep already marked
+        // still names the continuation.
+        return conversationCollectionDocument
+                .updateOne(pendingContinuationFilter(conversationId, number, decisionId), Updates.unset(KEY_PENDING_CONTINUATION_DECIDED_AT))
+                .getMatchedCount() > 0;
+    }
+
+    @Override
+    public boolean clearPendingContinuation(String conversationId, Integer expectedNumber, String expectedDecisionId) {
+        if (!isStorableId(conversationId)) {
+            return false;
+        }
+        // One narrow update that hands back the record as it was, so whether it was
+        // still unhandled is read from the same write that removed it. Neither _rev
+        // nor _fence moves.
+        Document before = conversationCollectionDocument.findOneAndUpdate(
+                pendingContinuationFilter(conversationId, expectedNumber, expectedDecisionId),
+                Updates.unset(KEY_PENDING_CONTINUATION), new FindOneAndUpdateOptions()
+                        .projection(Projections.include(KEY_PENDING_CONTINUATION_DECIDED_AT)).returnDocument(ReturnDocument.BEFORE));
+        return before != null && before.get(KEY_PENDING_CONTINUATION) instanceof Document record && record.get("decidedAt") != null;
+    }
+
+    /**
+     * The conversation's record; with a number, only while it names that number and
+     * decision. {@code eq(field, null)} also matches a record without a decision
+     * id, which is what a null decision id means.
+     */
+    private static Bson pendingContinuationFilter(String conversationId, Integer number, String decisionId) {
+        Bson filter = Filters.and(Filters.eq(OBJECT_ID, new ObjectId(conversationId)), Filters.exists(KEY_PENDING_CONTINUATION));
+        return number != null
+                ? Filters.and(filter, Filters.eq(KEY_PENDING_CONTINUATION + ".number", number),
+                        Filters.eq(KEY_PENDING_CONTINUATION + ".decisionId", decisionId))
+                : filter;
+    }
+
+    private static PendingContinuation pendingContinuationOf(Object value) {
+        if (!(value instanceof Document record) || !(record.get("number") instanceof Number number)) {
+            return null;
+        }
+        return new PendingContinuation(number.intValue(),
+                record.get("maxContinuations") instanceof Number max ? max.intValue() : null,
+                record.get("input") instanceof String input ? input : null,
+                record.get("environment") instanceof String environment ? environment : null,
+                record.get("decidedAt") instanceof Number decidedAt ? decidedAt.longValue() : null,
+                record.get("decisionId") instanceof String decisionId ? decisionId : null);
+    }
+
+    private static ConversationState conversationStateOf(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return ConversationState.valueOf(value.toString());
+        } catch (IllegalArgumentException e) {
+            return null;
+        }
     }
 
     @Override

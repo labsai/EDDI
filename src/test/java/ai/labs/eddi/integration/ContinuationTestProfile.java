@@ -21,6 +21,14 @@ public class ContinuationTestProfile extends IntegrationTestProfile {
     public Map<String, String> getConfigOverrides() {
         Map<String, String> overrides = new HashMap<>(super.getConfigOverrides());
         overrides.put("eddi.schedule.poll-interval", POLL_INTERVAL);
+        overrides.putAll(RECOVERY_OVERRIDES);
         return overrides;
     }
+
+    /**
+     * The recovery sweep is driven by the tests themselves (no scheduled pass that
+     * could race them), and looks at a decision as soon as it is stored.
+     */
+    static final Map<String, String> RECOVERY_OVERRIDES = Map.of("eddi.continuation.recovery.enabled", "false",
+            "eddi.continuation.recovery.grace-period", "0s");
 }
