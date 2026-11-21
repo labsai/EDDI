@@ -12218,7 +12218,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_attachment_*_total` — multimodal attachment handling.",
+          "description": "`eddi_attachment_*_total` — multimodal attachment handling, and files shared between conversations (by path) or refused (by reason).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -12269,6 +12269,28 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "quota rejected: {{scope}}"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (path) (rate(eddi_attachment_shared_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "shared: {{path}}"
+            },
+            {
+              "refId": "F",
+              "expr": "sum by (reason) (rate(eddi_attachment_share_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "share refused: {{reason}}"
             }
           ],
           "fieldConfig": {
