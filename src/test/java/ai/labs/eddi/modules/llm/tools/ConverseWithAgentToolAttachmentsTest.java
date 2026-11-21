@@ -76,6 +76,7 @@ class ConverseWithAgentToolAttachmentsTest {
         conversationService = mock(IConversationService.class);
         var own = new ConversationMemorySnapshot();
         own.setUserId("user-1");
+        own.setAgentId("agent-b");
         lenient().when(conversationService.getConversationMemorySnapshot(anyString())).thenReturn(own);
         lenient().when(conversationService.startConversation(any(), anyString(), any(), any()))
                 .thenReturn(new ConversationResult(STARTED, null));
@@ -191,6 +192,19 @@ class ConverseWithAgentToolAttachmentsTest {
         assertTrue(result.startsWith("📎 Shared with the agent: notes.txt."), result);
         assertTrue(store.isGranted(NOTES, OTHER_OF_SAME_USER));
         assertEquals(NOTES, attachmentValue(sentInput(), 0).get("storageRef"));
+    }
+
+    @Test
+    @DisplayName("a conversation started here that no longer runs the named agent receives no file")
+    void startedConversationOfAnotherAgentGetsNothing() throws Exception {
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.DELEGATIONS_STARTED.key(), List.of(OTHER_OF_SAME_USER)));
+        memory.startNextStep();
+
+        String result = tool().converseWithAgent("agent-x", "and this one", OTHER_OF_SAME_USER, List.of("notes.txt"));
+
+        verify(store, never()).grantAccess(any(), any());
+        assertTrue(result.startsWith("⚠️ Not shared: notes.txt (" + AttachmentShareService.Refusal.TARGET.text() + ")."), result);
+        assertNull(memory.getCurrentStep().getData(MemoryKeys.ATTACHMENTS_SHARED));
     }
 
     @Test

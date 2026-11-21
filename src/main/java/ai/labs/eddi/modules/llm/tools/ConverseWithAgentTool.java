@@ -244,6 +244,9 @@ public class ConverseWithAgentTool {
 
     private String converseAndShare(String agentId, String message, String conversationId, List<String> attachments,
                                     StringBuilder filesNote) {
+        // Whether the model named a conversation to continue, before the start branch
+        // below fills conversationId in.
+        boolean continuation = conversationId != null && !conversationId.isBlank();
         try {
             // --- Validate parameters ---
             if (agentId == null || agentId.isBlank()) {
@@ -359,7 +362,7 @@ public class ConverseWithAgentTool {
             inputData.setContext(new HashMap<>(delegationContext));
 
             // --- Files: shared after every guardrail, before the message is sent ---
-            shareFiles(agentId, conversationId, attachments, inputData.getContext(), filesNote);
+            shareFiles(agentId, conversationId, continuation, attachments, inputData.getContext(), filesNote);
 
             CompletableFuture<SimpleConversationMemorySnapshot> responseFuture = new CompletableFuture<>();
             final AtomicBoolean skipped = new AtomicBoolean();
@@ -451,8 +454,8 @@ public class ConverseWithAgentTool {
      * the delegate's own shares are counted from. On the message turn, not the
      * start context: the start context reaches step 0 only.
      */
-    private void shareFiles(String agentId, String targetConversationId, List<String> attachments, Map<String, Context> turnContext,
-                            StringBuilder filesNote) {
+    private void shareFiles(String agentId, String targetConversationId, boolean continuation, List<String> attachments,
+                            Map<String, Context> turnContext, StringBuilder filesNote) {
         if (attachments == null || attachments.stream().allMatch(a -> a == null || a.isBlank())) {
             return;
         }
@@ -460,7 +463,12 @@ public class ConverseWithAgentTool {
             filesNote.append("⚠️ Files not shared: ").append(Refusal.UNAVAILABLE.text()).append(".\n");
             return;
         }
-        ShareResult result = shareBinding.shareTo(targetConversationId, agentId, attachments);
+        // A continued conversation must also still run the agent the model names: the
+        // engine refuses the message otherwise, and the grant would be made — and
+        // audited — for an agent that never receives the files.
+        ShareResult result = continuation && !runsAgent(targetConversationId, agentId)
+                ? shareBinding.refuseAll(attachments, Refusal.TARGET)
+                : shareBinding.shareTo(targetConversationId, agentId, attachments);
         int index = 0;
         for (ShareResult.Shared shared : result.shared()) {
             Map<String, Object> value = new LinkedHashMap<>();
@@ -491,6 +499,21 @@ public class ConverseWithAgentTool {
         }
         LOGGER.debugf("[CONVERSE] Shared %d file(s) with agent '%s' (%d refused)", (Object) result.shared().size(), sanitize(agentId),
                 result.refused().size());
+    }
+
+    /**
+     * Whether {@code conversationId} is a conversation of {@code agentId}. Any
+     * failure to tell counts as no.
+     */
+    private boolean runsAgent(String conversationId, String agentId) {
+        try {
+            var snapshot = conversationService.getConversationMemorySnapshot(conversationId);
+            return snapshot != null && agentId.equals(snapshot.getAgentId());
+        } catch (Exception e) {
+            LOGGER.debugf("[CONVERSE] Could not read the agent of conversation '%s': %s", sanitize(conversationId),
+                    sanitize(e.getMessage()));
+            return false;
+        }
     }
 
     /**

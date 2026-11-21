@@ -1866,7 +1866,9 @@ The rules the tool follows:
 - **The result says what happened**: which files were shared, which were refused and why, then the delegate's answer.
 - **Depth travels with the files** in the reserved context key `attachmentShareDepth`, which clients cannot set ([reserved context keys](passing-context-information.md#reserved-context-keys)). An operator who lists it in `eddi.conversation.client-context.permitted-reserved-keys` lets clients reset it — the warning on that property applies.
 
-A share grants the delegate's conversation read access to the whole file, is audited in the calling conversation's ledger and counted in `eddi_attachment_shared_total{path="delegation"}`. Parts of a file (a chapter, a page range) cannot be handed on yet.
+- **A continued conversation must still run the named agent.** If `agentId` is not the agent of the `conversationId` given, no file is shared.
+
+A share grants the delegate's conversation read access to the whole file, is audited in the calling conversation's ledger and counted in `eddi_attachment_shared_total{path="delegation"}`. The grant is made before the message is sent: if the delegate's turn does not run — the conversation is busy, or paused for an approval — the delegate keeps the grant but receives the file only on a later call that names it again. Parts of a file (a chapter, a page range) cannot be handed on yet.
 
 ## Conversation Window Management
 

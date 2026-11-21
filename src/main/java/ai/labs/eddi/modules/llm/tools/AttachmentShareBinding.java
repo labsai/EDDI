@@ -146,10 +146,7 @@ public final class AttachmentShareBinding {
             return new ShareResult(List.of(), List.of());
         }
         if (!startedHere(targetConversationId)) {
-            List<ShareResult.Refused> refused = requested.stream()
-                    .map(n -> new ShareResult.Refused(echo(n), Refusal.TARGET.text()))
-                    .toList();
-            return new ShareResult(List.of(), refused);
+            return refuseAll(requested, Refusal.TARGET);
         }
         String source = memory.getConversationId();
         ConversationListing listing = ConversationListing.of(source, store, AttachmentContextExtractor.withheldStorageRefs(memory), List.of());
@@ -162,6 +159,17 @@ public final class AttachmentShareBinding {
         ShareResult merged = new ShareResult(result.shared(), refused);
         recordShared(merged.toStepRecords(targetAgentId, ShareReason.DELEGATION));
         return merged;
+    }
+
+    /**
+     * Every named file refused for one reason, without reading the store: for a
+     * target that may not receive files.
+     */
+    public ShareResult refuseAll(List<String> names, Refusal reason) {
+        List<ShareResult.Refused> refused = names == null
+                ? List.of()
+                : names.stream().filter(n -> n != null && !n.isBlank()).map(n -> new ShareResult.Refused(echo(n), reason.text())).toList();
+        return new ShareResult(List.of(), refused);
     }
 
     /** Appends to {@code attachments:shared} on the current step. */

@@ -45,9 +45,12 @@ class DocumentSettingsDefaultsTest {
     @Test
     @DisplayName("WP-1.2: the sharing counts are bounded by default, without any operator property")
     void sharingBoundsHaveBuiltInDefaults() {
-        assertEquals(Map.of("sharing.maxFilesPerShare", "eddi.documents.sharing.max-files-per-share", "sharing.maxSharesPerTurn",
-                "eddi.documents.sharing.max-shares-per-turn", "sharing.maxDepth", "eddi.documents.sharing.max-depth"),
-                DocumentBounds.BOUND_PROPERTIES);
+        // Entries, not equality: BOUND_PROPERTIES is append-only, and later packages
+        // add to it.
+        assertTrue(DocumentBounds.BOUND_PROPERTIES.entrySet()
+                .containsAll(Map.of("sharing.maxFilesPerShare", "eddi.documents.sharing.max-files-per-share", "sharing.maxSharesPerTurn",
+                        "eddi.documents.sharing.max-shares-per-turn", "sharing.maxDepth", "eddi.documents.sharing.max-depth").entrySet()),
+                DocumentBounds.BOUND_PROPERTIES.toString());
         var bounds = DocumentBounds.current();
         assertEquals(0, new BigDecimal("5").compareTo(bounds.boundFor("sharing.maxFilesPerShare").orElseThrow()));
         assertEquals(0, new BigDecimal("10").compareTo(bounds.boundFor("sharing.maxSharesPerTurn").orElseThrow()));

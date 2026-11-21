@@ -126,10 +126,14 @@ class DocumentsConfigValidatorTest {
     }
 
     @Test
-    @DisplayName("live in this version: the four delegation-sharing keys (WP-1.2), nothing else")
-    void liveKeys() {
-        assertEquals(Set.of("sharing.delegation", "sharing.maxFilesPerShare", "sharing.maxSharesPerTurn", "sharing.maxDepth"),
-                DocumentsConfigValidator.LIVE_KEYS);
+    @DisplayName("WP-1.2 makes the four delegation-sharing keys live; handoff stays unavailable")
+    void delegationSharingKeysAreLive() {
+        // containsAll, not equals: LIVE_KEYS is append-only, and later packages add to
+        // it.
+        assertTrue(DocumentsConfigValidator.LIVE_KEYS
+                .containsAll(Set.of("sharing.delegation", "sharing.maxFilesPerShare", "sharing.maxSharesPerTurn", "sharing.maxDepth")),
+                DocumentsConfigValidator.LIVE_KEYS.toString());
+        assertTrue(!DocumentsConfigValidator.LIVE_KEYS.contains("sharing.handoff"), DocumentsConfigValidator.LIVE_KEYS.toString());
     }
 
     @Nested
