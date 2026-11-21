@@ -149,7 +149,9 @@ public final class AttachmentShareBinding {
             return refuseAll(requested, Refusal.TARGET);
         }
         String source = memory.getConversationId();
-        ConversationListing listing = ConversationListing.of(source, store, AttachmentContextExtractor.withheldStorageRefs(memory), List.of());
+        ConversationListing listing = ConversationListing.of(source, store,
+                AttachmentContextExtractor.withheldStorageRefsIncludingCurrentStep(memory),
+                List.of());
         Resolution resolution = service.resolveNames(listing, requested);
         ShareParties parties = new ShareParties(memory.getUserId(), memory.getAgentId(), memory.getAgentVersion(), targetAgentId, null);
         ShareResult result = service.share(source, listing, resolution.selectors(), targetConversationId, ShareReason.DELEGATION, policy,

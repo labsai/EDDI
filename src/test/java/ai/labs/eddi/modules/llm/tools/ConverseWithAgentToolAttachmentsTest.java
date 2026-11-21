@@ -101,7 +101,7 @@ class ConverseWithAgentToolAttachmentsTest {
     }
 
     private SharePolicy policy(int maxFiles, int currentDepth) {
-        return new SharePolicy(maxFiles, 10, 3, currentDepth, Set.of(), TurnCounter.onStep(memory, "documents:shares:t"));
+        return new SharePolicy(maxFiles, 10, 3, currentDepth, Set.of(), TurnCounter.onStep(memory, "documents:shares"));
     }
 
     private ConverseWithAgentAndFilesTool tool(SharePolicy policy) {
@@ -223,6 +223,20 @@ class ConverseWithAgentToolAttachmentsTest {
                 List.of(new Attachment("application/pdf", "report.pdf", 1_000, REPORT))));
         memory.getCurrentStep().storeData(new Data<>(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX + "t", true));
         memory.startNextStep();
+
+        String result = tool().converseWithAgent("agent-b", "hi", null, List.of("report.pdf"));
+
+        verify(store, never()).grantAccess(eq(REPORT), any());
+        assertTrue(result.startsWith("⚠️ Not shared: report.pdf (not found)."), result);
+    }
+
+    @Test
+    @DisplayName("a file whose input was refused earlier in this same step is not shareable")
+    void fileWithheldInTheCurrentStepIsNotShareable() throws Exception {
+        // An earlier LLM task of this turn refused the input; a later one delegates.
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.ATTACHMENTS.key(),
+                List.of(new Attachment("application/pdf", "report.pdf", 1_000, REPORT))));
+        memory.getCurrentStep().storeData(new Data<>(MemoryKeys.LLM_INPUT_WITHHELD_PREFIX + "t", true));
 
         String result = tool().converseWithAgent("agent-b", "hi", null, List.of("report.pdf"));
 

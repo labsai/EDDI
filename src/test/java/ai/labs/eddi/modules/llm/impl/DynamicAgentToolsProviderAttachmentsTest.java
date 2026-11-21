@@ -22,6 +22,7 @@ import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
 import ai.labs.eddi.modules.llm.model.DocumentsConfig;
@@ -32,6 +33,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -44,6 +46,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -107,8 +110,12 @@ class DynamicAgentToolsProviderAttachmentsTest {
     }
 
     private Object assemble(DynamicAgentToolsProvider provider, DocumentsConfig documents) {
+        return assemble(provider, documents, "t");
+    }
+
+    private Object assemble(DynamicAgentToolsProvider provider, DocumentsConfig documents, String taskId) {
         List<Object> tools = new ArrayList<>();
-        provider.addDynamicAgentTools(tools, WHITELIST, memory, null, "t", documents);
+        provider.addDynamicAgentTools(tools, WHITELIST, memory, null, taskId, documents);
         assertEquals(1, tools.size(), tools.toString());
         return tools.get(0);
     }
@@ -258,6 +265,30 @@ class DynamicAgentToolsProviderAttachmentsTest {
 
         assertTrue(result.startsWith("📎 Shared with the agent: report.pdf."), result);
         assertTrue(store.isGranted(REPORT, STARTED));
+        ArgumentCaptor<InputData> sent = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), anyString(), anyString(), anyBoolean(), anyBoolean(), any(), sent.capture(), anyBoolean(),
+                any());
+        assertEquals("3", String.valueOf(sent.getValue().getContext().get(ConverseWithAgentTool.CONTEXT_ATTACHMENT_SHARE_DEPTH).getValue()));
+    }
+
+    @Test
+    @DisplayName("maxSharesPerTurn counts the whole turn: a second LLM task cannot share past what the first used up")
+    void sharesPerTurnCountAcrossTasks() throws Exception {
+        String notes = "1123456789abcdef01234567";
+        store.put(notes, "notes.txt", "text/plain", 10, CALLER);
+        attachReport();
+        var documents = delegation(true);
+        documents.getSharing().setMaxSharesPerTurn(1);
+
+        var first = (ConverseWithAgentAndFilesTool) assemble(provider(), documents, "t1");
+        String firstResult = first.converseWithAgent("agent-b", "hi", null, List.of("report.pdf"));
+        var second = (ConverseWithAgentAndFilesTool) assemble(provider(), documents, "t2");
+        String secondResult = second.converseWithAgent("agent-c", "hi", null, List.of("notes.txt"));
+
+        assertTrue(firstResult.startsWith("📎 Shared with the agent: report.pdf."), firstResult);
+        assertTrue(secondResult.startsWith("⚠️ Not shared: notes.txt (" + AttachmentShareService.Refusal.SHARES_PER_TURN.text() + ")."),
+                secondResult);
+        verify(store, never()).grantAccess(eq(notes), any());
     }
 
     @Test

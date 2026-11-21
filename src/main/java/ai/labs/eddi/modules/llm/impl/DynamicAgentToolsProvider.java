@@ -144,10 +144,12 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
     static final String KEY_DELEGATIONS_PREFIX = "tools:delegations:";
 
     /**
-     * Step-data key prefix of an LLM task's file shares this turn
-     * ({@code documents.sharing.maxSharesPerTurn}); the task id follows.
+     * Step-data key of the conversation's file shares this turn
+     * ({@code documents.sharing.maxSharesPerTurn}). One key for the whole turn, not
+     * one per task: the limit counts every share made in the turn, whichever LLM
+     * task makes it.
      */
-    static final String KEY_SHARES_PREFIX = "documents:shares:";
+    static final String KEY_SHARES = "documents:shares";
 
     /**
      * What handing files on through {@code converseWithAgent} needs. Absent (or
@@ -409,7 +411,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // Counted on the step: this method runs once per tool assembly, and a turn
             // assembles once per cascade step and again on a HITL resume.
             TurnCounter delegations = TurnCounter.onStep(memory, KEY_DELEGATIONS_PREFIX + (taskId != null ? taskId : "default"));
-            AttachmentShareBinding shareBinding = shareBinding(memory, documents, taskId);
+            AttachmentShareBinding shareBinding = shareBinding(memory, documents);
             var converse = new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
                     resolveDelegationCeiling(memory), delegations, shareBinding);
             // Exactly one of the two classes (I8): the files argument exists only when
@@ -899,7 +901,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * or nothing to share with is wired. Reads configuration and memory only —
      * never the attachment store.
      */
-    private AttachmentShareBinding shareBinding(IConversationMemory memory, DocumentsConfig documents, String taskId) {
+    private AttachmentShareBinding shareBinding(IConversationMemory memory, DocumentsConfig documents) {
         if (fileSharing == null || fileSharing.service() == null || fileSharing.store() == null) {
             return null;
         }
@@ -922,7 +924,7 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
         // share never promises more than that.
         var policy = new SharePolicy(Math.min(sharing.maxFilesPerShare(), perTurn), sharing.maxSharesPerTurn(), sharing.maxDepth(),
                 resolveAttachmentShareDepth(memory), Set.of(),
-                TurnCounter.onStep(memory, KEY_SHARES_PREFIX + (taskId != null ? taskId : "default")));
+                TurnCounter.onStep(memory, KEY_SHARES));
         return new AttachmentShareBinding(memory, fileSharing.service(), fileSharing.store(), policy);
     }
 

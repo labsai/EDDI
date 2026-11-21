@@ -1853,7 +1853,7 @@ With `sharing.delegation: true`, `converse_with_agent` gains a fourth, optional 
 |---|---|---|
 | `sharing.delegation` | `false` | Whether `converse_with_agent` may hand files on. Off: the tool keeps its three arguments |
 | `sharing.maxFilesPerShare` | `5` | Most files one call shares; never more than `eddi.attachments.max-per-turn`, since the delegate's turn takes no more |
-| `sharing.maxSharesPerTurn` | `10` | Most files the conversation shares in one turn, across every call |
+| `sharing.maxSharesPerTurn` | `10` | Most files the conversation shares in one turn, across every call and every LLM task of the turn |
 | `sharing.maxDepth` | `3` | How many hops a file may travel: with 3, A→B→C→D works and D cannot pass the file on |
 
 The three counts have operator bounds (`eddi.documents.sharing.*`, see the [configuration reference](configuration-reference.md#documents)); a higher value is refused at save. `sharing.delegation` is an extra switch on top of the delegation policy: delegation itself (`allowDelegation`, the allowed targets, depth and per-task limits) is unchanged, and refuses before anything is shared.
@@ -1861,7 +1861,7 @@ The three counts have operator bounds (`eddi.documents.sharing.*`, see the [conf
 The rules the tool follows:
 
 - **The argument appears only when it can be used.** The four-argument tool is assembled when `sharing.delegation` is on, delegation is allowed, and the conversation's memory shows a stored file on this or an earlier turn; otherwise the tool and its specification are exactly the three-argument one. A turn without files never reads the attachment store.
-- **The model names files, never references.** Names resolve against the conversation's own files (owned or granted, minus files of a turn an input guardrail refused), by exact name or 1-based number, as described in [Sharing between agents — the rule](attachments-guide.md#sharing-between-agents--the-rule). A name that matches nothing is `not found`, whether the file exists elsewhere or not.
+- **The model names files, never references.** Names resolve against the conversation's own files (owned or granted, minus files of a turn an input guardrail refused — including the current turn, when an earlier LLM task of it refused the input), by exact name or 1-based number, as described in [Sharing between agents — the rule](attachments-guide.md#sharing-between-agents--the-rule). A name that matches nothing is `not found`, whether the file exists elsewhere or not.
 - **Only to a conversation this one started.** Files go to the conversation the call starts, or to one this conversation started earlier with `converse_with_agent` (recorded on its own steps under `delegation:started` while `sharing.delegation` is on). Continuing any other conversation — even one of the same user — delivers the message but no file, and the result says why.
 - **The result says what happened**: which files were shared, which were refused and why, then the delegate's answer.
 - **Depth travels with the files** in the reserved context key `attachmentShareDepth`, which clients cannot set ([reserved context keys](passing-context-information.md#reserved-context-keys)). An operator who lists it in `eddi.conversation.client-context.permitted-reserved-keys` lets clients reset it — the warning on that property applies.
