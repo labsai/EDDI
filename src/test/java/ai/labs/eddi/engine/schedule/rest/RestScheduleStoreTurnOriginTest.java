@@ -124,15 +124,20 @@ class RestScheduleStoreTurnOriginTest {
     }
 
     @Test
-    @DisplayName("an untainted edit whose body leaves the taint out keeps the stored taint: it is sticky")
+    @DisplayName("an untainted edit whose body sends metadata without the taint keeps the stored taint: it is sticky")
     void updateKeepsStoredTaint() throws Exception {
         ScheduleConfiguration stored = schedule("s1");
         stored.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL)));
         when(scheduleStore.readSchedule("s1")).thenReturn(stored);
+        // A body that names metadata replaces it (an absent one is carried over), so
+        // this is the edit that would drop the taint.
+        ScheduleConfiguration body = schedule("s1");
+        body.setMetadata(new HashMap<>(Map.of("note", "rewritten")));
 
-        assertEquals(200, rest.updateSchedule("s1", schedule("s1")).getStatus());
+        assertEquals(200, rest.updateSchedule("s1", body).getStatus());
 
         assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(updated("s1").getMetadata()));
+        assertEquals("rewritten", updated("s1").getMetadata().get("note"));
     }
 
     @Test
