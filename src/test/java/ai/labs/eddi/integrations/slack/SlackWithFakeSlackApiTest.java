@@ -1,0 +1,738 @@
+/*
+ * Copyright EDDI contributors
+ * SPDX-License-Identifier: Apache-2.0
+ */
+package ai.labs.eddi.integrations.slack;
+
+import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.properties.IUserMemoryStore;
+import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.api.IGroupConversationService;
+import ai.labs.eddi.engine.caching.ICache;
+import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
+import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
+import ai.labs.eddi.integrations.channels.ChannelTargetRouter.ResolvedTarget;
+import ai.labs.eddi.integrations.channels.ObserveGate;
+import ai.labs.eddi.integrations.slack.hitl.InMemorySlackApprovalRecordStore;
+import ai.labs.eddi.modules.llm.tools.ToolCostTracker;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
+import org.junit.jupiter.api.Test;
+import org.mockito.AdditionalMatchers;
+
+import java.net.URI;
+import java.time.Duration;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BooleanSupplier;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.timeout;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * The Slack client and the event handler against {@link FakeSlackApi}, an
+ * in-process stand-in for Slack's Web API. Until the API base URL was a
+ * deployment property nothing that needs a <em>successful</em> Slack call could
+ * run against a fake: the client always dialled slack.com, so the code after a
+ * posted answer — late answers, rate limits — had no test.
+ * <p>
+ * The fake is an engine behind the real outbound facade, not a socket, so this
+ * is a plain unit test.
+ */
+@DisplayName("Slack client and handler against a fake Slack API")
+class SlackWithFakeSlackApiTest {
+
+    private static final String CHANNEL = "C0FAKE";
+    private static final String AUTH = "Bearer xoxb-fake";
+
+    private final ObjectMapper mapper = new ObjectMapper();
+    private FakeSlackApi slack;
+
+    @BeforeEach
+    void setUp() {
+        slack = new FakeSlackApi();
+    }
+
+    private SlackWebApiClient client(SlackConfig config) {
+        return new SlackWebApiClient(mapper, TestOutbound.facade(slack), config);
+    }
+
+    private static SlackConfig config(int requestTimeoutSeconds, int retries, int lateWindowSeconds) {
+        return new SlackConfig(requestTimeoutSeconds, SlackConfig.DEFAULT_GROUP_COMPLETION_TIMEOUT_SECONDS, retries, 10L)
+                .withApiBaseUrl(FakeSlackApi.BASE_URL)
+                .withLateAnswerWindowSeconds(lateWindowSeconds);
+    }
+
+    // ─── The client ───
+
+    @Nested
+    @DisplayName("SlackWebApiClient")
+    class Client {
+
+        @Test
+        @DisplayName("post message: ok:true returns the ts, and the call goes to the configured base URL")
+        void postMessageOk() {
+            String ts = client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, "100.1", "hello");
+
+            assertNotNull(ts);
+            var call = slack.calls("chat.postMessage").getFirst();
+            assertEquals(AUTH, call.authorization());
+            assertEquals(CHANNEL, call.channel());
+            assertEquals("100.1", call.threadTs());
+            assertEquals("hello", call.text());
+        }
+
+        @Test
+        @DisplayName("post message: each post gets its own ts")
+        void postMessageTsIsFresh() {
+            var client = client(config(60, 3, 0));
+
+            assertNotNull(client.postMessage(AUTH, CHANNEL, null, "one"));
+            assertNotNull(client.postMessage(AUTH, CHANNEL, null, "two"));
+
+            assertEquals(List.of("one", "two"), slack.calls("chat.postMessage").stream().map(FakeSlackApi.Call::text).toList());
+        }
+
+        @Test
+        @DisplayName("chat.update and views.open go to the same configured base")
+        void otherMethodsUseTheConfiguredBase() {
+            var client = client(config(60, 3, 0));
+
+            assertTrue(client.updateMessage(AUTH, CHANNEL, "100.1", "done", null));
+            assertTrue(client.openView(AUTH, "trigger-1", Map.of("type", "modal")));
+
+            assertEquals(1, slack.calls("chat.update").size());
+            assertEquals(1, slack.calls("views.open").size());
+        }
+
+        @Test
+        @DisplayName("post message: ok:false is a refusal, not a retry — null, one call")
+        void postMessageNotOk() {
+            slack.nextError("channel_not_found");
+
+            assertNull(client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, null, "hello"));
+            assertEquals(1, slack.calls().size());
+        }
+
+        @Test
+        @DisplayName("post message: 429 throws a retryable error that carries Retry-After")
+        void postMessageRateLimited() {
+            slack.nextRateLimited(2);
+
+            var e = assertThrows(SlackDeliveryException.class,
+                    () -> client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, null, "hello"));
+
+            assertEquals(2000L, e.getRetryAfterMillis());
+        }
+
+        @Test
+        @DisplayName("a 5xx carries no Retry-After; a Retry-After that is not a number is ignored")
+        void noUsableRetryAfter() {
+            slack.nextStatus(503);
+            var e = assertThrows(SlackDeliveryException.class,
+                    () -> client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, null, "hello"));
+            assertEquals(0L, e.getRetryAfterMillis());
+
+            slack.nextRateLimited("Wed, 21 Oct 2015 07:28:00 GMT");
+            e = assertThrows(SlackDeliveryException.class,
+                    () -> client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, null, "hello"));
+            assertEquals(0L, e.getRetryAfterMillis());
+        }
+
+        @Test
+        @DisplayName("a Retry-After too long to parse asks for a long wait, not for none: clamped, never 0")
+        void hugeRetryAfterIsClamped() {
+            slack.nextRateLimited("99999999999999");
+            var e = assertThrows(SlackDeliveryException.class,
+                    () -> client(config(60, 3, 0)).postMessage(AUTH, CHANNEL, null, "hello"));
+            assertEquals(SlackWebApiClient.MAX_RETRY_AFTER_SECONDS * 1000L, e.getRetryAfterMillis());
+        }
+
+        @Test
+        @DisplayName("the fake refuses what Slack refuses: no token, no channel")
+        void theFakeRefusesWhatSlackRefuses() {
+            var client = client(config(60, 3, 0));
+            assertNull(client.postMessage("Bearer ", CHANNEL, null, "hello"));
+            assertNull(client.postMessage(AUTH, "", null, "hello"));
+        }
+    }
+
+    // ─── The handler ───
+
+    @Nested
+    @DisplayName("SlackEventHandler")
+    class Handler {
+
+        private ChannelTargetRouter router;
+        private IConversationService conversationService;
+        private SimpleMeterRegistry meters;
+        private SlackEventHandler handler;
+        private final AtomicReference<IConversationService.ConversationResponseHandler> pendingTurn = new AtomicReference<>();
+        private final Map<String, FakeCache<Object, Object>> caches = new ConcurrentHashMap<>();
+        private ChannelIntegrationConfiguration integration;
+
+        @BeforeEach
+        @SuppressWarnings({"unchecked", "rawtypes"})
+        void setUp() throws Exception {
+            router = mock(ChannelTargetRouter.class);
+            conversationService = mock(IConversationService.class);
+            meters = new SimpleMeterRegistry();
+            var cacheFactory = mock(ICacheFactory.class);
+            doAnswer(inv -> caches.computeIfAbsent(inv.getArgument(0), k -> new FakeCache<>()))
+                    .when(cacheFactory).getCache(anyString(), any(Duration.class));
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-new", URI.create("eddi://conv-new")));
+
+            var target = new ChannelTarget();
+            target.setName("default");
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-A");
+            integration = new ChannelIntegrationConfiguration();
+            integration.setName("int-a");
+            integration.setChannelType("slack");
+            integration.setPlatformConfig(new HashMap<>(Map.of("signingSecret", "secret-a", "botToken", "xoxb-fake")));
+            integration.setTargets(List.of(target));
+            // The channel is owned by the integration: the timeout notice, which has no
+            // resolved route to take a token from, looks it up by channel.
+            when(router.getBotToken("slack", CHANNEL)).thenReturn("xoxb-fake");
+            when(router.resolveTarget(any(), any(), any()))
+                    .thenAnswer(inv -> new ResolvedTarget(target, inv.getArgument(2), integration, null, null));
+            this.cacheFactory = cacheFactory;
+        }
+
+        private ICacheFactory cacheFactory;
+
+        @AfterEach
+        void tearDown() {
+            handler.shutdown();
+        }
+
+        private final ObserveGate observeGate = mock(ObserveGate.class);
+        private final ToolCostTracker toolCostTracker = mock(ToolCostTracker.class);
+        private final IUserConversationStore userConversationStore = mock(IUserConversationStore.class);
+        /** Every turn say() was given, in order, with the conversation it was for. */
+        private final List<IConversationService.ConversationResponseHandler> turns = new CopyOnWriteArrayList<>();
+        private final List<String> turnConversations = new CopyOnWriteArrayList<>();
+
+        private void build(SlackConfig config) {
+            handler = new SlackEventHandler(router, observeGate, toolCostTracker, client(config),
+                    conversationService, mock(IGroupConversationService.class), userConversationStore,
+                    cacheFactory, config, new InMemorySlackApprovalRecordStore(), mock(IUserMemoryStore.class), meters);
+        }
+
+        /** say() answers at once. */
+        private void answersAtOnce(String text) throws Exception {
+            doAnswer(inv -> {
+                ((IConversationService.ConversationResponseHandler) inv.getArgument(6)).onComplete(answer(text));
+                return null;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        /** say() holds the turn: the test completes it later. */
+        private void holdsTheTurn() throws Exception {
+            doAnswer(inv -> {
+                turnConversations.add(inv.getArgument(0));
+                turns.add(inv.getArgument(6));
+                pendingTurn.set(inv.getArgument(6));
+                return null;
+            }).when(conversationService).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+        }
+
+        private void mention(String text) {
+            var event = new HashMap<String, Object>();
+            event.put("type", "app_mention");
+            event.put("channel", CHANNEL);
+            event.put("ts", "100." + Math.abs(text.hashCode() % 1000));
+            event.put("user", "U0ALICE");
+            event.put("text", "<@UBOT> " + text);
+            handler.handleEventAsync("Ev" + System.nanoTime(), event, "UBOT",
+                    new SlackEventHandler.EventOrigin("T1", null, "secret-a"));
+        }
+
+        private List<String> postedTexts() {
+            return slack.calls("chat.postMessage").stream().map(FakeSlackApi.Call::text).toList();
+        }
+
+        private double late(String outcome) {
+            var counter = meters.find("eddi.slack.late.answers").tag("outcome", outcome).counter();
+            return counter == null ? 0.0 : counter.count();
+        }
+
+        // --- an answer through the fake ---
+
+        @Test
+        @DisplayName("an answer is posted to the thread through the fake API")
+        void answerIsPosted() throws Exception {
+            build(config(5, 3, 60));
+            answersAtOnce("the answer");
+
+            mention("question one");
+
+            verify(conversationService, timeout(3000)).say(anyString(), any(), any(), any(), any(), anyBoolean(), any());
+            waitFor(() -> !slack.calls("chat.postMessage").isEmpty());
+            assertEquals(List.of("the answer"), postedTexts());
+            assertEquals(AUTH, slack.calls("chat.postMessage").getFirst().authorization());
+        }
+
+        // --- Retry-After ---
+
+        @Test
+        @DisplayName("a 429 with Retry-After is waited out, then the message is posted — once")
+        void retryAfterIsHonoured() throws Exception {
+            build(config(5, 3, 60));
+            answersAtOnce("the answer");
+            slack.nextRateLimited(1);
+
+            long start = System.nanoTime();
+            mention("question two");
+            waitFor(() -> slack.calls("chat.postMessage").size() >= 2);
+            long elapsedMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start);
+
+            assertEquals(2, slack.calls("chat.postMessage").size(), "one refused, one retry");
+            assertTrue(elapsedMillis >= 900, "the retry waited for Retry-After (1 s), not the 10 ms backoff: " + elapsedMillis);
+        }
+
+        // --- late answers ---
+
+        @Test
+        @DisplayName("a turn that outlives the wait: a notice now, the answer — once — when it completes")
+        void lateAnswerIsPosted() throws Exception {
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            mention("slow question");
+            waitFor(() -> !postedTexts().isEmpty());
+            assertTrue(postedTexts().getFirst().contains("I'll post the answer"), postedTexts().getFirst());
+
+            waitFor(() -> pendingTurn.get() != null);
+            pendingTurn.get().onComplete(answer("the late answer"));
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertEquals("the late answer", postedTexts().get(1));
+            assertEquals(2, postedTexts().size(), "the answer is posted once");
+            // Counted once the delivery has returned, a moment after the post itself.
+            waitFor(() -> late("posted") == 1.0);
+            assertEquals(1.0, late("posted"));
+        }
+
+        @Test
+        @DisplayName("a turn that fails after the wait gave up: a failure notice, not silence")
+        void lateFailureIsReported() throws Exception {
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            mention("doomed question");
+            waitFor(() -> !postedTexts().isEmpty());
+            waitFor(() -> pendingTurn.get() != null);
+            pendingTurn.get().onComplete(null);
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertTrue(postedTexts().get(1).contains("could not finish"), postedTexts().get(1));
+            assertEquals(1.0, late("failed"));
+        }
+
+        @Test
+        @DisplayName("a turn that never completes is given up on after the late-answer window, with a notice")
+        void lateAnswerExpires() throws Exception {
+            build(config(1, 1, 1));
+            holdsTheTurn();
+
+            mention("endless question");
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertTrue(postedTexts().get(1).contains("stopped waiting"), postedTexts().get(1));
+            assertEquals(1.0, late("expired"));
+            // A completion after that is not posted a second time.
+            waitFor(() -> pendingTurn.get() != null);
+            pendingTurn.get().onComplete(answer("too late"));
+            Thread.sleep(300);
+            assertEquals(2, postedTexts().size());
+        }
+
+        @Test
+        @DisplayName("with the window at 0 the old behaviour stays: 'ask again', and nothing is posted later")
+        void windowZeroKeepsTheOldBehaviour() throws Exception {
+            build(config(1, 1, 0));
+            holdsTheTurn();
+
+            mention("slow question");
+            waitFor(() -> !postedTexts().isEmpty());
+            assertTrue(postedTexts().getFirst().contains("ask again"), postedTexts().getFirst());
+
+            waitFor(() -> pendingTurn.get() != null);
+            pendingTurn.get().onComplete(answer("the late answer"));
+            Thread.sleep(300);
+            assertEquals(1, postedTexts().size());
+            assertEquals(0.0, late("posted"));
+        }
+
+        // --- M2: a late turn whose conversation had ended ---
+
+        @Test
+        @DisplayName("a late turn dropped because its conversation ended: a fresh conversation, the message again, the answer")
+        void lateTurnOnAnEndedConversationIsResent() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-1", URI.create("eddi://conv-1")))
+                    .thenReturn(new ConversationResult("conv-2", URI.create("eddi://conv-2")));
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            mention("question on a dying conversation");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty());
+            turns.getFirst().onSkipped(stateOnly(ConversationState.ENDED));
+
+            waitFor(() -> turns.size() == 2);
+            assertEquals(List.of("conv-1", "conv-2"), turnConversations, "the message went to the fresh conversation");
+            turns.get(1).onComplete(answer("the answer after all"));
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertTrue(postedTexts().getFirst().contains("I'll post the answer"), postedTexts().getFirst());
+            assertEquals("the answer after all", postedTexts().get(1));
+            assertEquals(2, postedTexts().size(), "no second 'taking longer' notice and no failure notice");
+            waitFor(() -> late("posted") == 1.0);
+            assertEquals(0.0, late("failed"));
+        }
+
+        @Test
+        @DisplayName("the re-sent turn is not deferred again: past the window the thread is told to ask again, once")
+        void resentTurnIsNotDeferredASecondTime() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-1", URI.create("eddi://conv-1")))
+                    .thenReturn(new ConversationResult("conv-2", URI.create("eddi://conv-2")));
+            build(config(1, 1, 2));
+            holdsTheTurn();
+
+            mention("question on a dying conversation");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty()); // deferred: the notice is out
+            turns.getFirst().onSkipped(stateOnly(ConversationState.ENDED));
+            waitFor(() -> turns.size() == 2);
+            // The fresh turn never completes.
+            waitFor(() -> postedTexts().size() >= 2);
+            Thread.sleep(300);
+
+            assertEquals(2, postedTexts().size(), postedTexts().toString());
+            assertTrue(postedTexts().get(1).contains("stopped waiting"), postedTexts().get(1));
+            assertEquals(1.0, late("expired"));
+        }
+
+        // --- a late pause ---
+
+        @Test
+        @DisplayName("a late turn that pauses for approval posts its approval card, with the route's own token")
+        void lateTurnThatPausesPostsTheApprovalCard() throws Exception {
+            integration.setPlatformConfig(new HashMap<>(Map.of("signingSecret", "secret-a", "botToken", "xoxb-fake",
+                    SlackHitlSupport.CFG_HITL_APPROVAL_CHANNEL, "C0APPROVALS")));
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            mention("transfer the money");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty());
+            turns.getFirst().onComplete(pausedAnswer("I need an approval first."));
+
+            waitFor(() -> slack.calls("chat.postMessage").stream().anyMatch(call -> "C0APPROVALS".equals(call.channel())));
+            var card = slack.calls("chat.postMessage").stream().filter(call -> "C0APPROVALS".equals(call.channel()))
+                    .findFirst().orElseThrow();
+            assertEquals(AUTH, card.authorization());
+            assertTrue(card.body().has("blocks"));
+            assertTrue(postedTexts().contains("I need an approval first."), postedTexts().toString());
+        }
+
+        // --- a late answer in a DM ---
+
+        @Test
+        @DisplayName("a late answer in a DM goes out with the signing app's token, and its mapping records that app")
+        void lateAnswerInADm() throws Exception {
+            var dmIntegration = new ChannelIntegrationConfiguration();
+            dmIntegration.setName("int-dm");
+            dmIntegration.setChannelType("slack");
+            dmIntegration.setPlatformConfig(new HashMap<>(Map.of("signingSecret", "secret-dm", "botToken", "xoxb-dm")));
+            var target = new ChannelTarget();
+            target.setName("default");
+            target.setType(ChannelTarget.TargetType.AGENT);
+            target.setTargetId("agent-DM");
+            when(router.resolveDefaultForDm("slack", "slow dm question", "int-dm"))
+                    .thenReturn(new ResolvedTarget(target, "slow dm question", dmIntegration, null, null));
+            when(router.signerKeyOf(any())).thenReturn("integration:int-dm");
+            // A DM's channel is owned by nobody: no channel route.
+            when(router.resolveTarget(eq("slack"), eq("D0DM"), any())).thenReturn(null);
+            build(config(1, 1, 30));
+            holdsTheTurn();
+
+            var event = new HashMap<String, Object>();
+            event.put("type", "message");
+            event.put("channel", "D0DM");
+            event.put("channel_type", "im");
+            event.put("ts", "400.1");
+            event.put("user", "U0ALICE");
+            event.put("text", "slow dm question");
+            handler.handleEventAsync("Ev" + System.nanoTime(), event, "UBOT",
+                    new SlackEventHandler.EventOrigin("T1", "int-dm", "secret-dm"));
+
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty());
+            turns.getFirst().onComplete(answer("the dm answer"));
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertEquals("the dm answer", postedTexts().get(1));
+            assertTrue(slack.calls("chat.postMessage").stream().allMatch(call -> "Bearer xoxb-dm".equals(call.authorization())));
+            assertTrue(slack.calls("chat.postMessage").stream().allMatch(call -> "D0DM".equals(call.channel())));
+            verify(userConversationStore).createUserConversation(
+                    argThat(mapping -> "integration:int-dm".equals(mapping.getChannelSigner())));
+        }
+
+        // --- a late group follow-up ---
+
+        private void registerGroupDiscussion(String agentMessageTs) {
+            var listener = mock(SlackGroupDiscussionListener.class);
+            when(listener.getAgentIdForMessageTs(agentMessageTs)).thenReturn("agent-member");
+            when(listener.getAgentContext("agent-member")).thenReturn(new SlackGroupDiscussionListener.AgentContext(
+                    "agent-member", "Alice", "contribution", "", "question", "gc-1"));
+            caches.computeIfAbsent("slack-group-listeners", k -> new FakeCache<>()).put(agentMessageTs,
+                    new SlackEventHandler.GroupFollowUp(listener, new ResolvedTarget(null, null, integration, null, null),
+                            CHANNEL));
+        }
+
+        private void followUpReply(String agentMessageTs, String text) {
+            var event = new HashMap<String, Object>();
+            event.put("type", "message");
+            event.put("channel", CHANNEL);
+            event.put("channel_type", "channel");
+            event.put("thread_ts", agentMessageTs);
+            event.put("ts", agentMessageTs + "9");
+            event.put("user", "U0ALICE");
+            event.put("text", text);
+            handler.handleEventAsync("Ev" + System.nanoTime(), event, "UBOT",
+                    new SlackEventHandler.EventOrigin("T1", null, "secret-a"));
+        }
+
+        @Test
+        @DisplayName("a group follow-up that outlives the wait: a notice, then the answer in the agent's thread")
+        void lateFollowUpIsPosted() throws Exception {
+            build(config(1, 1, 30));
+            holdsTheTurn();
+            registerGroupDiscussion("300.1");
+
+            followUpReply("300.1", "why that choice?");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty());
+            turns.getFirst().onComplete(answer("because of the risks"));
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertEquals("because of the risks", postedTexts().get(1));
+            assertTrue(slack.calls("chat.postMessage").stream().allMatch(call -> "300.1".equals(call.threadTs())));
+        }
+
+        @Test
+        @DisplayName("a late group follow-up whose conversation ended is re-sent to a fresh one, not answered with a failure")
+        void lateFollowUpOnAnEndedConversationIsResent() throws Exception {
+            when(conversationService.startConversation(any(), anyString(), anyString(), any()))
+                    .thenReturn(new ConversationResult("conv-1", URI.create("eddi://conv-1")))
+                    .thenReturn(new ConversationResult("conv-2", URI.create("eddi://conv-2")));
+            build(config(1, 1, 30));
+            holdsTheTurn();
+            registerGroupDiscussion("300.1");
+
+            followUpReply("300.1", "why that choice?");
+            waitFor(() -> turns.size() == 1);
+            waitFor(() -> !postedTexts().isEmpty()); // deferred: the notice is out
+            turns.getFirst().onSkipped(stateOnly(ConversationState.ENDED));
+            waitFor(() -> turns.size() == 2);
+            turns.get(1).onComplete(answer("fresh answer"));
+            waitFor(() -> postedTexts().size() >= 2);
+
+            assertEquals(List.of("conv-1", "conv-2"), turnConversations);
+            assertEquals("fresh answer", postedTexts().get(1));
+            waitFor(() -> late("posted") == 1.0);
+        }
+
+        // --- M1: an observer that outlives the wait ---
+
+        private ChannelTarget observer;
+        private final AtomicReference<Double> spent = new AtomicReference<>(0.0);
+
+        private void observes() {
+            observer = new ChannelTarget();
+            observer.setName("watcher");
+            observer.setType(ChannelTarget.TargetType.AGENT);
+            observer.setTargetId("agent-observer");
+            when(router.observeCandidates("slack", CHANNEL)).thenReturn(List.of(observer));
+            when(router.integrationFor("slack", CHANNEL)).thenReturn(integration);
+            when(observeGate.select(any(), any(), any(), any(), any()))
+                    .thenReturn(Optional.of(new ObserveGate.Match(observer, new ObserveGate.Verdict(true, ObserveGate.Reason.MATCHED))));
+            when(toolCostTracker.getConversationCosts(anyString())).thenAnswer(inv -> {
+                var metrics = mock(ToolCostTracker.ConversationCostMetrics.class);
+                when(metrics.getTotalCost()).thenReturn(spent.get());
+                return metrics;
+            });
+        }
+
+        private void unaddressedMessage(String text) {
+            var event = new HashMap<String, Object>();
+            event.put("type", "message");
+            event.put("channel", CHANNEL);
+            event.put("channel_type", "channel");
+            event.put("ts", "500.1");
+            event.put("user", "U0ALICE");
+            event.put("text", text);
+            handler.handleEventAsync("Ev" + System.nanoTime(), event, "UBOT",
+                    new SlackEventHandler.EventOrigin("T1", null, "secret-a"));
+        }
+
+        @Test
+        @DisplayName("an observer turn that completes late: no 'taking longer' line, the answer, then the lock — and the whole spend is charged")
+        void observerCompletedLateIsChargedInFull() throws Exception {
+            build(config(1, 1, 10));
+            holdsTheTurn();
+            observes();
+
+            unaddressedMessage("the build is red again");
+            waitFor(() -> turns.size() == 1);
+            Thread.sleep(1_400); // past the request timeout
+            assertTrue(postedTexts().isEmpty(), "an observer never says it is taking longer: " + postedTexts());
+            verify(router, never()).lockThreadTarget(any(), any(), any(), any());
+
+            spent.set(0.42); // what the turn spent after the request timeout
+            turns.getFirst().onComplete(answer("looks like the flaky test"));
+
+            waitFor(() -> postedTexts().size() == 1);
+            assertEquals("looks like the flaky test", postedTexts().getFirst());
+            verify(observeGate, timeout(3000)).addCost(eq("slack"), eq(CHANNEL), eq(observer), AdditionalMatchers.eq(0.42, 1e-9));
+            verify(router, timeout(3000)).lockThreadTarget("slack", CHANNEL, "500.1", observer);
+        }
+
+        @Test
+        @DisplayName("an observer turn still running after the window: nothing posted or locked; spend charged so far, the rest when it ends")
+        void observerExpiredIsChargedWhenTheTurnEnds() throws Exception {
+            build(config(1, 1, 1));
+            holdsTheTurn();
+            observes();
+
+            unaddressedMessage("the build is red again");
+            waitFor(() -> turns.size() == 1);
+            spent.set(0.10);
+            verify(observeGate, timeout(5000)).addCost(eq("slack"), eq(CHANNEL), eq(observer), AdditionalMatchers.eq(0.10, 1e-9));
+
+            spent.set(0.35);
+            turns.getFirst().onComplete(answer("too late to say"));
+
+            verify(observeGate, timeout(3000)).addCost(eq("slack"), eq(CHANNEL), eq(observer), AdditionalMatchers.eq(0.25, 1e-9));
+            Thread.sleep(300);
+            assertTrue(postedTexts().isEmpty(), "nothing is posted for a turn nobody asked for: " + postedTexts());
+            verify(router, never()).lockThreadTarget(any(), any(), any(), any());
+            assertEquals(0.0, late("posted") + late("expired") + late("failed"), "observers do not take a late-answer slot");
+        }
+    }
+
+    // ─── Helpers ───
+
+    private static void waitFor(BooleanSupplier condition) throws InterruptedException {
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
+        while (!condition.getAsBoolean()) {
+            if (System.nanoTime() > deadline) {
+                throw new AssertionError("condition not reached within 10 s");
+            }
+            Thread.sleep(20);
+        }
+    }
+
+    private static SimpleConversationMemorySnapshot answer(String text) {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(ConversationState.READY);
+        var output = new ConversationOutput();
+        output.put("output", List.of(text));
+        snapshot.getConversationOutputs().add(output);
+        return snapshot;
+    }
+
+    private static SimpleConversationMemorySnapshot pausedAnswer(String text) {
+        var snapshot = answer(text);
+        snapshot.setConversationState(ConversationState.AWAITING_HUMAN);
+        return snapshot;
+    }
+
+    /** What a dropped turn's {@code onSkipped} carries: the state it found. */
+    private static SimpleConversationMemorySnapshot stateOnly(ConversationState state) {
+        var snapshot = new SimpleConversationMemorySnapshot();
+        snapshot.setConversationState(state);
+        return snapshot;
+    }
+
+    private static final class FakeCache<K, V> extends ConcurrentHashMap<K, V> implements ICache<K, V> {
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public String getCacheName() {
+            return "fake";
+        }
+
+        @Override
+        public V put(K key, V value, long lifespan, TimeUnit unit) {
+            return put(key, value);
+        }
+
+        @Override
+        public V putIfAbsent(K key, V value, long lifespan, TimeUnit unit) {
+            return putIfAbsent(key, value);
+        }
+
+        @Override
+        public void putAll(Map<? extends K, ? extends V> map, long lifespan, TimeUnit unit) {
+            putAll(map);
+        }
+
+        @Override
+        public V replace(K key, V value, long lifespan, TimeUnit unit) {
+            return replace(key, value);
+        }
+
+        @Override
+        public boolean replace(K key, V oldValue, V value, long lifespan, TimeUnit unit) {
+            return replace(key, oldValue, value);
+        }
+
+        @Override
+        public V put(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime, TimeUnit maxIdleTimeUnit) {
+            return put(key, value);
+        }
+
+        @Override
+        public V putIfAbsent(K key, V value, long lifespan, TimeUnit lifespanUnit, long maxIdleTime,
+                             TimeUnit maxIdleTimeUnit) {
+            return putIfAbsent(key, value);
+        }
+    }
+}

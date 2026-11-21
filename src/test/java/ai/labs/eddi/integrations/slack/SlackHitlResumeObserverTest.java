@@ -155,6 +155,116 @@ class SlackHitlResumeObserverTest {
                 contains("Order placed."));
     }
 
+    // ─── Direct messages: a DM's channel id belongs to no integration ───
+
+    @Test
+    void parseIntent_carriesTheAgent_followUpDoesNot() {
+        assertEquals("agent-1", SlackHitlResumeObserver.parseIntent("channel:slack:D123:agent-1:1700.0001").agentId());
+        assertNull(SlackHitlResumeObserver.parseIntent("channel:followup:C123:1700.0001").agentId());
+    }
+
+    @Test
+    void teamOf_readsTheWorkspaceOutOfTheEddiUserId() {
+        assertEquals("T1", SlackHitlResumeObserver.teamOf("slack:T1:U1"));
+        assertNull(SlackHitlResumeObserver.teamOf("slack:U1"));
+        assertNull(SlackHitlResumeObserver.teamOf("alice"));
+        assertNull(SlackHitlResumeObserver.teamOf(null));
+    }
+
+    @Test
+    void onResumeCompleted_dm_isPostedWithTheTokenOfTheAppServingTheAgent() throws Exception {
+        var mapping = new UserConversation("channel:slack:D123:agent-1:1700.0001", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-dm");
+        when(userConversationStore.readUserConversationByConversationId("conv-dm")).thenReturn(mapping);
+        when(router.getBotToken("slack", "D123")).thenReturn(null);
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn("xoxb-dm-app");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-dm", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("Order placed.")));
+
+        verify(slackApi).postMessage(eq("Bearer xoxb-dm-app"), eq("D123"), eq("1700.0001"), contains("Order placed."));
+    }
+
+    /**
+     * S5: the app that signed the DM is recorded on the mapping, so the outcome is
+     * posted with exactly its token — the "one app serves the agent" guess is not
+     * consulted at all.
+     */
+    @Test
+    void onResumeCompleted_dm_usesTheRecordedSigningAppsToken() throws Exception {
+        var mapping = new UserConversation("channel:slack:D123:agent-1:1700.0001", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-dm");
+        mapping.setChannelSigner("integration:app-a");
+        when(userConversationStore.readUserConversationByConversationId("conv-dm")).thenReturn(mapping);
+        when(router.getBotTokenForSignerKey("slack", "integration:app-a")).thenReturn("xoxb-app-a");
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn("xoxb-app-b");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-dm", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("Order placed.")));
+
+        verify(slackApi).postMessage(eq("Bearer xoxb-app-a"), eq("D123"), eq("1700.0001"), contains("Order placed."));
+        verify(router, never()).getBotTokenForTarget(any(), any(), any());
+    }
+
+    @Test
+    void onResumeCompleted_dm_recordedAppWithoutAToken_postsNothing() throws Exception {
+        var mapping = new UserConversation("channel:slack:D123:agent-1:main", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-dm");
+        mapping.setChannelSigner("integration:app-a");
+        when(userConversationStore.readUserConversationByConversationId("conv-dm")).thenReturn(mapping);
+        when(router.getBotTokenForSignerKey("slack", "integration:app-a")).thenReturn(null);
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn("xoxb-app-b");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-dm", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("x")));
+
+        verifyNoInteractions(slackApi);
+    }
+
+    @Test
+    void onResumeCompleted_dmFollowUp_fallsBackToTheMappingsAgent() throws Exception {
+        // A follow-up intent carries no agent; the mapping does.
+        var mapping = new UserConversation("channel:followup:D123:1700.0001", "slack:T1:U1",
+                Deployment.Environment.production, "agent-7", "conv-fu");
+        when(userConversationStore.readUserConversationByConversationId("conv-fu")).thenReturn(mapping);
+        when(router.getBotTokenForTarget("slack", "agent-7", "T1")).thenReturn("xoxb-only-app");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-fu", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("done")));
+
+        verify(slackApi).postMessage(eq("Bearer xoxb-only-app"), eq("D123"), eq("1700.0001"), contains("done"));
+    }
+
+    @Test
+    void onResumeCompleted_dmServedByTwoApps_isNotGuessed() throws Exception {
+        var mapping = new UserConversation("channel:slack:D123:agent-1:main", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-dm");
+        when(userConversationStore.readUserConversationByConversationId("conv-dm")).thenReturn(mapping);
+        // The router answers null when the candidates are ambiguous.
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn(null);
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-dm", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("x")));
+
+        verifyNoInteractions(slackApi);
+    }
+
+    @Test
+    void onResumeCompleted_channelAnIntegrationOwnsButLeftTokenless_doesNotBorrowAnotherAppsToken() throws Exception {
+        var mapping = new UserConversation("channel:slack:C123:agent-1:main", "slack:T1:U1",
+                Deployment.Environment.production, "agent-1", "conv-9");
+        when(userConversationStore.readUserConversationByConversationId("conv-9")).thenReturn(mapping);
+        when(router.getBotToken("slack", "C123")).thenReturn(null);
+        when(router.isChannelOwned("slack", "C123")).thenReturn(true);
+        when(router.getBotTokenForTarget("slack", "agent-1", "T1")).thenReturn("xoxb-other-app");
+
+        observer.onResumeCompleted(new HitlResumeCompletedEvent(
+                "conv-9", HitlVerdict.APPROVED, "slack:U9", snapshotWithText("x")));
+
+        verifyNoInteractions(slackApi);
+        verify(router, never()).getBotTokenForTarget(any(), any(), any());
+    }
+
     @Test
     void onResumeCompleted_slackShapedIntentNotOwnedByASlackUser_isNotPosted() throws Exception {
         // An editor's own trigger named after someone else's Slack channel: the

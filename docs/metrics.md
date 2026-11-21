@@ -942,6 +942,26 @@ worker cannot keep up — see [Alerts](alerts.md#operating-alerts). A Grafana al
 rule on `outcome="gave_up"` is in the
 [Monitoring Guide](monitoring/monitoring-guide.md#alerting-on-alert-delivery).
 
+### Slack Metrics
+
+```text
+eddi_slack_thread_replies_ignored_total   # Unmentioned thread replies dropped because the bot takes no part in the thread
+eddi_slack_late_answers_total             # Turns that outlived the wait; tag: outcome (posted|failed|expired)
+```
+
+`eddi_slack_thread_replies_ignored_total` is not an error: it is the rule "the bot answers an unmentioned
+thread reply only in a thread it already takes part in" working. A high rate means the Slack app receives a lot
+of conversation between people (`message.channels` is subscribed); none of it reaches a model. See
+[Slack Integration](slack-integration.md#when-the-bot-answers).
+
+`eddi_slack_late_answers_total` counts the turns that did not finish within `eddi.slack.request-timeout-seconds`:
+`posted` — the answer was posted to the thread when the turn completed; `failed` — the turn ended in an error and the
+thread got a failure notice; `expired` — the turn was still running after `eddi.slack.late-answer-window-seconds`
+and the thread was told to ask again. A steady `expired` rate means turns routinely run longer than both limits.
+The series of an outcome appears with its first count, so a query over an instance that has had no late answer
+finds none. An observer's turn is never deferred and is not counted here.
+See [Slack Integration](slack-integration.md#slow-answers).
+
 ### Agent Identity & Signing Metrics
 
 ```text

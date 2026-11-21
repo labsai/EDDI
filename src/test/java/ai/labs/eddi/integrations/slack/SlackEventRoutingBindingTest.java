@@ -167,7 +167,10 @@ class SlackEventRoutingBindingTest {
 
         handler.handleEventAsync(nextEventId(), channelReply("D_A", "200.1"), null, signedBy("int-b", "secret-b"));
 
-        verify(router, timeout(2000)).resolveThreadTarget("slack", "D_A", "200.1");
+        // The lock is consulted twice now: once to decide whether the bot takes part in
+        // the
+        // thread, once to route the reply.
+        verify(router, timeout(2000).atLeastOnce()).resolveThreadTarget("slack", "D_A", "200.1");
         verify(conversationService, after(700).never()).startConversation(any(), any(), any(), any());
     }
 
