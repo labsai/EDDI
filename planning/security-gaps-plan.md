@@ -1,6 +1,6 @@
 # Security gaps: canary tokens, role-filtered MCP tools, token exchange, step-up auth
 
-**Status:** Proposal, revision 2 (2026-11-21), revised after an adversarial review. Nothing here is built.
+**Status:** Proposal, revision 2 (2026-11-21), revised after an adversarial review, then fact-checked against `main` @ `a2acb28e86` the same day (corrections are marked *Fact-check*). Nothing here is built yet.
 **Origin:** A comparison of EDDI against the security patterns presented in Quarkus Insights #267/#268 (guardrails, zero-trust MCP auth, agent sandboxing).
 **Read with:** [`guardrails-architecture.md`](guardrails-architecture.md), [`saas-connectors-plan.md`](saas-connectors-plan.md) (§12 "What I would NOT do" binds this plan), [`mcp-oauth-protected-resource-plan.md`](mcp-oauth-protected-resource-plan.md), [`docs/tool-call-guardrails.md`](../docs/tool-call-guardrails.md), [`docs/connections.md`](../docs/connections.md), [`docs/hitl.md`](../docs/hitl.md).
 
@@ -43,6 +43,8 @@ The system message is assembled in `LlmTask` in this order (verified):
 
 A marker appended before step 5 is silently cut from any long prompt. So:
 
+> *Fact-check.* Two refinements. (a) The cap is opt-in: `maxSystemPromptChars` defaults to `-1`, and `capSystemPrompt` returns the prompt unchanged when `maxChars <= 0` (`LlmTask.java:3830`), so the cut happens only where an author set it. (b) There is a sixth, uncapped step: `ConversationHistoryBuilder.composeSystemMessage` (`:72-76`, called at `:125` and `:225`) appends the rolling summary *after* the cap. "After `capSystemPrompt`" must therefore mean after the summary is composed too, or the helper must run inside `ConversationHistoryBuilder`; otherwise the marker is not at the tail whenever a summary is active.
+
 - `CanaryMarker.apply(systemMessage, task, memory)` is a single shared helper, called **after** `capSystemPrompt`. It replaces the tail of the prompt when needed so that the marker always survives. Wherever a system message is built, it goes through this helper:
   - the normal turn path;
   - `ToolLoopResumer.fallbackRebuildMessages` (verified: it rebuilds from the raw `systemMessage` parameter at `:543-562`, so today that path would carry no marker);
@@ -65,7 +67,7 @@ A marker appended before step 5 is silently cut from any long prompt. So:
 
 Revision 1 said the token is never stored. That was false (verified):
 
-- `LlmTask.java:1216`, `:2507` and `:2910` store the compiled system prompt under `AUDIT_COMPILED_PROMPT`.
+- `LlmTask.java:1216`, `:2507` and `:2910` store the compiled system prompt under `AUDIT_COMPILED_PROMPT`. *Fact-check:* only `:1216` stores the assembled prompt. `:2507` (`executeResume`) and `:2910` (`storeRevision`) store the templated `systemMessage` parameter, without RAG, counterweight, format blocks or a marker, so the scrub is moot there, and those audit entries do not show what the model saw.
 - Every tool pause serializes the full message list, system message included, into `PendingToolCallBatch.chatTranscriptJson` (`orchestration/ToolApprovalGateSupport.java:347`; `ChatTranscriptCodec` has no system-message filter).
 
 So:
@@ -80,11 +82,11 @@ So:
 - Not covered, and stated as such in the docs:
   - Leaks into `postResponse` properties or long-term user memory, which are written from tool results and not screened.
   - A user who has learned the marker pasting it into input. That stays in history, and every later answer that quotes it would trip the guardrail. So: run the canary type in phase `INPUT` too, in mode `warn`. It records the event and does not refuse, so a user cannot lock a conversation by quoting the marker.
-- Model-backed guardrails (judge, classifier) may forward the system message to a third-party model (unverified). If they do, the marker is sent with it. Check `GuardrailModelClient` before building. If it does, strip the marker line before the call.
+- ~~Model-backed guardrails (judge, classifier) may forward the system message to a third-party model (unverified).~~ *Fact-check, answered: they do not.* `GuardrailModelClient.templateData` (`:280-287`) offers only `input` (the last user message), `output` (the screened text) and, opt-in, retrieved `context`; `ClassifierGuardrail.buildMessages` and `JudgeGuardrail.buildMessages` send no `SystemMessage`. The marker can reach such a model only inside a leaked answer it is screening, so order the canary before model-backed output guardrails.
 
 ### Actions
 
-`block` only, enforced at save time as `disclosure` enforces `redact`. `redact` would remove the marker and deliver the rest of the leaked prompt, which looks safe and is not. Buffering follows from `block`: `requiresBuffering` is true (verified), so a streamed answer is held until it is screened, as for every other blocking output guardrail.
+`block` only, enforced as `disclosure` enforces `redact` (*fact-check:* that is at save time for `toolCallGuardrails`, `ToolCallGuardrailConfigValidator.java:83-84`, but only at deploy time for `outputGuardrails`, `ToolCallGuardrailValidation.checkOutputDisclosure`; either follow both or add a save-time output check). `redact` would remove the marker and deliver the rest of the leaked prompt, which looks safe and is not. Buffering follows from `block`: `requiresBuffering` is true (verified), so a streamed answer is held until it is screened, as for every other blocking output guardrail.
 
 ### Companion, deferred: `system-prompt-overlap`
 
@@ -104,6 +106,8 @@ N-gram overlap between the answer and the system message, which `GuardrailContex
 
 An unknown guardrail type is skipped with a warning (`GuardrailService.java:1028`) (verified). So an older EDDI, or a rollback, silently runs agents without the canary. Say this in the docs' Compatibility section, as [`tool-call-guardrails.md`](../docs/tool-call-guardrails.md) does for 6.7.
 
+*Fact-check:* that holds for input and output only. An unknown `toolCallGuardrails` type is **refused** (`ToolCallGuardrailValidation.java:28-31`), so on an older EDDI that knows tool-call guardrails, an agent with a canary tool-call entry fails to deploy instead of running unguarded. The Compatibility section needs both behaviours.
+
 ## 2. Role-aware MCP tool visibility
 
 ### Gap
@@ -121,10 +125,10 @@ Revision 1 called this "disclosure, not enforcement". That was wrong. In quarkus
 
 ### One source of truth for tiers
 
-- Add `McpToolTiers`, a `Map<String, List<String>>` beside `McpRoles`. It is used by the list filter, by the tool methods (replacing the literal in each method), and by `McpRoleTierParityTest`, which then asserts that the measured tier equals the map entry.
+- Add `McpToolTiers`, a `Map<String, List<String>>` beside `McpRoles`. It is used by the list filter, by the tool methods (replacing the literal in each method), and by `McpRoleTierParityTest`, which then asserts that the measured tier equals the map entry. *Fact-check:* once the methods read the map, "measured equals map" compares the map with itself, so the test must also keep its own hand-written tool-to-tier record and assert that the map equals it.
 - Tools whose tier depends on their arguments are listed under the **union** of their tiers. `read_agent_logs` is one (verified, comment in `McpRoleTierParityTest`). Showing a tool that then refuses some arguments is fine; hiding a tool a caller can use is not.
 - HITL tools are listed by the HITL tier. The per-conversation `HitlAccessGuard` cannot be decided at list time.
-- The parity test javadoc says 107 tools and the docs say 120. Reconcile the count as part of this change.
+- The parity test javadoc says 107 tools and the docs say 120. Reconcile the count as part of this change. *Fact-check:* the docs and the whitelist are right at 120. The test asserts 119 because it never measures `McpVersionTools` (`get_eddi_version`, gated by a literal `requireRole(…, "eddi-admin")`), and its javadoc is stale.
 
 ### Identity inside the filter
 
@@ -148,7 +152,7 @@ The filter changes nothing. This is the dev posture; production is guarded by `A
 
 ### What it is, and what it replaces
 
-**Correction to the first comparison:** `${caller:token}` is not the passthrough the MCP spec warns about. It is released only to the caller's own origin or to EDDI itself (`CallerIdentityResolver`) (verified). It stays exactly as it is ([`saas-connectors-plan.md`](saas-connectors-plan.md) §12 and §5: never relax it).
+**Correction to the first comparison:** `${caller:token}` is not the passthrough the MCP spec warns about. It is released only to the caller's own origin or to EDDI itself (`CallerIdentityResolver`) (verified). It stays exactly as it is ([`saas-connectors-plan.md`](saas-connectors-plan.md) §5.5: never relax it; *fact-check:* §12 does not mention it).
 
 Token exchange covers a different case: calling a downstream API protected by **the same IdP**, as the signed-in user, without a per-user consent flow. Today that needs:
 
@@ -173,12 +177,12 @@ With exchange, EDDI sends the user's inbound token, with its own client credenti
 | No sixth bespoke `HttpClient` | Uses the existing OAuth token client on the shared outbound stack |
 | No `PER_USER` on LLM, embedding or vector-store connections | The exchange binding is refused there at validation time, for the same reason |
 | "Never accept a client-supplied header as the grant principal" | The subject is the validated inbound token, never a header. The video's interim `X-MCP-*` identity headers (external) are not adopted |
-| Who may reference the connection | As for `${caller:token}`: only trusted authors, i.e. whoever may edit agents and connections (`CallerIdentityResolver` javadoc ~43-47). State it in [`docs/connections.md`](../docs/connections.md) |
+| Who may reference the connection | As for `${caller:token}`: only trusted authors. *Fact-check:* that is not every editor but a configurable role set, `eddi.caller-identity.author-roles`, enforced on save and import by `CallerTokenAuthorPolicy` (`CallerIdentityResolver` javadoc `:52-59`). Reuse that policy. State it in [`docs/connections.md`](../docs/connections.md) |
 
 ### Model
 
 - `AuthType.OAUTH2_TOKEN_EXCHANGE` with a new `Binding.CALLER_EXCHANGED`.
-- `isOAuth()` stays **false** for it. That predicate means "completes a flow and needs a stored grant" (`AuthType` javadoc) (verified), and exchange stores no grant. Add `usesTokenEndpoint()` and go through the four `isOAuth()` call sites one by one, deciding for each which predicate it actually means.
+- `isOAuth()` stays **false** for it. That predicate means "completes a flow and needs a stored grant" (`AuthType` javadoc) (verified), and exchange stores no grant. Add `usesTokenEndpoint()` and go through the `isOAuth()` call sites one by one (*fact-check:* three, not four: `RestConnectionStore.java:899`, `ConnectionResolver.java:321`, `ConnectionStartupGuard.java:181`; `isServiceAccount()` is an existing sibling predicate), deciding for each which predicate it actually means.
 - Fields: `tokenUrl`, `clientId`, `clientSecret` (`${vault:…}`), `audience` and/or `resource`, `scopes`, `requestedTokenType` (default `access_token`).
 
 ### Cache
@@ -195,8 +199,8 @@ With exchange, EDDI sends the user's inbound token, with its own client credenti
 | --- | --- |
 | Synchronous turn from an authenticated caller | Exchange the caller's token |
 | Scheduled fire, continuation, async group turn | `ConnectionException` (no subject). The same posture as `PER_USER` with `SELF_ASSERTED` provenance |
-| `/v1` OpenAI-compatible API | Kept off OIDC (`application.properties:652`), so there is no subject. Refused at resolve time with a clear message |
-| HITL resume | **Fail closed by default.** Exchanging the approver's token would run the requester's call with the approver's (often admin) rights downstream: a confused deputy. The only exception is when the decider is the conversation owner, which is the same principal. This matches [`saas-connectors-plan.md`](saas-connectors-plan.md) ~620-640 for `CALLER_SUPPLIED` and the existing fail-closed resumes in [`docs/hitl.md`](../docs/hitl.md):218 |
+| `/v1` OpenAI-compatible API | Under the default `eddi.openai-compat.http-policy=permit`, kept off OIDC (`application.properties:651-655`), so there is no subject: refused at resolve time with a clear message. *Fact-check:* under `http-policy=authenticated` Quarkus OIDC validates the bearer token, so there is a subject and the exchange can run as on a synchronous turn |
+| HITL resume | **Fail closed by default.** Exchanging the approver's token would run the requester's call with the approver's (often admin) rights downstream: a confused deputy. The only exception is when the decider is the conversation owner, which is the same principal. This is stricter than [`saas-connectors-plan.md`](saas-connectors-plan.md) `:621-650` for `CALLER_SUPPLIED` (*fact-check:* its decision at `:642` is "C, with A as the failure mode": the integrator re-supplies the credential on resume, and only failing that does the call fail) and the existing fail-closed resumes in [`docs/hitl.md`](../docs/hitl.md):218 |
 | Group member turn on the caller's thread | Exchange only when the member conversation's provenance is `VERIFIED` for that user. Otherwise refuse. The open group-binding question in [`docs/connections.md`](../docs/connections.md) Limitations applies unchanged |
 
 ### Observability
@@ -217,6 +221,8 @@ A mid-turn "authenticate more strongly" challenge is a pause followed by a resum
 
 Quarkus OIDC 3.40.1 ships `@AuthenticationContext(value, maxAge)` and `StepUpAuthenticationPolicy` (verified in the jar). Its challenge format (`insufficient_user_authentication`) is (external); confirm it against the Quarkus OIDC guide for 3.40 before the UIs depend on it.
 
+> *Fact-check.* The platform is 3.40.1.2 (`pom.xml:18`). `@AuthenticationContext` is public API, but it is static per endpoint, so a per-batch, rule-driven `acr` set cannot be expressed with it. `StepUpAuthenticationPolicy` is a package-private record in `io.quarkus.oidc.runtime`, not an API EDDI can call. So EDDI implements the `acr`/`auth_time` check and emits the challenge itself, matching Quarkus' format. The jar does contain the literals `insufficient_user_authentication`, `acr_values` and `max_age`; the exact header layout is still to be confirmed.
+
 ### Config
 
 `toolApprovals.rules[].requiredAuthLevel: { "acr": ["mfa", "hwk"], "maxAge": "PT5M" }`. The `acr` list is the set of acceptable values; the token's `acr` must be one of them.
@@ -225,7 +231,7 @@ Quarkus OIDC 3.40.1 ships `@AuthenticationContext(value, maxAge)` and `StepUpAut
 
 ### The batch keeps a separately merged auth level
 
-`ToolApprovalRules.governing` reduces a batch to one whole rule, chosen by timeout-policy strictness and then specificity (`ToolApprovalRules.java:85-96`) (verified). Riding on `effectiveRule` would drop a `requiredAuthLevel` from a losing rule. For example, an MFA-gated call batched with a `WAIT_INDEFINITELY` call would lose step-up entirely. So:
+`ToolApprovalRules.governing` reduces a batch to one whole rule, chosen by timeout-policy strictness and then specificity (`ToolApprovalRules.java:92-101`) (verified). Note that `matchByCallId` (`:65-84`) takes the first matching rule per call, so "all matched rules" below means one rule per call in the batch. Riding on `effectiveRule` would drop a `requiredAuthLevel` from a losing rule. For example, an MFA-gated call batched with a `WAIT_INDEFINITELY` call would lose step-up entirely. So:
 
 - `PendingToolCallBatch.effectiveAuthLevel` is a separate persisted field, merged field by field across **all** matched rules:
   - `acr`: the **intersection** of the acceptable sets. ACR values are unordered strings, so "highest" does not exist. An empty intersection is a configuration conflict, and the batch fails closed: it can only be rejected.
@@ -290,7 +296,7 @@ Unit tests with JUnit 5 and Mockito, plus ITs where a real store or HTTP is need
 | # | Item | Size | Gate before starting |
 | --- | --- | --- | --- |
 | 1 | `McpToolTiers` single source (§2) | S | None; removes tier drift on its own |
-| 2 | Canary guardrail (§1), without the overlap companion | M | Check `GuardrailModelClient` for system-message forwarding |
+| 2 | Canary guardrail (§1), without the overlap companion | M | None left: `GuardrailModelClient` was checked and forwards no system message. Decide where the marker goes relative to the rolling summary |
 | 3 | Role-aware `tools/list` (§2) | S | Identity-in-filter spike passes |
 | 4 | Step-up on approvals (§4) | M–L (backend, two UIs, realm) | Confirm the resume path sees `acr` / `auth_time` |
 | 5 | Token exchange (§3) | M–L | Keycloak 26.8 exchange check; §12 carve-out agreed |
