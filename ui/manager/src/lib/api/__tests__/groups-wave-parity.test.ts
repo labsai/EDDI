@@ -24,6 +24,8 @@ vi.mock("@eddi/app-kit/lib/api-client", () => ({
     delete: vi.fn(),
     getAuthHeader: vi.fn().mockReturnValue({}),
     getBaseUrl: vi.fn().mockReturnValue("http://localhost:7070"),
+    // The refreshing fetch; the streams go through it. The tests stub the global fetch.
+    authorizedFetch: (url: string, init?: RequestInit) => fetch(url, init),
   },
 }));
 

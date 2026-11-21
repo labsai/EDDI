@@ -31,7 +31,11 @@
     "initFailedBody": "Manager はサインインを完了できませんでした。ログインサービスに接続できないか、セッションが拒否された可能性があります。",
     "signInAgain": "もう一度サインイン",
     "sessionExpiredTitle": "セッションの有効期限が切れました。",
-    "sessionExpiredBody": "未保存の変更はこのページに残っています。再度サインインする前に、必要な内容をコピーしてください。"
+    "sessionExpiredBody": "未保存の変更はこのページに残っています。再度サインインする前に、必要な内容をコピーしてください。",
+    "logout": "ログアウト",
+    "userMenu": "ユーザーメニュー",
+    "signedIn": "サインイン済み",
+    "initFailedBodyWorkforce": "Workforce はサインインを完了できませんでした。ログインサービスに接続できないか、セッションが拒否された可能性があります。"
   },
   "nav": {
     "modeManager": "マネージャー",

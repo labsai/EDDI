@@ -67,13 +67,15 @@ import {
   type Translate,
   type TurnFailure,
   type TurnFailureContext,
+  turnFailureMessage,
+  DETACHED_TURN_GRACE_MS,
 } from "@eddi/conversation";
 import { ToolActivityLog, TurnNotesLog, turnNoteListener } from "@eddi/conversation/tool-activity";
 import { toolResultListener } from "@eddi/core/tool-events";
 import { useDebugStore, type ToolTraceEntry } from "./use-debug-events";
 import { getErrorMessage } from "../lib/api-client";
 import { toast } from "sonner";
-import { chatKeys } from "../lib/query-keys";
+import { chatKeys, invalidateAll, CONVERSATION_MUTATION_INVALIDATIONS } from "../lib/query-keys";
 import { parseToolCallEvent, toolCallActivity, type ToolActivity } from "../lib/tool-labels";
 
 /**
@@ -557,7 +559,10 @@ export function useDeployedAgents() {
  */
 export function useStartConversation() {
   const store = useChatStore;
+  const queryClient = useQueryClient();
   return useMutation({
+    // A started conversation is in the history and the dashboard's recent list.
+    onSuccess: () => invalidateAll(queryClient, CONVERSATION_MUTATION_INVALIDATIONS),
     mutationFn: async ({
       agentId,
       environment,
@@ -648,7 +653,7 @@ export { UNCONSUMED_STREAM_ERROR_CODES };
  * swallows the terminal frame would otherwise keep the fetch and its mutation
  * open for good, one more per switch.
  */
-export const DETACHED_STREAM_GRACE_MS = 120_000;
+export const DETACHED_STREAM_GRACE_MS = DETACHED_TURN_GRACE_MS;
 
 /* ─── The turn loop: @eddi/conversation's AgentConversation ───────────────
  *
@@ -731,18 +736,25 @@ const selectedAgent = () => useChatStore.getState().selectedAgentId ?? "";
 /** The Manager's API binding as a transport (its token refresh, its errors, its mocks in tests). */
 const chatTransport: AgentTransport = {
   mode: "conversation",
-  stream: (conversationId, text, { context, signal }) =>
+  stream: (conversationId, text, { context, signal, idempotencyKey }) =>
     sendMessageStreaming(
       "production",
       selectedAgent(),
       conversationId ?? "",
       context ? { input: text, context } : { input: text },
       signal,
+      { idempotencyKey },
     ),
-  say: (conversationId, text, { context }) =>
+  say: (conversationId, text, { context, signal, idempotencyKey }) =>
     (context
-      ? sendMessageWithContext("production", selectedAgent(), conversationId ?? "", { input: text, context })
-      : sendMessage("production", selectedAgent(), conversationId ?? "", text)) as unknown as Promise<
+      ? sendMessageWithContext("production", selectedAgent(), conversationId ?? "", { input: text, context }, {
+          idempotencyKey,
+          signal,
+        })
+      : sendMessage("production", selectedAgent(), conversationId ?? "", text, {
+          idempotencyKey,
+          signal,
+        })) as unknown as Promise<
       Partial<ConversationSnapshot>
     >,
   read: (conversationId, currentStepOnly) =>
@@ -785,6 +797,9 @@ function patchLastAgent(patch: (last: ChatMessage) => ChatMessage): void {
  */
 async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext): Promise<boolean> {
   const store = useChatStore;
+  // The turn ran and its result was not saved: the controller's notice says so
+  // (and what sending again does); "Retry Last Step" would re-run the step before.
+  if (failure.class === "notStored" || failure.class === "unknownOutcome") return false;
   if (failure.kind === "streamError") {
     // A known code gets a sentence in the reader's language that says what to
     // do next. The backend message is kept as the fallback: an unrecognised
@@ -798,25 +813,21 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
     return true;
   }
 
-  const refusal = failure.kind === "refused" && (failure.status === 409 || failure.code !== null);
+  // The controller classified the failure (`failure.class`); the Manager renders
+  // from that, not from the status. An ended conversation and a turn whose
+  // outcome is unknown (a 408, a drop after the send) are the controller's own
+  // handling: the ENDED footer (a turn of unknown outcome returned above).
+  if (failure.class === "ended") return false;
+
+  const refusal = failure.class === "notAccepted" || failure.class === "paused";
   if (refusal) {
-    // Paused is decided by the conversation's actual state, not by the status:
-    // a 409 also answers "processing another turn", "agent version mismatch"
-    // and "the conversation changed while your message was queued", and each
-    // used to show the approval banner over a conversation nobody could
-    // approve. Only a confirmed AWAITING_HUMAN is a pause; a failed read is a
-    // refusal, with the input left enabled.
-    let paused = failure.code === "awaiting_approval";
-    let pausedAt: string | null = null;
-    if (failure.status === 409 && ctx.conversationId) {
-      try {
-        const snapshot = await readConversation("production", "", ctx.conversationId, true);
-        paused = snapshot.conversationState === "AWAITING_HUMAN";
-        pausedAt = paused ? (snapshot.hitlPausedAt ?? null) : null;
-      } catch {
-        // Unconfirmed: a refusal, not a pause.
-      }
-    }
+    // Paused is decided by the conversation's actual state, which the controller
+    // read for a 409: a 409 also answers "processing another turn", "agent
+    // version mismatch" and "the conversation changed while your message was
+    // queued", and each used to show the approval banner over a conversation
+    // nobody could approve.
+    const paused = failure.class === "paused" || failure.code === "awaiting_approval";
+    const pausedAt = paused ? ((failure.conversation as { hitlPausedAt?: string } | null | undefined)?.hitlPausedAt ?? null) : null;
     if (!ctx.isCurrent()) return true;
     const secretModeBefore = store.getState().isSecretMode;
     const rejected = store.getState().messages.find((m) => m.id === ctx.userMessageId);
@@ -842,9 +853,18 @@ async function presentChatFailure(failure: TurnFailure, ctx: TurnFailureContext)
     if (paused) {
       store.getState().setPaused(true, null, pausedAt);
     } else {
+      // The shared sentence for the class and status (sign in again, too large,
+      // …), without its warning sign: a toast is not a transcript line.
+      // A 409's own sentence names why (busy, version mismatch, queued and
+      // changed): the Manager is the operator's app, and that is what they need.
       const reason = failure.code
         ? (translateStreamError(failure.code, managerT ?? fallbackT) ?? failure.message)
-        : failure.message;
+        : failure.status === 409
+          ? failure.message
+          : turnFailureMessage(failure.class, failure.status, (managerT ?? fallbackT) as unknown as Translate).replace(
+            /^⚠️\s*/u,
+            "",
+          );
       toast.error(tr("chat.sendRejected", "Your message was not sent: {{reason}}", { reason }));
     }
     return true;

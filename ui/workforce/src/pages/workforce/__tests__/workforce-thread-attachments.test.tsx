@@ -352,6 +352,8 @@ describe("WorkforceThread – Attachment Features", () => {
             }),
           }),
           expect.anything(),
+          // the turn's Idempotency-Key
+          expect.objectContaining({ idempotencyKey: expect.any(String) }),
         );
       });
     });
@@ -398,6 +400,8 @@ describe("WorkforceThread – Attachment Features", () => {
             }),
           }),
           expect.anything(),
+          // the turn's Idempotency-Key
+          expect.objectContaining({ idempotencyKey: expect.any(String) }),
         );
       });
     });
@@ -450,6 +454,8 @@ describe("WorkforceThread – Attachment Features", () => {
             }),
           }),
           expect.anything(),
+          // the turn's Idempotency-Key
+          expect.objectContaining({ idempotencyKey: expect.any(String) }),
         );
       });
     });
@@ -556,6 +562,8 @@ describe("WorkforceThread – Attachment Features", () => {
           "conv-test-123",
           { input: "Plain text message" },
           expect.anything(),
+          // the turn's Idempotency-Key
+          expect.objectContaining({ idempotencyKey: expect.any(String) }),
         );
       });
     });
@@ -732,7 +740,7 @@ describe("WorkforceThread – Attachment Features", () => {
       setupMocks({
         sendMessageStreaming: (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(
           () => {
-            throw new Error("Upstream model unavailable");
+            throw Object.assign(new Error("Upstream model unavailable"), { status: 500 });
           },
         ),
       });
@@ -827,6 +835,10 @@ describe("WorkforceThread – Attachment Features", () => {
 
     it("says a paused conversation is paused, and does not offer a pointless retry", async () => {
       setupMocks({
+        // A 409 is a pause only when the conversation reads AWAITING_HUMAN.
+        readConversation: vi
+          .spyOn(chatApi, "readConversation")
+          .mockResolvedValue({ conversationSteps: [], conversationState: "AWAITING_HUMAN" } as any),
         sendMessageStreaming: (vi.spyOn(chatApi, "sendMessageStreaming") as any).mockImplementation(
           () => {
             // A 409 is the backend refusing the send WITHOUT consuming it.

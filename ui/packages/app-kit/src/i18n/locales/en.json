@@ -31,7 +31,11 @@
     "initFailedBody": "The Manager could not complete sign-in. The login service may be unreachable or your session may have been rejected.",
     "signInAgain": "Sign in again",
     "sessionExpiredTitle": "Your session has expired.",
-    "sessionExpiredBody": "Unsaved changes are still on this page — copy anything you need before signing in again."
+    "sessionExpiredBody": "Unsaved changes are still on this page — copy anything you need before signing in again.",
+    "logout": "Logout",
+    "userMenu": "User menu",
+    "signedIn": "Signed in",
+    "initFailedBodyWorkforce": "Workforce could not complete sign-in. The login service may be unreachable or your session may have been rejected."
   },
   "nav": {
     "modeManager": "Manager",

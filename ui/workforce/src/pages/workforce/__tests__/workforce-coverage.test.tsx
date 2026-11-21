@@ -227,8 +227,9 @@ describe("Workforce Coverage Tests", () => {
         "conv-123",
         { input: "Hello" },
         expect.anything(),
+        { idempotencyKey: expect.any(String) },
       );
-      
+
       await waitFor(() => {
         expect(screen.getAllByText(/Hello from agent/i).length).toBeGreaterThan(0);
       });

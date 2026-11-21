@@ -534,7 +534,7 @@ function postSSE(
   signal?: AbortSignal,
   extraHeaders?: Record<string, string>,
 ): Promise<Response> {
-  return fetch(`${api.getBaseUrl()}${path}`, {
+  return api.authorizedFetch(`${api.getBaseUrl()}${path}`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { ThemeProvider } from "@eddi/ui";
 import { AppToaster } from "./app-toaster";
-import { AuthProvider } from "../auth/auth-provider";
+import { AuthProvider, type AuthApp } from "../auth/auth-provider";
 import { GrantRequiredDialogHost } from "../secrets/grant-required-dialog";
 
 /**
@@ -14,9 +14,18 @@ import { GrantRequiredDialogHost } from "../secrets/grant-required-dialog";
  * the Manager is the theme Workforce opens with: moving between the two is a
  * full page navigation on one origin, and localStorage is what carries it over.
  */
-export function AppProviders({ queryClient, children }: { queryClient: QueryClient; children: ReactNode }) {
+export function AppProviders({
+  queryClient,
+  app,
+  children,
+}: {
+  queryClient: QueryClient;
+  /** The app this stack runs in (sign-out lands in it); default the Manager. */
+  app?: AuthApp;
+  children: ReactNode;
+}) {
   return (
-    <AuthProvider>
+    <AuthProvider app={app}>
       <QueryClientProvider client={queryClient}>
         <ThemeProvider defaultTheme="system" storageKey="eddi-theme">
           {children}

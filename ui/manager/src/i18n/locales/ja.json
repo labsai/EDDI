@@ -33,11 +33,7 @@
     "license": "EDDI は Apache License 2.0 でライセンスされたオープンソースソフトウェアです。",
     "licenseLink": "ライセンスを読む"
   },
-  "auth": {
-    "logout": "ログアウト",
-    "userMenu": "ユーザーメニュー",
-    "signedIn": "サインイン済み"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "ダッシュボード",
     "agents": "エージェント",

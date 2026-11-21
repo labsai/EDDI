@@ -133,7 +133,7 @@ export const KEYCLOAK_THEME_FILE_NAME = "brand-keycloak-theme.zip";
  * goes through `fetch` with the same auth header `ApiClient` sends.
  */
 export async function fetchKeycloakTheme(): Promise<Blob> {
-  const res = await fetch(`${api.getBaseUrl()}${BASE}/keycloak-theme.zip`, { headers: api.getAuthHeader() });
+  const res = await api.authorizedFetch(`${api.getBaseUrl()}${BASE}/keycloak-theme.zip`, { headers: api.getAuthHeader() });
   if (!res.ok) {
     throw new ApiClientError(res.status, `Download failed: ${res.status} ${res.statusText}`.trim());
   }

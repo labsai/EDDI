@@ -17,6 +17,8 @@ import {
   type ViewState,
 } from "@eddi/app-kit/lib/api/conversations";
 
+import { CONVERSATION_MUTATION_INVALIDATIONS, invalidateAll } from "@eddi/app-kit/lib/query-keys";
+
 const CONVERSATIONS_KEY = ["conversations"] as const;
 
 const IN_PROGRESS_POLL_MS = 3000;
@@ -87,7 +89,8 @@ export function useDeleteConversation() {
       permanent?: boolean;
     }) => deleteConversation(id, permanent),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: CONVERSATIONS_KEY });
+      // The dashboard's recent-conversations card shows the same conversations.
+      invalidateAll(queryClient, CONVERSATION_MUTATION_INVALIDATIONS);
     },
   });
 }

@@ -33,11 +33,7 @@
     "license": "EDDI ओपन-सोर्स सॉफ़्टवेयर है, जो Apache License 2.0 के तहत लाइसेंस प्राप्त है।",
     "licenseLink": "लाइसेंस पढ़ें"
   },
-  "auth": {
-    "logout": "लॉगआउट",
-    "userMenu": "उपयोगकर्ता मेनू",
-    "signedIn": "साइन इन किया गया"
-  },
+  "auth": {},
   "nav": {
     "dashboard": "डैशबोर्ड",
     "agents": "एजेंट",
