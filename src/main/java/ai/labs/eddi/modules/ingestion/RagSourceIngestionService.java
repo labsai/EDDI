@@ -739,6 +739,14 @@ public class RagSourceIngestionService {
         } catch (IllegalArgumentException e) {
             return IngestionReport.failed(null, source.effectiveId(), e.getMessage());
         }
+        // Before the run is claimed, the source listed or the provider called: a
+        // cron firing every ten minutes would otherwise re-list the whole source and
+        // spend the provider's quota on every fire until it came back. Only scheduled
+        // fires are held: "Run now" is an operator's explicit choice, and overrides it.
+        var heldUntil = pipeline.throttledUntil(ragConfigId, source);
+        if (heldUntil.isPresent()) {
+            return IngestionReport.heldBackByThrottle(source.effectiveId(), heldUntil.get());
+        }
         return runAsync(ragConfigId, knowledgeBase, source, IngestionRun.Trigger.SCHEDULED, onFinished)
                 .map(runId -> IngestionReport.started(runId, source.effectiveId()))
                 .orElseGet(() -> IngestionReport.alreadyRunning(source.effectiveId()));

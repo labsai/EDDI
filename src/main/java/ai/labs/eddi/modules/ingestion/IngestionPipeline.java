@@ -34,6 +34,8 @@ import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreFullException;
 import ai.labs.eddi.modules.llm.impl.InMemoryStoreRetiredException;
+import ai.labs.eddi.modules.llm.impl.ProviderBillingException;
+import ai.labs.eddi.modules.llm.impl.ProviderRetryHints;
 import ai.labs.eddi.modules.llm.impl.ProviderThrottledException;
 import ai.labs.eddi.modules.llm.impl.SegmentMetadataUpdates;
 import ai.labs.eddi.modules.llm.impl.ThrottledEmbeddingModel;
@@ -50,6 +52,7 @@ import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Tags;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -61,6 +64,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.function.Supplier;
 
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
@@ -121,6 +126,24 @@ public class IngestionPipeline {
      * per document is not. Not final only so a test can make every document report.
      */
     Duration progressReportInterval = Duration.ofSeconds(2);
+
+    /**
+     * How long after a daily quota stop the next scheduled run waits, when the
+     * provider's reset time is not known. Gemini's is: midnight Pacific time.
+     * Field-injected with its default so the hand-assembled pipeline keeps it.
+     */
+    @ConfigProperty(name = "eddi.ingestion.throttle.daily-cooldown", defaultValue = "1h")
+    Duration dailyCooldown = Duration.ofHours(1);
+
+    /**
+     * How long after a rate-limit stop the next scheduled run waits, when the
+     * provider named no time.
+     */
+    @ConfigProperty(name = "eddi.ingestion.throttle.cooldown", defaultValue = "1m")
+    Duration throttleCooldown = Duration.ofMinutes(1);
+
+    /** The time the throttle gate compares against; replaced in tests. */
+    Supplier<Instant> clock = Instant::now;
 
     /**
      * Metadata key that ties a segment back to its document, used to replace it.
@@ -235,6 +258,74 @@ public class IngestionPipeline {
         String sourceKey = stateKey(ragConfigId, source);
         stateStore.reapStaleRuns(sourceKey, staleBefore(source));
         return stateStore.startRun(sourceKey, staleAfterClaim(source));
+    }
+
+    /**
+     * Until when a scheduled run of this source should not start, because its last
+     * run was stopped by the embedding provider's rate limit and the provider is
+     * not taking calls yet.
+     *
+     * <p>
+     * Asked before the source is listed or the provider called: without it a
+     * {@code *}{@code /10} cron re-listed a whole drive and spent the provider's
+     * quota again on every fire until the quota came back, only to stop as
+     * {@code THROTTLED} once more. The time is the last run's {@code resumeAfter};
+     * a run that recorded none (the provider named no time for a rate limit) waits
+     * {@link #throttleCooldown} from when it finished.
+     *
+     * <p>
+     * Only the source's latest run counts: once a run gets past the throttle, the
+     * gate is open. A store that cannot answer opens it too — a gate that fails
+     * closed would stop a source for good over a read error.
+     *
+     * @return the time the provider takes calls again, while it is still ahead;
+     *         empty when a run may start now
+     */
+    public Optional<Instant> throttledUntil(String ragConfigId, IngestionSource source) {
+        List<IngestionRun> latest;
+        try {
+            latest = stateStore.listRuns(stateKey(ragConfigId, source), 1);
+        } catch (RuntimeException e) {
+            LOGGER.debugf(e, "Could not read the last run of source '%s'; not holding it back",
+                    LogSanitizer.sanitize(source.getName()));
+            return Optional.empty();
+        }
+        if (latest.isEmpty()) {
+            return Optional.empty();
+        }
+        IngestionRun last = latest.get(0);
+        if (last.status() == IngestionRun.Status.RUNNING
+                || !WebCrawler.StopReason.THROTTLED.name().equals(last.stopReason())) {
+            return Optional.empty();
+        }
+        Instant until = last.resumeAfter();
+        if (until == null && last.finishedAt() != null) {
+            until = last.finishedAt().plus(throttleCooldown);
+        }
+        return until != null && until.isAfter(clock.get()) ? Optional.of(until) : Optional.empty();
+    }
+
+    /**
+     * When the provider takes calls again after the refusal that stopped a run.
+     *
+     * <ul>
+     * <li>A daily quota: the provider's documented reset — Gemini's is midnight
+     * Pacific time — or, where none is known, the delay it named, or
+     * {@link #dailyCooldown}.</li>
+     * <li>A rate limit: the delay the provider named, or null when it named none —
+     * not the 30 s fallback, which is a guess. The gate then uses
+     * {@link #throttleCooldown}.</li>
+     * </ul>
+     */
+    Instant resumeAfter(ProviderThrottledException e, Instant now) {
+        if (e.daily()) {
+            Optional<Instant> reset = ProviderRetryHints.dailyReset(e.provider(), now);
+            if (reset.isPresent()) {
+                return reset.get();
+            }
+            return now.plus(e.retryAfter() != null ? e.retryAfter() : dailyCooldown);
+        }
+        return e.retryAfter() == null ? null : now.plus(e.retryAfter());
     }
 
     /**
@@ -382,6 +473,14 @@ public class IngestionPipeline {
             // it is full, every later run says the same until an operator acts; when
             // it was replaced mid-run, the next run re-embeds into the new store.
             return IngestionRun.Status.FAILED;
+        }
+        if (collector.providerRefused != null) {
+            // The provider account's balance is spent: every run fails the same way
+            // until someone fixes the account, so say FAILED, not "paused".
+            return IngestionRun.Status.FAILED;
+        }
+        if (collector.interrupted) {
+            return IngestionRun.Status.CANCELLED;
         }
         boolean nothingUsable = collector.ingested + collector.unchanged == 0;
         return collector.failed > 0 && nothingUsable ? IngestionRun.Status.FAILED : IngestionRun.Status.COMPLETED;
@@ -867,6 +966,14 @@ public class IngestionPipeline {
             return new SourceRun(WebCrawler.StopReason.THROTTLED, Coverage.PARTIAL, false,
                     "the embedding provider's rate limit stopped the run", result.summary());
         }
+        if (collector.providerRefused != null || collector.interrupted) {
+            // The same reasoning: the documents after the stop were not looked at.
+            return new SourceRun(WebCrawler.StopReason.CANCELLED, Coverage.PARTIAL, false,
+                    collector.interrupted
+                            ? "the run was interrupted while waiting on the embedding provider"
+                            : "the embedding provider refused the account",
+                    result.summary());
+        }
         if (result.nextCursor() != null) {
             // Nothing persists cursors yet, so the next run lists in full — the safe
             // direction to be wrong in.
@@ -1146,9 +1253,18 @@ public class IngestionPipeline {
          */
         private ProviderThrottledException throttle;
         /**
-         * When the provider said it would take calls again; null when it did not say.
+         * When the provider takes calls again: the time it named, or for a daily quota
+         * its documented reset or {@link #dailyCooldown} from now. Null for a rate
+         * limit that named no time — the gate then uses {@link #throttleCooldown}.
          */
         private Instant resumeAfter;
+        /**
+         * Why the embedding provider refused this run for good — a spent balance — once
+         * it has. The run fails with this reason; no document is counted failed.
+         */
+        private String providerRefused;
+        /** A wait on the provider was interrupted: the run is being stopped. */
+        private boolean interrupted;
         /** The run's deadline, set when discovery starts. */
         private Instant deadline;
         private ExtractionLimits extractionLimits;
@@ -1208,7 +1324,8 @@ public class IngestionPipeline {
         }
 
         boolean isCancelled() {
-            return budgetExhausted || storeRefused != null || throttle != null || !stillOwnsRun(false);
+            return budgetExhausted || storeRefused != null || throttle != null || providerRefused != null
+                    || interrupted || !stillOwnsRun(false);
         }
 
         /**
@@ -1300,13 +1417,6 @@ public class IngestionPipeline {
         }
 
         private void upsert(WorkItem item, SourceConnector connector, SourceContext context) {
-            if (throttle != null) {
-                // The provider has already said no for now. Fetching and asking again
-                // would only spend the source's quota and hear the same answer.
-                deferThrottled(item.documentId(), mode == Mode.INGEST && stateStore.lookup(sourceKey,
-                        item.documentId()).isPresent());
-                return;
-            }
             SourceDocument document = item.prefetched();
             if (document == null) {
                 // Asked before the content is fetched: an unchanged document needs
@@ -1319,6 +1429,14 @@ public class IngestionPipeline {
                 if (unchanged.isPresent() && (item.citation() == null
                         || refreshCitation(unchanged.get(), item.citation().title(), item.citation().url()) != CitationCheck.REEMBED)) {
                     onUnchanged(item.documentId());
+                    return;
+                }
+                // After the unchanged check, not before it: a document that has not
+                // changed needs no provider call, so it is unchanged, not throttled. One
+                // that has changed is not fetched once the provider has said no: asking
+                // again would only hear the same answer.
+                if (providerUnavailable() && leaveForLater(item.documentId(),
+                        mode == Mode.INGEST && stateStore.lookup(sourceKey, item.documentId()).isPresent())) {
                     return;
                 }
                 try {
@@ -1714,6 +1832,11 @@ public class IngestionPipeline {
                 ingested++;
                 return;
             }
+            if (providerUnavailable() && leaveForLater(documentId, existing.isPresent())) {
+                // A changed document after the provider said no: not sent again. An
+                // unchanged one was settled above, and counts as unchanged.
+                return;
+            }
             if (!stillOwnsRun(true)) {
                 // Nothing written for a source that is no longer this run's: the
                 // chunks would belong to nobody. Nothing was embedded either, so
@@ -1740,6 +1863,23 @@ public class IngestionPipeline {
                 // failed: the provider's quota ran out, which says nothing about it.
                 onThrottled(e);
                 deferThrottled(documentId, existing.isPresent());
+                return;
+            } catch (ProviderBillingException e) {
+                // The account is out of balance: every later document would fail the
+                // same way, each costing a call. The run fails with that reason; this
+                // document is not at fault and keeps whatever it had.
+                if (providerRefused == null) {
+                    providerRefused = e.getMessage();
+                    LOGGER.warnf("Ingestion of source '%s' stopped: %s", LogSanitizer.sanitize(source.getName()),
+                            LogSanitizer.sanitize(e.getMessage()));
+                }
+                ownershipUnverified(documentId, existing.isPresent());
+                return;
+            } catch (CancellationException e) {
+                // Interrupted while waiting out a rate limit: the run is being stopped
+                // (a shutdown, a cancel), which says nothing about this document.
+                interrupted = true;
+                ownershipUnverified(documentId, existing.isPresent());
                 return;
             }
             if (stored < 0) {
@@ -1790,6 +1930,30 @@ public class IngestionPipeline {
         }
 
         /**
+         * Whether the provider may not be called again in this run: it throttled it,
+         * refused the account, or a wait on it was interrupted.
+         */
+        private boolean providerUnavailable() {
+            return throttle != null || providerRefused != null || interrupted;
+        }
+
+        /**
+         * A changed document met after {@link #providerUnavailable}: counted as
+         * throttled after a throttle, otherwise left unjudged — not failed, not
+         * missing.
+         *
+         * @return always true, so a caller can return on it
+         */
+        private boolean leaveForLater(String documentId, boolean known) {
+            if (throttle != null) {
+                deferThrottled(documentId, known);
+            } else {
+                ownershipUnverified(documentId, known);
+            }
+            return true;
+        }
+
+        /**
          * The embedding provider refused this run for its quota, and the wait did not
          * fit. Recorded once; the run stops at the next {@link #isCancelled} check.
          */
@@ -1798,7 +1962,7 @@ public class IngestionPipeline {
                 return;
             }
             throttle = e;
-            resumeAfter = e.retryAfter() == null ? null : Instant.now().plus(e.retryAfter());
+            resumeAfter = resumeAfter(e, Instant.now());
             LOGGER.warnf("Ingestion of source '%s' paused: %s. The remaining documents wait for the next run%s",
                     LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(e.getMessage()),
                     resumeAfter == null ? "" : " (the provider takes calls again from " + resumeAfter + ")");
@@ -1943,6 +2107,9 @@ public class IngestionPipeline {
             if (error == null && storeRefused != null) {
                 error = storeRefused;
             }
+            if (error == null && providerRefused != null) {
+                error = providerRefused;
+            }
             IngestionReport.Outcome outcome;
             if (error != null) {
                 outcome = IngestionReport.Outcome.FAILED;
@@ -2035,8 +2202,24 @@ public class IngestionPipeline {
              * in the run: it stopped with coverage {@code PARTIAL}, no document counted as
              * failed and nothing tombstoned. The next run lists the source again and takes
              * the documents left over.
+             * <p>
+             * Also the outcome of a scheduled fire that did not start a run because the
+             * last one was throttled and the provider is not taking calls yet: then
+             * {@code runId} is null and {@code resumeAfter} says when the gate opens.
              */
             THROTTLED
+        }
+
+        /**
+         * A scheduled fire held back by the throttle gate: no run was started, the
+         * source was not listed and the provider was not called.
+         */
+        public static IngestionReport heldBackByThrottle(String sourceId, Instant until) {
+            return new IngestionReport(null, sourceId, Outcome.THROTTLED, 0, 0, 0, 0, 0, 0, 0, 0.0,
+                    false, false, WebCrawler.StopReason.THROTTLED, Duration.ZERO,
+                    "Not run: the last run was paused by the embedding provider's rate limit, and the provider "
+                            + "takes calls again from " + until,
+                    0, until);
         }
 
         static IngestionReport failed(String runId, String sourceId, String message) {

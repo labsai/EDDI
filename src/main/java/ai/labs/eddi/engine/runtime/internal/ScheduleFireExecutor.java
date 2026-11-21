@@ -788,6 +788,15 @@ public class ScheduleFireExecutor {
                     return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status, null, 0.0,
                             false);
                 }
+                if (report.outcome() == IngestionReport.Outcome.THROTTLED && report.runId() == null) {
+                    // Held back by the throttle gate: nothing ran and nothing failed. The
+                    // reason goes into the fire log's text, as an email poll's outage does,
+                    // so the fire log says why this fire did no work.
+                    LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
+                            schedule.getName(), schedule.getId(), report.message());
+                    return logIngestionFire(schedule, instanceId, attemptNumber, startedAt, status,
+                            report.message(), 0.0, false);
+                }
                 if (!report.isSuccess()) {
                     LOGGER.infof("[SCHEDULE] Ingestion for schedule '%s' (id=%s) did not run: %s",
                             schedule.getName(), schedule.getId(), report.message());

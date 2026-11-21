@@ -26,6 +26,8 @@ import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
+import ai.labs.eddi.modules.llm.impl.ProviderRetryHints;
+import ai.labs.eddi.modules.llm.impl.ProviderThrottledException;
 import ai.labs.eddi.modules.llm.impl.ThrottledEmbeddingModel;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
@@ -35,6 +37,7 @@ import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import dev.langchain4j.model.output.Response;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -48,6 +51,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -79,6 +83,9 @@ class IngestionPipelineThrottleTest {
     private final List<Duration> sleeps = new ArrayList<>();
     private QuotaProvider provider;
     private Duration runBudget = Duration.ofMinutes(10);
+    private int batchSize = ThrottledEmbeddingModel.DEFAULT_BATCH_SIZE;
+    private ThrottledEmbeddingModel.Sleeper sleeper;
+    private IngestionPipeline lastPipeline;
 
     @BeforeEach
     void setUp() {
@@ -91,26 +98,37 @@ class IngestionPipelineThrottleTest {
         provider = new QuotaProvider(Integer.MAX_VALUE, fixture("gemini-429-embed-per-minute"));
         when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
         when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
+        sleeper = duration -> {
+            sleeps.add(duration);
+            now = now.plus(duration);
+        };
         // The factory's DOCUMENT model, as it builds it: the throttle decorator over
         // the provider — here with a clock and a sleep the test controls.
         when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class)))
                 .thenAnswer(invocation -> ThrottledEmbeddingModel.of(provider, "gemini", 5, true, meters,
-                        duration -> {
-                            sleeps.add(duration);
-                            now = now.plus(duration);
-                        }, () -> now));
+                        duration -> sleeper.sleep(duration), () -> now,
+                        ThrottledEmbeddingModel.DEFAULT_UNBOUND_MAX_WAIT, batchSize));
+    }
+
+    @AfterEach
+    void clearInterrupt() {
+        Thread.interrupted();
     }
 
     /**
-     * A provider with a quota of {@code limit} calls per window: past it, every
-     * call is refused with the given 429 body until the clock has moved 26 s on.
+     * A provider with a quota of {@code limit} units per window: past it, every
+     * call is refused with the given 429 body until the clock has moved 26 s on. A
+     * unit is a call, or — with {@link #perSegment} — a segment, which is how
+     * Gemini counts a batch request against its per-minute quota.
      */
     private final class QuotaProvider implements EmbeddingModel {
         int limit;
         String body;
-        int callsInWindow;
+        boolean perSegment;
+        int usedInWindow;
         Instant blockedUntil = Instant.MIN;
         int refusals;
+        int segmentsEmbedded;
 
         QuotaProvider(int limit, String body) {
             this.limit = limit;
@@ -123,14 +141,53 @@ class IngestionPipelineThrottleTest {
                 refusals++;
                 throw new RateLimitException(new HttpException(429, body));
             }
-            if (callsInWindow >= limit) {
-                callsInWindow = 0;
+            int cost = perSegment ? segments.size() : 1;
+            if (usedInWindow + cost > limit) {
+                // The window turns 26 s from now.
+                usedInWindow = 0;
                 blockedUntil = now.plusSeconds(26);
                 refusals++;
                 throw new RateLimitException(new HttpException(429, body));
             }
-            callsInWindow++;
+            usedInWindow += cost;
+            segmentsEmbedded += segments.size();
             return Response.from(segments.stream().map(s -> Embedding.from(new float[]{0.1f})).toList());
+        }
+    }
+
+    /**
+     * Lists documents by version token and fetches each on demand, counting the
+     * fetches: the path where the pipeline can know a document is unchanged without
+     * its content.
+     */
+    private static final class Versioned implements SourceConnector {
+        final Map<String, String> versions = new LinkedHashMap<>();
+        final List<String> fetched = new ArrayList<>();
+
+        @Override
+        public String type() {
+            return IngestionSource.TYPE_WEB;
+        }
+
+        @Override
+        public List<Partition> listPartitions(SourceContext context) {
+            return List.of(Partition.IMPLICIT);
+        }
+
+        @Override
+        public DiscoveryResult discover(DiscoveryContext context) {
+            versions.forEach((id, version) -> context.accept(WorkItem.upsert(id, version, context.partition(),
+                    Map.of(), new WorkItem.Citation("T-" + id, "doc:" + id))));
+            return new DiscoveryResult(StopReason.COMPLETED, Coverage.FULL_LISTING, null, null, null);
+        }
+
+        @Override
+        public SourceDocument fetch(WorkItem item, SourceContext context) {
+            fetched.add(item.documentId());
+            return new SourceDocument(item.documentId(), new Content.Text("Body of " + item.documentId() + " "
+                    + item.versionToken()), item.versionToken(), null, false,
+                    Map.of(SourceMetadataKeys.TITLE, "T-" + item.documentId(), SourceMetadataKeys.CITATION_URL,
+                            "doc:" + item.documentId()));
         }
     }
 
@@ -167,7 +224,7 @@ class IngestionPipelineThrottleTest {
         }
     }
 
-    private IngestionReport run(Listing connector) {
+    private IngestionReport run(SourceConnector connector) {
         var pipeline = new IngestionPipeline(SourceConnectors.of(connector), new HtmlToMarkdownConverter(), stateStore,
                 new DocumentExtractors(List.of(new PlainTextExtractor())), modelFactory, storeFactory, meters) {
             @Override
@@ -175,6 +232,7 @@ class IngestionPipelineThrottleTest {
                 return start.plus(runBudget);
             }
         };
+        lastPipeline = pipeline;
         return pipeline.run(KB_RESOURCE_ID, knowledgeBase(), source(), Mode.INGEST);
     }
 
@@ -254,7 +312,7 @@ class IngestionPipelineThrottleTest {
         // Everything changed, "f" has gone from the source, and the quota now allows
         // two calls a window with only 10 s of run left.
         provider.limit = 2;
-        provider.callsInWindow = 0;
+        provider.usedInWindow = 0;
         runBudget = Duration.ofSeconds(10);
         IngestionReport throttled = run(listing("v2", "a", "b", "c", "d", "e"));
 
@@ -308,6 +366,206 @@ class IngestionPipelineThrottleTest {
         assertEquals(2, report.documentsThrottled());
         assertEquals(0, report.documentsFailed());
         assertTrue(sleeps.isEmpty(), "a day does not fit in any run");
-        assertNull(report.resumeAfter(), "the provider named no time a daily quota comes back");
+        // Gemini's daily quota resets at midnight Pacific time, which the run records
+        // so the next scheduled fire waits for it.
+        assertEquals(ProviderRetryHints.dailyReset("gemini", Instant.now()).orElseThrow(), report.resumeAfter());
+        assertEquals(report.resumeAfter(), lastRun().resumeAfter());
+    }
+
+    @Test
+    @DisplayName("a daily stop on a provider with no known reset waits the configured daily cooldown")
+    void dailyStopUsesTheCooldownWhereTheResetIsUnknown() {
+        var pipeline = new IngestionPipeline(SourceConnectors.of(new Listing()), new HtmlToMarkdownConverter(),
+                stateStore, new DocumentExtractors(List.of(new PlainTextExtractor())), modelFactory, storeFactory,
+                meters);
+        pipeline.dailyCooldown = Duration.ofHours(3);
+        Instant at = Instant.parse("2026-11-21T10:00:00Z");
+
+        assertEquals(at.plus(Duration.ofHours(3)), pipeline.resumeAfter(
+                new ProviderThrottledException("openai", null, true, null, null), at));
+        assertEquals(Instant.parse("2026-11-22T08:00:00Z"), pipeline.resumeAfter(
+                new ProviderThrottledException("gemini", null, true, null, null), at));
+        assertEquals(at.plusSeconds(26), pipeline.resumeAfter(
+                new ProviderThrottledException("gemini", Duration.ofSeconds(26), false, null, null), at));
+        assertNull(pipeline.resumeAfter(new ProviderThrottledException("gemini", null, false, null, null), at),
+                "a rate limit that named no time gets none invented");
+    }
+
+    @Test
+    @DisplayName("a document larger than one quota window finishes: each batch is retried alone")
+    void documentLargerThanTheQuotaWindowFinishes() {
+        provider = new QuotaProvider(100, fixture("gemini-429-embed-per-minute"));
+        provider.perSegment = true;
+
+        IngestionReport report = run(bigDocument());
+
+        assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome());
+        assertEquals(1, report.documentsIngested());
+        assertTrue(report.segmentsStored() > 200, "got " + report.segmentsStored());
+        assertEquals(report.segmentsStored(), provider.segmentsEmbedded,
+                "no segment was embedded twice: a refused batch is the only thing sent again");
+        assertFalse(sleeps.isEmpty());
+    }
+
+    @Test
+    @DisplayName("embedded as one call, the same document never fits the window and the run stops THROTTLED")
+    void wholeDocumentRetryNeverFinishes() {
+        // The defect: a retry repaid every batch already done, so the call never fit.
+        provider = new QuotaProvider(100, fixture("gemini-429-embed-per-minute"));
+        provider.perSegment = true;
+        batchSize = 10_000;
+
+        IngestionReport report = run(bigDocument());
+
+        assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+        assertEquals(0, report.documentsIngested());
+        assertEquals(1, report.documentsThrottled());
+    }
+
+    private static Listing bigDocument() {
+        var connector = new Listing();
+        StringBuilder body = new StringBuilder();
+        for (int i = 0; i < 250; i++) {
+            body.append("Paragraph ").append(i).append(' ').append("x".repeat(300)).append("\n\n");
+        }
+        connector.documents.put("big", body.toString());
+        return connector;
+    }
+
+    @Test
+    @DisplayName("after a throttle, an unchanged prefetched document still counts as unchanged, not throttled")
+    void unchangedPrefetchedAfterAThrottle() {
+        run(listing("v1", "a", "b", "c", "d"));
+
+        // a and b changed; c and d did not. The provider refuses for the day at once.
+        provider = new QuotaProvider(0, fixture("gemini-429-embed-per-day"));
+        var connector = listing("v1", "a", "b", "c", "d");
+        connector.documents.put("a", "Body of a v2");
+        connector.documents.put("b", "Body of b v2");
+        IngestionReport report = run(connector);
+
+        assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+        assertEquals(2, report.documentsUnchanged(), "c and d need no provider call");
+        assertEquals(2, report.documentsThrottled(), "a, refused, and b, not sent");
+        assertEquals(1, provider.refusals, "b is not sent to a provider that has said no");
+        assertEquals(0, report.documentsFailed());
+    }
+
+    @Test
+    @DisplayName("after a throttle, an unchanged listed document is not fetched and counts as unchanged")
+    void unchangedFetchedAfterAThrottle() {
+        var connector = new Versioned();
+        connector.versions.put("a", "1");
+        connector.versions.put("b", "1");
+        connector.versions.put("c", "1");
+        connector.versions.put("d", "1");
+        run(connector);
+
+        connector.fetched.clear();
+        connector.versions.put("a", "2");
+        connector.versions.put("b", "2");
+        provider = new QuotaProvider(0, fixture("gemini-429-embed-per-day"));
+        IngestionReport report = run(connector);
+
+        assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+        assertEquals(List.of("a"), connector.fetched, "b is not fetched once the provider has said no");
+        assertEquals(2, report.documentsUnchanged());
+        assertEquals(2, report.documentsThrottled());
+        assertEquals(0, report.documentsFailed());
+    }
+
+    @Test
+    @DisplayName("a spent balance fails the run with a clear error, and no document")
+    void billingFailureFailsTheRun() {
+        provider = new QuotaProvider(0, fixture("openai-429-insufficient-quota"));
+
+        IngestionReport report = run(listing("v1", "a", "b", "c"));
+
+        assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+        assertTrue(report.message().contains("billing"), report.message());
+        assertEquals(0, report.documentsFailed(), "no document is at fault");
+        assertEquals(0, report.documentsThrottled(), "not a throttle");
+        assertEquals(1, provider.refusals, "the run stops at the first refusal");
+        IngestionRun record = lastRun();
+        assertEquals(IngestionRun.Status.FAILED, record.status());
+        assertEquals(report.message(), record.error());
+        assertNull(record.resumeAfter());
+    }
+
+    @Test
+    @DisplayName("a run the provider's billing stopped concludes nothing deleted")
+    void billingStopTombstonesNothing() {
+        run(listing("v1", "a", "b", "c"));
+
+        provider = new QuotaProvider(0, fixture("openai-429-insufficient-quota"));
+        IngestionReport report = run(listing("v2", "a", "b"));
+
+        assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+        assertEquals(0, report.documentsTombstoned(), "c's absence proves nothing in a stopped run");
+        assertFalse(stateStore.lookup(sourceKey(), "c").orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("an interrupted wait cancels the run: not paused by the provider, nothing failed")
+    void interruptedWaitCancelsTheRun() {
+        provider.limit = 1;
+        sleeper = duration -> {
+            throw new InterruptedException();
+        };
+
+        IngestionReport report = run(listing("v1", "a", "b", "c"));
+        Thread.interrupted();
+
+        assertEquals(IngestionReport.Outcome.COMPLETED, report.outcome(), "not THROTTLED");
+        assertEquals(0, report.documentsThrottled());
+        assertEquals(0, report.documentsFailed());
+        assertNull(report.resumeAfter());
+        assertEquals(IngestionRun.Status.CANCELLED, lastRun().status());
+    }
+
+    @Test
+    @DisplayName("the gate holds a scheduled run while resumeAfter is ahead, and opens after it")
+    void gateFollowsResumeAfter() {
+        provider = new QuotaProvider(1, fixture("gemini-429-embed-per-day"));
+        IngestionReport report = run(listing("v1", "a", "b"));
+        var pipeline = lastPipeline;
+
+        pipeline.clock = () -> report.resumeAfter().minusSeconds(1);
+        assertEquals(Optional.of(report.resumeAfter()), pipeline.throttledUntil(KB_RESOURCE_ID, source()));
+
+        pipeline.clock = () -> report.resumeAfter();
+        assertTrue(pipeline.throttledUntil(KB_RESOURCE_ID, source()).isEmpty(), "open from resumeAfter on");
+    }
+
+    @Test
+    @DisplayName("a throttled run with no resume time holds the gate for the cooldown from when it finished")
+    void gateUsesTheCooldownWithoutAResumeTime() {
+        // A rate limit that names no time, and a run too short to wait the fallback.
+        provider = new QuotaProvider(1, "<html>Too Many Requests</html>");
+        runBudget = Duration.ofSeconds(10);
+        IngestionReport report = run(listing("v1", "a", "b"));
+        assertEquals(IngestionReport.Outcome.THROTTLED, report.outcome());
+        assertNull(report.resumeAfter(), "the 30 s fallback is not reported as the provider's time");
+
+        var pipeline = lastPipeline;
+        pipeline.throttleCooldown = Duration.ofMinutes(5);
+        Instant finished = lastRun().finishedAt();
+        pipeline.clock = () -> finished.plus(Duration.ofMinutes(4));
+        assertEquals(Optional.of(finished.plus(Duration.ofMinutes(5))),
+                pipeline.throttledUntil(KB_RESOURCE_ID, source()));
+        pipeline.clock = () -> finished.plus(Duration.ofMinutes(5));
+        assertTrue(pipeline.throttledUntil(KB_RESOURCE_ID, source()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("the gate is open when the last run was not throttled, or there is none")
+    void gateOpenOtherwise() {
+        var pipeline = new IngestionPipeline(SourceConnectors.of(new Listing()), new HtmlToMarkdownConverter(),
+                stateStore, new DocumentExtractors(List.of(new PlainTextExtractor())), modelFactory, storeFactory,
+                meters);
+        assertTrue(pipeline.throttledUntil(KB_RESOURCE_ID, source()).isEmpty(), "no runs");
+
+        run(listing("v1", "a"));
+        assertTrue(lastPipeline.throttledUntil(KB_RESOURCE_ID, source()).isEmpty(), "a completed run");
     }
 }

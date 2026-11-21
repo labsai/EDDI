@@ -1667,6 +1667,24 @@ class ScheduleFireExecutorTest {
     }
 
     @Test
+    void fire_ragIngestion_heldBackByTheThrottleGateIsACompletedFireThatSaysWhy() throws Exception {
+        // No run started: the last one was throttled and the provider is not taking
+        // calls yet. Not a failure, but the fire log has to say why nothing ran.
+        var schedule = makeIngestionSchedule("rag-7", "kb-1", 1, "src-1");
+        var until = Instant.parse("2026-11-22T08:00:00Z");
+        when(ragSourceIngestionService.processScheduledFire(any(), any(), any(), any()))
+                .thenReturn(IngestionPipeline.IngestionReport.heldBackByThrottle("src-1", until));
+
+        executor.fire(schedule, "instance-1", 1);
+
+        var logged = ArgumentCaptor.forClass(ScheduleFireLog.class);
+        verify(scheduleStore, times(1)).logFire(logged.capture());
+        assertEquals(FireStatus.COMPLETED.name(), logged.getValue().status());
+        assertTrue(logged.getValue().errorMessage().contains("2026-11-22T08:00:00Z"),
+                logged.getValue().errorMessage());
+    }
+
+    @Test
     void fire_ragIngestion_alreadyRunningIsNotAFailure() throws Exception {
         // A run can outlast the interval between fires, so the next fire legitimately
         // finds it still going. Calling that FAILED increments failCount on every fire
