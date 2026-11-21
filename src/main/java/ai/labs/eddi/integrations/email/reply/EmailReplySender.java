@@ -21,6 +21,8 @@ import ai.labs.eddi.engine.mail.PlainTextMailRenderer.RenderedMail;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.integrations.email.EmailApprovalNotes;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailMetrics;
@@ -310,7 +312,38 @@ public class EmailReplySender {
         if (snapshot == null) {
             return Optional.empty();
         }
+        LedgerEntry inbound = located.get().inbound();
+        // The email approval gate held this mail before its new conversation started
+        // (email plan v3 §8.1). Approved: CONVERSATION_START has now run, and the mail
+        // itself goes back to the poll — its turn answers it, so nothing is sent here.
+        if (EmailApprovalNotes.AWAITING_START.equals(inbound.lastError()) && verdict == HitlVerdict.APPROVED
+                && snapshot.getConversationState() != ConversationState.ERROR) {
+            if (ledger.transition(inbound.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
+                LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", inbound.id(),
+                        sanitize(inbound.integrationId()));
+            }
+            return Optional.empty();
+        }
+        if (rejectedBeforeRun(snapshot.getConversationOutputs(), inbound.messageId())) {
+            ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REJECTED, false, now);
+        } else if (verdict == HitlVerdict.APPROVED && snapshot.getConversationState() != ConversationState.ERROR
+                && AWAITING_HUMAN_NOTE.equals(inbound.lastError())) {
+            // The turn ran after all: the mail is an answered contact now (firstContact).
+            ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, null, false, now);
+        }
         return resumeRequest(located.get(), snapshot, verdict == null ? "NONE" : verdict.name()).flatMap(request -> enqueue(request, now));
+    }
+
+    /** The note the inbound processor closes a paused mail's row with. */
+    static final String AWAITING_HUMAN_NOTE = "awaiting_human";
+
+    /**
+     * Whether the mail's step is one the email approval gate's rejection answered
+     * before the agent ran ({@code Conversation#rejectBeforeRun}).
+     */
+    static boolean rejectedBeforeRun(List<? extends Map<String, Object>> outputs, String messageId) {
+        int step = EmailReplyThread.mailStep(outputs, messageId);
+        return step >= 0 && EmailApprovalGate.REJECTED_OUTPUT_VALUE.equals(outputs.get(step).get(EmailApprovalGate.REJECTED_OUTPUT_KEY));
     }
 
     /**
@@ -388,7 +421,17 @@ public class EmailReplySender {
         if (step < 0) {
             return Optional.empty();
         }
-        String text = resumeText(verdict, snapshot.getConversationState(), EmailReplyThread.lastText(outputs));
+        String text;
+        if (rejectedBeforeRun(outputs, inbound.messageId())) {
+            // The target's rejectedReply, as the rejection wrote it; none configured
+            // (trigger mode) means nothing is sent.
+            text = EmailReplyThread.textOf(outputs.get(step));
+            if (text.isBlank()) {
+                return Optional.empty();
+            }
+        } else {
+            text = resumeText(verdict, snapshot.getConversationState(), EmailReplyThread.lastText(outputs));
+        }
         String discriminator = verdict + "." + sha256(text).substring(0, 16);
         return Optional.of(new Request(inbound.integrationId(), located.settings(), inbound, inbound.conversationId(), snapshot.getUserId(),
                 EmailReplyThread.mailOf(outputs.get(step)), ReplyKind.RESUME, discriminator, text));

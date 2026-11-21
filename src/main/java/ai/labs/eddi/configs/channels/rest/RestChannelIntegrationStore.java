@@ -14,6 +14,7 @@ import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.channels.ChannelTargetRouter;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -602,6 +603,54 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         }
     }
 
+    /** Most {@code readOnlyTools} patterns one target may list. */
+    static final int MAX_READ_ONLY_TOOLS = 100;
+    /** Longest {@code rejectedReply}. */
+    static final int MAX_REJECTED_REPLY_CHARS = 2000;
+
+    /**
+     * The email approval gate's per-target fields (email plan v3 §8.1): email
+     * integrations only, never on a GROUP target (a group turn auto-rejects tool
+     * approvals, so the gate could not do what it says), {@code readOnlyTools} in
+     * the {@code toolApprovals} pattern language.
+     */
+    static void validateEmailApprovalFields(ChannelTarget target, boolean email) {
+        boolean anySet = target.getApprovalPolicy() != null || target.getReadOnlyTools() != null || target.getRejectedReply() != null;
+        if (!anySet) {
+            return;
+        }
+        if (!email) {
+            throw new BadRequestException("Target '" + target.getName()
+                    + "': approvalPolicy, readOnlyTools and rejectedReply are only supported for email integrations.");
+        }
+        if (target.getType() == ChannelTarget.TargetType.GROUP) {
+            if (target.effectiveApprovalPolicy() != ChannelTarget.ApprovalPolicy.NONE || target.getReadOnlyTools() != null
+                    || target.getRejectedReply() != null) {
+                throw new BadRequestException("Target '" + target.getName()
+                        + "': approvalPolicy is not supported for GROUP targets — a group turn rejects tool approvals automatically, so "
+                        + "the gate could not pause anything. Gate the member agents' own toolApprovals instead.");
+            }
+            return;
+        }
+        List<String> readOnly = target.getReadOnlyTools();
+        if (readOnly != null) {
+            if (readOnly.size() > MAX_READ_ONLY_TOOLS) {
+                throw new BadRequestException("Target '" + target.getName() + "': readOnlyTools may list at most " + MAX_READ_ONLY_TOOLS
+                        + " patterns.");
+            }
+            for (String pattern : readOnly) {
+                var error = ToolApprovalPatterns.validate(pattern);
+                if (error.isPresent()) {
+                    throw new BadRequestException("Target '" + target.getName() + "': readOnlyTools: " + error.get() + ".");
+                }
+            }
+        }
+        if (target.getRejectedReply() != null && target.getRejectedReply().length() > MAX_REJECTED_REPLY_CHARS) {
+            throw new BadRequestException("Target '" + target.getName() + "': rejectedReply may be at most " + MAX_REJECTED_REPLY_CHARS
+                    + " characters.");
+        }
+    }
+
     void validateConfiguration(ChannelIntegrationConfiguration config) {
         // A document read through the redacted view must not be stored with the
         // marker in place of the credential — see RedactionMarkerGuard.
@@ -684,6 +733,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 throw new BadRequestException(
                         "Target '" + target.getName() + "' must have a targetId.");
             }
+            validateEmailApprovalFields(target, email);
             if (email && target.isObserveMode()) {
                 // Every mail is addressed to the mailbox; there is no traffic to observe.
                 throw new BadRequestException(

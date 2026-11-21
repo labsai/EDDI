@@ -31,6 +31,7 @@ import ai.labs.eddi.engine.mail.SenderAuthenticator;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.InputData;
@@ -408,6 +409,19 @@ public class EmailInboundProcessor {
             }
         }
 
+        // The email approval gate (email plan v3 §8.1). A GROUP target never has one
+        // (refused at save). firstContact asks the ledger, so it is decided only for
+        // that policy; a mail whose conversation start an approver already let through
+        // does not wait a second time.
+        ChannelTarget.ApprovalPolicy approvalPolicy = target.getType() == ChannelTarget.TargetType.GROUP
+                ? ChannelTarget.ApprovalPolicy.NONE
+                : target.effectiveApprovalPolicy();
+        boolean preRun = !EmailApprovalNotes.START_APPROVED.equals(row.lastError())
+                && (approvalPolicy == ChannelTarget.ApprovalPolicy.EVERY_TURN
+                        || approvalPolicy == ChannelTarget.ApprovalPolicy.FIRST_CONTACT && isFirstContact(id, sender, authenticated, target, row));
+        Context approvalGate = EmailApprovalGate.contextValue(approvalPolicy.json(), target.getReadOnlyTools(), preRun,
+                rejectedReply(target, settings), preRunReason(target, authenticated));
+
         // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
         Instant deadline = now.plus(strandedAfter);
@@ -444,7 +458,14 @@ public class EmailInboundProcessor {
             String conversationId = existingConversation;
             double costBefore = 0.0;
             if (conversationId == null) {
-                conversationId = startConversation(target.getTargetId(), userId, id, intent);
+                // A mail that waits before the agent runs pauses the new conversation
+                // before CONVERSATION_START: the start context then also carries the mail,
+                // so the sender's in-thread notice and the approver see what it is about.
+                conversationId = startConversation(target.getTargetId(), userId, id, intent, approvalGate,
+                        preRun ? mailData(parsed, List.of(), false) : null);
+                if (preRun && stateOf(conversationId) == ConversationState.AWAITING_HUMAN) {
+                    return heldBeforeStart(ctx, row, conversationId, now);
+                }
             } else {
                 costBefore = conversationCost(conversationId);
             }
@@ -458,6 +479,9 @@ public class EmailInboundProcessor {
             // Every mail turn re-asserts the taint, also on a conversation that is older
             // than the stored taint.
             context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+            if (approvalGate != null) {
+                context.put(EmailApprovalGate.CONTEXT_KEY, approvalGate);
+            }
             input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true));
             InputData inputData = new InputData(input, context);
             // The turn carries the mail's ledger key: a turn submitted again for the same
@@ -592,11 +616,119 @@ public class EmailInboundProcessor {
         return known;
     }
 
-    private String startConversation(String agentId, String userId, String integrationId, String intent) throws Exception {
+    /** What a rejected mail is answered with in conversation mode by default. */
+    static final String DEFAULT_REJECTED_REPLY = "Your request was not approved.";
+
+    /** Earlier rows of a sender {@link #isFirstContact} looks up at most. */
+    static final int MAX_FIRST_CONTACT_LOOKUPS = 20;
+
+    /**
+     * The new conversation of a mail the email approval gate holds was started
+     * paused, before {@code CONVERSATION_START} ran (email plan v3 §8.1): the
+     * mail's turn cannot go into a paused conversation, so the row is closed as
+     * {@link EmailApprovalNotes#AWAITING_START} with the conversation named. The
+     * approval puts it back for the next poll ({@code EmailReplySender}); the
+     * sender gets the pause notice now, in conversation mode.
+     */
+    private Disposition heldBeforeStart(IntegrationContext ctx, LedgerEntry row, String conversationId, Instant now) {
+        ledger.transition(row.id(), State.TURN_SUBMITTED, State.DONE, conversationId, null, EmailApprovalNotes.AWAITING_START, false, now);
+        count(ctx, EmailMetrics.PROCESSED);
+        LOGGER.infof("Email integration %s: mail %s waits for approval before conversation %s starts", sanitize(ctx.integrationId()), row.id(),
+                sanitize(conversationId));
+        if (ctx.settings().replies()) {
+            try {
+                // The pause event may have been handled before the row named the
+                // conversation; the notice is idempotent, so asking again is safe.
+                LedgerEntry current = ledger.findById(row.id()).orElse(row);
+                SimpleConversationMemorySnapshot snapshot = conversationService.readConversation(conversationId, true, false, List.of());
+                replies.ensureFor(ctx.settings(), current, snapshot, now);
+            } catch (Exception e) {
+                LOGGER.warnf("Email integration %s: the pause notice for mail %s could not be queued: %s", sanitize(ctx.integrationId()),
+                        row.id(), e.getMessage());
+            }
+        }
+        return Disposition.SETTLED;
+    }
+
+    /**
+     * Whether this mail is the sender's first contact with {@code target}: no
+     * earlier {@code DONE} row from that address on this integration whose
+     * conversation belongs to the target's agent and that ran to an answer. An
+     * unauthenticated sender is always a first contact — its From proves nothing.
+     * Rows expire with the ledger's retention, after which a sender counts as new
+     * again. A row that cannot be checked does not count as a contact.
+     */
+    boolean isFirstContact(String integrationId, String sender, boolean authenticated, ChannelTarget target, LedgerEntry current) {
+        if (!authenticated || sender == null) {
+            return true;
+        }
+        List<LedgerEntry> rows;
+        try {
+            rows = ledger.findByRecipient(sender);
+        } catch (RuntimeException e) {
+            return true;
+        }
+        int lookups = 0;
+        for (LedgerEntry earlier : rows) {
+            if (!integrationId.equals(earlier.integrationId()) || earlier.kind() != Kind.TRIGGER || earlier.direction() != Direction.IN
+                    || earlier.state() != State.DONE || earlier.id().equals(current.id()) || earlier.conversationId() == null
+                    || earlier.lastError() != null && EmailApprovalNotes.NOT_A_CONTACT.contains(earlier.lastError())) {
+                continue;
+            }
+            if (++lookups > MAX_FIRST_CONTACT_LOOKUPS) {
+                break;
+            }
+            try {
+                var snapshot = conversationService.readConversation(earlier.conversationId(), false, true, List.of());
+                if (snapshot != null && target.getTargetId().equals(snapshot.getAgentId())) {
+                    return false;
+                }
+            } catch (Exception e) {
+                // gone or unreadable: not a contact
+            }
+        }
+        return true;
+    }
+
+    /**
+     * What a rejected held mail is answered with: the target's text, else the
+     * default in conversation mode; nothing in trigger mode, which never replies.
+     */
+    static String rejectedReply(ChannelTarget target, EmailChannelSettings settings) {
+        if (!settings.replies()) {
+            return null;
+        }
+        return target.getRejectedReply() != null && !target.getRejectedReply().isBlank() ? target.getRejectedReply() : DEFAULT_REJECTED_REPLY;
+    }
+
+    /**
+     * What the approver is shown for a held mail: the target and whether the sender
+     * was authenticated — never the address or the subject, because a pause reason
+     * reaches the write-once audit ledger and the sender's own pause notice. The
+     * mail itself is on the paused step (input and {@code context.mail}).
+     */
+    static String preRunReason(ChannelTarget target, boolean authenticated) {
+        String text = "A mail to target '" + target.getName() + "' from " + (authenticated ? "an authenticated" : "an unauthenticated")
+                + " sender waits for approval before the agent runs. Open the conversation to read it.";
+        return text.length() > 500 ? text.substring(0, 497) + "..." : text;
+    }
+
+    private String startConversation(String agentId, String userId, String integrationId, String intent, Context approvalGate,
+                                     Map<String, Object> heldMail)
+            throws Exception {
         // The taint (email plan v3 §5.3): this conversation, and every one it starts,
         // cannot change channel integrations or decide approvals.
-        Map<String, Context> startContext = Map.of(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId),
-                TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        Map<String, Context> startContext = new LinkedHashMap<>();
+        startContext.put(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, integrationId));
+        startContext.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        // The email approval gate covers the CONVERSATION_START turn too: it can call
+        // tools like any other.
+        if (approvalGate != null) {
+            startContext.put(EmailApprovalGate.CONTEXT_KEY, approvalGate);
+        }
+        if (heldMail != null) {
+            startContext.put(MAIL_CONTEXT_KEY, new Context(Context.ContextType.object, heldMail));
+        }
         String conversationId = conversationService.startConversation(Deployment.Environment.production, agentId, userId, startContext)
                 .conversationId();
         if (intent == null) {

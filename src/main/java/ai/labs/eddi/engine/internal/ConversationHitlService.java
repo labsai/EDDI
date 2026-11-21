@@ -55,6 +55,7 @@ import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.memory.model.ConversationState;
@@ -62,6 +63,7 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.event.Event;
+import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -1946,6 +1948,7 @@ class ConversationHitlService {
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
         populateTimeoutBookmark(memory);
+        applyEmailGateTimeout(memory, emailGateExpiry());
         renderApprovalContext(memory);
         // Last: after the turn's secret scrub (done before this is called) and before
         // the store, so the hash covers exactly what is persisted.
@@ -1974,6 +1977,60 @@ class ConversationHitlService {
                     hitlConfig != null ? hitlConfig.getToolApprovals() : null));
         } catch (Exception e) {
             LOGGER.warnf("Could not render the approval context for %s: %s", sanitize(memory.getConversationId()), sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * How long a pause the email approval gate caused waits before it is rejected.
+     */
+    static final String EMAIL_GATE_EXPIRY_PROPERTY = "eddi.email.approval-gate.expiry";
+    static final String DEFAULT_EMAIL_GATE_EXPIRY = "PT72H";
+
+    private static String emailGateExpiry() {
+        try {
+            String configured = ConfigProvider.getConfig().getOptionalValue(EMAIL_GATE_EXPIRY_PROPERTY, String.class).orElse(null);
+            if (configured != null && !configured.isBlank()) {
+                Duration parsed = Duration.parse(configured.trim());
+                if (!parsed.isNegative() && !parsed.isZero()) {
+                    return configured.trim();
+                }
+            }
+        } catch (RuntimeException e) {
+            LOGGER.warnf("%s is not a positive ISO-8601 duration; using %s", EMAIL_GATE_EXPIRY_PROPERTY, DEFAULT_EMAIL_GATE_EXPIRY);
+        }
+        return DEFAULT_EMAIL_GATE_EXPIRY;
+    }
+
+    /**
+     * The email approval gate's timeout (email plan v3 §8.1), applied after the
+     * agent's: a pause of a mail turn that the email gate caused — the mail waiting
+     * before the agent ran, or a tool call it gated — is {@code AUTO_REJECT} after
+     * {@code expiry}, whatever the agent's {@code toolApprovals} or rules say. Any
+     * other pause of a mail turn keeps the agent's policy, except that it never
+     * auto-approves: an {@code AUTO_APPROVE} becomes {@code AUTO_REJECT}. A turn
+     * without an email gate is left as it is.
+     */
+    static void applyEmailGateTimeout(IConversationMemory memory, String expiry) {
+        EmailApprovalGate.Policy gate = EmailApprovalGate.of(memory);
+        if (gate == null) {
+            return;
+        }
+        var step = memory.getCurrentStep();
+        boolean preRun = step != null && step.getData(EmailApprovalGate.PRE_RUN_MARKER) != null;
+        PendingToolCallBatch batch = memory.getHitlPendingToolCalls();
+        boolean toolPause = ConversationPauseException.PauseOrigin.TOOL_CALL.name().equals(memory.getHitlPauseType());
+        boolean gatedByEmail = toolPause && batch != null && batch.getCalls() != null
+                && batch.getCalls().stream().anyMatch(call -> EmailApprovalGate.GATE_REASON.equals(call.getGateReason()));
+        if (preRun || gatedByEmail) {
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
+            memory.setHitlApprovalTimeout(expiry);
+            if (preRun) {
+                memory.setHitlPauseReason(gate.pauseReason() != null && !gate.pauseReason().isBlank()
+                        ? gate.pauseReason()
+                        : EmailApprovalGate.DEFAULT_PRE_RUN_REASON);
+            }
+        } else if (memory.getHitlTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE) {
+            memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
         }
     }
 

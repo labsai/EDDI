@@ -68,6 +68,12 @@ public class ClientContextGuard {
      * restrict itself with it, but only EDDI has a reason to set it.
      */
     public static final String KEY_TURN_ORIGIN = TurnOrigin.CONTEXT_KEY;
+    /**
+     * Written by the email channel; the target's approval gate for a mail turn
+     * ({@link EmailApprovalGate}). A client value could name its own read-only
+     * tools, so only EDDI may set it.
+     */
+    public static final String KEY_EMAIL_APPROVAL = EmailApprovalGate.CONTEXT_KEY;
 
     /**
      * Every context key only EDDI itself may set. Case-sensitive names; every
@@ -78,7 +84,7 @@ public class ClientContextGuard {
      */
     public static final Set<String> RESERVED_KEYS = Set.of(KEY_GROUP_ID, KEY_GROUP_CONVERSATION_ID, KEY_GROUP_DEPTH,
             KEY_GROUP_TRANSCRIPT, KEY_DYNAMIC_AGENT_CONFIG, KEY_DYNAMIC_CREATED_AGENT_IDS, KEY_DELEGATION_DEPTH, KEY_SELF_CONTINUATION,
-            KEY_TURN_ORIGIN);
+            KEY_TURN_ORIGIN, KEY_EMAIL_APPROVAL);
 
     private final Set<String> permittedReservedKeys;
 

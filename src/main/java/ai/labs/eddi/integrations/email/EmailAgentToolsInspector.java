@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Predicate;
 
 /**
  * Finds the agents an email integration targets that can use tools without any
@@ -88,11 +89,68 @@ public class EmailAgentToolsInspector {
         return names;
     }
 
+    /**
+     * The AGENT targets on {@code approvalPolicy: none} (or unset) whose agent can
+     * act — has tools, or rule-driven HTTP/MCP calls — for the
+     * {@code email.approval-policy-none} warning (email plan v3 §8.1).
+     */
+    public List<String> targetsActingWithoutApprovalPolicy(List<ChannelTarget> targets) {
+        return inspect(targets, target -> target.effectiveApprovalPolicy() == ChannelTarget.ApprovalPolicy.NONE,
+                profile -> profile.usesTools() || profile.ruleCalls());
+    }
+
+    /**
+     * The AGENT targets with an approval policy whose workflow has rule-driven
+     * HTTP/MCP calls, which a mail turn then refuses unless {@code readOnlyTools}
+     * names them — for the {@code email.rule-calls-refused} warning.
+     */
+    public List<String> targetsWithRefusedRuleCalls(List<ChannelTarget> targets) {
+        return inspect(targets, target -> target.effectiveApprovalPolicy().gatesTools(), ToolProfile::ruleCalls);
+    }
+
+    private List<String> inspect(List<ChannelTarget> targets, Predicate<ChannelTarget> targetFilter,
+                                 Predicate<ToolProfile> profileFilter) {
+        List<String> names = new ArrayList<>();
+        if (targets == null) {
+            return names;
+        }
+        for (ChannelTarget target : targets) {
+            if (target == null || target.getType() == ChannelTarget.TargetType.GROUP || target.getTargetId() == null
+                    || !targetFilter.test(target)) {
+                continue;
+            }
+            try {
+                if (profileFilter.test(profileOf(target.getTargetId()))) {
+                    names.add(target.getName());
+                }
+            } catch (Exception e) {
+                LOGGER.debugf("Tool inspection skipped for agent %s: %s", LogSanitizer.sanitize(target.getTargetId()),
+                        LogSanitizer.sanitize(e.getMessage()));
+            }
+        }
+        return names;
+    }
+
+    /**
+     * What an agent can do, as far as its configuration says: whether an LLM task
+     * uses tools, whether one does so without tool approvals, whether a workflow
+     * has rule-driven HTTP or MCP calls.
+     */
+    record ToolProfile(boolean usesTools, boolean ungated, boolean ruleCalls) {
+    }
+
     boolean hasUngatedTools(String agentId) throws Exception {
+        return profileOf(agentId).ungated();
+    }
+
+    ToolProfile profileOf(String agentId) throws Exception {
+        boolean usesTools = false;
+        boolean ungated = false;
+        boolean ruleCalls = false;
         int version = agentStore.getCurrentResourceId(agentId).getVersion();
         AgentConfiguration agent = agentStore.read(agentId, version);
         if (agent == null || agent.getWorkflows() == null) {
-            return false;
+            return new ToolProfile(false, false, false);
         }
         ToolApprovalsConfig agentLevel = agent.getHitlConfig() == null ? null : agent.getHitlConfig().getToolApprovals();
         for (URI workflowUri : agent.getWorkflows()) {
@@ -121,6 +179,7 @@ public class EmailAgentToolsInspector {
                     }
                 }
             }
+            ruleCalls |= hasApiCalls || hasMcpCalls;
             for (URI uri : llmUris) {
                 LlmConfiguration llm = resourceClientLibrary.getResource(uri, LlmConfiguration.class);
                 if (llm == null || llm.tasks() == null) {
@@ -130,14 +189,15 @@ public class EmailAgentToolsInspector {
                     if (!task.usesTools(hasApiCalls, hasMcpCalls)) {
                         continue;
                     }
+                    usesTools = true;
                     ToolApprovalsConfig effective = TaskToolApprovalsResolver.resolve(agentLevel, task.getToolApprovals());
                     if (effective == null || effective.getRequireApproval() == null || effective.getRequireApproval().isEmpty()) {
-                        return true;
+                        ungated = true;
                     }
                 }
             }
         }
-        return false;
+        return new ToolProfile(usesTools, ungated, ruleCalls);
     }
 
     /**

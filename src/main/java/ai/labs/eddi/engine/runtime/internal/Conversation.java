@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyValues;
@@ -1481,10 +1482,32 @@ public class Conversation implements IConversation {
                 IData<?> current = keepReplacements ? step.getData(datum.getKey()) : null;
                 step.storeData(current != null ? current : datum);
             });
+            if (first) {
+                pauseBeforeRunIfEmailGateAsks(data, executableWorkflow.getWorkflowId());
+            }
             first = false;
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
+    }
+
+    /**
+     * The email approval gate's pause before the agent runs (email plan v3 §8.1,
+     * {@code firstContact} / {@code everyTurn}): once the turn's input and context
+     * are on the step and before its first task — for a new conversation before
+     * {@code CONVERSATION_START}, so nothing of the agent runs and no model is
+     * called. A RULE pause on the first workflow at task index {@code -1}: the
+     * resume continues at index 0, i.e. runs the whole turn. The marker tells the
+     * resume (and the timeout bookmark) that this was the email gate's pause.
+     */
+    private void pauseBeforeRunIfEmailGateAsks(List<IData<?>> data, String firstWorkflowId) throws ConversationPauseException {
+        EmailApprovalGate.Policy gate = EmailApprovalGate.preRunRequested(conversationMemory, data);
+        if (gate == null) {
+            return;
+        }
+        conversationMemory.getCurrentStep().storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, Boolean.TRUE));
+        String reason = gate.pauseReason() != null && !gate.pauseReason().isBlank() ? gate.pauseReason() : EmailApprovalGate.DEFAULT_PRE_RUN_REASON;
+        throw new ConversationPauseException(firstWorkflowId, -1, reason, ConversationPauseException.PauseOrigin.RULE);
     }
 
     /**
@@ -2025,6 +2048,20 @@ public class Conversation implements IConversation {
             // gracefully (Task 9). Only RULE pauses short-circuit on REJECTED.
             boolean toolPause = "TOOL_CALL".equals(conversationMemory.getHitlPauseType());
 
+            // The email gate's pause before the agent ran (pauseBeforeRunIfEmailGateAsks):
+            // nothing of the turn has run, so there is no draft to revise or edit. A
+            // rejection answers with the target's rejectedReply (none in trigger mode);
+            // an approval runs the whole turn from its first task.
+            boolean emailPreRun = !toolPause && currentStep.getData(EmailApprovalGate.PRE_RUN_MARKER) != null;
+            if (emailPreRun) {
+                currentStep.removeData(EmailApprovalGate.PRE_RUN_MARKER);
+                if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
+                    rejectBeforeRun(currentStep);
+                    return;
+                }
+                decision.setEditedAnswer(null);
+            }
+
             // onRejection: REVISE — the answer a rule pause kept for revision. Taken
             // off the step on every decision; its round count carries over to any
             // later pause of this turn.
@@ -2186,6 +2223,25 @@ public class Conversation implements IConversation {
             if (outputProvider != null)
                 outputProvider.renderOutput(conversationMemory);
         }
+    }
+
+    /**
+     * A rejected email pre-run pause: the turn ends without running, answered with
+     * the target's {@code rejectedReply} when it has one, and marked so the email
+     * reply path sends that text rather than a generic one.
+     */
+    private void rejectBeforeRun(IWritableConversationStep currentStep) {
+        EmailApprovalGate.Policy gate = EmailApprovalGate.of(conversationMemory);
+        String reply = gate != null ? gate.rejectedReply() : null;
+        if (reply != null && !reply.isBlank()) {
+            var rejectionData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(reply));
+            rejectionData.setPublic(true);
+            currentStep.storeData(rejectionData);
+            currentStep.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(reply));
+        }
+        currentStep.addConversationOutputString(EmailApprovalGate.REJECTED_OUTPUT_KEY, EmailApprovalGate.REJECTED_OUTPUT_VALUE);
+        clearHitlStatusMarker(currentStep);
+        clearHitlBookmark();
     }
 
     private void clearHitlBookmark() {

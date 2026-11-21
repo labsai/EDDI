@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.shared.LlmFailureClassifier;
 import ai.labs.eddi.configs.shared.TurnDeadline;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.ExtensionDescriptor;
 import ai.labs.eddi.engine.hitl.tools.ChatTranscriptCodec;
@@ -3862,6 +3863,16 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
 
             for (ApiCall apiCall : httpCallsConfig.getHttpCalls()) {
                 if (httpCallName.equals(apiCall.getName())) {
+                    // The email approval gate (email plan v3 §8.1): a retrieval call is a
+                    // rule-driven httpcall like any other — a mail turn whose target has an
+                    // approval policy sends it only when readOnlyTools names it.
+                    var request = apiCall.getRequest();
+                    if (EmailApprovalGate.refusesRuleCall(memory, EmailApprovalGate.httpCallAddresses(apiCall.getName(),
+                            request != null ? request.getMethod() : null, request != null ? request.getPath() : null))) {
+                        LOGGER.warnf("httpCall RAG '%s' not executed: the mail turn's approvalPolicy refuses httpcalls readOnlyTools does "
+                                + "not name", httpCallName);
+                        return null;
+                    }
                     // Found the named httpCall — execute it
                     try {
                         // Make current user input available to httpCall templates

@@ -422,6 +422,98 @@ or an `httpcalls` write to one of those paths. That check is best effort: it can
 at runtime, skips GROUP targets and documents it cannot read, and does not run when the agent changes after the
 integration was saved.
 
+## Keeping an email agent in bounds
+
+An approved sender can still ask for something nobody should do on their word alone. Several layers keep an email
+agent in bounds, from the outermost in:
+
+1. **The agent's tools are the blast radius.** Give an email-facing agent the fewest tools it needs. What it cannot
+   call, no mail can make it call.
+2. **The email approval gate**, per target (below): a mail turn's tool calls wait for a person, and a mail can wait
+   before the agent runs at all.
+3. **The agent's own tool approvals** (`hitlConfig.toolApprovals`, [hitl.md](hitl.md#tool-level-approval-gating)),
+   which apply to every turn — mail or not — and to which the email gate adds, never subtracts.
+4. **Sender lists and authentication** ([Managing senders](#managing-senders)): who can reach the agent at all.
+5. Later phases of the email plan add sender roles (it matters who said it), a review of the reply before it leaves,
+   and input/output guardrails once they ship.
+
+### The approval gate of a target
+
+Each AGENT target of an email integration takes three optional fields:
+
+```json
+{
+  "name": "orders",
+  "type": "AGENT",
+  "targetId": "<agentId>",
+  "triggers": ["orders"],
+  "approvalPolicy": "actions",
+  "readOnlyTools": ["http.get:*", "lookup_order"],
+  "rejectedReply": "We can't do that by mail. Please call us."
+}
+```
+
+| `approvalPolicy` | What happens to a mail for this target |
+|---|---|
+| `none` | Only the agent's own `toolApprovals` apply. The default of every target saved before the gate existed, so upgrading changes nothing |
+| `actions` | The agent runs and answers; **every tool call that `readOnlyTools` does not name pauses for approval**. What the Manager preselects for a new email target |
+| `firstContact` | As `actions`, and a sender's **first mail to this target** waits for approval before the agent runs |
+| `everyTurn` | **Every mail** waits for approval before the agent runs |
+
+The values are ordered by strictness — `none` < `actions` < `firstContact` < `everyTurn` — and each one does
+everything the one before it does.
+
+- **Its own gate, not a merge.** The gate is applied to a mail turn after the agent's and the task's tool approvals
+  have been resolved, and only adds pauses. A call the agent exempts (`exempt` always wins inside `toolApprovals`), a
+  task under `eddi.hitl.tool.task-approvals.mode=replace` and an agent `timeoutPolicy: AUTO_APPROVE` do not let a mail
+  turn's call through. It covers every tool source the LLM task assembles (built-in, HTTP, MCP, A2A, delegation and the
+  others), the `CONVERSATION_START` turn of a new conversation included.
+- **`readOnlyTools`** are [tool-approval patterns](hitl.md#pattern-language): a bare name (`lookup_order`), a source
+  (`mcp:search`), or an HTTP endpoint (`http.get:*`, `http.get:/orders/{id}`). At most 100. A call that matches one runs
+  without the email gate — but **never one the agent's own `toolApprovals` gate**: `readOnlyTools` cannot un-gate
+  anything. EDDI cannot tell what changes something; list only tools that do not. Two built-in loop helpers that only
+  read what the turn already has are never held by the email gate: `discover_tools` (LAZY tool loading) and
+  `fetch_tool_response_page`. The reply tool of an answer-tool agent is not a tool call either. Every other call
+  counts — the conversation-recall and memory tools included (sources `recall:*` and `memory:*`) — so name them if they
+  should run freely.
+- **Timeout:** a pause the email gate caused is rejected automatically after `eddi.email.approval-gate.expiry`
+  (default `PT72H`) — `AUTO_REJECT`, whatever the agent's policy says. Any other pause of a mail turn keeps the agent's
+  timeout policy, except that it never auto-approves (`AUTO_APPROVE` becomes `AUTO_REJECT`).
+- **Rule-driven calls are refused.** `httpcalls` (`ApiCallsTask`), `mcpcalls` (`McpCallsTask`) and an LLM task's
+  `httpCallRag` run from behavior rules, with no tool loop to pause in, so on a target with a policy a mail turn
+  **refuses** them unless `readOnlyTools` names them — an httpcall as `http.<method>:<path>`, `http:<name>` or its
+  name, an mcpcall as `mcp:<tool>`, its tool or its call name. The refusal is recorded on the step
+  (`httpCalls:emailGateRefused`, or the mcpcall's `…Error` entry). Saving warns `email.rule-calls-refused` when such a
+  target's workflow has `httpcalls` or `mcpcalls` steps.
+- **Refused** on GROUP targets (a group turn rejects tool approvals automatically, so the gate could not pause
+  anything — gate the member agents instead) and on non-email integrations: `400`.
+- Saving warns `email.approval-policy-none` for a target on `none` whose agent has tools or rule-driven calls.
+
+### Waiting before the agent runs
+
+Under `firstContact` and `everyTurn` the mail's conversation pauses **before any task of the turn runs**: for a new
+conversation before `CONVERSATION_START`, so no model is called and nothing is spent; for a continued conversation
+before its pipeline. It is an ordinary rule pause, so everything that handles approvals handles it unchanged:
+
+- approvers get the [notification](hitl.md#email-notifications), the Manager's **Approvals** page lists it, and MCP
+  `list_pending_approvals` / `resume_conversation` decide it. The pause reason names the target and whether the sender
+  was authenticated, never the address or the subject; the mail itself is on the paused step (its input and
+  `context.mail`);
+- in conversation mode an authenticated sender gets the [in-thread notice](#approvals-in-the-thread);
+- **approved** (with or without a note): the whole turn runs, from its first task. An edited answer has nothing to
+  replace and is ignored. For a new conversation the approval runs `CONVERSATION_START`, then puts the mail back: the
+  next poll fetches it again by its Message-ID and runs it in that conversation, without asking a second time;
+- **rejected** (or timed out): nothing of the turn runs. In conversation mode the sender gets the target's
+  `rejectedReply` — default "Your request was not approved." — and in trigger mode, which never replies, nothing.
+
+**First contact** means: no earlier mail from that address to this integration whose turn ran to an answer in a
+conversation of this target's agent. Mail that was rejected, skipped, failed or is still waiting does not count. An
+unauthenticated sender is always a first contact — its `From` proves nothing. The check reads the message ledger, so a
+sender counts as new again once their rows expire (`eddi.email.ledger-retention`, default 30 days).
+
+A conversation that a mail turn starts — a delegate, a group member — is tainted ([above](#a-mail-cannot-change-its-own-rules))
+but carries no target, so it has no email gate of its own; the delegating tool call itself is gated.
+
 ## Personal data
 
 - **No raw mail is stored.** The rendered input enters conversation memory like any user input; attachments are
@@ -632,7 +724,9 @@ the agent designer wrote — **never the tool or its arguments**. When the pause
 continuation after an approval, or a plain notice after a rejection, a cancellation or a timeout; the approver is
 never named. Both go through the ledger like any reply, so a second observer or a node failover writes no second row (a crash between the relay's acceptance and the row's completion can still deliver one twice, as for any reply). A
 pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn, sends no notice; the mail waits
-in the mailbox until the conversation continues.
+in the mailbox until the conversation continues. The exception is the email approval gate's own wait before the
+agent runs ([Waiting before the agent runs](#waiting-before-the-agent-runs)): that pause carries the mail, so the
+sender gets the notice.
 
 Human takeover of an email conversation (a person answering from the Manager) does not exist yet: EDDI has no
 takeover feature ([planning/human-takeover-design.md](../planning/human-takeover-design.md) is a design under review).

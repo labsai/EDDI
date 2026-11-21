@@ -163,6 +163,18 @@ public class EmailChannelSupport {
                     + "consider hitlConfig.toolApprovals for tools that change things.", sanitize(configuration.getName()),
                     sanitize(String.join(", ", ungated)));
         }
+        // Email plan v3 §8.1: a target that can act but has no email approval gate,
+        // and a gated target whose rule-driven calls a mail turn will refuse.
+        List<String> noPolicy = toolsInspector.targetsActingWithoutApprovalPolicy(configuration.getTargets());
+        if (!noPolicy.isEmpty()) {
+            warnings.add(EmailChannelSettings.WARNING_APPROVAL_POLICY_NONE);
+        }
+        List<String> ruleCalls = toolsInspector.targetsWithRefusedRuleCalls(configuration.getTargets());
+        if (!ruleCalls.isEmpty()) {
+            warnings.add(EmailChannelSettings.WARNING_RULE_CALLS_REFUSED);
+            LOGGER.infof("Email integration '%s': target(s) %s have an approvalPolicy and rule-driven httpcalls/mcpcalls; a mail turn refuses "
+                    + "those calls unless readOnlyTools names them.", sanitize(configuration.getName()), sanitize(String.join(", ", ruleCalls)));
+        }
         return warnings;
     }
 
