@@ -461,14 +461,26 @@ class GroupConversationServiceConcurrencyTest {
                 ProtocolConfig.MemberUnavailablePolicy.SKIP);
 
         var attempts = new AtomicInteger();
+        var hanging = new AtomicReference<IConversationService.ConversationResponseHandler>();
         doAnswer(inv -> {
             // Attempts 1 and 2 never answer: the member runs into its OWN timeout and
             // takes executeAgentTurn's RETRY branch. Attempt 3 answers immediately.
             if (attempts.incrementAndGet() >= 3) {
                 handlerOf(inv.getArgument(8)).onComplete(snapshot("retried answer"));
+            } else {
+                hanging.set(handlerOf(inv.getArgument(8)));
             }
             return null;
         }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+        // K7: a RETRY first cancels the timed-out attempt and waits for it to end —
+        // here the cancel ends it, so the retry may run.
+        doAnswer(inv -> {
+            var handler = hanging.getAndSet(null);
+            if (handler != null) {
+                handler.onComplete(snapshot("stopped"));
+            }
+            return IConversationService.CancelOutcome.CANCELLED;
+        }).when(conversationService).cancelConversation(any(), any(), any());
 
         invoke(parallelPhaseMethod(), gc, config(List.of(member(0))), List.of(member(0)),
                 phase(PhaseType.OPINION, TurnOrder.PARALLEL), protocol, QUESTION, 0, null,

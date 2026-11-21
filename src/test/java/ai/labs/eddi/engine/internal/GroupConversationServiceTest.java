@@ -32,6 +32,7 @@ import ai.labs.eddi.engine.api.IGroupConversationService;
 import ai.labs.eddi.engine.lifecycle.model.ControlSignal;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
+import ai.labs.eddi.engine.internal.groups.MemberTurnExecutor;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -550,7 +551,7 @@ class GroupConversationServiceTest {
             assertEquals("Unknown", entry.speakerDisplayName());
             assertNull(entry.content());
             assertEquals(TranscriptEntryType.ERROR, entry.type());
-            assertEquals("some error", entry.errorReason());
+            assertEquals(MemberTurnExecutor.REASON_EXECUTION_FAILED, entry.errorReason()); // K9: the message is logged, not stored
             assertEquals(0, entry.phaseIndex());
             assertEquals("TestPhase", entry.phaseName());
         }
@@ -566,7 +567,7 @@ class GroupConversationServiceTest {
             assertEquals("Agent X", entry.speakerDisplayName());
             assertNull(entry.content());
             assertEquals(TranscriptEntryType.ERROR, entry.type());
-            assertEquals("timeout occurred", entry.errorReason());
+            assertEquals(MemberTurnExecutor.REASON_EXECUTION_FAILED, entry.errorReason());
             assertEquals(2, entry.phaseIndex());
         }
     }

@@ -8266,6 +8266,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
+          "description": "`eddi_group_discussion_count_total` (started) and `eddi_group_discussion_failure_count_total` (failed with an error), plus `eddi_group_discussion_unanswered_total` by `outcome` — rounds that ended `NO_ANSWER` or `FAILED` instead of with an answer (the `reason` label says why: NO_MEMBER_ANSWERED, SYNTHESIS_FAILED, TURN_LIMIT_REACHED, ...). A steady unanswered rate means discussions complete without a usable result — usually members whose model fails.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -8294,6 +8295,17 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "failed"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (outcome) (rate(eddi_group_discussion_unanswered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "unanswered: {{outcome}}"
             }
           ],
           "fieldConfig": {
@@ -9225,12 +9237,12 @@
         {
           "id": 271,
           "type": "timeseries",
-          "title": "Unparseable VERIFY verdicts",
+          "title": "Unparseable / unanswered VERIFY verdicts",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_group_verify_unparseable_total` — verifier replies that could not be parsed; every task of that pass was auto-verified (fail-open). Should stay near zero: a steady rate means the moderator's model ignores the verdict format.",
+          "description": "`eddi_group_verify_unparseable_total` — verifier replies that could not be parsed; every task of that pass was auto-verified (fail-open). Should stay near zero: a steady rate means the moderator's model ignores the verdict format. `eddi_group_verify_unanswered_total` — VERIFY passes whose verifier did not answer at all (not deployed, skipped, failed, timed out); every task of that pass was failed, not verified, and goes to rework. A steady rate means the verifier itself is broken.",
           "gridPos": {
             "h": 7,
             "w": 8,
@@ -9246,7 +9258,19 @@
                 "uid": "${datasource}"
               },
               "editorMode": "code",
-              "range": true
+              "range": true,
+              "legendFormat": "unparseable (auto-verified)"
+            },
+            {
+              "refId": "B",
+              "expr": "sum(rate(eddi_group_verify_unanswered_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "verifier did not answer (failed)"
             }
           ],
           "fieldConfig": {

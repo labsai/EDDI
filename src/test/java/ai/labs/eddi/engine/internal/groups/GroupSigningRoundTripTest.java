@@ -131,6 +131,29 @@ class GroupSigningRoundTripTest {
         assertWithheld(visible.get(0), "does not match");
     }
 
+    /**
+     * M1: a stored entry holding the old failure placeholder — signed, as the old
+     * engine signed it — reads as a FAILED turn without content. The verifier skips
+     * an entry without content, so it is neither withheld as tampered nor shown as
+     * text, and the transcript's real signed entries still verify.
+     */
+    @Test
+    void aLegacySignedFailurePlaceholder_readsAsFailedAndTheRestStillVerifies() throws Exception {
+        provisionKeyAndEnableSigning();
+        var signed = guard.sign(gc, entry("the plan is sound", 0));
+        var legacy = withContent(guard.sign(gc, entry("placeholder stand-in", 0)),
+                "[Agent failed to produce output — conversation entered ERROR state]");
+
+        assertEquals(GroupConversation.TurnOutcome.FAILED, legacy.outcome());
+        assertNull(legacy.content());
+
+        var visible = guard.visibleTo(RECEIVER, gc, List.of(signed, legacy));
+
+        assertEquals(signed, visible.get(0), "the real signed entry still verifies");
+        assertTrue(visible.stream().noneMatch(e -> e.content() != null && e.content().contains("Agent failed to produce output")),
+                "the placeholder text is never shown");
+    }
+
     @Test
     void anUnsignedEntryFromAnAgentIsWithheld() throws Exception {
         provisionKeyAndEnableSigning();
