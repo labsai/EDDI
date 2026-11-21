@@ -35,6 +35,7 @@ import ai.labs.eddi.modules.nlp.internal.InputParser;
 import ai.labs.eddi.modules.nlp.internal.Limits;
 import ai.labs.eddi.modules.nlp.internal.matches.RawSolution;
 import ai.labs.eddi.modules.nlp.semantic.SemanticFallback;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
@@ -221,7 +222,8 @@ public class InputParserTask implements ILifecycleTask {
             // The same tokens the dictionaries read: words past maxInputTokens must not
             // select an example either.
             String fallbackInput = limits == null ? normalizedUserInput : InputParser.withinTokenLimit(normalizedUserInput, limits);
-            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), fallbackInput, userLanguage);
+            Solution semantic = consultSemanticFallback(parser.getSemanticFallback(), fallbackInput, userLanguage,
+                    SecretAccess.agent(memory.getAgentId()));
             if (semantic != null) {
                 solution = semantic;
                 solutions = List.of(semantic);
@@ -238,8 +240,8 @@ public class InputParserTask implements ILifecycleTask {
      *         similar enough (or the provider failed — the fallback never fails the
      *         turn)
      */
-    private Solution consultSemanticFallback(SemanticFallback fallback, String normalizedInput, String userLanguage) {
-        var match = fallback.classify(normalizedInput, userLanguage);
+    private Solution consultSemanticFallback(SemanticFallback fallback, String normalizedInput, String userLanguage, SecretAccess access) {
+        var match = fallback.classify(normalizedInput, userLanguage, access);
         countSemanticFallback(match.isPresent() ? "match" : "no_match");
         if (match.isEmpty()) {
             return null;
@@ -589,7 +591,8 @@ public class InputParserTask implements ILifecycleTask {
         ragConfiguration.setEmbeddingParameters(fallback.embeddingParameters() == null ? Map.of() : fallback.embeddingParameters());
         // A symmetric task: the input and the examples are the same kind of text, so
         // both are embedded in the query role.
-        return new SemanticFallback(() -> embeddingModelFactory.getOrCreate(ragConfiguration, EmbeddingInputType.QUERY), distinct, minScore);
+        return SemanticFallback.perAgent(access -> embeddingModelFactory.getOrCreate(ragConfiguration, EmbeddingInputType.QUERY, access), distinct,
+                minScore);
     }
 
     private static boolean hasMeaningfulExpression(Expressions expressions) {

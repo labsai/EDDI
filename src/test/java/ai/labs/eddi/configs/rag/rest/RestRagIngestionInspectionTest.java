@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.configs.rag.rest;
 
+import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.configs.rag.IRestRagIngestion.KnowledgeBaseSearch;
 import ai.labs.eddi.configs.rag.IRestRagStore;
@@ -130,6 +131,27 @@ class RestRagIngestionInspectionTest {
 
         assertEquals(501, response.getStatus());
         assertEquals("cannot filter", ((Map<?, ?>) response.getEntity()).get("error"));
+    }
+
+    @Test
+    @DisplayName("a key the vault grant withholds is a 403 with the grant message, not a 502 blaming the provider (#1179)")
+    void grantRefusalIs403() {
+        when(inspector.search(anyString(), any(), any(), anyString(), anyInt(), anyDouble()))
+                .thenThrow(new SecretResolver.SecretNotGrantedException("Vault secret ${vault:openai-key} is not resolved for no agent"));
+
+        Response response = rest.searchKnowledgeBase(KB_ID, 1, new KnowledgeBaseSearch("hello", null, null, null));
+
+        assertEquals(403, response.getStatus());
+        assertEquals("Vault secret ${vault:openai-key} is not resolved for no agent", ((Map<?, ?>) response.getEntity()).get("error"));
+    }
+
+    @Test
+    @DisplayName("a key that does not exist is a 400 on the chunk view")
+    void missingSecretIs400() {
+        when(inspector.documentChunks(anyString(), any(), any(), anyString(), anyInt()))
+                .thenThrow(new SecretResolver.SecretMissingException("${vault:openai-key}, which does not exist"));
+
+        assertEquals(400, rest.readDocumentChunks(KB_ID, SOURCE_ID, 1, "https://example.com/a", 50).getStatus());
     }
 
     @Test

@@ -62,11 +62,13 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * master key and does not touch any ciphertext.
  * <p>
  * <b>Access model:</b> {@code allowedAgents} is not consulted here — this class
- * resolves secrets and does not police who asked. It is checked one level up,
+ * resolves secrets and does not police who asked. It is checked one level up:
  * when an agent is deployed, by {@link ai.labs.eddi.secrets.VaultGrantGate},
- * which blocks or merely logs according to
- * {@code eddi.vault.grant-enforcement}. "Not enforced at resolution time" is a
- * statement about this class, not about the field.
+ * and whenever a reference is resolved, by
+ * {@link ai.labs.eddi.secrets.SecretResolver} for the {@code SecretAccess} the
+ * caller names. Both block or merely log according to
+ * {@code eddi.vault.grant-enforcement}. Internal readers that call this class
+ * directly (agent signing keys) read a namespace the resolver refuses.
  * <p>
  * The KEK (Master Key) is supplied via the {@code EDDI_VAULT_MASTER_KEY}
  * environment variable. If not set, the provider is disabled and all operations

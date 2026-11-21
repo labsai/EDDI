@@ -188,7 +188,7 @@ class ConversationTitleServiceTest {
         @DisplayName("on: the first exchange goes to the model and its answer is written as LLM")
         void writesLlmTitle() throws Exception {
             enableLlmTitles();
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini"), any()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), eq("openai"), eq("gpt-4o-mini"), any(), any()))
                     .thenReturn(new SummarizationService.SummarizationResult("\"Vienna weather\"", 1000, 500));
             var memory = conversation();
             plainTurn(memory, "What is the weather in Vienna?", "Sunny, 24 degrees.");
@@ -196,7 +196,7 @@ class ConversationTitleServiceTest {
             service.afterTurn(memory, false);
 
             var content = ArgumentCaptor.forClass(String.class);
-            verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"), any());
+            verify(summarizationService).summarizeWithUsage(content.capture(), anyString(), eq("openai"), eq("gpt-4o-mini"), any(), any());
             assertTrue(content.getValue().contains("User: What is the weather in Vienna?"), content.getValue());
             assertTrue(content.getValue().contains("Agent: Sunny, 24 degrees."), content.getValue());
             verify(descriptorStore).writeGeneratedTitle("conv-1", "Vienna weather", TitleSource.LLM);
@@ -206,7 +206,7 @@ class ConversationTitleServiceTest {
         @DisplayName("its cost is charged to the tenant and reported as CONVERSATION_TITLE")
         void costTracked() throws Exception {
             enableLlmTitles();
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                     .thenReturn(new SummarizationService.SummarizationResult("Vienna weather", 1000, 500));
             var memory = conversation();
             plainTurn(memory, "What is the weather in Vienna?", "Sunny.");
@@ -228,7 +228,7 @@ class ConversationTitleServiceTest {
         @DisplayName("an owner's rename wins: the LLM write is refused by the store and the title stays")
         void renameWins() throws Exception {
             enableLlmTitles();
-            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+            when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                     .thenReturn(new SummarizationService.SummarizationResult("Vienna weather", 10, 5));
             // AUTO lands; by the time the model answers the owner has renamed it, so the
             // store's guard (titleSource USER) refuses the LLM write.

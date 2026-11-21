@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.secrets.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.ISecretProvider;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.EncryptedDek;
@@ -220,7 +221,7 @@ class SecretVaultIntegrationTest {
             var ref = new SecretReference(TENANT, KEY_NAME);
             provider.store(ref, SECRET_VALUE, "Test API key", List.of("*"));
 
-            String resolved = resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            String resolved = resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals(SECRET_VALUE, resolved);
         }
 
@@ -233,7 +234,7 @@ class SecretVaultIntegrationTest {
             var ref = new SecretReference("production", KEY_NAME);
             provider.store(ref, SECRET_VALUE, "Prod key", List.of("*"));
 
-            String resolved = resolver.resolveValue("${vault:production/" + KEY_NAME + "}");
+            String resolved = resolver.resolveValue("${vault:production/" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals(SECRET_VALUE, resolved);
         }
 
@@ -247,7 +248,7 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "apiSecret"), "secret-456", null, List.of("*"));
 
             String input = "key=${vault:apiKey}&secret=${vault:apiSecret}";
-            String resolved = resolver.resolveValue(input);
+            String resolved = resolver.resolveValue(input, SecretAccess.outsideAgentGrants("test"));
             assertEquals("key=key-123&secret=secret-456", resolved);
         }
     }
@@ -265,7 +266,7 @@ class SecretVaultIntegrationTest {
             setupSecretMocking();
 
             // First attempt — secret doesn't exist yet
-            String result1 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            String result1 = resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             // Should pass through unchanged (not found)
             assertEquals("${vault:" + KEY_NAME + "}", result1);
 
@@ -275,7 +276,7 @@ class SecretVaultIntegrationTest {
             // Second attempt — should now resolve successfully
             // The POINT of this test: we DON'T call invalidateAll()
             // because failed resolutions should NEVER be cached.
-            String result2 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            String result2 = resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals(SECRET_VALUE, result2);
         }
 
@@ -288,8 +289,8 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // Resolve twice
-            resolver.resolveValue("${vault:" + KEY_NAME + "}");
-            resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
+            resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
 
             // Second resolve should use cache — verify cache hit counter
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.hits").count());
@@ -312,8 +313,8 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "key2"), "value2", null, List.of("*"));
 
             // Verify pre-rotation
-            assertEquals("value1", resolver.resolveValue("${vault:key1}"));
-            assertEquals("value2", resolver.resolveValue("${vault:key2}"));
+            assertEquals("value1", resolver.resolveValue("${vault:key1}", SecretAccess.outsideAgentGrants("test")));
+            assertEquals("value2", resolver.resolveValue("${vault:key2}", SecretAccess.outsideAgentGrants("test")));
 
             // Clear cache and rotate DEK
             resolver.invalidateAll();
@@ -324,8 +325,8 @@ class SecretVaultIntegrationTest {
             resolver.invalidateAll();
 
             // Verify post-rotation — secrets should still resolve to same values
-            assertEquals("value1", resolver.resolveValue("${vault:key1}"));
-            assertEquals("value2", resolver.resolveValue("${vault:key2}"));
+            assertEquals("value1", resolver.resolveValue("${vault:key1}", SecretAccess.outsideAgentGrants("test")));
+            assertEquals("value2", resolver.resolveValue("${vault:key2}", SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -362,7 +363,7 @@ class SecretVaultIntegrationTest {
             assertTrue(ex.getMessage().contains("safe to re-run"), "nothing is lost, and the message must say so: " + ex.getMessage());
 
             resolver.invalidateAll();
-            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}"),
+            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test")),
                     "deleting the generation a row still names is what made a partly swept tenant unreadable");
         }
 
@@ -412,7 +413,7 @@ class SecretVaultIntegrationTest {
             resolver.invalidateAll();
 
             // The in-memory provider now uses the new KEK — secrets should still resolve
-            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}"));
+            assertEquals(SECRET_VALUE, resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -497,11 +498,11 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, KEY_NAME), SECRET_VALUE, null, List.of("*"));
 
             // First resolve — cache miss
-            resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.misses").count());
 
             // Second resolve — cache hit
-            resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals(1.0, meterRegistry.counter("eddi.vault.cache.hits").count());
         }
 
@@ -569,13 +570,13 @@ class SecretVaultIntegrationTest {
 
             provider.store(new SecretReference(TENANT, KEY_NAME), "old-value", null, List.of("*"));
 
-            String v1 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            String v1 = resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals("old-value", v1);
 
             provider.store(new SecretReference(TENANT, KEY_NAME), "new-value", null, List.of("*"));
             resolver.invalidateCache(new SecretReference(TENANT, KEY_NAME));
 
-            String v2 = resolver.resolveValue("${vault:" + KEY_NAME + "}");
+            String v2 = resolver.resolveValue("${vault:" + KEY_NAME + "}", SecretAccess.outsideAgentGrants("test"));
             assertEquals("new-value", v2);
         }
 
@@ -588,15 +589,15 @@ class SecretVaultIntegrationTest {
             provider.store(new SecretReference(TENANT, "k1"), "v1", null, List.of("*"));
             provider.store(new SecretReference(TENANT, "k2"), "v2", null, List.of("*"));
 
-            resolver.resolveValue("${vault:k1}");
-            resolver.resolveValue("${vault:k2}");
+            resolver.resolveValue("${vault:k1}", SecretAccess.outsideAgentGrants("test"));
+            resolver.resolveValue("${vault:k2}", SecretAccess.outsideAgentGrants("test"));
 
             resolver.invalidateAll();
             provider.store(new SecretReference(TENANT, "k1"), "v1-updated", null, List.of("*"));
             provider.store(new SecretReference(TENANT, "k2"), "v2-updated", null, List.of("*"));
 
-            assertEquals("v1-updated", resolver.resolveValue("${vault:k1}"));
-            assertEquals("v2-updated", resolver.resolveValue("${vault:k2}"));
+            assertEquals("v1-updated", resolver.resolveValue("${vault:k1}", SecretAccess.outsideAgentGrants("test")));
+            assertEquals("v2-updated", resolver.resolveValue("${vault:k2}", SecretAccess.outsideAgentGrants("test")));
         }
     }
 }

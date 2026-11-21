@@ -288,7 +288,7 @@ class SystemMailerTest {
             try (var server = new StartTlsSmtpServer(TestTls.serverContext(), "250 2.1.5 ok")) {
                 ConnectionResolver resolver = mock(ConnectionResolver.class);
                 when(resolver.authTypeOf("${connection:exo-smtp}")).thenReturn(Optional.of(AuthType.OAUTH2_CLIENT_CREDENTIALS));
-                when(resolver.resolveAccessToken(eq("${connection:exo-smtp}"), any(URI.class), isNull())).thenReturn("eyJ.token");
+                when(resolver.resolveAccessToken(eq("${connection:exo-smtp}"), any(URI.class), isNull(), any())).thenReturn("eyJ.token");
                 @SuppressWarnings("unchecked")
                 Instance<ConnectionResolver> instance = mock(Instance.class);
                 when(instance.isResolvable()).thenReturn(true);
@@ -298,7 +298,8 @@ class SystemMailerTest {
 
                 TestTls.trustingDefault(() -> mailer.send(notification(), List.of(TO)));
 
-                verify(resolver).resolveAccessToken("${connection:exo-smtp}", URI.create("smtp://localhost:" + server.port()), null);
+                verify(resolver).resolveAccessToken(eq("${connection:exo-smtp}"), eq(URI.create("smtp://localhost:" + server.port())), eq(null),
+                        any());
                 var auth = server.commands.stream().filter(c -> c.line().startsWith("AUTH")).findFirst().orElseThrow();
                 assertTrue(auth.overTls());
                 String[] parts = auth.line().split(" ");

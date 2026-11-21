@@ -166,7 +166,7 @@ class LlmTaskToolLoopStreamingTest {
         var conversationOutput = new ConversationOutput();
         conversationOutput.put("input", "user input");
         lenient().when(memory.getConversationOutputs()).thenReturn(List.of(conversationOutput));
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
         lenient().when(templatingEngine.processTemplate(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         @SuppressWarnings("unchecked")
         IData<String> inputData = mock(IData.class);
@@ -235,7 +235,7 @@ class LlmTaskToolLoopStreamingTest {
     @Test
     @DisplayName("a streamed final answer is not emitted a second time, and is not a downgrade")
     void streamedAnswerIsNotDoubleEmitted() throws Exception {
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(streamingModel());
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(streamingModel());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
 
@@ -255,7 +255,7 @@ class LlmTaskToolLoopStreamingTest {
     @Test
     @DisplayName("the tool loop receives the bridge, not the synchronous model")
     void toolLoopReceivesTheBridge() throws Exception {
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(streamingModel());
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(streamingModel());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
 
@@ -267,7 +267,7 @@ class LlmTaskToolLoopStreamingTest {
     @Test
     @DisplayName("a buffered provider (no partials) still gets the single-chunk fallback and the downgrade record")
     void bufferedProviderKeepsFallbackEmit() throws Exception {
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(bufferedModel());
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(bufferedModel());
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
 
@@ -282,7 +282,7 @@ class LlmTaskToolLoopStreamingTest {
     @Test
     @DisplayName("no streaming builder for the provider → previous behaviour, synchronous model and fallback emit")
     void noStreamingBuilderFallsBackToSynchronousModel() throws Exception {
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(null);
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(null);
         // doReturn: a when() re-stub would run the setUp thenAnswer during stubbing.
         doReturn(new AgentOrchestrator.ExecutionResult(FINAL_ANSWER, new ArrayList<>()))
                 .when(agentOrchestrator).executeIfToolsEnabled(any(), any(), any(), any(), any(), any(), anyInt(), anyInt(), any());
@@ -306,7 +306,7 @@ class LlmTaskToolLoopStreamingTest {
 
         llmTask.execute(memory, new LlmConfiguration(List.of(task)));
 
-        verify(chatModelRegistry, times(0)).getOrCreateStreaming(anyString(), any());
+        verify(chatModelRegistry, times(0)).getOrCreateStreaming(anyString(), any(), any());
         verify(eventSink, times(0)).onToken(anyString());
     }
 
@@ -318,7 +318,7 @@ class LlmTaskToolLoopStreamingTest {
     @Test
     @DisplayName("the resume loop also receives the bridge")
     void resumeLoopReceivesTheBridge() throws Exception {
-        when(chatModelRegistry.getOrCreateStreaming(anyString(), any())).thenReturn(streamingModel());
+        when(chatModelRegistry.getOrCreateStreaming(anyString(), any(), any())).thenReturn(streamingModel());
         var batch = new PendingToolCallBatch();
         batch.setLlmTaskId("taskA");
         batch.setLlmTaskIndex(0);
@@ -346,7 +346,7 @@ class LlmTaskToolLoopStreamingTest {
 
         llmTask.execute(memory, new LlmConfiguration(List.of(toolTask())));
 
-        verify(chatModelRegistry, times(0)).getOrCreateStreaming(anyString(), any());
+        verify(chatModelRegistry, times(0)).getOrCreateStreaming(anyString(), any(), any());
         verify(eventSink).onToken(FINAL_ANSWER);
         assertEquals(1.0, downgradeCount());
     }

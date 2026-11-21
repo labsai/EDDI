@@ -177,7 +177,7 @@ class LlmTaskFallbackTest {
     }
 
     private void liveModelReplies(Step... script) throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(script).repeatLast());
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(script).repeatLast());
     }
 
     private void run(LlmConfiguration.Task task) throws Exception {
@@ -236,7 +236,7 @@ class LlmTaskFallbackTest {
         @Test
         @DisplayName("a model that cannot even be built is absorbed")
         void modelConstructionFailureIsAbsorbed() throws Exception {
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new IllegalArgumentException("no api key"));
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenThrow(new IllegalArgumentException("no api key"));
 
             assertDoesNotThrow(() -> run(withOnError(task(false), "fallback")));
 
@@ -267,7 +267,7 @@ class LlmTaskFallbackTest {
             lenient().when(partial.getKey()).thenReturn("partial");
             var elements = new ArrayList<IData<?>>(List.of(older));
             when(currentStep.getAllElements()).thenAnswer(inv -> new ArrayList<>(elements));
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenAnswer(inv -> {
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenAnswer(inv -> {
                 elements.add(partial); // written during the failing phase
                 throw new IllegalStateException("boom");
             });
@@ -301,7 +301,7 @@ class LlmTaskFallbackTest {
         @Test
         @DisplayName("a HITL tool approval signal propagates")
         void toolApprovalPropagates() throws Exception {
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new ToolApprovalRequiredException("approve", null));
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenThrow(new ToolApprovalRequiredException("approve", null));
 
             assertThrows(ToolApprovalRequiredException.class, () -> run(withOnError(task(false), "fallback")));
             verify(dataFactory, never()).createData(eq("llm:fallback:taskA"), any());
@@ -310,7 +310,7 @@ class LlmTaskFallbackTest {
         @Test
         @DisplayName("a graceful-shutdown interrupt propagates, even wrapped")
         void interruptPropagates() throws Exception {
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenAnswer(inv -> {
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenAnswer(inv -> {
                 throw new IllegalStateException("wrapped", new LifecycleException.LifecycleInterruptedException("shutdown"));
             });
 
@@ -321,7 +321,7 @@ class LlmTaskFallbackTest {
         @Test
         @DisplayName("a cancellation propagates")
         void cancellationPropagates() throws Exception {
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new CancellationException());
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenThrow(new CancellationException());
 
             assertThrows(CancellationException.class, () -> run(withOnError(task(false), "fallback")));
         }
@@ -338,7 +338,7 @@ class LlmTaskFallbackTest {
         @Test
         @DisplayName("an interrupted thread propagates the failure")
         void interruptedThreadPropagates() throws Exception {
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new IllegalStateException("boom"));
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenThrow(new IllegalStateException("boom"));
             Thread.currentThread().interrupt();
             try {
                 assertThrows(IllegalStateException.class, () -> run(withOnError(task(false), "fallback")));
@@ -462,7 +462,7 @@ class LlmTaskFallbackTest {
         void streamGetsFallbackText() throws Exception {
             var sink = mock(ConversationEventSink.class);
             when(memory.getEventSink()).thenReturn(sink);
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenThrow(new IllegalStateException("boom"));
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenThrow(new IllegalStateException("boom"));
 
             run(withOnError(task(false), "fallback"));
 

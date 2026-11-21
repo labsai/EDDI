@@ -71,6 +71,15 @@ public class VaultGrantService {
     private final ISecretProvider secretProvider;
     private final AuditLedgerService auditLedgerService;
 
+    /**
+     * Told about every grant written here: it caches each secret's grant and checks
+     * it at every resolution, so an agent just added would otherwise be refused
+     * until the entry expired. Field-injected so the tests that build this class
+     * with {@code new} keep working; null there.
+     */
+    @Inject
+    SecretResolver secretResolver;
+
     @Inject
     public VaultGrantService(ISecretProvider secretProvider, AuditLedgerService auditLedgerService) {
         this.secretProvider = secretProvider;
@@ -128,6 +137,11 @@ public class VaultGrantService {
             }
             try {
                 SecretMetadata after = secretProvider.updateGrant(secret, next, null, current);
+                if (secretResolver != null) {
+                    // Every node, not only this one: the event reaches the cluster. The
+                    // grant only: the value and its clients are unchanged.
+                    secretResolver.invalidateGrant(secret);
+                }
                 audit(secret, agentId, actor, origin, current, after.allowedAgents());
                 return new AppendResult(before, after, true);
             } catch (GrantConflictException e) {

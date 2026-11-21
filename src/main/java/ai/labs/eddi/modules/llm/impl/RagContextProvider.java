@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.engine.memory.IConversationMemory;
@@ -166,8 +167,10 @@ public class RagContextProvider {
                 // configuration's id — never by its name, which another knowledge base
                 // may share.
                 String ragConfigId = ragConfigIdOf(step.stepConfig());
-                EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY);
-                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
+                // Retrieval runs for the conversation's agent.
+                SecretAccess access = SecretAccess.agent(memory.getAgentId());
+                EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY, access);
+                EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig, access);
 
                 var retrieverBuilder = EmbeddingStoreContentRetriever.builder().embeddingStore(store).embeddingModel(embeddingModel)
                         .maxResults(maxResults).minScore(minScore);

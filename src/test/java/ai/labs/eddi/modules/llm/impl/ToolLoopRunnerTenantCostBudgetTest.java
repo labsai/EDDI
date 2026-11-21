@@ -147,7 +147,7 @@ class ToolLoopRunnerTenantCostBudgetTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(i -> i.getArgument(2));
 
         tenantQuotaService = mock(TenantQuotaService.class);

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -215,7 +216,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
         @Test
         @DisplayName("null config list returns empty result")
         void nullConfigList() {
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -224,7 +225,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
         @Test
         @DisplayName("empty config list returns empty result")
         void emptyConfigList() {
-            var result = manager.discoverTools(List.of());
+            var result = manager.discoverTools(List.of(), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -235,7 +236,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
         void nullUrlConfig() {
             var config = new A2AAgentConfig();
             config.setUrl(null);
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -245,7 +246,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
         void emptyUrlConfig() {
             var config = new A2AAgentConfig();
             config.setUrl("");
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -259,7 +260,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
 
             var config = new A2AAgentConfig();
             config.setUrl("http://broken.com");
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -276,7 +277,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
             config2.setUrl("http://127.0.0.1:1");
 
             // config2 will fail with connection refused (not a circuit break)
-            var result = manager.discoverTools(List.of(config1, config2));
+            var result = manager.discoverTools(List.of(config1, config2), SecretAccess.outsideAgentGrants("test"));
             // config1 is circuit-broken, config2 fails at HTTP level
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -613,7 +614,7 @@ class A2AToolProviderManagerUncoveredBranchTest {
 
             // After cooldown, isCircuitOpen auto-resets the entry and returns false
             // Then discovery is attempted (will fail or succeed depending on DNS)
-            manager.discoverTools(List.of(config));
+            manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
 
             // The key assertion: the OLD entry with failures=3 was removed by auto-reset.
             // If DNS fails, a NEW entry with failures=1 will exist.

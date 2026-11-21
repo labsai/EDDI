@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -110,7 +111,7 @@ class McpConnectionCredentialTest {
         resolutionPrincipalContext = new ResolutionPrincipalContext();
 
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString()))
+        lenient().when(secretResolver.resolveValue(anyString(), any()))
                 .thenAnswer(i -> i.<String>getArgument(0).replace("${vault:mcp-token}", "live-token"));
 
         connectionResolver = new ConnectionResolver(registry, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
@@ -314,7 +315,7 @@ class McpConnectionCredentialTest {
             // A connection supplies the WHOLE header value. "Bearer ${connection:crm}"
             // used to drop the word Bearer silently and send a bare token, and the 401
             // that came back named nothing at all.
-            var result = rejectingManager().discoverTools(List.of(config("Bearer ${connection:crm}")));
+            var result = rejectingManager().discoverTools(List.of(config("Bearer ${connection:crm}")), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.failures().size());
             var failure = result.failures().get(0);
@@ -330,7 +331,8 @@ class McpConnectionCredentialTest {
         @Test
         @DisplayName("two references in one value are refused rather than silently using the first")
         void refusesTwoReferences() {
-            var result = rejectingManager().discoverTools(List.of(config("${connection:crm} ${connection:billing}")));
+            var result = rejectingManager().discoverTools(List.of(config("${connection:crm} ${connection:billing}")),
+                    SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.failures().size());
             var failure = result.failures().get(0);
@@ -349,7 +351,7 @@ class McpConnectionCredentialTest {
             McpToolProviderManager manager = spy(manager());
             doReturn(null).when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("${connection:crm}")));
+            var result = manager.discoverTools(List.of(config("${connection:crm}")), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager).fetchToolsFromServer(any());
             assertTrue(result.failures().isEmpty(), () -> "a well-formed reference must not be rejected: " + result.failures());
@@ -373,7 +375,7 @@ class McpConnectionCredentialTest {
         private McpToolProviderManager fourTurns(RuntimeException failure, McpFailureKind expected, McpServerConfig config) {
             McpToolProviderManager manager = failingWith(failure);
             for (int turn = 1; turn <= 4; turn++) {
-                var result = manager.discoverTools(List.of(config));
+                var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
                 assertEquals(expected, result.failures().get(0).kind(), "turn " + turn + " was classified wrongly");
             }
             return manager;
@@ -417,12 +419,14 @@ class McpConnectionCredentialTest {
                     new ConnectionException(ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, "token endpoint 503"));
 
             for (int turn = 1; turn <= 3; turn++) {
-                assertEquals(McpFailureKind.CONNECTION_FAILURE, manager.discoverTools(List.of(config)).failures().get(0).kind(),
+                assertEquals(McpFailureKind.CONNECTION_FAILURE,
+                        manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")).failures().get(0).kind(),
                         "turn " + turn);
             }
 
             assertTrue(manager.isCircuitOpen(config), "a genuinely transient failure is exactly what the breaker is for");
-            assertEquals(McpFailureKind.CIRCUIT_OPEN, manager.discoverTools(List.of(config)).failures().get(0).kind());
+            assertEquals(McpFailureKind.CIRCUIT_OPEN,
+                    manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")).failures().get(0).kind());
             verify(manager, times(3)).fetchToolsFromServer(any());
         }
 
@@ -449,7 +453,8 @@ class McpConnectionCredentialTest {
             McpToolProviderManager manager = failingWith(new RuntimeException("Connection reset after reading 401 bytes"));
 
             for (int turn = 1; turn <= 3; turn++) {
-                assertEquals(McpFailureKind.CONNECTION_FAILURE, manager.discoverTools(List.of(config)).failures().get(0).kind(),
+                assertEquals(McpFailureKind.CONNECTION_FAILURE,
+                        manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test")).failures().get(0).kind(),
                         "turn " + turn);
             }
 

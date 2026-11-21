@@ -58,7 +58,7 @@ class InputParserTaskQualityTest {
         normalizers.put(PunctuationNormalizerProvider.ID, PunctuationNormalizerProvider::new);
         task = new InputParserTask(expressionProvider, normalizers, dictionaries, new HashMap<>(), MAPPER, mock(IResourceClientLibrary.class),
                 embeddingModelFactory, meterRegistry);
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
     }
 
     private IInputParser configure(Map<String, Object> config) throws Exception {

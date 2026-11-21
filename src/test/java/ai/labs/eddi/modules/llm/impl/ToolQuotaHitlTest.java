@@ -182,7 +182,7 @@ class ToolQuotaHitlTest {
         when(memory.getUserId()).thenReturn("user-1");
         when(memory.getAgentVersion()).thenReturn(null);
         when(memory.getCurrentStep()).thenReturn(currentStep);
-        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any()))
+        when(toolResponseTruncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
                 .thenAnswer(inv -> inv.getArgument(2));
         when(tenantQuotaService.getDefaultTenantId()).thenReturn("t");
         when(tenantQuotaService.checkCostBudget(any(), anyDouble())).thenReturn(QuotaCheckResult.OK);

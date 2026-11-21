@@ -87,7 +87,7 @@ class LlmTaskBranchTest {
         });
 
         var secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
         globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
@@ -585,7 +585,7 @@ class LlmTaskBranchTest {
                 }
             });
             var secretResolver = mock(SecretResolver.class);
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> inv.getArgument(0));
+            when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> inv.getArgument(0));
             var registry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
             var counterweightService = new CounterweightService(mockSnippetService, new SimpleMeterRegistry());
             counterweightService.initMetrics();

@@ -355,6 +355,7 @@
     "valuePlaceholder": "أدخل قيمة Secret…",
     "store": "تخزين Secret",
     "storeSuccess": "تم تخزين Secret \"{{key}}\"",
+    "storeGrantWarning": "تم حفظ السر \"{{key}}\" — راجع صلاحيته",
     "descriptionLabel": "الوصف (اختياري)",
     "allowedHosts": "الوجهات المسموح بها",
     "allowedHostsAdd": "إضافة مضيف مسموح به",

@@ -71,7 +71,7 @@ class ApiCallExecutorPreRequestTest {
         var secretResolver = mock(SecretResolver.class);
         var callerIdentityResolver = mock(CallerIdentityResolver.class);
         var globalVariableResolver = mock(GlobalVariableResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.redactCallerToken(anyString(), anyString())).thenAnswer(inv -> inv.getArgument(0));

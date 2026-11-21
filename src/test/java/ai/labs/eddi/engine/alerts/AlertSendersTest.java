@@ -78,7 +78,7 @@ class AlertSendersTest {
     @DisplayName("a webhook POST is signed eddi-v1 — EDDI's own inbound verifier accepts it — strict SSRF, no redirects")
     @SuppressWarnings("unchecked")
     void signedWebhook() throws Exception {
-        when(secrets.resolveValue("${vault:hook}")).thenReturn(SECRET);
+        when(secrets.resolveValue(eq("${vault:hook}"), any())).thenReturn(SECRET);
         when(http.send(any(), any())).thenReturn(new OutboundResponse<>(204, "No Content", Map.of(), URI.create("https://hooks.example.com"),
                 List.of(), new byte[0], false));
 
@@ -103,7 +103,7 @@ class AlertSendersTest {
     @Test
     @DisplayName("an unresolvable signing secret refuses to send — nothing unsigned goes out")
     void unresolvedSecret() throws Exception {
-        when(secrets.resolveValue("${vault:hook}")).thenReturn("${vault:hook}");
+        when(secrets.resolveValue(eq("${vault:hook}"), any())).thenReturn("${vault:hook}");
         AlertDeliveryException e = assertThrows(AlertDeliveryException.class,
                 () -> senders.send(event, DeliveryTarget.webhook("https://hooks.example.com/eddi", "${vault:hook}")));
         assertTrue(e.getMessage().contains("vault"));
@@ -113,7 +113,7 @@ class AlertSendersTest {
     @Test
     @DisplayName("a non-2xx answer or an unreachable host is a failure whose message carries no response body")
     void webhookFailures() throws Exception {
-        when(secrets.resolveValue(anyString())).thenReturn(SECRET);
+        when(secrets.resolveValue(anyString(), any())).thenReturn(SECRET);
         when(http.send(any(), any())).thenReturn(new OutboundResponse<>(500, "Error", Map.of(), URI.create("https://h.example.com"), List.of(),
                 "stack trace with internals".getBytes(StandardCharsets.UTF_8), false));
         AlertDeliveryException http500 = assertThrows(AlertDeliveryException.class,
@@ -150,8 +150,8 @@ class AlertSendersTest {
     @DisplayName("a vault-reference URL is resolved only at send time; an unresolvable one sends nothing")
     @SuppressWarnings("unchecked")
     void vaultReferenceUrl() throws Exception {
-        when(secrets.resolveValue("${vault:hook}")).thenReturn(SECRET);
-        when(secrets.resolveValue("${vault:hook-url}")).thenReturn("https://hooks.example.com/services/T/B/token");
+        when(secrets.resolveValue(eq("${vault:hook}"), any())).thenReturn(SECRET);
+        when(secrets.resolveValue(eq("${vault:hook-url}"), any())).thenReturn("https://hooks.example.com/services/T/B/token");
         when(http.send(any(), any())).thenReturn(new OutboundResponse<>(200, "OK", Map.of(), URI.create("https://hooks.example.com"),
                 List.of(), new byte[0], false));
 
@@ -160,7 +160,7 @@ class AlertSendersTest {
         verify(http).send(sent.capture(), any());
         assertEquals("https://hooks.example.com/services/T/B/token", sent.getValue().uri().toString());
 
-        when(secrets.resolveValue("${vault:missing}")).thenReturn("${vault:missing}");
+        when(secrets.resolveValue(eq("${vault:missing}"), any())).thenReturn("${vault:missing}");
         AlertDeliveryException e = assertThrows(AlertDeliveryException.class,
                 () -> senders.send(event, DeliveryTarget.webhook("${vault:missing}", "${vault:hook}")));
         assertTrue(e.getMessage().contains("URL could not be resolved"));
@@ -170,8 +170,8 @@ class AlertSendersTest {
     @Test
     @DisplayName("only https is delivered to — a vault-reference URL that resolves to http sends nothing")
     void httpsOnly() throws Exception {
-        when(secrets.resolveValue("${vault:hook}")).thenReturn(SECRET);
-        when(secrets.resolveValue("${vault:plain-url}")).thenReturn("http://hooks.example.com/services/T/B/token");
+        when(secrets.resolveValue(eq("${vault:hook}"), any())).thenReturn(SECRET);
+        when(secrets.resolveValue(eq("${vault:plain-url}"), any())).thenReturn("http://hooks.example.com/services/T/B/token");
         AlertDeliveryException e = assertThrows(AlertDeliveryException.class,
                 () -> senders.send(event, DeliveryTarget.webhook("${vault:plain-url}", "${vault:hook}")));
         assertTrue(e.getMessage().contains("https"));

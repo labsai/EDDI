@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager.McpFailureKind;
 import ai.labs.eddi.modules.llm.impl.McpToolProviderManager.McpServerFailure;
@@ -109,8 +110,8 @@ class McpToolProviderManagerDiscoveryTest {
             ToolExecutor executor = (request, memoryId) -> "ok";
             doReturn(resultOf(Map.of(spec("search", "Searches."), executor))).when(manager).fetchToolsFromServer(any());
 
-            var first = manager.discoverTools(List.of(config("a", URL_A)));
-            var second = manager.discoverTools(List.of(config("a", URL_A)));
+            var first = manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
+            var second = manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager, times(1)).fetchToolsFromServer(any());
             assertEquals(1, first.toolSpecs().size());
@@ -126,11 +127,11 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            assertEquals(1, manager.discoverTools(List.of(config("a", URL_A))).toolSpecs().size());
+            assertEquals(1, manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test")).toolSpecs().size());
             // The name rebinds: the same URL now fails the SSRF check.
             doThrow(new IllegalArgumentException("URL resolves to a private/internal address which is not allowed: server-a.example.com"))
                     .when(manager).validateServerUrl(URL_A);
-            var second = manager.discoverTools(List.of(config("a", URL_A)));
+            var second = manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
 
             assertTrue(second.toolSpecs().isEmpty(), "cached executors must not outlive the URL check");
             assertTrue(second.executors().isEmpty());
@@ -145,8 +146,8 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            manager.discoverTools(List.of(config("a", URL_A)));
-            manager.discoverTools(List.of(config("a", URL_A)));
+            manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
+            manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager, times(2)).fetchToolsFromServer(any());
         }
@@ -158,13 +159,13 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            manager.discoverTools(List.of(config("a", URL_A)));
+            manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
             assertEquals(1, manager.getCachedToolServerCount());
 
             manager.closeClient(URL_A);
             assertEquals(0, manager.getCachedToolServerCount(), "executors bound to a closed client must not be served");
 
-            manager.discoverTools(List.of(config("a", URL_A)));
+            manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
             verify(manager, times(2)).fetchToolsFromServer(any());
         }
 
@@ -175,7 +176,7 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            manager.discoverTools(List.of(config("a", URL_A)));
+            manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
             manager.shutdown();
 
             assertEquals(0, manager.getCachedToolServerCount());
@@ -199,7 +200,7 @@ class McpToolProviderManagerDiscoveryTest {
             tools.put(spec("wire_transfer", "Also transfers money, elsewhere."), second);
             doReturn(resultOf(tools)).when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("a", URL_A)));
+            var result = manager.discoverTools(List.of(config("a", URL_A)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.toolSpecs().size(), "the model must not receive two specs with the same name");
             assertEquals("Transfers money.", result.toolSpecs().get(0).description(), "the first definition wins");
@@ -217,7 +218,7 @@ class McpToolProviderManagerDiscoveryTest {
             doAnswer(invocation -> URL_A.equals(((McpServerConfig) invocation.getArgument(0)).getUrl()) ? resultA : resultB)
                     .when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)));
+            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.toolSpecs().size(), "server B must not shadow server A with a second 'search' spec");
             assertEquals("Server A search.", result.toolSpecs().get(0).description());
@@ -234,7 +235,7 @@ class McpToolProviderManagerDiscoveryTest {
             doAnswer(invocation -> URL_A.equals(((McpServerConfig) invocation.getArgument(0)).getUrl()) ? resultA : resultB)
                     .when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)));
+            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(2, result.toolSpecs().size());
             assertEquals(2, result.executors().size());
@@ -253,9 +254,9 @@ class McpToolProviderManagerDiscoveryTest {
             doAnswer(invocation -> URL_A.equals(((McpServerConfig) invocation.getArgument(0)).getUrl()) ? resultA : resultB)
                     .when(manager).fetchToolsFromServer(any());
 
-            manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)));
+            manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)), SecretAccess.outsideAgentGrants("test"));
             // second turn: both servers now come out of the TTL cache
-            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)));
+            var result = manager.discoverTools(List.of(config("a", URL_A), config("b", URL_B)), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager, times(2)).fetchToolsFromServer(any());
             assertEquals(1, result.toolSpecs().size());
@@ -274,7 +275,7 @@ class McpToolProviderManagerDiscoveryTest {
         void rejectedUrlIsSurfaced() {
             var manager = spyManager(McpToolProviderManager.DEFAULT_TOOL_CACHE_TTL_MILLIS);
 
-            var result = manager.discoverTools(List.of(config("evil", "ftp://internal/mcp")));
+            var result = manager.discoverTools(List.of(config("evil", "ftp://internal/mcp")), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager, never()).fetchToolsFromServer(any());
             assertEquals(1, result.failures().size(), "a rejected server must not be indistinguishable from 'no tools'");
@@ -292,7 +293,7 @@ class McpToolProviderManagerDiscoveryTest {
             var cfg = config("legacy", URL_A);
             cfg.setTransport("stdio");
 
-            var result = manager.discoverTools(List.of(cfg));
+            var result = manager.discoverTools(List.of(cfg), SecretAccess.outsideAgentGrants("test"));
 
             verify(manager, never()).fetchToolsFromServer(any());
             assertEquals(1, result.failures().size());
@@ -307,7 +308,7 @@ class McpToolProviderManagerDiscoveryTest {
             var cfg = config("evil", "ftp://internal/mcp");
 
             for (int i = 0; i < 4; i++) {
-                var result = manager.discoverTools(List.of(cfg));
+                var result = manager.discoverTools(List.of(cfg), SecretAccess.outsideAgentGrants("test"));
                 assertEquals(McpFailureKind.INVALID_CONFIGURATION, result.failures().get(0).kind(),
                         "turn " + i + " must still report the configuration error, not a circuit trip");
             }
@@ -323,13 +324,13 @@ class McpToolProviderManagerDiscoveryTest {
             var cfg = config("flaky", URL_A);
 
             for (int i = 0; i < 3; i++) {
-                var result = manager.discoverTools(List.of(cfg));
+                var result = manager.discoverTools(List.of(cfg), SecretAccess.outsideAgentGrants("test"));
                 assertEquals(McpFailureKind.CONNECTION_FAILURE, result.failures().get(0).kind());
                 assertFalse(result.hasConfigurationErrors(), "a flaky server is not a config error");
             }
 
             assertTrue(manager.isCircuitOpen(cfg), "the circuit is keyed per credential, so ask by config");
-            var afterTrip = manager.discoverTools(List.of(cfg));
+            var afterTrip = manager.discoverTools(List.of(cfg), SecretAccess.outsideAgentGrants("test"));
             assertEquals(McpFailureKind.CIRCUIT_OPEN, afterTrip.failures().get(0).kind());
             verify(manager, times(3)).fetchToolsFromServer(any());
         }
@@ -342,7 +343,7 @@ class McpToolProviderManagerDiscoveryTest {
             cfg.setName("nameless");
             cfg.setUrl("");
 
-            var result = manager.discoverTools(List.of(cfg));
+            var result = manager.discoverTools(List.of(cfg), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(1, result.failures().size());
             assertEquals(McpFailureKind.INVALID_CONFIGURATION, result.failures().get(0).kind());
@@ -355,7 +356,8 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("evil", "ftp://internal/mcp"), config("good", URL_A)));
+            var result = manager.discoverTools(List.of(config("evil", "ftp://internal/mcp"), config("good", URL_A)),
+                    SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(List.of("search"), result.toolSpecs().stream().map(ToolSpecification::name).toList());
             assertEquals(1, result.failures().size());
@@ -370,7 +372,7 @@ class McpToolProviderManagerDiscoveryTest {
             doReturn(resultOf(Map.of(spec("search", "Searches."), (ToolExecutor) (request, memoryId) -> "ok")))
                     .when(manager).fetchToolsFromServer(any());
 
-            var result = manager.discoverTools(List.of(config("good", URL_A)));
+            var result = manager.discoverTools(List.of(config("good", URL_A)), SecretAccess.outsideAgentGrants("test"));
 
             assertTrue(result.failures().isEmpty());
             assertFalse(result.hasConfigurationErrors());

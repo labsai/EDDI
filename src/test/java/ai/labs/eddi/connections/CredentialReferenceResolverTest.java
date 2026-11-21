@@ -4,6 +4,9 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.secrets.SecretResolver;
 import org.junit.jupiter.api.BeforeEach;
@@ -39,16 +42,17 @@ class CredentialReferenceResolverTest {
         secretResolver = mock(SecretResolver.class);
         globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         resolver = new CredentialReferenceResolver(secretResolver, globalVariableResolver);
     }
 
     @Test
     @DisplayName("a fully resolved value comes back as-is")
     void resolvesCleanly() {
-        when(secretResolver.resolveValue("Bearer ${vault:jira}")).thenReturn("Bearer live-token");
+        when(secretResolver.resolveValue(eq("Bearer ${vault:jira}"), any())).thenReturn("Bearer live-token");
 
-        assertEquals("Bearer live-token", resolver.resolveRequired("Bearer ${vault:jira}", "jira", "credential"));
+        assertEquals("Bearer live-token",
+                resolver.resolveRequired("Bearer ${vault:jira}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -59,7 +63,7 @@ class CredentialReferenceResolverTest {
         // provider answered invalid_client, which maps to GRANT_UNUSABLE, and every
         // grant on that connection was marked REFRESH_FAILED — terminally.
         var error = assertThrows(ConnectionException.class,
-                () -> resolver.resolveRequired("${vars:client-secret}", "jira", "client secret"));
+                () -> resolver.resolveRequired("${vars:client-secret}", "jira", "client secret", SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, error.getReason());
         assertTrue(error.getMessage().contains("client secret"), error.getMessage());
@@ -69,17 +73,20 @@ class CredentialReferenceResolverTest {
     @Test
     @DisplayName("an unresolved ${vault:} is refused too, in either spelling")
     void refusesUnresolvedVaultReference() {
-        assertThrows(ConnectionException.class, () -> resolver.resolveRequired("${vault:missing}", "jira", "credential"));
-        assertThrows(ConnectionException.class, () -> resolver.resolveRequired("${eddivault:missing}", "jira", "credential"));
+        assertThrows(ConnectionException.class,
+                () -> resolver.resolveRequired("${vault:missing}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
+        assertThrows(ConnectionException.class,
+                () -> resolver.resolveRequired("${eddivault:missing}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
     @DisplayName("a reference that resolves to nothing is refused rather than sent as an empty credential")
     void refusesEmptyResult() {
-        when(secretResolver.resolveValue("${vault:blank}")).thenReturn("   ");
+        when(secretResolver.resolveValue(eq("${vault:blank}"), any())).thenReturn("   ");
 
         assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION,
-                assertThrows(ConnectionException.class, () -> resolver.resolveRequired("${vault:blank}", "jira", "credential")).getReason());
+                assertThrows(ConnectionException.class,
+                        () -> resolver.resolveRequired("${vault:blank}", "jira", "credential", SecretAccess.outsideAgentGrants("test"))).getReason());
     }
 
     @Test
@@ -87,9 +94,9 @@ class CredentialReferenceResolverTest {
     void expandsVariablesBeforeSecrets() {
         // A variable may expand INTO a vault reference; the reverse is never intended.
         when(globalVariableResolver.resolveValue("${vars:secret-ref}")).thenReturn("${vault:jira}");
-        when(secretResolver.resolveValue("${vault:jira}")).thenReturn("live-token");
+        when(secretResolver.resolveValue(eq("${vault:jira}"), any())).thenReturn("live-token");
 
-        assertEquals("live-token", resolver.resolveRequired("${vars:secret-ref}", "jira", "credential"));
+        assertEquals("live-token", resolver.resolveRequired("${vars:secret-ref}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
     }
 
     @Test
@@ -108,10 +115,10 @@ class CredentialReferenceResolverTest {
         // A closing brace only in front of every opener: the regex rescanned the
         // rest of the value at each of the 300 000 openers before failing.
         String value = "}" + "${vault:".repeat(300_000);
-        when(secretResolver.resolveValue("${vault:big}")).thenReturn(value);
+        when(secretResolver.resolveValue(eq("${vault:big}"), any())).thenReturn(value);
 
         String resolved = assertTimeoutPreemptively(Duration.ofSeconds(5),
-                () -> resolver.resolveRequired("${vault:big}", "jira", "credential"));
+                () -> resolver.resolveRequired("${vault:big}", "jira", "credential", SecretAccess.outsideAgentGrants("test")));
 
         assertEquals(value, resolved);
     }
@@ -120,8 +127,8 @@ class CredentialReferenceResolverTest {
     @DisplayName("a null template is refused, not passed on as a credential")
     void refusesNull() {
         lenient().when(globalVariableResolver.resolveValue(null)).thenReturn(null);
-        lenient().when(secretResolver.resolveValue(null)).thenReturn(null);
+        lenient().when(secretResolver.resolveValue(eq(null), any())).thenReturn(null);
 
-        assertThrows(ConnectionException.class, () -> resolver.resolveRequired(null, "jira", "credential"));
+        assertThrows(ConnectionException.class, () -> resolver.resolveRequired(null, "jira", "credential", SecretAccess.outsideAgentGrants("test")));
     }
 }

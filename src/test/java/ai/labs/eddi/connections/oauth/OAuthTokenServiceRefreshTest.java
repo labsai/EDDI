@@ -141,7 +141,7 @@ class OAuthTokenServiceRefreshTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenReturn("client-secret-value");
         return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
                 new SimpleMeterRegistry(), connectionStore);
     }
@@ -751,7 +751,7 @@ class OAuthTokenServiceRefreshTest {
         SecretResolver secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         lenient().when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        lenient().when(secretResolver.resolveValue(anyString())).thenReturn("client-secret-value");
+        lenient().when(secretResolver.resolveValue(anyString(), any())).thenReturn("client-secret-value");
         return new OAuthTokenService(grantStore, tokenClient, secretProvider, new CredentialReferenceResolver(secretResolver, globalVariableResolver),
                 registry, connectionStore);
     }

@@ -10,6 +10,7 @@ import ai.labs.eddi.engine.memory.ConversationLogGenerator;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.ConversationSummaryConfig;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -287,7 +288,7 @@ public class ConversationSummarizer {
         String summary;
         Map<String, Object> usage;
         try {
-            var attempt = summarizeOnce(contentToSummarize, instructions, config, inheritedParameters);
+            var attempt = summarizeOnce(contentToSummarize, instructions, config, inheritedParameters, SecretAccess.agent(memory.getAgentId()));
             summary = attempt.summary();
             usage = attempt.usage();
         } catch (RuntimeException e) {
@@ -361,9 +362,10 @@ public class ConversationSummarizer {
      * One summarizer call. The usage map is mutable (a retry adds into it) and
      * empty when the provider reported no tokens.
      */
-    private Attempt summarizeOnce(String content, String instructions, ConversationSummaryConfig config, Map<String, String> inheritedParameters) {
+    private Attempt summarizeOnce(String content, String instructions, ConversationSummaryConfig config, Map<String, String> inheritedParameters,
+                                  SecretAccess access) {
         var result = summarizationService.summarizeWithUsage(content, instructions, config.getLlmProvider(), config.getLlmModel(),
-                inheritedParameters);
+                inheritedParameters, access);
         String summary = result.summary() != null ? result.summary() : "";
         Map<String, Object> usage = new LinkedHashMap<>();
         if (!tokenUsage(result.inputTokens(), result.outputTokens()).isEmpty()) {
@@ -394,7 +396,7 @@ public class ConversationSummarizer {
         }
         Attempt second;
         try {
-            second = summarizeOnce(content, instructions, config, inheritedParameters);
+            second = summarizeOnce(content, instructions, config, inheritedParameters, SecretAccess.agent(memory.getAgentId()));
         } catch (RuntimeException e) {
             LOGGER.warnf("[SUMMARY] Citation retry failed for conversation='%s'; keeping the previous summary.",
                     sanitize(memory.getConversationId()));

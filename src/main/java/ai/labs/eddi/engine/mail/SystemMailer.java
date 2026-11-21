@@ -10,6 +10,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
+import ai.labs.eddi.secrets.SecretAccess;
 import io.quarkus.runtime.StartupEvent;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.event.Observes;
@@ -282,6 +283,12 @@ public class SystemMailer {
     /**
      * {@code [username, secret, mechanisms]} for the configured credential source.
      */
+    /**
+     * The deployment's own outgoing mail (eddi.mail.*), configured by the operator,
+     * not by an agent: the agent grant does not apply (see {@link SecretAccess}).
+     */
+    private static final SecretAccess SYSTEM_MAIL = SecretAccess.outsideAgentGrants("system mail");
+
     private String[] login(SafeSocketConnector.Endpoint endpoint) throws MailSendException {
         if (settings.connection() == null) {
             return new String[]{settings.username(), settings.password(), "PLAIN LOGIN"};
@@ -296,12 +303,12 @@ public class SystemMailer {
         ConnectionResolver resolver = connectionResolver.get();
         try {
             if (resolver.authTypeOf(reference).orElse(null) == AuthType.BASIC) {
-                ConnectionResolver.BasicLogin login = resolver.resolveBasicLogin(reference, target);
+                ConnectionResolver.BasicLogin login = resolver.resolveBasicLogin(reference, target, SYSTEM_MAIL);
                 return new String[]{login.username(), login.password(), "PLAIN LOGIN"};
             }
             // XOAUTH2 carries the mailbox as the user and the token as the secret. The
             // mailbox of a client-credentials grant is the sender itself.
-            String token = resolver.resolveAccessToken(reference, target, null);
+            String token = resolver.resolveAccessToken(reference, target, null, SYSTEM_MAIL);
             return new String[]{settings.from().address(), token, "XOAUTH2"};
         } catch (ConnectionException e) {
             throw new MailSendException(MailSendException.Category.AUTHENTICATION, false,

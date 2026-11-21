@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.shared.RetryConfiguration;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.internal.groups.ConvergenceDetector.ConvergenceVerdict;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -202,11 +203,18 @@ public class ServiceConvergenceJudge {
      * (interrupted, best effort) and surfaces as a failure, which the caller turns
      * into "not converged".
      */
+    /**
+     * A group is not an agent: only a secret granted to every agent, the rule
+     * {@code ServiceJudgeVaultGrants} applies before the call and the resolver
+     * applies again at it.
+     */
+    private static final SecretAccess SERVICE_JUDGE = SecretAccess.withoutAgent("SERVICE convergence judge");
+
     private static SummarizationService.SummarizationResult callWithin(SummarizationService summarizer, String input,
                                                                        ServiceJudgeConfig service)
             throws Exception {
         Future<SummarizationService.SummarizationResult> call = JUDGE_EXECUTOR.submit(() -> summarizer.summarizeWithUsage(input,
-                JUDGE_INSTRUCTIONS, service.llmProvider(), service.llmModel(), parametersWithTimeout(service), SINGLE_ATTEMPT));
+                JUDGE_INSTRUCTIONS, service.llmProvider(), service.llmModel(), parametersWithTimeout(service), SINGLE_ATTEMPT, SERVICE_JUDGE));
         try {
             return call.get(service.timeoutMs(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException | InterruptedException e) {

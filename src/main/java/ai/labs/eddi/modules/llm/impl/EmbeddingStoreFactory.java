@@ -12,6 +12,7 @@ import ai.labs.eddi.connections.ConnectionParameterGuard;
 import ai.labs.eddi.datastore.mongo.MongoDriverInfoFactory;
 import ai.labs.eddi.engine.httpclient.OutboundTargetPolicy;
 import ai.labs.eddi.modules.llm.impl.builder.BoundedJdkHttpClient;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import com.github.benmanes.caffeine.cache.Cache;
@@ -369,7 +370,7 @@ public class EmbeddingStoreFactory {
      * @param ragConfigId
      *            the RAG configuration's id (the same for every version)
      */
-    public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config) {
+    public EmbeddingStore<TextSegment> getOrCreate(String ragConfigId, RagConfiguration config, SecretAccess access) {
         requireId(ragConfigId);
         if (isInMemory(config)) {
             return inMemoryStores.computeIfAbsent(inMemoryKey(ragConfigId, config), key -> newInMemoryStore(config, key)).store();
@@ -378,8 +379,70 @@ public class EmbeddingStoreFactory {
         // store). A structural key, not a concatenated string: TreeMap.toString() has
         // no unambiguous entry boundaries ({a='x, b=y'} renders like {a='x', b='y'}),
         // so two configurations could share one store.
-        var cacheKey = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), config.getStoreParameters());
-        return cache.get(cacheKey, k -> build(ragConfigId, config));
+        // Before the cache, which is keyed on the configuration and so shared by every
+        // agent using it: a store one agent opened with its secret must not serve
+        // another the secret's grant leaves out (#1179). One expansion of the global
+        // variables serves the check, the key and the build, so a variable repointed
+        // to another secret is another key rather than a hit on the old store.
+        Map<String, String> expanded = expandedStoreParams(config);
+        secretResolver.requireGranted(expanded, access, "vector store '" + config.getStoreType() + "'");
+        var cacheKey = new StoreCacheKey(config.getStoreType(), ragConfigId, namespaceOf(config), expanded);
+        return cache.get(cacheKey, k -> build(ragConfigId, config, expanded, access));
+    }
+
+    /**
+     * The grant check of {@link #getOrCreate}, without opening anything: for a
+     * caller that must know whether the store may be used before it changes state
+     * (tombstoning a document, committing a source removal) or pays for another
+     * call (embedding a search query). An in-memory store holds no secret.
+     *
+     * @throws SecretResolver.SecretNotGrantedException
+     *             when a referenced secret is not granted to {@code access}
+     */
+    public void requireGranted(RagConfiguration config, SecretAccess access) {
+        requireGranted(config, isInMemory(config) ? Map.of() : expandedStoreParams(config), access);
+    }
+
+    /**
+     * The store parameters with their global variables expanded and their vault
+     * references not: what a store is built from and cached under. A caller that
+     * holds a store across many calls records this when it acquires the store and
+     * re-checks it with
+     * {@link #requireGranted(RagConfiguration, Map, SecretAccess)}.
+     */
+    public Map<String, String> credentialBinding(RagConfiguration config) {
+        return isInMemory(config) ? Map.of() : expandedStoreParams(config);
+    }
+
+    /**
+     * The binding {@code store} was built with: the expanded parameters of the
+     * cache entry that holds it, so exactly what the store's credential came from,
+     * not a second expansion that a variable edit may have changed meanwhile.
+     * {@code null} for a store this factory does not cache (in-memory), which holds
+     * no secret.
+     */
+    public Map<String, String> bindingOf(EmbeddingStore<TextSegment> store) {
+        for (var entry : cache.asMap().entrySet()) {
+            if (entry.getValue() == store) {
+                return entry.getKey().storeParameters();
+            }
+        }
+        return null;
+    }
+
+    /**
+     * The grant check against a binding recorded earlier (see
+     * {@link #credentialBinding}), so a variable repointed since then cannot make
+     * the check pass for a secret the held store does not use.
+     */
+    public void requireGranted(RagConfiguration config, Map<String, String> binding, SecretAccess access) {
+        if (isInMemory(config)) {
+            return;
+        }
+        // No recorded binding (the cache entry was invalidated before it could be read
+        // back) is never "nothing to check": the current expansion is checked instead.
+        secretResolver.requireGranted(binding != null ? binding : expandedStoreParams(config), access,
+                "vector store '" + config.getStoreType() + "'");
     }
 
     /**
@@ -388,12 +451,12 @@ public class EmbeddingStoreFactory {
      * it replaces a store built under a different embedding configuration: adding
      * another model's vectors to it would make every search over it meaningless.
      */
-    public EmbeddingStore<TextSegment> getOrCreateForIngestion(String ragConfigId, RagConfiguration config) {
+    public EmbeddingStore<TextSegment> getOrCreateForIngestion(String ragConfigId, RagConfiguration config, SecretAccess access) {
         requireId(ragConfigId);
         if (isInMemory(config)) {
             return inMemoryStoreForWrite(ragConfigId, config).store();
         }
-        return getOrCreate(ragConfigId, config);
+        return getOrCreate(ragConfigId, config, access);
     }
 
     /**
@@ -682,17 +745,31 @@ public class EmbeddingStoreFactory {
      * it: an external client may open sockets as it is built, which a unit test of
      * the cache around it does not need.
      */
-    EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config) {
+    EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config, SecretAccess access) {
+        return build(ragConfigId, config, expandedStoreParams(config), access);
+    }
+
+    /**
+     * The store parameters with global variables expanded, vault references not.
+     */
+    private Map<String, String> expandedStoreParams(RagConfiguration config) {
+        Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
+        Map<String, String> expanded = globalVariableResolver.resolveAll(rawParams);
+        return expanded != null ? expanded : rawParams;
+    }
+
+    // Package-private: the seam a test overrides to build no real client.
+    EmbeddingStore<TextSegment> build(String ragConfigId, RagConfiguration config, Map<String, String> expanded, SecretAccess access) {
         String storeType = config.getStoreType();
         LOGGER.infof("Building embedding store: type=%s, knowledgeBase=%s, namespace=%s", sanitize(storeType), sanitize(ragConfigId),
                 KnowledgeBaseStorage.usesIdNamespace(config) ? KnowledgeBaseStorage.NAMESPACE_ID : KnowledgeBaseStorage.NAMESPACE_NAME);
 
         return switch (storeType) {
-            case "pgvector" -> buildPgVector(config, ragConfigId);
-            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId);
-            case "elasticsearch" -> buildElasticsearch(config, ragConfigId);
-            case "qdrant" -> buildQdrant(config, ragConfigId);
-            case "chroma" -> buildChroma(config, ragConfigId);
+            case "pgvector" -> buildPgVector(config, ragConfigId, expanded, access);
+            case "mongodb-atlas" -> buildMongoDbAtlas(config, ragConfigId, expanded, access);
+            case "elasticsearch" -> buildElasticsearch(config, ragConfigId, expanded, access);
+            case "qdrant" -> buildQdrant(config, ragConfigId, expanded, access);
+            case "chroma" -> buildChroma(config, ragConfigId, expanded, access);
             default -> throw new IllegalArgumentException(
                     "Unsupported store type: " + storeType + ". Supported: in-memory, pgvector, mongodb-atlas, elasticsearch, qdrant, chroma");
         };
@@ -725,8 +802,9 @@ public class EmbeddingStoreFactory {
      * Connections come from a pool shared per server and login
      * ({@link PgVectorConnectionPools}).
      */
-    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildPgVector(RagConfiguration config, String ragConfigId, Map<String, String> expanded,
+                                                      SecretAccess access) {
+        Map<String, String> params = resolveParams(config, expanded, access);
 
         String host = requirePlainHost(params.getOrDefault("host", "localhost"), "pgvector");
         int port = parseIntParam(params, "port", 5432);
@@ -796,8 +874,9 @@ public class EmbeddingStoreFactory {
      * "vector_index")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildMongoDbAtlas(RagConfiguration config, String ragConfigId, Map<String, String> expanded,
+                                                          SecretAccess access) {
+        Map<String, String> params = resolveParams(config, expanded, access);
 
         String connectionString = requireParam(params, "connectionString", "mongodb-atlas");
         guardConnectionStringHosts(connectionString);
@@ -841,8 +920,9 @@ public class EmbeddingStoreFactory {
      */
     @SuppressWarnings("removal") // serverUrl/apiKey/userName/password deprecated in favor of
                                  // restClient(RestClient), but usable without direct ES REST client dependency
-    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildElasticsearch(RagConfiguration config, String ragConfigId, Map<String, String> expanded,
+                                                           SecretAccess access) {
+        Map<String, String> params = resolveParams(config, expanded, access);
 
         String serverUrl = params.getOrDefault("serverUrl", "http://localhost:9200");
         targetPolicy.validateUrl(serverUrl);
@@ -881,8 +961,8 @@ public class EmbeddingStoreFactory {
      * <li>{@code useTls} — use TLS (default: "false")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildQdrant(RagConfiguration config, String ragConfigId, Map<String, String> expanded, SecretAccess access) {
+        Map<String, String> params = resolveParams(config, expanded, access);
 
         String host = requirePlainHost(params.getOrDefault("host", "localhost"), "qdrant");
         int port = parseIntParam(params, "port", 6334);
@@ -920,8 +1000,8 @@ public class EmbeddingStoreFactory {
      * (default: "V2")</li>
      * </ul>
      */
-    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId) {
-        Map<String, String> params = resolveParams(config);
+    private EmbeddingStore<TextSegment> buildChroma(RagConfiguration config, String ragConfigId, Map<String, String> expanded, SecretAccess access) {
+        Map<String, String> params = resolveParams(config, expanded, access);
 
         String baseUrl = params.getOrDefault("baseUrl", "http://localhost:8000");
         targetPolicy.validateUrl(baseUrl);
@@ -954,13 +1034,12 @@ public class EmbeddingStoreFactory {
     /**
      * Resolves global variable and vault references in store parameters.
      */
-    private Map<String, String> resolveParams(RagConfiguration config) {
-        Map<String, String> rawParams = config.getStoreParameters() != null ? config.getStoreParameters() : Map.of();
-        Map<String, String> resolved = globalVariableResolver.resolveAll(rawParams);
+    private Map<String, String> resolveParams(RagConfiguration config, Map<String, String> expanded, SecretAccess access) {
+        Map<String, String> resolved = expanded;
         ConnectionParameterGuard.rejectConnectionReferences(resolved);
         String usedFor = "vector store '" + config.getStoreType() + "'";
         Set<String> references = VaultHostAllowlist.referencesIn(resolved.values());
-        Map<String, String> params = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved), usedFor);
+        Map<String, String> params = SecretResolver.requireResolved(secretResolver.resolveSecrets(resolved, access), usedFor);
         if (vaultHostAllowlist != null && !references.isEmpty()) {
             // After resolution, not before: a MongoDB connection string is commonly the
             // secret itself, so its hosts are only known once it is decrypted. Nothing

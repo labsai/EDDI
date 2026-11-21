@@ -37,7 +37,7 @@ class CascadingModelExecutorExecuteTest {
     private ChatModelRegistry createMockRegistry(ChatModel model) {
         ChatModelRegistry registry = mock(ChatModelRegistry.class);
         try {
-            when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+            when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -250,8 +250,8 @@ class CascadingModelExecutorExecuteTest {
                             AiMessage.from("Here is a detailed and confident explanation of the topic with evidence.")).build());
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(cheapModel);
-            when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(expensiveModel);
+            when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(cheapModel);
+            when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(expensiveModel);
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",
@@ -294,8 +294,8 @@ class CascadingModelExecutorExecuteTest {
                     ChatResponse.builder().aiMessage(AiMessage.from("Success")).build());
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(failModel);
-            when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(goodModel);
+            when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(failModel);
+            when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(goodModel);
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",
@@ -329,7 +329,7 @@ class CascadingModelExecutorExecuteTest {
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
             try {
-                when(registry.getOrCreate(anyString(), anyMap())).thenReturn(failModel);
+                when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(failModel);
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
@@ -369,8 +369,8 @@ class CascadingModelExecutorExecuteTest {
             when(failModel.chat(anyList())).thenThrow(new RuntimeException("Rate limit exceeded"));
 
             ChatModelRegistry registry = mock(ChatModelRegistry.class);
-            when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(cheapModel);
-            when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(failModel);
+            when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(cheapModel);
+            when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(failModel);
 
             var result = runCascade(
                     registry, cascade, createMessages(), "system",
@@ -515,7 +515,7 @@ class CascadingModelExecutorExecuteTest {
                     mock(AgentOrchestrator.class));
 
             // Should call registry with task type "gemini"
-            verify(registry).getOrCreate(eq("gemini"), anyMap());
+            verify(registry).getOrCreate(eq("gemini"), anyMap(), any());
         }
 
         @Test
@@ -543,7 +543,7 @@ class CascadingModelExecutorExecuteTest {
                     Map.of("apiKey", "key"), task, createMemory(),
                     mock(AgentOrchestrator.class));
 
-            verify(registry).getOrCreate(eq("anthropic"), anyMap());
+            verify(registry).getOrCreate(eq("anthropic"), anyMap(), any());
         }
     }
 

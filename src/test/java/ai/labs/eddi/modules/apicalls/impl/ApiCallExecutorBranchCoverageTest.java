@@ -89,7 +89,7 @@ class ApiCallExecutorBranchCoverageTest {
                 .thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString()))
                 .thenAnswer(inv -> inv.getArgument(0));
-        when(secretResolver.resolveValue(anyString()))
+        when(secretResolver.resolveValue(anyString(), any()))
                 .thenAnswer(inv -> inv.getArgument(0));
         when(httpClient.newRequest(any(URI.class), any())).thenReturn(mockRequest);
         when(mockRequest.send()).thenReturn(mockResponse);

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import static org.mockito.ArgumentMatchers.any;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.A2AToolProviderManager.RemoteDialect;
 import ai.labs.eddi.modules.llm.impl.A2AToolProviderManager.RemoteEndpoint;
@@ -207,7 +209,7 @@ class A2AToolProviderManagerDialectTest {
             var globals = mock(GlobalVariableResolver.class);
             var secrets = mock(SecretResolver.class);
             doReturn("k").when(globals).resolveValue(anyString());
-            doReturn("k").when(secrets).resolveValue(anyString());
+            doReturn("k").when(secrets).resolveValue(anyString(), any());
             manager = new A2AToolProviderManager(globals, secrets, false);
             server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
         }
@@ -260,7 +262,7 @@ class A2AToolProviderManagerDialectTest {
             config.setUrl(url);
             config.setName("peer");
             config.setTimeoutMs(5000L);
-            var tools = manager.discoverTools(List.of(config));
+            var tools = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertFalse(tools.toolSpecs().isEmpty(), "no tool discovered");
             String name = tools.toolSpecs().getFirst().name();
             return tools.executors().get(name).execute(ToolExecutionRequest.builder().name(name).arguments("{\"message\":\"hi\"}").build(), null);

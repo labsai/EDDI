@@ -81,7 +81,7 @@ class DreamServiceCitationTest {
     }
 
     private void answer(String... responses) {
-        var stub = when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()));
+        var stub = when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()));
         for (String response : responses) {
             stub = stub.thenReturn(new SummarizationService.SummarizationResult(response, 100, 20));
         }
@@ -106,7 +106,7 @@ class DreamServiceCitationTest {
 
         var content = ArgumentCaptor.forClass(String.class);
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), instructions.capture(), anyString(), anyString(), any(), any());
         assertFalse(content.getValue().contains("\"ref\""), content.getValue());
         assertFalse(instructions.getValue().contains("\"sources\""));
         var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
@@ -126,7 +126,7 @@ class DreamServiceCitationTest {
         assertTrue(result.isSuccess());
         var content = ArgumentCaptor.forClass(String.class);
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService).summarizeWithUsage(content.capture(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService).summarizeWithUsage(content.capture(), instructions.capture(), anyString(), anyString(), any(), any());
         assertTrue(content.getValue().contains("\"ref\" : 2"), content.getValue());
         assertTrue(instructions.getValue().contains("\"sources\""));
         var written = ArgumentCaptor.forClass(UserMemoryEntry.class);
@@ -190,7 +190,7 @@ class DreamServiceCitationTest {
         var result = dreamService.process(USER, AGENT, config);
 
         var instructions = ArgumentCaptor.forClass(String.class);
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), instructions.capture(), anyString(), anyString(), any(), any());
         String retryInstructions = instructions.getAllValues().get(1);
         assertTrue(retryInstructions.contains("number 1.000"), "the retry is told what failed");
         String feedback = retryInstructions.substring(instructions.getAllValues().get(0).length());
@@ -216,7 +216,7 @@ class DreamServiceCitationTest {
 
         dreamService.process(USER, AGENT, config);
 
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(store, never()).insertIfAbsent(any());
         assertEquals(1, count("fallback"));
     }
@@ -231,7 +231,7 @@ class DreamServiceCitationTest {
 
         dreamService.process(USER, AGENT, config);
 
-        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(1)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(store, never()).insertIfAbsent(any());
         assertEquals(1, count("fallback"));
     }
@@ -241,7 +241,7 @@ class DreamServiceCitationTest {
     void retryOnceSecondCallThrows() throws Exception {
         config.setCiteSources(true);
         config.setOnValidationFailure("retry_once");
-        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any()))
+        when(summarizationService.summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any()))
                 .thenReturn(new SummarizationService.SummarizationResult(BAD, 100, 20)).thenThrow(new RuntimeException("401 unauthorized"));
 
         var result = dreamService.process(USER, AGENT, config);
@@ -302,7 +302,7 @@ class DreamServiceCitationTest {
 
         dreamService.process(USER, AGENT, config);
 
-        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any());
+        verify(summarizationService, times(2)).summarizeWithUsage(anyString(), anyString(), anyString(), anyString(), any(), any());
         verify(store, never()).insertIfAbsent(any());
         assertEquals(1, count("fallback"));
         assertEquals(0, count("retried"));

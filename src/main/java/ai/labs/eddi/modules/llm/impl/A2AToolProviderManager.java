@@ -21,6 +21,7 @@ import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.A2AAgentConfig;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -260,7 +261,7 @@ public class A2AToolProviderManager {
     /**
      * Discover tools from configured A2A agents.
      */
-    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents) {
+    public A2AToolsResult discoverTools(List<A2AAgentConfig> a2aAgents, SecretAccess access) {
         List<ToolSpecification> toolSpecs = new ArrayList<>();
         Map<String, ToolExecutor> executors = new HashMap<>();
         Map<String, ToolRequestResolver> requestResolvers = new HashMap<>();
@@ -269,7 +270,11 @@ public class A2AToolProviderManager {
             return new A2AToolsResult(toolSpecs, executors, requestResolvers);
         }
 
-        for (A2AAgentConfig config : a2aAgents) {
+        for (A2AAgentConfig configured : a2aAgents) {
+            // Grant-checked, card-cached and called with ONE expansion of a ${vars:…}
+            // apiKey: a variable repointed to another secret is another card-cache key,
+            // never a hit on a card fetched with the old secret (#1179).
+            A2AAgentConfig config = bindCredential(configured);
             if (isNullOrEmpty(config.getUrl())) {
                 LOGGER.warnf("Skipping A2A agent config with empty URL");
                 continue;
@@ -282,7 +287,10 @@ public class A2AToolProviderManager {
                     continue;
                 }
 
-                discoverAgentTools(config, toolSpecs, executors, requestResolvers);
+                // Before the agent-card cache, which is keyed on the peer and shared by
+                // every agent naming it (#1179).
+                requireSecretGranted(config, access);
+                discoverAgentTools(config, toolSpecs, executors, requestResolvers, access);
                 // Reset circuit on success
                 circuitBreakers.remove(config.getUrl());
             } catch (ConnectionException | IllegalArgumentException | IllegalStateException e) {
@@ -304,6 +312,68 @@ public class A2AToolProviderManager {
         return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
 
+    /**
+     * Refuses {@code access} a peer whose apiKey names a vault secret, directly,
+     * through a {@code ${vars:…}} or behind a {@code ${connection:…}}, that is not
+     * granted to it. The calls that follow resolve under {@link #A2A_SESSION}.
+     *
+     * @throws IllegalStateException
+     *             (a {@link SecretResolver.SecretNotGrantedException}) or a
+     *             {@link ConnectionException}, both kept away from the circuit
+     *             breaker by the caller
+     */
+    void requireSecretGranted(A2AAgentConfig config, SecretAccess access) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey)) {
+            return;
+        }
+        if (ConnectionResolver.containsReference(apiKey)) {
+            if (connectionResolver != null) {
+                connectionResolver.requireGranted(apiKey, access);
+            }
+            return;
+        }
+        // The bound apiKey is the final credential: one that still holds a variable is
+        // refused as it stands, never expanded again (see the MCP manager).
+        if (access != null && access.checksGrant() && GlobalVariableResolver.containsReference(apiKey)) {
+            // A variable that does not resolve names no secret: refused rather than
+            // checked vacuously while a card fetched with its old value is cached.
+            throw new IllegalArgumentException("The apiKey of the A2A agent at " + config.getUrl() + " names a global variable that does "
+                    + "not resolve to a value, so its vault grant cannot be checked.");
+        }
+        secretResolver.requireGranted(VaultHostAllowlist.referencesIn(List.of(apiKey)), access, "A2A agent at " + config.getUrl());
+    }
+
+    /**
+     * {@code config} with a {@code ${vars:…}} apiKey replaced by its expansion, or
+     * {@code config} itself when there is nothing to expand.
+     */
+    A2AAgentConfig bindCredential(A2AAgentConfig config) {
+        String apiKey = config.getApiKey();
+        if (isNullOrEmpty(apiKey) || !GlobalVariableResolver.containsReference(apiKey) || globalVariableResolver == null) {
+            return config;
+        }
+        String expanded = GlobalVariableResolver.expandFully(globalVariableResolver, apiKey);
+        if (expanded == null || expanded.equals(apiKey)) {
+            return config;
+        }
+        var bound = new A2AAgentConfig();
+        bound.setUrl(config.getUrl());
+        bound.setName(config.getName());
+        bound.setSkillsFilter(config.getSkillsFilter());
+        bound.setTimeoutMs(config.getTimeoutMs());
+        bound.setApiKey(expanded);
+        return bound;
+    }
+
+    /**
+     * What a cached peer's own credential resolves as: the tools are shared by
+     * every agent naming the peer, so the agent grant is read for the asking agent
+     * in {@link #requireSecretGranted}, on every tool assembly, before they are
+     * handed out.
+     */
+    static final SecretAccess A2A_SESSION = SecretAccess.outsideAgentGrants("A2A peer session (agent grant checked at tool assembly)");
+
     /** Number of Agent Cards currently cached (one per peer URL, 5 minute TTL). */
     public int getActiveConnectionCount() {
         return agentCache.size();
@@ -318,7 +388,7 @@ public class A2AToolProviderManager {
 
     @SuppressWarnings("unchecked")
     private void discoverAgentTools(A2AAgentConfig config, List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> executors,
-                                    Map<String, ToolRequestResolver> requestResolvers)
+                                    Map<String, ToolRequestResolver> requestResolvers, SecretAccess access)
             throws Exception {
 
         // Warn once at discovery time if raw key is used
@@ -367,7 +437,7 @@ public class A2AToolProviderManager {
                 return;
             }
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config, access));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
             return;
         }
@@ -429,7 +499,7 @@ public class A2AToolProviderManager {
             }
 
             toolSpecs.add(spec);
-            executors.put(toolName, createA2AToolExecutor(endpoint, config));
+            executors.put(toolName, createA2AToolExecutor(endpoint, config, access));
             requestResolvers.put(toolName, RemoteToolRequestResolvers.forA2A(endpoint.url(), !isNullOrEmpty(config.getApiKey())));
             admitted++;
         }
@@ -798,10 +868,10 @@ public class A2AToolProviderManager {
         return "https".equalsIgnoreCase(uri.getScheme()) ? 443 : 80;
     }
 
-    private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config) {
+    private ToolExecutor createA2AToolExecutor(RemoteEndpoint endpoint, A2AAgentConfig config, SecretAccess access) {
         return (request, memoryId) -> {
             try {
-                return executeA2ATask(endpoint, config, request);
+                return executeA2ATask(endpoint, config, request, access);
             } catch (Exception e) {
                 LOGGER.errorf("A2A tool execution failed for %s: %s", endpoint.url(), e.getMessage());
                 // The operator gets the detail, in the log above. The MODEL gets a
@@ -849,7 +919,8 @@ public class A2AToolProviderManager {
     }
 
     @SuppressWarnings("unchecked")
-    private String executeA2ATask(RemoteEndpoint endpoint, A2AAgentConfig config, ToolExecutionRequest request) throws Exception {
+    private String executeA2ATask(RemoteEndpoint endpoint, A2AAgentConfig config, ToolExecutionRequest request, SecretAccess access)
+            throws Exception {
 
         Map<String, Object> args = MAPPER.readValue(request.arguments(), Map.class);
         String message = (String) args.getOrDefault("message", "");
@@ -870,7 +941,9 @@ public class A2AToolProviderManager {
             requestBuilder.header("A2A-Version", "1.0");
         }
 
-        applyCredential(requestBuilder, config, agentUrl);
+        // For the agent the tools were assembled for, checked again at the call: a
+        // grant narrowed after assembly must not let this call carry the credential.
+        applyCredential(requestBuilder, config, agentUrl, false, access);
 
         // Bounded read: the body is capped as it arrives rather than buffered whole
         // and measured afterwards. A body cut short is rejected outright.
@@ -1042,6 +1115,10 @@ public class A2AToolProviderManager {
         applyCredential(requestBuilder, config, agentUrl, false);
     }
 
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
+        applyCredential(requestBuilder, config, agentUrl, discovery, A2A_SESSION);
+    }
+
     /**
      * The same credential rule, told whether it is serving discovery.
      *
@@ -1063,7 +1140,14 @@ public class A2AToolProviderManager {
      *            CALLER is deliberately not consulted, since on a HITL resume that
      *            is the approver rather than the user whose call was approved.
      */
-    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery) {
+    /**
+     * As above, resolving the credential for {@code access}: {@link #A2A_SESSION}
+     * for the shared agent-card fetch, the calling agent for a task call, so the
+     * agent's grant is read again when the call is made (#1179).
+     */
+    void applyCredential(OutboundRequest.Builder requestBuilder, A2AAgentConfig config, String agentUrl, boolean discovery,
+                         SecretAccess access) {
+        SecretAccess asking = discovery || access == null ? A2A_SESSION : access;
         String apiKey = config.getApiKey();
         if (isNullOrEmpty(apiKey)) {
             return;
@@ -1078,7 +1162,7 @@ public class A2AToolProviderManager {
             }
             ConnectionReference.requireSole(apiKey, "The apiKey of the A2A agent at " + agentUrl);
             if (discovery) {
-                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl));
+                var credential = connectionResolver.resolveForDiscovery(apiKey, URI.create(agentUrl), A2A_SESSION);
                 if (credential.isEmpty()) {
                     // Same rule and same warning as the MCP handshake: the agent card is
                     // fetched once and reused, so a per-caller credential must not pin one
@@ -1094,7 +1178,7 @@ public class A2AToolProviderManager {
                 requestBuilder.header(credential.get().headerName(), credential.get().headerValue());
                 return;
             }
-            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null);
+            var credential = connectionResolver.resolve(apiKey, URI.create(agentUrl), null, asking);
             requestBuilder.header(credential.headerName(), credential.headerValue());
             return;
         }
@@ -1105,7 +1189,7 @@ public class A2AToolProviderManager {
         if (vaultHostAllowlist != null) {
             vaultHostAllowlist.requireAllowed(VaultHostAllowlist.referencesIn(List.of(withVariables)), agentUrl, "A2A agent at " + agentUrl);
         }
-        String resolved = secretResolver.resolveValue(withVariables);
+        String resolved = secretResolver.resolveValue(withVariables, asking);
         requestBuilder.header("Authorization", "Bearer " + resolved);
     }
 

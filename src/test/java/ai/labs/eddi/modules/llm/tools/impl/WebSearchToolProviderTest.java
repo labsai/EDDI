@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.tools.impl;
 
+import static org.mockito.ArgumentMatchers.eq;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
 import ai.labs.eddi.engine.httpclient.outbound.TestOutbound;
@@ -211,7 +212,7 @@ class WebSearchToolProviderTest {
         @Test
         void vaultReferenceIsResolvedBeforeSending() throws Exception {
             brave("${vault:brave-search}");
-            when(secretResolver.resolveValue("${vault:brave-search}")).thenReturn("from-vault");
+            when(secretResolver.resolveValue(eq("${vault:brave-search}"), any())).thenReturn("from-vault");
             answer(200, BRAVE_BODY);
 
             textOf(() -> tool.searchWeb("q", 5));
@@ -230,7 +231,7 @@ class WebSearchToolProviderTest {
             };
             expanded.searchProvider = "brave";
             expanded.braveApiKey = Optional.of("brave-search");
-            when(secretResolver.resolveValue("${vault:brave-search}")).thenReturn("from-vault");
+            when(secretResolver.resolveValue(eq("${vault:brave-search}"), any())).thenReturn("from-vault");
             answer(200, BRAVE_BODY);
 
             textOf(() -> expanded.searchWeb("q", 5));
@@ -258,7 +259,7 @@ class WebSearchToolProviderTest {
         @Test
         void unresolvedVaultReferenceIsRefusedAndNeverSent() throws Exception {
             brave("${vault:brave-search}");
-            when(secretResolver.resolveValue("${vault:brave-search}")).thenReturn("${vault:brave-search}");
+            when(secretResolver.resolveValue(eq("${vault:brave-search}"), any())).thenReturn("${vault:brave-search}");
 
             String result = textOf(() -> tool.searchWeb("q", 5));
 

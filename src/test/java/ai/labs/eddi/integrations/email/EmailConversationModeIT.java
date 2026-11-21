@@ -167,7 +167,7 @@ class EmailConversationModeIT {
                 .thenReturn(new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com"));
         ConnectionResolver resolver = mock(ConnectionResolver.class);
         when(resolver.authTypeOf("${connection:mailbox}")).thenReturn(Optional.of(AuthType.BASIC));
-        when(resolver.resolveBasicLogin(eq("${connection:mailbox}"), any())).thenReturn(new ConnectionResolver.BasicLogin(MAILBOX, PASSWORD));
+        when(resolver.resolveBasicLogin(eq("${connection:mailbox}"), any(), any())).thenReturn(new ConnectionResolver.BasicLogin(MAILBOX, PASSWORD));
         Instance<ConnectionResolver> resolverInstance = mock(Instance.class);
         when(resolverInstance.isResolvable()).thenReturn(true);
         when(resolverInstance.get()).thenReturn(resolver);

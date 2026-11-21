@@ -68,8 +68,8 @@ class RagIngestionServiceTest {
 
     @Test
     void ingest_shouldReturnIngestionId() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -94,8 +94,8 @@ class RagIngestionServiceTest {
      */
     @Test
     void ingest_asksForADocumentModel() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
         when(embeddingModel.embed(any(TextSegment.class)))
                 .thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
@@ -105,15 +105,15 @@ class RagIngestionServiceTest {
         // ingest() hands the work to a virtual thread, so the factory call has not
         // necessarily happened yet when ingest() returns.
         var role = ArgumentCaptor.forClass(EmbeddingInputType.class);
-        verify(embeddingModelFactory, timeout(5000).atLeastOnce()).getOrCreate(any(), role.capture());
+        verify(embeddingModelFactory, timeout(5000).atLeastOnce()).getOrCreate(any(), role.capture(), any());
         assertEquals(EmbeddingInputType.DOCUMENT, role.getValue(),
                 "text being stored must be embedded as a DOCUMENT");
     }
 
     @Test
     void getStatus_shouldReturnPendingInitially() {
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(embeddingStore);
 
         var config = createConfig();
         String ingestionId = service.ingest("test-kb", "Content", "doc.txt", config);
@@ -361,7 +361,7 @@ class RagIngestionServiceTest {
 
         awaitCompleted(ALPHA_ID, service.ingest(ALPHA_ID, "text", "doc", config, false));
 
-        verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config));
+        verify(embeddingStoreFactory).getOrCreateForIngestion(eq(ALPHA_ID), same(config), any());
     }
 
     // --- delete ---
@@ -376,7 +376,7 @@ class RagIngestionServiceTest {
     void delete_removesOnlyTheNamedDocumentOfThisKnowledgeBase() {
         var shared = new InMemoryEmbeddingStore<TextSegment>();
         wireRealStore(shared);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(shared);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(shared);
         var alpha = createConfig();
         alpha.setStoreNamespace("id");
         var beta = createConfig();
@@ -397,13 +397,13 @@ class RagIngestionServiceTest {
         assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete(ALPHA_ID, "policy.txt", alpha));
 
         assertEquals(List.of("BETA policy text.", "Crawled policy page.", "Shipping takes 5 days."), storedTexts(shared));
-        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(alpha));
-        verify(embeddingStoreFactory, never()).getOrCreateForIngestion(eq(ALPHA_ID), any());
+        verify(embeddingStoreFactory).getOrCreate(eq(ALPHA_ID), same(alpha), any());
+        verify(embeddingStoreFactory, never()).getOrCreateForIngestion(eq(ALPHA_ID), any(), any());
     }
 
     @Test
     void delete_ofANameNothingWasIngestedUnder_isNotAnError() {
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(new InMemoryEmbeddingStore<>());
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(new InMemoryEmbeddingStore<>());
 
         assertEquals(RagIngestionService.DeleteOutcome.DELETED, service.delete("test-kb", "nothing.txt", createConfig()));
     }
@@ -411,12 +411,12 @@ class RagIngestionServiceTest {
     @Test
     void delete_withoutAName_isRefused() {
         assertThrows(IllegalArgumentException.class, () -> service.delete("test-kb", " ", createConfig()));
-        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any());
+        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any(), any());
     }
 
     @Test
     void delete_onAStoreThatCannotDeleteByMetadata_saysSo() {
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(embeddingStore);
         doThrow(new UnsupportedOperationException("not supported")).when(embeddingStore).removeAll(any(Filter.class));
 
         assertEquals(RagIngestionService.DeleteOutcome.UNSUPPORTED, service.delete("test-kb", "policy.txt", createConfig()));
@@ -424,7 +424,7 @@ class RagIngestionServiceTest {
 
     @Test
     void delete_whoseStoreFails_throwsAndReleasesTheLock() {
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(embeddingStore);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(embeddingStore);
         doThrow(new RuntimeException("connection reset")).when(embeddingStore).removeAll(any(Filter.class));
         var config = createConfig();
 
@@ -457,7 +457,7 @@ class RagIngestionServiceTest {
             }
         };
         wireRealStore(store);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(store);
         var config = createConfig();
 
         String replacing = service.ingest("test-kb", "Refunds within 47 days.", "policy.txt", config, true);
@@ -489,8 +489,8 @@ class RagIngestionServiceTest {
                 return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{1f, 0f})).toList());
             }
         };
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(fixed);
-        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any())).thenReturn(store);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(fixed);
+        when(embeddingStoreFactory.getOrCreateForIngestion(anyString(), any(), any())).thenReturn(store);
     }
 
     private void awaitCompleted(String ingestionId) {

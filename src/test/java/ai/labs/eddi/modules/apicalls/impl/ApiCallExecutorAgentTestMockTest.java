@@ -78,7 +78,7 @@ class ApiCallExecutorAgentTestMockTest {
         secretResolver = mock(SecretResolver.class);
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         CallerIdentityResolver callerIdentityResolver = mock(CallerIdentityResolver.class);
-        when(secretResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
+        when(secretResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
         when(globalVariableResolver.resolveValue(anyString())).thenAnswer(inv -> inv.getArgument(0));
         when(callerIdentityResolver.resolveValue(anyString(), any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -304,7 +304,7 @@ class ApiCallExecutorAgentTestMockTest {
     @DisplayName("a mocked call with an unresolvable ${vault:} reference succeeds without touching the vault")
     void mockedCallNeverResolvesSecrets() throws Exception {
         arm(List.of(new ToolMock("getAvailability", null, new MockResponse(200, "3 rooms"))));
-        when(secretResolver.resolveValue(anyString())).thenThrow(new IllegalStateException("vault key 'partner' not provisioned"));
+        when(secretResolver.resolveValue(anyString(), any())).thenThrow(new IllegalStateException("vault key 'partner' not provisioned"));
         ApiCall call = call(false);
         call.getRequest().setHeaders(Map.of("Authorization", "Bearer ${vault:partner}"));
 

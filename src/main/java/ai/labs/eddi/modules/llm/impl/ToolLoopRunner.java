@@ -1944,7 +1944,8 @@ class ToolLoopRunner {
         // across a long tool loop, and exactly the drift the ceiling exists to stop.
         toolResult = toolResponseTruncator.truncateIfNeeded(conversationId,
                 toolRequest.name(), screened.result(), reserveEnvelopeBudget(task.getToolResponseLimits(), task),
-                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend));
+                task.getType(), task.getParameters(), summarizerSpend(memory, task, conversationId, chargeTracker, runSpend),
+                LlmTask.secretAccessOf(memory));
 
         // A summary is new text, written by a model from third-party content, and a
         // summarizer that normalises an obfuscated instruction the pattern missed can

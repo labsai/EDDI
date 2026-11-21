@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.channels.rest;
 
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -561,9 +563,9 @@ class RestChannelIntegrationStoreValidationTest {
         @DisplayName("a vault secret that already exists but is shorter than 16 characters → BadRequest")
         void shortVaultSecretRejected() {
             var resolver = mock(SecretResolver.class);
-            when(resolver.resolveValue("${vault:short}")).thenReturn("a".repeat(15));
-            when(resolver.resolveValue("${vault:ok}")).thenReturn("a".repeat(16));
-            when(resolver.resolveValue("${vault:later}")).thenReturn("${vault:later}");
+            when(resolver.resolveValue(eq("${vault:short}"), any())).thenReturn("a".repeat(15));
+            when(resolver.resolveValue(eq("${vault:ok}"), any())).thenReturn("a".repeat(16));
+            when(resolver.resolveValue(eq("${vault:later}"), any())).thenReturn("${vault:later}");
             var strict = new RestChannelIntegrationStore(null, null, mock(ResourceAccessGuard.class), resolver);
 
             var ex = assertThrows(BadRequestException.class,
@@ -575,9 +577,9 @@ class RestChannelIntegrationStoreValidationTest {
             assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:later}"))));
             // Another tenant's reference is never resolved at save time (no
             // existence/length oracle).
-            when(resolver.resolveValue("${vault:other/short}")).thenReturn("a".repeat(3));
+            when(resolver.resolveValue(eq("${vault:other/short}"), any())).thenReturn("a".repeat(3));
             assertDoesNotThrow(() -> strict.validateConfiguration(webhook(Map.of("signingSecret", "${vault:other/short}"))));
-            verify(resolver, never()).resolveValue("${vault:other/short}");
+            verify(resolver, never()).resolveValue(eq("${vault:other/short}"), any());
         }
 
         @Test

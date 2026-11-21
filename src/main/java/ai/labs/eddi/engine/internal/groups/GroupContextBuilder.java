@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
 import ai.labs.eddi.modules.templating.ITemplatingEngine;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.utils.LogSanitizer;
 import org.jboss.logging.Logger;
 
@@ -704,7 +705,7 @@ public class GroupContextBuilder {
         }
         try {
             var result = summarizationService.summarizeWithUsage(content, WINDOW_SUMMARY_INSTRUCTIONS,
-                    window.llmProvider(), window.llmModel());
+                    window.llmProvider(), window.llmModel(), SecretAccess.withoutAgent("group transcript window summary"));
             if (result.summary().isBlank()) {
                 LOGGER.warnf("Group %s: window summarization returned empty — keeping previous state, will retry next boundary",
                         LogSanitizer.sanitize(gc.getId()));

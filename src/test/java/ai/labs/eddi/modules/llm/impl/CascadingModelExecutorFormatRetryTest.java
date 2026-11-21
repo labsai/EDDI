@@ -87,8 +87,8 @@ class CascadingModelExecutorFormatRetryTest {
     }
 
     private void models(FaultInjectingChatModel first, FaultInjectingChatModel second) throws Exception {
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(first);
-        when(registry.getOrCreate(eq("anthropic"), anyMap())).thenReturn(second);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(first);
+        when(registry.getOrCreate(eq("anthropic"), anyMap(), any())).thenReturn(second);
     }
 
     private static CascadeStep step(String type, Consumer<CascadeStep> tweak) {

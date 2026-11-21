@@ -166,7 +166,7 @@ class LlmTaskResumeRecoveryTest {
         lenient().when(memory.getConversationProperties()).thenReturn(new ConversationProperties(memory));
         lenient().when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         lenient().when(memory.getHitlResumeDecision()).thenReturn(decision);
-        lenient().when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(chatModel);
+        lenient().when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(chatModel);
     }
 
     @AfterEach
@@ -314,7 +314,7 @@ class LlmTaskResumeRecoveryTest {
 
         run(task(validation(v -> v.setOnInvalidJson("retry"))));
 
-        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any());
+        verify(chatModelRegistry, never()).getOrCreateStreaming(anyString(), any(), any());
         verify(sink, times(1)).onToken(VALID);
     }
 

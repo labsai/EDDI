@@ -145,7 +145,7 @@ class McpToolsProviderDiscoveryTest {
         config.setToolsWhitelist(List.of("keep"));
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("keep"), spec("drop")),
                 Map.of("keep", executor(), "drop", executor())));
 
@@ -163,7 +163,7 @@ class McpToolsProviderDiscoveryTest {
         config.setToolsBlacklist(List.of("dangerous"));
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("safe"), spec("dangerous")),
                 Map.of("safe", executor(), "dangerous", executor())));
 
@@ -181,7 +181,7 @@ class McpToolsProviderDiscoveryTest {
         config.setToolsWhitelist(List.of());
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("a")), Map.of("a", executor())));
 
         assertEquals(1, provider().discover(memory).toolSpecs().size());
@@ -194,7 +194,7 @@ class McpToolsProviderDiscoveryTest {
     void specWithoutExecutorIsSkipped() throws Exception {
         wireWorkflowWith(mcpConfig("srv", "http://mcp.example/sse"));
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("orphan")), Map.of()));
 
         var result = provider().discover(memory);
@@ -215,7 +215,7 @@ class McpToolsProviderDiscoveryTest {
         ToolSpecification firstSpec = spec("shared");
         ToolExecutor firstExecutor = executor();
         ToolExecutor secondExecutor = executor();
-        when(manager.discoverTools(anyList()))
+        when(manager.discoverTools(anyList(), any()))
                 .thenReturn(new McpToolProviderManager.McpToolsResult(
                         List.of(firstSpec), Map.of("shared", firstExecutor)))
                 .thenReturn(new McpToolProviderManager.McpToolsResult(
@@ -241,9 +241,9 @@ class McpToolsProviderDiscoveryTest {
         config.setExposeResources(Boolean.TRUE);
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("normal")), Map.of("normal", executor())));
-        when(manager.resourceBridgeTools(any())).thenReturn(new McpToolProviderManager.McpResourceBridge(
+        when(manager.resourceBridgeTools(any(), any())).thenReturn(new McpToolProviderManager.McpResourceBridge(
                 List.of(spec("srv_list_resources")), Map.of("srv_list_resources", executor())));
 
         var discovered = names(provider().discover(memory).toolSpecs());
@@ -257,7 +257,7 @@ class McpToolsProviderDiscoveryTest {
     void resourceBridgeSkippedWhenNotOptedIn() throws Exception {
         wireWorkflowWith(mcpConfig("srv", "http://mcp.example/sse"));
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("normal")), Map.of("normal", executor())));
 
         assertEquals(List.of("normal"), names(provider().discover(memory).toolSpecs()));
@@ -271,9 +271,9 @@ class McpToolsProviderDiscoveryTest {
         config.setToolsWhitelist(List.of("nothing-matches"));
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("normal")), Map.of("normal", executor())));
-        when(manager.resourceBridgeTools(any())).thenReturn(new McpToolProviderManager.McpResourceBridge(
+        when(manager.resourceBridgeTools(any(), any())).thenReturn(new McpToolProviderManager.McpResourceBridge(
                 List.of(spec("srv_read_resource")), Map.of("srv_read_resource", executor())));
 
         assertEquals(List.of("srv_read_resource"), names(provider().discover(memory).toolSpecs()));
@@ -286,9 +286,9 @@ class McpToolsProviderDiscoveryTest {
         config.setExposeResources(Boolean.TRUE);
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("normal")), Map.of("normal", executor())));
-        when(manager.resourceBridgeTools(any())).thenThrow(new IllegalArgumentException("bad bridge"));
+        when(manager.resourceBridgeTools(any(), any())).thenThrow(new IllegalArgumentException("bad bridge"));
 
         var result = provider().discover(memory);
 
@@ -306,7 +306,7 @@ class McpToolsProviderDiscoveryTest {
     void serverFailuresArePropagated() throws Exception {
         wireWorkflowWith(mcpConfig("srv", "http://mcp.example/sse"));
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(), Map.of(),
                 List.of(new McpToolProviderManager.McpServerFailure("srv", "http://mcp.example/sse",
                         McpToolProviderManager.McpFailureKind.CONNECTION_FAILURE, "refused"))));
@@ -322,7 +322,7 @@ class McpToolsProviderDiscoveryTest {
     void contributeMapsAllFailureKinds() throws Exception {
         wireWorkflowWith(mcpConfig("srv", "http://mcp.example/sse"));
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(), Map.of(),
                 List.of(
                         new McpToolProviderManager.McpServerFailure("s1", "u",
@@ -355,7 +355,7 @@ class McpToolsProviderDiscoveryTest {
         config.setToolsBlacklist(List.of("dropped"));
         wireWorkflowWith(config);
 
-        when(manager.discoverTools(anyList())).thenReturn(new McpToolProviderManager.McpToolsResult(
+        when(manager.discoverTools(anyList(), any())).thenReturn(new McpToolProviderManager.McpToolsResult(
                 List.of(spec("kept"), spec("dropped")),
                 Map.of("kept", executor(), "dropped", executor())));
 

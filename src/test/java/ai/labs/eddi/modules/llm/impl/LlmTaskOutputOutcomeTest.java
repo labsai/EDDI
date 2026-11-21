@@ -159,7 +159,7 @@ class LlmTaskOutputOutcomeTest {
     }
 
     private void liveModelReplies(Step... script) throws Exception {
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(FaultInjectingChatModel.script(script));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(FaultInjectingChatModel.script(script));
     }
 
     private void resumeReplies(String reply) throws Exception {
@@ -170,7 +170,7 @@ class LlmTaskOutputOutcomeTest {
         decision.setVerdict(HitlVerdict.APPROVED);
         when(memory.getHitlPendingToolCalls()).thenReturn(batch);
         when(memory.getHitlResumeDecision()).thenReturn(decision);
-        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(mock(ChatModel.class));
+        when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(mock(ChatModel.class));
         when(agentOrchestrator.resumeToolLoop(any(), any(), any(), any(), any(), anyBoolean(), any()))
                 .thenReturn(new AgentOrchestrator.ExecutionResult(reply, new ArrayList<>()));
     }
@@ -365,7 +365,7 @@ class LlmTaskOutputOutcomeTest {
         @DisplayName("the task's responseSchema reaches the outgoing request natively for openai, and not for anthropic")
         void nativeSchemaWiredThroughTask() throws Exception {
             var model = FaultInjectingChatModel.script(Step.text("{\"htmlResponseText\":\"hi\"}")).repeatLast();
-            when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+            when(chatModelRegistry.getOrCreate(anyString(), any(), any())).thenReturn(model);
 
             llmTask.execute(memory, shaped(SHAPE_SCHEMA, null, false));
 

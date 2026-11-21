@@ -73,7 +73,7 @@ class CascadingModelExecutorToolReplayTest {
     void setUp() throws Exception {
         model = mock(ChatModel.class);
         registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(anyString(), anyMap())).thenReturn(model);
+        when(registry.getOrCreate(anyString(), anyMap(), any())).thenReturn(model);
         orchestrator = mock(IAgentOrchestrator.class);
         memory = mock(IConversationMemory.class);
     }

@@ -54,7 +54,9 @@ class ConnectionExceptionMapperTest {
             ConnectionException.Reason.NOT_CONNECTED, 409,
             ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, 409,
             ConnectionException.Reason.GRANT_UNUSABLE, 409,
-            ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, 503));
+            ConnectionException.Reason.TOKEN_ENDPOINT_UNAVAILABLE, 503,
+            // The agent is not on a vault secret's grant: an admin widens the grant.
+            ConnectionException.Reason.SECRET_NOT_GRANTED, 403));
 
     @Test
     @DisplayName("the table above covers every reason there is")

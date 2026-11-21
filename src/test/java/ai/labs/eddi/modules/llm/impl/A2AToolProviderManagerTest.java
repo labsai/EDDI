@@ -4,6 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import java.util.Set;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.any;
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
@@ -57,7 +62,7 @@ class A2AToolProviderManagerTest {
         @Test
         @DisplayName("should return empty result for null config list")
         void nullConfig() {
-            var result = manager.discoverTools(null);
+            var result = manager.discoverTools(null, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
             assertTrue(result.executors().isEmpty());
@@ -66,7 +71,7 @@ class A2AToolProviderManagerTest {
         @Test
         @DisplayName("should return empty result for empty config list")
         void emptyConfig() {
-            var result = manager.discoverTools(List.of());
+            var result = manager.discoverTools(List.of(), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(result);
             assertTrue(result.toolSpecs().isEmpty());
         }
@@ -76,7 +81,7 @@ class A2AToolProviderManagerTest {
         void skipNullUrl() {
             var config = new A2AAgentConfig();
             config.setUrl(null);
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
 
@@ -85,7 +90,7 @@ class A2AToolProviderManagerTest {
         void skipBlankUrl() {
             var config = new A2AAgentConfig();
             config.setUrl("  ");
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }
@@ -172,12 +177,12 @@ class A2AToolProviderManagerTest {
 
             // First 3 attempts will fail and record failures
             for (int i = 0; i < 3; i++) {
-                manager.discoverTools(List.of(config));
+                manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             }
 
             // The 4th attempt should skip due to circuit breaker
             // (no HTTP attempt, still returns empty)
-            var result = manager.discoverTools(List.of(config));
+            var result = manager.discoverTools(List.of(config), SecretAccess.outsideAgentGrants("test"));
             assertTrue(result.toolSpecs().isEmpty());
         }
     }
@@ -204,10 +209,13 @@ class A2AToolProviderManagerTest {
      * socket.
      */
     private A2AToolProviderManager managerAgainstPeers() {
+        return managerAgainstPeers(mock(SecretResolver.class));
+    }
+
+    private A2AToolProviderManager managerAgainstPeers(SecretResolver secrets) {
         GlobalVariableResolver globals = mock(GlobalVariableResolver.class);
-        SecretResolver secrets = mock(SecretResolver.class);
         when(globals.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-        when(secrets.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
+        when(secrets.resolveValue(anyString(), any())).thenAnswer(i -> i.getArgument(0));
         OutboundEngine engine = hop -> {
             sent.add(hop);
             var card = cards.get(hop.uri().getHost());
@@ -257,7 +265,8 @@ class A2AToolProviderManagerTest {
             cards.put("peer.example.com", hop -> Map.of("name", "peer", "skills",
                     List.of(skill(sharedPrefix + "alpha"), skill(sharedPrefix + "bravo"))));
 
-            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", agentName, null)));
+            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", agentName, null)),
+                    SecretAccess.outsideAgentGrants("test"));
 
             List<String> names = names(result);
             assertEquals(2, names.size(), names::toString);
@@ -272,7 +281,8 @@ class A2AToolProviderManagerTest {
         void shortNamesUnchanged() {
             cards.put("peer.example.com", hop -> Map.of("name", "peer", "skills", List.of(skill("order-tracking"))));
 
-            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", "Support Agent", null)));
+            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", "Support Agent", null)),
+                    SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(List.of("support_agent_order_tracking"), names(result));
         }
@@ -282,7 +292,8 @@ class A2AToolProviderManagerTest {
         void nonLatinAgentNameGetsAUsableName() {
             cards.put("peer.example.com", hop -> Map.of("name", "peer", "description", "answers questions"));
 
-            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", "検索エージェント", null)));
+            var result = managerAgainstPeers().discoverTools(List.of(peer("peer.example.com", "検索エージェント", null)),
+                    SecretAccess.outsideAgentGrants("test"));
 
             List<String> names = names(result);
             assertEquals(1, names.size(), "the peer's single tool was dropped: " + names);
@@ -297,7 +308,7 @@ class A2AToolProviderManagerTest {
             cards.put("two.example.com", hop -> Map.of("name", "two", "skills", List.of(skill("lookup"))));
 
             var result = managerAgainstPeers().discoverTools(
-                    List.of(peer("one.example.com", "検索", null), peer("two.example.com", "翻訳", null)));
+                    List.of(peer("one.example.com", "検索", null), peer("two.example.com", "翻訳", null)), SecretAccess.outsideAgentGrants("test"));
 
             List<String> names = names(result);
             assertEquals(2, new HashSet<>(names).size(), () -> "the second peer was dropped as a name collision: " + names);
@@ -312,7 +323,7 @@ class A2AToolProviderManagerTest {
             cards.put("two.example.com", hop -> Map.of("name", "Bravo", "skills", List.of(skill("lookup"))));
 
             var result = managerAgainstPeers().discoverTools(
-                    List.of(peer("one.example.com", "", null), peer("two.example.com", " ", null)));
+                    List.of(peer("one.example.com", "", null), peer("two.example.com", " ", null)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(List.of("alpha_lookup", "bravo_lookup"), names(result));
         }
@@ -338,11 +349,30 @@ class A2AToolProviderManagerTest {
             var manager = managerAgainstPeers();
 
             var result = manager.discoverTools(List.of(peer(HOST, "tenant-a", "${vault:key-a}"), peer(HOST, "tenant-b", null),
-                    peer(HOST, "tenant-c", "${vault:key-c}")));
+                    peer(HOST, "tenant-c", "${vault:key-c}")), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(3, cardFetches(), "each credential needs its own card");
             assertEquals(List.of("tenant_a_public", "tenant_a_private", "tenant_b_public", "tenant_c_public", "tenant_c_private"),
                     names(result));
+        }
+
+        @Test
+        @DisplayName("a card cached for a granted agent is not handed to an agent the key's vault grant leaves out (#1179)")
+        void cachedCardRefusedToUngrantedAgent() {
+            cards.put(HOST, hop -> Map.of("name", "peer", "skills", List.of(skill("lookup"))));
+            SecretResolver secrets = mock(SecretResolver.class);
+            SecretAccess refused = SecretAccess.agent("bbbbbbbbbbbbbbbbbbbbbbbb");
+            doThrow(new SecretResolver.SecretNotGrantedException("not granted")).when(secrets).requireGranted(eq(Set.of("${vault:key-a}")),
+                    eq(refused),
+                    anyString());
+            var manager = managerAgainstPeers(secrets);
+            var config = peer(HOST, "peer", "${vault:key-a}");
+
+            assertEquals(List.of("peer_lookup"), names(manager.discoverTools(List.of(config), SecretAccess.agent("aaaaaaaaaaaaaaaaaaaaaaaa"))));
+            assertEquals(1, manager.getActiveConnectionCount(), "the card is cached");
+
+            assertTrue(manager.discoverTools(List.of(config), refused).toolSpecs().isEmpty(), "the cached card must not reach the refused agent");
+            assertEquals(1, cardFetches());
         }
 
         @Test
@@ -352,7 +382,7 @@ class A2AToolProviderManagerTest {
             var manager = managerAgainstPeers();
 
             var result = manager.discoverTools(List.of(peer(HOST, "first", "${vault:key-a}"), peer(HOST, "second", "${vault:key-a}"),
-                    peer(HOST, "third", null), peer(HOST, "fourth", null)));
+                    peer(HOST, "third", null), peer(HOST, "fourth", null)), SecretAccess.outsideAgentGrants("test"));
 
             assertEquals(2, cardFetches(), "one fetch per distinct credential, the anonymous one included");
             assertEquals(List.of("first_lookup", "second_lookup", "third_lookup", "fourth_lookup"), names(result));

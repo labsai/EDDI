@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.nlp.semantic;
 
+import ai.labs.eddi.secrets.SecretAccess;
+import ai.labs.eddi.secrets.SecretResolver;
 import dev.langchain4j.data.embedding.Embedding;
 import dev.langchain4j.data.segment.TextSegment;
 import dev.langchain4j.model.embedding.EmbeddingModel;
@@ -65,6 +67,28 @@ class SemanticFallbackTest {
 
         assertTrue(fallback.classify("wetter", null).isEmpty(), "a German example matched a turn of no stated language");
         assertEquals("cancel_order", fallback.classify("cancel order", null).orElseThrow().example().expressions());
+    }
+
+    @Test
+    @DisplayName("an agent whose vault grant withholds the embedding key gets no match, and the granted agent's examples stay embedded (#1179)")
+    void grantRefusalLeavesTheExamplesAlone() {
+        SecretAccess granted = SecretAccess.agent("aaaaaaaaaaaaaaaaaaaaaaaa");
+        SecretAccess refused = SecretAccess.agent("bbbbbbbbbbbbbbbbbbbbbbbb");
+        var fallback = SemanticFallback.perAgent(access -> {
+            if (refused.equals(access)) {
+                throw new SecretResolver.SecretNotGrantedException("not granted");
+            }
+            return model;
+        }, EXAMPLES, 0.8);
+
+        assertTrue(fallback.classify("please cancel the order", "en", granted).isPresent());
+        int requestsAfterFirst = model.requests.get();
+
+        assertTrue(fallback.classify("please cancel the order", "en", refused).isEmpty());
+        assertEquals(requestsAfterFirst, model.requests.get(), "the refused agent embedded nothing");
+
+        assertTrue(fallback.classify("please cancel the order", "en", granted).isPresent(), "no back-off for the granted agent");
+        assertEquals(requestsAfterFirst + 1, model.requests.get(), "the examples were not embedded again, only the input");
     }
 
     @Test

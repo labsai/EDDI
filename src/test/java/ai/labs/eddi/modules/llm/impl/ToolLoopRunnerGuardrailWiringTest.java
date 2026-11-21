@@ -76,7 +76,8 @@ class ToolLoopRunnerGuardrailWiringTest {
                 .thenAnswer(invocation -> ((Supplier<?>) invocation.getArgument(4)).get());
 
         var truncator = mock(ToolResponseTruncator.class);
-        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(i -> i.getArgument(2));
+        lenient().when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any()))
+                .thenAnswer(i -> i.getArgument(2));
 
         runner = new ToolLoopRunner(toolExecutionService, truncator, null, null, null, null, null,
                 new ToolResultGuardrail(new SimpleMeterRegistry()));
@@ -228,7 +229,7 @@ class ToolLoopRunnerGuardrailWiringTest {
             return ChatResponse.builder().aiMessage(AiMessage.from("Order #7 shipped.")).build();
         });
         var registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(summarizer);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(summarizer);
         runner = runnerWithRealTruncator(registry, mock(PaginatedResponseStore.class));
 
         String result = execute("o".repeat(2_500) + DIRECTIVE, Map.of("get_order", "mcp"), new ArrayList<>());
@@ -252,7 +253,7 @@ class ToolLoopRunnerGuardrailWiringTest {
         when(summarizer.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder().aiMessage(AiMessage.from("The page says: " + DIRECTIVE)).build());
         var registry = mock(ChatModelRegistry.class);
-        when(registry.getOrCreate(eq("openai"), anyMap())).thenReturn(summarizer);
+        when(registry.getOrCreate(eq("openai"), anyMap(), any())).thenReturn(summarizer);
         runner = runnerWithRealTruncator(registry, mock(PaginatedResponseStore.class));
         var trace = new ArrayList<Map<String, Object>>();
 
@@ -358,7 +359,7 @@ class ToolLoopRunnerGuardrailWiringTest {
 
         var budgets = new ArrayList<Integer>();
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             LlmConfiguration.ToolResponseLimits applied = invocation.getArgument(3);
             budgets.add(applied == null ? null : applied.getDefaultMaxChars());
             return invocation.getArgument(2);
@@ -434,7 +435,7 @@ class ToolLoopRunnerGuardrailWiringTest {
     void redactsBeforeTheTruncatorSeesTheResult() {
         var seen = new ArrayList<String>();
         var truncator = mock(ToolResponseTruncator.class);
-        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any())).thenAnswer(invocation -> {
+        when(truncator.truncateIfNeeded(any(), anyString(), anyString(), any(), any(), any(), any(), any())).thenAnswer(invocation -> {
             seen.add(invocation.getArgument(2));
             return invocation.getArgument(2);
         });

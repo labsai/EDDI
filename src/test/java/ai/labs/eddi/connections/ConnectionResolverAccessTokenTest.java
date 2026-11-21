@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.connections;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.connections.model.AuthType;
 import ai.labs.eddi.configs.connections.model.Binding;
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
@@ -121,7 +122,7 @@ class ConnectionResolverAccessTokenTest {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
             when(accessTokenSupplier.accessToken(any(), anyString())).thenReturn("eyJ.service");
 
-            assertEquals("eyJ.service", resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            assertEquals("eyJ.service", resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
             verify(accessTokenSupplier).accessToken(any(), eq(ConnectionResolver.SERVICE_PRINCIPAL));
         }
 
@@ -132,7 +133,7 @@ class ConnectionResolverAccessTokenTest {
             resolutionPrincipalContext.bind(new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED));
             when(accessTokenSupplier.accessToken(any(), anyString())).thenReturn("ya29.alice");
 
-            assertEquals("ya29.alice", resolver().resolveAccessToken("${connection:exo}", GRAPH, "alice"));
+            assertEquals("ya29.alice", resolver().resolveAccessToken("${connection:exo}", GRAPH, "alice", SecretAccess.outsideAgentGrants("test")));
             verify(accessTokenSupplier).accessToken(any(), eq("alice"));
         }
 
@@ -142,7 +143,8 @@ class ConnectionResolverAccessTokenTest {
             register(oauth(AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.PER_USER));
             resolutionPrincipalContext.bind(new ResolutionPrincipal("email:int:bob@example.org", ResolutionPrincipal.Provenance.SELF_ASSERTED));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -153,7 +155,8 @@ class ConnectionResolverAccessTokenTest {
         void perUserWithoutPrincipalRefused() {
             register(oauth(AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.PER_USER));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -165,7 +168,8 @@ class ConnectionResolverAccessTokenTest {
             register(oauth(AuthType.OAUTH2_AUTHORIZATION_CODE, Binding.PER_USER));
             resolutionPrincipalContext.bind(new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.VERIFIED));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, "bob"));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, "bob", SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NO_VERIFIED_PRINCIPAL, error.getReason());
         }
@@ -176,7 +180,8 @@ class ConnectionResolverAccessTokenTest {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("https://attacker.example.net/"), null));
+                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("https://attacker.example.net/"), null,
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -187,7 +192,8 @@ class ConnectionResolverAccessTokenTest {
         void nullTargetRefused() {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", null, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", null, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
         }
@@ -202,7 +208,8 @@ class ConnectionResolverAccessTokenTest {
             register(connection);
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("imaps://outlook.office365.com:993"), null));
+                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("imaps://outlook.office365.com:993"), null,
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
             verify(accessTokenSupplier, never()).accessToken(any(), any());
@@ -217,9 +224,11 @@ class ConnectionResolverAccessTokenTest {
             when(accessTokenSupplier.accessToken(any(), anyString())).thenReturn("eyJ.mail");
 
             assertEquals("eyJ.mail",
-                    resolver().resolveAccessToken("${connection:exo}", URI.create("smtps://smtp.office365.com:465"), null));
+                    resolver().resolveAccessToken("${connection:exo}", URI.create("smtps://smtp.office365.com:465"), null,
+                            SecretAccess.outsideAgentGrants("test")));
             var other = assertThrows(ConnectionException.class,
-                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("smtp://smtp.office365.com:587"), null));
+                    () -> resolver().resolveAccessToken("${connection:exo}", URI.create("smtp://smtp.office365.com:587"), null,
+                            SecretAccess.outsideAgentGrants("test")));
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, other.getReason());
         }
 
@@ -229,7 +238,8 @@ class ConnectionResolverAccessTokenTest {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
             when(accessTokenSupplier.accessToken(any(), anyString())).thenReturn("  ");
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.GRANT_UNUSABLE, error.getReason());
         }
@@ -252,9 +262,9 @@ class ConnectionResolverAccessTokenTest {
         void basicResolves() {
             register(basic());
             when(globalVariableResolver.resolveValue(anyString())).thenAnswer(i -> i.getArgument(0));
-            when(secretResolver.resolveValue("${vault:app-password}")).thenReturn("app-pw");
+            when(secretResolver.resolveValue(eq("${vault:app-password}"), any())).thenReturn("app-pw");
 
-            var login = resolver().resolveBasicLogin("${connection:exo}", RELAY);
+            var login = resolver().resolveBasicLogin("${connection:exo}", RELAY, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("mailbox@example.com", login.username());
             assertEquals("app-pw", login.password());
@@ -267,7 +277,8 @@ class ConnectionResolverAccessTokenTest {
             register(basic());
 
             var error = assertThrows(ConnectionException.class,
-                    () -> resolver().resolveBasicLogin("${connection:exo}", URI.create("smtp://elsewhere.example.com:587")));
+                    () -> resolver().resolveBasicLogin("${connection:exo}", URI.create("smtp://elsewhere.example.com:587"),
+                            SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, error.getReason());
             verifyNoInteractions(secretResolver);
@@ -278,10 +289,12 @@ class ConnectionResolverAccessTokenTest {
         void otherTypesRefused() {
             register(oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE));
             assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
-                    assertThrows(ConnectionException.class, () -> resolver().resolveBasicLogin("${connection:exo}", RELAY)).getReason());
+                    assertThrows(ConnectionException.class,
+                            () -> resolver().resolveBasicLogin("${connection:exo}", RELAY, SecretAccess.outsideAgentGrants("test"))).getReason());
             register(headerConnection(AuthType.STATIC));
             assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT,
-                    assertThrows(ConnectionException.class, () -> resolver().resolveBasicLogin("${connection:exo}", RELAY)).getReason());
+                    assertThrows(ConnectionException.class,
+                            () -> resolver().resolveBasicLogin("${connection:exo}", RELAY, SecretAccess.outsideAgentGrants("test"))).getReason());
             verifyNoInteractions(secretResolver);
         }
     }
@@ -295,7 +308,8 @@ class ConnectionResolverAccessTokenTest {
         void staticRefused() {
             register(headerConnection(AuthType.STATIC));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, error.getReason());
             verifyNoInteractions(secretResolver, accessTokenSupplier);
@@ -306,7 +320,8 @@ class ConnectionResolverAccessTokenTest {
         void basicRefused() {
             register(headerConnection(AuthType.BASIC));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, error.getReason());
             verifyNoInteractions(secretResolver, accessTokenSupplier);
@@ -318,7 +333,8 @@ class ConnectionResolverAccessTokenTest {
             var connection = oauth(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.CALLER_SUPPLIED);
             register(connection);
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, error.getReason());
             verifyNoInteractions(accessTokenSupplier);
@@ -329,7 +345,8 @@ class ConnectionResolverAccessTokenTest {
         void refusalCounted() {
             register(headerConnection(AuthType.BASIC));
 
-            assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null));
+            assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:exo}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             var counter = meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "unsupported_placement").counter();
             assertNotNull(counter);
@@ -342,7 +359,8 @@ class ConnectionResolverAccessTokenTest {
             when(registry.require(any(ConnectionReference.class)))
                     .thenThrow(new ConnectionException(ConnectionException.Reason.NOT_FOUND, "No connection named 'gone'"));
 
-            var error = assertThrows(ConnectionException.class, () -> resolver().resolveAccessToken("${connection:gone}", GRAPH, null));
+            var error = assertThrows(ConnectionException.class,
+                    () -> resolver().resolveAccessToken("${connection:gone}", GRAPH, null, SecretAccess.outsideAgentGrants("test")));
 
             assertEquals(ConnectionException.Reason.NOT_FOUND, error.getReason());
             assertNotNull(meterRegistry.find("eddi.connection.resolve.count").tag("outcome", "not_found").counter());

@@ -15,15 +15,16 @@ import java.util.List;
  * exposed through this record.
  * <p>
  * Secrets are stored at the <b>tenant level</b>. Which agents may use one is
- * governed by {@code allowedAgents}, checked when an agent is deployed (see
- * {@link ai.labs.eddi.secrets.VaultGrantGate}) rather than when a secret is
- * resolved, so a misconfiguration surfaces before the agent serves traffic
- * rather than in the middle of a live conversation.
+ * governed by {@code allowedAgents}, checked twice: when an agent is deployed
+ * (see {@link ai.labs.eddi.secrets.VaultGrantGate}), so a misconfiguration
+ * surfaces before the agent serves traffic, and whenever a secret is resolved
+ * (see {@link ai.labs.eddi.secrets.SecretResolver}), so the grant holds on a
+ * cluster and after it is narrowed.
  * <p>
  * What a violation costs depends on {@code eddi.vault.grant-enforcement}: under
- * {@code enforce} (the default) the deployment is blocked, under {@code warn}
- * it is logged and allowed, and under {@code off} the check does not run at
- * all.
+ * {@code enforce} (the default) the deployment is blocked and the resolution
+ * refused, under {@code warn} both are logged and allowed, and under
+ * {@code off} neither check runs.
  *
  * @param tenantId
  *            the owning tenant
@@ -44,7 +45,7 @@ import java.util.List;
  * @param allowedAgents
  *            list of agent IDs allowed to use this secret, or {@code ["*"]} for
  *            all agents. {@code null} or empty means unrestricted, not "deny
- *            all". Enforced at deployment time, not at resolution time.
+ *            all". Enforced at deployment time and at resolution time.
  * @param allowedHosts
  *            the destinations this secret may be sent to, as exact {@code host}
  *            or {@code host:port} entries (no scheme, no path, no wildcard).

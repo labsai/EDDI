@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.secrets.SecretAccess;
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.modules.llm.impl.builder.ILanguageModelBuilder;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -96,7 +97,7 @@ class ChatModelRegistryTest {
 
         // Create pass-through mocks
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
 
@@ -182,7 +183,7 @@ class ChatModelRegistryTest {
      */
     private static ChatModelRegistry passThroughRegistry(Map<String, Provider<ILanguageModelBuilder>> builders) {
         SecretResolver secretResolver = mock(SecretResolver.class);
-        when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
+        when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
         GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
         when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
         return new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
@@ -195,7 +196,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreate creates model for valid type")
         void getOrCreate_validType_createsModel() throws Exception {
-            ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"));
+            ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
             assertInstanceOf(ObservableChatModel.class, model);
         }
@@ -204,15 +205,16 @@ class ChatModelRegistryTest {
         @DisplayName("getOrCreate caches models by type+params")
         void getOrCreate_sameParams_returnsCached() throws Exception {
             var params = Map.of("apiKey", "test");
-            ChatModel first = registry.getOrCreate("openai", params);
-            ChatModel second = registry.getOrCreate("openai", params);
+            ChatModel first = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+            ChatModel second = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertSame(first, second);
         }
 
         @Test
         @DisplayName("getOrCreate throws for unknown type")
         void getOrCreate_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class, () -> registry.getOrCreate("unknown", Map.of()));
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
+                    () -> registry.getOrCreate("unknown", Map.of(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -226,8 +228,8 @@ class ChatModelRegistryTest {
             params2.put("apiKey", "test");
             params2.put("systemMessage", "be different");
 
-            ChatModel first = registry.getOrCreate("openai", params1);
-            ChatModel second = registry.getOrCreate("openai", params2);
+            ChatModel first = registry.getOrCreate("openai", params1, SecretAccess.outsideAgentGrants("test"));
+            ChatModel second = registry.getOrCreate("openai", params2, SecretAccess.outsideAgentGrants("test"));
             assertSame(first, second);
         }
     }
@@ -239,7 +241,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreateStreaming creates streaming model for supported type")
         void getOrCreateStreaming_supportedType_createsModel() throws Exception {
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"));
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
             assertInstanceOf(ObservableStreamingChatModel.class, model);
         }
@@ -248,30 +250,31 @@ class ChatModelRegistryTest {
         @DisplayName("getOrCreateStreaming caches streaming models")
         void getOrCreateStreaming_sameParams_returnsCached() throws Exception {
             var params = Map.of("apiKey", "test");
-            StreamingChatModel first = registry.getOrCreateStreaming("openai", params);
-            StreamingChatModel second = registry.getOrCreateStreaming("openai", params);
+            StreamingChatModel first = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
+            StreamingChatModel second = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertSame(first, second);
         }
 
         @Test
         @DisplayName("getOrCreateStreaming returns null for unsupported builder")
         void getOrCreateStreaming_unsupportedBuilder_returnsNull() throws Exception {
-            StreamingChatModel model = registry.getOrCreateStreaming("unsupported", Map.of());
+            StreamingChatModel model = registry.getOrCreateStreaming("unsupported", Map.of(), SecretAccess.outsideAgentGrants("test"));
             assertNull(model);
         }
 
         @Test
         @DisplayName("getOrCreateStreaming throws for unknown type")
         void getOrCreateStreaming_unknownType_throwsException() {
-            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class, () -> registry.getOrCreateStreaming("unknown", Map.of()));
+            assertThrows(ChatModelRegistry.UnsupportedLlmTaskException.class,
+                    () -> registry.getOrCreateStreaming("unknown", Map.of(), SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
         @DisplayName("Streaming and sync caches are independent")
         void getOrCreate_streamingAndSyncAreIndependent() throws Exception {
             var params = Map.of("apiKey", "test");
-            ChatModel syncModel = registry.getOrCreate("openai", params);
-            StreamingChatModel streamingModel = registry.getOrCreateStreaming("openai", params);
+            ChatModel syncModel = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+            StreamingChatModel streamingModel = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(syncModel);
             assertNotNull(streamingModel);
@@ -290,7 +293,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "5000");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
             assertInstanceOf(ObservableChatModel.class, model, "Model should be wrapped with ObservableChatModel when timeout is set");
         }
@@ -302,7 +305,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("logRequests", "true");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertInstanceOf(ObservableChatModel.class, model);
         }
 
@@ -313,7 +316,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("logResponses", "true");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertInstanceOf(ObservableChatModel.class, model);
         }
 
@@ -326,7 +329,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("getOrCreate wraps even with no observability params, so telemetry has a hook")
         void getOrCreate_noObservabilityParams_stillWraps() throws Exception {
-            ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"));
+            ChatModel model = registry.getOrCreate("openai", Map.of("apiKey", "test"), SecretAccess.outsideAgentGrants("test"));
             assertNotNull(model);
             assertInstanceOf(ObservableChatModel.class, model,
                     "an unwrapped model has nowhere to hang the telemetry listener");
@@ -342,7 +345,7 @@ class ChatModelRegistryTest {
             params.put("logRequests", "true");
             params.put("logResponses", "true");
 
-            registry.getOrCreate("openai", params);
+            registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             var seen = lastBuildParams.get();
             assertNotNull(seen, "builder should have been invoked");
@@ -375,7 +378,7 @@ class ChatModelRegistryTest {
             params.put("logRequests", "true");
             params.put("logResponses", "true");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             var seen = lastBuildParams.get();
             assertNotNull(seen);
@@ -392,7 +395,7 @@ class ChatModelRegistryTest {
             params.put("logRequests", "true");
             params.put("logResponses", "true");
 
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             var seen = lastBuildStreamingParams.get();
             assertNotNull(seen);
@@ -414,9 +417,11 @@ class ChatModelRegistryTest {
             loud.put("logRequests", "true");
             loud.put("logResponses", "true");
 
-            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", loud, SecretAccess.outsideAgentGrants("test")),
                     "D11's cache-key correctness must survive: the flags still change which model instance a task gets");
-            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet), uniqueRegistry.getOrCreateStreaming("openai", loud),
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreateStreaming("openai", loud, SecretAccess.outsideAgentGrants("test")),
                     "Same on the streaming path");
         }
     }
@@ -440,7 +445,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", " ");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"), "An unusable timeout must be dropped, not forwarded");
@@ -453,7 +458,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "30s");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"));
@@ -466,7 +471,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "0");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertInstanceOf(ObservableChatModel.class, model);
             assertFalse(lastBuildParams.get().containsKey("timeout"));
@@ -479,7 +484,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "");
 
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertInstanceOf(ObservableStreamingChatModel.class, model);
             assertFalse(lastBuildStreamingParams.get().containsKey("timeout"));
@@ -492,7 +497,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "5000");
 
-            ChatModel model = registry.getOrCreate("openai", params);
+            ChatModel model = registry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertEquals("5000", lastBuildParams.get().get("timeout"), "A usable timeout must still configure the provider");
             assertInstanceOf(ObservableChatModel.class, model, "and must still be honoured by the decorator");
@@ -500,7 +505,8 @@ class ChatModelRegistryTest {
             var other = new HashMap<String, String>();
             other.put("apiKey", "test");
             other.put("timeout", "9000");
-            assertNotSame(uniqueRegistry.getOrCreate("openai", params), uniqueRegistry.getOrCreate("openai", other),
+            assertNotSame(uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", other, SecretAccess.outsideAgentGrants("test")),
                     "Normalisation must not collapse two genuinely different timeouts into one cached model");
         }
 
@@ -515,10 +521,11 @@ class ChatModelRegistryTest {
             plain.put("apiKey", "test");
             plain.put("timeout", "5000");
 
-            assertSame(uniqueRegistry.getOrCreate("openai", padded), uniqueRegistry.getOrCreate("openai", plain),
+            assertSame(uniqueRegistry.getOrCreate("openai", padded, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", plain, SecretAccess.outsideAgentGrants("test")),
                     "' 5000 ' and '5000' are the same timeout and must share one model instance");
 
-            registry.getOrCreate("openai", padded);
+            registry.getOrCreate("openai", padded, SecretAccess.outsideAgentGrants("test"));
             assertEquals("5000", lastBuildParams.get().get("timeout"), "The builder must receive the trimmed value it can parse");
         }
 
@@ -532,7 +539,8 @@ class ChatModelRegistryTest {
             var none = new HashMap<String, String>();
             none.put("apiKey", "test");
 
-            assertSame(uniqueRegistry.getOrCreate("openai", unusable), uniqueRegistry.getOrCreate("openai", none),
+            assertSame(uniqueRegistry.getOrCreate("openai", unusable, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", none, SecretAccess.outsideAgentGrants("test")),
                     "A dropped timeout must produce exactly the timeout-free model, not a second identical one");
         }
     }
@@ -555,9 +563,9 @@ class ChatModelRegistryTest {
             installCache(uniqueRegistry, "modelCache", racingCache);
 
             var params = Map.of("apiKey", "test");
-            assertNotNull(uniqueRegistry.getOrCreate("openai", params), "first call must construct a model");
+            assertNotNull(uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test")), "first call must construct a model");
 
-            ChatModel second = uniqueRegistry.getOrCreate("openai", params);
+            ChatModel second = uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(second, "A cache clear racing the lookup must fall through to construction, never hand null to the caller");
             assertEquals(0, racingCache.containsKeyCalls.get(),
@@ -571,9 +579,10 @@ class ChatModelRegistryTest {
             installCache(uniqueRegistry, "streamingModelCache", racingCache);
 
             var params = Map.of("apiKey", "test");
-            assertNotNull(uniqueRegistry.getOrCreateStreaming("openai", params), "first call must construct a model");
+            assertNotNull(uniqueRegistry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test")),
+                    "first call must construct a model");
 
-            StreamingChatModel second = uniqueRegistry.getOrCreateStreaming("openai", params);
+            StreamingChatModel second = uniqueRegistry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(second, "A null here is indistinguishable from 'this provider cannot stream'");
             assertEquals(0, racingCache.containsKeyCalls.get(), "The streaming lookup must be a single get() too");
@@ -630,11 +639,12 @@ class ChatModelRegistryTest {
             fast.put("apiKey", "test");
             fast.put("timeout", "1000");
 
-            ChatModel slowModel = uniqueRegistry.getOrCreate("openai", slow);
-            ChatModel fastModel = uniqueRegistry.getOrCreate("openai", fast);
+            ChatModel slowModel = uniqueRegistry.getOrCreate("openai", slow, SecretAccess.outsideAgentGrants("test"));
+            ChatModel fastModel = uniqueRegistry.getOrCreate("openai", fast, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(slowModel, fastModel, "A different timeout must produce a different model instance");
-            assertSame(slowModel, uniqueRegistry.getOrCreate("openai", slow), "Identical params must still hit the cache");
+            assertSame(slowModel, uniqueRegistry.getOrCreate("openai", slow, SecretAccess.outsideAgentGrants("test")),
+                    "Identical params must still hit the cache");
         }
 
         @Test
@@ -648,8 +658,8 @@ class ChatModelRegistryTest {
             withTimeout.put("timeout", "5000");
 
             // Construction order is the trigger: the timeout-free task is built first.
-            ChatModel unwrapped = uniqueRegistry.getOrCreate("openai", noTimeout);
-            ChatModel wrapped = uniqueRegistry.getOrCreate("openai", withTimeout);
+            ChatModel unwrapped = uniqueRegistry.getOrCreate("openai", noTimeout, SecretAccess.outsideAgentGrants("test"));
+            ChatModel wrapped = uniqueRegistry.getOrCreate("openai", withTimeout, SecretAccess.outsideAgentGrants("test"));
 
             assertNotSame(unwrapped, wrapped, "The timeout task must not be served the cached timeout-free model");
             assertInstanceOf(ObservableChatModel.class, wrapped, "The timeout task must get a model that actually carries the timeout");
@@ -666,7 +676,8 @@ class ChatModelRegistryTest {
             loud.put("apiKey", "test");
             loud.put("logRequests", "true");
 
-            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", loud, SecretAccess.outsideAgentGrants("test")),
                     "A different logRequests must produce a different model instance");
         }
 
@@ -681,7 +692,8 @@ class ChatModelRegistryTest {
             loud.put("apiKey", "test");
             loud.put("logResponses", "true");
 
-            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet), uniqueRegistry.getOrCreate("openai", loud),
+            assertNotSame(uniqueRegistry.getOrCreate("openai", quiet, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreate("openai", loud, SecretAccess.outsideAgentGrants("test")),
                     "A different logResponses must produce a different model instance");
         }
 
@@ -696,7 +708,8 @@ class ChatModelRegistryTest {
             fast.put("apiKey", "test");
             fast.put("timeout", "1000");
 
-            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", slow), uniqueRegistry.getOrCreateStreaming("openai", fast),
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", slow, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreateStreaming("openai", fast, SecretAccess.outsideAgentGrants("test")),
                     "A different timeout must produce a different streaming model instance");
         }
 
@@ -711,7 +724,8 @@ class ChatModelRegistryTest {
             loud.put("apiKey", "test");
             loud.put("logResponses", "true");
 
-            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet), uniqueRegistry.getOrCreateStreaming("openai", loud),
+            assertNotSame(uniqueRegistry.getOrCreateStreaming("openai", quiet, SecretAccess.outsideAgentGrants("test")),
+                    uniqueRegistry.getOrCreateStreaming("openai", loud, SecretAccess.outsideAgentGrants("test")),
                     "A different logResponses must produce a different streaming model instance");
         }
 
@@ -722,7 +736,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("timeout", "7500");
 
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertNotNull(model);
             var seen = lastBuildStreamingParams.get();
@@ -738,7 +752,7 @@ class ChatModelRegistryTest {
             params.put("apiKey", "test");
             params.put("logResponses", "true");
 
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", params);
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             assertInstanceOf(ObservableStreamingChatModel.class, model,
                     "logResponses must be honoured on the streaming path, not silently discarded");
@@ -748,7 +762,7 @@ class ChatModelRegistryTest {
         @Test
         @DisplayName("a streaming task without logging flags is wrapped too")
         void getOrCreateStreaming_noLogging_stillWraps() throws Exception {
-            StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"));
+            StreamingChatModel model = registry.getOrCreateStreaming("openai", Map.of("apiKey", "test"), SecretAccess.outsideAgentGrants("test"));
             assertInstanceOf(ObservableStreamingChatModel.class, model);
             assertNotSame(mockStreamingModel, model);
         }
@@ -776,8 +790,8 @@ class ChatModelRegistryTest {
                 // What a resolved "{properties.preferredModel}" looks like by the time it
                 // reaches the registry: one distinct value per conversation.
                 params.put("modelName", "tuned-model-" + i);
-                uniqueRegistry.getOrCreate("openai", params);
-                uniqueRegistry.getOrCreateStreaming("openai", params);
+                uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+                uniqueRegistry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             }
 
             int[] counts = uniqueRegistry.cachedModelCounts();
@@ -793,8 +807,8 @@ class ChatModelRegistryTest {
         @DisplayName("bounding does not break plain caching of a repeated config")
         void repeatedConfigStillHitsTheCache() throws Exception {
             var params = Map.of("apiKey", "test", "modelName", "gpt-4o");
-            ChatModel first = uniqueRegistry.getOrCreate("openai", params);
-            assertSame(first, uniqueRegistry.getOrCreate("openai", params),
+            ChatModel first = uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+            assertSame(first, uniqueRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test")),
                     "a bounded cache is still a cache");
         }
     }
@@ -835,7 +849,7 @@ class ChatModelRegistryTest {
             });
 
             SecretResolver secretResolver = mock(SecretResolver.class);
-            when(secretResolver.resolveSecrets(any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
+            when(secretResolver.resolveSecrets(any(), any())).thenAnswer(inv -> resolvingVault(inv.getArgument(0)));
             GlobalVariableResolver globalVariableResolver = mock(GlobalVariableResolver.class);
             when(globalVariableResolver.resolveAll(any())).thenAnswer(inv -> inv.getArgument(0));
             invalidationRegistry = new ChatModelRegistry(builders, globalVariableResolver, secretResolver, null, mock(VaultHostAllowlist.class));
@@ -846,21 +860,21 @@ class ChatModelRegistryTest {
         void invalidateForSecret_evictsOnlyMatching() throws Exception {
             var targetParams = new HashMap<String, String>();
             targetParams.put("apiKey", "${vault:openai-key}");
-            ChatModel targetModel = invalidationRegistry.getOrCreate("openai", targetParams);
+            ChatModel targetModel = invalidationRegistry.getOrCreate("openai", targetParams, SecretAccess.outsideAgentGrants("test"));
 
             var otherParams = new HashMap<String, String>();
             otherParams.put("apiKey", "${vault:anthropic-key}");
-            ChatModel otherModel = invalidationRegistry.getOrCreate("openai", otherParams);
+            ChatModel otherModel = invalidationRegistry.getOrCreate("openai", otherParams, SecretAccess.outsideAgentGrants("test"));
 
             // Invalidate only the openai secret
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
 
             // Target model should be evicted (new instance on rebuild)
-            ChatModel rebuilt = invalidationRegistry.getOrCreate("openai", targetParams);
+            ChatModel rebuilt = invalidationRegistry.getOrCreate("openai", targetParams, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(targetModel, rebuilt, "Evicted model should be rebuilt as a new instance");
 
             // Other model should still be the exact same cached instance
-            ChatModel cached = invalidationRegistry.getOrCreate("openai", otherParams);
+            ChatModel cached = invalidationRegistry.getOrCreate("openai", otherParams, SecretAccess.outsideAgentGrants("test"));
             assertSame(otherModel, cached, "Unrelated model should remain cached");
         }
 
@@ -870,11 +884,11 @@ class ChatModelRegistryTest {
             // ${vars:key} may expand to the changed secret; the cache key cannot tell.
             var viaVariable = new HashMap<String, String>();
             viaVariable.put("apiKey", "${vars:openai-key-ref}");
-            ChatModel original = invalidationRegistry.getOrCreate("openai", viaVariable);
+            ChatModel original = invalidationRegistry.getOrCreate("openai", viaVariable, SecretAccess.outsideAgentGrants("test"));
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
 
-            assertNotSame(original, invalidationRegistry.getOrCreate("openai", viaVariable));
+            assertNotSame(original, invalidationRegistry.getOrCreate("openai", viaVariable, SecretAccess.outsideAgentGrants("test")));
         }
 
         @Test
@@ -882,11 +896,11 @@ class ChatModelRegistryTest {
         void invalidateForSecret_fullForm_evicts() throws Exception {
             var params = new HashMap<String, String>();
             params.put("apiKey", "${vault:default/openai-key}");
-            ChatModel original = invalidationRegistry.getOrCreate("openai", params);
+            ChatModel original = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
 
-            ChatModel rebuilt = invalidationRegistry.getOrCreate("openai", params);
+            ChatModel rebuilt = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(original, rebuilt, "Full-form vault ref should be matched and evicted");
         }
 
@@ -897,12 +911,12 @@ class ChatModelRegistryTest {
             // Rotating acme's "openai-key" must NOT evict default-tenant models.
             var defaultParams = new HashMap<String, String>();
             defaultParams.put("apiKey", "${vault:openai-key}");
-            ChatModel defaultModel = invalidationRegistry.getOrCreate("openai", defaultParams);
+            ChatModel defaultModel = invalidationRegistry.getOrCreate("openai", defaultParams, SecretAccess.outsideAgentGrants("test"));
 
             // Invalidate acme tenant's secret with the same keyName
             invalidationRegistry.invalidateForSecret(new SecretReference("acme", "openai-key"));
 
-            ChatModel stillCached = invalidationRegistry.getOrCreate("openai", defaultParams);
+            ChatModel stillCached = invalidationRegistry.getOrCreate("openai", defaultParams, SecretAccess.outsideAgentGrants("test"));
             assertSame(defaultModel, stillCached,
                     "Non-default tenant invalidation must not evict default-tenant models");
         }
@@ -912,17 +926,17 @@ class ChatModelRegistryTest {
         void invalidateForSecret_null_clearsAll() throws Exception {
             var params1 = new HashMap<String, String>();
             params1.put("apiKey", "${vault:key1}");
-            ChatModel model1 = invalidationRegistry.getOrCreate("openai", params1);
+            ChatModel model1 = invalidationRegistry.getOrCreate("openai", params1, SecretAccess.outsideAgentGrants("test"));
 
             var params2 = new HashMap<String, String>();
             params2.put("apiKey", "${vault:key2}");
-            ChatModel model2 = invalidationRegistry.getOrCreate("openai", params2);
+            ChatModel model2 = invalidationRegistry.getOrCreate("openai", params2, SecretAccess.outsideAgentGrants("test"));
 
             invalidationRegistry.invalidateForSecret(null);
 
-            assertNotSame(model1, invalidationRegistry.getOrCreate("openai", params1),
+            assertNotSame(model1, invalidationRegistry.getOrCreate("openai", params1, SecretAccess.outsideAgentGrants("test")),
                     "All models should be evicted on null (bulk rotation)");
-            assertNotSame(model2, invalidationRegistry.getOrCreate("openai", params2),
+            assertNotSame(model2, invalidationRegistry.getOrCreate("openai", params2, SecretAccess.outsideAgentGrants("test")),
                     "All models should be evicted on null (bulk rotation)");
         }
 
@@ -931,11 +945,11 @@ class ChatModelRegistryTest {
         void invalidateForSecret_noMatch_leavesAllCached() throws Exception {
             var params = new HashMap<String, String>();
             params.put("apiKey", "${vault:openai-key}");
-            ChatModel original = invalidationRegistry.getOrCreate("openai", params);
+            ChatModel original = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "unrelated-key"));
 
-            ChatModel stillCached = invalidationRegistry.getOrCreate("openai", params);
+            ChatModel stillCached = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertSame(original, stillCached, "Non-matching invalidation should leave cache intact");
         }
 
@@ -945,15 +959,15 @@ class ChatModelRegistryTest {
             var params = new HashMap<String, String>();
             params.put("apiKey", "${vault:openai-key}");
 
-            ChatModel syncOriginal = invalidationRegistry.getOrCreate("openai", params);
-            StreamingChatModel streamOriginal = invalidationRegistry.getOrCreateStreaming("openai", params);
+            ChatModel syncOriginal = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+            StreamingChatModel streamOriginal = invalidationRegistry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(syncOriginal);
             assertNotNull(streamOriginal);
 
             invalidationRegistry.invalidateForSecret(new SecretReference("default", "openai-key"));
 
-            ChatModel syncRebuilt = invalidationRegistry.getOrCreate("openai", params);
-            StreamingChatModel streamRebuilt = invalidationRegistry.getOrCreateStreaming("openai", params);
+            ChatModel syncRebuilt = invalidationRegistry.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
+            StreamingChatModel streamRebuilt = invalidationRegistry.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(syncOriginal, syncRebuilt, "Sync model should be evicted and rebuilt");
             assertNotSame(streamOriginal, streamRebuilt, "Streaming model should be evicted and rebuilt");
         }
@@ -1021,15 +1035,15 @@ class ChatModelRegistryTest {
             registryRef.set(reg);
             var params = Map.of("apiKey", "${vault:openai-key}");
 
-            ChatModel racing = reg.getOrCreate("openai", params);
+            ChatModel racing = reg.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(racing, "the racing caller still receives its freshly built model");
 
-            ChatModel afterRace = reg.getOrCreate("openai", params);
+            ChatModel afterRace = reg.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(racing, afterRace,
                     "a model built from values a concurrent rotation made stale must NOT be cached — "
                             + "the next lookup must miss and rebuild");
 
-            ChatModel stable = reg.getOrCreate("openai", params);
+            ChatModel stable = reg.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertSame(afterRace, stable, "with no further invalidation, the rebuilt model caches normally");
 
             assertEquals(2, buildCount.get(),
@@ -1072,14 +1086,14 @@ class ChatModelRegistryTest {
             registryRef.set(reg);
             var params = Map.of("apiKey", "${vault:openai-key}");
 
-            StreamingChatModel racing = reg.getOrCreateStreaming("openai", params);
+            StreamingChatModel racing = reg.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotNull(racing, "the racing caller still receives its freshly built streaming model");
 
-            StreamingChatModel afterRace = reg.getOrCreateStreaming("openai", params);
+            StreamingChatModel afterRace = reg.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertNotSame(racing, afterRace,
                     "a streaming model built from values a concurrent rotation made stale must NOT be cached");
 
-            StreamingChatModel stable = reg.getOrCreateStreaming("openai", params);
+            StreamingChatModel stable = reg.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertSame(afterRace, stable, "with no further invalidation, the rebuilt streaming model caches normally");
 
             assertEquals(2, buildCount.get(),
@@ -1120,11 +1134,11 @@ class ChatModelRegistryTest {
             ChatModelRegistry reg = capturing();
             var params = Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3", "maxCompletionTokens", "500");
 
-            reg.getOrCreate("openai", params);
+            reg.getOrCreate("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertFalse(built.get().containsKey("temperature"));
             assertEquals("500", built.get().get("maxCompletionTokens"));
 
-            reg.getOrCreateStreaming("openai", params);
+            reg.getOrCreateStreaming("openai", params, SecretAccess.outsideAgentGrants("test"));
             assertFalse(builtStreaming.get().containsKey("temperature"));
             assertEquals("o3", builtStreaming.get().get("modelName"));
         }
@@ -1133,7 +1147,7 @@ class ChatModelRegistryTest {
         @DisplayName("a parameter the model accepts is passed on unchanged")
         void acceptedIsKept() throws Exception {
             ChatModelRegistry reg = capturing();
-            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "gpt-4o", "temperature", "0.3"));
+            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "gpt-4o", "temperature", "0.3"), SecretAccess.outsideAgentGrants("test"));
             assertEquals("0.3", built.get().get("temperature"));
         }
 
@@ -1141,7 +1155,8 @@ class ChatModelRegistryTest {
         @DisplayName("a parameter the model ignores is kept")
         void ignoredIsKept() throws Exception {
             ChatModelRegistry reg = capturing();
-            reg.getOrCreate("gemini", Map.of("apiKey", "k", "modelName", "gemini-3.8-flash", "temperature", "0.3"));
+            reg.getOrCreate("gemini", Map.of("apiKey", "k", "modelName", "gemini-3.8-flash", "temperature", "0.3"),
+                    SecretAccess.outsideAgentGrants("test"));
             assertEquals("0.3", built.get().get("temperature"));
         }
 
@@ -1150,9 +1165,10 @@ class ChatModelRegistryTest {
         void dropDisabled() throws Exception {
             ChatModelRegistry reg = capturing();
             reg.dropRejectedParameters = false;
-            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"));
+            reg.getOrCreate("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"), SecretAccess.outsideAgentGrants("test"));
             assertEquals("0.3", built.get().get("temperature"));
-            reg.getOrCreateStreaming("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"));
+            reg.getOrCreateStreaming("openai", Map.of("apiKey", "k", "modelName", "o3", "temperature", "0.3"),
+                    SecretAccess.outsideAgentGrants("test"));
             assertEquals("0.3", builtStreaming.get().get("temperature"));
         }
 
@@ -1160,7 +1176,8 @@ class ChatModelRegistryTest {
         @DisplayName("the catalog gates on the resolved model, after global variables and secrets")
         void gatesOnResolvedValues() throws Exception {
             ChatModelRegistry reg = capturing();
-            reg.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "modelName", "o4-mini", "topP", "0.9"));
+            reg.getOrCreate("openai", Map.of("apiKey", "${vault:openai-key}", "modelName", "o4-mini", "topP", "0.9"),
+                    SecretAccess.outsideAgentGrants("test"));
             assertEquals("resolved-secret", built.get().get("apiKey"));
             assertFalse(built.get().containsKey("topP"));
         }

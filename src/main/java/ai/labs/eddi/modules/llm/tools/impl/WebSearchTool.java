@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.model.SecretReference;
+import ai.labs.eddi.secrets.SecretAccess;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.P;
@@ -256,11 +257,18 @@ public class WebSearchTool {
      * The Brave key with a {@code ${vault:...}} reference resolved. A reference the
      * vault cannot resolve is refused rather than sent as the credential.
      */
+    /**
+     * The Brave key is deployment configuration
+     * ({@code eddi.tools.websearch.brave.api-key}), shared by every agent that
+     * enables web search; no agent configured it, so no agent grant governs it.
+     */
+    private static final SecretAccess BRAVE_KEY = SecretAccess.outsideAgentGrants("web search provider key (deployment configuration)");
+
     private String resolveBraveKey() throws IOException {
         String key = rawBraveKey().filter(SecretReference::isVaultReference).orElse(braveApiKey.orElseThrow()).trim();
         if (SecretReference.isVaultReference(key)) {
             if (secretResolver != null) {
-                key = secretResolver.resolveValue(key);
+                key = secretResolver.resolveValue(key, BRAVE_KEY);
             }
             if (key == null || SecretReference.isVaultReference(key)) {
                 throw new IOException("eddi.tools.websearch.brave.api-key names a vault secret that could not be resolved");

@@ -208,13 +208,13 @@ class RagContextProviderChunkStrategyTest {
         }
 
         EmbeddingModel embeddingModel = mock(EmbeddingModel.class);
-        when(embeddingModelFactory.getOrCreate(any(), any())).thenReturn(embeddingModel);
+        when(embeddingModelFactory.getOrCreate(any(), any(), any())).thenReturn(embeddingModel);
 
         var embedding = Embedding.from(new float[]{0.1f, 0.2f, 0.3f});
         when(embeddingModel.embed(anyString())).thenReturn(Response.from(embedding));
 
         EmbeddingStore<TextSegment> store = mock(EmbeddingStore.class);
-        when(embeddingStoreFactory.getOrCreate(anyString(), any())).thenReturn(store);
+        when(embeddingStoreFactory.getOrCreate(anyString(), any(), any())).thenReturn(store);
 
         var match = new EmbeddingMatch<>(0.9, "id-1", embedding, TextSegment.from(contentText));
         when(store.search(any(EmbeddingSearchRequest.class))).thenReturn(new EmbeddingSearchResult<>(List.of(match)));
