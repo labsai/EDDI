@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.internal.TurnNotStored;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.setup.AgentSetupService;
@@ -86,6 +87,25 @@ class CreateSubAgentToolHitlTest {
         assertTrue(result.contains("busy"), result);
         assertTrue(result.contains("not delivered"), result);
         assertFalse(result.contains("PAUSED_FOR_APPROVAL"), result);
+    }
+
+    @Test
+    void initialTurnNotStored_isNeverReportedAsTheInitialResponse() throws Exception {
+        // S4: the initial turn ran but was not stored in the sub-agent's conversation.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        TurnNotStored.withoutAnswer(snapshot, TurnNotStored.Reason.CONFLICT.error());
+
+        Answer<Void> deliver = invocation -> {
+            ConversationResponseHandler handler = invocation.getArgument(8);
+            handler.onComplete(snapshot);
+            return null;
+        };
+        doAnswer(deliver).when(conversationService).say(any(), eq("sub-1"), eq("conv-init"),
+                any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tool.createSubAgent("helper", "You help.", null, null, "bootstrap context", false);
+
+        assertTrue(result.contains("Initial message not stored"), result);
     }
 
     @Test

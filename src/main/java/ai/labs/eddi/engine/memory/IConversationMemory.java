@@ -300,6 +300,36 @@ public interface IConversationMemory extends Serializable {
         return false;
     }
 
+    /**
+     * A side effect of a turn that must happen only once the turn's conversation
+     * write has succeeded — the turn's long-term property writes to the user memory
+     * store (A5). Run by whoever stores the turn, right after the store; a turn
+     * that is not stored never runs it.
+     */
+    @FunctionalInterface
+    interface AfterCommit {
+        void run() throws Exception;
+    }
+
+    /**
+     * Hands {@code action} to the turn's committer, to run once the turn is stored.
+     * Transient, never persisted; at most one per turn, a later call replaces it.
+     *
+     * @return {@code false} when this memory cannot defer it (the caller then runs
+     *         the action at once, as before the deferral existed)
+     */
+    default boolean deferUntilCommitted(AfterCommit action) {
+        return false;
+    }
+
+    /**
+     * Takes the action {@link #deferUntilCommitted} left, or {@code null}. The
+     * committer calls it once, right after the turn's store succeeded.
+     */
+    default AfterCommit takeAfterCommit() {
+        return null;
+    }
+
     // === HITL pause bookmark ===
 
     /** Workflow ID where the pipeline paused. */
@@ -483,6 +513,31 @@ public interface IConversationMemory extends Serializable {
      * @since 6.2.0
      */
     default void setPendingLongTermWrites(Set<String> keys) {
+        // no-op by default
+    }
+
+    /**
+     * When this conversation last changed each owed key (epoch milliseconds), for
+     * the keys of {@link #getPendingLongTermWrites()}. A write that makes up for an
+     * earlier turn checks it against the user memory store and leaves a value
+     * another conversation wrote later alone (F4). A key with no time (a marker
+     * stored before the times existed) is treated as old.
+     */
+    default Map<String, Long> getPendingLongTermWritesSince() {
+        return Map.of();
+    }
+
+    /** See {@link #getPendingLongTermWritesSince()}. */
+    default void setPendingLongTermWritesSince(Map<String, Long> since) {
+        // no-op by default
+    }
+
+    /**
+     * The id the store gave a conversation on its first write, for a memory that
+     * was created without one (the conversation's start turn). Ignored once the
+     * memory has an id.
+     */
+    default void assignConversationId(String conversationId) {
         // no-op by default
     }
 

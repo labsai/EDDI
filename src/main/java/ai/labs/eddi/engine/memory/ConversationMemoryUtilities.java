@@ -73,6 +73,7 @@ public class ConversationMemoryUtilities {
         // exists to prevent (the next turn's baseline is taken from those very
         // properties, so an owed write would look "unchanged" forever).
         snapshot.getPendingLongTermWrites().addAll(conversationMemory.getPendingLongTermWrites());
+        snapshot.getPendingLongTermWritesSince().putAll(conversationMemory.getPendingLongTermWritesSince());
 
         return snapshot;
     }
@@ -193,6 +194,7 @@ public class ConversationMemoryUtilities {
         conversationMemory.setHitlPlanHash(snapshot.getHitlPlanHash());
         conversationMemory.getConversationProperties().putAll(snapshot.getConversationProperties());
         conversationMemory.setPendingLongTermWrites(snapshot.getPendingLongTermWrites());
+        conversationMemory.setPendingLongTermWritesSince(snapshot.getPendingLongTermWritesSince());
 
         var redoSteps = iterateRedoCache(snapshot.getRedoCache());
         for (var redoStep : redoSteps) {

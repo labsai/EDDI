@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.engine.internal.groups.LiveDiscussionRegistry;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.ConversationGroups;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.ConversationMemoryTail;
@@ -65,6 +66,7 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.model.Deployment;
 import ai.labs.eddi.engine.model.Deployment.Environment;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.modules.nlp.expressions.utilities.ExpressionLimits;
@@ -190,6 +192,17 @@ public class ConversationService implements IConversationService, UserErasurePar
      */
     @ConfigProperty(name = "eddi.conversations.max-input-chars", defaultValue = "200000")
     int maxInputChars;
+
+    /**
+     * The largest conversation document a write may produce, in bytes (estimated;
+     * see {@code ConversationStepRunner#requireWithinDocumentLimit}); {@code <= 0}
+     * leaves it to the database. The default stays below MongoDB's 16 MB document
+     * limit and applies to PostgreSQL as well, so both backends refuse the same
+     * turn. Field-injected; {@code 0} (off) for the services tests build with
+     * {@code new}.
+     */
+    @ConfigProperty(name = "eddi.conversations.max-document-bytes", defaultValue = "14680064")
+    long maxConversationDocumentBytes;
 
     /**
      * Bounds for {@code context} entries of type {@code expressions}, applied with
@@ -1364,6 +1377,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                     }
 
                     @Override
+                    public void notStored(SimpleConversationMemorySnapshot snapshot) {
+                        // The tokens cannot be taken back: the stream ends with an error that
+                        // says the turn was not stored, not with a done event for it.
+                        streamingHandler.onError(new TurnNotStored.TurnNotStoredException(snapshot.getError()));
+                    }
+
+                    @Override
                     public ConversationEventSink eventSink() {
                         return eventSink;
                     }
@@ -1393,6 +1413,16 @@ public class ConversationService implements IConversationService, UserErasurePar
         void completed(SimpleConversationMemorySnapshot snapshot);
 
         void skipped(SimpleConversationMemorySnapshot snapshot);
+
+        /**
+         * The turn ran but its write failed: the snapshot is marked {@code ERROR} and
+         * carries a {@link TurnNotStored} error. A plain turn is completed with it (the
+         * REST layer answers it with an error status); a streamed one ends with an
+         * {@code error} event instead of {@code done}.
+         */
+        default void notStored(SimpleConversationMemorySnapshot snapshot) {
+            completed(snapshot);
+        }
 
         /**
          * The turn was dropped unrun because its caller had stopped waiting
@@ -1566,6 +1596,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                                 + " POST /agents/" + conversationId + "/resume (or cancel) before new input is accepted");
             }
 
+            // S6: a conversation already over eddi.conversations.max-document-bytes cannot
+            // store another turn. Refused here, before the pipeline, instead of after every
+            // model and tool call has been paid for (an upgrade puts existing ones there).
+            if (maxConversationDocumentBytes > 0) {
+                conversationStepRunner.requireWithinDocumentLimit(preloaded != null ? preloaded : convertConversationMemory(conversationMemory));
+            }
+
             IAgent resolvedAgent = resolveConversationAgent(environment, conversationMemory);
             if (resolvedAgent == null) {
                 final IConversationMemory memoryToResolve = conversationMemory;
@@ -1582,6 +1619,13 @@ public class ConversationService implements IConversationService, UserErasurePar
                 String msg = "Agent not deployed (environment=%s, conversationId=%s, version=%s)";
                 msg = String.format(msg, environment, conversationMemory.getAgentId(), agentVersion);
                 throw new AgentNotReadyException(msg);
+            }
+            if (agent.getDeploymentStatus() == Deployment.Status.ERROR) {
+                // A failed deployment leaves a placeholder (the agent was deleted, or a
+                // config it names is gone) whose continueConversation throws "deployment
+                // still in progress" — a 500 for what is "this agent cannot run" (A12).
+                throw new AgentNotReadyException(String.format("Agent deployment failed (environment=%s, agentId=%s, version=%s)",
+                        environment, conversationMemory.getAgentId(), agent.getAgentVersion()));
             }
 
             // In-flight admission BEFORE the quota slot: a turn refused for capacity
@@ -1692,7 +1736,7 @@ public class ConversationService implements IConversationService, UserErasurePar
                             }
                             recordAgentVersionMove(returnConversationMemory, storedVersion);
                             recordMetrics(timerConversationProcessing, counterConversationProcessing, startTime);
-                            completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed);
+                            completeTurn(processingTurn, conversationId, memorySnapshot, listener::completed, listener::notStored);
                         });
 
                 if (conversation.isEnded()) {
@@ -1707,7 +1751,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.rerun(inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
-                            listener.pipelineFailed(e);
+                            // After the (deferred) snapshot, as before the delivery waited for the write.
+                            processingTurn.deferredDelivery.runAfterDelivery(() -> listener.pipelineFailed(e));
                         }
                         return null;
                     };
@@ -1718,7 +1763,8 @@ public class ConversationService implements IConversationService, UserErasurePar
                             conversation.say(inputData.getInput(), inputData.getContext());
                         } catch (LifecycleException | IConversation.ConversationNotReadyException e) {
                             LOGGER.error(e.getLocalizedMessage(), e);
-                            listener.pipelineFailed(e);
+                            // After the (deferred) snapshot, as before the delivery waited for the write.
+                            processingTurn.deferredDelivery.runAfterDelivery(() -> listener.pipelineFailed(e));
                         }
                         return null;
                     };
@@ -1747,7 +1793,8 @@ public class ConversationService implements IConversationService, UserErasurePar
             // TenantQuotaService.recordDenial's own.
             releaseTurn(admittedTurn);
             throw e;
-        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException | IllegalArgumentException e) {
+        } catch (AgentMismatchException | AgentNotReadyException | ConversationEndedException | IllegalArgumentException
+                | ConversationTooLargeException e) {
             // IllegalArgumentException: a malformed conversation id, refused by the store
             // before any lookup. A client mistake (the REST layer answers 400), not a
             // fault worth an ERROR stack trace.
@@ -1888,8 +1935,11 @@ public class ConversationService implements IConversationService, UserErasurePar
         // invariant crash recovery relies on. Checked against the loaded
         // (DB-backed) state; false maps to 409 CONFLICT at the REST layer.
         ConversationState loadedStateForUndo = conversationMemory.getConversationState();
+        // A9: an ENDED conversation is not edited either — say and rerun refuse it, and
+        // undo/redo rewrote its history (the REST layer answers 410 for it).
         if (loadedStateForUndo == ConversationState.AWAITING_HUMAN
-                || loadedStateForUndo == ConversationState.IN_PROGRESS) {
+                || loadedStateForUndo == ConversationState.IN_PROGRESS
+                || loadedStateForUndo == ConversationState.ENDED) {
             LOGGER.warnf("Undo rejected: conversation %s is in state %s", conversationId, loadedStateForUndo);
             return false;
         }
@@ -1951,8 +2001,10 @@ public class ConversationService implements IConversationService, UserErasurePar
         // redo during IN_PROGRESS races an executing resume (see undo).
         // DB-backed state check; false maps to 409 CONFLICT at the REST layer.
         ConversationState loadedStateForRedo = conversationMemory.getConversationState();
+        // A9: nor an ENDED one (see undoLoaded).
         if (loadedStateForRedo == ConversationState.AWAITING_HUMAN
-                || loadedStateForRedo == ConversationState.IN_PROGRESS) {
+                || loadedStateForRedo == ConversationState.IN_PROGRESS
+                || loadedStateForRedo == ConversationState.ENDED) {
             LOGGER.warnf("Redo rejected: conversation %s is in state %s", conversationId, loadedStateForRedo);
             return false;
         }
@@ -2676,9 +2728,10 @@ public class ConversationService implements IConversationService, UserErasurePar
             if (!storedIsLongTerm && !targetIsLongTerm) {
                 return;
             }
-            // GDPR bookkeeping is never written from a conversation — the store refuses
-            // it, as the turn boundary does (Conversation.storePropertiesPermanently).
-            if (IUserMemoryStore.isReservedKey(key)) {
+            // GDPR bookkeeping and engine keys are never written from a conversation —
+            // the store refuses them, as the turn boundary does
+            // (Conversation.storePropertiesPermanently).
+            if (IUserMemoryStore.isRefusedWriteKey(key)) {
                 return;
             }
             try {
@@ -2842,6 +2895,11 @@ public class ConversationService implements IConversationService, UserErasurePar
             @Override
             public ConversationGroups.MembershipCheck getGroupMembershipCheck() {
                 return groupMembershipCheck();
+            }
+
+            @Override
+            public void countLongTermWrite(String outcome) {
+                ConversationService.this.countLongTermWrite(outcome);
             }
         };
     }
@@ -3336,42 +3394,81 @@ public class ConversationService implements IConversationService, UserErasurePar
      * Completes a turn towards the client — the single place that decides WHEN the
      * sync response / streaming {@code done} may be sent.
      * <p>
-     * <b>Ordering contract.</b>
+     * <b>Ordering contract.</b> No turn is delivered here. Its memory is only
+     * written afterwards by the runtime's {@code onComplete}
+     * ({@code ConversationStepRunner.runGuardedConversationStep}), so the delivery
+     * is deferred and runs from that persistence step once the write's outcome is
+     * known:
      * <ul>
-     * <li>A turn that ends {@code AWAITING_HUMAN} is NOT delivered here. Its pause
-     * is only written afterwards by the runtime's {@code onComplete}
-     * ({@code ConversationStepRunner.runGuardedConversationStep}), and a client
-     * told "paused" before that write reads {@code approval-status} /
-     * {@code pending-approvals} and finds no pause (or one with no details). The
-     * delivery is deferred and runs from that persistence step, with the state the
-     * store really holds — so a pause that was not committed (lost CAS, cancel
-     * race, store failure) is reported as what it became, never as a phantom pause.
-     * The state cache is updated from the same committed state.</li>
-     * <li>Every other turn is delivered immediately, exactly as before: its
-     * snapshot already matches what the store will hold (or a revision-conflict
-     * handler corrects it), and the next turn of the conversation is serialized
-     * behind this one by the coordinator, so holding it back would add latency for
-     * no consistency gain.</li>
+     * <li>stored — the snapshot is delivered as it is (a pause with the state the
+     * store really holds, so a pause that was not committed is reported as what it
+     * became, never as a phantom pause);</li>
+     * <li>not stored (the write failed: document too large, a data error, a fence,
+     * a revision conflict, any driver failure) — the snapshot is marked
+     * {@code ERROR} with a {@link TurnNotStored} error and handed to
+     * {@code notStoredCompletion}, never delivered as done;</li>
+     * <li>discarded (cancelled, abandoned) — the snapshot carries the state the
+     * store holds.</li>
      * </ul>
-     * The delivery runs at most once; the turn's {@code finally} and its failure
-     * callback flush a still-pending one, so the stream always terminates.
+     * Delivered from the pipeline's callback, before the write, a turn whose write
+     * then failed was answered 200/{@code READY} although it did not exist (A1);
+     * the price of the order is the write's latency on every answer. The state
+     * cache is updated from the delivered state. The delivery runs at most once;
+     * the turn's {@code finally} and its failure callback flush a still-pending
+     * one, so the stream always terminates.
      */
     private void completeTurn(ProcessingTurn processingTurn, String conversationId, SimpleConversationMemorySnapshot memorySnapshot,
-                              Consumer<SimpleConversationMemorySnapshot> clientCompletion) {
-        if (memorySnapshot.getConversationState() == ConversationState.AWAITING_HUMAN) {
-            processingTurn.deferredDelivery.defer(committedState -> {
-                if (committedState != null) {
-                    memorySnapshot.setConversationState(committedState);
-                    cacheConversationState(conversationId, committedState);
-                }
+                              Consumer<SimpleConversationMemorySnapshot> clientCompletion,
+                              Consumer<SimpleConversationMemorySnapshot> notStoredCompletion) {
+        processingTurn.deferredDelivery.defer(committedState -> {
+            TurnError notStored = processingTurn.deferredDelivery.notStored();
+            if (notStored != null) {
+                // S4: carries no answer — every surface (MCP, Slack, sub-agent tools,
+                // group members) reads the turn as failed, none as a reply.
+                TurnNotStored.withoutAnswer(memorySnapshot, notStored);
                 processingTurn.release();
-                clientCompletion.accept(memorySnapshot);
-            });
-            return;
+                notStoredCompletion.accept(memorySnapshot);
+                return;
+            }
+            if (committedState != null) {
+                memorySnapshot.setConversationState(committedState);
+            }
+            cacheConversationState(conversationId, memorySnapshot.getConversationState());
+            processingTurn.release();
+            clientCompletion.accept(memorySnapshot);
+        });
+    }
+
+    /**
+     * A turn ran but its write failed ({@code eddi_turn_not_stored_total}, tagged
+     * by {@link TurnNotStored.Reason#tag()}). Never throws.
+     */
+    void countTurnNotStored(TurnNotStored.Reason reason) {
+        try {
+            Counter counter = meterRegistry.counter("eddi.turn.not_stored", "reason", reason.tag());
+            if (counter != null) {
+                counter.increment();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count a turn that was not stored: %s", e.getMessage());
         }
-        cacheConversationState(conversationId, memorySnapshot.getConversationState());
-        processingTurn.release();
-        clientCompletion.accept(memorySnapshot);
+    }
+
+    /**
+     * A deferred long-term memory write that failed after its turn was stored, or
+     * was dropped with a turn that was not
+     * ({@code eddi_turn_long_term_writes_total}, tag {@code outcome}). Never
+     * throws.
+     */
+    void countLongTermWrite(String outcome) {
+        try {
+            Counter counter = meterRegistry.counter("eddi.turn.long_term_writes", "outcome", outcome);
+            if (counter != null) {
+                counter.increment();
+            }
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not count a long-term memory write: %s", e.getMessage());
+        }
     }
 
     void cacheConversationState(String conversationId, ConversationState conversationState) {

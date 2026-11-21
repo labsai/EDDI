@@ -58,6 +58,8 @@ public class UserMemoryTool {
     private static final String TURN_DISCARDED_REFUSAL = "⚠️ This turn has been cancelled; nothing was stored or changed.";
     private static final String RESERVED_KEY_REFUSAL = "⚠️ Keys starting with '%s' are reserved for GDPR bookkeeping and cannot be "
             + "written or forgotten by an agent.";
+    private static final String ENGINE_KEY_REFUSAL = "⚠️ Keys starting with '%s' are the conversation's own engine properties and "
+            + "cannot be stored as memories. Choose another key.";
 
     private final IUserMemoryStore store;
     private final String userId;
@@ -179,6 +181,12 @@ public class UserMemoryTool {
         // restriction row in place.
         if (IUserMemoryStore.isReservedKey(key.trim())) {
             return RESERVED_KEY_REFUSAL.formatted(IUserMemoryStore.RESERVED_KEY_PREFIX);
+        }
+        // The engine's own conversation properties (the rolling summary and its step
+        // marker): a memory under such a key would replace them in every conversation
+        // of this user (A6).
+        if (IUserMemoryStore.isEngineKey(key)) {
+            return ENGINE_KEY_REFUSAL.formatted(IUserMemoryStore.ENGINE_KEY_PREFIX);
         }
 
         // Guardrail: value length

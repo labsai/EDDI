@@ -43,16 +43,16 @@ for anything this page does not cover.
 | Method & path | Purpose | Success |
 | --- | --- | --- |
 | `POST /agents/{agentId}/start` | Start a conversation (optionally with a context map) | `201` + `Location` |
-| `POST /agents/{conversationId}` | Send a message (text or JSON), wait for the reply | `200` snapshot |
+| `POST /agents/{conversationId}` | Send a message (text or JSON), wait for the reply — answered once the turn is stored | `200` snapshot |
 | `POST /agents/{conversationId}/stream` | Send a message, receive the turn as Server-Sent Events | `200` `text/event-stream` |
 | `POST /agents/{conversationId}/resume/stream` | Decide a paused conversation and receive the resumed turn as Server-Sent Events | `200` `text/event-stream` |
 | `GET /agents/{conversationId}` | Read the conversation | `200` snapshot |
 | `GET /agents/{conversationId}/status` | Read the conversation state | `200` `"READY"` |
 | `GET /agents/{conversationId}/log` | Conversation history as chat messages | `200` |
-| `GET` / `POST /agents/{conversationId}/undo` | Is undo available? / undo the last turn | `200` |
-| `GET` / `POST /agents/{conversationId}/redo` | Is redo available? / redo | `200` |
+| `GET` / `POST /agents/{conversationId}/undo` | Is undo available? / undo the last turn (`409` when nothing changed, `410` on an ended conversation) | `200` |
+| `GET` / `POST /agents/{conversationId}/redo` | Is redo available? / redo (`409` when nothing changed, `410` on an ended conversation) | `200` |
 | `POST /agents/{conversationId}/rerun` | Re-execute the last turn | `200` snapshot |
-| `POST /agents/{conversationId}/endConversation` | End the conversation | `200` |
+| `POST /agents/{conversationId}/endConversation` | End the conversation (`404` for an unknown id) | `200` |
 | `POST /agents/{conversationId}/cancel` | Cancel an executing or paused turn | `200` |
 | `POST /agents/{conversationId}/resume` | Submit a human decision for a paused turn | `200` |
 | `GET /agents/{conversationId}/approval-status` | Pause details of a conversation | `200` |
@@ -293,7 +293,7 @@ Rules for clients:
 - **An `error` before anything ran carries a `code`.** When the turn is refused
   up front — the cases the blocking endpoint answers with a status — the event is
   `{"message":"…","code":"…"}` with `code` one of `awaiting_approval`,
-  `conversation_not_found`, `input_too_large`, `conversation_ended`,
+  `conversation_not_found`, `input_too_large`, `conversation_ended`, `conversation_too_large`,
   `agent_not_ready`, `agent_mismatch`, `quota_exceeded`,
   `quota_accounting_unavailable`, `processing_restricted` or
   `restriction_status_unavailable`. Branch on `code`, show `message`. Captured:
@@ -308,6 +308,14 @@ Rules for clients:
   that then carries none of its events for `systemRuntime.agentTimeoutInSeconds`
   plus one keep-alive interval ends with `code` `turn_timeout` (the turn was
   abandoned and never returned); retry the message.
+- **A turn that ran but was not stored ends with an `error`, not `done`.** Its
+  tokens are already on the wire, so the last event is
+  `{"message":"…","code":"turn_not_stored","reason":"…","retryable":…}` —
+  `reason` one of `conversation_too_large`, `data_rejected`, `conflict`, `conversation_ended`, `outcome_unknown`,
+  `fenced`, `store_failure` (see
+  [When a turn is not stored](conversation-memory.md#when-a-turn-is-not-stored)).
+  The turn is not in the conversation: show the error in place of the streamed
+  answer. `done` is sent only after the turn was stored.
 - **Ownership and input size are checked before the stream opens,** so those
   failures are plain `403` / `413` responses, not SSE events.
 - **`/resume/stream` does not cancel on disconnect by default.** A resume is a
@@ -386,7 +394,7 @@ curl -s "$EDDI/agents/<CONVERSATION_ID>/log?logSize=4"
 curl -s "$EDDI/agents/<CONVERSATION_ID>/undo"              # → true   (text/plain)
 curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>/undo"      # → 200
 curl -s "$EDDI/agents/<CONVERSATION_ID>/redo"              # → true
-curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>/redo"      # → 200; 409 when there is nothing to redo
+curl -s -X POST "$EDDI/agents/<CONVERSATION_ID>/redo"      # → 200; 409 when there is nothing to redo, 410 once ended
 ```
 
 Undo removes the last turn from the conversation and keeps it for redo; sending a
@@ -629,13 +637,15 @@ admin endpoints, described under
 | `400` | `Request body must include a 'verdict' field …` | Malformed request |
 | `401` | — | OIDC on and no or invalid token |
 | `403` | — | Wrong role, not the conversation's owner, or processing restricted for this user ([GDPR](gdpr-compliance.md)) |
-| `404` | `Agent is not deployed or not ready` | No `READY` deployment of the agent in that environment |
+| `404` | `Agent is not deployed or not ready` | No `READY` deployment of the agent in that environment — also when the agent's deployment failed, for example because the agent or a configuration it names was deleted while conversations were open |
 | `404` | `No conversation found! (conversationId=…)`; `Conversation not found.` from cancel, resume and approval-status | Unknown conversation id |
 | `409` | `Nothing to cancel: …` | The conversation's state does not allow the call — awaiting approval, nothing to redo, nothing to cancel |
-| `410` | `Conversation has ended` | Message to an ended conversation |
+| `410` | `Conversation has ended` | Message, rerun, undo or redo on an ended conversation |
 | `413` | — | Input longer than `eddi.conversations.max-input-chars`, or a `context` entry of type `expressions` longer or nested deeper than `eddi.expressions.max-length` / `eddi.expressions.max-depth` allow |
 | `422` | `{"error": "agent_misconfigured", "message": "API call 'weather': header 'X-Api-Key' references ${vault:api-key} (no tenant given, so tenant 'default'), which could not be resolved: ...", "retryable": false}` | `POST /agents/{agentId}/start` only: the agent's own `CONVERSATION_START` turn hit a configuration it cannot run — a `${vault:…}` reference that names no secret in the tenant it is looked up in (or no vault is configured), or a secret sent to a host its [`allowedHosts`](secrets-vault.md#destination-allow-list-allowedhosts) does not name. No conversation was created; fix the configuration rather than retrying. A server-side failure (the vault could not be read, the database failed) stays a `500` |
-| `408` | `caller_timed_out` | The caller's wait for the turn ran out (see [metrics.md](metrics.md)) |
+| `408` | `{"error": {"code": "REQUEST_TIMEOUT", …}}` | The caller's wait for the turn ran out (`eddi_turn_rejected_total` / `eddi_turn_skipped_total` `reason="caller_timed_out"`, see [metrics.md](metrics.md)). The turn may still finish: read the conversation before sending again |
+| `409`, `410`, `422`, `503`, `507` | `{"error": {"code": "TURN_NOT_STORED", "errorType": "conflict" \| "fenced" \| "conversation_ended" \| "data_rejected" \| "store_failure" \| "outcome_unknown" \| "conversation_too_large", "retryable": …, "message": …}}` | `POST /agents/{conversationId}` and `/rerun`: the turn ran but is not (or not verifiably) in the conversation — `409` another request or node changed the conversation meanwhile (with `Retry-After`), `410` it was ended meanwhile, `422` the database refused the content, `503` `store_failure` the database did not confirm the write and `503` `outcome_unknown` the turn did not finish in time — for these two it *may* have been stored, so read the conversation before sending again — and `507` the conversation reached `eddi.conversations.max-document-bytes`. A stream ends with an `error` event `{"code": "turn_not_stored", "reason": …}` instead of `done`. See [Conversation memory](conversation-memory.md#when-a-turn-is-not-stored) |
+| `507` | `{"error": {"code": "CONVERSATION_TOO_LARGE", …}}` | `POST /agents/{conversationId}` and `/rerun`: the stored conversation is already over `eddi.conversations.max-document-bytes`; the message was refused before it ran. Start a new conversation |
 | `429` | — | A [tenant quota](tenant-quotas.md) is exhausted |
 | `503` | `capacity_exceeded` (with `Retry-After`) | The node is at its in-flight turn limit (`eddi.conversation.max-in-flight-turns`), the per-conversation queue is full or the database pool is exhausted; retry after the delay |
 | `503` | — | Quota accounting or the GDPR restriction status could not be read; retry |

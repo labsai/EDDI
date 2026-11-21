@@ -15,6 +15,8 @@ import ai.labs.eddi.engine.api.IRestAgentAdministration;
 import ai.labs.eddi.engine.api.IRestAgentEngine;
 import ai.labs.eddi.engine.audit.rest.IRestAuditStore;
 import ai.labs.eddi.engine.memory.descriptor.IConversationDescriptorStore;
+import ai.labs.eddi.engine.internal.TurnNotStored;
+import ai.labs.eddi.engine.memory.model.ConversationOutput;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -33,7 +35,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
@@ -195,6 +199,29 @@ class McpConversationToolsHitlTest {
         assertTrue(result.contains("/resume"));
         assertTrue(result.contains("AWAITING_HUMAN"));
         assertTrue(result.contains("\"suggestNextTool\":\"resume_conversation\""), result);
+    }
+
+    @Test
+    void talkToAgent_turnNotStored_carriesNoAgentResponse() throws Exception {
+        // S4: a turn that ran but was not stored — the snapshot the engine delivers
+        // carries no answer, so the tool cannot present one; it reports the error.
+        var snapshot = new SimpleConversationMemorySnapshot();
+        var output = new ConversationOutput();
+        output.put("output", List.of(Map.of("type", "text", "text", "the unstored answer")));
+        snapshot.setConversationOutputs(new ArrayList<>(List.of(output)));
+        TurnNotStored.withoutAnswer(snapshot, TurnNotStored.Reason.CONVERSATION_TOO_LARGE.error());
+        doAnswer(inv -> {
+            ConversationResponseHandler handler = inv.getArgument(6);
+            handler.onComplete(snapshot);
+            return null;
+        }).when(conversationService).say(eq("conv-1"), any(), any(), any(), any(), anyBoolean(), any());
+
+        String result = tools.talkToAgent("agent-1", "conv-1", "hello", "production");
+
+        assertFalse(result.contains("agentResponse"), result);
+        assertFalse(result.contains("the unstored answer"), result);
+        assertTrue(result.contains("TURN_NOT_STORED"), result);
+        assertTrue(result.contains("ERROR"), result);
     }
 
     @Test

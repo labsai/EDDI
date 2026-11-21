@@ -14,13 +14,17 @@ import ai.labs.eddi.engine.api.IConversationService.ConversationNotFoundExceptio
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
 import ai.labs.eddi.engine.memory.ConcurrentConversationModificationException;
+import ai.labs.eddi.engine.memory.ConversationDocumentSize;
+import ai.labs.eddi.engine.memory.ConversationTooLargeException;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.IData;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.Deployment.Environment;
+import ai.labs.eddi.engine.model.TurnError;
 import ai.labs.eddi.engine.cluster.lease.LeaseHandle;
 import ai.labs.eddi.engine.cluster.lease.LeaseUnavailableException;
 import ai.labs.eddi.engine.memory.ConversationFencedException;
@@ -31,14 +35,18 @@ import ai.labs.eddi.engine.runtime.ILeaseAwareTask;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.security.CallerIdentity;
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
@@ -115,6 +123,9 @@ class ConversationStepRunner {
         this.conversationStateCache = conversationStateCache;
         this.inFlightConversations = inFlightConversations;
         this.agentTimeout = agentTimeout;
+        Cache<String, Long> fences = Caffeine.newBuilder().maximumSize(RAISED_FENCES_MAX)
+                .expireAfterWrite(raisedFenceRetention(agentTimeout)).build();
+        this.raisedFences = fences.asMap();
     }
 
     /**
@@ -258,11 +269,11 @@ class ConversationStepRunner {
                         throw fenced;
                     }
                     if (conflicted != null && lease != null) {
-                        // Cluster mode (A4): the turn's reply already went out, then its write
-                        // lost to another writer of the document (an undo, a degraded-mode turn
-                        // on another node, a resume). Logged and counted as before — and now
-                        // dead-lettered with its input as well, so a turn whose caller was told
-                        // it ran is not lost without a trace.
+                        // Cluster mode (A4): the turn's write lost to another writer of the
+                        // document (an undo, a degraded-mode turn on another node, a resume).
+                        // Logged and counted, its caller told it was not stored — and
+                        // dead-lettered with its input as well, so it is not lost without a
+                        // trace.
                         failure = failureDetail(DeadLetterEntry.REASON_CONFLICT, lease.fence(), null);
                         throw conflicted;
                     }
@@ -274,12 +285,12 @@ class ConversationStepRunner {
                     // an entry that is never released leaks into the gauge forever.
                     // release() is one-shot, so releasing twice is a no-op.
                     //
-                    // The same applies to a deferred paused-turn delivery: the runtime
+                    // The same applies to a turn's deferred delivery: the runtime
                     // callbacks flush it, and this is the backstop for a turn that never
                     // reached either (cancelled before it ran, a runtime that dropped
                     // it) — the caller's response/stream must terminate exactly once.
                     // deliver() is one-shot too.
-                    flushDeferredDelivery(processingTurn, conversationId);
+                    flushDeferredDelivery(processingTurn, conversationMemory);
                     // finish(), not release(): this is where the task ends, so the
                     // in-flight permit is returned here, after the turn was persisted.
                     processingTurn.finish();
@@ -415,6 +426,11 @@ class ConversationStepRunner {
         if (storedFence != null) {
             detail.put("storedFence", storedFence);
         }
+        // S3: every turn dead-lettered from here (lease lost, fenced, conflict) has
+        // told
+        // its caller it was not stored and to send it again. A replay on top of that
+        // retry would run it twice, so the entry is a trace, not something to replay.
+        detail.put(DeadLetterEntry.TURN_ANSWERED_RETRY, true);
         return detail;
     }
 
@@ -633,6 +649,14 @@ class ConversationStepRunner {
                     leaseLostConversations.add(conversationId);
                     abandonTurn(leasedMemory);
                 });
+            } else if (lease == null) {
+                // Single node (F2): the turn writes with the fencing token of the document
+                // it loaded — or of a fence this node raised over an abandoned write since
+                // — so a write the watchdog abandoned can be refused once its caller was
+                // told it may not be stored (fenceAbandonedWrite). No extra round trip.
+                Long stored = conversationMemory.getStoredFence();
+                Long raised = raisedFences.remove(conversationId);
+                conversationMemory.setFenceToken(Math.max(stored != null ? stored : 0L, raised != null ? raised : 0L));
             }
             // Carry the agent-level tool-approval config onto memory BEFORE the
             // pipeline (LlmTask) runs, so the tool-approval gate can resolve its
@@ -645,6 +669,12 @@ class ConversationStepRunner {
                 abandoned = runGuardedConversationStep(loggingContext, conversationId, environment, conversationMemory,
                         registration.track(executeConversation), memoryStateAtSubmit, persistedState, processingTurn,
                         registration::dispatcherGaveUp);
+                if (abandoned && lease == null && processingTurn != null && processingTurn.deferredDelivery.isPending()) {
+                    // F2: the watchdog gave up while the turn's write may still be running;
+                    // it must not land after its caller is told it may not have been stored
+                    // (the delivery follows in the task's finally).
+                    fenceAbandonedWrite(conversationId, conversationMemory);
+                }
             } catch (RejectedExecutionException e) {
                 // The runtime refused the body (its pool is saturated or shutting down), so
                 // it never started and nothing of it ran. Answered busy rather than left to
@@ -883,9 +913,11 @@ class ConversationStepRunner {
      * only then — from a {@code finally}, on every exit — delivers it with the
      * state the store actually holds. {@code onFailure} and the task's own
      * {@code finally} flush a still-pending delivery, and delivery is one-shot, so
-     * the client's response / stream terminates exactly once on every path.
-     * Non-pause turns are answered immediately from the callback and are not
-     * affected.
+     * the client's response / stream terminates exactly once on every path. Every
+     * other say turn is deferred the same way (A1): it is answered once its write
+     * succeeded, and a turn whose write failed — checked or unchecked exception,
+     * size guard, fence, revision conflict — is answered as not stored
+     * ({@link TurnNotStored}), never as done.
      * <p>
      * <b>The late outcome of an abandoned turn is inert.</b> Once the watchdog
      * gives up, this method returns, the task ends and the coordinator starts the
@@ -920,6 +952,13 @@ class ConversationStepRunner {
                         // Set only once the pause is durably committed AND not cancel-raced.
                         // Drives what the deferred client completion reports (see finally).
                         boolean pauseCommitted = false;
+                        // Set once the turn's own write succeeded (pause or settled turn); a
+                        // failure after it is not a failed write.
+                        boolean written = false;
+                        // Set when the write failed: the caller is told the turn was not stored.
+                        TurnError notStored = null;
+                        // Set when the stored document still names owed keys that are now written.
+                        boolean clearMarkers = false;
                         try {
                             // #2 (say path parity with resume): a concurrent cancel/end
                             // may have signalled this in-flight memory (e.g. a group
@@ -941,6 +980,10 @@ class ConversationStepRunner {
                                     return;
                                 }
                                 if (discardLeaseLostTurn(conversationId, conversationMemory)) {
+                                    // S2: discarded and dead-lettered — its caller must hear that,
+                                    // not get the answer of a turn that is not stored.
+                                    notStored = reportTurnNotStored(loggingContext, conversationMemory, TurnNotStored.Reason.FENCED,
+                                            "lease lost");
                                     return;
                                 }
                                 settleCancelledTurn(conversationId);
@@ -988,7 +1031,7 @@ class ConversationStepRunner {
                                 // the terminal state stands — mirrors the resume path's
                                 // storeConversationMemoryIfState guard.
                                 boolean persisted = storeConversationMemoryIfState(
-                                        conversationMemory, environment, preTurnPersistedState);
+                                        conversationMemory, environment, preTurnPersistedState, true);
                                 if (!persisted) {
                                     conversationService.contextLogger.setLoggingContext(loggingContext);
                                     LOGGER.infof("Pause of conversation %s not persisted: a concurrent writer moved it "
@@ -1000,6 +1043,7 @@ class ConversationStepRunner {
                                     refreshCachedState(conversationId);
                                     return;
                                 }
+                                written = true;
                                 // M2: close the cancel-during-commit window. A cancel that
                                 // signalled setCancelled(true) AFTER the top-of-onComplete
                                 // check but BEFORE the store above returned CANCELLED to its
@@ -1041,7 +1085,11 @@ class ConversationStepRunner {
                                 // the store succeeded: a turn that is not committed — fenced,
                                 // conflicted, failed to store — never queues its successor.
                                 conversationService.decideContinuation(conversationMemory);
-                                storeConversationMemory(conversationMemory, environment);
+                                // Written, then the turn's long-term memory writes (A5) — the
+                                // marker clean-up waits until the caller has its answer (F3).
+                                storeOnly(conversationMemory, environment, true);
+                                written = true;
+                                clearMarkers = runDeferredWork(conversationMemory);
                                 conversationService.armContinuation(conversationId, conversationMemory, environment);
                             }
                         } catch (ConversationFencedException e) {
@@ -1056,11 +1104,12 @@ class ConversationStepRunner {
                             conversationService.forgetUnpersistedTurn(conversationId);
                             recordForTheWaitingDispatcher(fencedTurns, conversationId, e, dispatcherGaveUp);
                             refreshCachedState(conversationId);
+                            notStored = reportTurnNotStored(loggingContext, conversationMemory, e);
                         } catch (ConcurrentConversationModificationException e) {
-                            // The turn ran, its reply was already handed to the caller
-                            // (renderOutput fires from inside the pipeline callable, before
-                            // this persist), and the document has since been rewritten by
-                            // another writer. Report it loudly instead of overwriting the
+                            // The turn ran, its reply is held back until this persist (see
+                            // ConversationService#completeTurn), and the document has since
+                            // been rewritten by another writer: its caller is told the turn
+                            // was not stored. Report it loudly instead of overwriting the
                             // winner — which is what happened before the revision guard
                             // existed, silently.
                             //
@@ -1069,24 +1118,33 @@ class ConversationStepRunner {
                             // belongs to a writer that succeeded. Breaking a healthy
                             // conversation because THIS turn lost the race would trade one
                             // wrong outcome for another.
-                            if (reportStoreConflict(loggingContext, conversationId, e)) {
+                            boolean lostRace = reportStoreConflict(loggingContext, conversationId, e);
+                            if (lostRace) {
                                 recordForTheWaitingDispatcher(conflictedTurns, conversationId, e, dispatcherGaveUp);
                             }
                             conversationService.forgetUnpersistedTurn(conversationId);
                             refreshCachedState(conversationId);
+                            // S8: refused because the conversation was ended meanwhile — that
+                            // is the end winning (410), not a race worth retrying (409).
+                            notStored = lostRace
+                                    ? reportTurnNotStored(loggingContext, conversationMemory, e)
+                                    : reportTurnNotStored(loggingContext, conversationMemory, TurnNotStored.Reason.CONVERSATION_ENDED,
+                                            e.getClass().getSimpleName());
                         } catch (ResourceStoreException e) {
-                            conversationService.forgetUnpersistedTurn(conversationId);
-                            if (dispatcherGaveUp.getAsBoolean()) {
-                                // Abandoned while it persisted: inert (see the method doc). The
-                                // watchdog recorded its state, and ERROR would land on the next
-                                // turn's.
-                                conversationService.contextLogger.setLoggingContext(loggingContext);
-                                LOGGER.warnf("Turn of conversation %s, abandoned by the watchdog, was not persisted: %s",
-                                        sanitize(conversationId), e.getMessage());
-                                refreshCachedState(conversationId);
-                            } else {
-                                logConversationError(loggingContext, conversationId, e);
+                            failedWrite(loggingContext, conversationMemory, e, dispatcherGaveUp);
+                            notStored = reportTurnNotStored(loggingContext, conversationMemory, e);
+                        } catch (RuntimeException e) {
+                            if (written) {
+                                // Not the write: something after it (scheduling a pause's timeout).
+                                // Surfaced through the Future as before.
+                                throw e;
                             }
+                            // An unchecked failure of the write itself — a driver exception such as
+                            // MongoWriteException for a document over 16 MB. Handled exactly like a
+                            // checked one: before, it bypassed forgetUnpersistedTurn and reached the
+                            // caller only as a log line, after the caller had been answered.
+                            failedWrite(loggingContext, conversationMemory, e, dispatcherGaveUp);
+                            notStored = reportTurnNotStored(loggingContext, conversationMemory, e);
                         } finally {
                             // Ordering contract: a turn that ended AWAITING_HUMAN tells its
                             // client only NOW, after the pause commit above has succeeded
@@ -1095,12 +1153,32 @@ class ConversationStepRunner {
                             // was not committed is reported with the state the store holds.
                             // Runs on every exit (returns, conflicts, store errors); a no-op
                             // for turns that delivered immediately.
-                            // Only a deferred (paused) delivery needs the committed state: for
-                            // every other turn the delivery is a no-op, and evaluating the
-                            // argument eagerly cost one store read per turn for nothing.
-                            if (processingTurn != null && processingTurn.deferredDelivery.isPending()) {
-                                processingTurn.deferredDelivery
-                                        .deliver(pauseCommitted ? ConversationState.AWAITING_HUMAN : committedStateOrError(conversationId));
+                            //
+                            // Every other turn is delivered here as well (A1): a stored turn
+                            // with the state it was stored with (no store read), a turn whose
+                            // write failed as not stored — never as done — and a discarded
+                            // one with the state the store holds.
+                            if (!written) {
+                                // The turn was not stored: its deferred long-term writes go with it.
+                                discardDeferredWork(conversationMemory);
+                            }
+                            if (notStored != null) {
+                                // Counted only when this delivery wins the claim (F5).
+                                deliverNotStored(processingTurn, notStored);
+                            } else if (processingTurn != null && processingTurn.deferredDelivery.isPending()) {
+                                ConversationState delivered;
+                                if (pauseCommitted) {
+                                    delivered = ConversationState.AWAITING_HUMAN;
+                                } else if (written && conversationMemory.getConversationState() != ConversationState.AWAITING_HUMAN) {
+                                    delivered = null;
+                                } else {
+                                    delivered = committedStateOrError(conversationId);
+                                }
+                                processingTurn.deferredDelivery.deliver(delivered);
+                            }
+                            if (clearMarkers) {
+                                // Bookkeeping after the answer (F3): the turn is stored.
+                                clearOwedMarkers(conversationMemory, environment);
                             }
                         }
                     }
@@ -1110,11 +1188,12 @@ class ConversationStepRunner {
                         try {
                             onFailureInner(t);
                         } finally {
-                            // The body completed its pipeline (and deferred a paused
-                            // completion) before the runtime routed it here: abandoned by
-                            // the watchdog, or failed afterwards. This path never commits a
-                            // pause, so the caller hears the state the store holds.
-                            flushDeferredDelivery(processingTurn, conversationId);
+                            // The body completed its pipeline (and deferred its delivery)
+                            // before the runtime routed it here: abandoned by the watchdog, or
+                            // failed afterwards. This path never stores the turn, so its caller
+                            // is told it was not stored (S1), never answered as done.
+                            discardDeferredWork(conversationMemory);
+                            flushDeferredDelivery(processingTurn, conversationMemory);
                         }
                     }
 
@@ -1193,12 +1272,228 @@ class ConversationStepRunner {
         return ConversationState.ERROR;
     }
 
-    private void flushDeferredDelivery(ConversationService.ProcessingTurn processingTurn, String conversationId) {
-        if (processingTurn != null && processingTurn.deferredDelivery.isPending()) {
-            processingTurn.deferredDelivery.deliver(committedStateOrError(conversationId));
+    /**
+     * A turn's write failed (checked or unchecked): its answer must not be replayed
+     * to an {@code Idempotency-Key} retry, and the conversation is marked
+     * {@code ERROR} — unless the watchdog had already given up on the turn, whose
+     * state it recorded itself.
+     */
+    private void failedWrite(Map<String, String> loggingContext, IConversationMemory memory, Exception e, BooleanSupplier dispatcherGaveUp) {
+        String conversationId = memory.getConversationId();
+        conversationService.forgetUnpersistedTurn(conversationId);
+        // The turn's outcome is a failure, whatever state its pipeline ended in: the
+        // turn-outcome report (alerts, Agent Health) reads it off the memory.
+        memory.setConversationState(ConversationState.ERROR);
+        if (dispatcherGaveUp.getAsBoolean()) {
+            // Abandoned while it persisted: inert (see runGuardedConversationStep). The
+            // watchdog recorded its state, and ERROR would land on the next turn's.
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+            LOGGER.warnf("Turn of conversation %s, abandoned by the watchdog, was not persisted: %s",
+                    sanitize(conversationId), e.getMessage());
+            refreshCachedState(conversationId);
+        } else {
+            logConversationError(loggingContext, conversationId, e);
         }
     }
 
+    /**
+     * Runs what the turn deferred until it is stored (A5: its long-term property
+     * writes to the user memory store, see
+     * {@link IConversationMemory#deferUntilCommitted}) — from the store methods
+     * themselves, right after a successful write, so every path that stores a turn
+     * (say, the conversation's start turn, resume) runs it and none can forget to.
+     * Never throws.
+     * <p>
+     * The stored document still names the keys the write owes
+     * ({@code pendingLongTermWrites}, with the time this conversation changed
+     * each). If the write fails, or this node dies before it, the next turn finds
+     * them and makes them up — unless another conversation stored a newer value
+     * meanwhile ({@code Conversation#isNewerElsewhere}). The stored turn is not
+     * reported as failed.
+     *
+     * @return whether the stored document still names keys that are now written, so
+     *         {@link #clearOwedMarkers} should run
+     */
+    private boolean runDeferredWork(IConversationMemory memory) {
+        IConversationMemory.AfterCommit action = memory.takeAfterCommit();
+        if (action == null) {
+            return false;
+        }
+        boolean storedOwedMarkers = !memory.getPendingLongTermWrites().isEmpty();
+        try {
+            action.run();
+        } catch (Exception e) {
+            conversationService.countLongTermWrite("failed");
+            LOGGER.warnf(e, "Turn of conversation %s is stored, but its long-term memory write failed; the keys it owes stay "
+                    + "recorded in the conversation and are made up by its next turn", sanitize(memory.getConversationId()));
+            return false;
+        }
+        return storedOwedMarkers && memory.getPendingLongTermWrites().isEmpty() && memory.getConversationId() != null;
+    }
+
+    /**
+     * Clears the owed long-term markers from the stored document once their write
+     * succeeded: a conditional write of the document (same state, same revision).
+     * Bookkeeping — a say turn's caller is answered before it (F3). A miss (the
+     * conversation changed meanwhile) is benign and neither logged as a conflict
+     * nor counted as one: the next turn finds the markers, sees the values already
+     * stored and writes nothing. Never throws.
+     */
+    void clearOwedMarkers(IConversationMemory memory, Environment environment) {
+        try {
+            var snapshot = convertConversationMemory(memory);
+            snapshot.setEnvironment(environment);
+            if (conversationMemoryStore.storeConversationMemorySnapshotIfState(snapshot, memory.getConversationState())) {
+                memory.setRevision(snapshot.getRevision());
+                memory.setPersistedStepCount(snapshot.getPersistedStepCount());
+            } else {
+                LOGGER.debugf("Owed long-term markers of conversation %s not cleared (the conversation changed)",
+                        sanitize(memory.getConversationId()));
+            }
+        } catch (ResourceStoreException | RuntimeException e) {
+            LOGGER.debugf("Owed long-term markers of conversation %s not cleared (%s)", sanitize(memory.getConversationId()),
+                    e.getMessage());
+        }
+    }
+
+    /**
+     * A turn that is not stored drops what it deferred until its store — its
+     * long-term writes must not outlive it. Counted, so a path that stores a turn
+     * without going through the store methods (and so silently drops the writes)
+     * shows up as {@code eddi_turn_long_term_writes_total{outcome="discarded"}}
+     * rising on turns that did succeed.
+     */
+    void discardDeferredWork(IConversationMemory memory) {
+        if (memory != null && memory.takeAfterCommit() != null) {
+            conversationService.countLongTermWrite("discarded");
+            LOGGER.debugf("Long-term memory writes of conversation %s dropped with its unstored turn",
+                    sanitize(memory.getConversationId()));
+        }
+    }
+
+    /**
+     * Classifies a failed write and logs it with the conversation, the agent and
+     * the reason. Not counted here: only the delivery that wins the claim counts
+     * (see {@link #deliverNotStored}).
+     *
+     * @return the error the turn's caller is given instead of its answer
+     */
+    TurnError reportTurnNotStored(Map<String, String> loggingContext, IConversationMemory memory, Throwable failure) {
+        return reportTurnNotStored(loggingContext, memory, TurnNotStored.classify(failure), failure.getClass().getSimpleName());
+    }
+
+    /** As above, for a reason that is already known. */
+    TurnError reportTurnNotStored(Map<String, String> loggingContext, IConversationMemory memory, TurnNotStored.Reason reason,
+                                  String cause) {
+        if (loggingContext != null) {
+            conversationService.contextLogger.setLoggingContext(loggingContext);
+        }
+        LOGGER.warnf("Turn of conversation %s (agent %s, version %s) ran but was NOT (or not verifiably) stored: reason=%s (%s) — its "
+                + "caller is told so instead of receiving the answer", sanitize(memory.getConversationId()), sanitize(memory.getAgentId()),
+                memory.getAgentVersion(), reason.tag(), cause);
+        return reason.error();
+    }
+
+    /**
+     * Claims the turn's delivery for a not-stored answer and counts it
+     * ({@code eddi_turn_not_stored_total}) — only if the claim succeeds, so a turn
+     * another path already answered (stored, or with a more precise reason) is
+     * neither re-answered nor counted (F5). Without a deferred delivery (no client
+     * waits) it is counted all the same.
+     */
+    private void deliverNotStored(ConversationService.ProcessingTurn processingTurn, TurnError error) {
+        if (processingTurn == null || processingTurn.deferredDelivery.deliverNotStored(error)) {
+            conversationService.countTurnNotStored(TurnNotStored.reasonOf(error));
+        }
+    }
+
+    /**
+     * The backstop delivery of a turn whose persistence step never delivered it:
+     * the watchdog gave up while it ran or wrote, the runtime routed it to
+     * {@code onFailure}, or it was dropped. Whether it was stored is not known
+     * here, so it is never answered as done (S1): it is reported as not stored —
+     * {@code fenced} when its lease was lost, otherwise {@code outcome_unknown}.
+     * The reason is decided before the claim, and only the claimant reports it.
+     */
+    private void flushDeferredDelivery(ConversationService.ProcessingTurn processingTurn, IConversationMemory memory) {
+        if (processingTurn == null || !processingTurn.deferredDelivery.isPending()) {
+            return;
+        }
+        String conversationId = memory.getConversationId();
+        TurnNotStored.Reason reason = leaseLostTurns.containsKey(conversationId) || memory.isLeaseLost()
+                ? TurnNotStored.Reason.FENCED
+                : TurnNotStored.Reason.OUTCOME_UNKNOWN;
+        if (processingTurn.deferredDelivery.deliverNotStored(reason.error())) {
+            conversationService.countTurnNotStored(reason);
+            reportTurnNotStored(null, memory, reason, "no confirmed write");
+        }
+    }
+
+    /**
+     * Single node (F2): the turn's write is still running although its caller was
+     * told it may not be stored — a late write must lose, or it lands next to the
+     * caller's retry as a duplicate turn. Every single-node turn writes with the
+     * fencing token of the document it loaded (see {@link #runConversationStep}),
+     * so raising the document's fence above it makes the store refuse the late
+     * write; the conversation's next turn on this node writes with the raised token
+     * ({@link #raisedFences}). Only on this path, never on a turn that delivered
+     * normally: no extra round trip on the happy path.
+     */
+    void fenceAbandonedWrite(String conversationId, IConversationMemory live) {
+        Long token = live != null ? live.getFenceToken() : null;
+        if (token == null) {
+            return;
+        }
+        long raised = token + 1;
+        try {
+            conversationMemoryStore.raiseFence(conversationId, raised);
+            raisedFences.merge(conversationId, raised, Math::max);
+        } catch (ResourceStoreException | RuntimeException e) {
+            LOGGER.warnf("Could not fence the abandoned write of conversation %s (%s); a late write may still land",
+                    sanitize(conversationId), e.getMessage());
+        }
+    }
+
+    /**
+     * Single node: fences raised by {@link #fenceAbandonedWrite}, so the
+     * conversation's next turn — loaded before the raise, i.e. already queued —
+     * writes with a token the store accepts. Consumed when that turn starts; any
+     * later turn loads the raised {@code _fence} from the store and needs no entry.
+     * Bounded (see {@link #raisedFenceRetention}), so a conversation abandoned once
+     * and never continued does not keep its entry for the life of the JVM.
+     */
+    private final ConcurrentMap<String, Long> raisedFences;
+
+    /** At most this many conversations with a raised fence are remembered. */
+    static final int RAISED_FENCES_MAX = 10_000;
+
+    /** Queued turns per conversation the retention allows for (with headroom). */
+    private static final int RAISED_FENCE_QUEUED_TURNS = 25;
+
+    /** Floor of the retention, whatever the agent timeout. */
+    private static final Duration RAISED_FENCE_MIN_RETENTION = Duration.ofMinutes(10);
+
+    /**
+     * How long a raised fence is remembered: long enough for every turn that was
+     * already queued behind the abandoned one to start. A queued turn starts once
+     * the turns ahead of it end, and each of those ends at the latest when the
+     * watchdog gives up on it ({@code systemRuntime.agentTimeoutInSeconds}). With
+     * {@code eddi.conversation.max-queued-turns-per-conversation} at its default of
+     * 20, 25 watchdog periods cover a full queue; never below ten minutes. A turn
+     * that starts later still loaded the document after the raise, so a forgotten
+     * entry costs it nothing.
+     */
+    static Duration raisedFenceRetention(int agentTimeoutSeconds) {
+        Duration byQueue = Duration.ofSeconds(Math.max(0, agentTimeoutSeconds) * (long) RAISED_FENCE_QUEUED_TURNS);
+        return byQueue.compareTo(RAISED_FENCE_MIN_RETENTION) > 0 ? byQueue : RAISED_FENCE_MIN_RETENTION;
+    }
+
+    /**
+     * The fence remembered for {@code conversationId}, or {@code null}; for tests.
+     */
+    Long rememberedFence(String conversationId) {
+        return raisedFences.get(conversationId);
+    }
     /**
      * Cluster mode: a turn cancelled because this node lost its lease, whether it
      * then completed or failed. The conversation belongs to whoever holds the lease
@@ -1451,7 +1746,7 @@ class ConversationStepRunner {
         conversationService.counterConversationStoreConflict.increment();
         LOGGER.errorf(e, "Turn of conversation %s was NOT persisted: the conversation document was written by another "
                 + "turn, resume, undo/redo or instance while this turn was running (this turn started from revision %d). "
-                + "The reply was already returned to the caller, so this turn's step is lost — the caller should retry it.",
+                + "Its caller is told the turn was not stored and should send it again.",
                 conversationId, e.getExpectedRevision());
         return true;
     }
@@ -1466,9 +1761,14 @@ class ConversationStepRunner {
         } catch (RuntimeException readFailure) {
             currentState = null;
         }
-        transitionUnlessEnded(conversationId, currentState, ConversationState.ERROR);
+        boolean recorded = transitionUnlessEnded(conversationId, currentState, ConversationState.ERROR);
+        // The state the conversation really has now (A13): ERROR only when the CAS
+        // above recorded it; otherwise whatever it was (ENDED, a concurrent writer's
+        // state, or unknown when it could not be read).
         String msg = "Error while processing user input (conversationId=%s , conversationState=%s)";
-        msg = String.format(msg, conversationId, ConversationState.ERROR);
+        msg = String.format(msg, conversationId, recorded
+                ? ConversationState.ERROR
+                : (currentState != null ? currentState + " (ERROR not recorded)" : "unknown (ERROR not recorded)"));
         conversationService.contextLogger.setLoggingContext(loggingContext);
         LOGGER.error(msg, t);
     }
@@ -1495,19 +1795,22 @@ class ConversationStepRunner {
      * compare-and-set, unless it is {@code ENDED} (or unknown). When the CAS loses
      * — the state changed after it was read — the store's value stands and the
      * cache is refreshed from it.
+     *
+     * @return whether {@code target} was recorded
      */
-    void transitionUnlessEnded(String conversationId, ConversationState observedState, ConversationState target) {
+    boolean transitionUnlessEnded(String conversationId, ConversationState observedState, ConversationState target) {
         if (observedState != null && observedState != ConversationState.ENDED) {
             try {
                 if (conversationMemoryStore.compareAndSetState(conversationId, observedState, target)) {
                     cacheConversationState(conversationId, target);
-                    return;
+                    return true;
                 }
             } catch (ResourceStoreException | RuntimeException e) {
                 LOGGER.warnf("Could not record %s for conversation %s: %s", target, sanitize(conversationId), sanitize(e.getMessage()));
             }
         }
         refreshCachedState(conversationId);
+        return false;
     }
 
     void setConversationState(String conversationId, ConversationState conversationState) {
@@ -1591,9 +1894,31 @@ class ConversationStepRunner {
         }
     }
 
+    /**
+     * Stores the turn, then runs what it deferred until it is stored (A5; M1 — the
+     * conversation's start turn comes through here too) and clears the owed
+     * long-term markers once their write succeeded.
+     */
     String storeConversationMemory(IConversationMemory conversationMemory, Environment environment) throws ResourceStoreException {
+        String conversationId = storeOnly(conversationMemory, environment, true);
+        if (runDeferredWork(conversationMemory)) {
+            clearOwedMarkers(conversationMemory, environment);
+        }
+        return conversationId;
+    }
+
+    /**
+     * The write itself.
+     *
+     * @param sizeGuarded
+     *            apply {@link #requireWithinDocumentLimit}
+     */
+    String storeOnly(IConversationMemory conversationMemory, Environment environment, boolean sizeGuarded) throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
+        if (sizeGuarded) {
+            requireWithinDocumentLimit(memorySnapshot);
+        }
         var conversationId = conversationMemoryStore.storeConversationMemorySnapshot(memorySnapshot);
         // The store stamped the revision it created. Carry it back so a second write
         // from this same live memory (a start turn that stores and is then stored
@@ -1606,7 +1931,32 @@ class ConversationStepRunner {
         // the revision on the loaded value so a second write from this memory is
         // refused rather than allowed to erase them).
         conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
+        // F1: a conversation created by this write (its start turn) gets its id, so the
+        // marker clean-up — and anything else that writes this memory again — can
+        // address the document.
+        conversationMemory.assignConversationId(conversationId);
         return conversationId;
+    }
+
+    /**
+     * The size guard (A2): refuses a write whose document would exceed
+     * {@code eddi.conversations.max-document-bytes}, before it reaches the database
+     * — on both backends, so a conversation behaves the same on MongoDB (whose own
+     * limit is 16 MB) and PostgreSQL. The estimate walks the snapshot (see
+     * {@link ConversationDocumentSize}); it does not serialise it.
+     *
+     * @throws ConversationTooLargeException
+     *             when the document would be too large; nothing is written
+     */
+    void requireWithinDocumentLimit(ConversationMemorySnapshot snapshot) throws ConversationTooLargeException {
+        long limit = conversationService.maxConversationDocumentBytes;
+        if (limit <= 0 || snapshot == null) {
+            return;
+        }
+        long estimated = ConversationDocumentSize.estimate(snapshot);
+        if (estimated > limit) {
+            throw new ConversationTooLargeException(snapshot.getConversationId(), estimated, limit);
+        }
     }
 
     /**
@@ -1616,16 +1966,40 @@ class ConversationStepRunner {
      * so a resumed or undone outcome cannot clobber an ENDED/EXECUTION_INTERRUPTED
      * state written concurrently by end/cancel, nor a step appended concurrently by
      * a say turn.
+     * <p>
+     * Not size-guarded (S6): undo/redo do not grow the document, and the write of a
+     * resumed pause cannot be refused without losing the pause — a conversation
+     * that crossed {@code eddi.conversations.max-document-bytes} (an upgrade puts
+     * existing ones there) keeps those working; its next say turn is refused at
+     * admission instead.
      */
     boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
                                            ConversationState expectedState)
             throws ResourceStoreException {
+        return storeConversationMemoryIfState(conversationMemory, environment, expectedState, false);
+    }
+
+    /**
+     * @param sizeGuarded
+     *            apply {@link #requireWithinDocumentLimit} — for the write of a say
+     *            turn (its pause commit), which grows the document
+     */
+    boolean storeConversationMemoryIfState(IConversationMemory conversationMemory, Environment environment,
+                                           ConversationState expectedState, boolean sizeGuarded)
+            throws ResourceStoreException {
         var memorySnapshot = convertConversationMemory(conversationMemory);
         memorySnapshot.setEnvironment(environment);
+        if (sizeGuarded) {
+            requireWithinDocumentLimit(memorySnapshot);
+        }
         boolean stored = conversationMemoryStore.storeConversationMemorySnapshotIfState(memorySnapshot, expectedState);
         if (stored) {
             conversationMemory.setRevision(memorySnapshot.getRevision());
             conversationMemory.setPersistedStepCount(memorySnapshot.getPersistedStepCount());
+            // A resumed turn's long-term writes (A5).
+            if (runDeferredWork(conversationMemory)) {
+                clearOwedMarkers(conversationMemory, environment);
+            }
         } else {
             diagnoseConditionalStoreMiss(conversationMemory, expectedState);
         }

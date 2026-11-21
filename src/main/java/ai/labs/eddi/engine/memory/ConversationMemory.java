@@ -39,6 +39,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Set;
 import java.util.Stack;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BooleanSupplier;
 import java.util.function.Consumer;
 
@@ -82,6 +83,8 @@ public class ConversationMemory implements IConversationMemory {
      * {@link #setLeaseLostCheck}.
      */
     private transient volatile BooleanSupplier leaseLostCheck;
+    /** See {@link #deferUntilCommitted}. */
+    private final transient AtomicReference<AfterCommit> afterCommit = new AtomicReference<>();
     /**
      * Optimistic-concurrency revision of the document this memory was loaded from.
      * See {@link IConversationMemory#getRevision()}.
@@ -694,6 +697,17 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public boolean deferUntilCommitted(AfterCommit action) {
+        afterCommit.set(action);
+        return true;
+    }
+
+    @Override
+    public AfterCommit takeAfterCommit() {
+        return afterCommit.getAndSet(null);
+    }
+
+    @Override
     public boolean isLeaseLost() {
         BooleanSupplier check = leaseLostCheck;
         return check != null && check.getAsBoolean();
@@ -715,6 +729,29 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setPendingLongTermWrites(Set<String> keys) {
         this.pendingLongTermWrites = keys == null ? new LinkedHashSet<>() : new LinkedHashSet<>(keys);
+    }
+
+    /**
+     * See {@link IConversationMemory#getPendingLongTermWritesSince()}; persisted
+     * like the keys.
+     */
+    private transient Map<String, Long> pendingLongTermWritesSince = new LinkedHashMap<>();
+
+    @Override
+    public Map<String, Long> getPendingLongTermWritesSince() {
+        return pendingLongTermWritesSince;
+    }
+
+    @Override
+    public void setPendingLongTermWritesSince(Map<String, Long> since) {
+        this.pendingLongTermWritesSince = since == null ? new LinkedHashMap<>() : new LinkedHashMap<>(since);
+    }
+
+    @Override
+    public void assignConversationId(String conversationId) {
+        if (this.conversationId == null) {
+            this.conversationId = conversationId;
+        }
     }
 
     // === HITL pause bookmark ===

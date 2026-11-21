@@ -1206,6 +1206,11 @@ public class McpConversationTools {
         if (snapshot.getConversationState() != null) {
             result.put("conversationState", snapshot.getConversationState().name());
         }
+        // A failed turn says why — for TURN_NOT_STORED, that its answer is not in the
+        // conversation (the snapshot then carries no agentResponse).
+        if (snapshot.getError() != null) {
+            result.put("error", snapshot.getError());
+        }
 
         // Full snapshot for detailed access
         result.put("response", snapshot);
