@@ -92,7 +92,8 @@ public class EmailSenderListAudit {
     }
 
     /** An address-shaped token inside free text; bounded classes, no nesting. */
-    private static final Pattern ADDRESS_IN_TEXT = Pattern.compile("[^\s@<>,;\"'()]{1,64}@[^\s@<>,;\"'()]{1,255}");
+    private static final Pattern ADDRESS_IN_TEXT = Pattern
+            .compile("(?:\"[^\"\\r\\n]{1,64}\"|[^\\s@<>,;\"'()]{1,64})@[^\\s@<>,;\"'()]{1,255}");
 
     /**
      * The free-text reason with every exact address replaced by its pseudonym, as

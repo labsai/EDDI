@@ -19,6 +19,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -77,6 +78,22 @@ class EmailSenderListAuditTest {
         var entry = ArgumentCaptor.forClass(AuditEntry.class);
         verify(ledger).submit(entry.capture());
         assertEquals("Allow p-alice (new supplier), not *@spam.example", entry.getValue().output().get("reason"));
+    }
+
+    @Test
+    @DisplayName("a quoted local part, or an address after a tab, is pseudonymised too")
+    void quotedAndTabbedAddressesAreScrubbed() {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        var pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor(anyString())).thenReturn("p-x");
+
+        new EmailSenderListAudit(instance(ledger), instance(pseudonymizer), instance(null)).changed("int-1", 3, 4, List.of(), List.of(),
+                "ok \"Ann Lee\"@partner.com\tbob@partner.com", false);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("ok p-x\tp-x", entry.getValue().output().get("reason"));
     }
 
     @Test

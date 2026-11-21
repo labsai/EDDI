@@ -453,6 +453,25 @@ describe("ChannelDetailPage — email integration", () => {
     await waitFor(() => expect(versions).toContain("2"));
   });
 
+  it("blocks Save while the version a sender change wrote has not loaded, so the old lists are not written back", async () => {
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) =>
+        new URL(request.url).searchParams.get("version") === "2"
+          ? HttpResponse.json({ error: "down" }, { status: 500 })
+          : HttpResponse.json(emailChannel),
+      ),
+    );
+    renderChannelDetail("mail1", 1);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-allow-input")).toBeInTheDocument());
+    expect(screen.getByTestId("save-channel-btn")).toBeEnabled();
+
+    await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
+    await user.click(screen.getByTestId("email-senders-apply"));
+
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeDisabled());
+  });
+
   it("shows the email form and setup notes instead of a webhook URL", async () => {
     useEmailChannel();
     renderChannelDetail("mail1", 1);

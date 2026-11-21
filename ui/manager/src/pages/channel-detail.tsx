@@ -26,7 +26,7 @@ import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
-import { platformConfigForType, withStoredSenderLists } from "@/lib/channel-platform-config";
+import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
   CHANNEL_TYPES,
@@ -260,7 +260,16 @@ export function ChannelDetailPage() {
   const [copied, setCopied] = useState(false);
   // The stored configuration the draft was seeded from (or last saved as), as
   // JSON. The draft differing from it is what "unsaved changes" means here.
-  const [baseline, setBaseline] = useState<string | null>(null);
+  const [baseline, setBaselineState] = useState<string | null>(null);
+  // The same value, readable inside the seed effect without re-running it.
+  const baselineRef = useRef<string | null>(null);
+  const setBaseline = (json: string | null) => {
+    baselineRef.current = json;
+    setBaselineState(json);
+  };
+  // A sender-list change was stored and the page has not yet adopted the version
+  // it wrote: saving now would send the old lists with the new version.
+  const [pendingSenderVersion, setPendingSenderVersion] = useState<number | null>(null);
   const isDirty =
     draft !== null && baseline !== null && JSON.stringify(draft) !== baseline;
   useUnsavedChangesGuard(isDirty);
@@ -274,25 +283,27 @@ export function ChannelDetailPage() {
    * reseed.
    */
   const seededFor = useRef<string | null>(null);
-  // The version a targeted sender-list change moved the integration to: moving
-  // to it keeps the draft's unsaved edits and adopts only the stored lists.
-  const senderChangeVersion = useRef<string | null>(null);
   useEffect(() => {
     const key = `${id}@${version}`;
     if (config && seededFor.current !== key) {
       const sameChannel = seededFor.current?.startsWith(`${id}@`) ?? false;
       seededFor.current = key;
-      if (sameChannel && senderChangeVersion.current === String(version)) {
-        senderChangeVersion.current = null;
-        setDraft((prev) => prev ? { ...prev, platformConfig: withStoredSenderLists(prev.platformConfig, config.platformConfig) } : { ...config });
+      if (pendingSenderVersion === version) setPendingSenderVersion(null);
+      const previous = baselineRef.current;
+      if (sameChannel && pendingSenderVersion === version && previous !== null) {
+        // The version a sender-list change wrote: every field takes its stored value,
+        // except one the user edited on this page since it was seeded.
+        const base = JSON.parse(previous) as typeof config;
+        setDraft((prev) => prev ? adoptStoredVersion(prev, base, config) : { ...config });
         setBaseline(JSON.stringify(config));
+        setTargetKeys(config.targets.map(() => nextTargetKey()));
         return;
       }
       setDraft({ ...config });
       setBaseline(JSON.stringify(config));
       setTargetKeys(config.targets.map(() => nextTargetKey()));
     }
-  }, [config, id, version]);
+  }, [config, id, version, pendingSenderVersion]);
 
   const isWebhook = draft?.channelType === "webhook";
   const isEmail = draft?.channelType === "email";
@@ -301,7 +312,7 @@ export function ChannelDetailPage() {
     : `${window.location.origin}/integrations/slack/events`;
 
   const handleSave = async () => {
-    if (!draft || !id) return;
+    if (!draft || !id || pendingSenderVersion !== null) return;
     // Bot token and signing secret are references only. A plaintext value is
     // returned verbatim by GET /channelstore/channels/{id} to anyone who can
     // read the channel and travels into every export; the backend only logs a
@@ -495,7 +506,7 @@ export function ChannelDetailPage() {
         <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleteOpen(true)} data-testid="delete-channel-btn">
           <Trash2 className="h-4 w-4 me-1" /> {t("common.delete")}
         </Button>
-        <Button size="sm" onClick={handleSave} disabled={updateMutation.isPending} data-testid="save-channel-btn">
+        <Button size="sm" onClick={handleSave} disabled={updateMutation.isPending || pendingSenderVersion !== null} data-testid="save-channel-btn">
           <Save className="h-4 w-4 me-1" /> {updateMutation.isPending ? t("common.saving") : t("common.save")}
         </Button>
       </div>
@@ -540,7 +551,7 @@ export function ChannelDetailPage() {
                   integrationId={id}
                   disabled={isDirty}
                   onChanged={(newVersion) => {
-                    senderChangeVersion.current = String(newVersion);
+                    setPendingSenderVersion(newVersion);
                     setSearchParams({ version: String(newVersion) }, { replace: true });
                   }}
                 />
