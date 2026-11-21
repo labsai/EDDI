@@ -30,9 +30,35 @@ import java.util.Objects;
  *            the document itself, when discovering it meant reading it — a
  *            crawl. Null otherwise, and the framework calls
  *            {@link SourceConnector#fetch}
+ * @param citation
+ *            the title and citation URL the fetched document will carry, when
+ *            discovery already knows them — exactly as {@code fetch} will put
+ *            them under {@link SourceMetadataKeys#TITLE} and
+ *            {@link SourceMetadataKeys#CITATION_URL}. Lets the framework notice
+ *            a rename of a document whose version token says it is unchanged,
+ *            and update its chunks' citation without fetching or embedding it.
+ *            Null when only the fetch can tell
  */
 public record WorkItem(String documentId, String versionToken, Action action, String partitionId,
-        Map<String, String> hints, SourceDocument prefetched) {
+        Map<String, String> hints, SourceDocument prefetched, Citation citation) {
+
+    /**
+     * What a document is cited as: the title and URL stored on each of its chunks.
+     * Either may be null.
+     */
+    public record Citation(String title, String url) {
+
+        /** The citation a document carries, read from its metadata. */
+        public static Citation of(SourceDocument document) {
+            return new Citation(document.title(), document.citationUrl());
+        }
+    }
+
+    /** A work item whose citation discovery does not know. */
+    public WorkItem(String documentId, String versionToken, Action action, String partitionId,
+            Map<String, String> hints, SourceDocument prefetched) {
+        this(documentId, versionToken, action, partitionId, hints, prefetched, null);
+    }
 
     /** What discovery learned about a document. */
     public enum Action {
@@ -63,7 +89,16 @@ public record WorkItem(String documentId, String versionToken, Action action, St
     /** A document to be fetched by {@link SourceConnector#fetch}. */
     public static WorkItem upsert(String documentId, String versionToken, Partition partition,
                                   Map<String, String> hints) {
-        return new WorkItem(documentId, versionToken, Action.UPSERT, partition.id(), hints, null);
+        return upsert(documentId, versionToken, partition, hints, null);
+    }
+
+    /**
+     * A document to be fetched, whose citation discovery already knows — see
+     * {@link #citation()}.
+     */
+    public static WorkItem upsert(String documentId, String versionToken, Partition partition,
+                                  Map<String, String> hints, Citation citation) {
+        return new WorkItem(documentId, versionToken, Action.UPSERT, partition.id(), hints, null, citation);
     }
 
     /** A document discovery has already read. */

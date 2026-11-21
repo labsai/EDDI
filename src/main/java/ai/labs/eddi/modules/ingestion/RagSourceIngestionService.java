@@ -200,7 +200,7 @@ public class RagSourceIngestionService {
             } finally {
                 inFlight.remove(runId);
                 try {
-                    cleanUpAfterRun(ragConfigId, knowledgeBase, source);
+                    cleanUpAfterRun(ragConfigId, knowledgeBase, source, runId);
                 } catch (RuntimeException e) {
                     // Its own guard: settling a source that changed under the run touches
                     // the state store, and a failure there used to skip the report below
@@ -286,8 +286,12 @@ public class RagSourceIngestionService {
      * into the old one, so the next run found them "unchanged" and never embedded
      * them where retrieval now looks. Both are settled here, once the run is over
      * and cannot add more.
+     *
+     * @param runId
+     *            the run that just ended — what a removed source's cleanup is
+     *            fenced on, see {@link #discardWhatTheRunWrote}
      */
-    void cleanUpAfterRun(String ragConfigId, RagConfiguration ranWith, IngestionSource source) {
+    void cleanUpAfterRun(String ragConfigId, RagConfiguration ranWith, IngestionSource source, String runId) {
         RagConfiguration current;
         try {
             current = currentKnowledgeBase(ragConfigId).orElse(null);
@@ -298,11 +302,11 @@ public class RagSourceIngestionService {
             return;
         }
         IngestionSource now = current == null ? null : current.findSource(sourceIdOf(source));
-        if (now == null || now.isUpload() != source.isUpload()) {
+        if (now == null || !now.sameTypeAs(source)) {
             LOGGER.warnf("Source '%s' of knowledge base %s was removed while it was running; removing what the "
                     + "run wrote after that", LogSanitizer.sanitize(source.getName()),
                     LogSanitizer.sanitize(ragConfigId));
-            discardSourceContent(ragConfigId, ranWith, source);
+            discardWhatTheRunWrote(ragConfigId, ranWith, source, runId);
             return;
         }
         // Compared by where the vectors live, the same test the save used to clear
@@ -323,6 +327,89 @@ public class RagSourceIngestionService {
                     + "holds it now; its documents will be embedded again rather than purged",
                     LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
+    }
+
+    /** How many runs of a source {@link #historySince} reads, newest first. */
+    private static final int NEWER_RUN_LOOKBACK = 10;
+
+    /**
+     * Takes back what one run wrote for a source that was removed, or changed type,
+     * while it ran — and never what another run wrote under the same key.
+     *
+     * <p>
+     * The save that removed the source cleared its state, and with it the running
+     * row that held the run slot. A new run with the same source key could
+     * therefore start before this one stopped: after a crawl is switched to Google
+     * Drive, the first Drive run is the obvious one. Forgetting the whole source
+     * key here deleted that run's chunks and its state, the running row included,
+     * and its next documents went into a knowledge base that no longer listed them.
+     *
+     * <p>
+     * So the source's slot is claimed first, and the run history read under the
+     * claim. The whole key is forgotten as before only when this run's own row is
+     * still the newest: then the save's removal never happened (it failed, and this
+     * retries it), and everything under the key is this run's or older. Otherwise
+     * only the chunks tagged with this run's id are removed — an empty history is
+     * not proof that nobody else wrote, since a purge erases the run rows and keeps
+     * the chunks. The state is then purged when no other run is listed, its rows
+     * being this run's late inserts, and otherwise left to the run that owns it
+     * with every row's content forgotten: that run may already have found one of
+     * this run's documents "unchanged", and its chunks are the ones just removed.
+     * The cost is one re-embedding of what that run holds, in a race that needs a
+     * save during a run.
+     */
+    private void discardWhatTheRunWrote(String ragConfigId, RagConfiguration ranWith, IngestionSource source,
+                                        String runId) {
+        String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
+        Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
+        try {
+            History history = claim.map(claimId -> historySince(sourceKey, runId, claimId)).orElse(History.ANOTHER_RUN);
+            if (history == History.THIS_RUN_NEWEST) {
+                discardSourceContent(ragConfigId, ranWith, source);
+                return;
+            }
+            pipeline.forgetRun(ragConfigId, ranWith, source, runId);
+            if (history == History.NO_RUNS) {
+                // Takes the claim's own row with it, which is what releases the claim.
+                stateStore.purgeSource(sourceKey);
+                return;
+            }
+            LOGGER.warnf("Source '%s' of knowledge base %s has been run again since it changed; removed only what "
+                    + "run %s wrote, and its documents will be embedded again",
+                    LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId),
+                    LogSanitizer.sanitize(runId));
+            stateStore.invalidateContent(sourceKey);
+        } finally {
+            // A no-op when a purge above already took the claim's row with it; not one
+            // when the vector removal failed before the purge, which would otherwise
+            // leave the source blocked until the claim is reaped.
+            claim.ifPresent(claimId -> pipeline.releaseClaim(ragConfigId, source, claimId));
+        }
+    }
+
+    /** What a source's run history says about the runs since one of them. */
+    private enum History {
+        /** That run's row is the newest, apart from the caller's own claim. */
+        THIS_RUN_NEWEST,
+        /** Nothing is listed apart from the claim. */
+        NO_RUNS,
+        /** Another run is listed before it, or it is gone and another is there. */
+        ANOTHER_RUN
+    }
+
+    /**
+     * Reads the newest runs of a source, skipping the caller's own claim. When the
+     * run's row is gone — the save that removed the source purged it — every run
+     * listed is newer.
+     */
+    private History historySince(String sourceKey, String runId, String claimId) {
+        for (IngestionRun run : stateStore.listRuns(sourceKey, NEWER_RUN_LOOKBACK)) {
+            if (run.runId().equals(claimId)) {
+                continue;
+            }
+            return run.runId().equals(runId) ? History.THIS_RUN_NEWEST : History.ANOTHER_RUN;
+        }
+        return History.NO_RUNS;
     }
 
     /**
@@ -515,6 +602,7 @@ public class RagSourceIngestionService {
         capped.setType(source.getType());
         capped.setWeb(source.getWeb());
         capped.setUpload(source.getUpload());
+        capped.setGoogleDrive(source.getGoogleDrive());
         capped.setCron(null);
 
         var settings = new IngestionSource.IngestionSettings();
@@ -995,7 +1083,7 @@ public class RagSourceIngestionService {
                 continue;
             }
             IngestionSource now = updated == null ? null : updated.findSource(sourceIdOf(source));
-            if (now != null && now.isUpload() == source.isUpload()) {
+            if (now != null && now.sameTypeAs(source)) {
                 continue;
             }
             LOGGER.warnf("Source '%s' of knowledge base %s %s. Everything the knowledge base learned from it%s "

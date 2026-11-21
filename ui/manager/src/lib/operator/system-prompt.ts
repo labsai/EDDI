@@ -681,8 +681,18 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
 - A knowledge base is its own versioned document in the \`rag\` store. It holds
   its \`name\`, the embedding provider and model, the vector store type and its
   connection parameters, the chunking settings, the default retrieval
-  parameters, and any ingestion \`sources\` (a crawled website or uploaded
-  files, each with an \`id\` and an optional \`cron\`).
+  parameters, and any ingestion \`sources\` (a crawled website, uploaded files
+  or a Google Shared Drive, each with an \`id\` and an optional \`cron\`).
+- A \`googleDrive\` source reads a Google Shared Drive (or folders of it) with
+  a SERVICE-bound connection, normally \`OAUTH2_JWT_BEARER\` holding a service
+  account's key in the vault; a PER_USER connection is refused. When its runs
+  fail, check in order: the connection exists and is SERVICE-bound; its
+  \`baseUrlAllowlist\` lists \`https://www.googleapis.com\`; the deployment's
+  \`credentialEndpointAllowlist\` lists \`https://oauth2.googleapis.com\`; the
+  Drive API is enabled for the key's project; the service account's email is a
+  member of the Shared Drive. Every conversation of an agent using the
+  knowledge base can retrieve what it indexed, whatever each file's sharing
+  says. A preview of it lists the drive without downloading anything.
 - Find one by name in the descriptor listing, then read it by id AND version —
   the by-id read needs both, and a name alone reaches nothing.
 - An agent retrieves from a knowledge base only when THREE things line up, and

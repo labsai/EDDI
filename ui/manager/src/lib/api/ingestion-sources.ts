@@ -33,6 +33,42 @@ export interface UploadSource {
   maxTotalBytes?: number;
 }
 
+/** The formats a `googleDrive` source may list in `mimeTypes` (`GoogleDriveSource.FORMATS`). */
+export const GOOGLE_DRIVE_FORMATS = [
+  "google-docs",
+  "google-sheets",
+  "google-slides",
+  "pdf",
+  "docx",
+  "xlsx",
+  "pptx",
+  "text",
+  "markdown",
+  "csv",
+  "html",
+] as const;
+
+/**
+ * A Google Shared Drive, or folders of one, read with a SERVICE-bound
+ * connection (an `OAUTH2_JWT_BEARER` service account).
+ */
+export interface GoogleDriveSource {
+  /** Name of a SERVICE-bound connection; a PER_USER one is refused at run time. */
+  connection?: string;
+  sharedDriveId?: string;
+  /** Folders of that drive to read; empty means the whole drive. */
+  folderIds?: string[];
+  includeSubfolders?: boolean;
+  /** Formats to read, from {@link GOOGLE_DRIVE_FORMATS}; empty means all. */
+  mimeTypes?: string[];
+  /** Case-insensitive file-name globs to skip. */
+  excludeNamePatterns?: string[];
+  maxFiles?: number;
+  maxFileBytes?: number;
+  /** Refused when true: per-document access control is not built yet. */
+  captureAcl?: boolean;
+}
+
 /** Limits that apply to the ingestion rather than to the crawl. */
 export interface IngestionSettings {
   maxContentLength?: number;
@@ -48,10 +84,14 @@ export interface IngestionSource {
   id?: string;
   name?: string;
   enabled?: boolean;
-  /** `web` crawls a site; `upload` reads files stored on the source. */
+  /**
+   * `web` crawls a site; `upload` reads files stored on the source;
+   * `googleDrive` reads a Google Shared Drive.
+   */
   type?: string;
   web?: WebSource;
   upload?: UploadSource;
+  googleDrive?: GoogleDriveSource;
   settings?: IngestionSettings;
   /** Standard cron; absent means the source only runs when triggered by hand. */
   cron?: string;
