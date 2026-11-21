@@ -391,6 +391,24 @@ Each member's private conversation is granted access on its **first** turn and r
 
 Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) applies per **member turn**, and anything dropped is reported in that member's `attachments:errors`, not in the group transcript. See [group-conversations.md → Attachments](group-conversations.md#attachments).
 
+## Sharing between agents — the rule
+
+Every path that hands a stored file from one conversation to another follows one rule, implemented once in `AttachmentShareService` (`engine/attachments`). Today only its read check (rule 3) is in use, by the nested-group pass-through above — that path is neither metered nor audited as a share; the agent tools that pass files on (delegation first) call the full service.
+
+1. **A model names files; it never holds a reference.** What a conversation's model may name is its **listing**: the files it owns or was granted (`listAccessible`), minus the files of a turn an input guardrail refused (withheld). Each entry is shown by its file name — `(unnamed)` for a file stored without one, never the `storageRef` — and can also be named by its 1-based number. The listing is sorted by name (then by reference), so the same files always list the same way, but a file added or granted later can shift the numbers: a number is only meaningful against the listing shown in the same turn. A name that matches several files is refused with their numbers; a name that is not in the listing is `not found`, whether the file exists elsewhere or not at all.
+2. **Server code picks both ends.** The source is the conversation the tool is bound to; the target is a conversation server code created for the share. Neither comes from a model or from client context.
+3. **The listing is checked, not trusted.** It must have been built for the source conversation; a withheld file is never shared, even from a listing assembled by hand; and the source must still be able to read the file when it shares it (owner or grantee). Each of these refusals reads `not found` and names no file. A grantee may share a file onward, within the hop limit.
+4. **Limits**, set by the caller from the agent's configuration: files per share, shares per turn (one count for the whole turn, whatever the number of tool assemblies), allowed MIME types and the hop limit. A refused file uses up no slot.
+5. **What a share does:** it grants the target conversation read access to the file's root — so the receiver can read the whole file with `readAttachment` — records an audit entry in the **source** conversation's ledger (`taskId` `attachment.share`: target conversation and agent, reason, MIME type, size; no bytes, no file name), and counts the metrics below. The tool that shared stores a row per file under the step key `attachments:shared` (file name, target agent, reason — no references).
+6. **Not yet:** parts of a file. `report.pdf#u3` (a unit) and `report.pdf#p4-9` (pages) are understood and refused with *parts of a file cannot be shared yet*. A file whose name itself contains `#` is still found by its exact name.
+
+| Metric | Tag | Meaning |
+|---|---|---|
+| `eddi_attachment_shared_total` | `path` (`delegation`, `group_task`, `group_share`, `handoff`, `a2a_outbound`, `mcp`, `nested_group`) | Files shared |
+| `eddi_attachment_share_refused_total` | `reason` (`not_found`, `ambiguous`, `part`, `mime_type`, `depth`, `files_per_share`, `shares_per_turn`, `target`, `grant_failed`, `unavailable`) | Share requests refused |
+
+Granting is idempotent on both stores (MongoDB adds to a set, PostgreSQL appends only when absent), so sharing the same file twice leaves one grant.
+
 ## Architecture Notes
 
 - **No inline storage**: Attachment payloads are never stored inline in conversation memory documents. Only metadata references are persisted.
