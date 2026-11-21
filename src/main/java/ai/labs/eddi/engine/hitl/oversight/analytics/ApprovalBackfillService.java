@@ -7,13 +7,17 @@ package ai.labs.eddi.engine.hitl.oversight.analytics;
 import ai.labs.eddi.engine.audit.IAuditStore;
 import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.hitl.audit.HitlApprovalAudit;
+import ai.labs.eddi.engine.hitl.audit.HitlDecisionUnit;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
 import org.jboss.logging.Logger;
 
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+
+import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 
 /**
  * Rebuilds approval-decision facts from the audit ledger: pages the
@@ -35,6 +39,14 @@ public class ApprovalBackfillService {
     static final int PAGE_SIZE = 500;
     /** Upper bound of entries one rebuild reads (2 million). */
     static final int MAX_PAGES = 4_000;
+    /**
+     * Upper bound of pending rows one reconciliation checks. Rows are pending only
+     * while a projection is in flight or after one failed, so this is a backlog
+     * bound, not a throughput limit.
+     */
+    static final int RECONCILE_LIMIT = 1_000;
+    /** Upper bound of ledger pages read to find one pending row's entry. */
+    static final int LEDGER_LOOKUP_PAGES = 20;
 
     private final IAuditStore auditStore;
     private final ApprovalDecisionProjector projector;
@@ -48,6 +60,92 @@ public class ApprovalBackfillService {
 
     /** What a rebuild did. */
     public record Result(long entriesRead, long unitsStored, boolean truncated) {
+    }
+
+    /**
+     * Settles rows a projection left pending (it failed, or the process stopped,
+     * before it confirmed the row against the erased-subject record), at most
+     * {@value #RECONCILE_LIMIT}. A pending row is stored masked, so its identities
+     * are read back from its ledger entry (by conversation) and settled through the
+     * same two checks as a fresh projection; a row whose entry is gone or redacted
+     * keeps its masked identities. Run by the hourly HITL maintenance and after
+     * every rebuild; a row that cannot be settled now stays pending.
+     *
+     * @return how many rows were settled
+     */
+    public int reconcilePending() {
+        List<IApprovalDecisionStore.Pending> pending;
+        try {
+            pending = projector.pendingRows(RECONCILE_LIMIT);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not read approval decisions pending the erased-subject check: %s", e.getMessage());
+            return 0;
+        }
+        List<ApprovalDecision> settled = new ArrayList<>();
+        for (IApprovalDecisionStore.Pending p : pending) {
+            ApprovalDecision row = p.row();
+            try {
+                LedgerLookup lookup = fromLedger(row);
+                if (!lookup.complete()) {
+                    LOGGER.warnf("The ledger entry of pending approval decision %s was not found within %d entries of its conversation; "
+                            + "it stays pending", sanitize(row.id()), LEDGER_LOOKUP_PAGES * PAGE_SIZE);
+                    continue;
+                }
+                ApprovalDecision now = lookup.row() != null
+                        ? projector.settle(lookup.row(), row, p.version())
+                        : projector.settleMasked(row, p.version());
+                if (now != null) {
+                    settled.add(now);
+                }
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Pending approval decision %s could not be settled yet: %s", sanitize(row.id()), e.getMessage());
+            }
+        }
+        // A rejection whose live settlement failed reaches earned autonomy here.
+        projector.evaluate(settled);
+        if (!settled.isEmpty()) {
+            LOGGER.infof("Settled %d approval decision row(s) left pending the erased-subject check", settled.size());
+        }
+        return settled.size();
+    }
+
+    /**
+     * The result of looking a pending row's entry up in the ledger.
+     *
+     * @param row
+     *            the row as the ledger has it, or null when the entry was not found
+     * @param complete
+     *            false when the lookup stopped at its page bound: "not found" is
+     *            then unknown, not an answer
+     */
+    record LedgerLookup(ApprovalDecision row, boolean complete) {
+    }
+
+    /**
+     * The row as the ledger has it: the {@code hitl.approval} entry of the row's
+     * conversation that holds its decision, at the row's unit index.
+     */
+    LedgerLookup fromLedger(ApprovalDecision row) {
+        if (row.conversationId() == null || row.decisionId() == null) {
+            return new LedgerLookup(null, true);
+        }
+        for (int page = 0; page < LEDGER_LOOKUP_PAGES; page++) {
+            List<AuditEntry> entries = auditStore.getEntries(row.conversationId(), page * PAGE_SIZE, PAGE_SIZE);
+            for (AuditEntry entry : entries) {
+                if (!HitlApprovalAudit.TASK_ID.equals(entry.taskId())) {
+                    continue;
+                }
+                List<HitlDecisionUnit> units = HitlApprovalAudit.parse(entry);
+                int index = row.unitIndex();
+                if (index >= 0 && index < units.size() && units.get(index) != null && row.decisionId().equals(units.get(index).decisionId())) {
+                    return new LedgerLookup(ApprovalDecision.of(units.get(index), index), true);
+                }
+            }
+            if (entries.size() < PAGE_SIZE) {
+                return new LedgerLookup(null, true);
+            }
+        }
+        return new LedgerLookup(null, false);
     }
 
     /** Whether a rebuild is running on this node. */
@@ -89,6 +187,7 @@ public class ApprovalBackfillService {
                     break;
                 }
             }
+            reconcilePending();
             LOGGER.infof("Approval analytics rebuild read %d hitl.approval entries and stored %d new decision rows%s", read, stored,
                     truncated ? " (stopped at the page limit)" : "");
             return new Result(read, stored, truncated);

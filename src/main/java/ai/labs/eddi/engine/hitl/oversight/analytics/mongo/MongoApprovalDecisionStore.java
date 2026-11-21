@@ -29,8 +29,12 @@ import static com.mongodb.client.model.Filters.eq;
 import static com.mongodb.client.model.Filters.exists;
 import static com.mongodb.client.model.Filters.gte;
 import static com.mongodb.client.model.Filters.lt;
+import static com.mongodb.client.model.Filters.ne;
 import static com.mongodb.client.model.Filters.or;
+import static com.mongodb.client.model.Updates.combine;
+import static com.mongodb.client.model.Updates.inc;
 import static com.mongodb.client.model.Updates.set;
+import static com.mongodb.client.model.Updates.unset;
 
 /**
  * MongoDB implementation of {@link IApprovalDecisionStore}: collection
@@ -61,6 +65,10 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     static final String USER_ID = "userId";
     static final String DECIDED_BY = "decidedBy";
     static final String DATA = "data";
+    static final String PENDING_CHECK = "pendingCheck";
+    static final String SETTLE_VERSION = "settleVersion";
+    /** Rows that are not pending — what every read sees. */
+    private static final Bson SETTLED = ne(PENDING_CHECK, true);
 
     private final MongoCollection<Document> collection;
 
@@ -74,12 +82,26 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
         collection.createIndex(Indexes.descending(DECIDED_AT), new IndexOptions().name("idx_decision_decided"));
         collection.createIndex(Indexes.ascending(USER_ID), new IndexOptions().name("idx_decision_user").sparse(true));
         collection.createIndex(Indexes.ascending(DECIDED_BY), new IndexOptions().name("idx_decision_decider"));
+        collection.createIndex(Indexes.ascending(PENDING_CHECK), new IndexOptions().name("idx_decision_pending_check").sparse(true));
     }
 
     @Override
     public boolean insertIfAbsent(ApprovalDecision decision) {
         try {
-            collection.insertOne(toDocument(decision));
+            collection.insertOne(toDocument(decision).append(SETTLE_VERSION, INITIAL_VERSION));
+            return true;
+        } catch (MongoException e) {
+            if (e.getCode() == DUPLICATE_KEY) {
+                return false;
+            }
+            throw e;
+        }
+    }
+
+    @Override
+    public boolean insertPendingIfAbsent(ApprovalDecision decision) {
+        try {
+            collection.insertOne(toDocument(decision).append(PENDING_CHECK, true).append(SETTLE_VERSION, INITIAL_VERSION));
             return true;
         } catch (MongoException e) {
             if (e.getCode() == DUPLICATE_KEY) {
@@ -112,7 +134,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public List<ApprovalDecision> readByUser(String userId, int limit) {
         List<ApprovalDecision> rows = new ArrayList<>();
-        for (Document doc : collection.find(or(eq(USER_ID, userId), eq(DECIDED_BY, userId))).limit(Math.max(0, limit))) {
+        for (Document doc : collection.find(and(or(eq(USER_ID, userId), eq(DECIDED_BY, userId)), SETTLED)).limit(Math.max(0, limit))) {
             rows.add(fromDocument(doc));
         }
         return rows;
@@ -120,9 +142,33 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
 
     @Override
     public long eraseUser(String userId, String pseudonym) {
-        long changed = collection.updateMany(eq(USER_ID, userId), set(USER_ID, null)).getModifiedCount();
-        changed += collection.updateMany(eq(DECIDED_BY, userId), set(DECIDED_BY, pseudonym)).getModifiedCount();
+        long changed = collection.updateMany(eq(USER_ID, userId), combine(set(USER_ID, null), inc(SETTLE_VERSION, 1L))).getModifiedCount();
+        changed += collection.updateMany(eq(DECIDED_BY, userId), combine(set(DECIDED_BY, pseudonym), inc(SETTLE_VERSION, 1L)))
+                .getModifiedCount();
         return changed;
+    }
+
+    @Override
+    public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending) {
+        Bson mark = pending ? set(PENDING_CHECK, true) : unset(PENDING_CHECK);
+        // A document stored before the version existed has no field; pendingCheck reads
+        // it
+        // as the initial version, so the initial version must match it too.
+        Bson version = expectedVersion == INITIAL_VERSION
+                ? or(eq(SETTLE_VERSION, INITIAL_VERSION), exists(SETTLE_VERSION, false))
+                : eq(SETTLE_VERSION, expectedVersion);
+        return collection.updateOne(and(eq(ID, id), version),
+                combine(set(USER_ID, userId), set(DECIDED_BY, decidedBy), mark, inc(SETTLE_VERSION, 1L))).getMatchedCount() > 0;
+    }
+
+    @Override
+    public List<Pending> pendingCheck(int limit) {
+        List<Pending> rows = new ArrayList<>();
+        for (Document doc : collection.find(eq(PENDING_CHECK, true)).limit(Math.max(0, limit))) {
+            Object version = doc.get(SETTLE_VERSION);
+            rows.add(new Pending(fromDocument(doc), version instanceof Number n ? n.longValue() : INITIAL_VERSION));
+        }
+        return rows;
     }
 
     public static Document toDocument(ApprovalDecision d) {
@@ -150,6 +196,7 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
 
     static Bson toBson(DecisionFilter f) {
         List<Bson> parts = new ArrayList<>();
+        parts.add(SETTLED);
         if (f.agentId() != null) {
             parts.add(eq(AGENT_ID, f.agentId()));
         }
@@ -177,6 +224,6 @@ public class MongoApprovalDecisionStore implements IApprovalDecisionStore {
         if (f.agentVersion() != null) {
             parts.add(eq(AGENT_VERSION, f.agentVersion()));
         }
-        return parts.isEmpty() ? new Document() : and(parts);
+        return and(parts);
     }
 }

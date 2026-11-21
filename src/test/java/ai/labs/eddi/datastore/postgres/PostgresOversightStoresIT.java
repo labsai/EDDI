@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.datastore.postgres;
 
+import ai.labs.eddi.engine.hitl.oversight.OversightFixtures;
 import ai.labs.eddi.engine.hitl.oversight.OversightStoreContracts;
+import ai.labs.eddi.engine.hitl.oversight.analytics.ApprovalDecision;
 import ai.labs.eddi.engine.hitl.oversight.analytics.DecisionFilter;
 import ai.labs.eddi.engine.hitl.oversight.analytics.IApprovalDecisionStore;
 import ai.labs.eddi.engine.hitl.oversight.autonomy.IAutonomyStateStore;
@@ -22,6 +24,7 @@ import java.sql.Statement;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -69,6 +72,22 @@ class PostgresOversightStoresIT extends PostgresTestBase {
             List<String> indexes = indexNames("approval_decisions");
             assertTrue(indexes.containsAll(List.of("idx_approval_decisions_agent", "idx_approval_decisions_group",
                     "idx_approval_decisions_decided", "idx_approval_decisions_user", "idx_approval_decisions_decider")), indexes.toString());
+        }
+
+        @Test
+        void aPendingRowWithANullVersionAndNullDeciderReadsAsInitialAndSettles() throws Exception {
+            ApprovalDecision row = OversightFixtures.decision("APPROVED", OversightFixtures.NOW).withPersonalFields(null, null);
+            store.insertPendingIfAbsent(row);
+            // A row written before settle_version existed: decided_by, the last column
+            // read, is null as well, so a wasNull() check would test the wrong column.
+            try (Connection conn = DATA_SOURCE.getConnection(); Statement stmt = conn.createStatement()) {
+                stmt.execute("UPDATE approval_decisions SET settle_version = NULL");
+            }
+
+            IApprovalDecisionStore.Pending pending = store.pendingCheck(10).getFirst();
+            assertEquals(IApprovalDecisionStore.INITIAL_VERSION, pending.version());
+            assertTrue(store.updateIdentities(row.id(), pending.version(), null, null, false));
+            assertTrue(store.pendingCheck(10).isEmpty());
         }
     }
 

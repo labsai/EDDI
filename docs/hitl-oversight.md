@@ -264,6 +264,30 @@ reviewer, as a decider in the decision facts and as the actor in the autonomy st
 removes the `userId` from the decision facts of their conversations (the rows stay — they hold no content, and keep the
 analytics correct). Export includes their samples and decision rows.
 
+A rebuild (`POST /hitl/analytics/rebuild`, or the first-start one) does not undo this. The decision facts are a
+projection of the `hitl.approval` ledger entries, and an entry is filed under the conversation owner while it names the
+decider in `output.decidedBy` — so erasing a decider who is not the owner leaves the entry as it was, and a rebuild that
+re-inserted a row it had lost (retention, a failed write, a pre-6.7 entry imported for the first time) used to name the
+erased person again. Erasure now writes the person to the `gdpr_erased_subjects` record first (see
+[GDPR Compliance](gdpr-compliance.md#1-right-to-erasure-gdpr-art-17--ccpa-1798105)), and the projector checks both
+identities of every row against it: for a decision made no later than the erasure it stores what erasure leaves — no
+`userId`, the same keyed pseudonym as decider — so the rebuilt counts match the erased ones. A decision made after the
+erasure (a returning user) keeps its id. A "not erased" answer is never cached.
+
+The stored state is always the safe one. A row with an identity is inserted **masked** (no `userId`, decider
+pseudonymised) and **pending**, and a pending row is left out of every read: the analytics queries and counts, and the
+GDPR export (`readByUser`). It is then settled: a fresh check says which identities may be kept, they are written back to
+that row alone with a compare-and-set (still pending), a second fresh check confirms them or reverts the row if an
+erasure was recorded in between, and only then is the pending mark cleared. Every compare-and-set is bound to a
+settlement version that each identity write increments, erasure's included, so a stale settler cannot match a row that
+erasure masked back to the very values it expected. A settled row also reaches earned autonomy, so a demote-coded
+rejection resets the evidence window even when it was settled late. A failure or a crash at any step leaves the
+row pending and hidden; the hourly maintenance run and every rebuild settle pending rows again (at most 1,000 per run),
+reading their identities back from the ledger entry of their conversation. A pending row whose entry is gone or redacted
+settles in its masked form; one whose entry is not found within the lookup bound (10,000 entries of its conversation)
+stays pending. Only a failure in the moment between writing an identity back and confirming it leaves that
+identity at rest, still pending and hidden, until the next maintenance run.
+
 ## Metrics and properties
 
 Metrics are listed in [Metrics → HITL](metrics.md#hitl-metrics) and charted in the Full Metrics Reference dashboard's

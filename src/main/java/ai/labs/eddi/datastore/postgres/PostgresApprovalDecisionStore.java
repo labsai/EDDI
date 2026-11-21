@@ -64,8 +64,17 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
                     + "WHERE group_id IS NOT NULL",
             "CREATE INDEX IF NOT EXISTS idx_approval_decisions_decided ON approval_decisions (decided_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_approval_decisions_user ON approval_decisions (user_id) WHERE user_id IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_approval_decisions_decider ON approval_decisions (decided_by)"
+            "CREATE INDEX IF NOT EXISTS idx_approval_decisions_decider ON approval_decisions (decided_by)",
+            // Added after 6.7.0's first schema: rows awaiting the erased-subject check.
+            "ALTER TABLE approval_decisions ADD COLUMN IF NOT EXISTS pending_check BOOLEAN",
+            "CREATE INDEX IF NOT EXISTS idx_approval_decisions_pending_check ON approval_decisions (id) WHERE pending_check",
+            "ALTER TABLE approval_decisions ADD COLUMN IF NOT EXISTS settle_version BIGINT"
     };
+
+    /** Rows that are not pending — what every read sees. */
+    static final String SETTLED = "pending_check IS NOT TRUE";
+    /** Increments a row's settlement version. */
+    private static final String BUMP = "settle_version = COALESCE(settle_version, 0) + 1";
 
     private static final String COLUMNS = "id, agent_id, group_id, category, decided_at, surface, pause_type, channel, agent_version, "
             + "user_id, decided_by, data";
@@ -96,8 +105,18 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
 
     @Override
     public boolean insertIfAbsent(ApprovalDecision d) {
+        return insert(d, false);
+    }
+
+    @Override
+    public boolean insertPendingIfAbsent(ApprovalDecision d) {
+        return insert(d, true);
+    }
+
+    private boolean insert(ApprovalDecision d, boolean pending) {
         ensureSchema();
-        String sql = "INSERT INTO approval_decisions (" + COLUMNS + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING";
+        String sql = "INSERT INTO approval_decisions (" + COLUMNS + ", pending_check, settle_version) "
+                + "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING";
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
             ps.setString(1, d.id());
             ps.setString(2, d.agentId());
@@ -115,6 +134,12 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
             ps.setString(10, d.userId());
             ps.setString(11, d.decidedBy());
             ps.setString(12, OversightJson.write(d.withoutPersonalFields()));
+            if (pending) {
+                ps.setBoolean(13, true);
+            } else {
+                ps.setNull(13, Types.BOOLEAN);
+            }
+            ps.setLong(14, INITIAL_VERSION);
             return ps.executeUpdate() > 0;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to store approval decision", e);
@@ -156,21 +181,55 @@ public class PostgresApprovalDecisionStore implements IApprovalDecisionStore {
     @Override
     public List<ApprovalDecision> readByUser(String userId, int limit) {
         ensureSchema();
-        return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE user_id = ? OR decided_by = ? LIMIT ?",
+        return select("SELECT " + COLUMNS + " FROM approval_decisions WHERE (user_id = ? OR decided_by = ?) AND " + SETTLED + " LIMIT ?",
                 List.of(userId, userId, Math.max(0, limit)));
     }
 
     @Override
     public long eraseUser(String userId, String pseudonym) {
         ensureSchema();
-        long changed = update("UPDATE approval_decisions SET user_id = NULL WHERE user_id = ?", List.of(userId));
-        changed += update("UPDATE approval_decisions SET decided_by = ? WHERE decided_by = ?", List.of(pseudonym, userId));
+        long changed = update("UPDATE approval_decisions SET user_id = NULL, " + BUMP + " WHERE user_id = ?", List.of(userId));
+        changed += update("UPDATE approval_decisions SET decided_by = ?, " + BUMP + " WHERE decided_by = ?", List.of(pseudonym, userId));
         return changed;
     }
 
-    /** The WHERE clause of a filter; appends its parameters. */
+    @Override
+    public boolean updateIdentities(String id, long expectedVersion, String userId, String decidedBy, boolean pending) {
+        ensureSchema();
+        List<Object> params = new ArrayList<>();
+        params.add(userId);
+        params.add(decidedBy);
+        params.add(id);
+        params.add(expectedVersion);
+        return update("UPDATE approval_decisions SET user_id = ?, decided_by = ?, pending_check = " + (pending ? "TRUE" : "NULL") + ", "
+                + BUMP + " WHERE id = ? AND COALESCE(settle_version, 0) = ?", params) > 0;
+    }
+
+    @Override
+    public List<Pending> pendingCheck(int limit) {
+        ensureSchema();
+        String sql = "SELECT " + COLUMNS + ", COALESCE(settle_version, 0) AS settle_version FROM approval_decisions WHERE pending_check LIMIT ?";
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, Math.max(0, limit));
+            List<Pending> rows = new ArrayList<>();
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    ApprovalDecision stored = OversightJson.read(rs.getString("data"), ApprovalDecision.class);
+                    // COALESCE in the query: a wasNull() here would test the last column read.
+                    long version = rs.getLong("settle_version");
+                    rows.add(new Pending(stored.withPersonalFields(rs.getString("user_id"), rs.getString("decided_by")), version));
+                }
+            }
+            return rows;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read pending approval decisions", e);
+        }
+    }
+
+    /** The WHERE clause of a filter (settled rows only); appends its parameters. */
     public static String where(DecisionFilter f, List<Object> params) {
         List<String> parts = new ArrayList<>();
+        parts.add(SETTLED);
         addEq(parts, params, "agent_id", f.agentId());
         addEq(parts, params, "group_id", f.groupId());
         addEq(parts, params, "category", f.category());

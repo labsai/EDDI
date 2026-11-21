@@ -115,5 +115,31 @@ class GdprPseudonymizerTest {
     void nullUser_isRefused() {
         var pseudonymizer = new GdprPseudonymizer(unsignedLedger(), null);
         assertThrows(IllegalArgumentException.class, () -> pseudonymizer.pseudonymFor(null));
+        assertThrows(IllegalArgumentException.class, () -> pseudonymizer.stableTokenFor(null));
+    }
+
+    @Test
+    void stableToken_isSaltedEvenWhenTheLedgerSigns_andTheSameOnEveryReplica() {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.pseudonymOf(USER)).thenReturn(AuditHmac.keyedPseudonymFor(USER, new byte[32]));
+        var shared = new HashMap<String, String>();
+
+        String token = new GdprPseudonymizer(ledger, instance(metaStore(shared))).stableTokenFor(USER);
+
+        assertTrue(token.startsWith(AuditHmac.SALTED_PSEUDONYM_PREFIX), token);
+        assertEquals(token, new GdprPseudonymizer(unsignedLedger(), instance(metaStore(shared))).stableTokenFor(USER),
+                "a key rotation or another replica must find the same record");
+    }
+
+    @Test
+    void stableToken_failsClosedWithoutASalt_insteadOfFallingBackToTheUnsaltedHash() {
+        assertThrows(IllegalStateException.class, () -> new GdprPseudonymizer(unsignedLedger(), null).stableTokenFor(USER));
+
+        var persistence = mock(ISecretPersistence.class);
+        when(persistence.setMetaValueIfAbsent(anyString(), anyString())).thenThrow(new PersistenceException("down"))
+                .thenReturn("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=");
+        var pseudonymizer = new GdprPseudonymizer(unsignedLedger(), instance(persistence));
+        assertThrows(IllegalStateException.class, () -> pseudonymizer.stableTokenFor(USER));
+        assertTrue(pseudonymizer.stableTokenFor(USER).startsWith(AuditHmac.SALTED_PSEUDONYM_PREFIX), "retried on the next call");
     }
 }

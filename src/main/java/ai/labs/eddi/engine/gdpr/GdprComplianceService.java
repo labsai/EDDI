@@ -162,6 +162,14 @@ public class GdprComplianceService {
     @Inject
     GdprPseudonymizer pseudonymizer;
 
+    /**
+     * The durable record of erased people that projections rebuilt from the audit
+     * ledger consult (approval analytics). Field-injected; null in tests built with
+     * {@code new}.
+     */
+    @Inject
+    ErasedSubjects erasedSubjects;
+
     private String pseudonymFor(String userId) {
         return pseudonymizer != null ? pseudonymizer.pseudonymFor(userId) : AuditHmac.pseudonymFor(userId);
     }
@@ -463,6 +471,16 @@ public class GdprComplianceService {
         } catch (Exception e) {
             recordFailure(failedSteps, "auditRewrite", e, pseudonym);
         }
+
+        // 0c. Record the erasure durably and cluster-wide before anything is erased. A
+        // projection rebuilt from the audit ledger later (approval analytics) re-reads
+        // entries this cascade does not rewrite — one names its decider while it is
+        // filed under another user — and consults this record so that it does not put
+        // the erased identity back. Written first so a rebuild running concurrently,
+        // or an erasure that fails half-way, is still covered; written again just
+        // before the participants (8a) to cover decisions made while the cascade ran.
+        Instant erasureStarted = Instant.now();
+        recordErasedSubject(userId, erasureStarted, failedSteps, pseudonym);
 
         // 0. Stop the user's in-flight work on this node BEFORE deleting anything. A
         // turn still running wrote its longTerm properties back to user memory at
@@ -970,6 +988,13 @@ public class GdprComplianceService {
         // are kept and reported as failed: erasing the directory entry now would leave
         // the re-run nothing to find those rows by (the same reason step 4c keeps the
         // snapshots until a retry).
+        // 8a. Record the erasure again, now, before the participants pseudonymise the
+        // stored rows: a decision made while the cascade ran is covered by this time,
+        // and a projection that inserts such a row either re-checks after this write
+        // (and scrubs it) or inserted before it (and the participant's pass reaches
+        // it).
+        recordErasedSubject(userId, Instant.now(), failedSteps, pseudonym);
+
         Map<String, Long> additionalDeleted = new LinkedHashMap<>();
         List<String> participantsFailed = new ArrayList<>();
         for (IGdprParticipant participant : participants()) {
@@ -1036,6 +1061,20 @@ public class GdprComplianceService {
         submitComplianceAuditEntry("GDPR_ERASURE", pseudonym, auditDetails);
 
         return result;
+    }
+
+    /** Writes the erased-subject record; a failure marks the erasure incomplete. */
+    private void recordErasedSubject(String userId, Instant at, List<String> failedSteps, String pseudonym) {
+        if (erasedSubjects == null) {
+            return;
+        }
+        try {
+            erasedSubjects.record(userId, at);
+        } catch (Exception e) {
+            if (!failedSteps.contains("erasedSubjectRecord")) {
+                recordFailure(failedSteps, "erasedSubjectRecord", e, pseudonym);
+            }
+        }
     }
 
     private List<IGdprParticipant> participants() {
