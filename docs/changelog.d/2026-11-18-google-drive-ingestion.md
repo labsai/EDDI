@@ -35,7 +35,7 @@ Phase G1 of [`rag-ingestion-source-types-plan.md`](../../planning/rag-ingestion-
 - **Manager.** A third source type, **Google Drive**, with its fields, the audience warning, and the
   preview summary; strings in all 11 locales; MSW mocks for a Drive-fed knowledge base and a
   `google-drive-sa` connection. The Platform Operator learns the type and its failure checklist
-  (revision 82).
+  (revision 83).
 - **Docs.** [`docs/rag.md`](../rag.md#google-shared-drive-type-googledrive): the source, the
   service-account setup, how a run reads the drive, failure modes.
 
