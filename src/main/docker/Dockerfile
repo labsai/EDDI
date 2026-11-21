@@ -108,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:dab1be80efb4b8b6e97a314715b367bc9c5ebea3f9c1233b9023910423c45f6c AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -119,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:dab1be80efb4b8b6e97a314715b367bc9c5ebea3f9c1233b9023910423c45f6c
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.
@@ -238,9 +238,10 @@ EXPOSE 7070
 # words and DKIM signatures of inbound mail, webhook signature headers). The flag removes
 # only that code path; decoding falls back to the plain Java loop. It rides here, not on
 # JAVA_OPTS_APPEND, for the same reason as the two flags above. It is a product flag in
-# this JDK, so no -XX:+UnlockDiagnosticVMOptions is needed. REMOVE it once the base image
-# pin carries an OpenJDK build with the fix (25.0.5.1 or later), together with
-# Java4ShellMitigationTest, which fails the build if the flag is dropped before then.
+# this JDK, so no -XX:+UnlockDiagnosticVMOptions is needed. The base image pin now carries
+# the fixed OpenJDK (25.0.5.1, confirmed with `java -version`), so the flag is a second line
+# of defence. Remove it, together with Java4ShellMitigationTest (which fails the build if the
+# flag is dropped alone), in a change of its own; see docs/security.md.
 ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics"
 # Heap = 75 % of the container memory limit (run-java's default is 50 %). Conversation
 # turns run on virtual threads, so heap, not threads, bounds how many turns a node holds,
