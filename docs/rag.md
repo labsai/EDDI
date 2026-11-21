@@ -983,11 +983,49 @@ embedding call each, while the document listing returns only ingestion state and
 
 Each run row carries, besides its counters, **why it stopped** (`stopReason`: `COMPLETED`, or the limit
 it hit — `PAGE_LIMIT`, `FETCH_LIMIT`, `BYTE_LIMIT`, `TIME_LIMIT` — or `CANCELLED`, which also covers a
-run that was superseded or reached its chunk budget), **what started it** (`trigger`: `MANUAL` or
+run that was superseded or reached its chunk budget, or `THROTTLED`, below), **what started it** (`trigger`: `MANUAL` or
 `SCHEDULED`; absent on rows written before it was recorded) and how many documents were **skipped** for
 having no text worth embedding. A running run writes its counters every couple of seconds
 (`IIngestionStateStore.reportProgress`), fenced on the row still being `RUNNING`, so a late write can
 neither reopen nor overwrite a finished run. A run cancelled at shutdown keeps the counters it had got to.
+
+#### When the embedding provider throttles
+
+An embedding provider's quota belongs to its project, not to any document: once a free-tier Gemini key
+has spent its 100 requests a minute, every call fails until the window turns. Ingestion therefore treats
+a provider's "slow down" (HTTP 429) as a reason to **wait**, or to **stop and come back**, never as a
+failed document. Retrieval is not affected: a query embedding answers a user who is waiting, so it keeps
+the provider client's short retry and never sleeps on a throttle.
+
+- **The delay is the provider's.** Gemini says how long in its error body (`RetryInfo.retryDelay`,
+  for example `26s`); OpenAI and Gemini also write "retry in 13s" into the message, which is read when
+  there is no `RetryInfo`. With nothing to read, the wait is 30 seconds. An HTTP `Retry-After` header
+  is not available: the provider clients EDDI builds on keep the body of an error response, not its
+  headers.
+- **Minute or day.** Gemini names the quota that ran out
+  (`EmbedContentRequestsPerMinutePerUserPerProjectPerModel-FreeTier`, `…PerDay…`). A per-minute quota
+  is waited out, up to the embedding model's `maxRetries` times per call (default 5), as long as the
+  wait ends before the run's time budget does. A per-day quota, an OpenAI `insufficient_quota`, and —
+  when no quota is named — any delay over 5 minutes stop the run at once.
+- **Stopping is not failing.** A run that cannot wait ends with `stopReason: THROTTLED` (the REST
+  outcome is `THROTTLED` too; the run's `status` stays `COMPLETED`). The document that hit the limit,
+  and every one after it, is counted in `documentsThrottled` — not in `documentsFailed` — and is not
+  sent to the provider again during the run. The run's coverage is partial, so **nothing is
+  tombstoned**, and documents already in the knowledge base keep their chunks. `resumeAfter` records
+  when the provider said it would take calls again (absent for a daily quota with no time given).
+- **The next run picks up the rest.** There is no automatic retry run: the source's next scheduled run,
+  or the next **Run now**, lists the source again and finds the documents left over as new or changed.
+  A source without a `cron` waits for a manual run. A scheduled fire whose run is throttled is not
+  counted as a failed fire, so a daily quota cannot dead-letter the schedule.
+
+For the providers whose client is langchain4j's own (`openai`, `ollama`, `mistral`, `gemini`), the
+ingestion-side model is built with the provider's own retries off and EDDI does the retrying —
+including a short backoff after a 5xx or a timeout — because langchain4j's retry waits half a second
+and ignores the delay the provider asked for. `azure-openai`, `vertex`, `bedrock` and `cohere` keep
+their SDK's retries; a throttle EDDI recognises after them is still waited out or stopped on as above.
+
+Two meters show it: `eddi.ingestion.throttled` counts documents left for later (tags `knowledgeBase`,
+`source`), and `eddi.provider.throttle.wait` times each wait (tag `provider`).
 
 A source with a `cron` gets a schedule named `rag-ingestion:{ragConfigId}:{sourceId}`, kept in step with
 the configuration whenever the knowledge base is saved and removed when it is deleted. `{sourceId}` is
@@ -1289,6 +1327,10 @@ tighten it.
 - **`model` and `modelName` are the same parameter** — LLM tasks call it `modelName`, so either is
   accepted. Setting both to different values is refused.
 - **`timeout` is in milliseconds**, as it is for LLM tasks.
+- **`maxRetries` means two things.** For retrieval it is the provider client's own retry count. For
+  ingestion it is how often EDDI repeats one embedding call after a rate limit or a transient failure
+  (default 5), waiting as long as the provider asks — see
+  [When the embedding provider throttles](#when-the-embedding-provider-throttles).
 - **Every value may be a vault reference** (`${vault:…}`) or a global variable; both are resolved when
   the model is built, and an unresolvable reference fails the build rather than reaching the provider.
 - **An endpoint the provider cannot honour is an error, not a silent fallback.** Until 6.6 the
