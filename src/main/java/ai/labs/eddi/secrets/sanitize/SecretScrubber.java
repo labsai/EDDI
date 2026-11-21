@@ -155,6 +155,26 @@ public class SecretScrubber {
     private static final Pattern SCHEME_PREFIX = Pattern.compile("^[a-zA-Z][a-zA-Z0-9+.-]{0,31}://");
 
     /**
+     * A connection URL whose only secret is a vault reference in the userinfo
+     * password slot:
+     * {@code jdbc:postgresql://app:${vault:db-password}@db:5432/eddi}. The scheme
+     * is one of the connection schemes by name — a grammar would also admit
+     * {@code hunter2://…}, and a password cannot be told from a scheme by its
+     * shape. That holds for the JDBC subprotocol too ({@code jdbc:hunter2://…}), so
+     * it is listed as well: only the drivers that take a
+     * {@code //user:password@host} URL (PostgreSQL, MySQL, MariaDB). After the slot
+     * only a host name, an optional port and an optional single database name may
+     * follow: no further path, no query, no fragment, no further {@code @},
+     * reference or template. Possessive or bounded throughout, so it is linear on
+     * any input.
+     */
+    private static final Pattern VAULT_PASSWORD_SLOT_URL = Pattern.compile(
+            "\\s*+(?:jdbc:(?:postgresql|mysql|mariadb)|mongodb(?:\\+srv)?|postgres(?:ql)?|mysql|mariadb|redis|rediss|amqps?|nats|https?)"
+                    + "://[A-Za-z0-9._-]{0,200}+:\\$\\{(?:vault|eddivault):[A-Za-z0-9._/-]{1,200}+}"
+                    + "@[A-Za-z0-9.-]{1,253}+(?::[0-9]{1,5}+)?+(?:/[A-Za-z0-9_.-]{1,128}+)?+/?+\\s*+",
+            Pattern.CASE_INSENSITIVE);
+
+    /**
      * Qualifiers that turn a credential noun into a COUNT of them.
      * <p>
      * Without this the suffix rule above is a round-trip bug on the most common LLM
@@ -314,8 +334,39 @@ public class SecretScrubber {
         return isSecretFieldName(fieldName, null);
     }
 
+    /**
+     * The document-level walk: {@link #scrubJson} and {@link #containsCredential}.
+     */
     private void scrubNode(JsonNode node, String parentFieldName) {
+        maskKeyNamedParameters(node, "");
         scrubNode(node, parentFieldName, false);
+    }
+
+    /**
+     * In the model-parameter maps listed in
+     * {@link ConfigSecretRedactor#KEY_NAMED_CREDENTIAL_PATHS}, any literal under a
+     * name ending in {@code key} ({@code accessKey}, {@code subscriptionKey}) is
+     * redacted — the rule the read redaction and the save-time check apply there.
+     * By path, because the same names are ordinary settings elsewhere (an LLM
+     * task's {@code promptCacheKey}), and the export round trip must stay lossless
+     * there.
+     */
+    private static void maskKeyNamedParameters(JsonNode node, String pattern) {
+        if (node instanceof ObjectNode object) {
+            boolean keyNamed = ConfigSecretRedactor.KEY_NAMED_CREDENTIAL_PATHS.contains(pattern);
+            for (Map.Entry<String, JsonNode> field : object.properties()) {
+                JsonNode value = field.getValue();
+                if (keyNamed && value.isTextual() && ConfigSecretRedactor.isKeyNamedLiteral(field.getKey(), value.asText())) {
+                    field.setValue(new TextNode(REDACTED));
+                } else {
+                    maskKeyNamedParameters(value, pattern.isEmpty() ? field.getKey() : pattern + "." + field.getKey());
+                }
+            }
+        } else if (node instanceof ArrayNode array) {
+            for (JsonNode element : array) {
+                maskKeyNamedParameters(element, pattern + "[]");
+            }
+        }
     }
 
     /**
@@ -461,7 +512,19 @@ public class SecretScrubber {
             while (entries.hasNext()) {
                 Map.Entry<String, JsonNode> entry = entries.next();
                 if (!entry.getValue().isTextual()) {
-                    scrubNode(entry.getValue(), entry.getKey(), true);
+                    if (entry.getValue().isValueNode() && !entry.getValue().isNull()) {
+                        // A number or boolean is sent as its text, so {"sig": 1234} is a
+                        // signature: judged by name like the read path's judgeEmbeddedMap.
+                        // scrubNode only walks objects and arrays and passed it through.
+                        String key = entry.getKey();
+                        boolean credential = isSecretFieldName(key, mapName) || (queryMap && ConfigSecretRedactor.isCredentialQueryName(key))
+                                || (!queryMap && ConfigSecretRedactor.isCredentialHeaderName(key));
+                        if (credential) {
+                            entry.setValue(new TextNode(REDACTED));
+                        }
+                    } else {
+                        scrubNode(entry.getValue(), entry.getKey(), true);
+                    }
                     continue;
                 }
                 String value = entry.getValue().asText();
@@ -720,6 +783,21 @@ public class SecretScrubber {
         // `?api_key=${vault:k}&access_token=<plaintext>` was exported intact. A URL
         // is therefore always handed to the part-by-part pass below, which judges
         // each parameter on its own.
+        // A connection string under a credential name — connectionString, recognised by
+        // name since the read rules were adopted — whose ONLY secret is a vault
+        // reference in the userinfo password slot:
+        // "jdbc:postgresql://app:${vault:db-password}@db.internal:5432/eddi". It is
+        // kept as written, so the export keeps the pointer and the host. Nothing else
+        // is: any other credential-named value containing "://" is judged by the rules
+        // below and, being a literal, masked whole. Judging such values part by part
+        // kept whatever sat outside the password slot — "hunter2://${vault:k}", a
+        // literal in the path, the fragment or a query value — and a scheme grammar
+        // cannot tell a password from a scheme name, so the shape is matched exactly:
+        // no query, no fragment, no second reference, nothing but a username before the
+        // slot.
+        if (isSecretFieldName(fieldName, parentFieldName) && VAULT_PASSWORD_SLOT_URL.matcher(textValue).matches()) {
+            return textValue;
+        }
         if (!looksLikeUrl(textValue)) {
             if (SOLE_CONNECTION_REFERENCE.matcher(textValue).matches()) {
                 return null;
@@ -752,9 +830,19 @@ public class SecretScrubber {
             }
         }
 
-        // Check 1: Known secret field names
+        // Check 1: Known secret field names — for a literal. A value made only of
+        // references and templates (${vars:x}, ${vars.x}, {properties.key},
+        // ${context:…}), optionally with a scheme word ("Bearer ${vars.t}"), is a
+        // pointer: the read redaction keeps it (ConfigSecretRedactor.isLiteral) and so
+        // does the export now, or the export → import round trip replaced a configured
+        // reference with a placeholder. Whatever sits beside a reference is still
+        // judged — "sk-… ${vars.x}" or "prefix {properties.t}" is a literal and is
+        // masked whole, exactly as the read masks it. Vault references were decided
+        // above, by the stricter scaffolding rule. A pointer is returned as it is, so
+        // the free-text shape scan that follows a null cannot take "Bearer ${vars.t}"
+        // for a bearer token.
         if (isSecretFieldName(fieldName, parentFieldName)) {
-            return REDACTED;
+            return ConfigSecretRedactor.isLiteral(textValue) ? REDACTED : textValue;
         }
 
         // Check 2: a credential embedded in a URL. Neither of the other checks can
@@ -890,6 +978,17 @@ public class SecretScrubber {
                 return true;
             }
         }
+        // Never narrower than the editor read: whatever ConfigSecretRedactor hides
+        // from a GET by its name alone (connectionString, nonAzureApiKey,
+        // secretAccessKey, any *ApiKey / *SecretKey, and in a query-parameter map
+        // key, sig, subscriptionKey, ...) is redacted here too. This scrubber judged
+        // those by entropy and shape instead, so a low-entropy literal such as
+        // nonAzureApiKey = "my-litellm-master-key" was hidden on GET and exported
+        // in clear.
+        if (ConfigSecretRedactor.isCredentialName(fieldName)
+                || (isQueryParamContainer(parentFieldName) && ConfigSecretRedactor.isCredentialQueryName(fieldName))) {
+            return true;
+        }
         if (!isHeaderContainer(parentFieldName)) {
             return false;
         }
@@ -939,6 +1038,15 @@ public class SecretScrubber {
     /** Whether an enclosing field name denotes a map of HTTP headers. */
     private static boolean isHeaderContainer(String parentFieldName) {
         return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("headers");
+    }
+
+    /**
+     * Whether an enclosing field name denotes a query-parameter map — the same test
+     * {@link ConfigSecretRedactor} applies, so the two agree on which map's
+     * {@code key} or {@code sig} entry is a credential.
+     */
+    private static boolean isQueryParamContainer(String parentFieldName) {
+        return parentFieldName != null && normalizeFieldName(parentFieldName).endsWith("queryparams");
     }
 
     /**
@@ -1008,6 +1116,20 @@ public class SecretScrubber {
     private static boolean isReferenceScaffolding(String remainder) {
         for (String word : remainder.split("[^a-zA-Z0-9\\-]+")) {
             if (!word.isEmpty() && !AUTH_SCHEME_WORDS.contains(word.toLowerCase(Locale.ROOT))) {
+                return false;
+            }
+        }
+        // The words alone are not the whole remainder: a password made only of
+        // symbols ("!!!${vault:k}") or of non-ASCII letters splits into no word and
+        // passed as scaffolding, so the export kept a literal the read masks. Only
+        // the characters ConfigSecretRedactor.isLiteral accepts beside a reference
+        // are scaffolding: whitespace, ASCII letters, digits and '-', and the
+        // separators a scheme uses (':' ',' ';' '=').
+        for (int i = 0; i < remainder.length(); i++) {
+            char c = remainder.charAt(i);
+            boolean scaffolding = Character.isWhitespace(c) || (c < 128 && (Character.isLetterOrDigit(c) || c == '-')) || c == ':'
+                    || c == ',' || c == ';' || c == '=';
+            if (!scaffolding) {
                 return false;
             }
         }
