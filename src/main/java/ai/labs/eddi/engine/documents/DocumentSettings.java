@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.documents;
 
+import ai.labs.eddi.engine.attachments.DerivedCaps;
 import jakarta.enterprise.context.ApplicationScoped;
+import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 
 import java.util.Map;
@@ -80,4 +82,30 @@ public class DocumentSettings {
     }
 
     // --- WP-0.1: the mechanism only; later packages append below ---
+
+    // --- WP-2a.2: per-source caps on derived blobs ---
+
+    /**
+     * The per-source caps on derived blobs ({@code eddi.attachments.derived.*}).
+     * The attachment stores enforce them, reading the same properties; this is for
+     * runtime code that wants to know a cap before it produces a view. A CDI
+     * instance reads the deployment's configuration on every call; explicit
+     * settings ({@link #of}, {@link #none}) return the built-in defaults.
+     */
+    public DerivedCaps.Limits derivedCaps() {
+        if (bounds != null) {
+            return DerivedCaps.Limits.defaults();
+        }
+        Config config = ConfigProvider.getConfig();
+        return new DerivedCaps.Limits(
+                derived(config, "eddi.attachments.derived.max-per-source", DerivedCaps.DEFAULT_MAX_PER_SOURCE),
+                derived(config, "eddi.attachments.derived.max-total-bytes-per-source", DerivedCaps.DEFAULT_MAX_TOTAL_BYTES_PER_SOURCE),
+                derived(config, "eddi.attachments.derived.max-slices-per-source", DerivedCaps.DEFAULT_MAX_SLICES_PER_SOURCE),
+                derived(config, "eddi.attachments.derived.max-slice-bytes-per-source", DerivedCaps.DEFAULT_MAX_SLICE_BYTES_PER_SOURCE),
+                derived(config, "eddi.attachments.derived.max-text-bytes-per-source", DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE));
+    }
+
+    private static long derived(Config config, String property, long fallback) {
+        return config.getOptionalValue(property, Long.class).orElse(fallback);
+    }
 }

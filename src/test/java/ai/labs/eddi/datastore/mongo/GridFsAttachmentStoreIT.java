@@ -9,7 +9,10 @@ import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.configs.migration.MigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
@@ -51,7 +54,10 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store = new GridFsAttachmentStore(getDatabase());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
+        rootDeleted = new RecordingEvent<>();
+        store.rootDeletedEvent = rootDeleted;
         store.ensureIndexes();
+        store.ensureLineageIndexes();
         // Production reads MigrationLog through its POJO codec; the bare test client
         // has none.
         migrationLog = new MigrationLogStore(getDatabase().withCodecRegistry(CodecRegistries.fromRegistries(getDatabase().getCodecRegistry(),
@@ -61,6 +67,7 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
 
     private MigrationLogStore migrationLog;
     private GroupConversationStore groupConversations;
+    private RecordingEvent<AttachmentRootDeleted> rootDeleted;
 
     @Override
     public IMigrationLogStore migrationLog() {
@@ -101,6 +108,25 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store.maxTotalBytesPerConversation = bytesPerConversation;
         store.maxPerUser = perUser;
         store.maxTotalBytesPerUser = bytesPerUser;
+    }
+
+    @Override
+    public void setDerivedLimits(DerivedCaps.Limits limits) {
+        store.derivedMaxPerSource = limits.maxPerSource();
+        store.derivedMaxTotalBytesPerSource = limits.maxTotalBytesPerSource();
+        store.derivedMaxSlicesPerSource = limits.maxSlicesPerSource();
+        store.derivedMaxSliceBytesPerSource = limits.maxSliceBytesPerSource();
+        store.derivedMaxTextBytesPerSource = limits.maxTextBytesPerSource();
+    }
+
+    @Override
+    public List<AttachmentRootDeleted> rootDeletions() {
+        return rootDeleted.fired();
+    }
+
+    @Override
+    public long lineageRows(String rootRef) {
+        return files().countDocuments(Filters.eq("metadata.rootRef", rootRef));
     }
 
     private static MongoCollection<Document> grants() {

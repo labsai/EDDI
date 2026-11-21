@@ -8,7 +8,10 @@ import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.mongo.GroupConversationStore;
 import ai.labs.eddi.configs.migration.IMigrationLogStore;
 import ai.labs.eddi.engine.attachments.AttachmentGrantBackfill;
+import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.AttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.attachments.RecordingEvent;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.datastore.serialization.JsonSerialization;
@@ -46,6 +49,8 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
         store = new PostgresAttachmentStore(createDataSourceInstance());
         store.maxSizeBytes = 1_048_576;
         setQuotas(0, 0, 0, 0);
+        rootDeleted = new RecordingEvent<>();
+        store.rootDeletedEvent = rootDeleted;
         // The first calls create the schemas; then start from empty tables.
         store.listByConversation(OWNER);
         store.ensureGrantIndexes();
@@ -59,6 +64,26 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
     private PostgresMigrationLogStore migrationLog;
     private JsonSerialization json;
     private GroupConversationStore groupConversations;
+    private RecordingEvent<AttachmentRootDeleted> rootDeleted;
+
+    @Override
+    public void setDerivedLimits(DerivedCaps.Limits limits) {
+        store.derivedMaxPerSource = limits.maxPerSource();
+        store.derivedMaxTotalBytesPerSource = limits.maxTotalBytesPerSource();
+        store.derivedMaxSlicesPerSource = limits.maxSlicesPerSource();
+        store.derivedMaxSliceBytesPerSource = limits.maxSliceBytesPerSource();
+        store.derivedMaxTextBytesPerSource = limits.maxTextBytesPerSource();
+    }
+
+    @Override
+    public List<AttachmentRootDeleted> rootDeletions() {
+        return rootDeleted.fired();
+    }
+
+    @Override
+    public long lineageRows(String rootRef) {
+        return count("SELECT COUNT(*) FROM attachments WHERE root_ref = ?", rootRef);
+    }
 
     @Override
     public IMigrationLogStore migrationLog() {
@@ -183,5 +208,20 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
             }
         }
         assertTrue(indexes.containsAll(List.of("attachment_grants_pkey", "idx_attach_grants_conv", "idx_attach_grants")), indexes.toString());
+    }
+
+    @Test
+    void createsThePartialLineageIndexes() throws Exception {
+        List<String> definitions = new ArrayList<>();
+        try (Connection conn = DATA_SOURCE.getConnection();
+                Statement stmt = conn.createStatement();
+                ResultSet rs = stmt.executeQuery(
+                        "SELECT indexdef FROM pg_indexes WHERE tablename = 'attachments' AND indexname IN ('idx_attach_lineage', 'idx_attach_dedup')")) {
+            while (rs.next()) {
+                definitions.add(rs.getString(1));
+            }
+        }
+        assertTrue(definitions.size() == 2 && definitions.stream().allMatch(d -> d.contains("WHERE (root_ref IS NOT NULL)")), definitions.toString());
+        assertTrue(definitions.stream().anyMatch(d -> d.startsWith("CREATE UNIQUE INDEX idx_attach_dedup")), definitions.toString());
     }
 }

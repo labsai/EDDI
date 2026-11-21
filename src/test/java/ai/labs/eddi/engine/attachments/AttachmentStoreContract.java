@@ -26,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -88,6 +89,18 @@ public interface AttachmentStoreContract {
      * database.
      */
     AttachmentGrantBackfill backfillWithRealStores();
+
+    /** Sets the per-source caps on derived blobs. */
+    void setDerivedLimits(DerivedCaps.Limits limits);
+
+    /**
+     * Every {@link AttachmentRootDeleted} the store announced since the test
+     * started, in order.
+     */
+    List<AttachmentRootDeleted> rootDeletions();
+
+    /** Rows (files) whose lineage root is {@code rootRef}, read under the store. */
+    long lineageRows(String rootRef);
 
     /** Realistic ids: 24-hex, the shape the ids take in production. */
     String OWNER = "6aba70011a25f8be7920e001";
@@ -450,6 +463,308 @@ public interface AttachmentStoreContract {
         assertEquals(1, result.danglingRowsRemoved());
         assertEquals(0, grantRowsOn("8d4f6f1e-0000-4000-8000-00000000dead"));
         assertEquals(1, grantRowsOn(kept), "a row whose blob exists stays");
+    }
+
+    // -------------------------------------------------------------- lineage
+
+    private static byte[] text(String value) {
+        return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    /** Bytes with a PNG signature, so the store's MIME check accepts image/png. */
+    private static byte[] png(String body) {
+        byte[] signature = {(byte) 0x89, 'P', 'N', 'G', '\r', '\n', 0x1A, '\n'};
+        byte[] tail = text(body);
+        byte[] bytes = new byte[signature.length + tail.length];
+        System.arraycopy(signature, 0, bytes, 0, signature.length);
+        System.arraycopy(tail, 0, bytes, signature.length, tail.length);
+        return bytes;
+    }
+
+    private static byte[] pdf(String body) {
+        return text("%PDF-1.4\n" + body);
+    }
+
+    private Attachment derive(String rootRef, Derivation.Kind kind, String unitId, byte[] bytes, String mime, String requester)
+            throws AttachmentStoreException {
+        return store().storeDerived(bytes, mime, kind.name().toLowerCase() + ".bin", Derivation.of(rootRef, kind, unitId), requester);
+    }
+
+    private Attachment deriveText(String rootRef, String unitId, String body, String requester) throws AttachmentStoreException {
+        return derive(rootRef, Derivation.Kind.TEXT_PART, unitId, text(body), "text/plain", requester);
+    }
+
+    @Test
+    default void aViewAGranteeStoresBelongsToTheRootOwnerAndSurvivesTheGranteesDeletion() throws Exception {
+        String root = upload(OWNER, "the owner's file").storageRef();
+        store().grantAccess(root, GRANTEE);
+        store().grantAccess(root, STRANGER);
+
+        Attachment view = deriveText(root, "u1", "chapter one", GRANTEE);
+
+        assertEquals(OWNER, view.conversationId(), "the root owner's, not the grantee's");
+        assertEquals(new IAttachmentStore.OwnerRef(OwnerScope.CONVERSATION, OWNER, null), store().ownerOf(view.storageRef(), OWNER));
+        assertEquals(root, store().rootOf(view.storageRef(), GRANTEE));
+        assertArrayEquals(text("chapter one"), store().load(view.storageRef(), OWNER), "the owner reads it");
+        assertArrayEquals(text("chapter one"), store().load(view.storageRef(), STRANGER), "another grantee of the root reads it");
+
+        assertEquals(0, store().deleteByConversation(GRANTEE));
+
+        assertArrayEquals(text("chapter one"), store().load(view.storageRef(), OWNER), "it does not die with the grantee");
+        assertEquals(1, lineageRows(root));
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(view.storageRef(), GRANTEE),
+                "the grantee's grant is gone, and with it its access to the view");
+    }
+
+    @Test
+    default void theSameBytesAreSharedWithinAnOwnersRootOnlyNeverAcrossOwners() throws Exception {
+        String mine = upload(OWNER, "same pdf").storageRef();
+        String theirs = upload(OTHER_OWNER, "same pdf").storageRef();
+
+        Attachment first = deriveText(mine, "u1", "identical text", OWNER);
+        Attachment again = deriveText(mine, "u1", "identical text", OWNER);
+        Attachment other = deriveText(theirs, "u1", "identical text", OTHER_OWNER);
+
+        assertEquals(first.storageRef(), again.storageRef(), "dedup within (owner, root)");
+        assertEquals(1, lineageRows(mine));
+        // The dedup key is (owner, root, sha256): the same bytes under another key
+        // return the first blob, which keeps its own key.
+        assertEquals(first.storageRef(), deriveText(mine, "u2", "identical text", OWNER).storageRef());
+        assertTrue(store().findDerived(mine, Derivation.Kind.TEXT_PART, "u2", OWNER).isEmpty());
+        assertFalse(first.storageRef().equals(other.storageRef()), "two owners with the same bytes share nothing");
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(first.storageRef(), OTHER_OWNER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(other.storageRef(), OWNER));
+    }
+
+    @Test
+    default void aStrangerIsToldADerivedBlobDoesNotExist() throws Exception {
+        String root = upload(OWNER, "private").storageRef();
+        String view = deriveText(root, "u1", "private text", OWNER).storageRef();
+
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().getMetadata(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().getDerivation(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().rootOf(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().ownerOf(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().pageCount(view, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().listDerived(root, null, STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> store().findDerived(root, Derivation.Kind.TEXT_PART, "u1", STRANGER));
+        assertThrows(AttachmentNotFoundException.class, () -> deriveText(root, "u2", "planted", STRANGER), "nor may it add one");
+        assertEquals(1, lineageRows(root));
+    }
+
+    @Test
+    default void deletingARootLeavesNoLineageNoGrantsAndAnnouncesItOnce() throws Exception {
+        Attachment rootBlob = store().store(text("root"), "text/plain", "a.txt", OWNER, "default", USER);
+        String root = rootBlob.storageRef();
+        store().grantAccess(root, GRANTEE);
+        String manifest = derive(root, Derivation.Kind.MANIFEST, "m", text("{}"), "application/json", OWNER).storageRef();
+        store().storeDerived(text("part"), "text/plain", "p.txt", Derivation.of(root, Derivation.Kind.MANIFEST_PART, "m.1").withParent(manifest),
+                GRANTEE);
+        assertEquals(2, lineageRows(root));
+
+        assertTrue(store().delete(root, OWNER));
+
+        assertEquals(0, lineageRows(root), "the whole lineage, including a view of a view");
+        assertEquals(0, grantRowsOn(root));
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(manifest, OWNER));
+        assertEquals(List.of(new AttachmentRootDeleted(root, OwnerScope.CONVERSATION, OWNER, USER)), rootDeletions());
+    }
+
+    @Test
+    default void deletingAConversationAnnouncesEachRootAndNoView() throws Exception {
+        String a = upload(OWNER, "a").storageRef();
+        String b = upload(OWNER, "b").storageRef();
+        deriveText(a, "u1", "a1", OWNER);
+        deriveText(a, "u2", "a2", OWNER);
+
+        assertEquals(2, store().deleteByConversation(OWNER), "roots are counted, views are not");
+
+        assertEquals(0, lineageRows(a));
+        Set<String> announced = new LinkedHashSet<>();
+        rootDeletions().forEach(e -> announced.add(e.rootRef()));
+        assertEquals(Set.of(a, b), announced);
+        assertEquals(2, rootDeletions().size());
+    }
+
+    @Test
+    default void deletingAViewDeletesThatViewOnlyAndAnnouncesNothing() throws Exception {
+        String root = upload(OWNER, "kept").storageRef();
+        String one = deriveText(root, "u1", "one", OWNER).storageRef();
+        deriveText(root, "u2", "two", OWNER);
+
+        assertThrows(AttachmentAccessDeniedException.class, () -> store().delete(one, GRANTEE));
+        assertTrue(store().delete(one, OWNER));
+
+        assertEquals(1, lineageRows(root));
+        assertArrayEquals(text("kept"), store().load(root, OWNER));
+        assertTrue(rootDeletions().isEmpty());
+    }
+
+    @Test
+    default void listingsAndFileCountsSeeRootsOnly() throws Exception {
+        setQuotas(2, 0, 0, 0);
+        String root = upload(OWNER, "root").storageRef();
+        store().grantAccess(root, GRANTEE);
+        String view = deriveText(root, "u1", "view", GRANTEE).storageRef();
+        deriveText(root, "u2", "view two", OWNER);
+
+        assertEquals(Set.of(root), refs(store().listByConversation(OWNER)));
+        assertEquals(Set.of(root), refs(store().listAccessible(OWNER)));
+        assertEquals(Set.of(root), refs(store().listAccessible(GRANTEE)));
+        List<Attachment> views = store().listDerived(root, Derivation.Kind.TEXT_PART, OWNER);
+        assertEquals(2, views.size());
+        assertEquals(view, views.get(0).storageRef(), "oldest first");
+        assertEquals(2, store().listDerived(root, null, GRANTEE).size());
+        assertTrue(store().listDerived(root, Derivation.Kind.IMAGE, OWNER).isEmpty());
+
+        // Two views stored; the conversation's file count is still one.
+        assertNotNull(upload(OWNER, "second upload fits the count of 2"));
+        assertThrows(AttachmentQuotaExceededException.class, () -> upload(OWNER, "a third does not"));
+    }
+
+    @Test
+    default void textViewsAndSlicesNeverUseTheOwnersUploadQuotaButMediaDo() throws Exception {
+        String root = upload(OWNER, "1234567890").storageRef(); // 10 bytes
+        store().grantAccess(root, GRANTEE);
+        setQuotas(0, 20, 0, 0); // 10 bytes of room left
+
+        // A grantee reads the file into far more than the owner's quota: text and
+        // slices.
+        deriveText(root, "u1", "x".repeat(500), GRANTEE);
+        for (int i = 0; i < 20; i++) {
+            derive(root, Derivation.Kind.PDF_SLICE, "p" + i, pdf("slice " + i + " " + "y".repeat(100)), "application/pdf", GRANTEE);
+        }
+        assertNotNull(upload(OWNER, "123456789"), "the owner's upload quota is untouched: 9 of the 10 bytes left still fit");
+
+        // Media views are the owner's bytes: 1 byte left now.
+        var refused = assertThrows(AttachmentQuotaExceededException.class,
+                () -> derive(root, Derivation.Kind.IMAGE, "i1", png("an image"), "image/png", GRANTEE));
+        assertEquals(AttachmentQuotaExceededException.SCOPE_CONVERSATION, refused.getScope());
+    }
+
+    @Test
+    default void aMediaViewCountsTowardTheOwnersBytesExactlyOnce() throws Exception {
+        String root = upload(OWNER, "12345").storageRef(); // 5 bytes
+        byte[] image = png("img"); // 11 bytes
+        derive(root, Derivation.Kind.IMAGE, "i1", image, "image/png", OWNER);
+        setQuotas(0, 5 + image.length + 4, 0, 0);
+
+        assertNotNull(upload(OWNER, "1234"), "5 + 11 + 4 fits exactly");
+        assertThrows(AttachmentQuotaExceededException.class, () -> upload(OWNER, "1"));
+    }
+
+    @Test
+    default void aViewOfAViewKeepsTheOriginalRootAndRecordsItsParent() throws Exception {
+        String root = upload(OWNER, "root").storageRef();
+        String manifest = derive(root, Derivation.Kind.MANIFEST, "m", text("{\"units\":[]}"), "application/json", OWNER).storageRef();
+
+        // Named by the view alone: the store finds the original root.
+        Attachment part = store().storeDerived(text("part"), "text/plain", "p.txt",
+                new Derivation(manifest, null, Derivation.Kind.MANIFEST_PART, "m.1", 3, "a caller-supplied hash is ignored"), OWNER);
+
+        Derivation recorded = store().getDerivation(part.storageRef(), OWNER).orElseThrow();
+        assertEquals(root, recorded.rootRef());
+        assertEquals(manifest, recorded.parentRef());
+        assertEquals(Derivation.Kind.MANIFEST_PART, recorded.kind());
+        assertEquals("m.1", recorded.unitId());
+        assertEquals(3, recorded.page());
+        assertEquals(DerivedBlobs.sha256Hex(text("part")), recorded.sha256());
+        assertTrue(store().getDerivation(root, OWNER).isEmpty(), "a root has no derivation");
+        assertNull(store().getDerivation(manifest, OWNER).orElseThrow().parentRef(), "taken from the root itself");
+    }
+
+    @Test
+    default void aParentOfAnotherRootIsRefused() throws Exception {
+        String root = upload(OWNER, "root").storageRef();
+        String otherRoot = upload(OWNER, "other").storageRef();
+        String otherView = deriveText(otherRoot, "u1", "other view", OWNER).storageRef();
+
+        assertThrows(AttachmentStoreException.class, () -> store().storeDerived(text("x"), "text/plain", "x.txt",
+                Derivation.of(root, Derivation.Kind.TEXT_PART, "u9").withParent(otherView), OWNER));
+        assertEquals(0, lineageRows(root));
+    }
+
+    @Test
+    default void findDerivedIsAnExactKeyAndTheNewestWriteWins() throws Exception {
+        String root = upload(OWNER, "root").storageRef();
+        Attachment old = deriveText(root, "u1", "first version", OWNER);
+        Thread.sleep(20);
+        Attachment newer = deriveText(root, "u1", "second version", OWNER);
+        Attachment unkeyed = derive(root, Derivation.Kind.SUMMARY, null, text("a summary"), "text/plain", OWNER);
+
+        assertEquals(newer.storageRef(), store().findDerived(root, Derivation.Kind.TEXT_PART, "u1", OWNER).orElseThrow().storageRef());
+        assertFalse(old.storageRef().equals(newer.storageRef()));
+        assertTrue(store().findDerived(root, Derivation.Kind.TEXT_PART, "u2", OWNER).isEmpty());
+        assertTrue(store().findDerived(root, Derivation.Kind.SUMMARY, "u1", OWNER).isEmpty(), "the kind is part of the key");
+        assertEquals(unkeyed.storageRef(), store().findDerived(root, Derivation.Kind.SUMMARY, null, OWNER).orElseThrow().storageRef());
+    }
+
+    @Test
+    default void theMediaCapRefusesWithItsName() throws Exception {
+        setDerivedLimits(new DerivedCaps.Limits(2, 0, 0, 0, 0));
+        String root = upload(OWNER, "root").storageRef();
+        derive(root, Derivation.Kind.IMAGE, "i1", png("one"), "image/png", OWNER);
+        derive(root, Derivation.Kind.TABLE, "t1", text("a,b"), "text/csv", OWNER);
+        deriveText(root, "u1", "text does not count against the media cap", OWNER);
+
+        var refused = assertThrows(IAttachmentStore.AttachmentDerivedCapException.class,
+                () -> derive(root, Derivation.Kind.AUDIO, "a1", png("three"), "image/png", OWNER));
+        assertEquals("max-per-source", refused.getCap());
+        assertEquals(3, lineageRows(root));
+    }
+
+    @Test
+    default void slicesEvictTheLeastRecentlyLoadedInsteadOfRefusing() throws Exception {
+        setDerivedLimits(new DerivedCaps.Limits(0, 0, 2, 0, 0));
+        String root = upload(OWNER, "root").storageRef();
+        String first = derive(root, Derivation.Kind.PDF_SLICE, "p1-2", pdf("first"), "application/pdf", OWNER).storageRef();
+        Thread.sleep(20);
+        String second = derive(root, Derivation.Kind.PDF_SLICE, "p3-4", pdf("second"), "application/pdf", OWNER).storageRef();
+        Thread.sleep(20);
+        store().load(first, OWNER); // the first is now the most recently used
+        Thread.sleep(20);
+
+        String third = derive(root, Derivation.Kind.PDF_SLICE, "p5-6", pdf("third"), "application/pdf", OWNER).storageRef();
+
+        Set<String> slices = refs(store().listDerived(root, Derivation.Kind.PDF_SLICE, OWNER));
+        assertEquals(Set.of(first, third), slices, "the second, least recently used, was evicted");
+        assertThrows(AttachmentNotFoundException.class, () -> store().load(second, OWNER));
+    }
+
+    @Test
+    default void aGrantOnAViewIsAGrantOnItsRoot() throws Exception {
+        String root = upload(OWNER, "root").storageRef();
+        String view = deriveText(root, "u1", "view", OWNER).storageRef();
+
+        store().grantAccess(view, GRANTEE);
+
+        assertEquals(1, grantRowsOn(root));
+        assertEquals(0, grantRowsOn(view));
+        assertArrayEquals(text("root"), store().load(root, GRANTEE));
+        assertArrayEquals(text("view"), store().load(view, GRANTEE));
+    }
+
+    @Test
+    default void thePageCountIsRecordedOnTheRootAndReadThroughAnyView() throws Exception {
+        String root = upload(OWNER, "root").storageRef();
+        String view = deriveText(root, "u1", "view", OWNER).storageRef();
+        assertNull(store().pageCount(root, OWNER), "unknown until recorded");
+
+        store().setPageCount(root, 42);
+        store().setPageCount(view, 7); // a derived ref is ignored
+
+        assertEquals(42, store().pageCount(root, OWNER));
+        assertEquals(42, store().pageCount(view, OWNER));
+    }
+
+    @Test
+    default void aViewOfADeletedRootIsRefused() throws Exception {
+        String root = upload(OWNER, "gone soon").storageRef();
+        assertTrue(store().delete(root, OWNER));
+
+        assertThrows(AttachmentNotFoundException.class, () -> deriveText(root, "u1", "too late", OWNER));
+        assertEquals(0, lineageRows(root));
     }
 
     // ------------------------------------------------------------ concurrency

@@ -116,6 +116,10 @@ class GridFsAttachmentStoreTest {
         GridFSFindIterable it = mock(GridFSFindIterable.class);
         when(gridFSBucket.find(any(Bson.class))).thenReturn(it);
         when(it.first()).thenReturn(file);
+        // A root's delete also sweeps its lineage: iterate as empty.
+        @SuppressWarnings("unchecked")
+        MongoCursor<GridFSFile> empty = mock(MongoCursor.class);
+        doReturn(empty).when(it).iterator();
     }
 
     /**
