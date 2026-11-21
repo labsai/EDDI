@@ -13,6 +13,8 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * Turns a model's raw reply into the object a {@code convertToObject} task
@@ -46,7 +48,11 @@ import java.util.Map;
  * rename a top-level key of a parsed object when the target key is absent; and
  * {@code wrap}, which turns a still-unparseable prose reply into
  * <code>{ wrapField: text }</code> (never text that starts with {@code {} or
- * {@code [}, and never text over the configured length).
+ * {@code [}, and never text over the configured length); and {@code
+ * recoverFields}, which lifts the listed string fields out of a reply that
+ * starts with <code>{</code> but is not valid JSON (see {@link #recover}).
+ * Recovery runs before wrapping and only on text that starts with
+ * <code>{</code>, so the two never compete for the same reply.
  *
  * <h2>Reasons</h2> {@link JsonOutcome#reason()} is always one of this class'
  * own constants. It never contains model output, because it is meant to be fed
@@ -105,20 +111,28 @@ public final class ModelOutputParser {
      *            true when the value is a plain-text reply wrapped into an object
      *            ({@link RescueOptions#wrapField()}); also true on a wrapped reply
      *            that then broke the shape
+     * @param recovered
+     *            true when the value was built from fields lifted out of broken
+     *            JSON ({@link RescueOptions#recoverFields()}); also true on a
+     *            recovered reply that then broke the shape
      */
-    public record JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw, boolean wrapped) {
+    public record JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw, boolean wrapped, boolean recovered) {
 
         public JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw) {
-            this(kind, value, repaired, reason, raw, false);
+            this(kind, value, repaired, reason, raw, false, false);
+        }
+
+        public JsonOutcome(Kind kind, Object value, boolean repaired, String reason, String raw, boolean wrapped) {
+            this(kind, value, repaired, reason, raw, wrapped, false);
         }
 
         /**
          * The label recorded on the step and used as the metric tag:
-         * {@code valid|repaired|wrapped|invalid|empty|schema_mismatch}.
+         * {@code valid|repaired|recovered|wrapped|invalid|empty|schema_mismatch}.
          */
         public String label() {
             return switch (kind) {
-                case VALID -> wrapped ? "wrapped" : repaired ? "repaired" : "valid";
+                case VALID -> recovered ? "recovered" : wrapped ? "wrapped" : repaired ? "repaired" : "valid";
                 case INVALID -> "invalid";
                 case EMPTY -> "empty";
                 case SCHEMA_MISMATCH -> "schema_mismatch";
@@ -171,7 +185,7 @@ public final class ModelOutputParser {
         }
         return shapeValidator.validate(outcome.value(), responseSchema, nonBlankFields, taskId)
                 .map(reason -> new JsonOutcome(Kind.SCHEMA_MISMATCH, outcome.value(), outcome.repaired(), reason, outcome.raw(),
-                        outcome.wrapped()))
+                        outcome.wrapped(), outcome.recovered()))
                 .orElse(outcome);
     }
 
@@ -247,20 +261,31 @@ public final class ModelOutputParser {
             reason = value == null ? REASON_INVALID_SYNTAX : REASON_NO_OBJECT;
             from = scan.end() + 1;
         }
+        // Broken JSON (it starts with a brace): keep the listed string fields it
+        // still holds. Before wrap, which refuses exactly this text.
+        JsonOutcome recovered = recover(trimmed, options, raw);
+        if (recovered != null) {
+            return recovered;
+        }
         JsonOutcome wrapped = wrap(trimmed, unfenced, options, raw);
         return wrapped != null ? wrapped : new JsonOutcome(Kind.INVALID, raw, false, reason, raw);
     }
 
     /** A parsed reply, with the task's field aliases applied. */
     private static JsonOutcome valid(Object parsed, boolean repaired, RescueOptions options, String raw) {
-        if (options.fieldAliases().isEmpty() || !(parsed instanceof Map<?, ?> map)) {
-            return new JsonOutcome(Kind.VALID, parsed, repaired, null, raw);
-        }
+        Map<String, Object> renamed = parsed instanceof Map<?, ?> map ? withAliases(map, options) : null;
+        return renamed == null ? new JsonOutcome(Kind.VALID, parsed, repaired, null, raw) : new JsonOutcome(Kind.VALID, renamed, true, null, raw);
+    }
+
+    /**
+     * The map with the task's field aliases applied, or null when no alias matched.
+     * A key is renamed only into an absent target: when the model sent both keys,
+     * the target is the one the template reads and it wins.
+     */
+    private static Map<String, Object> withAliases(Map<?, ?> map, RescueOptions options) {
         Map<String, Object> renamed = null;
         for (Map.Entry<String, String> alias : options.fieldAliases().entrySet()) {
             Map<?, ?> current = renamed != null ? renamed : map;
-            // Rename only into an absent target: when the model sent both keys, the
-            // target is the one the template reads and it wins.
             if (current.containsKey(alias.getKey()) && !current.containsKey(alias.getValue())) {
                 if (renamed == null) {
                     renamed = new LinkedHashMap<>();
@@ -271,7 +296,7 @@ public final class ModelOutputParser {
                 renamed.put(alias.getValue(), renamed.remove(alias.getKey()));
             }
         }
-        return renamed == null ? new JsonOutcome(Kind.VALID, parsed, repaired, null, raw) : new JsonOutcome(Kind.VALID, renamed, true, null, raw);
+        return renamed;
     }
 
     /**
@@ -290,6 +315,272 @@ public final class ModelOutputParser {
         }
         wrapped.put(options.wrapField(), trimmed);
         return new JsonOutcome(Kind.VALID, wrapped, true, null, raw, true);
+    }
+
+    /**
+     * The object of the configured {@code recoverFields} lifted out of a reply that
+     * starts with <code>{</code> (after an opening code fence, if any) but did not
+     * parse, merged over {@code wrapDefaults}; null when recovery is off, the text
+     * is not such a reply, or none of the fields could be read.
+     * <p>
+     * Only string fields: a field is found as {@code "name"}, a colon and an
+     * opening quote, so an array or object value never matches. The value is read
+     * leniently by {@link #readLenientString}. A field that begins inside the value
+     * of an earlier one is that value's text, not a field of its own.
+     */
+    private static JsonOutcome recover(String trimmed, RescueOptions options, String raw) {
+        if (!options.recovers()) {
+            return null;
+        }
+        String body = stripOpeningFence(trimmed);
+        if (!body.startsWith("{")) {
+            return null;
+        }
+        Map<String, Object> found = new LinkedHashMap<>();
+        Map<String, Pattern> patterns = new LinkedHashMap<>();
+        for (String field : options.recoverFields()) {
+            patterns.put(field, Pattern.compile("\"" + Pattern.quote(field) + "\"\\s*:\\s*\""));
+        }
+        // One pass over the root object's members, tracking object/array depth: a
+        // field is recovered only where it is a member of the root, so a key nested
+        // in another object is never lifted to the root. Every string value is read
+        // with the same lenient reader, so the pass resumes after the value (and not
+        // inside it) and a later occurrence of a field is still found when an
+        // earlier one sits inside another field's text.
+        int n = body.length();
+        int depth = 0;
+        char last = 0;
+        int i = 0;
+        while (i < n && depth >= 0) {
+            char c = body.charAt(i);
+            if (c == '"') {
+                boolean keyPosition = last == '{' || last == ',';
+                Map.Entry<String, Pattern> hit = null;
+                if (depth == 1 && keyPosition) {
+                    for (Map.Entry<String, Pattern> candidate : patterns.entrySet()) {
+                        if (!found.containsKey(candidate.getKey()) && candidate.getValue().matcher(body).region(i, n).lookingAt()) {
+                            hit = candidate;
+                            break;
+                        }
+                    }
+                }
+                int[] end = new int[1];
+                if (hit != null) {
+                    Matcher m = hit.getValue().matcher(body).region(i, n);
+                    m.lookingAt();
+                    String value = readLenientString(body, m.end(), options.wrapMaxChars(), end);
+                    if (value != null && !value.isBlank()) {
+                        found.put(hit.getKey(), value);
+                    }
+                    i = Math.max(end[0], m.end());
+                } else if (depth == 1 && last == ':') {
+                    // a root member's value: ends where a real next key begins (nested
+                    // content is skipped by its quotes, as it is not recovered)
+                    readLenientString(body, i + 1, 0, end);
+                    i = Math.max(end[0], i + 1);
+                } else {
+                    i = skipKey(body, i + 1);
+                }
+                last = '"';
+                continue;
+            }
+            if (c == '{' || c == '[') {
+                depth++;
+            } else if (c == '}' || c == ']') {
+                depth--;
+            }
+            if (!Character.isWhitespace(c)) {
+                last = c;
+            }
+            i++;
+        }
+        if (found.isEmpty()) {
+            return null;
+        }
+        // keep the order the fields were configured in, whatever order they sit in
+        Map<String, Object> fields = new LinkedHashMap<>();
+        for (String field : options.recoverFields()) {
+            if (found.containsKey(field)) {
+                fields.put(field, found.get(field));
+            }
+        }
+        // aliases apply as they do to a reply that parsed, and before the defaults,
+        // so a default for the target key does not block the rename
+        Map<String, Object> aliased = withAliases(fields, options);
+        Map<String, Object> result = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> d : options.wrapDefaults().entrySet()) {
+            result.put(d.getKey(), deepCopy(d.getValue()));
+        }
+        result.putAll(aliased != null ? aliased : fields);
+        return new JsonOutcome(Kind.VALID, result, true, null, raw, false, true);
+    }
+
+    /** The index after a quoted key that starts just before {@code from}. */
+    private static int skipKey(String text, int from) {
+        int i = from;
+        while (i < text.length()) {
+            char c = text.charAt(i);
+            if (c == '\\') {
+                i += 2;
+                continue;
+            }
+            i++;
+            if (c == '"') {
+                break;
+            }
+        }
+        return i;
+    }
+
+    /**
+     * The reply without an opening Markdown fence line ({@code ```} or
+     * {@code ```json}), if it has one.
+     */
+    private static String stripOpeningFence(String trimmed) {
+        if (!trimmed.startsWith(FENCE)) {
+            return trimmed;
+        }
+        int start = FENCE.length();
+        if (hasJsonTag(trimmed, start)) {
+            start += JSON_TAG.length();
+        }
+        return trimmed.substring(start).trim();
+    }
+
+    /**
+     * Reads a JSON string value that may be malformed, starting just after its
+     * opening quote.
+     * <ul>
+     * <li>The standard JSON escapes are decoded (quote, backslash, slash, the
+     * control-character letters and the four-digit hex form, plus an escaped
+     * apostrophe); an unknown escape keeps the character after the backslash.</li>
+     * <li>The value ends at the first <em>unescaped</em> quote that is followed
+     * (after optional whitespace) by the end of the text, by a closing brace that
+     * ends the text, or by a comma and then the next key (a quoted name and a
+     * colon) or the end. Any other unescaped quote, such as the one in
+     * <code>style="color:red"</code> or a quotation, belongs to the value.</li>
+     * <li>When the text ends first (a reply cut off mid-string), the value is
+     * everything read, at most {@code maxChars} long, without a trailing partial
+     * escape.</li>
+     * </ul>
+     *
+     * @param end
+     *            receives the index after the value (and its closing quote)
+     * @return the decoded value
+     */
+    static String readLenientString(String text, int from, int maxChars, int[] end) {
+        StringBuilder out = new StringBuilder();
+        int n = text.length();
+        int i = from;
+        while (i < n) {
+            char c = text.charAt(i);
+            if (c == '\\') {
+                if (i + 1 >= n) {
+                    // a lone trailing backslash is half an escape
+                    i = n;
+                    break;
+                }
+                char next = text.charAt(i + 1);
+                if (next == 'u') {
+                    if (i + 6 > n) {
+                        // cut off inside the escape: drop the partial one
+                        end[0] = n;
+                        return capped(out, maxChars);
+                    }
+                    if (isHex4(text, i + 2)) {
+                        out.append((char) Integer.parseInt(text.substring(i + 2, i + 6), 16));
+                        i += 6;
+                        continue;
+                    }
+                    out.append('u');
+                } else {
+                    out.append(switch (next) {
+                        case 'n' -> '\n';
+                        case 't' -> '\t';
+                        case 'r' -> '\r';
+                        case 'b' -> '\b';
+                        case 'f' -> '\f';
+                        default -> next;
+                    });
+                }
+                i += 2;
+                continue;
+            }
+            if (c == '"' && endsValue(text, i + 1)) {
+                end[0] = i + 1;
+                return out.toString();
+            }
+            out.append(c);
+            i++;
+        }
+        end[0] = n;
+        return capped(out, maxChars);
+    }
+
+    private static String capped(StringBuilder out, int maxChars) {
+        if (out.length() > maxChars) {
+            out.setLength(maxChars);
+            // never end on half a surrogate pair
+            if (maxChars > 0 && Character.isHighSurrogate(out.charAt(maxChars - 1))) {
+                out.setLength(maxChars - 1);
+            }
+        }
+        return out.toString();
+    }
+
+    private static boolean isHex4(String text, int at) {
+        for (int k = at; k < at + 4; k++) {
+            if (Character.digit(text.charAt(k), 16) < 0) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    /**
+     * What the next key of an object looks like after a comma: a quoted name and a
+     * colon, or a quote and name cut off by the end of the text. The name is
+     * bounded (one quantifier, so the match stays linear) at the longest name
+     * {@code recoverFields} accepts; a longer, unrecognised key is read as part of
+     * the value, which only ever keeps text, never skips a check.
+     */
+    private static final Pattern NEXT_KEY = Pattern.compile("\"[^\"\\\\]{0," + RescueOptions.MAX_FIELD_NAME_CHARS + "}(?:\"\\s*:|\\z)");
+
+    /**
+     * Whether a quote followed by {@code text[from..]} closes a value. Prose can
+     * hold a quote followed by a comma or a brace, so the rest must look like the
+     * rest of the object: the end of the text (or a closing code fence) after a
+     * closing brace, or a comma followed by the next real key (a short quoted name
+     * and a colon) or by the end of the text. A quote that is followed by anything
+     * else belongs to the value.
+     */
+    private static boolean endsValue(String text, int from) {
+        int i = skipWhitespace(text, from);
+        if (i >= text.length()) {
+            return true;
+        }
+        char c = text.charAt(i);
+        if (c == '}') {
+            // by index: a substring per candidate would copy the rest of the reply
+            int rest = skipWhitespace(text, i + 1);
+            if (rest >= text.length()) {
+                return true;
+            }
+            return text.startsWith(FENCE, rest) && skipWhitespace(text, rest + FENCE.length()) >= text.length();
+        }
+        if (c == ',') {
+            int next = skipWhitespace(text, i + 1);
+            return next >= text.length() || NEXT_KEY.matcher(text).region(next, text.length()).lookingAt();
+        }
+        return false;
+    }
+
+    private static int skipWhitespace(String text, int from) {
+        int i = from;
+        while (i < text.length() && Character.isWhitespace(text.charAt(i))) {
+            i++;
+        }
+        return i;
     }
 
     private static boolean startsLikeJson(String text) {

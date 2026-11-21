@@ -28,6 +28,10 @@ final class LlmRecoveryLog {
     static final String REPAIR = "repair";
     /** A plain-text reply wrapped into the configured JSON object. */
     static final String WRAP = "wrap";
+    /**
+     * String fields lifted out of a broken JSON reply ({@code recoverFields}).
+     */
+    static final String RECOVER_FIELDS = "recover_fields";
     static final String RETRY = "retry";
     static final String ESCALATE = "escalate";
     static final String CIRCUIT_SKIP = "circuit_skip";

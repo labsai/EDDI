@@ -236,7 +236,15 @@ public class TemplatingEngine implements ITemplatingEngine {
     }
 
     private boolean containsTemplatingControlCharacters(String template) {
-        return QUTE_CONTROL_PATTERN.matcher(template).find();
+        return containsTemplateExpression(template);
+    }
+
+    /**
+     * Whether the text holds a Qute expression or section opener, by the same check
+     * the engine itself applies before it renders.
+     */
+    public static boolean containsTemplateExpression(String template) {
+        return template != null && QUTE_CONTROL_PATTERN.matcher(template).find();
     }
 
     /**

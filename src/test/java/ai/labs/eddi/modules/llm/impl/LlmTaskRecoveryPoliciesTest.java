@@ -224,6 +224,24 @@ class LlmTaskRecoveryPoliciesTest {
     }
 
     @Test
+    @DisplayName("wrap + onUnwrappable=retry + onEmpty=warn: broken JSON, then an empty re-ask, still ends in the fallback")
+    void unwrappableRetryThenEmptyFallsBack() throws Exception {
+        var model = FaultInjectingChatModel.script(Step.text("{\"answer\": [1, 2"), Step.text("")).repeatLast();
+        when(chatModelRegistry.getOrCreate(anyString(), any())).thenReturn(model);
+
+        run(task(v -> {
+            v.setOnInvalidJson("wrap");
+            v.setWrapField("answer");
+            v.setOnUnwrappable("retry");
+            v.setFallbackMessage("Please try again.");
+        }));
+
+        assertEquals(2, model.callCount());
+        assertEquals("Please try again.", templateData.get("taskA"));
+        verify(dataFactory).createData("llm:fallback:taskA", Boolean.TRUE);
+    }
+
+    @Test
     @DisplayName("fallbackAction error fails the turn, warn keeps the raw reply")
     void fallbackActionVariants() throws Exception {
         var model = FaultInjectingChatModel.script(Step.text(PROSE)).repeatLast();
