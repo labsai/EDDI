@@ -417,6 +417,39 @@ class MemberTurnExecutorTest {
      * Email plan v3 §5.3: a discussion a mail started hands its origin taint to
      * every member conversation it starts; an untainted one hands none.
      */
+    /**
+     * Email plan v3 §5.3: the taint rides on every member turn, not only on the
+     * member's first — a discussion tainted after its members started (continued
+     * from a tainted turn) taints conversations an untainted round started.
+     */
+    @Test
+    void executeAgentTurn_taintedDiscussion_taintsEveryMemberTurn() throws Exception {
+        for (String origin : new String[]{TurnOrigin.EMAIL, null}) {
+            var conversationService = Mockito.mock(IConversationService.class);
+            var agentFactory = Mockito.mock(IAgentFactory.class);
+            when(agentFactory.getLatestReadyAgent(any(), eq(AGENT_A))).thenReturn(Mockito.mock(IAgent.class));
+            when(conversationService.startConversation(any(), eq(AGENT_A), any(), any()))
+                    .thenReturn(new IConversationService.ConversationResult("conv-1", null));
+            var snapshot = new SimpleConversationMemorySnapshot();
+            snapshot.setConversationState(ConversationState.READY);
+            InputData[] turnInput = new InputData[1];
+            doAnswer(inv -> {
+                turnInput[0] = inv.getArgument(6);
+                inv.getArgument(8, ConversationResponseHandler.class).onComplete(snapshot);
+                return null;
+            }).when(conversationService).say(any(), any(), any(), any(), any(), any(), any(), anyBoolean(), any());
+            var gc = newGc();
+            gc.setOrigin(origin);
+            var executor = new MemberTurnExecutor(conversationService, agentFactory, new GroupSigningGuard(null, null, "default"),
+                    new GroupContextBuilder(null), Mockito.mock(GroupConversationService.class),
+                    new SimpleMeterRegistry().counter("test.member.pause.skipped"), 180, 2);
+
+            executor.executeAgentTurn(member(), gc, "input", protocol(MemberFailurePolicy.SKIP), 0, phase(PhaseType.OPINION), null, null, null);
+
+            assertEquals(origin, TurnOrigin.fromContext(turnInput[0].getContext()));
+        }
+    }
+
     @Test
     void executeAgentTurn_taintedDiscussion_taintsTheMemberConversation() throws Exception {
         for (String origin : new String[]{TurnOrigin.EMAIL, null}) {

@@ -377,16 +377,44 @@ does not see it. Choose the tools of an email-facing agent with that in mind. Th
 a self-continuation still carries it, and nothing clears it. A conversation of an `email:` or `email-anon:` user
 counts as tainted even when it predates the stored taint.
 
+**Going through EDDI's own API does not shed it.** Every HTTP request a tainted turn sends carries
+`X-Eddi-Turn-Origin: email`: `httpcalls` (set after the configured headers, so a configuration cannot replace it),
+the built-in tools on the outbound client (on every redirect hop), MCP calls (`mcpcalls` and LLM MCP tools) and the
+internal loopback of the MCP admin tools. A REST or MCP request that carries the header runs tainted, so what it
+starts or continues is tainted too:
+
+| Route | What ends up tainted |
+|---|---|
+| `POST /agents/{id}/start`, `POST /agents/{conversationId}` (and the streaming, `/v1` and A2A variants); MCP `chat_with_agent`, `create_conversation`, `talk_to_agent`, `chat_managed` | the conversation, for good |
+| `POST`/`PUT /schedulestore/schedules`; MCP `create_schedule` | the schedule (`metadata.turnOrigin`), so every fire runs tainted; an edit never removes a stored taint |
+| `POST …/schedules/{id}/fire`, the dead-letter retry; MCP `fire_schedule_now`, `retry_failed_schedule` | the fire; a retry also taints the schedule |
+| team cadences and lesson-consolidation schedules; MCP `create_team_cadence`, `schedule_lesson_consolidation` | the schedule, so its discussions start tainted |
+| `POST /groups/{id}/conversations` (and streaming); MCP `discuss_with_group`, `start_group_discussion` | the discussion and every member conversation |
+| a continuation or a follow-up of an existing discussion; MCP `continue_group_discussion`, `followup_with_member` | the discussion from then on, and every member turn, also of members an untainted round started |
+| agent test runs; MCP `run_agent_tests` | every test conversation of the run |
+
+The header is taken from any caller, authenticated or not: it can only add the taint, and a request without it is
+simply untainted. Nothing a request says removes a taint. Only a tainted turn sends the header, but it sends it to
+every target — not only to hosts recognised as this deployment, because an EDDI reached under a name the deployment
+does not know would otherwise start an untainted conversation. The value says only that a mail started the turn.
+
 A tainted turn is refused, at runtime:
 
 - the tools `create_channel_integration`, `update_channel_integration`, `delete_channel_integration`,
-  `update_email_senders`, `resume_conversation`, `approve_group_phase` and `submit_group_human_input` — by any tool
-  source (built-in, HTTP, MCP, A2A, `mcpcalls`), also behind a namespace prefix such as `eddi_`. The names of later
-  email-control tools (`update_email_roles`, `update_email_send_out`, `decide_held_email`) are refused already;
+  `update_email_senders`, `resume_conversation`, `approve_group_phase`, `submit_group_human_input`,
+  `accept_team_handoff` and `decline_team_handoff` — by any tool source (built-in, HTTP, MCP, A2A, `mcpcalls`), also
+  behind a namespace prefix such as `eddi_`. The names of later email-control tools (`update_email_roles`,
+  `update_email_send_out`, `decide_held_email`) are refused already;
 - any write (every method but `GET`, `HEAD`, `OPTIONS`, `TRACE`) to `/channelstore/channels/**`,
-  `/agents/{id}/resume`, `/groups/{id}/conversations/{id}/approve` or `…/human-input`, and
-  `/administration/spend-control-changes/{id}/approve`, from `httpcalls` or any outbound request — wherever the path
-  sits under a prefix, and on every redirect hop. A tainted write is not followed through a redirect.
+  `/agents/{id}/resume`, `/groups/{id}/conversations/{id}/approve` or `…/human-input`, the oversight endpoints
+  `/hitl/samples/**`, `/hitl/autonomy/**` and `/hitl/analytics/rebuild`, `/administration/spend-control-changes/**`,
+  and a team handoff's `…/workspace/handoffs/{id}/accept` or `…/decline` — from `httpcalls` or any outbound request,
+  wherever the path sits under a prefix, and on every redirect hop. A tainted write is not followed through a
+  redirect.
+
+The receiving side checks the same lists: a REST request carrying the header that writes to one of those paths
+answers `403` (`errorCode` `EMAIL_ORIGIN`), and EDDI's MCP server fails such a call of one of those tools with
+`EMAIL_ORIGIN` before it runs, whatever name the calling client listed it under.
 
 This runtime check is the boundary. On top of it, saving an email integration is **refused** when a target agent
 holds one of those tools by name (an LLM task's `tools` or `builtInToolsWhitelist`, an `mcpcalls` whitelist or call)

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.agents.IRestAgentStore;
 import ai.labs.eddi.configs.agents.model.AgentConfiguration;
@@ -570,6 +572,35 @@ class McpConversationToolsExtendedTest {
     }
 
     // ==================== chatWithAgent — edge cases ====================
+
+    /**
+     * Email plan v3 §5.3: a tainted turn's MCP client calling
+     * {@code chat_with_agent} on EDDI sends {@code X-Eddi-Turn-Origin: email}; the
+     * tool starts and talks to the conversation on the request's own thread, so
+     * ConversationService sees the taint at both choke points.
+     */
+    @Test
+    void chatWithAgent_fromTaintedRequest_startsAndTalksTainted() throws Exception {
+        var seen = new ArrayList<String>();
+        when(conversationService.startConversation(eq(Environment.production), eq(AGENT_ID), isNull(), anyMap())).thenAnswer(inv -> {
+            seen.add(String.valueOf(TurnOrigin.current()));
+            return new ConversationResult(CONV_ID, URI.create("eddi://conv/" + CONV_ID));
+        });
+        doAnswer(invocation -> {
+            seen.add(String.valueOf(TurnOrigin.current()));
+            ConversationResponseHandler handler = invocation.getArgument(6);
+            handler.onComplete(new SimpleConversationMemorySnapshot());
+            return null;
+        }).when(conversationService).say(eq(CONV_ID), anyBoolean(), anyBoolean(), anyList(),
+                any(InputData.class), anyBoolean(), any(ConversationResponseHandler.class));
+        when(jsonSerialization.serialize(any(LinkedHashMap.class))).thenReturn("{\"conversationId\":\"test-conv-id\"}");
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            tools.chatWithAgent(AGENT_ID, "Hello!", null, "production");
+        }
+
+        assertEquals(List.of(TurnOrigin.EMAIL, TurnOrigin.EMAIL), seen);
+    }
 
     @Test
     void chatWithAgent_blankConversationId_createsNew() throws Exception {

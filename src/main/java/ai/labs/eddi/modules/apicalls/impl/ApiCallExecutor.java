@@ -1296,6 +1296,17 @@ public class ApiCallExecutor implements IApiCallExecutor {
         LOGGER.info(httpCallsName + format(" Execution time: %sms", duration));
     }
 
+    /**
+     * Sets {@link TurnOrigin#HEADER} on {@code request} when the turn on this
+     * thread is tainted, replacing whatever a configuration put there.
+     */
+    static void applyTurnOrigin(IRequest request) {
+        String origin = TurnOrigin.current();
+        if (request != null && origin != null) {
+            request.setHttpHeader(TurnOrigin.HEADER, origin);
+        }
+    }
+
     // Package-private for unit testing of the backoff curve.
     static int getDelayInMillis(ApiCall call, boolean retryCall, int amountOfExecutions) {
         int delayInMillis = 0;
@@ -1921,8 +1932,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Engine-owned, set after the configured headers so no config can drop it — and
         // only
-        // on a call to this deployment, so no EDDI header reaches a third-party API.
+        // on a call to this deployment, so this marker never reaches a third-party API.
         AgentCallMarker.apply(agentCallMarker, request, targetUri);
+        // The origin taint (email plan v3 §5.3), engine-owned the same way: set last,
+        // so
+        // no configured header replaces it. Unlike the marker it goes to every target,
+        // not only those recognised as this deployment — EDDI reached under a name the
+        // self-check does not know would otherwise start an untainted conversation.
+        // The value says only that a mail started the turn, and only a tainted turn
+        // sends it (as A2A already does to any peer).
+        applyTurnOrigin(request);
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

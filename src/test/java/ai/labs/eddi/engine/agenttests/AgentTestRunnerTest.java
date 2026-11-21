@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.agenttests;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.memory.ConversationMemoryUtilities;
 import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
@@ -114,6 +115,24 @@ class AgentTestRunnerTest {
                 null, "(?i)3 rooms", null, null, 0, null, "READY");
         return new TestCase("happy path", Map.of("language", "en"), null, null,
                 List.of(new Turn("hello", null, actions("greet", "ask_city")), new Turn("Vienna", null, cityStored)));
+    }
+
+    /**
+     * Email plan v3 §5.3: a run a mail-started turn starts ({@code run_agent_tests}
+     * over MCP, or its REST endpoint) runs every attempt — each on its own virtual
+     * thread — with the taint bound, so the test conversations start tainted; an
+     * untainted run's do not.
+     */
+    @Test
+    @DisplayName("a run started under the email taint starts every test conversation tainted")
+    void taintedRunStartsTaintedConversations() throws Exception {
+        var tainted = engine();
+        TurnOrigin.callWith(TurnOrigin.EMAIL, () -> runner(tainted, 4).run(started(false), suite(null, null, happyPath(), happyPath())));
+        assertEquals(List.of(TurnOrigin.EMAIL, TurnOrigin.EMAIL), tainted.startOrigins);
+
+        var plain = engine();
+        runner(plain, 4).run(started(false), suite(null, null, happyPath()));
+        assertEquals(List.of("null"), plain.startOrigins);
     }
 
     @Test

@@ -40,6 +40,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.utils.LogSanitizer;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.micrometer.core.instrument.Counter;
 import org.jboss.logging.Logger;
 
@@ -288,6 +289,9 @@ public class GroupLifecycleOps {
             try {
                 // Re-read after CAS to get the freshest transcript
                 gc = conversationStore.read(groupConversationId);
+                // A follow-up from a tainted turn taints the discussion (email plan v3
+                // §5.3), persisted with the follow-up below.
+                gc.setOrigin(TurnOrigin.combine(gc.getOrigin(), TurnOrigin.current()));
 
                 // Resolve targetAgentId — accept either agent ID or display name
                 String resolvedAgentId = targetAgentId;
@@ -340,7 +344,7 @@ public class GroupLifecycleOps {
                 context.put("groupTranscript", new Context(Context.ContextType.object, followUpTranscript));
                 context.put("groupId", new Context(Context.ContextType.string, gc.getGroupId()));
                 context.put("groupConversationId", new Context(Context.ContextType.string, gc.getId()));
-                inputData.setContext(context);
+                inputData.setContext(TurnOrigin.withOrigin(context, gc.getOrigin()));
 
                 CompletableFuture<String> responseFuture = new CompletableFuture<>();
                 final GroupConversation followUpGc = gc;
@@ -453,6 +457,9 @@ public class GroupLifecycleOps {
 
             // Re-read after CAS
             gc = conversationStore.read(groupConversationId);
+            // A continuation from a tainted turn taints the discussion for good (email
+            // plan v3 §5.3); every member turn of this round reads it from gc.
+            gc.setOrigin(TurnOrigin.combine(gc.getOrigin(), TurnOrigin.current()));
 
             // Increment round and append the new question. Persist the follow-up as the
             // run's resumeQuestion so that if a continuation round pauses at an HITL gate,

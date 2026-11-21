@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.internal;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.IResourceStore;
@@ -457,6 +459,29 @@ class RestGroupConversationExtendedTest {
             assertNotNull(bound, "the continuation must not run without the caller who started it");
             assertEquals("user-1", bound.userId());
             assertNull(callerIdentityContext.current(), "the request thread keeps no binding of its own");
+        }
+
+        /**
+         * Email plan v3 §5.3: the streamed continuation runs on the executor, where the
+         * request — and the taint its X-Eddi-Turn-Origin header carried — is gone. It
+         * is read on the request thread and bound around the continuation, which taints
+         * the discussion with it.
+         */
+        @Test
+        @DisplayName("the streamed continuation of a tainted request runs tainted")
+        void continuation_ofTaintedRequest_runsTainted() throws Exception {
+            when(groupService.readGroupConversation("gc-1")).thenReturn(gcInGroup("group-1"));
+            var boundOnWorker = new CompletableFuture<String>();
+            when(groupService.continueDiscussion(eq("gc-1"), eq("q"), any())).thenAnswer(inv -> {
+                boundOnWorker.complete(String.valueOf(TurnOrigin.current()));
+                return gcInGroup("group-1");
+            });
+
+            try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+                restGroupConversation.continueDiscussionStreaming("group-1", "gc-1", new DiscussRequest("q", "user-1"), eventSink, sse);
+            }
+
+            assertEquals(TurnOrigin.EMAIL, boundOnWorker.get(5, TimeUnit.SECONDS));
         }
 
         @Test

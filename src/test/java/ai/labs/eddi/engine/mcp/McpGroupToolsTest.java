@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.configs.groups.IGroupWorkspaceStore;
 import ai.labs.eddi.configs.groups.IRestAgentGroupStore;
@@ -575,6 +577,29 @@ class McpGroupToolsTest {
         tools.start_group_discussion("g1", "Q?", null);
 
         verify(groupConversationService).startAndDiscussAsync("g1", "Q?", "mcp-client", null);
+    }
+
+    /**
+     * Email plan v3 §5.3: {@code start_group_discussion} from a tainted MCP request
+     * creates the discussion on the request's own thread, where
+     * createGroupConversation reads the taint.
+     */
+    @Test
+    void startGroupDiscussion_fromTaintedRequest_createsTheDiscussionTainted() throws Exception {
+        GroupConversation gc = new GroupConversation();
+        gc.setId("gc-async-t");
+        gc.setState(GroupConversation.GroupConversationState.IN_PROGRESS);
+        String[] seen = new String[1];
+        when(groupConversationService.startAndDiscussAsync(any(), any(), any(), any())).thenAnswer(inv -> {
+            seen[0] = TurnOrigin.current();
+            return gc;
+        });
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            tools.start_group_discussion("g1", "Q?", "user1");
+        }
+
+        assertEquals(TurnOrigin.EMAIL, seen[0]);
     }
 
     @Test

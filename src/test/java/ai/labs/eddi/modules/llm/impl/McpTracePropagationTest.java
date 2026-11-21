@@ -5,6 +5,10 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.modules.llm.model.LlmConfiguration.McpServerConfig;
 import ai.labs.eddi.secrets.SecretResolver;
@@ -186,5 +190,43 @@ class McpTracePropagationTest {
                 toolCallWithMeta(Map.of("traceparent", TRACEPARENT, "tracestate", "vendor=v1")));
 
         assertEquals(Map.of("tracestate", "own=1"), headers);
+    }
+
+    /**
+     * The sending half of the MCP routes: a tainted turn calling
+     * {@code chat_with_agent}, {@code create_schedule} or
+     * {@code start_group_discussion} on EDDI's own MCP server sends
+     * {@code X-Eddi-Turn-Origin: email}. The taint is written into
+     * {@code params._meta} on the calling thread and mirrored from there, so the
+     * session-expiry retry that rebuilds the request on an HTTP-client thread
+     * carries it too.
+     */
+    @Test
+    @DisplayName("a tainted turn's MCP message carries the taint in _meta, and every request built from it the header")
+    void taintTravelsInMetaAndHeader() throws Exception {
+        var principals = new ResolutionPrincipalContext();
+        Map<String, Object> meta;
+        try {
+            principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+            meta = manager.traceMetaSupplier().apply(toolCallWithMeta(null));
+        } finally {
+            principals.clear();
+        }
+        assertEquals(TurnOrigin.EMAIL, meta.get(McpToolProviderManager.META_TURN_ORIGIN));
+
+        // On a thread with no taint bound, as the transport's retry runs.
+        Map<String, String> headers = headerSupplierFor(null).apply(toolCallWithMeta(meta));
+        assertEquals(TurnOrigin.EMAIL, headers.get(TurnOrigin.HEADER));
+        Map<String, String> withKey = headerSupplierFor("sk-static").apply(toolCallWithMeta(meta));
+        assertEquals(TurnOrigin.EMAIL, withKey.get(TurnOrigin.HEADER));
+        assertEquals("Bearer sk-static", withKey.get("Authorization"));
+    }
+
+    @Test
+    @DisplayName("an untainted turn's MCP message carries neither")
+    void untaintedCarriesNeither() throws Exception {
+        assertFalse(manager.traceMetaSupplier().apply(toolCallWithMeta(null)).containsKey(McpToolProviderManager.META_TURN_ORIGIN));
+        assertFalse(headerSupplierFor(null).apply(toolCallWithMeta(Map.of(McpToolProviderManager.META_TURN_ORIGIN, "none")))
+                .containsKey(TurnOrigin.HEADER));
     }
 }

@@ -26,6 +26,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -102,5 +103,39 @@ class OutboundHttpEscalationGuardTest {
 
         assertEquals(200, facade(engine).send(post("https://eddi.example.com/channelstore/channels/abc/email-senders"), text()).status());
         assertEquals(1, engine.hops.size());
+    }
+
+    /**
+     * The sending half for every tool on {@code OutboundHttp}: each hop of a
+     * tainted turn's request carries {@code X-Eddi-Turn-Origin: email} — a
+     * cross-origin redirect hop too, where only the safe headers survive — so the
+     * EDDI it reaches taints what it starts.
+     */
+    @Test
+    @DisplayName("every hop of a tainted request carries X-Eddi-Turn-Origin, a cross-origin redirect hop included")
+    void taintedHopsCarryTheHeader() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine engine = new Engine().respond(307, Map.of("Location", List.of("https://eddi.example.com/agents/a1/start")))
+                .respond(200, Map.of());
+        OutboundRequest start = OutboundRequest.builder(Profile.DEFAULT, URI.create("https://api.example.com/start")).ssrf(SsrfPolicy.NONE)
+                .method("POST", RequestBody.ofString("{}")).header(TurnOrigin.HEADER, "none")
+                .redirects(RedirectPolicy.follow(3, MethodRule.JDK_SAFE)).build();
+
+        facade(engine).send(start, text());
+
+        assertEquals(2, engine.hops.size());
+        for (var hop : engine.hops) {
+            assertEquals(List.of(TurnOrigin.EMAIL), OutboundRequest.caseInsensitiveCopy(hop.headers()).get(TurnOrigin.HEADER), hop.uri().toString());
+        }
+    }
+
+    @Test
+    @DisplayName("an untainted request carries no X-Eddi-Turn-Origin")
+    void untaintedCarriesNoHeader() throws Exception {
+        Engine engine = new Engine().respond(200, Map.of());
+
+        facade(engine).send(post("https://eddi.example.com/agents/a1/start"), text());
+
+        assertFalse(OutboundRequest.caseInsensitiveCopy(engine.hops.get(0).headers()).containsKey(TurnOrigin.HEADER));
     }
 }

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.security.EscalationGuard;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
@@ -11,6 +12,8 @@ import jakarta.annotation.Priority;
 import jakarta.interceptor.AroundInvoke;
 import jakarta.interceptor.Interceptor;
 import jakarta.interceptor.InvocationContext;
+
+import java.util.Optional;
 
 import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
 
@@ -35,6 +38,13 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
  * Only {@code @Tool} methods are touched; the payload test is
  * {@link #isErrorPayload(String)}, which matches exactly what the
  * {@code errorJson} builders emit.
+ * <p>
+ * It is also the receiving side of the email escalation guard (email plan v3
+ * §5.3) for EDDI's MCP server: a call of one of
+ * {@link EscalationGuard#GUARDED_TOOLS} from a request that carries the origin
+ * taint ({@code X-Eddi-Turn-Origin: email}, as every MCP request a mail-started
+ * turn sends does) fails with errorCode {@code EMAIL_ORIGIN} before the tool
+ * runs — whatever name the calling client listed the tool under.
  */
 @McpErrorResults
 @Interceptor
@@ -43,8 +53,13 @@ public class McpErrorResultInterceptor {
 
     @AroundInvoke
     Object toToolError(InvocationContext context) throws Exception {
-        if (!context.getMethod().isAnnotationPresent(Tool.class)) {
+        Tool tool = context.getMethod().getAnnotation(Tool.class);
+        if (tool == null) {
             return context.proceed();
+        }
+        Optional<String> escalation = EscalationGuard.refuseTool(toolName(tool, context.getMethod().getName()));
+        if (escalation.isPresent()) {
+            throw new ToolCallException(errorJson(escalation.get(), "EMAIL_ORIGIN", null));
         }
         Object result;
         try {
@@ -56,6 +71,14 @@ public class McpErrorResultInterceptor {
             throw new ToolCallException(text);
         }
         return result;
+    }
+
+    /**
+     * The name a client calls the tool by: its declared name, else the method's.
+     */
+    static String toolName(Tool tool, String methodName) {
+        String declared = tool.name();
+        return declared == null || declared.isBlank() || Tool.ELEMENT_NAME.equals(declared) ? methodName : declared;
     }
 
     /**
