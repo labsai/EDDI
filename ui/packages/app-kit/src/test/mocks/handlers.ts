@@ -5702,6 +5702,33 @@ export const backupSyncHandlers = [
     ]);
   }),
 
+  // The targeted sender-list edit of an email integration (email plan v3 §5.1):
+  // the lists of the version the page loaded, and an apply that writes the next one.
+  http.get("*/channelstore/channels/:id/email-senders", () =>
+    HttpResponse.json({ version: 1, allow: ["bob@partner.com"], block: [] }),
+  ),
+
+  http.post("*/channelstore/channels/:id/email-senders", async ({ request }) => {
+    const change = (await request.json()) as {
+      expectedVersion: number;
+      add?: { allow?: string[]; block?: string[] };
+      remove?: { allow?: string[]; block?: string[] };
+    };
+    const allow = ["bob@partner.com", ...(change.add?.allow ?? [])].filter((e) => !(change.remove?.allow ?? []).includes(e));
+    const block = (change.add?.block ?? []).filter((e) => !(change.remove?.block ?? []).includes(e));
+    return HttpResponse.json({
+      previousVersion: change.expectedVersion,
+      version: change.expectedVersion + 1,
+      changed: true,
+      allow,
+      block,
+      added: [...(change.add?.allow ?? []).map((e) => `allow:${e}`), ...(change.add?.block ?? []).map((e) => `block:${e}`)],
+      removed: [...(change.remove?.allow ?? []).map((e) => `allow:${e}`), ...(change.remove?.block ?? []).map((e) => `block:${e}`)],
+      unchanged: [],
+      warnings: [],
+    });
+  }),
+
   http.get("*/channelstore/channels/:id", ({ params }) => {
     const channelId = params.id as string;
     const configs: Record<string, object> = {

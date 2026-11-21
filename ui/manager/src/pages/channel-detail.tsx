@@ -24,6 +24,7 @@ import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -516,7 +517,22 @@ export function ChannelDetailPage() {
       <section className="rounded-xl border border-border/50 p-5 space-y-4">
         <h2 className="text-sm font-semibold flex items-center gap-2"><Hash className="h-4 w-4 text-primary" />{t("channelDetail.platformConfig", "Platform Configuration")}</h2>
         {isEmail ? (
-          <EmailPlatformFields advancedOpen platformConfig={draft.platformConfig} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
+          <EmailPlatformFields
+            advancedOpen
+            platformConfig={draft.platformConfig}
+            onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)}
+            senderLists={
+              id ? (
+                // A sender-list change is a new version: moving the URL to it
+                // reseeds the draft, so a later save cannot write the old lists back.
+                <EmailSenderListsEditor
+                  integrationId={id}
+                  disabled={isDirty}
+                  onChanged={(newVersion) => setSearchParams({ version: String(newVersion) }, { replace: true })}
+                />
+              ) : undefined
+            }
+          />
         ) : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (

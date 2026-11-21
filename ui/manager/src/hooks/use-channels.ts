@@ -6,7 +6,10 @@ import {
   updateChannel,
   deleteChannel,
   duplicateChannel,
+  getEmailSenders,
+  updateEmailSenders,
   type ChannelIntegrationConfiguration,
+  type EmailSenderChange,
 } from "@/lib/api/channels";
 
 const CHANNELS_KEY = ["channels"] as const;
@@ -85,6 +88,32 @@ export function useDuplicateChannel() {
     mutationFn: ({ id, version }: { id: string; version: number }) =>
       duplicateChannel(id, version),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
+    },
+  });
+}
+
+// ─── Email sender lists ──────────────────────────────────────────
+
+export function useEmailSenders(id: string, enabled = true) {
+  return useQuery({
+    queryKey: [...CHANNELS_KEY, id, "email-senders"],
+    queryFn: () => getEmailSenders(id),
+    enabled: !!id && enabled,
+  });
+}
+
+/**
+ * A targeted sender-list change. It writes a new version of the integration,
+ * so every channel query is stale afterwards — including the document the
+ * detail page was seeded from, which would otherwise write the old lists back
+ * on its next save.
+ */
+export function useUpdateEmailSenders() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, change }: { id: string; change: EmailSenderChange }) => updateEmailSenders(id, change),
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
     },
   });
