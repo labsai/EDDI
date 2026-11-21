@@ -68,11 +68,10 @@ unsaved changes. The create dialog keeps the comma-separated fields.
 - **Taking the taint from anyone is safe** — it only restricts — so the A2A header and the context key need no
   authentication; the key is still reserved in `ClientContextGuard`.
 - **Reading the lists needs VIEW**, like reading the document; changing them needs EDIT.
-- **Known gap:** a tainted turn can still start an *untainted* conversation through EDDI's own API — an `httpcalls`
-  call to `POST /agents/{id}/start` or `/schedulestore/schedules`, or an MCP client calling `chat_with_agent`,
-  `create_schedule` or `start_group_discussion` on EDDI's MCP server — because those requests arrive without the
-  taint. The guarded operations stay refused in the tainted turn itself; closing this needs the taint on loopback
-  requests (a later phase). `/hitl/autonomy` and `/hitl/samples` writes are not treated as approval endpoints.
+- **Starts through EDDI's own API** (an `httpcalls` call to `POST /agents/{id}/start` or `/schedulestore/schedules`,
+  an MCP client calling `chat_with_agent`, `create_schedule` or `start_group_discussion`) and the `/hitl/autonomy`
+  and `/hitl/samples` writes are covered by the follow-up entry "a mail-started turn cannot shed its taint through
+  EDDI's own API" (`fix/email-guard-start-paths`, same date).
 - "The last change and who made it" in the Manager (§5.4) is not shown yet: the audit entry records it, but there is
   no read of it per integration.
 
