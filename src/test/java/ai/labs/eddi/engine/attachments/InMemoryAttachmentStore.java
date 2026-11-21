@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -139,6 +140,21 @@ class InMemoryAttachmentStore implements IAttachmentStore {
 
     @Override
     public void setPageCount(String rootRef, int pages) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void release(String reservationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public void convert(String reservationId, String storageRef) {
         throw new UnsupportedOperationException();
     }
 }

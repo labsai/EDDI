@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.datastore.mongo;
 
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder;
+import ai.labs.eddi.engine.attachments.AttachmentLockOrder.Lock;
 import ai.labs.eddi.engine.attachments.AttachmentQuotas;
 import ai.labs.eddi.engine.attachments.AttachmentRootDeleted;
 import ai.labs.eddi.engine.attachments.Derivation;
@@ -14,6 +16,7 @@ import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.QuotaReservation;
 import com.mongodb.ErrorCategory;
 import com.mongodb.MongoTimeoutException;
 import com.mongodb.MongoWriteException;
@@ -24,6 +27,7 @@ import com.mongodb.client.gridfs.GridFSBucket;
 import com.mongodb.client.gridfs.GridFSBuckets;
 import com.mongodb.client.gridfs.model.GridFSFile;
 import com.mongodb.client.gridfs.model.GridFSUploadOptions;
+import com.mongodb.client.model.Accumulators;
 import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
@@ -46,6 +50,7 @@ import org.jboss.logging.Logger;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Date;
@@ -53,6 +58,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -95,6 +101,11 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * lock whose holder died is taken over once its lease has expired. The usage
  * itself is always counted from the blobs, so nothing can drift. A derived
  * write takes the root's source lock, from the same collection, after them.
+ * <p>
+ * <b>Reservations</b> ({@value #RESERVATIONS_COLLECTION}) hold quota for writes
+ * in flight and count as usage of their buckets until they expire by the
+ * server's {@code $$NOW}; a TTL index removes stragglers. They are written
+ * under the same lease locks as an upload, and deleted with their conversation.
  *
  * @since 6.0.0
  */
@@ -126,11 +137,21 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     static final String GRANT_CONVERSATION_ID = "conversationId";
     static final String GRANT_CREATED_AT = "createdAt";
     static final String BACKFILL_COLLECTION = "attachment_grants_backfill";
+    static final String RESERVATIONS_COLLECTION = "attachment_reservations";
+    static final String RESERVATION_OWNER_KEY = "ownerKey";
+    static final String RESERVATION_BYTES = "bytes";
+    static final String RESERVATION_COUNT = "count";
+    static final String RESERVATION_EXPIRES_AT = "expiresAt";
+    static final String RESERVATION_CREATED_AT = "createdAt";
+    /** A reservation that has not expired, by the database's clock. */
+    private static final Bson LIVE_RESERVATION = Filters.expr(new Document("$gt", List.of("$" + RESERVATION_EXPIRES_AT, "$$NOW")));
+    private static final Bson EXPIRED_RESERVATION = Filters.expr(new Document("$lte", List.of("$" + RESERVATION_EXPIRES_AT, "$$NOW")));
     private static final String BACKFILL_CURSOR = "cursor";
     /**
      * How long a quota lock is held at most before another upload may take it over.
      */
     static final long LOCK_LEASE_MILLIS = 60_000;
+    private static final String SOURCE_LOCK_KEY_PREFIX = "source:";
     /** How long an upload waits for a quota lock before giving up. */
     static final long LOCK_WAIT_MILLIS = 15_000;
     private static final long LOCK_POLL_MILLIS = 25;
@@ -157,6 +178,11 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     private final MongoCollection<Document> grantsCollection;
     /** The backfill's cursor, kept across starts. */
     private final MongoCollection<Document> backfillCollection;
+    /**
+     * Quota held by writes in flight, read from the PRIMARY: it is part of every
+     * usage count.
+     */
+    private final MongoCollection<Document> reservationsCollection;
 
     @ConfigProperty(name = "eddi.attachments.max-size-bytes", defaultValue = "20971520") // 20 MB
     long maxSizeBytes;
@@ -207,6 +233,41 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         this.locksCollection = database.getCollection(LOCKS_COLLECTION);
         this.grantsCollection = database.getCollection(GRANTS_COLLECTION).withReadPreference(ReadPreference.primary());
         this.backfillCollection = database.getCollection(BACKFILL_COLLECTION).withReadPreference(ReadPreference.primary());
+        this.reservationsCollection = database.getCollection(RESERVATIONS_COLLECTION).withReadPreference(ReadPreference.primary());
+    }
+
+    /**
+     * The reservation indexes, within a budget of their own; called at startup by
+     * {@link GridFsIndexInitializer}. A TTL index on the expiry removes what no
+     * reserve swept — only a backstop: usage filters on the expiry itself, since
+     * the TTL monitor runs about once a minute.
+     */
+    public void ensureReservationIndexes() {
+        ensureReservationIndexes(reservationsCollection, System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS), System::nanoTime);
+    }
+
+    static void ensureReservationIndexes(MongoCollection<Document> reservations, long deadlineNanos, LongSupplier nanoClock) {
+        List<Map.Entry<Bson, IndexOptions>> indexes = List.of(
+                Map.entry(Indexes.ascending(RESERVATION_EXPIRES_AT), new IndexOptions().expireAfter(0L, TimeUnit.SECONDS)),
+                Map.entry(Indexes.ascending(META_CONVERSATION_ID), new IndexOptions()),
+                Map.entry(Indexes.ascending(META_USER_ID), new IndexOptions()));
+        for (Map.Entry<Bson, IndexOptions> index : indexes) {
+            long remainingMillis = TimeUnit.NANOSECONDS.toMillis(deadlineNanos - nanoClock.getAsLong());
+            if (remainingMillis <= 0) {
+                LOGGER.warn("Ran out of time creating the attachment reservation indexes; reservation lookups fall back to a scan");
+                return;
+            }
+            try {
+                reservations.withTimeout(remainingMillis, TimeUnit.MILLISECONDS).createIndex(index.getKey(), index.getValue());
+            } catch (MongoTimeoutException e) {
+                LOGGER.warnf("Timed out creating an attachment reservation index; reservation lookups fall back to a scan: %s",
+                        sanitize(e.getMessage()));
+                return;
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Could not create an attachment reservation index; reservation lookups fall back to a scan: %s",
+                        sanitize(e.getMessage()));
+            }
+        }
     }
 
     /**
@@ -373,26 +434,16 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
         // Conversation first, then user: every upload takes them in this order, so two
         // uploads can never wait on each other in a cycle.
-        List<String> lockKeys = new ArrayList<>();
-        if (conversationQuota) {
-            lockKeys.add("conversation:" + conversationId);
-        }
-        if (userQuota) {
-            lockKeys.add("user:" + userId);
-        }
         List<String[]> held = new ArrayList<>();
         try {
-            for (String key : lockKeys) {
-                held.add(new String[]{key, acquireLock(key)});
-            }
+            lockAll(bucketLocks(conversationQuota ? conversationId : null, userQuota ? userId : null), held);
             if (conversationQuota) {
-                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_CONVERSATION,
-                        usage(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId)), bytes.length,
-                        maxPerConversation, maxTotalBytesPerConversation);
+                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage(META_CONVERSATION_ID, conversationId),
+                        bytes.length, maxPerConversation, maxTotalBytesPerConversation);
             }
             if (userQuota) {
-                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_USER, usage(Filters.eq("metadata." + META_USER_ID, userId)),
-                        bytes.length, maxPerUser, maxTotalBytesPerUser);
+                AttachmentQuotas.checkUsage(AttachmentQuotaExceededException.SCOPE_USER, usage(META_USER_ID, userId), bytes.length, maxPerUser,
+                        maxTotalBytesPerUser);
             }
             gridFSBucket.uploadFromStream(
                     filename != null ? filename : "unnamed",
@@ -675,6 +726,9 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             grantsCollection.deleteMany(Filters.in(GRANT_STORAGE_REF, deletedRefs));
         }
         long held = grantsCollection.deleteMany(Filters.eq(GRANT_CONVERSATION_ID, conversationId)).getDeletedCount();
+        // The quota this conversation's writes in flight held: an erasure during an
+        // upload leaves nothing reserved.
+        reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
         filesCollection.updateMany(Filters.eq("metadata." + META_GRANTS, conversationId), Updates.pull("metadata." + META_GRANTS, conversationId));
         if (!deletedRefs.isEmpty() || held > 0) {
             LOGGER.debugf("Deleted %d attachments (%d roots) and %d held grants for conversation '%s'", deletedRefs.size(), roots.size(), held,
@@ -738,14 +792,32 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     }
 
     /**
-     * {count, totalBytes} of the files matching {@code filter}: the count is of
-     * uploads (roots) only, the bytes are the uploads' plus their media views' —
-     * the only derived bytes that count toward an owner's quota.
+     * {count, totalBytes} of a bucket: the files whose {@code metadata.<field>} is
+     * {@code value} plus the live reservations whose {@code <field>} is — the two
+     * documents name the bucket fields alike. The count is of uploads (roots) only,
+     * the bytes are the uploads' plus their media views' — the only derived bytes
+     * that count toward an owner's quota. A reservation counts until it expires by
+     * the database's clock ({@code $$NOW}).
+     * <p>
+     * The reservations are read <em>before</em> the files, and both from the
+     * primary. A write against a reservation makes its blob visible before it
+     * removes the reservation, so in this order a conversion that happens between
+     * the two reads is seen at least once; the other order could see neither.
+     *
+     * @param field
+     *            {@link #META_CONVERSATION_ID} or {@link #META_USER_ID}
      */
-    private long[] usage(Bson filter) {
+    private long[] usage(String field, String value) {
         long count = 0;
         long totalBytes = 0;
-        for (GridFSFile file : primaryReadBucket.find(filter)) {
+        for (Document sum : reservationsCollection.aggregate(List.of(
+                Aggregates.match(Filters.and(Filters.eq(field, value), LIVE_RESERVATION)),
+                Aggregates.group(null, Accumulators.sum(RESERVATION_COUNT, "$" + RESERVATION_COUNT),
+                        Accumulators.sum(RESERVATION_BYTES, "$" + RESERVATION_BYTES))))) {
+            count += ((Number) sum.get(RESERVATION_COUNT)).longValue();
+            totalBytes += ((Number) sum.get(RESERVATION_BYTES)).longValue();
+        }
+        for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + field, value))) {
             if (meta(file, META_ROOT_REF) == null) {
                 count++;
                 totalBytes += file.getLength();
@@ -793,20 +865,12 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         boolean conversationQuota = media && maxTotalBytesPerConversation > 0;
         boolean userQuota = media && userId != null && maxTotalBytesPerUser > 0;
         // Lock order: conversation → user → source, as every writer takes them.
-        List<String> lockKeys = new ArrayList<>();
-        if (conversationQuota) {
-            lockKeys.add("conversation:" + conversationId);
-        }
-        if (userQuota) {
-            lockKeys.add("user:" + userId);
-        }
-        lockKeys.add("source:" + rootRef);
+        List<Lock> locks = bucketLocks(conversationQuota ? conversationId : null, userQuota ? userId : null);
+        locks.add(new Lock(AttachmentLockOrder.Scope.SOURCE, rootRef));
         List<String[]> held = new ArrayList<>();
         ObjectId uploaded;
         try {
-            for (String key : lockKeys) {
-                held.add(new String[]{key, acquireLock(key)});
-            }
+            lockAll(locks, held);
             // The root again, under the lock and from the primary: it may have been
             // deleted, or have changed owner, since it was read.
             GridFSFile current = primaryReadBucket.find(Filters.eq("_id", root.getObjectId())).first();
@@ -832,12 +896,12 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             }
             List<String> evict = DerivedCaps.check(kind, bytes.length, lineage, derivedLimits());
             if (conversationQuota) {
-                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, 0,
-                        usage(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))[1], bytes.length, 0, maxTotalBytesPerConversation);
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, 0, usage(META_CONVERSATION_ID, conversationId)[1],
+                        bytes.length, 0, maxTotalBytesPerConversation);
             }
             if (userQuota) {
-                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(Filters.eq("metadata." + META_USER_ID, userId))[1],
-                        bytes.length, 0, maxTotalBytesPerUser);
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, 0, usage(META_USER_ID, userId)[1], bytes.length, 0,
+                        maxTotalBytesPerUser);
             }
             for (String ref : evict) {
                 for (GridFSFile slice : primaryReadBucket.find(Filters.and(Filters.eq("metadata." + META_STORAGE_REF, ref),
@@ -1025,6 +1089,129 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
 
     private static Kind kindOf(GridFSFile file) {
         return Kind.fromStored(meta(file, META_KIND));
+    }
+
+    // ------------------------------------------------------- quota reservations
+
+    @Override
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+            throws AttachmentStoreException {
+        QuotaReservation.validateRequest(owner, conversationId, bytes, count, ttl);
+        boolean conversationQuota = maxPerConversation > 0 || maxTotalBytesPerConversation > 0;
+        boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
+        String id = UUID.randomUUID().toString();
+        List<String[]> held = new ArrayList<>();
+        try {
+            lockAll(bucketLocks(conversationQuota ? conversationId : null, userQuota ? userId : null), held);
+            // Only the buckets whose locks are held.
+            if (conversationQuota) {
+                reservationsCollection.deleteMany(Filters.and(Filters.eq(META_CONVERSATION_ID, conversationId), EXPIRED_RESERVATION));
+                long[] usage = usage(META_CONVERSATION_ID, conversationId);
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes, maxPerConversation,
+                        maxTotalBytesPerConversation);
+            }
+            if (userQuota) {
+                reservationsCollection.deleteMany(Filters.and(Filters.eq(META_USER_ID, userId), EXPIRED_RESERVATION));
+                long[] usage = usage(META_USER_ID, userId);
+                AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, usage[0], usage[1], count, bytes, maxPerUser,
+                        maxTotalBytesPerUser);
+            }
+            // The expiry from the server's clock ($$NOW), in a pipeline update: no node's
+            // clock decides how long a reservation counts. Values go in as $literal, so
+            // nothing a caller passes is read as a field path.
+            Document fields = new Document(RESERVATION_OWNER_KEY, literal(owner.ownerKey()))
+                    .append(META_CONVERSATION_ID, literal(conversationId))
+                    .append(META_USER_ID, literal(userId))
+                    .append(RESERVATION_BYTES, literal(bytes))
+                    .append(RESERVATION_COUNT, literal(count))
+                    .append(RESERVATION_CREATED_AT, "$$NOW")
+                    .append(RESERVATION_EXPIRES_AT, new Document("$add", List.of("$$NOW", ttl.toMillis())));
+            reservationsCollection.updateOne(Filters.eq("_id", id), List.of(new Document("$set", fields)), new UpdateOptions().upsert(true));
+            Document stored = reservationsCollection.find(Filters.eq("_id", id)).first();
+            if (stored == null) {
+                throw new AttachmentStoreException("Failed to reserve attachment quota");
+            }
+            return new QuotaReservation(id, owner.ownerKey(), bytes, count, stored.getDate(RESERVATION_EXPIRES_AT).toInstant());
+        } finally {
+            releaseAll(held);
+        }
+    }
+
+    private static Document literal(Object value) {
+        return new Document("$literal", value);
+    }
+
+    @Override
+    public void release(String reservationId) {
+        reservationsCollection.deleteOne(Filters.eq("_id", reservationId));
+    }
+
+    /**
+     * Under the reservation's bucket locks (conversation → user): the blob must be
+     * visible in its buckets and fit, then the reservation goes. The blob is never
+     * removed here; a refused conversion leaves it to its writer.
+     */
+    @Override
+    public void convert(String reservationId, String storageRef) throws AttachmentStoreException {
+        Document reservation = reservationsCollection.find(Filters.eq("_id", reservationId)).first();
+        if (reservation == null) {
+            throw reservationGone();
+        }
+        String conversationId = reservation.getString(META_CONVERSATION_ID);
+        String userId = reservation.getString(META_USER_ID);
+        List<String[]> held = new ArrayList<>();
+        try {
+            lockAll(bucketLocks(conversationId, userId), held);
+            Document live = reservationsCollection.find(Filters.and(Filters.eq("_id", reservationId), LIVE_RESERVATION)).first();
+            if (live == null) {
+                throw reservationGone();
+            }
+            GridFSFile blob = primaryReadBucket.find(Filters.and(refFilter(storageRef), ROOTS_ONLY,
+                    Filters.eq("metadata." + META_CONVERSATION_ID, conversationId), Filters.eq("metadata." + META_USER_ID, userId))).first();
+            if (blob == null) {
+                throw new AttachmentNotFoundException("No upload " + storageRef + " in the buckets of this quota reservation");
+            }
+            long reserved = ((Number) live.get(RESERVATION_BYTES)).longValue();
+            if (blob.getLength() > reserved) {
+                throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                        "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(blob.getLength(), reserved));
+            }
+            reservationsCollection.deleteOne(Filters.eq("_id", reservationId));
+        } finally {
+            releaseAll(held);
+        }
+    }
+
+    private static AttachmentQuotaExceededException reservationGone() {
+        return new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                "The quota reservation for this upload expired or was released before the upload completed. Please retry.");
+    }
+
+    /** The bucket locks of a write; a {@code null} id is a bucket not locked. */
+    private static List<Lock> bucketLocks(String conversationId, String userId) {
+        List<Lock> locks = new ArrayList<>();
+        locks.add(new Lock(AttachmentLockOrder.Scope.CONVERSATION, conversationId));
+        locks.add(new Lock(AttachmentLockOrder.Scope.USER, userId));
+        return locks;
+    }
+
+    /**
+     * Takes the lease locks {@code wanted} needs, in the one order every writer
+     * uses ({@link AttachmentLockOrder}), recording each in {@code held} for
+     * {@link #releaseAll}. The keys are the ones this store has always used, so a
+     * node of an older release serializes on the same locks.
+     */
+    private void lockAll(List<Lock> wanted, List<String[]> held) throws AttachmentStoreException {
+        for (Lock lock : AttachmentLockOrder.ordered(wanted)) {
+            String key = lockKey(lock);
+            held.add(new String[]{key, acquireLock(key)});
+        }
+    }
+
+    static String lockKey(Lock lock) {
+        return lock.scope() == AttachmentLockOrder.Scope.SOURCE
+                ? SOURCE_LOCK_KEY_PREFIX + lock.id()
+                : lock.scope().name().toLowerCase(Locale.ROOT) + ":" + lock.id();
     }
 
     /**

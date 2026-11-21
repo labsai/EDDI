@@ -145,6 +145,12 @@ principal, not a user: erasing or exporting it is refused with 400.
    granted — belongs to that file's owner and stays; the user's grant on it goes, and
    with it the user's access. `attachmentsDeleted` counts uploaded files; their
    views are deleted with them and not counted.
+
+   **Quota reservations** (`attachment_reservations`: quota held by a write still in
+   flight, with the conversation and user it counts against) go with the same
+   per-conversation delete, so an erasure during an upload leaves nothing reserved.
+   They are not counted. One that a racing write creates after the delete expires by
+   itself within its lifetime (at most 24 hours).
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**
