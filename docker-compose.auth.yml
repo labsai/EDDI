@@ -213,6 +213,10 @@ services:
       KC_BOOTSTRAP_ADMIN_PASSWORD: "${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}"
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
+      # Java4Shell (CVE-2026-114938) interim mitigation: Keycloak decodes Base64 before
+      # any login, and 26.8.0 bundles OpenJDK 21.0.12.1 (fixed in 21.0.13.1). Remove once
+      # the pinned Keycloak image ships a fixed JDK. See docs/security.md.
+      JAVA_OPTS_APPEND: "-XX:-UseBASE64Intrinsics"
       # KC_HOSTNAME must equal what browsers use to reach Keycloak.
       # Without this, Keycloak embeds the Docker-internal hostname in tokens,
       # causing iss-mismatch failures when the browser validates them.
