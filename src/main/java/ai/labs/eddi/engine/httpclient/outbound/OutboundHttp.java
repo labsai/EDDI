@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.security.EscalationGuard;
 import ai.labs.eddi.utils.LogSanitizer;
 import ai.labs.eddi.secrets.SecretResolver;
 import io.micrometer.core.instrument.Counter;
@@ -46,6 +47,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 import java.util.Set;
 import java.util.TreeMap;
@@ -381,6 +383,13 @@ public class OutboundHttp {
         int hops = 0;
 
         while (true) {
+            // The escalation guard (email plan v3 §5.3), on every hop: a turn a mail
+            // started never writes to EDDI's own channel or approval endpoints, also not
+            // by way of a redirect that keeps the method.
+            Optional<String> escalation = EscalationGuard.refuseRequest(method, uri);
+            if (escalation.isPresent()) {
+                throw new OutboundBlockedException(escalation.get());
+            }
             Received received = engine.send(new Hop(request.profile(), method, uri, headers, body, hopTimeout, deadlineNanos, peerCheck));
             recheckAfterExchange(check, uri, received);
             int status = received.status();

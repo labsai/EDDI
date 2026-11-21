@@ -5581,7 +5581,9 @@
       "openTrigger": "Saved, but anyone on the internet can make this agent run: there is no sender allowlist and unauthenticated mail is processed.",
       "toolsWithoutApprovals": "Saved, but an agent this integration targets has tools and no tool approvals. Mail content is untrusted input: add hitlConfig.toolApprovals for tools that change things.",
       "aiDisclosureDisabled": "Saved, but replies no longer say that an AI wrote them. Transparency rules such as the EU AI Act expect people to know they are talking to an AI.",
-      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes."
+      "honorReplyTo": "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      "allowlistEmptied": "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication.",
+      "allowlistBroad": "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses."
     },
     "defaultTargetHint": "The default target handles every mail whose plus-tag (invoices+urgent@…) or subject matches no other target's trigger. You can add more targets after creation.",
     "triggerLabel": "Plus-tags or subject words",
@@ -5615,6 +5617,27 @@
     "replyTemplateHint": "Wraps the agent's answer, which is inserted as text and never run as a template. Variables:",
     "noteDkim": "Replies need a mail server that signs outgoing mail with DKIM for the mailbox's domain, and a DMARC record for that domain — {{productName}} does not sign. Without them replies land in spam or are rejected. Exchange Online and most hosters sign submitted mail once DKIM is enabled for the domain.",
     "noteBounces": "A reply that bounces permanently puts the address on this integration's suppression list, and {{productName}} sends it nothing more until an administrator clears it (POST /channelstore/channels/<id>/email-suppressions/clear)."
+  },
+  "emailSenders": {
+    "loading": "Loading the sender lists…",
+    "invalidEntry": "Use user@domain, *@domain or *@*.domain.",
+    "onBothLists": "That sender is on the other list. Remove it there first.",
+    "saved": "Sender lists saved as version {{version}}.",
+    "nothingChanged": "Nothing changed: those entries were already in that state.",
+    "conflict": "Someone changed this integration meanwhile. The lists were reloaded; check them and apply again.",
+    "emptyAllowlist": "None — every sender is allowed (subject to sender authentication).",
+    "emptyBlocklist": "None.",
+    "keep": "Keep {{entry}}",
+    "remove": "Remove {{entry}}",
+    "addLabel": "Add to {{list}}",
+    "add": "Add",
+    "hint": "Prefer exact addresses. Each applied change is a new version of this integration and is recorded in the audit log with its reason. A conversation that an email started can never change these lists.",
+    "saveFirst": "Save or discard your other changes first; the sender lists are applied on their own.",
+    "reason": "Why (for the audit log)",
+    "reasonPlaceholder": "e.g. new supplier, contract 2026-114",
+    "confirmOpen": "I understand: with an empty allowlist every sender can make the agent run.",
+    "apply": "Apply sender changes",
+    "discard": "Discard"
   },
   "feedback": {
     "title": "Feedback",

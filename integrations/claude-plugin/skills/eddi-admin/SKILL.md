@@ -197,6 +197,12 @@ audit trail → server log → the configuration that produced it. Follow
   (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
   `email.honor-reply-to`) are worth relaying. Where a helpdesk already owns the mailbox, use a
   `webhook` channel instead. `read_docs("email-integration")`.
+  To allow or block one sender, never rewrite the integration: `list_email_senders` gives the
+  `version`, then `update_email_senders` with that `expectedVersion`, the entries to add or
+  remove (comma-separated; prefer exact addresses over `*@domain`) and a `reason` for the audit
+  log. A `CONFLICT` means someone changed it meanwhile — read again. Removing the last allowlist
+  entry lets every sender in and needs `confirmOpen: true`: only when the user asked for exactly
+  that. A conversation an email started can never call these tools.
 - **Groups** of agents: [groups.md](references/groups.md).
 - **User memory and GDPR** (admin): reads as in the `eddi` skill; writes are
   `upsert_user_memory`, `delete_user_memory`, `delete_all_user_memories`; requests from a

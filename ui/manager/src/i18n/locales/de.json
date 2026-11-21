@@ -5581,7 +5581,9 @@
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
-      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
+      "allowlistEmptied": "Gespeichert, aber die Allowlist ist jetzt leer: Jeder Absender kann den Agenten starten, begrenzt nur durch die Absender-Authentifizierung.",
+      "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5615,6 +5617,27 @@
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
     "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+  },
+  "emailSenders": {
+    "loading": "Absenderlisten werden geladen…",
+    "invalidEntry": "Verwenden Sie user@domain, *@domain oder *@*.domain.",
+    "onBothLists": "Dieser Absender steht auf der anderen Liste. Entfernen Sie ihn dort zuerst.",
+    "saved": "Absenderlisten als Version {{version}} gespeichert.",
+    "nothingChanged": "Nichts geändert: Diese Einträge waren bereits in diesem Zustand.",
+    "conflict": "Jemand hat diese Integration inzwischen geändert. Die Listen wurden neu geladen; prüfen Sie sie und wenden Sie die Änderung erneut an.",
+    "emptyAllowlist": "Keine – jeder Absender ist zugelassen (vorbehaltlich der Absender-Authentifizierung).",
+    "emptyBlocklist": "Keine.",
+    "keep": "{{entry}} behalten",
+    "remove": "{{entry}} entfernen",
+    "addLabel": "Zu {{list}} hinzufügen",
+    "add": "Hinzufügen",
+    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. Eine Unterhaltung, die eine E-Mail gestartet hat, kann diese Listen nie ändern.",
+    "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderlisten werden für sich angewendet.",
+    "reason": "Warum (für das Audit-Log)",
+    "reasonPlaceholder": "z. B. neuer Lieferant, Vertrag 2026-114",
+    "confirmOpen": "Mir ist klar: Mit einer leeren Allowlist kann jeder Absender den Agenten starten.",
+    "apply": "Absenderänderungen anwenden",
+    "discard": "Verwerfen"
   },
   "feedback": {
     "title": "Feedback",

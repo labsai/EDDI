@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { platformConfigForType } from "@/lib/channel-platform-config";
+import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
 
 const WEBHOOK = {
   signingSecret: "${vault:hook-secret}",
@@ -62,5 +62,27 @@ describe("platformConfigForType", () => {
     expect(platformConfigForType("email", "email", EMAIL)).toEqual(EMAIL);
     expect(platformConfigForType("teams", "slack", SLACK)).toEqual({});
     expect(platformConfigForType("webhook", "slack", null)).toEqual({});
+  });
+});
+
+describe("adoptStoredVersion", () => {
+  const cfg = (host: string, lists: string, name = "n") => ({
+    name,
+    platformConfig: { host, senderAllowlist: lists } as Record<string, string>,
+  });
+
+  it("takes every stored field, so another editor's change is not written back from an old snapshot", () => {
+    const merged = adoptStoredVersion(cfg("old", "a@x.com"), cfg("old", "a@x.com"), cfg("theirs", "b@x.com", "renamed"));
+    expect(merged).toEqual(cfg("theirs", "b@x.com", "renamed"));
+  });
+
+  it("keeps a field the user edited on this page, and still takes the stored lists", () => {
+    const merged = adoptStoredVersion(cfg("old", "a@x.com", "mine"), cfg("old", "a@x.com", "n"), cfg("old", "b@x.com", "n"));
+    expect(merged).toEqual(cfg("old", "b@x.com", "mine"));
+  });
+
+  it("keeps an edited platform key but never a stale sender list", () => {
+    const merged = adoptStoredVersion(cfg("mine", "a@x.com"), cfg("old", "a@x.com"), cfg("old", "b@x.com"));
+    expect(merged.platformConfig).toEqual({ host: "mine", senderAllowlist: "b@x.com" });
   });
 });

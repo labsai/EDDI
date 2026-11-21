@@ -5581,7 +5581,9 @@
       "openTrigger": "已保存，但互联网上的任何人都能让此智能体运行：没有发件人允许列表，且未经验证的邮件也会被处理。",
       "toolsWithoutApprovals": "已保存，但此集成指向的某个智能体有工具却没有工具审批。邮件内容是不可信的输入：请为会更改内容的工具添加 hitlConfig.toolApprovals。",
       "aiDisclosureDisabled": "已保存，但回复不再说明由 AI 撰写。欧盟《人工智能法案》等透明度规则要求人们知道自己在与 AI 交流。",
-      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。"
+      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。",
+      "allowlistEmptied": "已保存，但允许列表现在为空：任何发件人都能让该代理运行，仅受发件人认证的限制。",
+      "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5615,6 +5617,27 @@
     "replyTemplateHint": "包裹智能体的回答；回答作为文本插入，绝不会作为模板执行。变量：",
     "noteDkim": "回复需要一台为邮箱所在域使用 DKIM 签名外发邮件的邮件服务器，以及该域的 DMARC 记录——{{productName}} 不签名。缺少它们，回复会进入垃圾邮件或被拒收。为该域启用 DKIM 后，Exchange Online 和大多数托管商都会对提交的邮件签名。",
     "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+  },
+  "emailSenders": {
+    "loading": "正在加载发件人列表…",
+    "invalidEntry": "请使用 user@domain、*@domain 或 *@*.domain。",
+    "onBothLists": "该发件人在另一个列表中，请先从那里移除。",
+    "saved": "发件人列表已保存为版本 {{version}}。",
+    "nothingChanged": "没有变化：这些条目已经是该状态。",
+    "conflict": "在此期间有人修改了此集成。列表已重新加载，请检查后再次应用。",
+    "emptyAllowlist": "无 — 允许所有发件人（受发件人认证约束）。",
+    "emptyBlocklist": "无。",
+    "keep": "保留 {{entry}}",
+    "remove": "移除 {{entry}}",
+    "addLabel": "添加到{{list}}",
+    "add": "添加",
+    "hint": "建议使用精确地址。每次应用的更改都是此集成的新版本，并连同原因记录在审计日志中。由邮件发起的对话永远无法更改这些列表。",
+    "saveFirst": "请先保存或放弃其他更改；发件人列表会单独应用。",
+    "reason": "原因（用于审计日志）",
+    "reasonPlaceholder": "例如：新供应商，合同 2026-114",
+    "confirmOpen": "我了解：允许列表为空时，任何发件人都能让该代理运行。",
+    "apply": "应用发件人更改",
+    "discard": "放弃"
   },
   "feedback": {
     "title": "反馈",

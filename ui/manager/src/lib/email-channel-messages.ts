@@ -112,6 +112,16 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.honorReplyTo",
         "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
       );
+    case "email.allowlist-emptied":
+      return t(
+        "emailChannel.warning.allowlistEmptied",
+        "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication.",
+      );
+    case "email.allowlist-broad":
+      return t(
+        "emailChannel.warning.allowlistBroad",
+        "Saved, but an allowlist entry admits a whole public suffix (such as *@*.co.uk) or this integration's own domain. Prefer exact addresses.",
+      );
     default:
       return code;
   }

@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.userevents.UserEvent;
 import ai.labs.eddi.engine.userevents.UserEventAudience;
 import ai.labs.eddi.engine.userevents.UserEventPublisher;
@@ -43,6 +44,7 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -201,6 +203,34 @@ class ScheduleFireExecutorTest {
         ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
         verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
         assertEquals(0.3, (double) input.getValue().getContext().get(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE).getValue(), 1e-9);
+    }
+
+    /**
+     * Email plan v3 §5.3: a check-back a mail-started turn booked fires into a
+     * conversation that is just as tainted, the new one included.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void fire_taintedCheckBack_carriesTheOriginIntoTheStartAndTheTurn() throws Exception {
+        var schedule = makeCronSchedule("sched-taint", "new");
+        schedule.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL)));
+        when(conversationService.startConversation(any(), eq("agent-1"), eq("system:scheduler"), any()))
+                .thenReturn(new IConversationService.ConversationResult("conv-taint", null));
+        var done = new SimpleConversationMemorySnapshot();
+        done.setConversationState(ConversationState.READY);
+        doAnswer(inv -> {
+            ((IConversationService.ConversationResponseHandler) inv.getArgument(8)).onComplete(done);
+            return null;
+        }).when(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), any(), anyBoolean(), any());
+
+        executor.fire(schedule, "instance-1", 1);
+
+        ArgumentCaptor<Map<String, Context>> startContext = ArgumentCaptor.forClass(Map.class);
+        verify(conversationService).startConversation(any(), eq("agent-1"), eq("system:scheduler"), startContext.capture());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(startContext.getValue()));
+        ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+        verify(conversationService).say(any(), any(), any(), anyBoolean(), anyBoolean(), any(), input.capture(), anyBoolean(), any());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(input.getValue().getContext()));
     }
 
     @Test

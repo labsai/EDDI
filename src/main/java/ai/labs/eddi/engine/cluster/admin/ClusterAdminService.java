@@ -49,6 +49,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.nats.client.Connection;
 import io.nats.client.JetStreamApiException;
@@ -1181,6 +1182,8 @@ public class ClusterAdminService implements ClusterStartable {
         String conversationId = entry.conversationId();
         Map<String, Context> context = new HashMap<>();
         context.put("replayOf", new Context(Context.ContextType.string, id));
+        // A turn a mail influenced is replayed under the same taint.
+        context = TurnOrigin.withOrigin(context, TurnOrigin.normalise(String.valueOf(entry.turn().get("origin"))));
         InputData input = new InputData(String.valueOf(entry.turn().get("input")), context);
         String key = replayIdempotencyKey(id);
         input.setIdempotencyKey(key);

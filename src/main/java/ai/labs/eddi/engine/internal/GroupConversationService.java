@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.cluster.KvKeys;
 import ai.labs.eddi.configs.agents.AgentSigningService;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.userevents.GroupUserEvents;
 import ai.labs.eddi.engine.userevents.UserEventPublisher;
@@ -2827,6 +2828,9 @@ public class GroupConversationService implements IGroupConversationService, User
         gc.setOriginalQuestion(question);
         gc.setCurrentPhaseIndex(0);
         gc.setDepth(depth);
+        // The origin taint of whatever started the discussion: a tainted turn's tool,
+        // the email poller, or the discussion one level up (MemberTurnExecutor).
+        gc.setOrigin(TurnOrigin.current());
         gc.setCreated(Instant.now());
         gc.setLastModified(Instant.now());
 
