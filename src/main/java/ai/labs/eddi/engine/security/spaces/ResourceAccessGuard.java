@@ -451,16 +451,12 @@ public class ResourceAccessGuard {
     /**
      * The current caller's team subjects (their personal space excluded), for
      * {@link #principalMayUse(String, String, Collection, boolean)} to be asked
-     * later on their behalf. Empty for an anonymous caller.
+     * later on their behalf. Empty for an anonymous caller. The derivation is
+     * {@link CallerSpaces#teamSubjectsOf(CallerSpaces)}, shared with the snapshot a
+     * conversation turn carries ({@code CallerIdentity.teamSubjects()}).
      */
     public List<String> currentTeamSubjects() {
-        CallerSpaces caller = spaceContext.current();
-        if (caller == null) {
-            return List.of();
-        }
-        Set<String> personal = new LinkedHashSet<>();
-        caller.selfPrincipals().forEach(p -> personal.add(Subjects.personalSpace(p)));
-        return caller.subjects().stream().filter(subject -> !personal.contains(subject)).toList();
+        return CallerSpaces.teamSubjectsOf(spaceContext.current());
     }
 
     /**
