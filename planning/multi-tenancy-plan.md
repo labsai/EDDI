@@ -1381,11 +1381,11 @@ Phase 0, 2026-11-21. Each entry is detailed in
   with `rolsuper` or `rolbypassrls` is refused as an enablement precondition, before
   `SWITCHING`, and again at every multi-mode startup. *Why:* Spike A showed that superusers
   ignore `FORCE`d RLS, and the stock compose/Helm `POSTGRES_USER` is a superuser.
-- **DV-2 (§8.4), proposed and awaiting the user's decision.** The RLS interceptor would memoise
-  per physical connection (`unwrap(PGConnection.class)`) and skip `set_config` when the values
+- **DV-2 (§8.4), decided 2026-11-21 by the product owner: memo.** The RLS interceptor memoises
+  per physical connection (`unwrap(PGConnection.class)`) and skips `set_config` when the values
   are unchanged. The memo is recorded only in autocommit, the epoch on every acquire, and a
-  guard forbids other SQL from naming `eddi.*` GUCs. The alternative is the plan's "always
-  overwrite". *Why:* the naive interceptor adds a round trip to every acquire. Either way the
+  guard forbids other SQL from naming `eddi.*` GUCs.
+  *Why:* the naive interceptor adds a round trip to every acquire. Either way the
   key is the physical connection, because the caller's wrapper differs from the
   interceptor's.
 - **DV-3 (§6.1, §14.2).** No `@Transactional` on org data paths (new guard). *Why:* Agroal

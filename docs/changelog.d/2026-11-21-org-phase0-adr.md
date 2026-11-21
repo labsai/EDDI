@@ -11,8 +11,8 @@ and waits for approval. This branch also carries the rewritten plan itself (the
 
 - **[`docs/adr/0001-organizations.md`](../adr/0001-organizations.md)** (new; `docs/adr/` is new)
   records the spike evidence. It locks plan decisions 1–8, the org bundle format (decision 9)
-  and the MongoDB second-layer design (decision 12), and lists 13 deviations from the plan. DV-2 (memoising the RLS GUCs) and decision 9 (the
-  bundle's record rules) are left for the user to decide.
+  and the MongoDB second-layer design (decision 12), and lists 13 deviations from the plan. The product owner accepted it the same day, choosing the memo for DV-2. Decision 9 (the
+  bundle's record rules) stays a proposal for Phase 6.
 - **[`docs/multi-org-security.md`](../multi-org-security.md)** (new) is the draft STRIDE threat
   model per entry point.
 - Both pages are added to `docs/SUMMARY.md`, and the plan's §16 Deviations log is filled in.
@@ -47,5 +47,5 @@ never pushed.
 
 ### What's next
 
-The user reviews ADR 0001. Phase 1 (context and stamping, the floor release) starts only after
-approval.
+ADR 0001 is accepted. Phase 1 (context and stamping, the floor release) is next, one package
+per PR.
