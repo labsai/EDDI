@@ -19,6 +19,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -61,6 +62,38 @@ class EmailSenderListAuditTest {
         assertEquals("new supplier", entry.getValue().output().get("reason"));
         assertEquals(4, entry.getValue().output().get("version"));
         assertFalse(entry.getValue().output().toString().contains("alice@partner.com"), "no address in clear");
+    }
+
+    @Test
+    @DisplayName("an address typed into the reason is pseudonymised, never written in clear")
+    void reasonIsScrubbed() {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        var pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor("alice@partner.com")).thenReturn("p-alice");
+
+        new EmailSenderListAudit(instance(ledger), instance(pseudonymizer), instance(null)).changed("int-1", 3, 4, List.of(), List.of(),
+                "Allow Alice@partner.com (new supplier), not *@spam.example", false);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("Allow p-alice (new supplier), not *@spam.example", entry.getValue().output().get("reason"));
+    }
+
+    @Test
+    @DisplayName("a quoted local part, or an address after a tab, is pseudonymised too")
+    void quotedAndTabbedAddressesAreScrubbed() {
+        var ledger = mock(AuditLedgerService.class);
+        when(ledger.isEnabled()).thenReturn(true);
+        var pseudonymizer = mock(GdprPseudonymizer.class);
+        when(pseudonymizer.pseudonymFor(anyString())).thenReturn("p-x");
+
+        new EmailSenderListAudit(instance(ledger), instance(pseudonymizer), instance(null)).changed("int-1", 3, 4, List.of(), List.of(),
+                "ok \"Ann Lee\"@partner.com\tbob@partner.com", false);
+
+        var entry = ArgumentCaptor.forClass(AuditEntry.class);
+        verify(ledger).submit(entry.capture());
+        assertEquals("ok p-x\tp-x", entry.getValue().output().get("reason"));
     }
 
     @Test

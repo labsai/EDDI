@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.runtime.IAgent;
 import ai.labs.eddi.engine.runtime.IRuntime;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -335,6 +336,23 @@ class ConversationStepRunnerLeaseTest {
         assertFalse(turn.containsKey("context"));
         assertEquals(true, turn.get("secretInput"));
         assertFalse(new DeadLetterEntry("3", ID, "e", 1, "{}", turn).isReplayable());
+    }
+
+    @Test
+    @DisplayName("a dead letter records the email origin the turn runs under, from its context or from the stored conversation")
+    void deadLetterRecordsOrigin() throws Exception {
+        ConversationService service = describingService();
+        IAgent plainAgent = agentExpectingSecrets(false);
+        IConversationMemory turnMemory = mock(IConversationMemory.class);
+        when(turnMemory.getAgentId()).thenReturn("agent1");
+        var tainted = new InputData("hello", Map.of("turnOrigin", new Context(Context.ContextType.string, TurnOrigin.EMAIL)));
+
+        assertEquals(TurnOrigin.EMAIL, service.describeTurn(Environment.production, turnMemory, ID, tainted, false, plainAgent).get("origin"));
+        assertFalse(service.describeTurn(Environment.production, turnMemory, ID, new InputData("hello", Map.of()), false, plainAgent)
+                .containsKey("origin"));
+        when(turnMemory.getOrigin()).thenReturn(TurnOrigin.EMAIL);
+        assertEquals(TurnOrigin.EMAIL,
+                service.describeTurn(Environment.production, turnMemory, ID, new InputData("hello", Map.of()), false, plainAgent).get("origin"));
     }
 
     @Test
