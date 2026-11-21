@@ -572,6 +572,36 @@ public final class PdfFixtures {
         });
     }
 
+    /**
+     * Three pages without an outline: "1 First" at 18 pt on page 1 and "2 Second"
+     * at 17.5 pt on page 2, sizes a producer rounds differently but meant alike.
+     */
+    public static byte[] nearlyEqualHeadings() {
+        return build(document -> {
+            layoutPage(document, List.of(styled(18, "1 First")), 10, 1);
+            layoutPage(document, List.of(styled(17.5f, "2 Second")), 10, 11);
+            layoutPage(document, List.of(), 10, 21);
+        });
+    }
+
+    /**
+     * {@code pages} pages without an outline, each holding {@code perPage} 14 pt
+     * headings "Heading p.i", each followed by one body line.
+     */
+    public static byte[] manyHeadings(int pages, int perPage) {
+        return build(document -> {
+            for (int page = 1; page <= pages; page++) {
+                Object[] layout = new Object[perPage * 3];
+                for (int i = 0; i < perPage; i++) {
+                    layout[i * 3] = List.of(styled(14, "Heading " + page + "." + (i + 1)));
+                    layout[i * 3 + 1] = 1;
+                    layout[i * 3 + 2] = page * perPage + i;
+                }
+                layoutPage(document, layout);
+            }
+        });
+    }
+
     /** A line of {@link #headingsOnly()} in a given size. */
     private record Styled(float size, String text, boolean scaledByMatrix) {
     }

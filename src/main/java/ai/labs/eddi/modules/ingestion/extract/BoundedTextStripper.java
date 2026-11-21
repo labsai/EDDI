@@ -86,8 +86,11 @@ public final class BoundedTextStripper extends PDFTextStripper {
          * @param top
          *            the tallest glyph's top, in points from the page's top
          * @param fontSize
-         *            the largest font size on the line, in points, scaled by the text
-         *            matrix
+         *            the largest font size on the line as rendered, in points: the
+         *            vertical scale of the text rendering matrix, so a font set at size
+         *            1 and scaled by the text matrix counts at its real size. Not
+         *            {@code TextPosition.getFontSizeInPt()}, which rounds 17.5 down to
+         *            17 and would split headings meant alike
          */
         void line(int page, String text, float x, float xEnd, float top, float fontSize);
     }
@@ -301,13 +304,13 @@ public final class BoundedTextStripper extends PDFTextStripper {
                 lineX = x;
                 lineXEnd = right;
                 lineTop = top;
-                lineFontSize = position.getFontSizeInPt();
+                lineFontSize = position.getYScale();
                 continue;
             }
             lineX = Math.min(lineX, x);
             lineXEnd = Math.max(lineXEnd, right);
             lineTop = Math.min(lineTop, top);
-            lineFontSize = Math.max(lineFontSize, position.getFontSizeInPt());
+            lineFontSize = Math.max(lineFontSize, position.getYScale());
         }
     }
 

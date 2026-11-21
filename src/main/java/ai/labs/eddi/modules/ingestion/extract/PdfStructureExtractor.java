@@ -126,9 +126,9 @@ import java.util.Set;
  * {@link #blocks} reads one unit's pages again, under the same bounds, as
  * {@link TextBlock}s in reading order — page, then top to bottom, then left to
  * right — a heading a block of its own, consecutive body lines one block. When
- * the unit's title heading stands below other text on its first page, the unit
- * started mid-page: a note block first says that the text above the heading
- * belongs to the unit before.
+ * a top-level unit's title heading stands below other text on its first page,
+ * the unit started mid-page: a note block first says that the text above the
+ * heading belongs to the unit before. Parts get no such note.
  *
  * <p>
  * Images, tables and audio are not counted yet; their counts are zero. Warnings
@@ -620,12 +620,24 @@ public class PdfStructureExtractor {
                 levels.add(size);
             }
         }
+        // Each heading's level once, and per level whether its headings stand on two
+        // or more pages: linear in the headings, whatever the number of sizes.
+        int[] levelOf = new int[headings.size()];
+        int[] firstPage = new int[levels.size()];
+        boolean[] onTwoPages = new boolean[levels.size()];
+        for (int i = 0; i < headings.size(); i++) {
+            Heading heading = headings.get(i);
+            int level = levelOf(heading, levels);
+            levelOf[i] = level;
+            if (firstPage[level] == 0) {
+                firstPage[level] = heading.page();
+            } else if (firstPage[level] != heading.page()) {
+                onTwoPages[level] = true;
+            }
+        }
         int chapterLevel = -1;
         for (int level = 0; level < levels.size() && chapterLevel < 0; level++) {
-            int current = level;
-            long pages = headings.stream().filter(heading -> levelOf(heading, levels) == current)
-                    .mapToInt(Heading::page).distinct().count();
-            if (pages >= 2) {
+            if (onTwoPages[level]) {
                 chapterLevel = level;
             }
         }
@@ -633,8 +645,9 @@ public class PdfStructureExtractor {
             return null;
         }
         List<Entry> chapters = new ArrayList<>();
-        for (Heading heading : headings) {
-            int level = levelOf(heading, levels);
+        for (int i = 0; i < headings.size(); i++) {
+            Heading heading = headings.get(i);
+            int level = levelOf[i];
             if (level == chapterLevel) {
                 chapters.add(new Entry(heading.title(), heading.page()));
             } else if (level == chapterLevel + 1 && !chapters.isEmpty()) {
@@ -676,7 +689,11 @@ public class PdfStructureExtractor {
             stripper.setEndPage(page);
             stripper.allowGlyphs(limits.maxCharacters() - characters + GLYPH_SLACK);
             stripper.getText(document);
-            List<TextBlock> pageBlocks = pageBlocks(page, lines, page == unit.firstPage() ? unit.title() : null);
+            // Only a top-level unit gets the mid-page note: the first part of a chapter
+            // starts where its chapter starts, above its own heading, and this read
+            // cannot see the chapter's title to say so.
+            String noteTitle = page == unit.firstPage() && unit.parentId() == null ? unit.title() : null;
+            List<TextBlock> pageBlocks = pageBlocks(page, lines, noteTitle);
             for (TextBlock block : pageBlocks) {
                 characters += block.text().length();
             }

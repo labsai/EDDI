@@ -726,6 +726,41 @@ class PdfStructureExtractorTest {
         }
 
         @Test
+        @DisplayName("takes headings whose sizes differ by less than 5 % for one level")
+        void nearlyEqualSizes() {
+            DocumentManifest manifest = manifest(PdfFixtures.nearlyEqualHeadings(), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals("u1:1-1 u2:2-3", shape(manifest));
+        }
+
+        @Test
+        @Timeout(120)
+        @DisplayName("uses at most 2,000 headings, and says so")
+        void headingsTruncated() {
+            DocumentManifest manifest = manifest(PdfFixtures.manyHeadings(160, 13), unfitted(SplitStrategy.HEADINGS));
+
+            assertEquals(SplitStrategy.HEADINGS, manifest.splitUsed());
+            assertEquals(List.of(PdfStructureExtractor.WARNING_HEADINGS_TRUNCATED), manifest.warnings());
+            assertTrue(manifest.units().getLast().lastPage() == 160);
+            assertTrue(manifest.units().stream().noneMatch(unit -> unit.firstPage() > 154),
+                    "no chapter starts past the 2,000th heading");
+        }
+
+        @Test
+        @DisplayName("gives a part of a chapter no mid-page note: its pages start where the chapter does")
+        void noNoteForParts() {
+            byte[] pdf = PdfFixtures.headingsOnly();
+            DocumentUnit firstPart = manifest(pdf, unfitted(SplitStrategy.HEADINGS)).units().stream()
+                    .filter(unit -> unit.id().equals("u2.1")).findFirst().orElseThrow();
+
+            List<Block> blocks = extractor.blocks(pdf, firstPart, BlockOptions.textOnly(), limits);
+
+            TextBlock first = (TextBlock) blocks.getFirst();
+            assertTrue(first.text().startsWith("Body line 25:"), first.text());
+        }
+
+        @Test
         @DisplayName("numbers the same document the same way every time, and a re-saved copy too")
         void deterministic() {
             byte[] pdf = PdfFixtures.headingsOnly();
@@ -895,8 +930,10 @@ class PdfStructureExtractorTest {
                     PdfFixtures.flateBomb(8 * 1024 * 1024), page, null, oneMegabyte, false));
             assertTrue(bomb.getMessage().contains("expands to more than"), bomb.getMessage());
 
+            // Many pages, so the read outlasts one tick of a coarse wall clock.
+            var allPages = new DocumentUnit("u1", null, 1, null, 1, 300, 0, 0, 0, 0);
             var late = assertThrows(UnreadableDocumentException.class, () -> extractor.blocks(
-                    PdfFixtures.plain(1), page, null, limits.withMaxDuration(Duration.ofNanos(1)), false));
+                    PdfFixtures.plain(300), allPages, null, limits.withMaxDuration(Duration.ofNanos(1)), false));
             assertTrue(late.getMessage().contains("too long"), late.getMessage());
         }
 

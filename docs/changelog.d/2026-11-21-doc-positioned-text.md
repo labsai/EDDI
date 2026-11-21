@@ -9,7 +9,7 @@
   - The `(maxOperators, Duration[, maxGlyphs])` constructors keep the attachment behaviour: an operator cap, one glyph allowance for the whole extraction, and a sticky `IOException("Refused: …")` that `getText` raises again when PDFBox has swallowed it inside a form `Do`.
   - Unified: the deadline is checked every 256 operators and the interrupt flag on every operator, on both paths.
   - The text both extractors return is byte-identical before and after the fold. This was checked on every `PdfFixtures` document, at four character caps, for whole documents and page ranges.
-- **Positions.** With a `LineListener` set, the stripper also reports every laid-out line: page, text, left and right edge, top (above the baseline) and font size (scaled by the text matrix). The listener only observes; `getText` returns the same text with or without one.
+- **Positions.** With a `LineListener` set, the stripper also reports every laid-out line: page, text, left and right edge, top (above the baseline) and font size as rendered (the text rendering matrix's vertical scale). The listener only observes; `getText` returns the same text with or without one.
 - **`PageLayout`** (pure) reads one page's lines:
   - the body size, which is the median font size of its characters;
   - headings, meaning a short line (≤ 100 characters, with a letter) set ≥ 1.2× the body size;
@@ -25,7 +25,7 @@
 - **`PdfStructureExtractor.blocks(pdf, unit, options, limits)`** returns a unit's text as `TextBlock`s in `Block.READING_ORDER`: a heading is a block of its own and consecutive body lines form one block.
   - **Bounds:** the same defences as `manifest`, through one shared scaffold. That is the pre-scan, a decode budget armed for the read and checked afterwards, the `StackOverflowError` boundary and the page-tree checks.
   - **Caps:** at most `maxParts` pages and about `maxCharacters` characters. A closing note says when either cut the unit short.
-  - **Mid-page start:** a unit whose title heading stands below other text on its first page gets a leading note. It names the heading where the unit starts and the heading above it on that page, if there is one.
+  - **Mid-page start:** a top-level unit whose title heading stands below other text on its first page gets a leading note. It names the heading where the unit starts and the heading above it on that page, if there is one. Parts get no note: the first part of a chapter starts above its own heading, where the chapter starts, and `blocks()` cannot see the chapter's title.
   - **Refusal:** a unit whose pages are not in the file is refused.
   - **`BlockOptions`:** has no switches yet. Image, table and audio switches arrive with their extraction.
 - **`SplitConfig.RULES_VERSION` 1 → 2**, which changes every `hash()`. The same configuration now cuts outline-less documents differently, so a manifest or unit label from the old rules must not be reused.
@@ -37,6 +37,7 @@
 - **The fold keeps two refusal styles in one class.** The ingestion path's tests and messages expect an unchecked `UnreadableDocumentException`. The attachment path's tests and wording expect an `IOException` naming the bound. Both are kept, and everything else is shared.
 - **Headings are found on the measured pages only**, the first `maxParts`, like the estimates. Past those, a long document has no headings, and the existing warning says those pages were not measured.
 - **A mid-page note only for the start of a unit.** By the partition rule, a page belongs to the unit that starts on it, so the end of the previous unit is the only text that can be out of place.
+- **Font size is the text rendering matrix's vertical scale, not `TextPosition.getFontSizeInPt()`.** The latter reported a 17.5 pt heading as 17 pt, which put headings meant alike into different levels.
 - **The listener reports the right edge as well as the left (`xEnd`)**, which the plan's `(text, y, fontSize)` did not include: column detection needs it to tell columns from indented paragraphs.
 
 ### Not done here
