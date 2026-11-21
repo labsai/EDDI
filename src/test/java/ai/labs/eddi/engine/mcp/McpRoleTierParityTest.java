@@ -270,6 +270,11 @@ class McpRoleTierParityTest {
      * ForbiddenException whose message names the roles; anything else — a result, a
      * validation error, an exception from a mocked collaborator — means the call
      * got past the gate.
+     * <p>
+     * A broken tier lookup is neither, so it is rethrown: a gate naming a tool
+     * without a tier, or an McpToolTiers that failed to initialise, would otherwise
+     * read as "every role admitted" and send whoever reads the failure after a
+     * security regression that is not there.
      */
     private static boolean admitted(Object tools, Method tool, Object[] args) throws Exception {
         try {
@@ -277,6 +282,11 @@ class McpRoleTierParityTest {
             return true;
         } catch (InvocationTargetException e) {
             Throwable cause = e.getCause();
+            if (cause instanceof ExceptionInInitializerError || cause instanceof NoClassDefFoundError
+                    || (cause instanceof IllegalArgumentException && cause.getMessage() != null
+                            && cause.getMessage().startsWith("No MCP role tier"))) {
+                throw new AssertionError("the tier lookup itself failed in " + tool.getName(), cause);
+            }
             return !(cause instanceof ForbiddenException && cause.getMessage() != null && cause.getMessage().contains("requires"));
         }
     }
@@ -359,25 +369,32 @@ class McpRoleTierParityTest {
     @Test
     @DisplayName("every tool's gate reads its own tool name — once")
     void eachGateNamesItsOwnTool() throws Exception {
-        Pattern lookup = Pattern.compile("McpToolTiers\\.of\\(\"([a-z_]+)\"\\)");
+        // The gate is a statement of its own; a mention in a comment or string is not
+        Pattern gateStatement = Pattern.compile("(?m)^\\s*requireAnyRole\\(identity, authEnabled, McpToolTiers\\.of\\(\"([a-z_]+)\"\\)\\);");
+        Pattern anyLookup = Pattern.compile("McpToolTiers\\.of\\(");
         Pattern explicitName = Pattern.compile("^@Tool\\((?:[^()]|\\([^()]*\\))*?\\bname\\s*=\\s*\"([a-z_]+)\"", Pattern.DOTALL);
         Pattern signature = Pattern.compile("public\\s+[\\w<>\\[\\], ?]+\\s+(\\w+)\\s*\\(");
         var violations = new ArrayList<String>();
         var gatesPerTool = new TreeMap<String, Integer>();
         for (Class<?> toolClass : TOOL_CLASSES) {
-            String src = Files.readString(Path.of("src/main/java", toolClass.getName().replace('.', '/') + ".java"));
-            List<Integer> starts = new ArrayList<>();
+            String src = Files.readString(Path.of("src/main/java", toolClass.getName().replace('.', '/') + ".java")).replace("\r\n", "\n");
+            int lookupsInFile = 0;
+            for (Matcher any = anyLookup.matcher(src); any.find();) {
+                lookupsInFile++;
+            }
+            int gatesInToolBodies = 0;
             Matcher tool = Pattern.compile("@Tool\\(").matcher(src);
             while (tool.find()) {
-                starts.add(tool.start());
-            }
-            for (int i = 0; i < starts.size(); i++) {
-                String segment = src.substring(starts.get(i), i + 1 < starts.size() ? starts.get(i + 1) : src.length());
-                Matcher sig = signature.matcher(segment);
+                String fromAnnotation = src.substring(tool.start());
+                Matcher sig = signature.matcher(fromAnnotation);
                 assertTrue(sig.find(), "no method after an @Tool in " + toolClass.getSimpleName());
-                Matcher named = explicitName.matcher(segment.substring(0, sig.start()));
+                Matcher named = explicitName.matcher(fromAnnotation.substring(0, sig.start()));
                 String name = named.find() ? named.group(1) : sig.group(1);
-                Matcher gate = lookup.matcher(segment.substring(sig.start()));
+                // The method body: from its signature to its closing brace, which the
+                // project formatter puts alone on a line at member indentation
+                int bodyEnd = fromAnnotation.indexOf("\n    }\n", sig.start());
+                assertTrue(bodyEnd > 0, "no closing brace for " + name);
+                Matcher gate = gateStatement.matcher(fromAnnotation.substring(sig.start(), bodyEnd));
                 int count = 0;
                 while (gate.find()) {
                     count++;
@@ -385,7 +402,12 @@ class McpRoleTierParityTest {
                         violations.add(name + " reads the tier of " + gate.group(1));
                     }
                 }
-                gatesPerTool.put(name, count);
+                gatesInToolBodies += count;
+                gatesPerTool.merge(name, count, Integer::sum);
+            }
+            if (lookupsInFile != gatesInToolBodies) {
+                violations.add(toolClass.getSimpleName() + " has " + (lookupsInFile - gatesInToolBodies)
+                        + " McpToolTiers.of(…) outside a tool's own gate statement (a helper, comment or second lookup)");
             }
         }
         assertEquals(McpToolTiers.TIERS.keySet(), gatesPerTool.keySet(), "the scan must see every tool");
@@ -401,6 +423,16 @@ class McpRoleTierParityTest {
     @DisplayName("an unknown tool name has no tier, so its gate fails closed")
     void unknownToolHasNoTier() {
         assertThrows(IllegalArgumentException.class, () -> McpToolTiers.of("no_such_tool"));
+    }
+
+    @Test
+    @DisplayName("a tool listed in two tiers is refused when the map is built")
+    void duplicateToolIsRefused() {
+        Map<String, List<String>> tiers = new LinkedHashMap<>();
+        McpToolTiers.put(tiers, McpRoles.CONVERSE, "some_tool");
+        var e = assertThrows(IllegalStateException.class, () -> McpToolTiers.put(tiers, McpRoles.AUTHOR, "some_tool"));
+        assertTrue(e.getMessage().contains("some_tool"), e.getMessage());
+        assertEquals(McpRoles.CONVERSE, tiers.get("some_tool"), "the first assignment stands");
     }
 
     @Test

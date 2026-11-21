@@ -47,7 +47,10 @@ final class McpToolTiers {
      * @throws IllegalArgumentException
      *             if the tool has no entry. That is a programming error: a gate
      *             that names a tool missing from this map fails closed on every
-     *             call.
+     *             call, as an internal error rather than a {@code FORBIDDEN} tool
+     *             error, since no role was refused. {@code McpRoleTierParityTest}
+     *             ({@code eachGateNamesItsOwnTool}, the measured matrix) fails the
+     *             build first.
      */
     static List<String> of(String tool) {
         List<String> tier = TIERS.get(tool);
@@ -92,9 +95,9 @@ final class McpToolTiers {
                 // McpGroupTools: group configuration, templates and the team backlog
                 "list_groups", "read_group", "create_group", "update_group", "delete_group", "add_team_task",
                 "list_team_backlog", "list_group_templates", "create_group_from_template",
-                // McpTeamHandoffTools
+                // McpTeamHandoffTools: VIEW/EDIT on the group still applies per call
                 "list_team_handoffs", "accept_team_handoff", "decline_team_handoff",
-                // McpTeamCadenceTools
+                // McpTeamCadenceTools: VIEW/EDIT on the group still applies per call
                 "list_team_cadences", "create_team_cadence", "delete_team_cadence", "read_lesson_consolidation",
                 "schedule_lesson_consolidation", "unschedule_lesson_consolidation",
                 // McpAgentTestTools
@@ -104,7 +107,8 @@ final class McpToolTiers {
                 "review_conversation_rating",
                 // McpAlertTools
                 "list_alert_events", "acknowledge_alert_event",
-                // McpPricingTools: the catalog read
+                // McpPricingTools: the catalog read only. Prices are a budget lever an
+                // administrator changes in the Manager (update_model_prices is ADMIN_ONLY)
                 "read_model_prices");
 
         // Operator-only
@@ -122,13 +126,16 @@ final class McpToolTiers {
                 "delete_user_data", "export_user_data",
                 // McpTeamBudgetTools: every budget write
                 "adjust_team_budget", "transfer_team_budget",
-                // McpSpendControlTools
+                // McpSpendControlTools: a stricter write applies, a looser one is only filed
+                // for an administrator's approval
                 "read_tenant_quota", "update_model_prices", "update_tenant_quota", "list_spend_control_changes",
                 "withdraw_spend_control_change",
                 // McpVaultTools: key names, never a value
                 "list_vault_keys");
 
-        // Published documentation: every EDDI role
+        // Published documentation: every EDDI role. The tool counterpart to the
+        // eddi://docs/* resources, for agentic clients that consume tools/list and
+        // never call resources/read
         put(tiers, McpRoles.DOCS, "list_docs", "read_docs");
 
         // Human-in-the-loop decisions and their reads (McpHitlTools). HitlAccessGuard
@@ -137,7 +144,8 @@ final class McpToolTiers {
                 "cancel_conversation", "list_group_pending_approvals", "list_all_group_pending_approvals",
                 "get_group_approval_status", "approve_group_phase", "cancel_group_discussion", "submit_group_human_input");
 
-        // HITL oversight reads (McpOversightTools)
+        // HITL oversight reads (McpOversightTools): analytics, earned-autonomy states,
+        // the sampled-audit count. No oversight write is ever a tool
         put(tiers, McpRoles.OVERSIGHT, "summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state",
                 "count_pending_audit_samples");
 
@@ -147,7 +155,11 @@ final class McpToolTiers {
         return Collections.unmodifiableMap(tiers);
     }
 
-    private static void put(Map<String, List<String>> tiers, List<String> tier, String... tools) {
+    /**
+     * Package-visible for {@code McpRoleTierParityTest}, which pins the duplicate
+     * guard.
+     */
+    static void put(Map<String, List<String>> tiers, List<String> tier, String... tools) {
         for (String tool : tools) {
             if (tiers.putIfAbsent(tool, tier) != null) {
                 throw new IllegalStateException("MCP tool listed in two tiers: " + tool);

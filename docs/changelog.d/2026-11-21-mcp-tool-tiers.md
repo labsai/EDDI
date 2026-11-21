@@ -18,7 +18,19 @@ still said 107.
 - **`McpToolFilter.MCP_TOOLS`** is now `McpToolTiers.TIERS.keySet()`, so a tool is exposed
   exactly when it has a tier. A gate that names a tool missing from the map throws, so it
   fails closed. A null tool name is now hidden (`false`) instead of throwing a
-  `NullPointerException`; `McpToolFilterTest` is updated to match.
+  `NullPointerException`; `McpToolFilterTest` is updated to match. The old behaviour failed
+  **open**: quarkus-mcp-server 2.0.4 (`ToolManagerImpl.test`, checked with `javap`) logs a
+  `RuntimeException` thrown by a `ToolFilter`, skips that filter and admits the tool, for
+  `tools/list` and `tools/call` alike. So a filter must never throw.
+- **Review fixes**, from a code review of this change:
+  - `eachGateNamesItsOwnTool` reads each tool's method body only, up to its closing brace,
+    and counts only a `requireAnyRole(…, McpToolTiers.of("…"));` statement. Any other
+    `McpToolTiers.of(` in a tool class (in a helper or a comment, or a second lookup) fails it.
+  - The parity harness rethrows a failed tier lookup instead of counting it as "admitted",
+    which had made a broken map read as "every tool open to every role".
+  - The duplicate-entry guard in `McpToolTiers` has its own test.
+  - The per-group notes of the old whitelist are carried over into `McpToolTiers`.
+  - The javadocs that still described tool gates as `requireRole` are updated.
 - **`read_agent_logs`**, whose tier depends on its arguments, is listed under the union of its
   tiers (`OBSERVE`). The method still narrows an unscoped read to `ADMIN_ONLY` itself.
 - **`McpRoleTierParityTest`** now measures all 120 tools, `McpVersionTools` included. It

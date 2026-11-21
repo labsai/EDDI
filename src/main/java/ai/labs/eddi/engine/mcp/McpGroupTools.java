@@ -129,7 +129,7 @@ public class McpGroupTools {
      * caller, and a non-admin naming someone else is rejected) — so the creator can
      * subsequently read/continue/close their own conversation through the ownership
      * gate, and cannot create one owned by another user. The legacy "mcp-client"
-     * default only applies when auth is off (with auth on, {@code requireRole} has
+     * default only applies when auth is off (with auth on, the role gate has
      * already rejected anonymous callers before this runs).
      */
     private String resolveOwner(String userId) {
