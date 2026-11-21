@@ -4,7 +4,11 @@
  */
 package ai.labs.eddi.modules.llm.model;
 
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.documents.DocumentBounds;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility.Reference;
+import ai.labs.eddi.engine.documents.index.DocumentIndexLookup;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -13,6 +17,8 @@ import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 /**
  * Save-time validation of an LLM task's {@link DocumentsConfig}. Three rules,
@@ -85,11 +91,20 @@ public final class DocumentsConfigValidator {
         if (config == null) {
             return; // no block: the operator bounds are not even read
         }
-        validate(config, fieldPath, LIVE_KEYS, DocumentBounds.current());
+        validate(config, fieldPath, LIVE_KEYS, DocumentBounds.current(), DocumentIndexLookup::fromContainer);
     }
 
     /** The whole contract, with the live set and the bounds supplied. */
     static void validate(DocumentsConfig config, String fieldPath, Set<String> liveKeys, DocumentBounds bounds) {
+        validate(config, fieldPath, liveKeys, bounds, DocumentIndexLookup::fromContainer);
+    }
+
+    /**
+     * The whole contract, with the live set, the bounds and the RAG lookup
+     * supplied. The lookup is obtained only when {@code index.rag} is set.
+     */
+    static void validate(DocumentsConfig config, String fieldPath, Set<String> liveKeys, DocumentBounds bounds,
+                         Supplier<Function<Reference, RagConfiguration>> ragLookup) {
         if (config == null) {
             return;
         }
@@ -102,6 +117,26 @@ public final class DocumentsConfigValidator {
             }
             checkEnum(path, value, field);
             checkNumber(path, value, field, bounds);
+        }
+        // --- WP-6.1: documents.index.rag must name an eligible document index ---
+        checkIndexReference(config, fieldPath, ragLookup);
+    }
+
+    /**
+     * {@code index.rag} must name a RAG configuration that is an eligible document
+     * index (DocumentIndexEligibility), so a task can never point its users'
+     * documents at an agent's knowledge base. Reached only once the key is live:
+     * before that, rule 1 has refused it.
+     */
+    private static void checkIndexReference(DocumentsConfig config, String fieldPath,
+                                            Supplier<Function<Reference, RagConfiguration>> ragLookup) {
+        String reference = config.getIndex() == null ? null : config.getIndex().getRag();
+        if (reference == null) {
+            return;
+        }
+        String reason = DocumentIndexEligibility.referenceIneligibility(reference, ragLookup.get());
+        if (reason != null) {
+            throw new IllegalArgumentException(fieldPath + ".index.rag must name a document index: " + reason);
         }
     }
 
