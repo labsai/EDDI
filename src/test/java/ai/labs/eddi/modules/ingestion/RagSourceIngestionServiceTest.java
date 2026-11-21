@@ -1130,7 +1130,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
             assertTrue(fileStore.list(keyOf(source)).isEmpty());
@@ -1144,7 +1144,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase(uploadSource("src-files")));
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
             assertEquals(1, fileStore.list(keyOf(source)).size());
@@ -1158,7 +1158,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
             assertEquals(1, fileStore.list(keyOf(source)).size());
@@ -1183,7 +1183,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             assertTrue(stateStore.lookup(key, "late.md").isEmpty());
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
@@ -1204,7 +1204,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(switched);
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             assertTrue(stateStore.lookup(key, "late.md").isEmpty());
         }
@@ -1227,7 +1227,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
 
-            service.cleanUpAfterRun(KB_ID, ranWith, source);
+            service.cleanUpAfterRun(KB_ID, ranWith, source, "run-ended");
 
             assertTrue(stateStore.lookup(key, "kept.md").isPresent());
         }
@@ -1253,7 +1253,7 @@ class RagSourceIngestionServiceTest {
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(renamed);
 
-            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source);
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             var state = stateStore.lookup(key, "late.md").orElseThrow();
             assertTrue(state.hasChanged("hash"), "the next look at the page must embed it into the renamed store");

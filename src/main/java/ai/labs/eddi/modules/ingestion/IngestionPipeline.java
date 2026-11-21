@@ -712,6 +712,41 @@ public class IngestionPipeline {
     }
 
     /**
+     * Removes the chunks one run wrote for a source, and nothing else.
+     *
+     * <p>
+     * For a run that outlived its source — removed, or changed into another type —
+     * while another run may already be writing under the same source key. Removing
+     * by the key alone deleted that run's chunks too: a source switched from a
+     * crawl to Google Drive had the first Drive run's chunks taken away by the
+     * cleanup of the crawl that was still finishing. Every chunk carries the run
+     * that wrote it, so the filter is the fence; nothing in the ingestion state is
+     * touched.
+     *
+     * @return false when the vector store cannot delete by metadata, or the delete
+     *         failed, so the run's chunks may still be there
+     */
+    public boolean forgetRun(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source, String runId) {
+        String sourceKey = stateKey(ragConfigId, source);
+        try {
+            embeddingStoreFactory.getOrCreate(ragConfigId, knowledgeBase)
+                    .removeAll(metadataKey(METADATA_SOURCE_KEY).isEqualTo(sourceKey)
+                            .and(metadataKey(METADATA_RUN_ID).isEqualTo(runId)));
+            return true;
+        } catch (UnsupportedFeatureException e) {
+            LOGGER.warnf("The vector store of knowledge base '%s' cannot delete by metadata, so the chunks run %s "
+                    + "wrote for source '%s' remain retrievable", LogSanitizer.sanitize(knowledgeBase.getName()),
+                    LogSanitizer.sanitize(runId), LogSanitizer.sanitize(source.getName()));
+            return false;
+        } catch (RuntimeException e) {
+            LOGGER.errorf(e, "Could not remove the chunks run %s wrote for source '%s' of knowledge base '%s'; they "
+                    + "stay retrievable", LogSanitizer.sanitize(runId), LogSanitizer.sanitize(source.getName()),
+                    LogSanitizer.sanitize(knowledgeBase.getName()));
+            return false;
+        }
+    }
+
+    /**
      * Claims the source's run slot for something other than a run.
      *
      * <p>
