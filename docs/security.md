@@ -484,6 +484,8 @@ A stored attachment's `storageRef` is a capability: whoever holds it, and a conv
 
 A grant is on the file's root and lets the receiving conversation read the whole file through `readAttachment`. See [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).
 
+**Delegation** (`converse_with_agent` with `attachments`, opt-in per agent with `documents.sharing.delegation`) calls `share()`. Its target is the conversation the call starts, or one the calling conversation started earlier, as recorded on its own steps (`delegation:started`). A model-supplied `conversationId` it did not start gets no file, even when the same user owns it: ownership says nothing about which agent sits behind the conversation now. The hop count travels in the reserved context key `attachmentShareDepth`, which clients cannot set unless an operator permits it (`eddi.conversation.client-context.permitted-reserved-keys`). A delegate that can read a file and also holds outbound tools can still send its text elsewhere; which tools such an agent gets is the designer's control.
+
 ---
 
 ### Cluster control plane (NATS)

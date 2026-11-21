@@ -54,6 +54,16 @@ class DocumentsConfigValidatorTest {
         return Stream.concat(Stream.concat(withValues, DocumentsDesignJson.NULL_IN_DESIGN.stream()), Stream.of(List.of("bridge", "{}")));
     }
 
+    /** The design leaves whose key is not available in this version. */
+    static Stream<List<String>> nonLiveDesignLeaves() throws Exception {
+        return designLeaves().filter(leaf -> !DocumentsConfigValidator.LIVE_KEYS.contains(leaf.get(0)));
+    }
+
+    /** The design leaves whose key is available in this version. */
+    static Stream<List<String>> liveDesignLeaves() throws Exception {
+        return designLeaves().filter(leaf -> DocumentsConfigValidator.LIVE_KEYS.contains(leaf.get(0)));
+    }
+
     /**
      * Every property Jackson would accept on the class, as dotted leaf paths:
      * nested {@code DocumentsConfig} types are walked, {@code bridge} is a leaf.
@@ -99,10 +109,27 @@ class DocumentsConfigValidatorTest {
         }
     }
 
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("ai.labs.eddi.modules.llm.model.DocumentsConfigValidatorTest#liveDesignLeaves")
+    @DisplayName("every live key saves at its design default, within the deployment's built-in bounds")
+    void liveLeafSavesAtItsDefault(List<String> leaf) throws Exception {
+        var config = parse(DocumentsDesignJson.withOnly(leaf.get(0), leaf.get(1)));
+        assertDoesNotThrow(() -> DocumentsConfigValidator.validate(config, PATH));
+    }
+
     @Test
-    @DisplayName("nothing is live in this version")
-    void nothingIsLiveYet() {
-        assertTrue(DocumentsConfigValidator.LIVE_KEYS.isEmpty(), DocumentsConfigValidator.LIVE_KEYS.toString());
+    @DisplayName("WP-1.2: a sharing count above its built-in bound is refused at save, naming the property")
+    void sharingAboveTheBuiltInBoundIsRefused() throws Exception {
+        var config = parse("{\"sharing\":{\"maxDepth\":4}}");
+        var e = assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator.validate(config, PATH));
+        assertEquals(PATH + ".sharing.maxDepth is 4, above the operator bound of 3 (eddi.documents.sharing.max-depth)", e.getMessage());
+    }
+
+    @Test
+    @DisplayName("live in this version: the four delegation-sharing keys (WP-1.2), nothing else")
+    void liveKeys() {
+        assertEquals(Set.of("sharing.delegation", "sharing.maxFilesPerShare", "sharing.maxSharesPerTurn", "sharing.maxDepth"),
+                DocumentsConfigValidator.LIVE_KEYS);
     }
 
     @Nested
@@ -110,8 +137,8 @@ class DocumentsConfigValidatorTest {
     class NotLive {
 
         @ParameterizedTest(name = "{0}")
-        @MethodSource("ai.labs.eddi.modules.llm.model.DocumentsConfigValidatorTest#designLeaves")
-        @DisplayName("every leaf key is refused when set, even to its default")
+        @MethodSource("ai.labs.eddi.modules.llm.model.DocumentsConfigValidatorTest#nonLiveDesignLeaves")
+        @DisplayName("every leaf key that is not live is refused when set, even to its default")
         void everyLeafIsRefused(List<String> leaf) throws Exception {
             var config = parse(DocumentsDesignJson.withOnly(leaf.get(0), leaf.get(1)));
             var e = assertThrows(IllegalArgumentException.class, () -> DocumentsConfigValidator.validate(config, PATH));
