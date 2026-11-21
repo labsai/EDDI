@@ -100,6 +100,8 @@ class ReservedPrincipalsTest {
             Map.entry("audit-key-id:", "audit key id record"),
             Map.entry("agent-signing-key:", "vault key name"),
             Map.entry("eddi-attachments-quota:", "advisory lock key"),
+            Map.entry("eddi-attachments-source:", "per-root advisory lock key of a derived-blob write (PostgresAttachmentStore)"),
+            Map.entry("source:", "per-root lease lock key of a derived-blob write (GridFsAttachmentStore)"),
             Map.entry("system-value:", "template value tag"),
             Map.entry("pii:", "guardrail audit reason code (PiiRedactionGuardrail: pii:<kinds>)"),
             Map.entry("unknown:", "in-memory dedupe key for the unknown-guardrail-type WARN (GuardrailService)"),
