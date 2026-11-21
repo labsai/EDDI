@@ -561,6 +561,12 @@ public class ConversationMemoryUtilities {
                             secretTurn ? maskedSecretTurnOutputValue(key, conversationOutput.get(key), needles) : conversationOutput.get(key));
                 }
             }
+            // Why the answer is not a plain complete one (length, content_filter, or
+            // empty when the turn shows nothing) — the streamed done event reads it here.
+            String finishReason = TurnFinishReason.of(conversationOutput);
+            if (finishReason != null) {
+                newConversationOutput.put(TURN_FINISH_REASON, finishReason);
+            }
         }
 
         // turnError reads only the last output, which the rendered list always ends

@@ -20079,6 +20079,433 @@
           }
         }
       ]
+    },
+    {
+      "id": 459,
+      "type": "row",
+      "title": "Streaming transport (SSE)",
+      "collapsed": true,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 41
+      },
+      "panels": [
+        {
+          "id": 460,
+          "type": "timeseries",
+          "title": "Open SSE streams by kind",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_streaming_active` — conversation event streams open on this node, by `kind` (`agent`, `group`, `openai`, `a2a`). A plateau at `eddi.streaming.max-concurrent-streams` means new streams are being refused (see the refused panel).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind) (eddi_streaming_active{job=~\"$job\"}) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "short",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 461,
+          "type": "timeseries",
+          "title": "Streams ended by kind and reason",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_streaming_closed_total` — native SSE streams ended, by `kind` and `reason` (`completed`, `failed`, `cancelled`, `client_gone`, `idle_timeout`, `backpressure`, `refused`). A rising `backpressure` rate means clients are not reading fast enough for the buffer bounds.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 42
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind, reason) (rate(eddi_streaming_closed_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}} — {{reason}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 462,
+          "type": "timeseries",
+          "title": "Streams refused at node capacity",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_streaming_refused_total` — streams answered 503 because the node was at `eddi.streaming.max-concurrent-streams`, by `kind`. Sustained refusals mean the node needs more capacity or the cap is too low.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 49
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind) (rate(eddi_streaming_refused_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "{{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 463,
+          "type": "timeseries",
+          "title": "Time to first token (mean / peak)",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_streaming_first_token_seconds` — from opening a stream to its first token, by `kind`: mean from `_sum` / `_count`, peak from `_max`.",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 12,
+            "y": 49
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (kind) (rate(eddi_streaming_first_token_seconds_sum{job=~\"$job\"}[$__rate_interval])) / sum by (kind) (rate(eddi_streaming_first_token_seconds_count{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "mean — {{kind}}"
+            },
+            {
+              "refId": "B",
+              "expr": "max by (kind) (eddi_streaming_first_token_seconds_max{job=~\"$job\"})",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "peak — {{kind}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "s",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        },
+        {
+          "id": 464,
+          "type": "timeseries",
+          "title": "LLM stream idle, incomplete and lenient completions",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "description": "`eddi_llm_stream_idle_timeouts_total` — a stream went silent for `streaming.idleTimeoutSeconds` after its first event; `eddi_llm_stream_incomplete_total` — a stream ended without a finish reason and was failed; `eddi_llm_stream_no_finish_reason_accepted_total` — a lenient endpoint completed without one and was accepted. All by `path` (`legacy`, `tool_loop`).",
+          "gridPos": {
+            "h": 7,
+            "w": 12,
+            "x": 0,
+            "y": 56
+          },
+          "targets": [
+            {
+              "refId": "A",
+              "expr": "sum by (path) (rate(eddi_llm_stream_idle_timeouts_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "idle timeout — {{path}}"
+            },
+            {
+              "refId": "B",
+              "expr": "sum by (path) (rate(eddi_llm_stream_incomplete_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "incomplete — {{path}}"
+            },
+            {
+              "refId": "C",
+              "expr": "sum by (path) (rate(eddi_llm_stream_no_finish_reason_accepted_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "accepted without finish reason — {{path}}"
+            }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "unit": "reqps",
+              "color": {
+                "mode": "palette-classic"
+              },
+              "custom": {
+                "drawStyle": "line",
+                "lineInterpolation": "linear",
+                "lineWidth": 2,
+                "fillOpacity": 8,
+                "showPoints": "never",
+                "spanNulls": false,
+                "axisSoftMin": 0,
+                "stacking": {
+                  "mode": "none",
+                  "group": "A"
+                },
+                "gradientMode": "none",
+                "scaleDistribution": {
+                  "type": "linear"
+                }
+              },
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "text",
+                    "value": null
+                  }
+                ]
+              }
+            },
+            "overrides": []
+          },
+          "options": {
+            "legend": {
+              "displayMode": "list",
+              "placement": "bottom",
+              "showLegend": true,
+              "calcs": []
+            },
+            "tooltip": {
+              "mode": "multi",
+              "sort": "desc"
+            }
+          }
+        }
+      ]
     }
   ],
   "preload": false,

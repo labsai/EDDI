@@ -269,6 +269,21 @@ public interface IConversationService {
         default void onGuardrailTriggered(String type, String phase, String action, String taskId) {
         }
 
+        /**
+         * The turn's agent is resolved; see
+         * {@code ConversationEventSink#onTurnStarted}. Default no-op.
+         */
+        default void onTurnStarted(String streamingClientDisconnect) {
+        }
+
+        /** The turn was asked to cancel. Default no-op. */
+        default void onCancelRequested() {
+        }
+
+        /** Every workflow of the turn has run; its write follows. Default no-op. */
+        default void onGenerationFinished() {
+        }
+
         void onComplete(SimpleConversationMemorySnapshot snapshot);
 
         void onError(Throwable error);
@@ -438,6 +453,19 @@ public interface IConversationService {
                                      ControlSignal mode,
                                      String cancelledBy)
             throws ResourceStoreException;
+
+    /**
+     * Raises the cancel flag of the turn of {@code conversationId} running on THIS
+     * node, if any — a map lookup and a flag, no store access. For a caller that
+     * must stop the turn's spending at once and does the store work of
+     * {@link #cancelConversation} afterwards.
+     *
+     * @return true when a running turn was signalled
+     * @since 6.7.0
+     */
+    default boolean signalLocalInFlight(String conversationId) {
+        return false;
+    }
 
     /**
      * Cancels the conversation only if it is awaiting a human decision — one

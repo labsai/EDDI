@@ -96,6 +96,7 @@ public class AgentStoreClientLibrary implements IAgentStoreClientLibrary {
         }
 
         ((Agent) agent).setTurnDeadline(agentConfig.getTurnDeadlineMs(), agentConfig.getTurnDeadlineReserveMs());
+        ((Agent) agent).setStreamingClientDisconnect(agentConfig.getStreamingClientDisconnect());
         ((Agent) agent).setMaxCostPerConversationUsd(agentConfig.getMaxCostPerConversationUsd());
         ((Agent) agent).setContinuationPolicy(ContinuationPolicy.of(agentConfig.getMaxContinuations(), agentConfig.getContinuationInput()));
         if (turnBudgetValidator != null) {

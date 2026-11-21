@@ -146,7 +146,7 @@ class ConversationStepRunnerLeaseTest {
         runTurn(lease);
         assertEquals(1, lease.lostCallbacks.size());
         lease.lostCallbacks.forEach(Runnable::run);
-        verify(memory).setCancelled(true);
+        verify(memory).abandon();
     }
 
     @SuppressWarnings("unchecked")

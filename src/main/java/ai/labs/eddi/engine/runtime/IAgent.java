@@ -85,6 +85,16 @@ public interface IAgent {
     }
 
     /**
+     * The agent's {@code streamingClientDisconnect} ({@code cancel} or
+     * {@code finish}); {@code null} follows the deployment default.
+     *
+     * @since 6.7.0
+     */
+    default String getStreamingClientDisconnect() {
+        return null;
+    }
+
+    /**
      * The agent's {@code maxCostPerConversationUsd}; {@code null} when unlimited.
      *
      * @since 6.6.0

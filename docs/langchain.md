@@ -214,6 +214,75 @@ Both stored shapes therefore keep working: a config that sets only `streamingTim
 
 > `timeout` is read from the task's stored parameters when deriving the backstop. A Qute-templated value (e.g. `"{vars.llm-timeout}"`) cannot be resolved at that point and simply leaves the 120s default in place — it never produces a shorter bound.
 
+### The streaming contract
+
+Since 6.7 every streaming path — a task without tools, the tool loop, and a cascade's live final step — judges a streamed model call by the same rules. A call **succeeds** only when the provider completes it and reports no error — with a finish reason, for a provider that always sends one (see `requireFinishReason` below). Everything else is a failure, and what happens next depends on whether text had already reached the client:
+
+| What the provider does | Nothing sent to the client yet | Text already sent to the client |
+| --- | --- | --- |
+| Completes with `finish_reason` `stop` / `tool_calls` | Success | Success |
+| Completes with `length` or `content_filter` | Success; the turn records the reason (below) | Same |
+| Stream ends without a finish reason (connection closed, no `[DONE]`), on a provider that always sends one | Retried, as a transient failure | Turn fails |
+| Error (an error frame, an HTTP error, a malformed frame) | Retried when `LlmFailureClassifier` calls the class retryable (429, 5xx, timeout); otherwise the turn fails | Turn fails |
+| No first event within `streamingTimeoutSeconds` (the backstop) | Retried as a timeout | Turn fails |
+| Silent for `streaming.idleTimeoutSeconds` after an event | Retried as a timeout | Turn fails |
+| The turn is cancelled (`/cancel`, or a client disconnect that cancels) | Stopped, not retried | Stopped, not retried |
+
+- **Retries** are the ones a non-streaming call gets: `RetryConfiguration.executeWithRetry`, three attempts unless the task's `retry` block says otherwise, `Retry-After` honoured, inside the turn deadline (`X-EDDI-Turn-Deadline-Ms`). Before 6.7 a task without tools made one streaming attempt by default and retried every error class. A cascade's live final step still gets one attempt, like every cascade step.
+- **The first terminal callback wins.** After an error or a completion nothing more is forwarded, so the client never sees text the conversation does not store.
+- **A failure after text was sent fails the turn.** Streamed text cannot be taken back, and a retry would send it again. The partial text is kept as error detail under `llm:partial_output:<taskId>` on the step (visible in the detailed conversation, never replayed to the model as an answer), and the client gets `task_failed` and a `done` in state `ERROR`. Before 6.7 a task without tools kept the partial text as its answer; `streaming.onFailureAfterText: "keepPartial"` restores that for one task (the answer is flagged `warning: streaming_error_partial` or, after a timeout, `streaming_timeout_partial` with `streamingTimeout: true`). A task whose `responseValidation.onStreamingTimeout` names an active action (anything but `warn`/`ignore`) also keeps a timed-out partial, so that policy still sees it.
+- **Cancelling stops the provider.** A cancel wakes the waiting call at once (the cluster lease, which nothing signals, is read once a second), and the provider's stream is cancelled through langchain4j's `StreamingHandle` when the provider hands one out. The handle arrives with the first token; a call given up on before that — cancelled, timed out, or an attempt abandoned for a retry — cancels the handle the moment it arrives, so the provider does not stream a whole answer nobody reads. A provider that hands out no handle is abandoned and its late tokens dropped. A cancel is never retried, never answered with a JSON-format fallback request and never escalates a cascade; the retry loop checks it before every attempt and while it waits out a backoff or a `Retry-After`.
+- **What is charged.** The usage of a call arrives with its completion. A call that was cancelled, timed out or abandoned never completes, so what the provider billed for it is in neither the tenant ledger nor `maxCostPerRun` — both undercount by such calls.
+- **JSON mode.** A JSON-formatted answer of a task without tools, or of a cascade's live final step, is forwarded token by token like any other answer. The tool loop buffers a JSON-formatted round instead: it may turn out to be a tool call, which must not reach the client as text.
+- **The time to the first token** is bounded by the `timeout` model parameter, the backstop (`streamingTimeoutSeconds`) and the agent-timeout watchdog only; the idle limit starts with the first stream event (text, reasoning or tool-call deltas), so a reasoning model that thinks for minutes before answering is not cut off by it — but it does have to answer within the backstop and the agent timeout.
+- **`OTHER` is a finish reason.** langchain4j maps Gemini's `MALFORMED_FUNCTION_CALL` and `RECITATION` to it too, indistinguishable from a provider's benign reason langchain4j does not know, so it counts as complete.
+- **The non-streaming tool loop** (a task with tools that does not stream) records no `finishReason`; the streamed tool loop records its final round's.
+
+Per-task settings (`streaming`, a sibling of `parameters`; every field optional):
+
+| Field | Default | Meaning |
+| --- | --- | --- |
+| `requireFinishReason` | `eddi.llm.streaming.require-finish-reason`; unset: per provider | `true` fails a stream that ends without a finish reason; `false` accepts it — a connection that closes mid-answer is then stored as a complete answer. Unset, it is `true` for `openai`, `azure-openai`, `anthropic`, `bedrock`, `gemini`, `gemini-vertex`, `mistral` and `jlama` without a `baseUrl`, and `false` for every other type and for any task with its own `baseUrl` (a gateway or self-hosted server); a lenient endpoint is warned about once in the log and counted in `eddi.llm.stream.no_finish_reason_accepted` |
+| `idleTimeoutSeconds` | `eddi.llm.streaming.idle-timeout-seconds` (`30`) | Longest silence after the first stream event; `0` turns it off |
+| `onFailureAfterText` | `fail` | `keepPartial` keeps the text sent before a failure as the answer (no-tools path only; the tool loop always fails such a round) |
+
+```json
+{
+  "id": "localModel",
+  "type": "openai",
+  "streaming": { "requireFinishReason": true, "idleTimeoutSeconds": 60 },
+  "parameters": { "baseUrl": "http://localhost:8000/v1", "modelName": "my-model" }
+}
+```
+
+What a client of `POST /agents/{conversationId}/stream` receives:
+
+| Event | When | Payload |
+| --- | --- | --- |
+| `token` | Each piece of answer text | The text |
+| `task_failed` | A lifecycle task failed (not sent for a cancelled turn) | `taskId`, `taskType`, `durationMs`, `errorType` — the failure class (`RATE_LIMITED`, `TRANSIENT`, `TIMEOUT`, `AUTH`, `BAD_REQUEST`, `QUOTA_EXHAUSTED`, `CONTEXT_TOO_LONG`, `MODEL_NOT_FOUND`, `UNKNOWN`) — and `error`, the redacted sentence the turn's `error.message` carries |
+| `cancelled` | Somebody stopped the turn (`/cancel`, a disconnect that cancels, a GDPR stop); sent just before `done` | `conversationState` (`EXECUTION_INTERRUPTED`), `persisted: false` |
+| `done` | Always last, for every turn that ran | `conversationState`, `conversationOutputs` (not for a cancelled turn — its outputs were discarded), `finishReason` when the answer is not a plain complete one, `error` for a failed turn, `hitlPausedAt` for a pause |
+| `error` | The stream could not run the turn at all (unknown or ended conversation, quota), the turn timed out, or the node is shutting down | `message`, `code`, `retryable` — or an opaque `message` with `code: internal_error` and a `correlationId` |
+
+`finishReason` in `done` (and under the same key in the turn's conversation output, so a reloaded conversation shows it too) is `length` (cut off at the token limit), `content_filter` (filtered by the provider) or `empty` (an LLM task that adds to the output got no text from the model, and nothing else in the turn produced output or quick replies). It is absent for a normal answer.
+
+Timeouts are reported as `error` with `code: turn_timeout`, never as `cancelled`. When the agent-timeout watchdog (or a lost cluster lease) interrupted the turn, the turn was discarded and `retryable` is `true` — send the input again. When the stream itself gave up on a turn that reported nothing for longer than the agent timeout plus one keep-alive interval, `retryable` is `false`: that layer cannot know whether the turn was stored, so read the conversation before sending again. A node that shuts down sends every open agent turn stream `error` with `code: server_shutdown` and `retryable: false` — the node lets in-flight and queued turns finish, so the turn may still be stored: read the conversation before sending again (a group discussion stream gets `retryable: true`). Every stream carries exactly one terminal event (`done` or `error`), whichever path claims it first. The OpenAI-compatible `/v1` endpoint reports the first two as its own `finish_reason`.
+
+What is stored in each case:
+
+| Outcome | Conversation state | Stored answer | Error detail |
+| --- | --- | --- | --- |
+| Success | `READY` | The answer | — |
+| `length` / `content_filter` | `READY` | The answer, plus `finishReason` and `llm:finish_reason` | — |
+| Empty answer | `READY` | None, `finishReason: empty` | — |
+| Failure (before or after text) | `ERROR` | None | `taskErrors` (code, retryable, redacted message); `llm:partial_output:<taskId>` when text had been sent |
+| Cancelled | `EXECUTION_INTERRUPTED` | The turn is discarded | — |
+
+Deployment settings: `eddi.llm.streaming.require-finish-reason` and `eddi.llm.streaming.idle-timeout-seconds` ([configuration reference](configuration-reference.md)). Metrics: `eddi.llm.stream.incomplete{path}`, `eddi.llm.stream.no_finish_reason_accepted{path}`, `eddi.llm.stream.idle_timeouts{path}`, `eddi.llm.stream.timeouts{path}` and `eddi.llm.cancelled{scope="stream"}` ([metrics](metrics.md)). Every `text/event-stream` response carries `Cache-Control: no-cache` and `X-Accel-Buffering: no`, so a buffering proxy passes tokens through as they come.
+
+**The transport.** The agent turn stream, its resume and the group discussion streams share one transport. An open stream holds no thread of its own: writes never wait for the client, and the keep-alive, the silence backstop and disconnect detection run on one scheduler thread for the whole node, which never waits on a stream either. A client that stops reading is disconnected once `eddi.streaming.max-pending-events` events or `eddi.streaming.max-pending-bytes` are waiting for it (reason `backpressure`; the endpoint's disconnect policy then applies) instead of being buffered for — also on a silent stream, where the keep-alive frames fill the bound and the tick closes it; all streams of a node together hold at most `eddi.streaming.max-pending-bytes-total`. When that budget is spent, the stream holding the most unsent data is closed (reason `backpressure`) and the write that hit the limit goes through; a budget kick never cancels a turn, which finishes and is stored. "Bytes" in these settings are characters of event data (UTF-16 code units), not UTF-8 bytes on the wire. `/v1` and A2A streams count against the stream cap but write through a blocking response body — a thread each while they run — and are outside the per-stream and node-wide buffer bounds. A node accepts `eddi.streaming.max-concurrent-streams` open streams — agent, resume, group, `/v1/chat/completions` with `stream: true` and A2A `message/stream` together; the user-event and admin streams are outside the cap — and refuses the next with `503` and a `Retry-After` of 3 to 8 seconds, before the turn's access check reads the store. A disconnect that cancels raises the turn's cancel flag at once, on the thread that noticed it, so the turn stops spending immediately; the store part of the cancel runs on at most `eddi.streaming.disconnect-concurrency` threads, so a proxy restart that drops thousands of streams queues that work instead of hitting the store with all of it. The agent's disconnect policy arrives with the turn, so a disconnect reads nothing. A client that leaves after the turn finished generating does not cancel it. Every `error` event of the agent stream carries a stable `code` and `retryable`; the group stream's `group_error` carries only a `message`. A group discussion stream gets the same keep-alive but no silence backstop — a member turn may run far longer than the agent timeout — and a client that leaves it does not cancel the discussion, which persists round by round. Meters: `eddi.streaming.active`, `eddi.streaming.closed{reason}`, `eddi.streaming.refused`, `eddi.streaming.first_token` ([metrics](metrics.md)).
+
 ### Provider-Specific Examples
 
 #### OpenAI
@@ -1936,7 +2005,7 @@ code and the body, not the headers.
 **EDDI is the only retry loop.** The provider clients are built with `maxRetries(0)` (OpenAI,
 Anthropic, Gemini, Vertex AI Gemini, Mistral, Ollama, Azure OpenAI, Bedrock), so `maxAttempts: 3`
 means three provider calls, not up to nine. The Hugging Face and OCI GenAI clients expose no such
-setting and the streaming clients have none; streaming retries are EDDI's own loop. Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
+setting and the streaming clients have none; streaming calls retry through the same EDDI loop, until the first token reached the client ([the streaming contract](#the-streaming-contract)). Helper calls that go straight to a model without a task retry policy (the cascade judge model, the tool-response summariser and the summarisation service) run through the default policy, `RetryConfiguration.executeWithDefaultRetry` (3 attempts, same classification), so every model call has exactly one retry owner.
 
 If a helper call still fails after the default policy, the tool-response summarizer and the judge fall
 back, and the shared summarizer throws to its caller.

@@ -775,6 +775,12 @@ public class Conversation implements IConversation {
         TurnAuditBuffer auditBuffer = TurnAuditBuffer.install(conversationMemory);
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
+            // The answer exists: a streaming client that leaves from now on must not
+            // cancel (and so discard) a turn that is only being stored.
+            var eventSink = conversationMemory.getEventSink();
+            if (eventSink != null) {
+                eventSink.onGenerationFinished();
+            }
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
