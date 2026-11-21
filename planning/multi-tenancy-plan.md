@@ -1374,7 +1374,38 @@ change later.
 
 **Deviations log** (the implementer appends: date, phase, what, why):
 
-- *(empty)*
+Phase 0, 2026-11-21. Each entry is detailed in
+[ADR 0001 §4](../docs/adr/0001-organizations.md#4-deviations-from-the-plan):
+
+- **DV-1 (§8.4, §5.1).** The Postgres role split is **required** in multi mode. Startup refuses
+  if the connected role has `rolsuper` or `rolbypassrls`. *Why:* Spike A showed that
+  superusers ignore `FORCE`d RLS, and the stock compose/Helm `POSTGRES_USER` is a superuser.
+- **DV-2 (§8.4).** The RLS interceptor memoises per physical connection
+  (`unwrap(PGConnection.class)`) and skips `set_config` when the values are unchanged.
+  *Why:* the naive interceptor adds a round trip to every acquire (about +100 %). The wrapper
+  object the caller gets differs from the interceptor's.
+- **DV-3 (§6.1, §14.2).** No `@Transactional` on org data paths (new guard). *Why:* Agroal
+  reuses a JTA-enlisted connection without calling the interceptor.
+- **DV-4 (§8.5a).** The read verifier is installed per collection through
+  `withCodecRegistry`, checks only the outermost document, and makes no extra copy.
+  *Why:* `Codec.decode` has no namespace, nested documents pass through it too, and the copy
+  cost +25–65 % on scans.
+- **DV-5 (§8.5a, §14.1).** Aggregation, `distinct` and count output is not decode-verified.
+  The guard's pipeline/filter check covers it, with allow-listed call sites. *Why:* that
+  output carries no `orgId`.
+- **DV-6 (§8.5, §8.5a, §14.2).** GridFS goes through `OrgGridFsBucket` on the raw database.
+  *Why:* the bucket's internals issue unfiltered queries.
+- **DV-7 (§14.2, §8.8, A.2).** `EmbeddingStoreFactory`'s `MongoClients.create` (external
+  Atlas) is an allowed second client. *Why:* the plan missed it.
+- **DV-8 (§8.5a).** The guarded types are deny-by-default `java.lang.reflect.Proxy`
+  instances. *Why:* they cover every overload, and new driver methods fail closed.
+- **DV-9 (§9.1).** Always request `organization:*`. `addOrganizationId=true` is required, and
+  the list shape is refused. *Why:* see the Spike B token shapes.
+- **DV-10 (§6.1).** `callAs` adapts `Callable` to `ScopedValue.CallableOp`. *Why:* the Java 25
+  API.
+- **DV-11 (§5.4).** `DataLayoutGuard` is a `StartupEvent` observer at
+  `@Priority(Integer.MIN_VALUE)` and reads before the schema lock. *Why:* Spike C (exit 1
+  before any write, on both datastores).
 
 ---
 

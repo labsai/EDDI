@@ -16,6 +16,7 @@
 
 - [Architecture Overview](architecture.md)
 - [Project Philosophy](project-philosophy.md)
+- [ADR 0001 — Organizations (proposed)](adr/0001-organizations.md)
 - [Conversation Memory & State Management](conversation-memory.md)
 - [Memory Policy (Commit Flags)](memory-policy.md)
 - [Properties](properties.md)
@@ -85,6 +86,7 @@
 - [Security](security.md)
 - [Cryptography & Post-Quantum Readiness](cryptography.md)
 - [Workspaces (per-user isolation & sharing)](workspaces.md)
+- [Multi-Org Security — Threat Model (draft)](multi-org-security.md)
 - [End-User Catalog](catalog.md)
 - [Secrets Vault](secrets-vault.md)
 - [Global Variables](global-variables.md)
