@@ -64,19 +64,34 @@ Two local reviews ran before any caller exists. Everything they found is fixed:
     multi mode.
   - `OrgConfig` observes at `Integer.MIN_VALUE + 1`, which leaves `MIN_VALUE` to the floor
     guard.
-- **Fallback counter.** It names the caller of `OrgQuotaKeys`, not the helper. Capped tags
-  overflow into `(overflow)`.
+- **Fallback counter.** It names the real caller, skipping `OrgQuotaKeys` and the proxies ArC
+  generates around it (`_ClientProxy`, `_Subclass`). Capped tags overflow into `(overflow)`.
+
+A third review (high-effort code review) found two more:
+
+- **The fail-closed exceptions are no longer `IllegalStateException`.** `OrgContextMissingException`
+  and `OrgBindingException` now derive from `OrgSecurityException extends RuntimeException`.
+  `src/main/java` has 18 `catch (IllegalStateException …)` blocks that degrade gracefully, and
+  those would have turned a missing binding into a silent fallback once stores call
+  `OrgContext.require()`.
+- **An unreadable configuration starts fail-closed.** When `eddi.org.mode` cannot be read at
+  class load, the mode starts as multi until `OrgConfig` applies the real value.
 
 ### Tests
 
-77 unit tests in `src/test/java/ai/labs/eddi/engine/org/`. Two mutation checks pass:
+84 unit tests in `src/test/java/ai/labs/eddi/engine/org/`. Mutation checks pass for each of
+these:
 
 - allowing an org-to-org rebinding fails `crossingOrgsThrowsAndTheMessageNamesNoOrg`;
-- dropping the rebind in `OrgPropagation` fails 5 propagation tests.
+- dropping the rebind in `OrgPropagation` fails 5 propagation tests;
+- letting platform work run inline on an org-bound thread fails
+  `platformWorkRefusesToRunInlineOnAnOrgBoundThread`;
+- skipping the request-context check fails
+  `outsideARequestContextTheIdentityIsAnonymousWithoutTouchingTheProxy`.
 
-The full unit suite ran 37,519 tests before the review fixes, with one failure: the split
-Kubernetes dashboard was stale. It was regenerated with `scripts/sync-monitoring-assets.py`, and
-that test now passes.
+The first full unit-suite run (37,519 tests) had one failure: the split Kubernetes dashboard was
+stale. It was regenerated with `scripts/sync-monitoring-assets.py`. After the first two reviews'
+fixes the full suite passed: 37,538 tests, 0 failures.
 
 ### What's next
 

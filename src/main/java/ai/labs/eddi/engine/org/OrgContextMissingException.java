@@ -9,9 +9,9 @@ package ai.labs.eddi.engine.org;
  * touch it. A missed propagation is an error, never a silent wrong org (plan
  * §4). It maps to a 500: it is a defect in EDDI, not a caller mistake.
  */
-public class OrgContextMissingException extends IllegalStateException {
+public class OrgContextMissingException extends OrgSecurityException {
 
     public OrgContextMissingException(String message) {
-        super("[SECURITY] " + message);
+        super(message);
     }
 }

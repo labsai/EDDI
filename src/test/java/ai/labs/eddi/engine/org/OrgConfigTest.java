@@ -5,8 +5,11 @@
 package ai.labs.eddi.engine.org;
 
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -59,11 +62,15 @@ class OrgConfigTest {
     }
 
     @Test
+    @SuppressWarnings("unchecked")
     void aResolverNameInAnotherCaseIsAccepted() {
-        assertEquals("single", OrgResolution.normalize(" Single "));
-        OrgResolution resolution = mock(OrgResolution.class);
-        when(resolution.resolverName()).thenReturn(OrgResolution.normalize(" Single "));
-        new OrgConfig("single", resolution, new SimpleMeterRegistry()).apply();
+        Instance<OrgResolver> resolvers = mock(Instance.class);
+        when(resolvers.stream()).thenAnswer(i -> Stream.of(new SingleOrgResolver()));
+        OrgResolution real = new OrgResolution(resolvers, mock(Instance.class), mock(Instance.class), " Single ", () -> false);
+        OrgContext.configure(OrgMode.MULTI, null);
+
+        new OrgConfig("single", real, new SimpleMeterRegistry()).apply();
+
         assertEquals(OrgMode.SINGLE, OrgContext.mode());
     }
 

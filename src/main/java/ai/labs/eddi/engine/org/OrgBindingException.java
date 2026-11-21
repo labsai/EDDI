@@ -13,13 +13,13 @@ package ai.labs.eddi.engine.org;
  * another org or to the platform plane.</li>
  * </ul>
  * Entering {@link OrgScope#platform} is not refused at runtime; the build guard
- * limits its callers. Like {@link OrgContextMissingException}, this is a
- * defect: no EDDI exception mapper handles {@code IllegalStateException}, so it
- * surfaces as a generic 500 and its message is not returned to the client.
+ * limits its callers. Like {@link OrgContextMissingException}, it is a defect:
+ * see {@link OrgSecurityException} for why it is not an
+ * {@code IllegalStateException} and how it surfaces.
  */
-public class OrgBindingException extends IllegalStateException {
+public class OrgBindingException extends OrgSecurityException {
 
     public OrgBindingException(String message) {
-        super("[SECURITY] " + message);
+        super(message);
     }
 }

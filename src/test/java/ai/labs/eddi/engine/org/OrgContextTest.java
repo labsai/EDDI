@@ -85,6 +85,33 @@ class OrgContextTest {
         }
 
         @Test
+        void generatedProxiesOfTheHelpersAreNotReportedAsCallSites() {
+            assertTrue(OrgContext.isInternalFrame(OrgQuotaKeys.class.getName()));
+            assertTrue(OrgContext.isInternalFrame(OrgQuotaKeys.class.getName() + "_ClientProxy"));
+            assertTrue(OrgContext.isInternalFrame(OrgQuotaKeys.class.getName() + "_Subclass"));
+            assertTrue(OrgContext.isInternalFrame(OrgContext.class.getName() + "$Org"));
+            assertFalse(OrgContext.isInternalFrame(OrgContextTest.class.getName()));
+            assertFalse(OrgContext.isInternalFrame(OrgQuotaKeys.class.getName() + "Test"));
+        }
+
+        @Test
+        void anUnreadableConfigurationStartsFailClosed() {
+            assertEquals(OrgMode.MULTI, OrgContext.initialMode(null));
+            assertEquals(OrgMode.MULTI, OrgContext.initialMode(" Multi "));
+            assertEquals(OrgMode.SINGLE, OrgContext.initialMode("single"));
+            assertEquals(OrgMode.SINGLE, OrgContext.initialMode("typo"));
+        }
+
+        @Test
+        void theFailClosedExceptionsAreNotIllegalStateExceptions() {
+            // EDDI catches IllegalStateException in many places to degrade gracefully;
+            // a missing or wrong binding must never be swallowed there.
+            assertFalse(IllegalStateException.class.isAssignableFrom(OrgContextMissingException.class));
+            assertFalse(IllegalStateException.class.isAssignableFrom(OrgBindingException.class));
+            assertTrue(new OrgBindingException("x").getMessage().startsWith("[SECURITY]"));
+        }
+
+        @Test
         void aFallbackThroughOrgQuotaKeysNamesTheCallerNotTheHelper() {
             Recorder recorder = new Recorder();
             OrgContext.configure(OrgMode.SINGLE, recorder);

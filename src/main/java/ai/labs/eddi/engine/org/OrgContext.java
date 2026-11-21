@@ -222,18 +222,32 @@ public final class OrgContext {
     }
 
     /**
-     * {@code eddi.org.mode} as the configuration holds it at class load. Any value
-     * other than {@code multi}, and a configuration that cannot be read, start as
-     * {@link OrgMode#SINGLE}; {@link OrgConfig} then validates the value and
-     * refuses a bad one at startup.
+     * {@code eddi.org.mode} as the configuration holds it at class load. A value
+     * other than {@code multi} starts as {@link OrgMode#SINGLE}, and
+     * {@link OrgConfig} refuses an invalid one at startup. A configuration that
+     * cannot be read starts as {@link OrgMode#MULTI}: failing closed until
+     * {@link OrgConfig} applies the real value is safer than a silent fallback to
+     * the default org.
      */
     static OrgMode initialMode() {
+        String value;
         try {
-            String value = ConfigProvider.getConfig().getOptionalValue("eddi.org.mode", String.class).orElse("single");
-            return "multi".equals(value.trim().toLowerCase(Locale.ROOT)) ? OrgMode.MULTI : OrgMode.SINGLE;
+            value = ConfigProvider.getConfig().getOptionalValue("eddi.org.mode", String.class).orElse("single");
         } catch (RuntimeException e) {
-            return OrgMode.SINGLE;
+            value = null;
         }
+        return initialMode(value);
+    }
+
+    /**
+     * {@link #initialMode()} for a raw value; {@code null} means "could not be
+     * read".
+     */
+    static OrgMode initialMode(String value) {
+        if (value == null) {
+            return OrgMode.MULTI;
+        }
+        return "multi".equals(value.trim().toLowerCase(Locale.ROOT)) ? OrgMode.MULTI : OrgMode.SINGLE;
     }
 
     static long nextEpoch() {
@@ -270,7 +284,21 @@ public final class OrgContext {
     }
 
     private static String callSite() {
-        return StackWalker.getInstance().walk(frames -> frames.filter(f -> !INTERNAL_CLASSES.contains(f.getClassName())).findFirst()
+        return StackWalker.getInstance().walk(frames -> frames.filter(f -> !isInternalFrame(f.getClassName())).findFirst()
                 .map(f -> f.getClassName() + "#" + f.getMethodName()).orElse("unknown"));
+    }
+
+    /**
+     * True for the org helpers themselves and for the classes ArC generates around
+     * them ({@code OrgQuotaKeys_ClientProxy}, {@code _Subclass}): a caller reaches
+     * an injected helper through its proxy, and the proxy is not the code to fix.
+     */
+    static boolean isInternalFrame(String className) {
+        for (String internal : INTERNAL_CLASSES) {
+            if (className.equals(internal) || className.startsWith(internal + "_") || className.startsWith(internal + "$")) {
+                return true;
+            }
+        }
+        return false;
     }
 }
