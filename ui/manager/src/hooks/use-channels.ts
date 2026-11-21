@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getEnrichedChannelDescriptors,
   getChannel,
+  getChannelCurrentVersion,
   createChannel,
   updateChannel,
   deleteChannel,
@@ -24,11 +25,29 @@ export function useEnrichedChannelDescriptors(
   });
 }
 
-export function useChannel(id: string, version?: number) {
+export function useChannel(id: string, version?: number, enabled = true) {
   return useQuery({
     queryKey: [...CHANNELS_KEY, id, version],
     queryFn: () => getChannel(id, version),
-    enabled: !!id,
+    enabled: enabled && !!id,
+  });
+}
+
+/**
+ * The channel's current version, for a link that names none. Keyed by the
+ * navigation, so each navigation gets its own request: never an answer, or a
+ * pending request, that belongs to an earlier one.
+ */
+export function useChannelCurrentVersion(id: string, navigationKey: string, enabled = true) {
+  return useQuery({
+    queryKey: [...CHANNELS_KEY, id, "currentversion", navigationKey],
+    queryFn: () => getChannelCurrentVersion(id),
+    enabled: enabled && !!id,
+    // Always this navigation's answer, never a cached one: another editor may
+    // have saved a newer version since.
+    staleTime: 0,
+    gcTime: 0,
+    retry: false,
   });
 }
 

@@ -238,6 +238,24 @@ public class EmailFullApplicationIT extends BaseIntegrationIT {
         assertEquals(null, refused.conversationId(), "no conversation for an auto-reply: " + refused);
         Thread.sleep(2000);
         assertEquals(0, mailsFrom(INVOICES), "still nothing sent");
+
+        // The mail log, through the real application: the refusal with its reason,
+        // the state filter on the server, and the lookup by Message-ID.
+        Response refusedLog = given().get("/channelstore/channels/" + triggerId + "/email-log?direction=IN&state=REFUSED&limit=10");
+        assertEquals(200, refusedLog.statusCode(), refusedLog.asString());
+        List<Map<String, Object>> refusedRows = refusedLog.jsonPath().getList("rows");
+        assertTrue(refusedRows.stream().anyMatch(r -> autoId.equals(r.get("messageId")) && String.valueOf(r.get("reason")).startsWith("loop:")
+                && "loop".equals(r.get("reasonCategory"))), "the auto-reply is listed with its loop reason: " + refusedRows);
+        assertTrue(refusedRows.stream().noneMatch(r -> messageId.equals(r.get("messageId"))), "the DONE mail is filtered out: " + refusedRows);
+        Response lookup = given().contentType(ContentType.JSON).body(Map.of("messageId", messageId))
+                .post("/channelstore/channels/" + triggerId + "/email-log/lookup");
+        assertEquals(200, lookup.statusCode(), lookup.asString());
+        assertEquals("DONE", lookup.jsonPath().getString("[0].state"));
+        assertEquals(row.conversationId(), lookup.jsonPath().getString("[0].conversationId"));
+        assertEquals("erin@vendor.test", lookup.jsonPath().getString("[0].counterpart"));
+        assertEquals(404, given().contentType(ContentType.JSON).body(Map.of("messageId", "<nobody@vendor.test>"))
+                .post("/channelstore/channels/" + triggerId + "/email-log/lookup").statusCode());
+        assertEquals(400, given().get("/channelstore/channels/" + triggerId + "/email-log?after=not-a-cursor").statusCode());
     }
 
     // ==================== A2: conversation mode ====================
