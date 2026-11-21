@@ -1125,15 +1125,37 @@ class RagSourceIngestionServiceTest {
             // The save removed what the source had ingested, then the run — which
             // stops only at its next check — embedded a document or two more under a
             // source nobody lists any more.
+            // The save already removed the source's files and chunks and purged its
+            // state; what is left is what this run wrote, by its id.
             var source = uploadSource("src-files");
-            fileStore.store(keyOf(source), "late.md", "text/markdown", "x".getBytes(UTF_8));
+            String key = keyOf(source);
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
 
             service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
+            verify(pipeline).forgetRun(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())), eq("run-ended"));
+            verify(pipeline, never()).forgetSource(anyString(), any(), any());
+            assertTrue(stateStore.activeRun(key).isEmpty(), "the cleanup's claim went with the purge");
+        }
+
+        @Test
+        @DisplayName("a run whose save never got to remove the source has the whole source removed afterwards")
+        void aRunWhoseSaveFailedIsRetried() throws Exception {
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            String runId = stateStore.startRun(key).orElseThrow();
+            stateStore.finishRun(new IIngestionStateStore.IngestionRun(runId, key,
+                    IIngestionStateStore.IngestionRun.Status.COMPLETED, null, Instant.now(),
+                    0, 0, 0, 0, 0, 0, 0.0, null));
+            fileStore.store(key, "late.md", "text/markdown", "x".getBytes(UTF_8));
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, runId);
+
             verify(pipeline).forgetSource(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())));
-            assertTrue(fileStore.list(keyOf(source)).isEmpty());
+            assertTrue(fileStore.list(key).isEmpty());
         }
 
         @Test

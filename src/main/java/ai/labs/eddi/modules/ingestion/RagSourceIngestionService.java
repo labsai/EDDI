@@ -329,12 +329,12 @@ public class RagSourceIngestionService {
         }
     }
 
-    /** How many runs of a source {@link #anotherRunSince} reads, newest first. */
+    /** How many runs of a source {@link #historySince} reads, newest first. */
     private static final int NEWER_RUN_LOOKBACK = 10;
 
     /**
      * Takes back what one run wrote for a source that was removed, or changed type,
-     * while it ran — and only that, when another run has had the source since.
+     * while it ran — and never what another run wrote under the same key.
      *
      * <p>
      * The save that removed the source cleared its state, and with it the running
@@ -345,55 +345,71 @@ public class RagSourceIngestionService {
      * and its next documents went into a knowledge base that no longer listed them.
      *
      * <p>
-     * So the source's slot is claimed first. With the claim held and no run since
-     * this one in the history, everything under the key is this run's or older, and
-     * the whole source is forgotten as before — which also retries a save whose own
-     * removal failed. Otherwise only the chunks tagged with this run's id are
-     * removed, and the state is left to the run that owns it, with every row's
-     * content forgotten: that run may already have found one of this run's
-     * documents "unchanged", and its chunks are the ones just removed. The cost is
-     * one re-embedding of what that run holds, in a race that needs a save during a
-     * run.
+     * So the source's slot is claimed first, and the run history read under the
+     * claim. The whole key is forgotten as before only when this run's own row is
+     * still the newest: then the save's removal never happened (it failed, and this
+     * retries it), and everything under the key is this run's or older. Otherwise
+     * only the chunks tagged with this run's id are removed — an empty history is
+     * not proof that nobody else wrote, since a purge erases the run rows and keeps
+     * the chunks. The state is then purged when no other run is listed, its rows
+     * being this run's late inserts, and otherwise left to the run that owns it
+     * with every row's content forgotten: that run may already have found one of
+     * this run's documents "unchanged", and its chunks are the ones just removed.
+     * The cost is one re-embedding of what that run holds, in a race that needs a
+     * save during a run.
      */
     private void discardWhatTheRunWrote(String ragConfigId, RagConfiguration ranWith, IngestionSource source,
                                         String runId) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
         try {
-            if (claim.isPresent() && !anotherRunSince(sourceKey, runId, claim.get())) {
+            History history = claim.map(claimId -> historySince(sourceKey, runId, claimId)).orElse(History.ANOTHER_RUN);
+            if (history == History.THIS_RUN_NEWEST) {
                 discardSourceContent(ragConfigId, ranWith, source);
                 return;
             }
-            LOGGER.warnf("Source '%s' of knowledge base %s has been run again since it changed; removing only what "
+            pipeline.forgetRun(ragConfigId, ranWith, source, runId);
+            if (history == History.NO_RUNS) {
+                // Takes the claim's own row with it, which is what releases the claim.
+                stateStore.purgeSource(sourceKey);
+                return;
+            }
+            LOGGER.warnf("Source '%s' of knowledge base %s has been run again since it changed; removed only what "
                     + "run %s wrote, and its documents will be embedded again",
                     LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId),
                     LogSanitizer.sanitize(runId));
-            pipeline.forgetRun(ragConfigId, ranWith, source, runId);
             stateStore.invalidateContent(sourceKey);
         } finally {
-            // A no-op when the purge above already took the claim's row with it; not
-            // one when the vector removal failed before the purge, which would
-            // otherwise leave the source blocked until the claim is reaped.
+            // A no-op when a purge above already took the claim's row with it; not one
+            // when the vector removal failed before the purge, which would otherwise
+            // leave the source blocked until the claim is reaped.
             claim.ifPresent(claimId -> pipeline.releaseClaim(ragConfigId, source, claimId));
         }
     }
 
+    /** What a source's run history says about the runs since one of them. */
+    private enum History {
+        /** That run's row is the newest, apart from the caller's own claim. */
+        THIS_RUN_NEWEST,
+        /** Nothing is listed apart from the claim. */
+        NO_RUNS,
+        /** Another run is listed before it, or it is gone and another is there. */
+        ANOTHER_RUN
+    }
+
     /**
-     * Whether a run other than {@code runId} has had this source since it started:
-     * any run listed before it, newest first, apart from the caller's own claim.
-     * When its row is gone — the save that removed the source purged it — every run
+     * Reads the newest runs of a source, skipping the caller's own claim. When the
+     * run's row is gone — the save that removed the source purged it — every run
      * listed is newer.
      */
-    private boolean anotherRunSince(String sourceKey, String runId, String claimId) {
+    private History historySince(String sourceKey, String runId, String claimId) {
         for (IngestionRun run : stateStore.listRuns(sourceKey, NEWER_RUN_LOOKBACK)) {
-            if (run.runId().equals(runId)) {
-                return false;
+            if (run.runId().equals(claimId)) {
+                continue;
             }
-            if (!run.runId().equals(claimId)) {
-                return true;
-            }
+            return run.runId().equals(runId) ? History.THIS_RUN_NEWEST : History.ANOTHER_RUN;
         }
-        return false;
+        return History.NO_RUNS;
     }
 
     /**

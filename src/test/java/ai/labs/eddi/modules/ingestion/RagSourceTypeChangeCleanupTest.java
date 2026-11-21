@@ -323,6 +323,43 @@ class RagSourceTypeChangeCleanupTest {
     }
 
     @Test
+    @DisplayName("a purge after the new run erased the history, and still the cleanup keeps that run's chunks")
+    void anEmptyHistoryIsNotProofOfNoOtherRun() {
+        String oldRun = oldRunOutlivesTheSave();
+        runNewType(context -> context.accept(WorkItem.prefetched(document("file-1"), context.partition())));
+        // A purge forgets the state and the run rows, and keeps the chunks retrievable
+        // until the next run has re-embedded.
+        assertTrue(service.purge(KB_ID, newTypeSource()));
+
+        service.cleanUpAfterRun(KB_ID, knowledgeBase(oldTypeSource()), oldTypeSource(), oldRun);
+
+        assertEquals(1, chunks.segmentsOf("file-1").size());
+        assertTrue(chunks.segmentsOf("https://example.com/late").isEmpty());
+        assertTrue(stateStore.activeRun(key()).isEmpty());
+    }
+
+    @Test
+    @DisplayName("when the save could not remove the source, the cleanup removes all of it")
+    void aFailedSaveIsRetried() {
+        String oldRun = stateStore.startRun(key()).orElseThrow();
+        chunkWrittenBy(oldRun, "https://example.com/before");
+        stateStore.recordIngested(key(), "https://example.com/before", "h0", null, null, oldRun);
+        embeddingStore.beforeRemove = () -> {
+            throw new IllegalStateException("vector store is unwell");
+        };
+        service.discardRemovedSources(KB_ID, knowledgeBase(oldTypeSource()), knowledgeBase(newTypeSource()));
+        embeddingStore.beforeRemove = () -> {
+        };
+        stateStore.finishRun(new IngestionRun(oldRun, key(), IngestionRun.Status.COMPLETED, null, null,
+                0, 0, 0, 0, 0, 0, 0.0, null));
+
+        service.cleanUpAfterRun(KB_ID, knowledgeBase(oldTypeSource()), oldTypeSource(), oldRun);
+
+        assertTrue(chunks.segments().isEmpty(), "what the old run had before the save goes too");
+        assertTrue(stateStore.listDocuments(key(), 10).isEmpty());
+    }
+
+    @Test
     @DisplayName("a cleanup whose vector delete fails does not leave the source blocked")
     void aFailedDeleteReleasesTheClaim() {
         String oldRun = oldRunOutlivesTheSave();
