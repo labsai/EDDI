@@ -67,10 +67,17 @@ These are LOCK items for the Phase 0 ADR:
 - IdP binding;
 - key hierarchy and AAD.
 
-Two of them, the pooled-tier datastore (PostgreSQL first) and break-glass approval, are left
-for the product owner to decide.
+The product owner decided three open points:
+
+- **Datastores.** MongoDB and PostgreSQL are both fully supported in the pooled tier. On
+  MongoDB, which has no row-level security, the second layer is a guarded collection boundary
+  that refuses unscoped commands, plus decode-time read verification.
+- **Moving an org to the dedicated tier** is an explicit platform-admin action, with no
+  automatic criteria.
+- **Break-glass** is granted by one platform admin with a reason and a time limit; the org's
+  admins are notified, and four-eyes approval can be configured.
 
 ### What's next
 
-Phase 0: three spikes (the Agroal interceptor, Keycloak Organizations claims, the floor
+Phase 0: four spikes (the Agroal interceptor, the MongoDB guarded wrapper and read verifier, Keycloak Organizations claims, the floor
 guard), then the ADR and the threat model for approval.

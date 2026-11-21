@@ -45,7 +45,7 @@ In particular:
 **How to proceed:**
 
 1. Read this whole file once.
-2. **Phase 0 is a stop point.** Run the three spikes (§15 Phase 0) and write the ADR (§16
+2. **Phase 0 is a stop point.** Run the four spikes (§15 Phase 0) and write the ADR (§16
    LOCK items) and the threat model. Present them to the user. Write no production code
    until the user approves.
 3. Do the phases strictly in order (§15). **Stop after each phase**, report against its exit
@@ -220,17 +220,17 @@ directory. `a.p` is short for `src/main/resources/application.properties`.
 4. **One code path.** Single mode is the same code with exactly one org. The persisted
    **marker** (§5.3), not the mode flag, decides predicates, unique-key shape and RLS.
 5. **The org is data.** Every durable work-starter stores its `orgId`.
-6. **Defense in depth:**
-   - app filter;
-   - Postgres RLS;
-   - Mongo `$jsonSchema` requiring `orgId` (stamping only);
-   - per-org keys;
-   - forced SSRF;
-   - the dedicated tier;
-   - an own instance.
+6. **Defense in depth: two independent layers on both datastores.** No single missed
+   check may leak.
+   - **PostgreSQL:** the app filter (`OrgSql`), plus row-level security.
+   - **MongoDB:** the app filter (`OrgCollections`), plus the guarded collection boundary
+     and decode-time read verification (§8.5a), plus a `$jsonSchema` validator requiring
+     `orgId`.
+   - **Both:** per-org keys, forced SSRF, then the dedicated tier, then a separate instance.
 
-   MongoDB has **no** database-level read isolation in the pooled tier, which is why §16
-   decision 12 exists.
+   **Both datastores are fully supported in the pooled tier** (§16 decision 12). MongoDB has
+   no row-level security, so its second layer runs in the driver boundary instead of the
+   database.
 7. **404, never 403, across orgs.** Ids are globally unique. An org id never appears in a
    public id.
 8. **The platform plane is separate from the org plane.** Platform staff see no customer
@@ -248,7 +248,7 @@ directory. `a.p` is short for `src/main/resources/application.properties`.
 
 | Aspect | Single mode (`eddi.org.mode=single`, **default**) | Multi mode (`eddi.org.mode=multi`) |
 |---|---|---|
-| Startup preconditions | none | Startup is **refused** unless all of these hold:<br>• the marker is `ENABLED`;<br>• `eddi.security.ssrf-protection.enabled=true`;<br>• `eddi.vault.master-key` is set;<br>• auth is on and `eddi.security.allow-unauthenticated` is not set;<br>• platform roles are configured (§9.3);<br>• no org role appears in `eddi.metrics.roles-allowed` or in any platform `quarkus.http.auth.policy.*`;<br>• a NATS signing key is set (if NATS is used);<br>• `eddi.org.multi.preview-acknowledged=true` (until the pentest);<br>• on Mongo pooled: `eddi.org.mongo.pooled-acknowledged=true` (§16 decision 12) |
+| Startup preconditions | none | Startup is **refused** unless all of these hold:<br>• the marker is `ENABLED`;<br>• `eddi.security.ssrf-protection.enabled=true`;<br>• `eddi.vault.master-key` is set;<br>• auth is on and `eddi.security.allow-unauthenticated` is not set;<br>• platform roles are configured (§9.3);<br>• no org role appears in `eddi.metrics.roles-allowed` or in any platform `quarkus.http.auth.policy.*`;<br>• a NATS signing key is set (if NATS is used);<br>• `eddi.org.multi.preview-acknowledged=true` (until the pentest);<br>• on Mongo: the guarded database and the read verifier are active (§8.5a) |
 | Org resolution | constant `default` | `OrgResolver` (§9.1) |
 | Unbound context | `default`, WARN once per call site, `eddi_org_context_fallback_total{site}` (stays 0 in CI) | `OrgContextMissingException` → 500 `[SECURITY]` |
 | Other orgs | Binding any org other than `default` throws, and org creation is refused | allowed |
@@ -656,6 +656,56 @@ before taking the fallback.
 - Dedicated tier (Phase 7): `OrgDatabaseRouter` replaces the single `MongoDatabase` bean.
   Use it for at most tens of orgs.
 
+### 8.5a MongoDB second layer (replaces RLS)
+
+MongoDB cannot filter rows per session, so EDDI adds two checks of its own. Both are
+independent of `OrgCollections`, so a missed or wrong helper call is caught by them and
+fails closed. Both live where every Mongo access already passes:
+- the single `MongoDatabase` producer, `PersistenceModule.provideMongoDB`;
+- the central codec registry, `PersistenceModule` (`fromRegistries(...)`).
+
+1. **`OrgGuardedMongoDatabase` / `OrgGuardedCollection`: refuses unscoped commands.**
+   - The producer returns a delegating `MongoDatabase` whose `getCollection(...)` hands out
+     a delegating `MongoCollection`.
+   - For collections in `OrgDataCatalog`, the wrapper **verifies** each operation and does
+     not rewrite it. It throws `[SECURITY]` unless the operation carries the bound org:
+     - `find`, `count`, `distinct`, `update*`, `replace*`, `delete*`, `findOneAnd*`:
+       the filter must have a top-level `orgId` equality, or an `$and` containing one,
+       equal to `OrgContext.require()`;
+     - `aggregate`: the first stage must be `$match` with that equality, and `$lookup`,
+       `$unionWith` and `$graphLookup` sub-pipelines on org collections must start with
+       one too;
+     - `insert*` and `bulkWrite`: every document or filter must carry the bound org;
+     - `watch`: the pipeline must start with the org `$match`;
+     - `estimatedDocumentCount` and `drop` are allowed only inside `OrgScope.platform`.
+   - Inside `OrgScope.platform`, only the dedicated `platform*` store methods may run
+     cross-org operations. They call `guarded.platform(reason)`, which is allow-listed and
+     audited.
+   - Before the marker the wrapper only counts unscoped operations (metric
+     `eddi_org_mongo_unscoped_total`, must be 0 in CI). Single mode therefore pays nothing
+     and fails nothing.
+   - GridFS is created only through the guarded database (`GridFSBuckets.create(guardedDb, …)`),
+     and its metadata filters are verified the same way.
+2. **`OrgReadVerifier`: checks every decoded document.**
+   - A codec decorator in the central registry, for `Document`, `BsonDocument` and EDDI's
+     `JacksonCodec`, checks every document decoded from an org collection.
+   - After the marker, an `orgId` that differs from the bound org, or a missing `orgId`,
+     throws `[SECURITY]` and the document is never returned.
+   - Projections on org collections must include `orgId`. The wrapper adds it when a
+     projection omits it.
+   - Counts return no documents, so they are covered by the wrapper (1) and the guards (§14.2).
+3. **`$jsonSchema` validator** requiring `orgId` on every org collection (§5.3 step 3).
+   It covers writes only.
+4. **Dedicated tier** (Phase 7) for orgs that need isolation at the database level.
+
+**Cost:** one BSON inspection per command and one field read per decoded document. This is
+measured in the Phase 5 benchmark, within the same 3 % gate. **Spike D** (Phase 0) proves
+three things:
+- the delegating wrapper covers every `MongoCollection` method the code uses, including
+  `ClientSession` overloads and GridFS;
+- the codec decorator sees every decode path;
+- the measured overhead.
+
 ### 8.6 Caches (A.5 plus `ICacheFactory`, `ClusterInvalidatingCache`, `SharedKvCache`)
 
 - Classify each cache:
@@ -775,10 +825,17 @@ before taking the fallback.
 - **New members** get `Org.defaultMemberRoles` (default `eddi-user`). Org admins manage
   members via `/orgs/current/members`.
 - **Single mode:** realm roles work as today, and `eddi-admin` implies the platform roles.
-- **Break-glass:** `POST /platform/orgs/{orgId}/access` with a reason and a TTL of at most
-  4 h, requested by `eddi-platform-admin`. **STOP (ADR):** decide whether a second platform
-  admin must approve it. Every action under it is written to the org's audit ledger and to
-  the platform ledger.
+- **Break-glass** is temporary emergency access by platform staff to one org's content, for
+  example to debug a customer's incident. It is the only way the platform plane sees
+  customer data.
+  - `POST /platform/orgs/{orgId}/access` with a reason and a TTL of at most 4 h, by
+    `eddi-platform-admin`.
+  - The org's admins are notified when access is granted and when it ends.
+  - Every action under the grant is written to the **org's** audit ledger, which they can
+    read, and to the platform ledger.
+  - A **second platform admin's approval** is configurable:
+    `eddi.org.break-glass.require-second-approver`, default `false`. When it is `true`, the
+    grant stays pending until a different `eddi-platform-admin` approves it.
 - **Role checks stay literal.** Extend `McpRoleTierParityTest` with the platform tier.
 - **Never visible to an org admin:** other orgs, platform logs, cluster admin, `/q/metrics`,
   platform catalog writes, enablement state, other orgs' quotas, `/platform/*` in OpenAPI.
@@ -977,9 +1034,13 @@ Runs with Testcontainers on Mongo **and** Postgres, in multi mode with the `ENAB
    - A's `/v1` key cannot reach B.
    - A NATS message carrying B's org and A's ids is refused or filtered.
    - A loopback call made with `X-EDDI-Org: A` by a B-only user is refused.
-4. **RLS backstop (Postgres only).** Disable the app filter in a test profile; the suite must
-   stay green with RLS. Mongo has no such backstop. Its compensations are the `$jsonSchema`
-   validator (writes only), the mutation checks and the guards.
+4. **Second-layer backstop, on both datastores.** In a test profile, disable the app filter
+   (`OrgSql` / `OrgCollections` predicates). The suite must stay green:
+   - on Postgres, because RLS returns no foreign rows;
+   - on Mongo, because `OrgGuardedCollection` refuses the unscoped commands, and with the
+     wrapper also disabled, `OrgReadVerifier` refuses foreign documents.
+   Every probe must end in 404, an empty result or a `[SECURITY]` refusal, never in another
+   org's data.
 
 ### 14.2 Build guards
 
@@ -989,6 +1050,9 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
   `datastore/**` and the listed stores, and that every org-table access goes through
   `OrgCollections` / `OrgSql`;
 - `Caffeine.newBuilder()` appears only in classified classes;
+- `MongoClients.create`, `MongoClient` and `getDatabase(` appear only in `PersistenceModule`
+  and `OrgDatabaseRouter`, and `GridFSBuckets.create` only takes the guarded database, so
+  nothing can bypass `OrgGuardedMongoDatabase` (§8.5a);
 - every JAX-RS implementation class and MCP tool class is `@OrgBound` or `@PlatformPlane`;
 - every A.12 class is annotated or uses `OrgRequest.callBound`;
 - every `@Scheduled` method uses the §7.4 patterns or is `@PlatformPlane`;
@@ -1026,6 +1090,9 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
 **Tasks:**
 
 1. **Spike A, Agroal interceptor (§8.4).** Throwaway branch. Report the results.
+   **Spike D, MongoDB second layer (§8.5a).** Use a throwaway branch: a delegating guarded
+   database, a collection and a codec decorator. Report the methods covered, the decode
+   paths and the overhead.
 2. **Spike B, Keycloak 26.8 Organizations.** Use a compose realm with two orgs and one user
    in both. Capture the exact access-token claim for `scope=organization:*` and for the
    default scope. Confirm that ids are included, and how roles and groups appear.
@@ -1095,6 +1162,8 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
 1. SPI and descriptors, `findByOriginId`, substring search (§8.2).
 2. Direct-store predicates. B.2 target pairs. Enablement steps 2–3: indexes, the
    marker switch with the barrier, `DROP DEFAULT`, the Mongo validators.
+   `OrgGuardedMongoDatabase`, `OrgGuardedCollection` and `OrgReadVerifier` (§8.5a) in
+   count-only mode. Their counters must be 0 across the conformance suite.
 3. Registries (§8.7) and caches (§8.6).
 4. NATS signature v2, value/payload org, archives, consumer binding (§8.9).
 5. RAG names (§8.8).
@@ -1134,6 +1203,8 @@ Report-only in Phase 1, failing the build from Phase 3. The guards check that:
 **Tasks:**
 
 1. `OrgRlsPoolInterceptor` per the Phase 0 spike, plus the connection-epoch assertion (§8.4).
+   On Mongo, switch `OrgGuardedCollection` and `OrgReadVerifier` from counting to refusing
+   (§8.5a). Both were built in Phase 3, task 2, in count-only mode.
 2. Enablement steps 4–5 and the `ENABLED` marker. From here on, presence advertises
    `org-layout-1`.
 3. Per-org KEK and AAD v2 (§11.2), per-org audit key and chain (§11.3).
@@ -1192,11 +1263,11 @@ change later.
 | 6 | Trust model for author-supplied infra | SSRF forced on; derived, hashed RAG names; per-org LLM keys by default; host-bound anonymous access; NATS signature v2 | LOCK |
 | 7 | IdP | Keycloak Organizations, matched by org id from the access token; `issuer` later | LOCK (after Spike B) |
 | 8 | Key hierarchy and AAD | Per-org KEK; AAD v2 with the org, v1 kept for `default`; KMS later | LOCK |
-| 9 | Dedicated-tier criteria | Thresholds set by the platform; manual moves | **open: STOP, ask the user in Phase 0** |
+| 9 | Moving an org to the dedicated tier | No automatic criteria. A platform admin moves an org explicitly (§13 "Move tier"), informed by the per-org usage API. The plan provides the mechanism, not a policy | decided |
 | 10 | Cross-org features | None; cross-org A2A only as external peers | recommend |
 | 11 | Data residency | `region` field reserved | recommend |
-| 12 | Datastore for the pooled tier | **PostgreSQL first** (RLS backstop). Mongo pooled multi mode stays behind `eddi.org.mongo.pooled-acknowledged=true` until the pentest and a clean conformance history; Mongo customers who need isolation sooner use the dedicated tier or their own instance | **LOCK: STOP, the user decides** |
-| 13 | Break-glass approval | Single platform admin with an audited reason and TTL, or four-eyes | **STOP, the user decides** |
+| 12 | Datastores for the pooled tier | **Both MongoDB and PostgreSQL, fully supported and equally tested** (product owner, 2026-11-21). Second layer: RLS on Postgres; on Mongo the guarded collection boundary plus decode-time read verification (§8.5a). The conformance suite and the backstop run (§14.1 step 4) run on both | decided (LOCK the §8.5a design after Spike D) |
+| 13 | Break-glass approval | One `eddi-platform-admin` with a reason and a TTL of at most 4 h; org admins are notified; full audit in the org's ledger; four-eyes approval optional via `eddi.org.break-glass.require-second-approver` | decided |
 
 **Deviations log** (the implementer appends: date, phase, what, why):
 
@@ -1209,7 +1280,8 @@ change later.
 | Risk | Mitigation |
 |---|---|
 | A missed store, cache, registry, filter or hand-off | Fail-closed context, helper-only DB access, guards, generated conformance suite, RLS (Postgres), mutation checks |
-| A missed filter on Mongo pooled | No DB-level read backstop: decision 12, `$jsonSchema` for writes, mutation checks, dedicated tier |
+| A missed filter on Mongo pooled | The guarded collection refuses unscoped commands; the read verifier refuses foreign documents; `$jsonSchema` on writes; backstop run and mutation checks on Mongo too (§8.5a, §14.1) |
+| A code path bypasses the guarded Mongo wrapper (e.g. a second `MongoClient`) | Build guard: `MongoClient`/`MongoClients` and `getDatabase(` appear only in `PersistenceModule` and the dedicated-tier router. Spike D lists every method that is used |
 | Rollback below the floor | Floor release, `DataLayoutGuard`, documented prohibition; on Mongo a pre-floor binary reads unfiltered |
 | Single-mode regression | No predicates before the marker, both marker states tested, 3 % gate, fallback counter |
 | Marker switch while nodes run | `SWITCHING` with a presence barrier for one TTL; old and new unique keys coexist until then |
@@ -1516,7 +1588,7 @@ Example: in `PostgresUserMemoryStore`, `ON CONFLICT (user_id, key) WHERE visibil
 | `eddi.org.ssrf.cluster-cidrs` | (empty) | §11.1 |
 | `eddi.org.agents.max-resident` | (unset = eager) | Phase 7 |
 | `eddi.org.multi.preview-acknowledged` | `false` | Required for multi mode until the pentest |
-| `eddi.org.mongo.pooled-acknowledged` | `false` | Required for multi mode on the Mongo pooled tier (decision 12) |
+| `eddi.org.break-glass.require-second-approver` | `false` | Four-eyes approval for break-glass (§9.3) |
 | `eddi.datastore.postgres.migration-username` / `-password` | (main credentials) | Optional role split (§8.4) |
 | `quarkus.http.cors.headers` | add `x-eddi-org` | §7.3 |
 
@@ -1528,6 +1600,6 @@ Example: in `PostgresUserMemoryStore`, `ON CONFLICT (user_id, key) WHERE visibil
 - **Identity and resolution:** `OrgResolver` (+ `SingleOrgResolver`, `KeycloakOrganizationsOrgResolver`, later `IssuerOrgResolver`), `OrgMembership`, `OrgRoleAugmentor`, `OrgRoutingIndex`, `OrgApiKey`.
 - **Org records:** `Org`, `IOrgStore`, `OrgSettings`.
 - **Marker, layout and migration:** `OrgMarker`, `IOrgMarkerStore`, `DataLayoutGuard`, `OrgEnablementMigration`, `OrgIntegrityCheck`, `OrgDataCatalog`.
-- **Data access:** `OrgCollections`, `OrgSql`, `OrgRlsPoolInterceptor`, `OrgKey<K>`, `OrgDatabaseRouter` (Phase 7).
+- **Data access:** `OrgCollections`, `OrgSql`, `OrgRlsPoolInterceptor`, `OrgGuardedMongoDatabase`, `OrgGuardedCollection`, `OrgReadVerifier`, `OrgKey<K>`, `OrgDatabaseRouter` (Phase 7).
 - **Jobs:** `OrgIterator` (Phase 5).
 - **Tests:** `MultiOrgConformanceIT`, `OrgTestProfile`.
