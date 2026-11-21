@@ -69,7 +69,8 @@ public final class AnswerToolConfigValidator {
     private static final List<Class<?>> ENGINE_TOOL_CLASSES = List.of(CalculatorTool.class, DateTimeTool.class, WebSearchTool.class,
             DataFormatterTool.class, WebScraperTool.class, TextSummarizerTool.class, PdfReaderTool.class, WeatherTool.class,
             FetchToolResponsePageTool.class, ReadAttachmentTool.class, ArtifactTools.class, GroupTaskTools.class, DiscoverToolsTool.class,
-            UserMemoryTool.class, ConversationRecallTool.class, ConverseWithAgentTool.class, CreateSubAgentTool.class,
+            UserMemoryTool.class, ConversationRecallTool.class, ConverseWithAgentTool.class, ConverseWithAgentAndFilesTool.class,
+            CreateSubAgentTool.class,
             FindAgentsByCapabilityTool.class, RecruitAgentTool.class, TeardownAgentTool.class);
 
     private static volatile Set<String> engineToolNames;

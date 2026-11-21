@@ -76,7 +76,7 @@ public final class ToolNameResolver {
             case "ConversationRecallTool" -> "conversationRecall";
             case "ReadAttachmentTool" -> "readattachment";
             case "CreateSubAgentTool" -> "create_sub_agent";
-            case "ConverseWithAgentTool" -> "converse_with_agent";
+            case "ConverseWithAgentTool", "ConverseWithAgentAndFilesTool" -> "converse_with_agent";
             case "FindAgentsByCapabilityTool" -> "find_agents_by_capability";
             case "TeardownAgentTool" -> "teardown_agent";
             case "RecruitAgentTool" -> "recruit_agent";

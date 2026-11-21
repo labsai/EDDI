@@ -147,7 +147,8 @@ final class ToolObjectReflector {
         return switch (simple) {
             case "UserMemoryTool" -> "memory";
             case "ConversationRecallTool" -> "recall";
-            case "CreateSubAgentTool", "ConverseWithAgentTool", "FindAgentsByCapabilityTool", "TeardownAgentTool",
+            case "CreateSubAgentTool", "ConverseWithAgentTool", "ConverseWithAgentAndFilesTool", "FindAgentsByCapabilityTool",
+                    "TeardownAgentTool",
                     // RecruitAgentTool is the highest-privilege of the five — it mutates a
                     // live roster. Left on the `builtin` default it would MISS a documented
                     // requireApproval:["dynamic:*"] and, worse, MATCH exempt:["builtin:*"],
