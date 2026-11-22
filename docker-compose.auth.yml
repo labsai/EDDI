@@ -87,7 +87,7 @@ services:
   keycloak-guard:
     # The Keycloak image itself, which this overlay pulls anyway — so the guard
     # costs no extra image on either base stack (MongoDB or PostgreSQL).
-    image: quay.io/keycloak/keycloak:26.8.0
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     entrypoint: ["/bin/sh", "-c"]
     environment:
       KEYCLOAK_BIND: "${KEYCLOAK_BIND:-127.0.0.1}"
@@ -144,7 +144,7 @@ services:
   # one, it needs a TTY this container lacks). With the dev default there is
   # nothing to rotate to, and keycloak-guard already keeps that case on loopback.
   keycloak-admin-rotate:
-    image: quay.io/keycloak/keycloak:26.8.0
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     depends_on:
       keycloak:
         condition: service_healthy
@@ -194,7 +194,7 @@ services:
         touch "$$marker"   # keycloak-guard may now allow a wider bind
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.8.0
+    image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
     command: start-dev --import-realm
     depends_on:
       keycloak-guard:
@@ -214,8 +214,9 @@ services:
       KC_HTTP_PORT: "8080"
       KC_HEALTH_ENABLED: "true"
       # Java4Shell (CVE-2026-114938) interim mitigation: Keycloak decodes Base64 before
-      # any login, and 26.8.0 bundles OpenJDK 21.0.12.1 (fixed in 21.0.13.1). Remove once
-      # the pinned Keycloak image ships a fixed JDK. See docs/security.md.
+      # any login. The pinned 26.8.2 image bundles the fixed OpenJDK 21.0.13.1 (confirmed with
+      # `java -version`); the flag stays as a safeguard for an overridden or earlier image.
+      # See docs/security.md.
       JAVA_OPTS_APPEND: "-XX:-UseBASE64Intrinsics"
       # KC_HOSTNAME must equal what browsers use to reach Keycloak.
       # Without this, Keycloak embeds the Docker-internal hostname in tokens,
