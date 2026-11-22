@@ -2266,8 +2266,9 @@ your tool schemas do not cover it, not as a routine first step:
   leaf plus intermediate(s) whose root is not publicly trusted or not shipped
   (the usual .p12 of an S/MIME-only CA) still signs, with save warning
   email.smime-untrusted-chain: trust is the recipient's decision. Refused only
-  when the chain is broken (a signature in it does not verify) or the leaf
-  comes without its intermediates. Other save warnings:
+  when the chain is broken (a signature in it does not verify, or an issuer in
+  it is expired, not a CA or not allowed to sign certificates), the leaf comes
+  without its intermediates, or the bundle holds more than 10 certificates. Other save warnings:
   email.smime-certificate-unusable, email.smime-certificate-expiring (within
   30 days; checked daily too, owner notice, gauge
   eddi_email_smime_certificate_days_left). Ledger OUT rows record signed.

@@ -39,10 +39,11 @@ Phase C2 of the email channel v3 control plan (`planning/email-channel-v3-contro
   Microsoft 365 unsigned = inconclusive.
 - **pom.** `bouncycastle.version` (2.73.13) shared by the `bcprov-lts8on` override and the new `bcpkix-lts8on`,
   `bcutil-lts8on`, `bcjmail-lts8on`.
-- **Manager** (the stacked UI PR, not this one). S/MIME section and SMTP fields in trigger mode in the email settings, the `SMIME_SIGNING` connection form
+- **Manager.** S/MIME section and SMTP fields in trigger mode in the email settings, the `SMIME_SIGNING` connection form
   (app-kit validation and labels), a self-test panel on the channel page; all 11 locales.
-- **Operator** (the stacked UI PR, not this one). The prompt describes `emailControl`, `SMIME_SIGNING` and the
-  self-test; no new allow-list entries (the operator still has no channel tools).
+- **Operator.** The prompt describes `emailControl`, `SMIME_SIGNING`, the maximum hold, `nonRepudiation`, the untrusted-root
+  rule and the self-test's chain verdicts; no new allow-list entries (the operator still has no channel tools). Revision 83
+  (`main` was at 82), and the Manager titles the `smime.untrusted-root` and `smime.chain-broken` findings in all 11 locales.
 - **Docs.** `email-integration.md` (S/MIME signing, self-test, common SMTP keys, `emailControl`), `connections.md`
   (`SMIME_SIGNING`), `metrics.md`, `configuration-reference.md` (`eddi.email.smime.check-interval`, `eddi.email.smime.max-hold`), the Full Metrics
   dashboard (days-left query on the email suppressions panel), `mcp-server.md`, the `eddi-admin` skill.
