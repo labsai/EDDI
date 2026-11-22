@@ -188,8 +188,8 @@ conversation integration, which always keeps a thread in one conversation.
 | `fromName` | *(none)* | Display name of the mail the integration sends; the address is `address`. At most 100 characters |
 
 Settings that a flat string map cannot hold — nested objects and lists — live in **`emailControl`**, an object next to
-`platformConfig` on the integration ([S/MIME signing](#smime-signing) is its first section; the sender, review and
-approval policies of later phases join it). It is valid on email integrations only (anywhere else: 400), its fields are
+`platformConfig` on the integration: [S/MIME signing](#smime-signing) (`smime`) and [reply review](#reply-review)
+(`replyReview`, `internalDomains`); the sender roles of a later phase join it. It is valid on email integrations only (anywhere else: 400), its fields are
 all optional with the defaults below, and a typo in it is refused like an unknown key. It is stored with the integration
 in both datastores. Channel integrations are not part of a ZIP export, so it travels the way the integration does.
 
@@ -491,8 +491,10 @@ agent in bounds, from the outermost in:
 3. **The agent's own tool approvals** (`hitlConfig.toolApprovals`, [hitl.md](hitl.md#tool-level-approval-gating)),
    which apply to every turn — mail or not — and to which the email gate adds, never subtracts.
 4. **Sender lists and authentication** ([Managing senders](#managing-senders)): who can reach the agent at all.
-5. Later phases of the email plan add sender roles (it matters who said it), a review of the reply before it leaves,
-   and input/output guardrails once they ship.
+5. **Reply review** ([below](#reply-review)), conversation mode: a person approves, edits or rejects a reply before it
+   leaves.
+6. Later phases of the email plan add sender roles (it matters who said it) and input/output guardrails once they
+   ship.
 
 ### The approval gate of a target
 
@@ -598,6 +600,67 @@ sender counts as new again once their rows expire (`eddi.email.ledger-retention`
 
 A conversation that a mail turn starts — a delegate, a group member — is tainted ([above](#a-mail-cannot-change-its-own-rules))
 but carries no target, so it has no email gate of its own; the delegating tool call itself is gated.
+
+### Reply review
+
+In conversation mode the reply to a mail can wait for a person before it is sent. One setting for the whole
+integration, in `emailControl`:
+
+```json
+{
+  "channelType": "email",
+  "platformConfig": { "mode": "conversation", "…": "…" },
+  "emailControl": {
+    "replyReview": "external",
+    "internalDomains": ["contoso.com", "*.contoso.com"]
+  }
+}
+```
+
+| `replyReview` | Which replies wait |
+|---|---|
+| `never` | None. The default, also for every integration saved before the setting existed |
+| `always` | Every reply |
+| `firstContact` | The reply to a sender's first mail to the target ([first contact](#waiting-before-the-agent-runs), as for `approvalPolicy`) |
+| `external` | A reply whose recipient is outside `internalDomains`. The recipient is the one the reply goes to ([Who gets a reply](#who-gets-a-reply), `Reply-To` included). With no internal domains every reply is external: saving warns `email.reply-review-no-internal-domains` |
+
+`internalDomains` lists at most 100 domains: `contoso.com` is that domain only, `*.contoso.com` its subdomains only.
+`replyReview` other than `never` is refused (`400`) in trigger mode, which never replies, and on an integration with a
+GROUP target, whose answer comes when the discussion ends and has no turn that could wait. A stored value EDDI does
+not know reads as `always`.
+
+**How it works.** The email channel decides per mail and arms only that mail's turn, with the reserved context key
+`emailReplyReview` (a client cannot set it). Once the turn's whole pipeline has run — and before the channel queues
+the reply — the conversation pauses: a rule pause, so the Manager's **Approvals** page, the approval banner, the
+[notification](hitl.md#email-notifications), REST `GET /agents/{conversationId}/approval-status` and
+`POST /agents/{conversationId}/resume`, and MCP `get_approval_status` / `list_pending_approvals` /
+`resume_conversation` handle it as any other. `pauseDetails.replyReview` is `true`, and the approval context's first
+item, `Reply`, shows the reply with credential shapes redacted.
+
+- **The draft is the whole reply**: everything the mail is answered with (for the first mail of a conversation, what
+  `CONVERSATION_START` said too). `pauseDetails.editableAnswer` serves it on every agent, whatever its own
+  `hitlConfig.review.allowAnswerEdits` says.
+- **Approve** — the reply is sent as the turn wrote it. **Approve with `editedAnswer`** — the approver's text replaces
+  the whole reply: it is what is rendered with the reply template, S/MIME-signed when signing is on, and sent, on
+  every attempt and after an S/MIME hold. The recipient and the subject cannot be changed. The edit is checked like
+  any edit (not blank, at most `review.maxEditChars` — 16,000 by default, at least the draft plus 2,000 — no control
+  characters, no redaction placeholder left from the served view). An edit identical to the draft is a plain approval.
+  The edit is data: the step keeps the draft in its own output and the sent text in the conversation output
+  `emailReplyText`; the decision record on the step (`emailGate:replyReviewDecision`) and the HITL audit entry keep
+  digests and sizes, never the text.
+- **Reject, or let it expire** — nothing is sent, and the mail's ledger row notes `email_gate:reply_rejected` (not a
+  contact for `firstContact`). The review expires as `AUTO_REJECT` after `eddi.email.approval-gate.expiry` (default
+  `PT72H`), whatever the target's `approvalPolicy` and the agent's timeout policy say.
+- **The sender hears nothing while the reply waits**: the [in-thread notice](#approvals-in-the-thread) would carry the
+  unreviewed draft. Any other pause of a reviewed turn (a gated tool call, the email gate's wait before the agent runs)
+  sends the notice without the agent's output; once that pause is approved the turn runs to its end and its reply
+  waits for review in turn.
+- A turn with nothing to send does not wait. A reviewed turn that ended without reaching its review (a rejected step,
+  an error) never sends what the agent wrote.
+- The decision runs no task again: no rule, no model call, no `postResponse`. Later model calls of the conversation
+  see the turn's own answer as before; the sender's next mail usually quotes the text that was sent.
+- **A mail-started turn cannot decide a review**, its own or another's: `resume_conversation` and the resume and
+  approval endpoints are refused for a turn tainted `origin=email` ([above](#a-mail-cannot-change-its-own-rules)).
 
 ## Personal data
 
@@ -919,7 +982,8 @@ never named. Both go through the ledger like any reply, so a second observer or 
 pause in a new conversation's `CONVERSATION_START` turn, before the mail's own turn, sends no notice; the mail waits
 in the mailbox until the conversation continues. The exception is the email approval gate's own wait before the
 agent runs ([Waiting before the agent runs](#waiting-before-the-agent-runs)): that pause carries the mail, so the
-sender gets the notice.
+sender gets the notice. Under [reply review](#reply-review) the reply's own review sends no notice, and any other
+pause of a reviewed turn sends one without the agent's output.
 
 Human takeover of an email conversation (a person answering from the Manager) does not exist yet: EDDI has no
 takeover feature ([planning/human-takeover-design.md](../planning/human-takeover-design.md) is a design under review).

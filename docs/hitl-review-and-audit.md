@@ -86,7 +86,9 @@ not a `400` but a new pause (see "A refused edit" below), so read `approval-stat
 { "verdict": "APPROVED", "editedAnswer": "The release is Monday.", "reasonCode": "FALSE_CLAIM", "pauseId": "1762077600000" }
 ```
 
-- Valid only with `APPROVED`, on a **rule** pause, when the agent version the conversation is pinned to allows it.
+- Valid only with `APPROVED`, on a **rule** pause, when the agent version the conversation is pinned to allows it —
+  except an email [reply review](email-integration.md#reply-review) (`pauseDetails.replyReview`), where the edit
+  replaces the whole outgoing reply on every agent and is applied by the email channel, not by the LLM task.
 - The pause must have kept a model answer from before the pause; otherwise `400` "there is no model answer to edit".
   `approval-status` serves it as `pauseDetails.editableAnswer = {draft, format, maxChars}` (secret-redacted).
 - Not blank, at most `maxEditChars`, no control characters other than line breaks and tabs; a JSON object when the

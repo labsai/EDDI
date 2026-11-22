@@ -800,6 +800,11 @@ continuation push:
   does: after an approval the sender gets the resumed turn's output; after a rejection, a cancellation or a timeout a
   plain notice that the step was not carried out; after a resume that failed, that it could not be completed. Who
   decided is never named — approvers are staff, the correspondent is outside.
+- **Reply review** ([email-integration.md](email-integration.md#reply-review), `emailControl.replyReview`): the
+  reply itself waits, as a rule pause after the turn's last task. `pauseDetails.replyReview` is `true` and
+  `editableAnswer` is the whole reply, editable on every agent; `editedAnswer` replaces it as a whole and nothing of
+  the pipeline runs again. Its expiry is `AUTO_REJECT`, a rejection sends nothing, and while it waits the sender gets
+  no notice; any other pause of such a turn sends the notice without the agent's output.
 - **One row, any node.** Both are reply rows in the email ledger, keyed by conversation and pause (or by the
   continuation's verdict and text), retried like every reply and rebuilt from the conversation if a node dies; a
   second observer of the event sends nothing. The ledger deduplicates rows, not deliveries: a node that dies after
