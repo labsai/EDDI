@@ -307,13 +307,14 @@ class PostgresScheduleStoreUnitTest {
         sut.updateSchedule("sched-1", config);
 
         // fire_status, fail_count and then enabled left the SET list, so every
-        // parameter from next_fire on shifted down.
-        verify(preparedStatement).setString(13, "changed");
-        verify(preparedStatement).setString(15, "Europe/Vienna");
-        verify(preparedStatement).setString(16, "test");
-        verify(preparedStatement).setInt(17, 3);
-        verify(preparedStatement).setBoolean(18, true);
-        verify(preparedStatement).setString(19, "sched-1");
+        // parameter from next_fire on shifted down; metadata is then bound twice (the
+        // CASE that keeps a stored taint), which shifts everything after it up one.
+        verify(preparedStatement).setString(14, "changed");
+        verify(preparedStatement).setString(16, "Europe/Vienna");
+        verify(preparedStatement).setString(17, "test");
+        verify(preparedStatement).setInt(18, 3);
+        verify(preparedStatement).setBoolean(19, true);
+        verify(preparedStatement).setString(20, "sched-1");
     }
 
     /**
