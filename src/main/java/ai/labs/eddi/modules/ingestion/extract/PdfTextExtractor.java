@@ -6,23 +6,12 @@ package ai.labs.eddi.modules.ingestion.extract;
 
 import jakarta.enterprise.context.ApplicationScoped;
 import org.apache.pdfbox.Loader;
-import org.apache.pdfbox.contentstream.operator.Operator;
-import org.apache.pdfbox.cos.COSArray;
-import org.apache.pdfbox.cos.COSBase;
-import org.apache.pdfbox.cos.COSName;
-import org.apache.pdfbox.cos.COSStream;
 import org.apache.pdfbox.io.MemoryUsageSetting;
 import org.apache.pdfbox.pdmodel.PDDocument;
-import org.apache.pdfbox.pdmodel.PDPage;
 import org.apache.pdfbox.pdmodel.encryption.InvalidPasswordException;
-import org.apache.pdfbox.text.PDFTextStripper;
-import org.apache.pdfbox.text.TextPosition;
 
 import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
 import java.time.Instant;
-import java.util.List;
 
 /**
  * PDF, through PDFBox — already a dependency of this project.
@@ -59,9 +48,6 @@ import java.util.List;
 public class PdfTextExtractor implements DocumentTextExtractor {
 
     private static final String MIME = "application/pdf";
-
-    /** How many content-stream operators run between deadline checks. */
-    private static final int OPERATORS_PER_DEADLINE_CHECK = 256;
 
     /**
      * Glyphs one page may lay out beyond the characters still wanted. Spacing and
@@ -164,123 +150,6 @@ public class PdfTextExtractor implements DocumentTextExtractor {
             throw e;
         } catch (IOException | RuntimeException e) {
             throw new UnreadableDocumentException("This file could not be read as a PDF.", e);
-        }
-    }
-
-    /**
-     * Charges the decode budget for the page content PDFBox reads around its
-     * counted filters, before the page is parsed.
-     *
-     * <p>
-     * Two paths bypass the counter. A page whose {@code /Contents} is one stream
-     * filtered by exactly {@code /FlateDecode} is inflated by a decoder PDFBox
-     * constructs itself, not one from the filter factory; that stream is decoded
-     * once here through the counted filter, so its real size is known before the
-     * parser is given it. And unfiltered content is never decoded at all, so one
-     * unfiltered stream referenced thousands of times from a {@code /Contents}
-     * array — each reference parsed in full, its operands retained until an
-     * operator arrives — cost nothing; each reference is now charged its length.
-     * Public for the attachment extractor, which reads PDFs under the same budget.
-     */
-    public static void chargePageContents(PDPage page) throws IOException {
-        COSBase contents = page.getCOSObject().getDictionaryObject(COSName.CONTENTS);
-        if (contents instanceof COSStream stream) {
-            if (COSName.FLATE_DECODE.equals(stream.getFilters())) {
-                try (InputStream decoded = stream.createInputStream()) {
-                    decoded.transferTo(OutputStream.nullOutputStream());
-                }
-            } else if (isUnfiltered(stream)) {
-                PdfDecodeBudget.charge(stream.getLength());
-            }
-        } else if (contents instanceof COSArray array) {
-            for (int i = 0; i < array.size(); i++) {
-                if (array.getObject(i) instanceof COSStream stream && isUnfiltered(stream)) {
-                    PdfDecodeBudget.charge(stream.getLength());
-                }
-            }
-        }
-    }
-
-    /**
-     * Whether PDFBox reads the stream as it is stored: it takes a {@code /Filter}
-     * that is neither a name nor a non-empty array ({@code []}, a number, a string,
-     * a dictionary) as zero filters.
-     */
-    private static boolean isUnfiltered(COSStream stream) {
-        COSBase filters = stream.getFilters();
-        return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
-    }
-
-    /** Stops a page that runs too long or lays out too much. */
-    private static final class BoundedTextStripper extends PDFTextStripper {
-
-        private final Instant deadline;
-        private long glyphsLeft;
-        private boolean pageWasCut;
-        private int operatorsSinceCheck;
-
-        BoundedTextStripper(Instant deadline) {
-            this.deadline = deadline;
-        }
-
-        void allowGlyphs(long glyphs) {
-            this.glyphsLeft = glyphs;
-            this.pageWasCut = false;
-        }
-
-        /** Whether the last page was stopped at its glyph allowance. */
-        boolean pageWasCut() {
-            return pageWasCut;
-        }
-
-        /**
-         * A page stopped at its glyph allowance still lays out the glyphs it gave
-         * before that. Dropping them made a readable PDF whose first page is dense — a
-         * small-font table, a large drawing — look like a scan with no text layer,
-         * since the upload probe allows only a few dozen characters.
-         *
-         * <p>
-         * {@link PDFTextStripper#processPage} is startPage, the page's program,
-         * writePage, endPage; the program is what {@link PageTooLong} leaves, so the
-         * remaining two are done here on what was collected.
-         */
-        @Override
-        public void processPage(PDPage page) throws IOException {
-            chargePageContents(page);
-            try {
-                super.processPage(page);
-            } catch (PageTooLong e) {
-                pageWasCut = true;
-                writePage();
-                endPage(page);
-            }
-        }
-
-        @Override
-        protected void processOperator(Operator operator, List<COSBase> operands) throws IOException {
-            if (++operatorsSinceCheck >= OPERATORS_PER_DEADLINE_CHECK) {
-                operatorsSinceCheck = 0;
-                if (Instant.now().isAfter(deadline) || Thread.currentThread().isInterrupted()) {
-                    throw new UnreadableDocumentException(
-                            "This PDF took too long to read. Split it into smaller files and upload those.");
-                }
-            }
-            super.processOperator(operator, operands);
-        }
-
-        @Override
-        protected void processTextPosition(TextPosition text) {
-            if (--glyphsLeft < 0) {
-                throw new PageTooLong();
-            }
-            super.processTextPosition(text);
-        }
-    }
-
-    /** A page that would lay out more glyphs than could ever be kept. */
-    private static final class PageTooLong extends RuntimeException {
-        PageTooLong() {
-            super(null, null, false, false);
         }
     }
 }
