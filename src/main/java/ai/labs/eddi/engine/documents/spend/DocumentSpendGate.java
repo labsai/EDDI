@@ -127,7 +127,16 @@ public class DocumentSpendGate {
         if (owner == null) {
             return Admission.granted(estimate);
         }
-        DocumentSpendLimits current = limits.get();
+        DocumentSpendLimits current;
+        try {
+            current = limits.get();
+        } catch (RuntimeException e) {
+            // A malformed eddi.documents.spend.* value: fail closed, like an unreadable
+            // counter.
+            LOGGER.warnf("Document spend admission failed closed: the daily ceilings could not be read: %s", sanitize(e.getMessage()));
+            return Admission.refused(Refusal.ACCOUNTING_UNAVAILABLE, Double.NaN, Double.NaN, estimate,
+                    "Document work was not started: the daily document spend ceilings could not be read.");
+        }
         long today = today();
         Admission user = admitDaily(SubjectKind.USER, owner.userId(), current.maxPerUserPerDayUsd(), today, estimate);
         if (user != null) {
@@ -198,7 +207,7 @@ public class DocumentSpendGate {
             return;
         }
         long today = today();
-        long oldestRetained = today - limits.get().retentionDays() + 1;
+        long oldestRetained = today - retentionDays() + 1;
         recordOne(SubjectKind.USER, owner.userId(), today, usd, oldestRetained);
         recordOne(SubjectKind.TEAM, owner.teamSpaceId(), today, usd, oldestRetained);
     }
@@ -211,6 +220,17 @@ public class DocumentSpendGate {
             store.add(kind, subject, today, usd, oldestRetained);
         } catch (RuntimeException e) {
             LOGGER.warnf("Document spend of $%.6f could not be added to the daily %s counter: %s", usd, kind, sanitize(e.getMessage()));
+        }
+    }
+
+    /** The configured retention, or the default when it cannot be read. */
+    private int retentionDays() {
+        try {
+            return limits.get().retentionDays();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Document spend retention could not be read; using %d days: %s", DocumentSpendLimits.DEFAULT_RETENTION_DAYS,
+                    sanitize(e.getMessage()));
+            return DocumentSpendLimits.DEFAULT_RETENTION_DAYS;
         }
     }
 

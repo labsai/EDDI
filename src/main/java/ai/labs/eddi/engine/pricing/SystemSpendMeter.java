@@ -214,8 +214,13 @@ public class SystemSpendMeter {
         if (documentSpend != null) {
             // Before the tenant, and whatever the tenant counter answers: the daily
             // ceilings must see every charge, and a carried tenant charge is never
-            // added to them a second time.
-            documentSpend.record(owner, positive ? usd : 0.0);
+            // added to them a second time. Guarded on its own, so a failure here (a
+            // store outage, a malformed ceiling property) never costs the tenant charge.
+            try {
+                documentSpend.record(owner, positive ? usd : 0.0);
+            } catch (RuntimeException e) {
+                LOGGER.warnf("Document work %s: the daily spend counters could not be updated: %s", sanitize(key), sanitize(e.getMessage()));
+            }
         }
         if (positive) {
             chargeTenant(new Pending(owner.tenantId(), SpendEvent.Kind.DOCUMENT, owner.userId(), null, null, detail, usd, priced.unpricedCalls(),
@@ -257,7 +262,7 @@ public class SystemSpendMeter {
             byTenant.computeIfAbsent(entry.tenantId(), ignored -> new ArrayList<>()).add(entry);
         }
         for (Map.Entry<String, List<Pending>> group : byTenant.entrySet()) {
-            chargeTenant(group.getKey(), group.getValue(), origin);
+            chargeTenant(group.getKey(), group.getValue(), group.getValue().contains(fresh) ? origin : "Carried system charges");
         }
     }
 

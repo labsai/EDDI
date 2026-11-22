@@ -44,7 +44,7 @@ public record DocumentSpendLimits(OptionalDouble maxPerUserPerDayUsd, OptionalDo
     /**
      * A negative or non-finite value means "no ceiling", as a negative
      * {@code maxMonthlyCostUsd} does for the tenant budget; {@code 0} refuses all
-     * priced document work.
+     * document work, priced or not (the spend so far already equals it).
      */
     private static OptionalDouble ceiling(OptionalDouble value) {
         if (value == null || value.isEmpty()) {

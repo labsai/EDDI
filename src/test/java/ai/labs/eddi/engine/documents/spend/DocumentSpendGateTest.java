@@ -199,6 +199,16 @@ class DocumentSpendGateTest {
         }
 
         @Test
+        @DisplayName("fails closed: a malformed ceiling property refuses instead of throwing")
+        void malformedLimits() {
+            var broken = new DocumentSpendGate(tenants, store, () -> {
+                throw new IllegalArgumentException("SRCFG00029: Expected a double value");
+            }, Clock.fixed(NOON, ZoneOffset.UTC));
+            Admission admission = assertDoesNotThrow(() -> broken.admit(OWNER, 1.0));
+            assertEquals(Refusal.ACCOUNTING_UNAVAILABLE, admission.refusal());
+        }
+
+        @Test
         @DisplayName("fails closed: an unreadable daily counter refuses, but only when a ceiling needs it")
         void counterUnavailable() {
             IDocumentSpendStore broken = mock(IDocumentSpendStore.class);
@@ -276,6 +286,18 @@ class DocumentSpendGateTest {
             assertDoesNotThrow(() -> brokenGate.record(OWNER, 1.0));
             verify(broken).add(SubjectKind.USER, USER, TODAY, 1.0, TODAY - 34);
             verify(broken).add(SubjectKind.TEAM, TEAM, TODAY, 1.0, TODAY - 34);
+        }
+
+        @Test
+        @DisplayName("a malformed retention property still records, with the default retention")
+        void malformedRetention() {
+            var broken = new DocumentSpendGate(tenants, store, () -> {
+                throw new IllegalArgumentException("SRCFG00029: Expected an integer value");
+            }, Clock.fixed(NOON, ZoneOffset.UTC));
+            store.add(SubjectKind.USER, USER, TODAY - 35, 1.0, TODAY - 70);
+            assertDoesNotThrow(() -> broken.record(OWNER, 2.0));
+            assertEquals(2.0, store.spent(SubjectKind.USER, USER, TODAY), 1e-12);
+            assertEquals(0.0, store.spent(SubjectKind.USER, USER, TODAY - 35), "35 days, the default");
         }
 
         @Test

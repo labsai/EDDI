@@ -170,6 +170,8 @@ class SystemSpendMeterOwnerTest {
         doThrow(new IllegalStateException("boom")).when(gate).record(OWNER, 1.0);
         assertEquals(1.0, assertDoesNotThrow(() -> SystemSpendMeter.charge(OWNER, "k", PriceOverride.of(1.0, null), usage(1_000_000, 0), "d")),
                 1e-12);
+        verify(quota).recordCost("default", 1.0);
+        assertEquals(1, events.size(), "a failure of the daily counters never costs the tenant charge");
     }
 
     @Test

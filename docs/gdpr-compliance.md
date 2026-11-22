@@ -223,8 +223,10 @@ principal, not a user: erasing or exporting it is refused with 400.
     participant: every daily bucket of document spend (UTC day, dollars, number of calls) kept under the
     erased user id, the id exactly as the conversation carries it. A bucket holds no content and is
     deleted on its own after `eddi.documents.spend.retention-days` (35). Team buckets hold a team space id
-    and amounts, no user id, and are kept. The participant has no in-flight work to stop; the document
-    jobs that charge the buckets are stopped by their own participant. The export carries the user's
+    and amounts, no user id, and are kept. The participant has no in-flight work of its own to stop.
+    Nothing charges the buckets yet; once the background document jobs do, a job still running when the
+    user is erased could write a new bucket for the erased id, so those jobs ship with their own
+    participant that stops them first (and a stray bucket is deleted after the retention). The export carries the user's
     buckets under `days` in the `documentSpend` section of `additionalData`, at most 1,000; past that the
     section says `"truncated": true`
 

@@ -124,11 +124,12 @@ public class DocumentSettings {
             return DocumentSpendLimits.defaults();
         }
         Config config = ConfigProvider.getConfig();
-        return new DocumentSpendLimits(usd(config, DocumentSpendLimits.MAX_PER_USER_PER_DAY), usd(config, DocumentSpendLimits.MAX_PER_TEAM_PER_DAY),
+        return new DocumentSpendLimits(usd(config.getOptionalValue(DocumentSpendLimits.MAX_PER_USER_PER_DAY, Double.class)),
+                usd(config.getOptionalValue(DocumentSpendLimits.MAX_PER_TEAM_PER_DAY, Double.class)),
                 config.getOptionalValue(DocumentSpendLimits.RETENTION_DAYS, Integer.class).orElse(DocumentSpendLimits.DEFAULT_RETENTION_DAYS));
     }
 
-    private static OptionalDouble usd(Config config, String property) {
-        return config.getOptionalValue(property, Double.class).map(OptionalDouble::of).orElse(OptionalDouble.empty());
+    private static OptionalDouble usd(Optional<Double> value) {
+        return value.map(OptionalDouble::of).orElse(OptionalDouble.empty());
     }
 }

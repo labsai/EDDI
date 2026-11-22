@@ -125,9 +125,15 @@ public class MongoDocumentSpendStore implements IDocumentSpendStore {
                 // exists now, so the same update applies to it.
                 after = days.findOneAndUpdate(filter, update, upsert);
             }
-            days.deleteMany(and(eq(F_KIND, kind.name()), eq(F_SUBJECT, subject), lt(F_DAY, oldestRetainedDay)));
         } catch (MongoException e) {
             throw new DocumentSpendStoreException("Could not record document spend", e);
+        }
+        try {
+            days.deleteMany(and(eq(F_KIND, kind.name()), eq(F_SUBJECT, subject), lt(F_DAY, oldestRetainedDay)));
+        } catch (MongoException e) {
+            // The increment is committed; expired buckets go with a later write, the sweep
+            // or the TTL index.
+            LOGGER.debugf("Could not delete expired document spend buckets; retried on a later write: %s", sanitize(e.getMessage()));
         }
         sweepIfDue(oldestRetainedDay);
         return toDaySpend(after);

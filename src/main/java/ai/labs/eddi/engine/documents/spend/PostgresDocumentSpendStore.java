@@ -72,7 +72,13 @@ public class PostgresDocumentSpendStore implements IDocumentSpendStore {
         this.dataSourceInstance = dataSourceInstance;
     }
 
-    private synchronized void createSchema() {
+    private void createSchema() {
+        if (!schemaInitialized) {
+            createSchemaLocked();
+        }
+    }
+
+    private synchronized void createSchemaLocked() {
         if (schemaInitialized) {
             return;
         }
@@ -102,17 +108,27 @@ public class PostgresDocumentSpendStore implements IDocumentSpendStore {
                     after = new DaySpend(kind, subject, epochDay, rows.getDouble(1), rows.getLong(2));
                 }
             }
-            try (PreparedStatement statement = connection.prepareStatement(DELETE_SUBJECT_EXPIRED)) {
-                statement.setString(1, kind.name());
-                statement.setString(2, subject);
-                statement.setLong(3, oldestRetainedDay);
-                statement.executeUpdate();
-            }
+            deleteExpired(connection, kind, subject, oldestRetainedDay);
         } catch (SQLException e) {
             throw new DocumentSpendStoreException("Could not record document spend", e);
         }
         sweepIfDue(oldestRetainedDay);
         return after;
+    }
+
+    /**
+     * The subject's expired buckets, after the increment has committed: a failure
+     * is logged, never thrown, so a caller is not told the charge was lost.
+     */
+    private static void deleteExpired(Connection connection, SubjectKind kind, String subject, long oldestRetainedDay) {
+        try (PreparedStatement statement = connection.prepareStatement(DELETE_SUBJECT_EXPIRED)) {
+            statement.setString(1, kind.name());
+            statement.setString(2, subject);
+            statement.setLong(3, oldestRetainedDay);
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            LOGGER.debugf("Could not delete expired document spend buckets; retried on a later write: %s", sanitize(e.getMessage()));
+        }
     }
 
     private void sweepIfDue(long oldestRetainedDay) {
