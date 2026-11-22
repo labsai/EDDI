@@ -5637,7 +5637,8 @@
       "allowlistEmptied": "Salvo, mas a lista de permitidos agora está vazia: qualquer remetente pode fazer o agente agir, limitado apenas pela autenticação do remetente.",
       "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos.",
       "approvalPolicyNone": "Guardado, mas um destino cujo agente pode agir não tem política de aprovação: o e-mail usa as suas ferramentas apenas sob as aprovações próprias do agente. Considere «Aprovar cada ação».",
-      "ruleCallsRefused": "Guardado. Um destino com política de aprovação tem chamadas HTTP ou MCP guiadas por regras: um turno de e-mail recusa-as, a menos que Ferramentas somente leitura as nomeie."
+      "ruleCallsRefused": "Guardado. Um destino com política de aprovação tem chamadas HTTP ou MCP guiadas por regras: um turno de e-mail recusa-as, a menos que Ferramentas somente leitura as nomeie.",
+      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",

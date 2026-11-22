@@ -132,6 +132,11 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.ruleCallsRefused",
         "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
       );
+    case "email.read-only-everything":
+      return t(
+        "emailChannel.warning.readOnlyEverything",
+        "Saved, but a Read-only tools pattern of a target with an approval policy matches every tool (such as *): no tool call of a mail turn waits for approval. Name the read-only tools instead.",
+      );
     default:
       return code;
   }
