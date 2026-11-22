@@ -224,6 +224,16 @@ public final class TurnOrigin {
     }
 
     /**
+     * Whether a conversation turn runs on this thread: one binds its conversation's
+     * principal for as long as it executes. Inside a turn the inbound request's
+     * approval ({@link #inboundApproved()}) is never the turn's — a conversation an
+     * approved call started inline would otherwise inherit it.
+     */
+    public static boolean inTurn() {
+        return PRINCIPALS.current() != null;
+    }
+
+    /**
      * Whether any of the {@link #APPROVED_HEADER} values is {@code true} (ignoring
      * case and blanks).
      */
