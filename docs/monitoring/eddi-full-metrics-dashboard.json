@@ -12868,7 +12868,24 @@
                 "mode": "palette-classic"
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "B"
+                },
+                "properties": [
+                  {
+                    "id": "custom.axisPlacement",
+                    "value": "right"
+                  },
+                  {
+                    "id": "unit",
+                    "value": "d"
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {

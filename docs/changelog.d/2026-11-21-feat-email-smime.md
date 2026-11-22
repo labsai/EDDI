@@ -39,10 +39,10 @@ Phase C2 of the email channel v3 control plan (`planning/email-channel-v3-contro
   Microsoft 365 unsigned = inconclusive.
 - **pom.** `bouncycastle.version` (2.73.13) shared by the `bcprov-lts8on` override and the new `bcpkix-lts8on`,
   `bcutil-lts8on`, `bcjmail-lts8on`.
-- **Manager.** S/MIME section and SMTP fields in trigger mode in the email settings, the `SMIME_SIGNING` connection form
+- **Manager** (the stacked UI PR, not this one). S/MIME section and SMTP fields in trigger mode in the email settings, the `SMIME_SIGNING` connection form
   (app-kit validation and labels), a self-test panel on the channel page; all 11 locales.
-- **Operator.** Prompt describes `emailControl`, `SMIME_SIGNING` and the self-test (no new allow-list entries: the
-  operator still has no channel tools). Revision 81 → 83 (see the review fixes).
+- **Operator** (the stacked UI PR, not this one). The prompt describes `emailControl`, `SMIME_SIGNING` and the
+  self-test; no new allow-list entries (the operator still has no channel tools).
 - **Docs.** `email-integration.md` (S/MIME signing, self-test, common SMTP keys, `emailControl`), `connections.md`
   (`SMIME_SIGNING`), `metrics.md`, `configuration-reference.md` (`eddi.email.smime.check-interval`, `eddi.email.smime.max-hold`), the Full Metrics
   dashboard (days-left query on the email suppressions panel), `mcp-server.md`, the `eddi-admin` skill.
@@ -99,10 +99,12 @@ An independent review of the branch; each finding verified in the code first.
   certificate, which EDDI cannot decrypt. The attribute is gone (test: OID 1.2.840.113549.1.9.15 absent); the docs
   recommend a signing-only certificate.
 - **Bouncy Castle tree.** `dependency:tree -Dincludes=org.bouncycastle`: only `*-lts8on` 2.73.13; nothing to exclude.
-- **Operator.** The prompt now names the maximum hold, `nonRepudiation`, the untrusted-root rule and the self-test's
-  chain verdicts. Revision 83: `main` has meanwhile reached 82 with another prompt, so this
-  branch's 82 would not reach deployments already on it; expect a conflict on `operator-revision.json` at merge
-  (take 83 and the fingerprint the test prints).
+- **Review round on the PR.** A shipped issuer must be a valid CA (valid now, `basicConstraints`, `keyCertSign`), and the
+  chain verdict no longer depends on the order of the bundle; a subject e-mail is read by OID from the structured
+  subject (a `+` address works); a certificate bundle over ten certificates is refused instead of cut; a
+  `multipart/signed` with a third part does not verify; a certificate that can no longer be inspected withdraws its
+  days-left gauge; `eddi.email.ledger-retention` below 3h is raised to 3h so a held row always reaches its give-up
+  step; a held group reply's content is kept for the hold's length.
 
 ### Unverified / next
 

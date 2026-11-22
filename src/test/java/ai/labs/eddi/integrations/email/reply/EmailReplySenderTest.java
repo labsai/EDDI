@@ -456,6 +456,26 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("a retention under three hours still leaves the hold room to be given up before the row is removed")
+        void maxHoldHoldsForShortRetentions() {
+            Duration retention = EmailReplySender.MIN_RETENTION;
+            assertEquals(Duration.ofHours(3), retention);
+            Duration hold = EmailReplySender.saneMaxHold(null, retention);
+            assertEquals(Duration.ofHours(1), hold);
+            assertTrue(hold.plus(Duration.ofHours(2)).compareTo(retention) <= 0, "given up before the row expires");
+            // Whatever the retention, the hold never exceeds what it leaves.
+            assertEquals(Duration.ofHours(1), EmailReplySender.saneMaxHold(null, Duration.ofHours(2)));
+        }
+
+        @Test
+        @DisplayName("a group reply's content outlives the longest hold")
+        void groupReplyContentOutlivesTheHold() {
+            Duration hold = Duration.ofHours(72);
+            assertTrue(EmailReplySender.groupReplyLifetime(5, hold).compareTo(hold) > 0);
+            assertTrue(EmailReplySender.groupReplyLifetime(5, hold).compareTo(EmailReplySender.groupReplyLifetime(5, Duration.ofHours(1))) > 0);
+        }
+
+        @Test
         @DisplayName("a permanent refusal ends FAILED and notifies the owners; so does the last attempt")
         void failed() {
             LedgerEntry inbound = storedInbound(State.DONE);

@@ -88,6 +88,7 @@ public class EmailSmimeCertificateMonitor {
                     ownerNotifier.notifyOnce(integration.id(), name, settings, EmailOwnerNotifier.Reason.CERTIFICATE_EXPIRING, now);
                 }
             } catch (EmailSmimeSigning.Unavailable e) {
+                metrics.clearCertificateDaysLeft(integration.id());
                 LOGGER.warnf("Email integration %s: its S/MIME certificate cannot be checked: %s", sanitize(integration.id()), e.getMessage());
                 ownerNotifier.notifyOnce(integration.id(), name, settings, EmailOwnerNotifier.Reason.SMIME_UNAVAILABLE, now);
             } catch (RuntimeException e) {

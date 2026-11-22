@@ -112,9 +112,12 @@ public record SmimeIdentity(PrivateKey privateKey, List<X509Certificate> chain) 
                 Key key = store.getKey(alias, password);
                 Certificate[] certificates = store.getCertificateChain(alias);
                 if (key instanceof PrivateKey privateKey && certificates != null && certificates.length > 0) {
+                    if (certificates.length > MAX_CERTIFICATES) {
+                        throw tooManyCertificates();
+                    }
                     List<X509Certificate> chain = new ArrayList<>();
                     for (Certificate certificate : certificates) {
-                        if (certificate instanceof X509Certificate x509 && chain.size() < MAX_CERTIFICATES) {
+                        if (certificate instanceof X509Certificate x509) {
                             chain.add(x509);
                         }
                     }
@@ -140,15 +143,18 @@ public record SmimeIdentity(PrivateKey privateKey, List<X509Certificate> chain) 
             int items = 0;
             while ((item = parser.readObject()) != null && items++ < MAX_CERTIFICATES + 2) {
                 if (item instanceof X509CertificateHolder holder) {
-                    if (certificates.size() < MAX_CERTIFICATES) {
-                        certificates.add(converter.getCertificate(holder));
+                    if (certificates.size() >= MAX_CERTIFICATES) {
+                        throw tooManyCertificates();
                     }
+                    certificates.add(converter.getCertificate(holder));
                 } else if (privateKey == null) {
                     privateKey = privateKeyOf(item, password, keys);
                 }
             }
         } catch (IOException | GeneralSecurityException e) {
             throw new IllegalArgumentException("The PEM signing certificate could not be read (" + e.getClass().getSimpleName() + ").");
+        } catch (IllegalArgumentException e) {
+            throw e; // already worded for the operator
         } catch (RuntimeException e) {
             throw new IllegalArgumentException("The PEM signing certificate could not be read: the key password is wrong or the key is "
                     + "damaged.");
@@ -161,6 +167,15 @@ public record SmimeIdentity(PrivateKey privateKey, List<X509Certificate> chain) 
             throw new IllegalArgumentException("The PEM signing certificate holds no certificate.");
         }
         return new SmimeIdentity(privateKey, orderLeafFirst(privateKey, certificates));
+    }
+
+    /**
+     * A bundle is refused, not cut: a dropped certificate could be the very issuer
+     * the chain check looks for.
+     */
+    private static IllegalArgumentException tooManyCertificates() {
+        return new IllegalArgumentException("The signing certificate bundle holds more than " + MAX_CERTIFICATES
+                + " certificates. Ship the leaf and its intermediates only.");
     }
 
     private static PrivateKey privateKeyOf(Object item, char[] password, JcaPEMKeyConverter keys) throws IOException {

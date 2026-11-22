@@ -162,6 +162,20 @@ public final class EmailMetrics {
     }
 
     /**
+     * Withdraws the certificate gauge of an integration whose certificate can no
+     * longer be inspected, so a stale day count is not published as if it were
+     * current. The next successful check registers it again.
+     */
+    public void clearCertificateDaysLeft(String integrationId) {
+        if (registry != null && certificateDays.remove(integrationId) != null) {
+            var gauge = registry.find(SMIME_DAYS_LEFT).tag("integration", integrationId).gauge();
+            if (gauge != null) {
+                registry.remove(gauge);
+            }
+        }
+    }
+
+    /**
      * From the reply's ledger row being written to the relay accepting it, retries
      * included.
      */
