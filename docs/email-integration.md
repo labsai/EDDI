@@ -622,12 +622,16 @@ integration, in `emailControl`:
 | `never` | None. The default, also for every integration saved before the setting existed |
 | `always` | Every reply |
 | `firstContact` | The reply to a sender's first mail to the target ([first contact](#waiting-before-the-agent-runs), as for `approvalPolicy`) |
-| `external` | A reply whose recipient is outside `internalDomains`. The recipient is the one the reply goes to ([Who gets a reply](#who-gets-a-reply), `Reply-To` included). With no internal domains every reply is external: saving warns `email.reply-review-no-internal-domains` |
+| `external` | A reply whose recipient is outside `internalDomains`. The recipient is the one the reply goes to ([Who gets a reply](#who-gets-a-reply), `Reply-To` included). With no internal domains every reply is external: saving warns `email.reply-review-no-internal-domains`. Under `honorReplyTo` this is the `Reply-To`: an authenticated outsider who names an internal `Reply-To` gets an unreviewed reply (to that internal address) |
 
 `internalDomains` lists at most 100 domains: `contoso.com` is that domain only, `*.contoso.com` its subdomains only.
 `replyReview` other than `never` is refused (`400`) in trigger mode, which never replies, and on an integration with a
-GROUP target, whose answer comes when the discussion ends and has no turn that could wait. A stored value EDDI does
-not know reads as `always`.
+GROUP target, whose answer comes when the discussion ends and has no turn that could wait; a document that holds both
+anyway (written another way) sends a GROUP target's mail **no** reply and notes its row
+`email_gate:reply_review_unsupported`. A stored value EDDI does not know reads as `always`. The settings are read
+again when a reply of a turn that was not armed is first queued: if they now ask for a review (`always`, or
+`external` and the recipient is outside the current `internalDomains`), that reply is recorded `SUPPRESSED` with
+`REVIEW_REQUIRED: …` and not sent — its turn is over and cannot be reviewed any more.
 
 **How it works.** The email channel decides per mail and arms only that mail's turn, with the reserved context key
 `emailReplyReview` (a client cannot set it). Once the turn's whole pipeline has run — and before the channel queues
@@ -646,9 +650,14 @@ with credential shapes redacted (its first 3,000 characters).
   every attempt and after an S/MIME hold. The recipient and the subject cannot be changed. The edit is checked like
   any edit (not blank, at most `review.maxEditChars` — 16,000 by default, at least the draft plus 2,000 — no control
   characters, no redaction placeholder left from the served view). An edit identical to the draft is a plain approval.
-  The edit is data: the step keeps the draft in its own output and the sent text in the conversation output
-  `emailReplyText`; the decision record on the step (`emailGate:replyReviewDecision`) and the HITL audit entry keep
-  digests and sizes, never the text.
+  The edit is data, and it is **what the conversation remembers**: the mail step's `output` becomes the sent text (its
+  `output:text:*` items are dropped), so the model's history, `{memory.last.output}` and later replies read the edit,
+  not the draft — a later, unreviewed reply (under `firstContact` or `external`) cannot repeat what the reviewer
+  removed. The sent text is also the conversation output `emailReplyText`. The draft stays in the step's decision
+  record (`emailGate:replyReviewDecision`, with digests and sizes); the HITL audit entry keeps digests and sizes only.
+  For a conversation's first mail the edit replaces what `CONVERSATION_START` said too, which stays in the start step.
+  **Output guardrails do not screen the edit yet**; when they ship they will have to
+  ([guardrails-architecture.md](../planning/guardrails-architecture.md)).
 - **Reject, or let it expire** — nothing is sent, and the mail's ledger row notes `email_gate:reply_rejected` (not a
   contact for `firstContact`). The review expires as `AUTO_REJECT` after `eddi.email.approval-gate.expiry` (default
   `PT72H`), whatever the target's `approvalPolicy` and the agent's timeout policy say.
@@ -658,8 +667,11 @@ with credential shapes redacted (its first 3,000 characters).
   waits for review in turn.
 - A turn with nothing to send does not wait. A reviewed turn that ended without reaching its review (a rejected step,
   an error) never sends what the agent wrote.
-- The decision runs no task again: no rule, no model call, no `postResponse`. Later model calls of the conversation
-  see the turn's own answer as before; the sender's next mail usually quotes the text that was sent.
+- The decision runs no task again: no rule, no model call, no `postResponse`.
+- A turn that ends its conversation (`CONVERSATION_END`, `STOP_CONVERSATION`) waits for its review first; the decision
+  then ends the conversation.
+- Under `firstContact`, a sender becomes an answered contact only once a reply row was written: a refused, suppressed
+  or throttled reply, or one with nothing to send, does not count.
 - **A mail-started turn cannot decide a review**, its own or another's: `resume_conversation` and the resume and
   approval endpoints are refused for a turn tainted `origin=email` ([above](#a-mail-cannot-change-its-own-rules)).
 

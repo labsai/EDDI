@@ -789,7 +789,7 @@ export function ApprovalBanner({
               : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
         </p>
       )}
-      {rulePause?.replyReview && surface === "regular" && (
+      {rulePause?.replyReview && (
         <p
           className="flex items-start gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs"
           data-testid="reply-review-notice"

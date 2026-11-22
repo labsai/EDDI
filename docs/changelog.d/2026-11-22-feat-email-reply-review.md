@@ -59,8 +59,22 @@ reply).
   `editableAnswer` view are reused, but the in-place LLM edit (`ReviewerEditStep`) is not: what is mailed is
   `replyText` — several outputs, for a first mail the start turn's too — so an in-place edit of one of them would have
   shown the approver a draft other than what is sent, worked only for agents that opted into `allowAnswerEdits`, and
-  not at all for rule-only agents. Consequence: the conversation keeps the draft as the turn's output and later model
-  calls see it as before; output guardrails do not screen the edit.
+  not at all for rule-only agents. The edited text becomes the mail step's `output` (what the model's history and
+  `{memory.last.output}` read), so a later unreviewed reply cannot repeat what the reviewer removed; the draft stays
+  in the step's decision record. Output guardrails do not screen the edit yet (noted in
+  `planning/guardrails-architecture.md`).
+
+### Review round (same day)
+
+- A retried neutral RESUME notice of a reviewed turn could be rebuilt from `lastText` — the draft. `resumeRequest`
+  now passes no continuation for an armed step, and a retry whose rebuilt text differs from the row's digest is
+  suppressed.
+- GROUP target with `replyReview` on (a document written around the save check): no synthesis is sent, the row
+  notes `email_gate:reply_review_unsupported`.
+- A reply of an unarmed turn is held (`SUPPRESSED`, `REVIEW_REQUIRED: …`) when the current settings ask for a review
+  (`always`, or `external` with a recipient outside the current `internalDomains`).
+- `firstContact`: the `awaiting_human` note is cleared only once a reply row exists.
+- The Manager's reply-review notice shows on every approval surface.
 - **Rejection sends nothing**, like an expiry — the plan says so for expiry; a human rejection sending the generic
   "a reviewer declined" text would tell an outside sender that a reply was held.
 - No new ledger state, no new REST or MCP surface.
