@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email.reply;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.audit.AuditLedgerService;
 import ai.labs.eddi.engine.gdpr.GdprPseudonymizer;
@@ -55,6 +56,7 @@ import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.output
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.snapshot;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
@@ -72,6 +74,7 @@ class EmailReplySenderReplyReviewTest {
     IConversationService conversations;
     EmailReplySenderTest.RecordingTransport transport;
     EmailReplySender sender;
+    InMemoryEmailSuppressionStore suppressions;
 
     @BeforeEach
     @SuppressWarnings("unchecked")
@@ -87,7 +90,8 @@ class EmailReplySenderReplyReviewTest {
                         Optional.of(new EmailIntegration(INTEGRATION, configuration, EmailChannelSettings.from(configuration.getPlatformConfig()))));
         conversations = mock(IConversationService.class);
         transport = new EmailReplySenderTest.RecordingTransport();
-        sender = new EmailReplySender(ledger, new InMemoryEmailSuppressionStore(), directory, conversations, transport,
+        suppressions = new InMemoryEmailSuppressionStore();
+        sender = new EmailReplySender(ledger, suppressions, directory, conversations, transport,
                 new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())),
                 mock(EmailOwnerNotifier.class), mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Runnable::run,
                 Duration.ofDays(30), 3, Duration.ofMinutes(1));
@@ -225,6 +229,83 @@ class EmailReplySenderReplyReviewTest {
         for (int i = 0; i < transport.messages.size(); i++) {
             assertFalse(sentText(i).contains(DRAFT), "no agent text: " + sentText(i));
         }
+    }
+
+    @Test
+    @DisplayName("the neutral notice of an undecided reviewed turn stays neutral on a retry: the sweep never rebuilds it from the draft")
+    void retriedNeutralNoticeStaysNeutral() throws Exception {
+        // A tool pause was approved, a cancel landed during the resume: ENDED, never
+        // reviewed.
+        conversation(ConversationState.ENDED, reviewed(null, null));
+        transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+
+        LedgerEntry row = sender.onResumeCompleted(CONVERSATION, HitlVerdict.APPROVED, NOW).orElseThrow();
+        assertTrue(transport.messages.isEmpty(), "the first attempt failed");
+
+        sender.sweep(NOW.plus(Duration.ofHours(2)));
+
+        assertEquals(1, transport.messages.size(), "the retry sent the notice");
+        assertFalse(sentText(0).contains(DRAFT), "no agent text on the retry: " + sentText(0));
+        assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
+    }
+
+    @Test
+    @DisplayName("a GROUP target under reply review sends no synthesis and notes the mail's row")
+    void groupUnderReviewSendsNothing() throws Exception {
+        var settings = reviewSettings(EmailControl.ReplyReview.ALWAYS);
+
+        assertTrue(sender.onGroupCompleted(INTEGRATION, settings, inbound(), "group-conv-1", EmailUserIdentity.perSender(INTEGRATION, SENDER),
+                mail(), "The group's answer.", NOW).isEmpty());
+
+        assertTrue(transport.messages.isEmpty());
+        assertEquals(EmailApprovalNotes.REPLY_REVIEW_UNSUPPORTED, inbound().lastError());
+        assertTrue(sender.onGroupCompleted(INTEGRATION, settings(), inbound(), "group-conv-1", EmailUserIdentity.perSender(INTEGRATION, SENDER),
+                mail(), "The group's answer.", NOW).isPresent(), "without a review the synthesis goes");
+    }
+
+    @Test
+    @DisplayName("a reply whose turn was not armed is held when the current settings ask for a review (always, or external)")
+    void unarmedReplyHeldWhenReviewNowRequired() throws Exception {
+        conversation(ConversationState.READY, output(DRAFT, mail()));
+        var snapshot = conversations.readConversation(CONVERSATION, true, false, List.of());
+
+        assertTrue(sender.onTurnCompleted(INTEGRATION, reviewSettings(EmailControl.ReplyReview.EXTERNAL, "contoso.com"), inbound(), CONVERSATION,
+                snapshot, NOW).isEmpty());
+        assertTrue(transport.messages.isEmpty(), "the recipient is external now");
+        var rows = ledger.findByRecipient(SENDER).stream().filter(r -> r.kind() == Kind.REPLY).toList();
+        assertEquals(1, rows.size());
+        assertEquals(State.SUPPRESSED, rows.get(0).state());
+        assertTrue(rows.get(0).lastError().startsWith(EmailReplySender.REVIEW_REQUIRED), rows.get(0).lastError());
+
+        String senderDomain = SENDER.substring(SENDER.indexOf('@') + 1);
+        assertNull(EmailReplySender.reviewNowRequired(request(reviewSettings(EmailControl.ReplyReview.EXTERNAL, senderDomain))),
+                "an internal recipient needs no review");
+        assertNotNull(EmailReplySender.reviewNowRequired(request(reviewSettings(EmailControl.ReplyReview.ALWAYS))));
+        assertNull(EmailReplySender.reviewNowRequired(request(settings())));
+    }
+
+    @Test
+    @DisplayName("an approved review whose reply is refused does not make the sender an answered contact")
+    void refusedApprovedReplyIsNoContact() throws Exception {
+        conversation(ConversationState.READY, reviewed(EmailReplyReview.APPROVED, null));
+        suppressions.suppress(INTEGRATION, SENDER, "bounce:5.1.1", NOW);
+
+        assertTrue(sender.onResumeCompleted(CONVERSATION, HitlVerdict.APPROVED, NOW).isEmpty());
+
+        assertEquals("awaiting_human", inbound().lastError(), "no reply row: still not a contact");
+    }
+
+    private EmailChannelSettings reviewSettings(EmailControl.ReplyReview mode, String... internalDomains) {
+        var configuration = new ChannelIntegrationConfiguration();
+        configuration.setChannelType("email");
+        configuration.setPlatformConfig(new HashMap<>(conversationConfig(Map.of())));
+        configuration.setEmailControl(new EmailControl(null, mode, internalDomains.length == 0 ? null : List.of(internalDomains)));
+        return EmailChannelSettings.from(configuration);
+    }
+
+    private EmailReplySender.Request request(EmailChannelSettings settings) {
+        return new EmailReplySender.Request(INTEGRATION, settings, inbound(), CONVERSATION, EmailUserIdentity.perSender(INTEGRATION, SENDER),
+                mail(), EmailReplySender.ReplyKind.REPLY, "0", DRAFT);
     }
 
     @Test

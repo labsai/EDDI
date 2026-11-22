@@ -1570,6 +1570,32 @@ public class Conversation implements IConversation {
      * never a template, a property or a model message; the step keeps digests and
      * sizes of both texts, the draft stays in the turn's own output.
      */
+    /**
+     * What later turns read of an edited reply's step is what was sent: its output
+     * becomes the approver's text — the conversation output {@code output} (what
+     * the model's history and the conversation log are built from) and the
+     * {@code output} datum ({@code {memory.last.output}}) — and its
+     * {@code output:text:*} items are dropped. Otherwise a later, unreviewed reply
+     * (under {@code firstContact} or {@code external}) could repeat what the
+     * reviewer removed. For a conversation's first mail the edit also covers what
+     * {@code CONVERSATION_START} said, which stays in the start step.
+     */
+    private static void replaceTurnOutputWithEdit(IWritableConversationStep step, String edited) {
+        var conversationOutput = step.getConversationOutput();
+        if (conversationOutput != null) {
+            for (String key : new ArrayList<>(conversationOutput.keySet())) {
+                if (key != null && key.startsWith(MemoryKeys.OUTPUT_PREFIX + ":text:")) {
+                    step.removeConversationOutput(key);
+                }
+            }
+        }
+        step.removeConversationOutput(MemoryKeys.OUTPUT_PREFIX);
+        step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(edited));
+        var outputData = new Data<>(MemoryKeys.OUTPUT_PREFIX, List.of(edited));
+        outputData.setPublic(true);
+        step.storeData(outputData);
+    }
+
     private void decideReplyReview(HitlDecision decision, IWritableConversationStep step, IData<Object> marker) {
         String draft = EmailReplyReview.draftOf(marker.getResult());
         step.removeData(EmailReplyReview.MARKER);
@@ -1583,6 +1609,10 @@ public class Conversation implements IConversation {
             if (edited != null && !edited.equals(draft)) {
                 outcome = EmailReplyReview.EDITED;
                 step.addConversationOutputString(EmailReplyReview.TEXT_OUTPUT_KEY, edited);
+                replaceTurnOutputWithEdit(step, edited);
+                // The draft stays in the step's own decision record (never in the audit
+                // ledger, which keeps digests): what the model wrote, for the reviewer.
+                record.put("draft", draft);
                 record.put("originalSha256", EditMetrics.sha256Hex(draft));
                 record.put("editedSha256", EditMetrics.sha256Hex(edited));
                 record.put("originalChars", draft == null ? 0 : draft.codePointCount(0, draft.length()));

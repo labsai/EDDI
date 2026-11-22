@@ -6,7 +6,11 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.configs.hitl.HitlRejectionAction;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationPauseException;
 import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionCandidate;
+import ai.labs.eddi.engine.lifecycle.model.HitlRevisionPolicy;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
@@ -19,6 +23,7 @@ import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
 import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.modules.llm.impl.ConversationOutputUtils;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -203,13 +208,18 @@ class ConversationEmailReplyReviewTest {
 
         assertEquals(EmailReplyReview.EDITED, output(EmailReplyReview.OUTPUT_KEY));
         assertEquals("Your refund of 20 EUR was sent today.", output(EmailReplyReview.TEXT_OUTPUT_KEY));
-        assertTrue(String.valueOf(output(MemoryKeys.OUTPUT_PREFIX)).contains("Your refund is on its way."));
+        assertEquals(List.of("Your refund of 20 EUR was sent today."), output(MemoryKeys.OUTPUT_PREFIX), "later turns see what was sent");
+        assertEquals(List.of("Your refund of 20 EUR was sent today."), memory.getCurrentStep().getData(MemoryKeys.OUTPUT_PREFIX).getResult(),
+                "{memory.last.output} too");
+        assertEquals("Your refund of 20 EUR was sent today.",
+                ConversationOutputUtils.extractOutputText(memory.getCurrentStep().getConversationOutput()),
+                "the model's history reads the edit, not the draft (ConversationHistoryBuilder)");
         @SuppressWarnings("unchecked")
         Map<String, Object> record = (Map<String, Object>) memory.getCurrentStep().getData(EmailReplyReview.DECISION_KEY).getResult();
         assertEquals(EmailReplyReview.EDITED, record.get("decision"));
         assertNotNull(record.get("editedSha256"));
         assertEquals("reviewer@example.com", record.get("decidedBy"));
-        assertTrue(record.values().stream().noneMatch(value -> String.valueOf(value).contains("20 EUR")), "digests, never the text");
+        assertEquals("Your refund is on its way.", record.get("draft"), "the draft stays in the decision record");
     }
 
     @Test
@@ -235,6 +245,62 @@ class ConversationEmailReplyReviewTest {
         assertTrue(!String.valueOf(output(MemoryKeys.OUTPUT_PREFIX)).contains("rejected by a human reviewer"),
                 "not the generic rule-pause text: nothing is mailed");
         verify(lastManager, never()).executeLifecycleFromIndex(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("an approved tool pause runs the rest of the turn, whose reply then waits for its own review")
+    void toolPauseApprovedReachesReview() throws Exception {
+        AtomicReference<Boolean> paused = new AtomicReference<>(false);
+        doAnswer(invocation -> {
+            if (!paused.get()) {
+                paused.set(true);
+                throw new ConversationPauseException("wf2", 0, "a tool call waits", ConversationPauseException.PauseOrigin.TOOL_CALL);
+            }
+            return null;
+        }).when(lastManager).executeLifecycle(any(), any());
+
+        conversation().say("please refund order 7", mailTurn(true));
+        assertEquals("TOOL_CALL", memory.getHitlPauseType());
+        assertNull(EmailReplyReview.draftOf(memory), "the tool pause is not the review");
+
+        conversation().resume(decision(HitlVerdict.APPROVED, null));
+
+        verify(lastManager).executeLifecycleFromIndex(any(), eq(0));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        assertEquals("RULE", memory.getHitlPauseType());
+        assertEquals("Your refund is on its way.", EmailReplyReview.draftOf(memory));
+    }
+
+    @Test
+    @DisplayName("onRejection REVISE: the revised answer's reply waits for review too")
+    void revisionReachesReview() throws Exception {
+        memory.setHitlRevisionPolicy(new HitlRevisionPolicy(HitlRejectionAction.REVISE, 2));
+        AtomicReference<Boolean> paused = new AtomicReference<>(false);
+        doAnswer(invocation -> {
+            if (!paused.get()) {
+                paused.set(true);
+                var candidate = new HitlRevisionCandidate();
+                candidate.setWorkflowId("wf2");
+                candidate.setLifecycleIndex(0);
+                candidate.setTranscriptJson("[]");
+                candidate.setDraft("Your refund is on its way.");
+                memory.setHitlRevisionCandidate(candidate);
+                throw new ConversationPauseException("wf2", 1, "the agent's own rule", ConversationPauseException.PauseOrigin.RULE);
+            }
+            return null;
+        }).when(lastManager).executeLifecycle(any(), any());
+        when(lastManager.reviseAnswerAt(any(), eq(0), any())).thenReturn(true);
+
+        conversation().say("please refund order 7", mailTurn(true));
+        assertNull(EmailReplyReview.draftOf(memory), "the agent's rule pause comes first");
+
+        var reject = decision(HitlVerdict.REJECTED, null);
+        reject.setNote("Say when it arrives.");
+        conversation().resume(reject);
+
+        verify(lastManager).executeLifecycleFromIndex(any(), eq(1));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState(), "the revision's reply waits for review");
+        assertEquals("Your refund is on its way.", EmailReplyReview.draftOf(memory));
     }
 
     @Test

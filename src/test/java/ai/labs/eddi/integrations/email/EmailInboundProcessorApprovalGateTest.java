@@ -420,6 +420,24 @@ class EmailInboundProcessorApprovalGateTest {
     }
 
     @Test
+    @DisplayName("replyReview external under honorReplyTo judges the Reply-To, not the From")
+    void replyReviewExternalUsesTheReplyTo() throws Exception {
+        Map<String, String> pc = new HashMap<>(conversationModeConfig());
+        pc.put("honorReplyTo", "true");
+
+        // From is internal, the Reply-To is not: the reply goes outside, so it waits.
+        processor.process(reviewContext(pc, EmailControl.ReplyReview.EXTERNAL, "supplier.com"),
+                EmailTestMail.mail().header("Reply-To: bob@outside.example").polled(1), Instant.now());
+        assertNotNull(reviewOf(inputs.get(0).getContext()), "the reply goes to bob@outside.example");
+
+        // From is external, the Reply-To internal: the reply stays inside (documented
+        // gap).
+        processor.process(reviewContext(pc, EmailControl.ReplyReview.EXTERNAL, "outside.example"),
+                EmailTestMail.mail().messageId("<m2@supplier.com>").header("Reply-To: carol@outside.example").polled(2), Instant.now());
+        assertNull(reviewOf(inputs.get(1).getContext()), "the reply goes to carol@outside.example, which is internal here");
+    }
+
+    @Test
     @DisplayName("replyReview external without internal domains: every reply waits")
     void replyReviewExternalWithoutDomains() throws Exception {
         processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.EXTERNAL), EmailTestMail.mail().polled(1), Instant.now());
