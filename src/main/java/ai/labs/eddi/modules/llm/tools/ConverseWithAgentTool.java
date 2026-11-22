@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentCon
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
 import ai.labs.eddi.engine.attachments.AttachmentShareService.Refusal;
 import ai.labs.eddi.engine.attachments.ShareResult;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
@@ -472,7 +473,13 @@ public class ConverseWithAgentTool {
         int index = 0;
         for (ShareResult.Shared shared : result.shared()) {
             Map<String, Object> value = new LinkedHashMap<>();
-            value.put(AttachmentContextExtractor.FIELD_STORAGE_REF, shared.selector().storageRef());
+            AttachmentSelector selector = shared.selector();
+            value.put(AttachmentContextExtractor.FIELD_STORAGE_REF, selector.storageRef());
+            // A part keeps the sender's pages: the delegate's intake checks them and never
+            // re-derives them from the unit under its own split.
+            putPart(value, AttachmentContextExtractor.FIELD_PAGES, selector.pages());
+            putPart(value, AttachmentContextExtractor.FIELD_UNIT, selector.unit());
+            putPart(value, AttachmentContextExtractor.FIELD_SPLIT, selector.split());
             if (shared.fileName() != null) {
                 value.put("fileName", shared.fileName());
             }
@@ -619,5 +626,11 @@ public class ConverseWithAgentTool {
      */
     private String extractResponse(SimpleConversationMemorySnapshot snapshot) {
         return ConversationOutputExtractor.extractResponse(snapshot);
+    }
+
+    private static void putPart(Map<String, Object> value, String field, String part) {
+        if (part != null && !part.isBlank()) {
+            value.put(field, part);
+        }
     }
 }

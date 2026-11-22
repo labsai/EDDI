@@ -7,11 +7,14 @@ package ai.labs.eddi.modules.llm.tools;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DynamicAgentConfig;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
 import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.IAttachmentStore.AttachmentAccessDeniedException;
 import ai.labs.eddi.engine.attachments.InMemoryAttachmentStore;
 import ai.labs.eddi.engine.attachments.SharePolicy;
+import ai.labs.eddi.engine.documents.DocumentSettings;
+import ai.labs.eddi.engine.documents.DocumentStructureService;
 import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
@@ -22,6 +25,10 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.modules.ingestion.extract.PdfFixtures;
+import ai.labs.eddi.modules.ingestion.extract.PdfStructureExtractor;
+import ai.labs.eddi.modules.ingestion.extract.document.DocumentUnit;
+import ai.labs.eddi.modules.ingestion.extract.document.SplitConfig;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
@@ -141,6 +148,32 @@ class ConverseWithAgentToolAttachmentsTest {
         assertTrue(store.isGranted(REPORT, STARTED));
         assertEquals(1, store.grantCount(REPORT));
         assertEquals(0, store.grantCount(NOTES));
+    }
+
+    @Test
+    @DisplayName("a chapter reaches the delegate as the sender's pages, and the grant is on the whole file")
+    void aChapterReachesTheDelegateAsItsPages() throws Exception {
+        String book = "2123456789abcdef01234567";
+        store.put(book, "book.pdf", "application/pdf", PdfFixtures.outlined(4, 3), CALLER);
+        var structure = new DocumentStructureService(store, new PdfStructureExtractor(), DocumentSettings.none());
+        DocumentUnit u3 = structure.manifest(book, CALLER, SplitConfig.defaults()).units().stream().filter(u -> u.id().equals("u3"))
+                .findFirst().orElseThrow();
+        var binding = new AttachmentShareBinding(memory, new AttachmentShareService(store, null, null, structure), store, policy(5, 0));
+        var tool = new ConverseWithAgentAndFilesTool(
+                new ConverseWithAgentTool(conversationService, "user-1", permissive(), 0, null, null, TurnCounter.local(), binding));
+
+        String result = tool.converseWithAgent("agent-b", "summarise chapter 3", null, List.of("book.pdf#u3"));
+
+        assertTrue(result.startsWith("📎 Shared with the agent: book.pdf — u3, p."), result);
+        Map<String, Object> value = attachmentValue(sentInput(), 0);
+        assertEquals(book, value.get(AttachmentContextExtractor.FIELD_STORAGE_REF));
+        assertEquals(u3.firstPage() + "-" + u3.lastPage(), value.get(AttachmentContextExtractor.FIELD_PAGES));
+        assertEquals("u3", value.get(AttachmentContextExtractor.FIELD_UNIT));
+        assertEquals(SplitConfig.defaults().hash(), value.get(AttachmentContextExtractor.FIELD_SPLIT));
+        // The delegate's intake reads the same pages back.
+        List<Attachment> parsed = AttachmentContextExtractor.extractAttachments(sentInput().getContext());
+        assertEquals(u3.firstPage() + "-" + u3.lastPage(), AttachmentSelector.fromAttachment(parsed.get(0)).pages());
+        assertTrue(store.isGranted(book, STARTED), "a part is a read grant on the whole file");
     }
 
     @Test
