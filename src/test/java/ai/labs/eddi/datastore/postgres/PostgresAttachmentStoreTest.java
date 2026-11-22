@@ -339,13 +339,16 @@ class PostgresAttachmentStoreTest {
     @Test
     void delete_rowWithNoOwner_isAllowed() throws Exception {
         // deleting discloses nothing: an ownerless legacy row must stay erasable
-        when(resultSet.next()).thenReturn(true);
+        // the row's owner lookup, then the one row the DELETE ... RETURNING removes
+        when(resultSet.next()).thenReturn(true, true, false);
         when(resultSet.getString("conversation_id")).thenReturn(null);
         when(preparedStatement.executeUpdate()).thenReturn(1);
 
         assertTrue(sut.delete("legacy-ref", "conv-1"));
-        // the row, then the grants on it — one transaction
-        verify(preparedStatement, times(2)).executeUpdate();
+        // the row (returning where its bytes were), then the grants on it — one
+        // transaction
+        verify(connection).prepareStatement(contains("DELETE FROM attachments WHERE storage_ref = ? OR root_ref = ? RETURNING"));
+        verify(preparedStatement, times(1)).executeUpdate();
         verify(connection).commit();
     }
 

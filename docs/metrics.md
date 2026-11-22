@@ -734,6 +734,8 @@ eddi_attachment_derived_stored_total        # Derived files (views of an upload)
 eddi_attachment_derived_bytes_total         # Bytes of those derived files; tag: kind
 eddi_attachment_shared_total                # Files shared from one conversation to another; tag: path (delegation, nested_group, …)
 eddi_attachment_share_refused_total         # Share requests refused; tag: reason (not_found, depth, shares_per_turn, …)
+eddi_attachment_blob_bytes_total            # Bytes a blob backend of large files wrote (direction=in) or handed out (direction=out); tags: backend, direction
+eddi_attachment_blob_tombstones_total       # Deleted files whose bytes their backend could not remove at once, left to the tombstone sweep; tag: backend
 ```
 
 The share meters are recorded by `AttachmentShareService`; the full tag lists are in [attachments-guide.md → Sharing between agents](attachments-guide.md#sharing-between-agents--the-rule).

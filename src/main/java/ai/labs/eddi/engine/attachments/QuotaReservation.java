@@ -79,4 +79,24 @@ public record QuotaReservation(String id, String ownerKey, long bytes, int count
             throw new IllegalArgumentException("A quota reservation needs a lifetime between 1 ms and " + MAX_TTL);
         }
     }
+
+    /**
+     * {@link #validateRequest(OwnerRef, String, long, int, Duration)} plus the
+     * quota mode: a {@link QuotaMode#LARGE_PER_USER} reservation needs a known
+     * user, because its bytes count against the user only.
+     *
+     * @throws IllegalArgumentException
+     *             as the shorter form does, for a {@code null} mode, or for
+     *             {@link QuotaMode#LARGE_PER_USER} without a user
+     */
+    public static void validateRequest(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+                                       QuotaMode mode) {
+        validateRequest(owner, conversationId, bytes, count, ttl);
+        if (mode == null) {
+            throw new IllegalArgumentException("A quota reservation needs a quota mode");
+        }
+        if (mode == QuotaMode.LARGE_PER_USER && userId == null) {
+            throw new IllegalArgumentException("A large upload counts against its user, so it needs one");
+        }
+    }
 }

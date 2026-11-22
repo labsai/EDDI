@@ -16,7 +16,15 @@ import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.MimeValidator;
 import ai.labs.eddi.engine.attachments.OwnerScope;
+import ai.labs.eddi.engine.attachments.QuotaMode;
 import ai.labs.eddi.engine.attachments.QuotaReservation;
+import ai.labs.eddi.engine.attachments.blob.BlobBackend;
+import ai.labs.eddi.engine.attachments.blob.BlobBackendSelector;
+import ai.labs.eddi.engine.attachments.blob.BlobKeys;
+import ai.labs.eddi.engine.attachments.blob.BlobLocator;
+import ai.labs.eddi.engine.attachments.blob.BlobMetrics;
+import ai.labs.eddi.engine.attachments.blob.BlobStreams;
+import ai.labs.eddi.engine.attachments.blob.StreamedUpload;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.quarkus.arc.DefaultBean;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -27,8 +35,13 @@ import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
 import javax.sql.DataSource;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.file.NoSuchFileException;
 import java.sql.*;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -78,6 +91,14 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * statement; expiry is compared with the database's {@code NOW()}. A
  * reservation is written under the same advisory locks as an upload, and
  * deleted with its conversation.
+ * <p>
+ * <b>Large files.</b> A streamed upload above
+ * {@code eddi.attachments.max-size-bytes} keeps its bytes in a blob backend
+ * ({@code pg-chunks}); its row has no {@code data}, and
+ * {@code blob_backend}/{@code blob_key} name where they are. Every delete of
+ * such a row records a tombstone in {@code attachment_blob_tombstones} in its
+ * transaction and then deletes the object; an upload records an intent
+ * tombstone before its first byte. See {@link #sweepTombstones}.
  *
  * @since 6.0.0
  */
@@ -135,7 +156,44 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
      */
     private static final List<String> CREATE_LINEAGE_INDEXES = List.of(
             "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_lineage ON attachments (root_ref, kind, unit_id) WHERE root_ref IS NOT NULL",
-            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_dedup ON attachments (owner_key, root_ref, sha256) WHERE root_ref IS NOT NULL");
+            "CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_dedup ON attachments (owner_key, root_ref, sha256) WHERE root_ref IS NOT NULL",
+            // The tombstone sweep asks whether a blob still references an object.
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_attach_blob_key ON attachments (blob_key) WHERE blob_key IS NOT NULL");
+    /**
+     * Where a blob's bytes live when they are not in {@code data}: the backend and
+     * the key of a {@link BlobLocator}, both null for every inline row. And the
+     * {@link QuotaMode} a streamed upload was stored under, null for
+     * {@link QuotaMode#STANDARD}. {@code data} stops being NOT NULL, as a located
+     * row has none; dropping the constraint touches only the catalog.
+     */
+    private static final List<String> ADD_BLOB_COLUMNS = List.of(
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS blob_backend TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS blob_key TEXT",
+            "ALTER TABLE attachments ADD COLUMN IF NOT EXISTS quota_mode TEXT",
+            "ALTER TABLE attachments ALTER COLUMN data DROP NOT NULL",
+            "ALTER TABLE attachment_reservations ADD COLUMN IF NOT EXISTS quota_mode TEXT");
+    /**
+     * Backend objects waiting to be removed: of a deleted blob whose backend could
+     * not delete its bytes (due at once), or of an upload in flight (due once its
+     * reservation could no longer be converted). See {@link #sweepTombstones}.
+     */
+    private static final String CREATE_TOMBSTONES_TABLE = """
+            CREATE TABLE IF NOT EXISTS attachment_blob_tombstones (
+                backend TEXT NOT NULL,
+                blob_key TEXT NOT NULL,
+                owner_key TEXT,
+                not_before TIMESTAMPTZ NOT NULL,
+                attempts INT NOT NULL DEFAULT 0,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (backend, blob_key)
+            )
+            """;
+    private static final String CREATE_INDEX_TOMBSTONES_DUE = "CREATE INDEX IF NOT EXISTS idx_attach_tomb_due ON attachment_blob_tombstones (not_before)";
+    private static final String CREATE_INDEX_TOMBSTONES_OWNER = "CREATE INDEX IF NOT EXISTS idx_attach_tomb_owner ON attachment_blob_tombstones (owner_key)";
+    /** How long past its reservation an upload's intent tombstone waits. */
+    static final Duration INTENT_GRACE = Duration.ofMinutes(1);
+    /** The tombstones a delete or a streamed upload retries on its way out. */
+    static final int TOMBSTONE_SWEEP_BATCH = 5;
     private static final String CREATE_BACKFILL_TABLE = "CREATE TABLE IF NOT EXISTS attachment_grants_backfill (name TEXT PRIMARY KEY, cursor_value TEXT)";
     private static final String BACKFILL_CURSOR = "cursor";
     private static final String CREATE_GRANTS_TABLE = """
@@ -228,6 +286,19 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     defaultValue = "" + DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE)
     long derivedMaxTextBytesPerSource = DerivedCaps.DEFAULT_MAX_TEXT_BYTES_PER_SOURCE;
 
+    /**
+     * The longest a streamed upload may take: the reservation the store takes for
+     * one lasts this long.
+     */
+    @ConfigProperty(name = "eddi.attachments.blob.upload-ttl-seconds", defaultValue = "3600")
+    long uploadTtlSeconds = 3600;
+
+    /**
+     * Where large blobs go; {@code null} outside CDI (tests), which stores none.
+     */
+    @Inject
+    BlobBackendSelector blobBackends;
+
     /** Announces deleted roots; {@code null} outside CDI (tests). */
     @Inject
     Event<AttachmentRootDeleted> rootDeletedEvent;
@@ -261,6 +332,12 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             stmt.execute(CREATE_INDEX_RESERVATIONS_CONV);
             stmt.execute(CREATE_INDEX_RESERVATIONS_USER);
             stmt.execute(CREATE_INDEX_RESERVATIONS_EXPIRY);
+            for (String column : ADD_BLOB_COLUMNS) {
+                stmt.execute(column);
+            }
+            stmt.execute(CREATE_TOMBSTONES_TABLE);
+            stmt.execute(CREATE_INDEX_TOMBSTONES_DUE);
+            stmt.execute(CREATE_INDEX_TOMBSTONES_OWNER);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -311,31 +388,548 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         return new Attachment(storageRef, filename, resolvedMime, bytes.length, conversationId);
     }
 
+    // ---------------------------------------------------------------- streaming
+
+    @Override
+    public Attachment store(InputStream in, long declaredLength, String declaredMime, String filename, String conversationId,
+                            String tenantId, String userId, String reservationId, QuotaMode quotaMode)
+            throws AttachmentStoreException {
+        if (quotaMode == null) {
+            throw new IllegalArgumentException("A streamed upload needs a quota mode");
+        }
+        if (quotaMode == QuotaMode.LARGE_PER_USER && userId == null) {
+            throw new IllegalArgumentException("A large upload counts against its user, so it needs one");
+        }
+        if (in == null || declaredLength < 1) {
+            throw new AttachmentStoreException("Attachment data is empty");
+        }
+        boolean inline = declaredLength <= maxSizeBytes;
+        if (!inline && quotaMode == QuotaMode.STANDARD) {
+            throw new AttachmentStoreException(
+                    "Attachment exceeds max size: %d bytes (limit: %d)".formatted(declaredLength, maxSizeBytes));
+        }
+        if (!inline && blobBackends == null) {
+            throw new AttachmentStoreException("No blob backend is configured for large attachments");
+        }
+        ensureSchema();
+        // The quota is held from before the first byte until the blob is recorded.
+        QuotaReservation reservation = reservationId != null
+                ? requireCovering(reservationId, conversationId, userId, declaredLength, quotaMode)
+                : reserve(new OwnerRef(OwnerScope.CONVERSATION, conversationId, userId), conversationId, userId, declaredLength, 1,
+                        uploadTtl(), quotaMode);
+        boolean stored = false;
+        try {
+            StreamedUpload upload = StreamedUpload.begin(in, declaredLength, declaredMime);
+            Attachment attachment = inline
+                    ? storeStreamedInline(upload, filename, conversationId, tenantId, userId, reservation, quotaMode)
+                    : storeStreamedInBackend(upload, filename, conversationId, tenantId, userId, reservation, quotaMode);
+            stored = true;
+            LOGGER.debugf("Stored streamed attachment '%s' (%s, %d bytes, %s) for conversation '%s'", sanitize(filename),
+                    attachment.mimeType(), declaredLength, inline ? "inline" : "in its blob backend", sanitize(conversationId));
+            return attachment;
+        } finally {
+            if (!stored) {
+                // Used up either way: converted above, or given back here.
+                release(reservation.id());
+            }
+            sweepTombstonesQuietly();
+        }
+    }
+
+    private Duration uploadTtl() {
+        return Duration.ofSeconds(Math.max(1, Math.min(uploadTtlSeconds, QuotaReservation.MAX_TTL.toSeconds())));
+    }
+
+    /**
+     * A caller's reservation, if it can cover this upload: live, of this
+     * conversation, user and quota mode, and holding at least its bytes and one
+     * file. Checked before the first byte is read.
+     */
+    private QuotaReservation requireCovering(String reservationId, String conversationId, String userId, long bytes, QuotaMode mode)
+            throws AttachmentStoreException {
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement("SELECT owner_key, bytes, count, expires_at FROM attachment_reservations "
+                        + "WHERE id = ? AND expires_at > NOW() AND conversation_id = ? AND user_id IS NOT DISTINCT FROM ? "
+                        + "AND quota_mode IS NOT DISTINCT FROM ?")) {
+            ps.setString(1, reservationId);
+            ps.setString(2, conversationId);
+            ps.setString(3, userId);
+            ps.setString(4, mode.stored());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                            "No live quota reservation of this conversation, user and quota mode covers this upload. Please retry.");
+                }
+                if (rs.getLong(2) < bytes || rs.getInt(3) < 1) {
+                    throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                            "The upload (%d bytes) is larger than the %d bytes reserved for it".formatted(bytes, rs.getLong(2)));
+                }
+                return new QuotaReservation(reservationId, rs.getString(1), rs.getLong(2), rs.getInt(3), rs.getTimestamp(4).toInstant());
+            }
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to read an attachment quota reservation", e);
+        }
+    }
+
+    /**
+     * Small enough for the {@code data} column: read whole (bounded by the memory
+     * guard, as every upload always was), inserted uncharged and converted in one
+     * transaction.
+     */
+    private Attachment storeStreamedInline(StreamedUpload upload, String filename, String conversationId, String tenantId, String userId,
+                                           QuotaReservation reservation, QuotaMode mode)
+            throws AttachmentStoreException {
+        byte[] bytes = upload.readFully();
+        String sha256 = upload.sha256Hex();
+        String storageRef = UUID.randomUUID().toString();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            inTransaction(conn, () -> {
+                insertStreamed(conn, storageRef, conversationId, tenantId, userId, filename, upload.resolvedMime(), bytes.length, bytes, null,
+                        sha256, mode);
+                convert(conn, reservation.id(), storageRef);
+                return null;
+            });
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to store attachment", e);
+        }
+        return new Attachment(storageRef, filename, upload.resolvedMime(), bytes.length, conversationId);
+    }
+
+    /**
+     * Too large for the {@code data} column: streamed to the blob backend outside
+     * any lock or transaction, then recorded and converted in one transaction.
+     * <p>
+     * An <em>intent tombstone</em> is written before the first byte and removed in
+     * that transaction, due only once the reservation can no longer be converted: a
+     * writer that dies mid-upload leaves its object to the sweep. The transaction
+     * must remove exactly that tombstone — if the sweep took it first, the object
+     * may be gone, and the upload is refused rather than recorded without bytes.
+     */
+    private Attachment storeStreamedInBackend(StreamedUpload upload, String filename, String conversationId, String tenantId,
+                                              String userId, QuotaReservation reservation, QuotaMode mode)
+            throws AttachmentStoreException {
+        BlobBackend backend = blobBackends.forWrites();
+        BlobLocator locator = new BlobLocator(backend.name(), BlobKeys.random());
+        long length = upload.declaredLength();
+        // Due once the reservation can no longer be converted, by the database's clock.
+        writeTombstone(locator, conversationId, reservation.expiresAt().plus(INTENT_GRACE));
+        try {
+            backend.put(locator.key(), upload.stream(), length, length);
+        } catch (IOException e) {
+            if (StreamedUpload.keyTaken(e)) {
+                removeTombstone(locator);
+            } else {
+                discard(locator, conversationId);
+            }
+            throw StreamedUpload.putFailed(e);
+        } catch (RuntimeException e) {
+            discard(locator, conversationId);
+            throw e;
+        }
+        BlobMetrics.recordWritten(meterRegistry, backend.name(), length);
+        String sha256 = upload.sha256Hex();
+        String storageRef = UUID.randomUUID().toString();
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            inTransaction(conn, () -> {
+                if (removeTombstone(conn, locator) != 1) {
+                    throw new AttachmentQuotaExceededException(AttachmentQuotaExceededException.SCOPE_RESERVATION,
+                            "This upload took longer than its quota reservation lasts. Please retry.");
+                }
+                insertStreamed(conn, storageRef, conversationId, tenantId, userId, filename, upload.resolvedMime(), length, null, locator,
+                        sha256, mode);
+                convert(conn, reservation.id(), storageRef);
+                return null;
+            });
+        } catch (SQLException e) {
+            // The outcome is unknown: a commit can fail after the server applied it. So
+            // the object is not deleted here but its tombstone made due; the sweep keeps
+            // it if a row turns out to reference it.
+            dueNow(locator, conversationId);
+            throw new AttachmentStoreException("Failed to record a streamed attachment", e);
+        } catch (AttachmentStoreException | RuntimeException e) {
+            discard(locator, conversationId);
+            throw e;
+        }
+        return new Attachment(storageRef, filename, upload.resolvedMime(), length, conversationId);
+    }
+
+    private static void insertStreamed(Connection conn, String storageRef, String conversationId, String tenantId, String userId,
+                                       String filename, String mime, long size, byte[] bytes, BlobLocator locator, String sha256,
+                                       QuotaMode mode)
+            throws SQLException {
+        String sql = "INSERT INTO attachments (storage_ref, conversation_id, tenant_id, user_id, filename, mime_type, size_bytes, data, "
+                + "owner_key, sha256, blob_backend, blob_key, quota_mode) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, storageRef);
+            ps.setString(2, conversationId);
+            ps.setString(3, tenantId);
+            ps.setString(4, userId);
+            ps.setString(5, filename);
+            ps.setString(6, mime);
+            ps.setLong(7, size);
+            if (bytes != null) {
+                ps.setBytes(8, bytes);
+            } else {
+                ps.setNull(8, Types.BINARY);
+            }
+            ps.setString(9, conversationId);
+            ps.setString(10, sha256);
+            ps.setString(11, locator != null ? locator.backend() : null);
+            ps.setString(12, locator != null ? locator.key() : null);
+            ps.setString(13, mode.stored());
+            ps.executeUpdate();
+        }
+    }
+
+    // --------------------------------------------------------------- tombstones
+
+    /**
+     * Writes a tombstone for {@code locator}, due at {@code notBefore} (a database
+     * time) or, for {@code null}, at once — or makes an existing one due sooner.
+     */
+    private void writeTombstone(BlobLocator locator, String ownerKey, Instant notBefore) throws AttachmentStoreException {
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            writeTombstone(conn, locator, ownerKey, notBefore);
+        } catch (SQLException e) {
+            throw new AttachmentStoreException("Failed to record an attachment blob tombstone", e);
+        }
+    }
+
+    private static void writeTombstone(Connection conn, BlobLocator locator, String ownerKey, Instant notBefore) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("INSERT INTO attachment_blob_tombstones (backend, blob_key, owner_key, not_before) "
+                + "VALUES (?, ?, ?, COALESCE(?, NOW())) ON CONFLICT (backend, blob_key) "
+                + "DO UPDATE SET not_before = LEAST(attachment_blob_tombstones.not_before, EXCLUDED.not_before)")) {
+            ps.setString(1, locator.backend());
+            ps.setString(2, locator.key());
+            ps.setString(3, ownerKey);
+            ps.setTimestamp(4, notBefore != null ? Timestamp.from(notBefore) : null);
+            ps.executeUpdate();
+        }
+    }
+
+    private static int removeTombstone(Connection conn, BlobLocator locator) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_blob_tombstones WHERE backend = ? AND blob_key = ?")) {
+            ps.setString(1, locator.backend());
+            ps.setString(2, locator.key());
+            return ps.executeUpdate();
+        }
+    }
+
+    private void removeTombstone(BlobLocator locator) {
+        try (Connection conn = dataSourceInstance.get().getConnection()) {
+            removeTombstone(conn, locator);
+        } catch (SQLException e) {
+            LOGGER.debugf("Could not remove an attachment blob tombstone; the sweep will: %s", sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Deletes an object no row references any more, and its tombstone. If the
+     * backend cannot delete it now, the tombstone stays (due at once) and a later
+     * sweep retries — for every reader the blob is gone already.
+     */
+    private void discard(BlobLocator locator, String ownerKey) {
+        try {
+            backendFor(locator).delete(locator.key());
+        } catch (IOException | RuntimeException e) {
+            BlobMetrics.recordTombstone(meterRegistry, locator.backend());
+            LOGGER.warnf("Could not delete an attachment's bytes from blob backend '%s'; left for the tombstone sweep: %s", locator.backend(),
+                    sanitize(e.getMessage()));
+            try {
+                writeTombstone(locator, ownerKey, null);
+            } catch (AttachmentStoreException recordFailure) {
+                LOGGER.errorf("Could not record a tombstone for an undeleted attachment blob in backend '%s': %s", locator.backend(),
+                        sanitize(recordFailure.getMessage()));
+            }
+            return;
+        }
+        removeTombstone(locator);
+    }
+
+    /**
+     * Makes the object's tombstone due at once — or writes one, if a committed
+     * record removed it — so the sweep decides by whether a row references it.
+     */
+    private void dueNow(BlobLocator locator, String ownerKey) {
+        try {
+            writeTombstone(locator, ownerKey, null);
+        } catch (AttachmentStoreException e) {
+            // The intent tombstone is still there if the record rolled back, due later.
+            LOGGER.warnf("Could not make an attachment blob tombstone due in backend '%s'; it falls due with its reservation: %s",
+                    locator.backend(), sanitize(e.getMessage()));
+        }
+    }
+
+    private void sweepTombstonesQuietly() {
+        try {
+            sweepTombstones(TOMBSTONE_SWEEP_BATCH);
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Attachment blob tombstone sweep failed; the next one retries: %s", sanitize(e.getMessage()));
+        }
+    }
+
+    /**
+     * Each due tombstone in a transaction of its own, locked {@code FOR UPDATE SKIP
+     * LOCKED}: a writer recording its upload holds its intent tombstone, so the
+     * sweep skips it; a writer that comes after the sweep took it finds it gone and
+     * refuses its upload. An object a row references is kept and only the tombstone
+     * goes. A failed delete is retried later, backing off by the minute.
+     */
+    @Override
+    public int sweepTombstones(int max) {
+        if (max < 1) {
+            return 0;
+        }
+        ensureSchema();
+        List<BlobLocator> due = new ArrayList<>();
+        try (Connection conn = dataSourceInstance.get().getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT backend, blob_key FROM attachment_blob_tombstones WHERE not_before <= NOW() ORDER BY not_before LIMIT ?")) {
+            ps.setInt(1, max);
+            try (ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    due.add(new BlobLocator(rs.getString(1), rs.getString(2)));
+                }
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to read attachment blob tombstones", e);
+        }
+        int cleared = 0;
+        for (BlobLocator locator : due) {
+            try (Connection conn = dataSourceInstance.get().getConnection()) {
+                if (inTransaction(conn, () -> sweepOne(conn, locator))) {
+                    cleared++;
+                }
+            } catch (SQLException | AttachmentStoreException e) {
+                LOGGER.debugf("Could not sweep an attachment blob tombstone: %s", sanitize(e.getMessage()));
+            }
+        }
+        return cleared;
+    }
+
+    private boolean sweepOne(Connection conn, BlobLocator locator) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM attachment_blob_tombstones WHERE backend = ? AND blob_key = ? "
+                + "AND not_before <= NOW() FOR UPDATE SKIP LOCKED")) {
+            ps.setString(1, locator.backend());
+            ps.setString(2, locator.key());
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next()) {
+                    return false;
+                }
+            }
+        }
+        boolean referenced;
+        try (PreparedStatement ps = conn.prepareStatement("SELECT 1 FROM attachments WHERE blob_key = ? AND blob_backend = ? LIMIT 1")) {
+            ps.setString(1, locator.key());
+            ps.setString(2, locator.backend());
+            try (ResultSet rs = ps.executeQuery()) {
+                referenced = rs.next();
+            }
+        }
+        if (!referenced) {
+            try {
+                backendFor(locator).delete(locator.key());
+            } catch (IOException | RuntimeException e) {
+                try (PreparedStatement ps = conn.prepareStatement("UPDATE attachment_blob_tombstones SET attempts = attempts + 1, "
+                        + "not_before = NOW() + LEAST(attempts + 1, 60) * INTERVAL '1 minute' WHERE backend = ? AND blob_key = ?")) {
+                    ps.setString(1, locator.backend());
+                    ps.setString(2, locator.key());
+                    ps.executeUpdate();
+                }
+                return false;
+            }
+        }
+        removeTombstone(conn, locator);
+        return true;
+    }
+
+    @Override
+    public long pendingTombstones(String ownerKeyOrNull) {
+        ensureSchema();
+        String sql = "SELECT COUNT(*) FROM attachment_blob_tombstones" + (ownerKeyOrNull != null ? " WHERE owner_key = ?" : "");
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (ownerKeyOrNull != null) {
+                ps.setString(1, ownerKeyOrNull);
+            }
+            try (ResultSet rs = ps.executeQuery()) {
+                rs.next();
+                return rs.getLong(1);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException("Failed to count attachment blob tombstones", e);
+        }
+    }
+
+    /**
+     * A located row a delete removed: its object and the owner it was stored for.
+     */
+    private record Removed(BlobLocator locator, String ownerKey) {
+    }
+
+    /**
+     * Reads {@code blob_backend, blob_key} at columns {@code backendColumn} and the
+     * next from a {@code DELETE … RETURNING} row; inline rows add nothing.
+     */
+    private static void collectLocated(ResultSet rs, int backendColumn, String ownerKey, List<Removed> into) throws SQLException {
+        String key = rs.getString(backendColumn + 1);
+        if (key != null) {
+            into.add(new Removed(new BlobLocator(rs.getString(backendColumn), key), ownerKey));
+        }
+    }
+
+    /**
+     * Tombstones (due at once) for the located rows a delete removed, in its
+     * transaction.
+     */
+    private static void tombstoneAll(Connection conn, List<Removed> removed) throws SQLException {
+        for (Removed row : removed) {
+            writeTombstone(conn, row.locator(), row.ownerKey(), null);
+        }
+    }
+
+    /** After the delete committed: the objects of the rows it removed. */
+    private void discardAll(List<Removed> removed) {
+        for (Removed row : removed) {
+            discard(row.locator(), row.ownerKey());
+        }
+        if (!removed.isEmpty()) {
+            sweepTombstonesQuietly();
+        }
+    }
+
     @Override
     public byte[] load(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        Located located = locate(storageRef, requestingConversationId, false);
+        // On size, not on where the bytes are: an inline row above a guard lowered
+        // later is refused too, and a located row within one raised later loads.
+        if (located.sizeBytes() > maxSizeBytes) {
+            throw new AttachmentTooLargeForMemoryException(located.sizeBytes(), maxSizeBytes);
+        }
+        if (located.locator() == null) {
+            return located.data();
+        }
+        try (InputStream in = openLocated(located.locator(), 0, -1)) {
+            return in.readAllBytes();
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to read the attachment's bytes from its blob backend", e);
+        }
+    }
+
+    @Override
+    public InputStream open(String storageRef, String requestingConversationId) throws AttachmentStoreException {
+        Located located = locate(storageRef, requestingConversationId, true);
+        if (located.locator() == null) {
+            return new ByteArrayInputStream(located.data());
+        }
+        try {
+            return openLocated(located.locator(), 0, -1);
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to open the attachment's bytes in its blob backend", e);
+        }
+    }
+
+    @Override
+    public InputStream openRange(String storageRef, String requestingConversationId, long offset, long length)
+            throws AttachmentStoreException {
+        BlobStreams.requireValidRange(offset, length);
+        Located located = locate(storageRef, requestingConversationId, true);
+        if (located.locator() == null) {
+            byte[] data = located.data();
+            int from = (int) Math.min(offset, data.length);
+            int count = (int) Math.min(length, data.length - from);
+            return new ByteArrayInputStream(data, from, count);
+        }
+        try {
+            return openLocated(located.locator(), offset, length);
+        } catch (IOException e) {
+            throw new AttachmentStoreException("Failed to open the attachment's bytes in its blob backend", e);
+        }
+    }
+
+    /**
+     * A located blob's bytes from its backend — all of them for a negative
+     * {@code length}. A backend that has no object under a key some row still names
+     * has lost data: a store failure, never "not found".
+     */
+    private InputStream openLocated(BlobLocator locator, long offset, long length) throws IOException {
+        BlobBackend backend = backendFor(locator);
+        try {
+            InputStream in = length < 0 ? backend.get(locator.key()) : backend.getRange(locator.key(), offset, length);
+            return BlobMetrics.countingReads(meterRegistry, backend.name(), in);
+        } catch (NoSuchFileException e) {
+            throw new IOException("The blob backend has no object for this attachment", e);
+        }
+    }
+
+    private BlobBackend backendFor(BlobLocator locator) throws IOException {
+        if (blobBackends == null) {
+            throw new IOException("No blob backend is configured on this node");
+        }
+        return blobBackends.forLocator(locator);
+    }
+
+    /**
+     * What a read needs of a blob the requester may read: its size, and its bytes
+     * when they are inline ({@code null} when located elsewhere or larger than the
+     * memory guard — those are never fetched).
+     */
+    private record Located(long sizeBytes, byte[] data, BlobLocator locator) {
+    }
+
+    /**
+     * Authorizes like {@link #load} always has, then returns where the bytes are
+     * ({@code forStream}: also an inline row above the memory guard, which
+     * {@link #load} refuses unread). A slice is touched: slices are a
+     * least-recently-used cache; nothing else is, so an ordinary read stays a read.
+     */
+    private Located locate(String storageRef, String requestingConversationId, boolean forStream) throws AttachmentStoreException {
         ensureSchema();
-        String sql = "SELECT a.data, " + LINEAGE_COLUMNS + LINEAGE_FROM;
+        String sql = "SELECT CASE WHEN a.blob_key IS NULL AND a.size_bytes <= ? THEN a.data END AS data, "
+                + "a.blob_backend, a.blob_key, " + LINEAGE_COLUMNS + LINEAGE_FROM;
         try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
-            ps.setString(1, requestingConversationId);
-            ps.setString(2, storageRef);
-            byte[] data;
+            ps.setLong(1, maxSizeBytes);
+            ps.setString(2, requestingConversationId);
+            ps.setString(3, storageRef);
+            Located located;
             boolean slice;
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {
                     throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
                 }
                 authorize(rs, storageRef, requestingConversationId);
-                data = rs.getBytes("data");
+                long size = rs.getLong("size_bytes");
+                String key = rs.getString("blob_key");
+                BlobLocator locator = key != null ? new BlobLocator(rs.getString("blob_backend"), key) : null;
+                byte[] data = rs.getBytes("data");
+                if (locator == null && data == null && size <= maxSizeBytes) {
+                    throw new AttachmentStoreException("Attachment " + storageRef + " has no bytes");
+                }
+                located = new Located(size, data, locator);
                 slice = Kind.PDF_SLICE.name().equals(rs.getString("kind"));
             }
             if (slice) {
-                // Slices are a least-recently-used cache; nothing else is touched, so an
-                // ordinary load stays a read.
                 touch(conn, storageRef);
             }
-            return data;
+            if (forStream && located.locator() == null && located.data() == null) {
+                // An inline row above a guard lowered since it was stored: a stream may
+                // have it; load() refuses it on its size without reading it.
+                located = new Located(located.sizeBytes(), readInline(conn, storageRef), null);
+            }
+            return located;
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to load attachment", e);
+        }
+    }
+
+    private static byte[] readInline(Connection conn, String storageRef) throws SQLException, AttachmentStoreException {
+        try (PreparedStatement ps = conn.prepareStatement("SELECT data FROM attachments WHERE storage_ref = ?")) {
+            ps.setString(1, storageRef);
+            try (ResultSet rs = ps.executeQuery()) {
+                if (!rs.next() || rs.getBytes(1) == null) {
+                    throw new AttachmentNotFoundException("Attachment not found: " + storageRef);
+                }
+                return rs.getBytes(1);
+            }
         }
     }
 
@@ -557,6 +1151,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         ensureSchema();
         boolean deleted;
         AttachmentRootDeleted announced = null;
+        List<Removed> located = new ArrayList<>();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             String owner;
             String rootRef;
@@ -598,13 +1193,22 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                         ps.executeQuery().close();
                     }
                 }
-                boolean removed;
-                try (PreparedStatement ps = conn.prepareStatement(
-                        "DELETE FROM attachments WHERE storage_ref = ? OR root_ref = ?")) {
+                boolean removed = false;
+                located.clear();
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE storage_ref = ? OR root_ref = ? "
+                        + "RETURNING blob_backend, blob_key, COALESCE(owner_key, conversation_id)")) {
                     ps.setString(1, storageRef);
                     ps.setString(2, storageRef);
-                    removed = ps.executeUpdate() > 0;
+                    try (ResultSet rs = ps.executeQuery()) {
+                        while (rs.next()) {
+                            removed = true;
+                            collectLocated(rs, 1, rs.getString(3), located);
+                        }
+                    }
                 }
+                // Bytes elsewhere are marked for removal in the same commit as their row,
+                // so no object outlives its blob unnoticed if this node stops next.
+                tombstoneAll(conn, located);
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachment_grants WHERE storage_ref = ?")) {
                     ps.setString(1, storageRef);
@@ -618,6 +1222,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         } catch (SQLException e) {
             throw new AttachmentStoreException("Failed to delete attachment", e);
         }
+        discardAll(located);
         if (announced != null) {
             DerivedBlobs.fireRootDeleted(rootDeletedEvent, List.of(announced));
         }
@@ -647,6 +1252,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     public long deleteByConversation(String conversationId) {
         ensureSchema();
         List<AttachmentRootDeleted> roots = new ArrayList<>();
+        List<Removed> located = new ArrayList<>();
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             List<String> refs = new ArrayList<>();
             int held = inTransaction(conn, () -> {
@@ -662,7 +1268,8 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     ps.executeUpdate();
                 }
                 try (PreparedStatement ps = conn.prepareStatement(
-                        "DELETE FROM attachments WHERE conversation_id = ? RETURNING storage_ref, root_ref, owner_scope, owner_key, user_id")) {
+                        "DELETE FROM attachments WHERE conversation_id = ? "
+                                + "RETURNING storage_ref, root_ref, owner_scope, owner_key, user_id, blob_backend, blob_key")) {
                     ps.setString(1, conversationId);
                     try (ResultSet rs = ps.executeQuery()) {
                         while (rs.next()) {
@@ -671,6 +1278,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                             if (rs.getString(2) == null) {
                                 roots.add(rootDeleted(ref, rs.getString(3), rs.getString(4), conversationId, rs.getString(5)));
                             }
+                            collectLocated(rs, 6, rs.getString(4) != null ? rs.getString(4) : conversationId, located);
                         }
                     }
                 }
@@ -678,11 +1286,17 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     // The lineage once more, as a new statement: the DELETE above may have
                     // waited on a root a storeDerived held FOR SHARE, and then worked from
                     // a snapshot without the view that storeDerived committed.
-                    try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachments WHERE root_ref = ANY(?)")) {
+                    try (PreparedStatement ps = conn.prepareStatement(
+                            "DELETE FROM attachments WHERE root_ref = ANY(?) RETURNING blob_backend, blob_key, COALESCE(owner_key, conversation_id)")) {
                         ps.setArray(1, conn.createArrayOf("text", roots.stream().map(AttachmentRootDeleted::rootRef).toArray()));
-                        ps.executeUpdate();
+                        try (ResultSet rs = ps.executeQuery()) {
+                            while (rs.next()) {
+                                collectLocated(rs, 1, rs.getString(3), located);
+                            }
+                        }
                     }
                 }
+                tombstoneAll(conn, located);
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachment_grants WHERE conversation_id = ? OR storage_ref = ANY(?)")) {
                     ps.setString(1, conversationId);
@@ -703,6 +1317,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         } catch (SQLException | AttachmentStoreException e) {
             throw new RuntimeException("Failed to delete attachments", e);
         }
+        discardAll(located);
         DerivedBlobs.fireRootDeleted(rootDeletedEvent, roots);
         return roots.size();
     }
@@ -1173,19 +1788,24 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
      * converted meanwhile is seen either as itself or as its blob. The count is of
      * uploads (roots) only, the bytes are the uploads' plus their media views' —
      * the only derived bytes that count toward an owner's quota. A reservation
-     * counts until it expires by the database's clock.
+     * counts until it expires by the database's clock. In the conversation's bucket
+     * the bytes of {@link QuotaMode#LARGE_PER_USER} uploads and reservations do not
+     * count — they count in the user's — though their files do.
      *
      * @param where
      *            {@code conversation_id = ?} or {@code user_id = ?}: the columns
      *            have the same name in both tables
      */
     private static long[] usage(Connection conn, String where, String value) throws SQLException {
+        String largeExempt = where.startsWith("conversation_id")
+                ? " AND quota_mode IS DISTINCT FROM '" + QuotaMode.LARGE_PER_USER.name() + "'"
+                : "";
         try (PreparedStatement ps = conn.prepareStatement(
                 "SELECT a.files + r.files, a.bytes + r.bytes FROM "
                         + "(SELECT COUNT(*) FILTER (WHERE root_ref IS NULL) AS files, "
-                        + "COALESCE(SUM(size_bytes) FILTER (WHERE root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + "), 0) AS bytes "
-                        + "FROM attachments WHERE " + where + ") a, "
-                        + "(SELECT COALESCE(SUM(count), 0) AS files, COALESCE(SUM(bytes), 0) AS bytes "
+                        + "COALESCE(SUM(size_bytes) FILTER (WHERE (root_ref IS NULL OR kind IN " + MEDIA_KINDS_SQL + ")" + largeExempt
+                        + "), 0) AS bytes FROM attachments WHERE " + where + ") a, "
+                        + "(SELECT COALESCE(SUM(count), 0) AS files, COALESCE(SUM(bytes) FILTER (WHERE TRUE" + largeExempt + "), 0) AS bytes "
                         + "FROM attachment_reservations WHERE " + where + " AND expires_at > NOW()) r")) {
             ps.setString(1, value);
             ps.setString(2, value);
@@ -1199,9 +1819,12 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
     // ------------------------------------------------------- quota reservations
 
     @Override
-    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+                                    QuotaMode mode)
             throws AttachmentStoreException {
-        QuotaReservation.validateRequest(owner, conversationId, bytes, count, ttl);
+        QuotaReservation.validateRequest(owner, conversationId, userId, bytes, count, ttl, mode);
+        // A large upload's bytes are the user's to carry, not the conversation's.
+        long conversationBytes = mode == QuotaMode.LARGE_PER_USER ? 0 : bytes;
         ensureSchema();
         boolean conversationQuota = maxPerConversation > 0 || maxTotalBytesPerConversation > 0;
         boolean userQuota = userId != null && (maxPerUser > 0 || maxTotalBytesPerUser > 0);
@@ -1219,7 +1842,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                 sweepExpired(conn);
                 if (conversationQuota) {
                     long[] usage = usage(conn, "conversation_id = ?", conversationId);
-                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes,
+                    AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, conversationBytes,
                             maxPerConversation, maxTotalBytesPerConversation);
                 }
                 if (userQuota) {
@@ -1228,8 +1851,8 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                             maxTotalBytesPerUser);
                 }
                 try (PreparedStatement ps = conn.prepareStatement("INSERT INTO attachment_reservations "
-                        + "(id, owner_key, conversation_id, user_id, bytes, count, expires_at) "
-                        + "VALUES (?, ?, ?, ?, ?, ?, NOW() + ? * INTERVAL '1 millisecond') RETURNING expires_at")) {
+                        + "(id, owner_key, conversation_id, user_id, bytes, count, expires_at, quota_mode) "
+                        + "VALUES (?, ?, ?, ?, ?, ?, NOW() + ? * INTERVAL '1 millisecond', ?) RETURNING expires_at")) {
                     ps.setString(1, id);
                     ps.setString(2, owner.ownerKey());
                     ps.setString(3, conversationId);
@@ -1237,6 +1860,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     ps.setLong(5, bytes);
                     ps.setInt(6, count);
                     ps.setLong(7, ttl.toMillis());
+                    ps.setString(8, mode.stored());
                     try (ResultSet rs = ps.executeQuery()) {
                         rs.next();
                         return new QuotaReservation(id, owner.ownerKey(), bytes, count, rs.getTimestamp(1).toInstant());

@@ -19,6 +19,9 @@ import ai.labs.eddi.engine.memory.ConversationMemoryStore;
 import ai.labs.eddi.engine.attachments.IAttachmentGrantMigration;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
 import ai.labs.eddi.engine.attachments.QuotaReservationContract;
+import ai.labs.eddi.engine.attachments.StreamingAttachmentStoreContract;
+import ai.labs.eddi.engine.attachments.blob.BlobBackendSelector;
+import ai.labs.eddi.engine.attachments.blob.FaultInjectingBlobBackend;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
@@ -47,7 +50,11 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  * stored before {@code storageRef} existed.
  */
 @DisplayName("Attachment store (MongoDB GridFS)")
-class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreContract, QuotaReservationContract {
+class GridFsAttachmentStoreIT extends MongoTestBase
+        implements
+            AttachmentStoreContract,
+            QuotaReservationContract,
+            StreamingAttachmentStoreContract {
 
     private GridFsAttachmentStore store;
 
@@ -55,6 +62,7 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
     void setUp() {
         dropCollections("attachments.files", "attachments.chunks", GridFsAttachmentStore.LOCKS_COLLECTION,
                 GridFsAttachmentStore.GRANTS_COLLECTION, GridFsAttachmentStore.BACKFILL_COLLECTION, GridFsAttachmentStore.RESERVATIONS_COLLECTION,
+                GridFsAttachmentStore.TOMBSTONES_COLLECTION, GridFsBlobBackend.BUCKET_NAME + ".files", GridFsBlobBackend.BUCKET_NAME + ".chunks",
                 "migrationlog",
                 "groupconversations");
         store = new GridFsAttachmentStore(getDatabase());
@@ -64,6 +72,10 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         store.rootDeletedEvent = rootDeleted;
         store.ensureIndexes();
         store.ensureLineageIndexes();
+        // The real GridFS backend, with 255 KiB chunks so a large test file spans
+        // several.
+        blobBackend = new FaultInjectingBlobBackend(new GridFsBlobBackend(getDatabase(), 255 * 1024));
+        store.blobBackends = BlobBackendSelector.of(blobBackend);
         // Production reads MigrationLog through its POJO codec; the bare test client
         // has none.
         migrationLog = new MigrationLogStore(getDatabase().withCodecRegistry(CodecRegistries.fromRegistries(getDatabase().getCodecRegistry(),
@@ -72,6 +84,40 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
     }
 
     private MigrationLogStore migrationLog;
+    private FaultInjectingBlobBackend blobBackend;
+
+    @Override
+    public FaultInjectingBlobBackend blobBackend() {
+        return blobBackend;
+    }
+
+    @Override
+    public void setMaxSizeBytes(long maxSizeBytes) {
+        store.maxSizeBytes = maxSizeBytes;
+    }
+
+    @Override
+    public void makeTombstonesDue() {
+        tombstones().updateMany(new Document(), List.of(new Document("$set",
+                new Document(GridFsAttachmentStore.TOMBSTONE_NOT_BEFORE, new Document("$subtract", List.of("$$NOW", 1000L))))));
+    }
+
+    @Override
+    public void seedDueTombstone(String key, String ownerKey) {
+        tombstones().insertOne(new Document("_id", GridFsBlobBackend.NAME + "/" + key).append(GridFsAttachmentStore.TOMBSTONE_BACKEND,
+                GridFsBlobBackend.NAME).append(GridFsAttachmentStore.TOMBSTONE_KEY, key).append(GridFsAttachmentStore.TOMBSTONE_OWNER_KEY, ownerKey)
+                .append(GridFsAttachmentStore.TOMBSTONE_ATTEMPTS, 0).append(GridFsAttachmentStore.TOMBSTONE_NOT_BEFORE, new Date(0)));
+    }
+
+    @Override
+    public List<String> heapProbeArgs() {
+        return List.of("mongodb", MONGO.getConnectionString(), getDatabase().getName());
+    }
+
+    private static MongoCollection<Document> tombstones() {
+        return getDatabase().getCollection(GridFsAttachmentStore.TOMBSTONES_COLLECTION);
+    }
+
     private GroupConversationStore groupConversations;
     private RecordingEvent<AttachmentRootDeleted> rootDeleted;
 

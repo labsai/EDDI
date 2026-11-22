@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import java.io.InputStream;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashSet;
@@ -144,7 +145,8 @@ class InMemoryAttachmentStore implements IAttachmentStore {
     }
 
     @Override
-    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl) {
+    public QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl,
+                                    QuotaMode mode) {
         throw new UnsupportedOperationException();
     }
 
@@ -156,5 +158,31 @@ class InMemoryAttachmentStore implements IAttachmentStore {
     @Override
     public void convert(String reservationId, String storageRef) {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Attachment store(InputStream in, long declaredLength, String declaredMime, String filename, String conversationId,
+                            String tenantId, String userId, String reservationId, QuotaMode quotaMode) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InputStream open(String storageRef, String requestingConversationId) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public InputStream openRange(String storageRef, String requestingConversationId, long offset, long length) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public long pendingTombstones(String ownerKeyOrNull) {
+        return 0;
+    }
+
+    @Override
+    public int sweepTombstones(int max) {
+        return 0;
     }
 }

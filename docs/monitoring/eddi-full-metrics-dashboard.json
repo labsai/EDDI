@@ -12218,7 +12218,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_attachment_*_total` — multimodal attachment handling, files shared between conversations (by path) or refused (by reason), and the derived files (views of an uploaded file: structure, page text, images, slices) stored by kind and in bytes.",
+          "description": "`eddi_attachment_*_total` — multimodal attachment handling, files shared between conversations (by path) or refused (by reason), and the derived files (views of an uploaded file: structure, page text, images, slices) stored by kind and in bytes, and the bytes the blob backends of large files wrote and read (`eddi_attachment_blob_bytes_total`) and the deleted files whose bytes a backend could not remove at once (`eddi_attachment_blob_tombstones_total`, retried by the tombstone sweep).",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -12313,6 +12313,28 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "derived bytes"
+            },
+            {
+              "refId": "I",
+              "expr": "sum by (backend, direction) (rate(eddi_attachment_blob_bytes_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "blob bytes: {{backend}} {{direction}}"
+            },
+            {
+              "refId": "J",
+              "expr": "sum by (backend) (rate(eddi_attachment_blob_tombstones_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "blob tombstones: {{backend}}"
             }
           ],
           "fieldConfig": {
