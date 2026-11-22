@@ -6,6 +6,7 @@ package ai.labs.eddi.configs.connections.rest;
 
 import ai.labs.eddi.configs.connections.model.ConnectionConfiguration;
 import ai.labs.eddi.configs.connections.model.OAuthConfig;
+import ai.labs.eddi.configs.connections.model.SmimeSigningConfig;
 import ai.labs.eddi.configs.connections.model.StaticAuth;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -59,6 +60,11 @@ public final class ConnectionReadRedactor {
         if (staticAuth != null) {
             staticAuth.setPasswordRef(keepIf(staticAuth.getPasswordRef(), ConnectionConfiguration::isReferenceOnly));
             staticAuth.setValueTemplate(keepIf(staticAuth.getValueTemplate(), ConnectionConfiguration::isAcceptableValueTemplate));
+        }
+        SmimeSigningConfig smime = copy.getSmimeSigning();
+        if (smime != null) {
+            smime.setCertificate(keepIf(smime.getCertificate(), ConnectionConfiguration::isReferenceOnly));
+            smime.setPassword(keepIf(smime.getPassword(), ConnectionConfiguration::isReferenceOnly));
         }
         OAuthConfig oauth = copy.getOauth();
         if (oauth != null) {

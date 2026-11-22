@@ -104,6 +104,31 @@ public interface MailTransport {
         throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
     }
 
+    /**
+     * What a submission produced: the relay's answer, and whether the message left
+     * S/MIME-signed ({@code emailControl.smime}).
+     */
+    record Sent(String providerResponse, boolean signed) {
+    }
+
+    /**
+     * {@link #send}, reporting whether the message was signed. A transport that
+     * signs overrides this; the default sends what it is given, unsigned.
+     */
+    default Sent sendMail(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        return new Sent(send(integrationId, settings, mime, recipient), false);
+    }
+
+    /**
+     * Submits the sending-health self-test (email channel v3 plan §6.5): one
+     * message from the mailbox to its own address, through its SMTP relay, signed
+     * as {@code emailControl.smime} says. Unlike {@link #send} it is allowed in
+     * trigger mode, which never replies but may test its relay.
+     */
+    default Sent sendSelfTest(String integrationId, EmailChannelSettings settings, byte[] mime) throws MailSendException {
+        throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true, "Transport " + id() + " cannot send mail.", null);
+    }
+
     /** The keyword a processed message gets. */
     String PROCESSED_KEYWORD = "$EddiProcessed";
 

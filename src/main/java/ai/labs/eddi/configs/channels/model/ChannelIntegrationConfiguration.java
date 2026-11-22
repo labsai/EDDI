@@ -28,6 +28,7 @@ public class ChannelIntegrationConfiguration {
     private String name;
     private String channelType;
     private Map<String, String> platformConfig;
+    private EmailControl emailControl;
     private List<ChannelTarget> targets;
     private String defaultTargetName;
 
@@ -106,6 +107,24 @@ public class ChannelIntegrationConfiguration {
 
     public void setPlatformConfig(Map<String, String> platformConfig) {
         this.platformConfig = platformConfig == null ? new HashMap<>() : new HashMap<>(platformConfig);
+    }
+
+    /**
+     * The typed settings of an email integration that the flat
+     * {@link #getPlatformConfig() platformConfig} cannot hold (S/MIME signing, and
+     * the sender, review and approval policies of later phases) — see
+     * {@link EmailControl}. Email integrations only: any other channel type
+     * carrying it is refused. Null when unset; every field then reads as its
+     * default.
+     *
+     * @since 6.7.0
+     */
+    public EmailControl getEmailControl() {
+        return emailControl;
+    }
+
+    public void setEmailControl(EmailControl emailControl) {
+        this.emailControl = emailControl;
     }
 
     /**

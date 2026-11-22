@@ -94,10 +94,10 @@ class McpToolContractTest {
     }
 
     @Test
-    @DisplayName("120 tools across the 19 tool classes — the count tools/list publishes")
+    @DisplayName("121 tools across the 19 tool classes — the count tools/list publishes")
     void toolCount() {
-        assertEquals(120, tools().size(), "a tool was added or removed — update this count, McpToolFilter and docs/mcp-server.md");
-        assertEquals(120, McpToolFilter.MCP_TOOLS.size());
+        assertEquals(121, tools().size(), "a tool was added or removed — update this count, McpToolFilter and docs/mcp-server.md");
+        assertEquals(121, McpToolFilter.MCP_TOOLS.size());
     }
 
     @Test

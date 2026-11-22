@@ -802,7 +802,7 @@ eddi_autonomy_suspension_gated_total        # Calls the suspension overlay gated
 **Email notifications** ([hitl.md → Email notifications](hitl.md#email-notifications)):
 
 ```text
-eddi_email_outbound_total                   # Mail EDDI sends, by outcome; tags: kind (notify|notice|reply), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited; for reply also throttled|refused|bounced|no_output)
+eddi_email_outbound_total                   # Mail EDDI sends, by outcome; tags: kind (notify|notice|reply|self_test), outcome (sent|retry|failed|suppressed|not_allowed|rate_limited; for reply also throttled|refused|bounced|no_output|held), signed (true only for a message that left S/MIME-signed)
 eddi_email_ledger_pending                   # Email ledger rows not yet sent, failed or suppressed (gauge)
 ```
 
@@ -846,6 +846,7 @@ eddi_email_poll_marked_total                # Processed mail marked in the mailb
 eddi_email_ledger_stranded_recovered_total  # Claims given back and submitted turns resolved after a crash; tag: outcome (requeued|done|failed|awaiting_human|lost|resubmitted|reply_rebuilt)
 eddi_email_outbound_latency_seconds         # Conversation mode: from a reply being queued to the relay accepting it, retries included (timer); tag: kind (reply)
 eddi_email_suppressions_total               # Addresses added to an integration's suppression list; tag: reason (bounce)
+eddi_email_smime_certificate_days_left      # Days until an email integration's S/MIME signing certificate expires, negative once expired (gauge, set by the daily check); tag: integration
 ```
 
 `integration` is the channel integration's resource id, never an address. `processed` means a turn was submitted;

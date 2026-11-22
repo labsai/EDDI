@@ -6,10 +6,14 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
 import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * The email channel's meters (email plan §20). Prometheus allows one tag set
@@ -33,6 +37,13 @@ public final class EmailMetrics {
     public static final String OUTBOUND = "eddi.email.outbound";
     public static final String OUTBOUND_LATENCY = "eddi.email.outbound.latency";
     public static final String SUPPRESSIONS = "eddi.email.suppressions";
+    public static final String SMIME_DAYS_LEFT = "eddi.email.smime.certificate.days_left";
+
+    /**
+     * One gauge value per integration. The daily check keeps one
+     * {@code EmailMetrics} for its lifetime, so each gauge is registered once.
+     */
+    private final Map<String, AtomicLong> certificateDays = new ConcurrentHashMap<>();
 
     /** Inbound outcomes, a bounded set. */
     public static final String PROCESSED = "processed";
@@ -48,6 +59,8 @@ public final class EmailMetrics {
     public static final String DEFERRED = "deferred";
     public static final String UNROUTABLE = "unroutable";
     public static final String FAILED = "failed";
+    /** The integration's own sending-health self-test came back. */
+    public static final String SELF_TEST = "self_test";
 
     private final MeterRegistry registry;
 
@@ -107,9 +120,44 @@ public final class EmailMetrics {
      * {@code eddi.email.outbound{kind=reply, outcome}} — the counter the HITL and
      * owner notifiers share, with their tag set.
      */
+    /** A reply outcome where no signed message left ({@code signed="false"}). */
     public void reply(String outcome) {
+        reply(outcome, false);
+    }
+
+    /**
+     * A reply outcome; {@code signed} says whether the message that left was
+     * S/MIME-signed. Every series of {@code eddi.email.outbound} carries the
+     * {@code signed} tag (Prometheus needs one tag set per name).
+     */
+    public void reply(String outcome, boolean signed) {
         if (registry != null) {
-            registry.counter(OUTBOUND, "kind", "reply", "outcome", outcome).increment();
+            registry.counter(OUTBOUND, "kind", "reply", "outcome", outcome, "signed", Boolean.toString(signed)).increment();
+        }
+    }
+
+    /**
+     * The self-test mail, by outcome ({@code sent}, {@code failed}, {@code held}).
+     */
+    public void selfTest(String outcome, boolean signed) {
+        if (registry != null) {
+            registry.counter(OUTBOUND, "kind", "self_test", "outcome", outcome, "signed", Boolean.toString(signed)).increment();
+        }
+    }
+
+    /**
+     * Days until the S/MIME signing certificate of an integration expires (negative
+     * once expired), set by the daily check.
+     */
+    public void certificateDaysLeft(String integrationId, long days) {
+        if (registry != null) {
+            certificateDays.computeIfAbsent(integrationId, id -> {
+                AtomicLong holder = new AtomicLong(days);
+                Gauge.builder(SMIME_DAYS_LEFT, holder, AtomicLong::doubleValue)
+                        .description("Days until an email integration's S/MIME signing certificate expires").tag("integration", id)
+                        .register(registry);
+                return holder;
+            }).set(days);
         }
     }
 

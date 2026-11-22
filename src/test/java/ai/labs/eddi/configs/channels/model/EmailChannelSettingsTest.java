@@ -105,7 +105,9 @@ class EmailChannelSettingsTest {
             assertNull(settings.fromName());
             assertTrue(settings.requireAuthentication());
             assertTrue(settings.correlateThreads(), "a conversation always keeps its thread");
-            assertEquals(List.of(), EmailChannelSettings.warnings(settings));
+            // Signing is on by default; without a certificate the save says mail goes out
+            // unsigned.
+            assertEquals(List.of(EmailChannelSettings.WARNING_SMIME_NO_CERTIFICATE), EmailChannelSettings.warnings(settings));
         }
 
         @Test
@@ -141,10 +143,12 @@ class EmailChannelSettingsTest {
         void warnings() {
             var noDisclosure = EmailChannelSettings.from(conversationWith("aiDisclosure", ""));
             assertEquals("", noDisclosure.aiDisclosure());
-            assertEquals(List.of(EmailChannelSettings.WARNING_AI_DISCLOSURE_DISABLED), EmailChannelSettings.warnings(noDisclosure));
+            assertEquals(List.of(EmailChannelSettings.WARNING_AI_DISCLOSURE_DISABLED, EmailChannelSettings.WARNING_SMIME_NO_CERTIFICATE),
+                    EmailChannelSettings.warnings(noDisclosure));
             var replyTo = EmailChannelSettings.from(conversationWith("honorReplyTo", "true"));
             assertTrue(replyTo.honorReplyTo());
-            assertEquals(List.of(EmailChannelSettings.WARNING_HONOR_REPLY_TO), EmailChannelSettings.warnings(replyTo));
+            assertEquals(List.of(EmailChannelSettings.WARNING_HONOR_REPLY_TO, EmailChannelSettings.WARNING_SMIME_NO_CERTIFICATE),
+                    EmailChannelSettings.warnings(replyTo));
             assertEquals(List.of(), EmailChannelSettings.warnings(EmailChannelSettings.from(with("aiDisclosure", ""))),
                     "trigger mode has nothing to disclose");
         }
@@ -174,7 +178,9 @@ class EmailChannelSettingsTest {
         void conversationKeysInTriggerMode() {
             assertTrue(refused(with("replyTemplate", "{output}"), "conversation mode"));
             assertTrue(refused(with("aiDisclosure", "x"), "conversation mode"));
-            assertTrue(refused(with("smtpHost", "smtp.office365.com"), "conversation mode"));
+            // smtpHost is a common key since v3 C2: trigger mode uses it for the self-test
+            // only.
+            assertEquals(List.of(), EmailChannelSettings.validate(with("smtpHost", "smtp.office365.com")));
             assertTrue(refused(with("honorReplyTo", "true"), "conversation mode"));
             assertEquals(List.of(), EmailChannelSettings.validate(with("aiDisclosure", "")));
             assertFalse(EmailChannelSettings.from(minimal()).replies(), "trigger mode never replies");

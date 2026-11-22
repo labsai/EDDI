@@ -44,7 +44,20 @@ public enum AuthType {
      * {@link #OAUTH2_CLIENT_CREDENTIALS} it needs no human step, so it is
      * {@link Binding#SERVICE} only and the first call mints the grant.
      */
-    OAUTH2_JWT_BEARER;
+    OAUTH2_JWT_BEARER,
+
+    /**
+     * An S/MIME signing certificate and its private key, for the mail an email
+     * integration sends (email channel v3 plan §6.2). Not an HTTP credential at
+     * all: nothing is sent to a server, the key signs mail inside EDDI and only the
+     * public certificate travels in the signature. {@link Binding#SERVICE} only,
+     * and resolved only by the email transport — every header-producing resolution
+     * path refuses it. Its {@code baseUrlAllowlist} names the SMTP origins
+     * ({@code smtps://host}, {@code smtp://host:587}) whose mail it may sign.
+     *
+     * @since 6.7.0
+     */
+    SMIME_SIGNING;
 
     /**
      * Whether this type completes an OAuth 2.0 flow, and so needs a token endpoint,

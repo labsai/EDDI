@@ -42,7 +42,7 @@ interface EmailMessageLedgerContract {
     /** Every field a row may store — and no body, subject or MIME. */
     Set<String> ALLOWED_FIELDS = Set.of("id", "integrationid", "kind", "direction", "messageid", "conversationid", "sourceref",
             "idempotencykey", "recipient", "state", "attempts", "nextattemptat", "claimtoken", "providerid", "lasterror", "createdat",
-            "updatedat", "expiresat");
+            "updatedat", "expiresat", "signed");
 
     IEmailMessageLedger ledger();
 
@@ -66,6 +66,38 @@ interface EmailMessageLedgerContract {
         return new LedgerEntry(UUID.randomUUID().toString(), IEmailMessageLedger.SYSTEM_INTEGRATION, Kind.NOTIFY, Direction.OUT,
                 "<eddi." + UUID.randomUUID() + "@example.com>", "conv-1", "pause-1", idempotencyKey, recipient, State.PENDING, 0, nextAttemptAt, null,
                 null, null, NOW, NOW, NOW.plus(Duration.ofDays(30)));
+    }
+
+    @Test
+    @DisplayName("whether an OUT row left S/MIME-signed is stored with its completion and read back (v3 C2)")
+    default void signedFlag() {
+        assertTrue(ledger().insertIfAbsent(entry("signed-1", NOW, "a@example.com")));
+        assertTrue(ledger().insertIfAbsent(entry("signed-2", NOW, "b@example.com")));
+        for (LedgerEntry row : ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(60), 10)) {
+            boolean signed = "signed-1".equals(row.idempotencyKey());
+            assertTrue(ledger().complete(row.id(), row.claimToken(), State.SENT, "250 ok", null, signed, NOW));
+        }
+        assertEquals(Boolean.TRUE, ledger().findByIdempotencyKey("signed-1").orElseThrow().signed());
+        assertEquals(Boolean.FALSE, ledger().findByIdempotencyKey("signed-2").orElseThrow().signed());
+
+        assertTrue(ledger().insertIfAbsent(entry("signed-3", NOW, "c@example.com")));
+        assertNull(ledger().findByIdempotencyKey("signed-3").orElseThrow().signed(), "not known until sent");
+    }
+
+    @Test
+    @DisplayName("a held row waits without spending an attempt, and is claimable again when its hold ends (v3 C2)")
+    default void holdKeepsAttempts() {
+        assertTrue(ledger().insertIfAbsent(entry("held-1", NOW, "a@example.com")));
+        LedgerEntry claimed = ledger().claimDue(Kind.NOTIFY, NOW, NOW.plusSeconds(60), 10).get(0);
+        assertEquals(1, claimed.attempts());
+        assertTrue(ledger().hold(claimed.id(), claimed.claimToken(), NOW.plusSeconds(3600), "smime_unavailable: expired", NOW));
+        LedgerEntry held = ledger().findById(claimed.id()).orElseThrow();
+        assertEquals(State.PENDING, held.state());
+        assertEquals(0, held.attempts());
+        assertEquals("smime_unavailable: expired", held.lastError());
+        assertTrue(ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(60), NOW.plusSeconds(120), 10).isEmpty(), "held for an hour");
+        assertEquals(1, ledger().claimDue(Kind.NOTIFY, NOW.plusSeconds(3601), NOW.plusSeconds(3700), 10).size());
+        assertFalse(ledger().hold(claimed.id(), "stale-token", NOW.plusSeconds(10), "x", NOW), "only the claim holds");
     }
 
     @Test

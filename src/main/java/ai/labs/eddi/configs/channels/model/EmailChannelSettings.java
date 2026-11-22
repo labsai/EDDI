@@ -70,7 +70,8 @@ public record EmailChannelSettings(
         String aiDisclosure,
         ThreadParticipants threadParticipants,
         int maxRepliesPerThreadPerHour,
-        boolean honorReplyTo) {
+        boolean honorReplyTo,
+        EmailControl emailControl) {
 
     /** The channel type this applies to. */
     public static final String CHANNEL_TYPE = "email";
@@ -110,7 +111,8 @@ public record EmailChannelSettings(
     public static final Set<String> COMMON_KEYS = Set.of(KEY_MODE, KEY_TRANSPORT, KEY_CONNECTION, KEY_HOST, KEY_PORT, KEY_ADDRESS, KEY_FOLDER,
             KEY_PROCESSED_ACTION, KEY_POLL_SECONDS, KEY_REQUIRE_AUTHENTICATION, KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST, KEY_IDENTITY_MODE,
             KEY_ATTACHMENTS, KEY_ATTACHMENT_MIME_TYPES, KEY_MAX_MESSAGE_BYTES, KEY_STRIP_QUOTED_HISTORY, KEY_INPUT_TEMPLATE,
-            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES);
+            KEY_MAX_TURNS_PER_SENDER_PER_DAY, KEY_DAILY_COST_BUDGET_USD, KEY_OWNER_NOTIFY_ADDRESSES, KEY_SMTP_HOST, KEY_SMTP_PORT,
+            KEY_FROM_NAME);
 
     /**
      * Keys only trigger mode reads: a conversation always threads, so
@@ -121,9 +123,14 @@ public record EmailChannelSettings(
     /**
      * Keys that only mean something in conversation mode (email plan §10), refused
      * in trigger mode with their own message so an author learns why.
+     * <p>
+     * {@code smtpHost}, {@code smtpPort} and {@code fromName} are common keys since
+     * v3 phase C2: a trigger-mode integration still never replies, but it sends its
+     * own sending-health self-test (and, in a later phase, approved send-outs)
+     * through its SMTP relay.
      */
-    public static final Set<String> CONVERSATION_KEYS = Set.of(KEY_SMTP_HOST, KEY_SMTP_PORT, KEY_FROM_NAME, KEY_REPLY_TEMPLATE, KEY_AI_DISCLOSURE,
-            KEY_THREAD_PARTICIPANTS, KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, KEY_HONOR_REPLY_TO);
+    public static final Set<String> CONVERSATION_KEYS = Set.of(KEY_REPLY_TEMPLATE, KEY_AI_DISCLOSURE, KEY_THREAD_PARTICIPANTS,
+            KEY_MAX_REPLIES_PER_THREAD_PER_HOUR, KEY_HONOR_REPLY_TO);
 
     /** Every key trigger mode reads. */
     public static final Set<String> TRIGGER_KEYS = union(COMMON_KEYS, TRIGGER_ONLY_KEYS);
@@ -328,6 +335,9 @@ public record EmailChannelSettings(
      * {@code smtps://<smtpHost>} (465) or {@code smtp://<smtpHost>:587}.
      */
     public String smtpOrigin() {
+        if (smtpHost == null) {
+            return null;
+        }
         return smtpPort == SMTP_IMPLICIT_TLS_PORT ? "smtps://" + smtpHost : "smtp://" + smtpHost + ":" + SMTP_STARTTLS_PORT;
     }
 
@@ -337,11 +347,80 @@ public record EmailChannelSettings(
     }
 
     /**
+     * Whether the integration has an SMTP relay at all ({@code smtpHost} set):
+     * always in conversation mode, optional in trigger mode, where only the
+     * self-test uses it.
+     */
+    public boolean hasSmtp() {
+        return smtpHost != null;
+    }
+
+    /**
+     * {@code emailControl.smime.sign}, default {@link EmailControl.SignMode#TRUE}.
+     */
+    public EmailControl.SignMode smimeSign() {
+        EmailControl.Smime smime = emailControl == null ? null : emailControl.getSmime();
+        return smime == null || smime.getSign() == null ? EmailControl.SignMode.TRUE : smime.getSign();
+    }
+
+    /**
+     * The bare name of the {@code SMIME_SIGNING} connection, or null when none is
+     * named (or the name is not usable — {@link #validate} reports it).
+     */
+    public String smimeConnection() {
+        EmailControl.Smime smime = emailControl == null ? null : emailControl.getSmime();
+        return smime == null ? null : connectionName(blankToNull(smime.getConnection()));
+    }
+
+    /**
+     * Whether mail this integration sends is to be signed: {@code sign} is
+     * {@code true} and a signing connection is named, or {@code sign} is
+     * {@code required} (which holds the mail when signing is impossible).
+     */
+    public boolean wantsSignature() {
+        EmailControl.SignMode sign = smimeSign();
+        return sign == EmailControl.SignMode.REQUIRED || (sign == EmailControl.SignMode.TRUE && smimeConnection() != null);
+    }
+
+    /**
+     * Reads the settings of an email integration document: its
+     * {@code platformConfig} and its {@code emailControl}. Every production reader
+     * uses this form, so a typed setting cannot be read as its default by one path
+     * and as its value by another.
+     */
+    public static EmailChannelSettings from(ChannelIntegrationConfiguration configuration) {
+        return configuration == null ? from(null, null) : from(configuration.getPlatformConfig(), configuration.getEmailControl());
+    }
+
+    /** {@link #validate(Map, EmailControl)} of an email integration document. */
+    public static List<String> validate(ChannelIntegrationConfiguration configuration) {
+        return configuration == null ? validate(null, null) : validate(configuration.getPlatformConfig(), configuration.getEmailControl());
+    }
+
+    /**
+     * The settings of a bare {@code platformConfig}, as if {@code emailControl}
+     * were absent. For tests and key-level checks; a document is read with
+     * {@link #from(ChannelIntegrationConfiguration)}.
+     */
+    public static EmailChannelSettings from(Map<String, String> platformConfig) {
+        return from(platformConfig, null);
+    }
+
+    /**
+     * {@link #validate(Map, EmailControl)} without an {@code emailControl}. For
+     * tests and key-level checks; a document is validated with
+     * {@link #validate(ChannelIntegrationConfiguration)}.
+     */
+    public static List<String> validate(Map<String, String> platformConfig) {
+        return validate(platformConfig, null);
+    }
+
+    /**
      * Reads the settings, defaults applied. Values that do not parse read as their
      * default (or null for a required field); {@link #validate} reports them, and
      * the poller refuses to run an integration whose settings do not validate.
      */
-    public static EmailChannelSettings from(Map<String, String> platformConfig) {
+    public static EmailChannelSettings from(Map<String, String> platformConfig, EmailControl emailControl) {
         Map<String, String> pc = platformConfig == null ? Map.of() : platformConfig;
         EmailProcessedAction parsedAction = EmailProcessedAction.parse(pc.get(KEY_PROCESSED_ACTION));
         // An unparseable value reads as the default; validate() reports it.
@@ -387,7 +466,7 @@ public record EmailChannelSettings(
                 replyTemplate == null || replyTemplate.isBlank() ? DEFAULT_REPLY_TEMPLATE : replyTemplate, disclosure,
                 ThreadParticipants.fromId(pc.get(KEY_THREAD_PARTICIPANTS)),
                 (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
-                bool(pc.get(KEY_HONOR_REPLY_TO), false));
+                bool(pc.get(KEY_HONOR_REPLY_TO), false), emailControl == null ? new EmailControl() : emailControl);
     }
 
     /**
@@ -396,7 +475,7 @@ public record EmailChannelSettings(
      * that need the deployment (the connection, the hosts' DNS, address uniqueness)
      * run in the store.
      */
-    public static List<String> validate(Map<String, String> platformConfig) {
+    public static List<String> validate(Map<String, String> platformConfig, EmailControl emailControl) {
         List<String> errors = new ArrayList<>();
         Map<String, String> pc = platformConfig == null ? Map.of() : platformConfig;
 
@@ -480,9 +559,11 @@ public record EmailChannelSettings(
             errors.add("platformConfig.requireAuthentication cannot be false in conversation mode: EDDI never answers a sender whose "
                     + "From DKIM and DMARC alignment did not authenticate, because that address may be forged.");
         }
+        validateSmtp(errors, pc, conversation);
         if (conversation) {
             validateConversation(errors, pc);
         }
+        validateEmailControl(errors, emailControl);
         booleanCheck(errors, pc, KEY_CORRELATE_THREADS);
         booleanCheck(errors, pc, KEY_STRIP_QUOTED_HISTORY);
         for (String key : List.of(KEY_SENDER_ALLOWLIST, KEY_SENDER_BLOCKLIST)) {
@@ -545,8 +626,13 @@ public record EmailChannelSettings(
         return errors;
     }
 
-    private static void validateConversation(List<String> errors, Map<String, String> pc) {
-        if (blankToNull(pc.get(KEY_SMTP_HOST)) == null) {
+    /**
+     * The SMTP relay: required in conversation mode, optional in trigger mode (only
+     * the self-test uses it there). Port and display name are checked in both
+     * modes.
+     */
+    private static void validateSmtp(List<String> errors, Map<String, String> pc, boolean conversation) {
+        if (conversation && blankToNull(pc.get(KEY_SMTP_HOST)) == null) {
             errors.add("Conversation mode requires platformConfig.smtpHost (the SMTP submission server, e.g. smtp.office365.com).");
         }
         String smtpPort = blankToNull(pc.get(KEY_SMTP_PORT));
@@ -561,6 +647,30 @@ public record EmailChannelSettings(
             errors.add("platformConfig.fromName must be at most " + MAX_FROM_NAME_LENGTH + " characters, without line breaks or control "
                     + "characters.");
         }
+    }
+
+    /**
+     * {@code emailControl}: what can be judged without the deployment. Whether the
+     * named connection exists, is {@code SMIME_SIGNING} and holds a usable
+     * certificate for {@code address} is checked against the deployment
+     * ({@code EmailChannelSupport}).
+     */
+    private static void validateEmailControl(List<String> errors, EmailControl emailControl) {
+        if (emailControl == null || emailControl.getSmime() == null) {
+            return;
+        }
+        EmailControl.Smime smime = emailControl.getSmime();
+        String connection = blankToNull(smime.getConnection());
+        if (connection != null && connectionName(connection) == null) {
+            errors.add("emailControl.smime.connection must be a connection name (letters, digits, '.', '_', '-') or ${connection:<name>}.");
+        }
+        if (smime.getSign() == EmailControl.SignMode.REQUIRED && connection == null) {
+            errors.add("emailControl.smime.sign 'required' needs emailControl.smime.connection: the name of an SMIME_SIGNING connection "
+                    + "holding the mailbox's certificate. Without one every outgoing mail would be held.");
+        }
+    }
+
+    private static void validateConversation(List<String> errors, Map<String, String> pc) {
         String template = pc.get(KEY_REPLY_TEMPLATE);
         if (template != null && template.length() > MAX_REPLY_TEMPLATE_LENGTH) {
             errors.add("platformConfig.replyTemplate is longer than " + MAX_REPLY_TEMPLATE_LENGTH + " characters.");
@@ -608,8 +718,32 @@ public record EmailChannelSettings(
                 warnings.add(WARNING_HONOR_REPLY_TO);
             }
         }
+        if (settings.hasSmtp() && settings.smimeSign() == EmailControl.SignMode.TRUE && settings.smimeConnection() == null) {
+            warnings.add(WARNING_SMIME_NO_CERTIFICATE);
+        }
         return warnings;
     }
+
+    /**
+     * Signing is on ({@code emailControl.smime.sign} true, the default) but no
+     * {@code SMIME_SIGNING} connection is named: mail goes out unsigned.
+     */
+    public static final String WARNING_SMIME_NO_CERTIFICATE = "email.smime-no-certificate";
+    /**
+     * The signing certificate does not match the mailbox, lacks the S/MIME key
+     * usages, has expired, or its chain cannot be built: signing would fail (and
+     * under {@code sign: required} the save is refused instead).
+     */
+    public static final String WARNING_SMIME_CERTIFICATE_UNUSABLE = "email.smime-certificate-unusable";
+    /**
+     * The certificate is usable but expires within 30 days.
+     */
+    public static final String WARNING_SMIME_CERTIFICATE_EXPIRING = "email.smime-certificate-expiring";
+    /**
+     * The certificate's chain is complete but does not lead to a publicly trusted
+     * root, so recipients' clients will show the signature as untrusted.
+     */
+    public static final String WARNING_SMIME_UNTRUSTED_CHAIN = "email.smime-untrusted-chain";
 
     /**
      * Replies no longer say an AI wrote them ({@code aiDisclosure} emptied) — see

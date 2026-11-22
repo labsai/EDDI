@@ -33,6 +33,12 @@
         <failsafe-plugin.version>3.6.1</failsafe-plugin.version>
         <failsafe.useModulePath>false</failsafe.useModulePath>
         <quarkus-mcp-server.version>2.0.4</quarkus-mcp-server.version>
+        <!-- One Bouncy Castle LTS line for every org.bouncycastle artifact: the
+             bcprov-lts8on CVE override below and the S/MIME modules the email
+             channel signs with (bcpkix-lts8on, bcutil-lts8on, bcjmail-lts8on).
+             Mixing lines puts two copies of the provider classes on the classpath,
+             so bump this property, never one artifact. -->
+        <bouncycastle.version>2.73.13</bouncycastle.version>
         <skipITs>true</skipITs>
         <!-- skipUTs skips surefire alone, so CI's Integration Tests job can reuse the
              unit-test coverage data Build & Test already produced (target/jacoco.exec)
@@ -159,7 +165,7 @@
             <dependency>
                 <groupId>org.bouncycastle</groupId>
                 <artifactId>bcprov-lts8on</artifactId>
-                <version>2.73.13</version>
+                <version>${bouncycastle.version}</version>
             </dependency>
             <!-- swagger-annotations is a VERSION PIN, not a usage. No source imports
                  io.swagger.v3.oas.annotations, so the direct <dependency> was removed
@@ -420,6 +426,27 @@
             <groupId>org.eclipse.angus</groupId>
             <artifactId>angus-mail</artifactId>
             <version>2.0.5</version>
+        </dependency>
+        <!-- S/MIME signing of the mail an email integration sends (email channel
+             v3 plan §6.4): Bouncy Castle's CMS/PKIX module and its Jakarta Mail
+             S/MIME module, on the same LTS line as the bcprov-lts8on override
+             (bouncycastle.version). Bouncy Castle Licence (MIT-style). bcjmail
+             signs the Angus MimeMessage EDDI already builds, so there is no second
+             MIME stack. -->
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcpkix-lts8on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcutil-lts8on</artifactId>
+            <version>${bouncycastle.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.bouncycastle</groupId>
+            <artifactId>bcjmail-lts8on</artifactId>
+            <version>${bouncycastle.version}</version>
         </dependency>
         <!-- DKIM/DMARC TXT lookups (engine/mail MailDnsResolver). dnsjava,
              BSD-3-Clause; its only runtime dependency is slf4j-api, which the

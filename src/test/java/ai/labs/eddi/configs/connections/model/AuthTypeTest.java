@@ -27,6 +27,7 @@ class AuthTypeTest {
         assertTrue(AuthType.OAUTH2_JWT_BEARER.isOAuth(), "the signed-assertion service account stores a grant too");
         assertFalse(AuthType.STATIC.isOAuth(), "a static header has no token endpoint; treating it as OAuth would demand a vault it never uses");
         assertFalse(AuthType.BASIC.isOAuth());
+        assertFalse(AuthType.SMIME_SIGNING.isOAuth(), "a signing certificate has no token endpoint");
     }
 
     @Test
@@ -37,6 +38,7 @@ class AuthTypeTest {
         assertFalse(AuthType.OAUTH2_AUTHORIZATION_CODE.isServiceAccount(), "a per-user grant needs its user's consent; it is never minted");
         assertFalse(AuthType.STATIC.isServiceAccount());
         assertFalse(AuthType.BASIC.isServiceAccount());
+        assertFalse(AuthType.SMIME_SIGNING.isServiceAccount());
     }
 
     @Test
@@ -47,7 +49,7 @@ class AuthTypeTest {
         // saves without a vault and then fails at the moment the token comes back.
         // This test is the tripwire — if it fails, decide the new constant's answer
         // above rather than only widening the number.
-        assertEquals(5, AuthType.values().length,
+        assertEquals(6, AuthType.values().length,
                 "a new AuthType was added; classify it in namesExactlyTheOAuthTypes and namesExactlyTheServiceAccountTypes, and check isOAuth still answers correctly for it");
     }
 }

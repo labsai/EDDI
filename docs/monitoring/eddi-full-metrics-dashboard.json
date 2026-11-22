@@ -12830,7 +12830,7 @@
         {
           "id": 287,
           "type": "timeseries",
-          "title": "Email suppressions added",
+          "title": "Email suppressions added, S/MIME certificate days left",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
@@ -12850,6 +12850,15 @@
               "expr": "sum by (reason) (increase(eddi_email_suppressions_total{job=~\"$job\"}[1h]))",
               "legendFormat": "{{reason}}",
               "refId": "A"
+            },
+            {
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "expr": "min by (integration) (eddi_email_smime_certificate_days_left{job=~\"$job\"})",
+              "legendFormat": "S/MIME certificate days left: {{integration}}",
+              "refId": "B"
             }
           ],
           "fieldConfig": {

@@ -11,6 +11,7 @@ import static org.mockito.Mockito.when;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
@@ -68,6 +69,14 @@ class RestChannelIntegrationStoreValidationTest {
     @DisplayName("valid config passes validation without exception")
     void validConfigPasses() {
         assertDoesNotThrow(() -> store.validateConfiguration(config));
+    }
+
+    @Test
+    @DisplayName("emailControl on a non-email integration is refused (400)")
+    void emailControlOnSlackIsRefused() {
+        config.setEmailControl(new EmailControl(new EmailControl.Smime(EmailControl.SignMode.TRUE, null)));
+        var e = assertThrows(BadRequestException.class, () -> store.validateConfiguration(config));
+        assertTrue(e.getMessage().contains("emailControl applies to email integrations only"), e.getMessage());
     }
 
     // ─── Name ──────────────────────────────────────────────────────────────────

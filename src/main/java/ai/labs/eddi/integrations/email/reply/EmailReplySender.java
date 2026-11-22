@@ -517,9 +517,10 @@ public class EmailReplySender {
                 }
                 return;
             }
-            String provider = transport.send(row.integrationId(), prepared.settings(), prepared.mail().mime(), row.recipient());
-            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, now)) {
-                metrics.reply("sent");
+            MailTransport.Sent sent = transport.sendMail(row.integrationId(), prepared.settings(), prepared.mail().mime(), row.recipient());
+            String provider = sent.providerResponse();
+            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, sent.signed(), now)) {
+                metrics.reply("sent", sent.signed());
                 metrics.replyLatency(Duration.between(row.createdAt(), now));
                 audit(row, "sent", provider, null);
                 groupReplies.invalidate(row.id());
@@ -527,6 +528,10 @@ public class EmailReplySender {
                         sanitize(row.conversationId()));
             }
         } catch (MailSendException e) {
+            if (e.getCategory() == MailSendException.Category.SIGNING) {
+                hold(row, prepared.settings(), e, now);
+                return;
+            }
             String error = e.getCategory() + ": " + truncate(e.getMessage());
             retry.deferOrFail(row, error, e.isPermanent(), now, () -> fail(row, prepared.settings(), error, now), () -> {
                 metrics.reply("retry");
@@ -537,6 +542,30 @@ public class EmailReplySender {
             LOGGER.warnf(e, "Email integration %s: reply %s failed unexpectedly", sanitize(row.integrationId()), row.id());
             String error = "OTHER: " + e.getClass().getSimpleName();
             retry.deferOrFail(row, error, false, now, () -> fail(row, prepared.settings(), error, now), () -> metrics.reply("retry"));
+        }
+    }
+
+    /**
+     * How long a reply held for its S/MIME certificate waits before it is tried
+     * again.
+     */
+    static final Duration SMIME_HOLD = Duration.ofHours(1);
+
+    /**
+     * {@code sign: required} and the reply cannot be signed: it is never sent
+     * unsigned. The row waits (without spending an attempt) and is tried again
+     * hourly, so it leaves as soon as the certificate is fixed; the owners hear
+     * about it once a day. It ends only when the ledger retention removes it.
+     */
+    private void hold(LedgerEntry row, EmailChannelSettings settings, MailSendException e, Instant now) {
+        String reason = truncate(e.getMessage() != null && e.getMessage().startsWith("smime_unavailable")
+                ? e.getMessage()
+                : "smime_unavailable: " + e.getMessage());
+        if (ledger.hold(row.id(), row.claimToken(), now.plus(SMIME_HOLD), reason, now)) {
+            metrics.reply("held");
+            LOGGER.warnf("Email integration %s: reply %s held, it cannot be S/MIME-signed and signing is required: %s",
+                    sanitize(row.integrationId()), row.id(), reason);
+            notifyOwners(row.integrationId(), settings, EmailOwnerNotifier.Reason.SMIME_UNAVAILABLE, now);
         }
     }
 

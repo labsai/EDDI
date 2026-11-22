@@ -1461,4 +1461,30 @@ public class McpAdminTools {
             return toolFailure(LOGGER, "delete_channel_integration", "Failed to delete channel integration", e);
         }
     }
+
+    @Tool(name = "run_email_self_test", description = "Run or read the sending-health self-test of an email channel integration. "
+            + "Without token: sends one short mail from the integration to its own address through its SMTP relay (platformConfig.smtpHost, "
+            + "trigger mode too), S/MIME-signed as emailControl.smime says, and returns {status: 'waiting', token, expiresAt}; the token "
+            + "is shown only once and is valid for 15 minutes. With token: returns the result once the mailbox poll picked the mail up "
+            + "(status waiting | done | expired | send_failed) — the DKIM verdict and signing domain, DMARC alignment, whether the "
+            + "S/MIME signature verified and whether the domain publishes DMARC, each as a plain-language finding with what to do. On "
+            + "Microsoft 365 an unsigned result is 'inconclusive'. The test mail never starts an agent turn. At most 5 tests per "
+            + "integration per hour. Needs edit access to the integration.")
+    public String runEmailSelfTest(
+                                   @ToolArg(description = "Email channel integration resource ID (required)") String integrationId,
+                                   @ToolArg(description = "The token a previous call returned, to read that test's result (omit to start a "
+                                           + "new test)", required = false) String token) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        try {
+            var channelStore = getRestStore(IRestChannelIntegrationStore.class);
+            var result = token == null || token.isBlank()
+                    ? channelStore.startEmailSelfTest(integrationId)
+                    : channelStore.readEmailSelfTest(integrationId, token.trim());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "run_email_self_test", "Failed to run the email self-test", e);
+        }
+    }
 }
