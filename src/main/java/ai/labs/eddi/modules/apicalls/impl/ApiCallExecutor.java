@@ -996,7 +996,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+            // A preview: built as the approved execution would build it, so a gated
+            // configuration write by a mail-started turn resolves and is pinned rather
+            // than approved on its tool name alone (see buildRequest).
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory),
+                    true);
             var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
@@ -1580,9 +1584,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
+        return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, false);
+    }
+
+    /**
+     * As the five-argument form; {@code preview} is {@code true} only for
+     * {@link #resolve}, which builds a gated call's request for its approval card
+     * and its pin, and never sends it.
+     */
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+                                      Map<String, Property> conversationProperties, Function<String, Context> secretContext, boolean preview)
+            throws ITemplatingEngine.TemplateEngineException {
         var resolvedSecrets = new ResolvedSecrets();
         try {
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets,
+                    preview);
             if (ApprovedCallScope.isActive()) {
                 // A human-approved tool call: judge the request exactly as it will be
                 // sent, after preRequest.propertyInstructions ran — the preview the
@@ -1766,7 +1782,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext,
-                                      ResolvedSecrets resolvedSecrets)
+                                      ResolvedSecrets resolvedSecrets, boolean preview)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -1806,8 +1822,16 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // writes to EDDI's own channel or approval endpoints, whatever the tool or
         // rule that sends the request is called. A configuration write passes only as
         // the approved execution of a gated call of this very conversation.
+        //
+        // A preview judges the configuration write as that approved execution would:
+        // it sends nothing, and it is what the approver sees and what the approval is
+        // pinned to. Refusing it here (no approval exists yet at gate time, and the
+        // resume re-check runs outside the approved scope too) left every such call
+        // approved unpinned — on its tool name and arguments, not on the request that
+        // runs. The guarded endpoints are refused in a preview as anywhere else, and
+        // the real build at execution still needs ApprovedCallScope.
         Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri,
-                ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
+                preview || ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
         if (escalation.isPresent()) {
             throw new IllegalArgumentException(escalation.get());
         }

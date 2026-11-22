@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -228,6 +229,28 @@ class RestChannelIntegrationStoreEmailSendersTest {
         assertTrue(response.getStatus() < 300, String.valueOf(response.getStatus()));
         assertTrue(response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER).contains(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED));
         verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
+    }
+
+    @Test
+    @DisplayName("PUT ?version=0 compares with the current version: emptying the allowlist still needs confirmOpen, and is audited at it")
+    void versionZeroIsTheCurrentVersion() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        var refused = assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 0, email(Map.of())));
+        assertTrue(refused.getMessage().contains("confirmOpen"));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+
+        sut.updateChannel(ID, 0, true, email(Map.of()));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
+    }
+
+    @Test
+    @DisplayName("a save whose stored sender lists cannot be read is refused, not saved unchecked")
+    void unreadableBaselineRefuses() throws Exception {
+        when(channelStore.read(ID, 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        assertThrows(InternalServerErrorException.class, () -> sut.updateChannel(ID, 3, email(Map.of())));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
     }
 
     @Test

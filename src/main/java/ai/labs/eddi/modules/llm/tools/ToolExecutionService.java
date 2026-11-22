@@ -429,7 +429,10 @@ public class ToolExecutionService {
             }
             String result;
             try {
-                result = executeBounded(toolExecution, timeoutMs);
+                // Bound on the thread the tool runs on (executeBounded may hand it to a
+                // worker): what tells an approved call's own requests from those of a
+                // conversation it runs inline (ApprovedCallScope#approvesHere).
+                result = executeBounded(() -> ApprovedCallScope.inConversation(conversationId, toolExecution), timeoutMs);
             } catch (ToolTimedOut | InterruptedException unknownOutcome) {
                 // Outcome unknown: the worker may still finish the side effect (an interrupt
                 // abandons it exactly as a timeout does). Keep the count.

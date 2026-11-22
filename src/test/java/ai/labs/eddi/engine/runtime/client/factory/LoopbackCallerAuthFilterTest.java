@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.runtime.client.factory;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.CallerIdentity;
@@ -120,6 +122,27 @@ class LoopbackCallerAuthFilterTest {
 
         assertEquals(TurnOrigin.EMAIL, headers.getFirst(TurnOrigin.HEADER));
         assertFalse(headers.containsKey(HttpHeaders.AUTHORIZATION));
+    }
+
+    @Test
+    @DisplayName("a loopback states an approval only for the approved call's own conversation, not one it runs inline")
+    void approvalOnlyForTheApprovedConversation() throws Exception {
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+        MultivaluedMap<String, Object> own = new MultivaluedHashMap<>();
+        MultivaluedMap<String, Object> nested = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", () -> {
+                filterFor(null, null).filter(requestWith(own));
+                return null;
+            }));
+            ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-b", () -> {
+                filterFor(null, null).filter(requestWith(nested));
+                return null;
+            }));
+        }
+
+        assertEquals("true", own.getFirst(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", nested.getFirst(TurnOrigin.APPROVED_HEADER));
     }
 
     @Test

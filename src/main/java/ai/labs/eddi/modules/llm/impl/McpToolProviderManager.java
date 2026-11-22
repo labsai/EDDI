@@ -1302,7 +1302,9 @@ public class McpToolProviderManager {
      * calls its meta supplier synchronously before the transport is involved.
      */
     McpMetaSupplier traceMetaSupplier() {
-        return callContext -> withTurnOriginMeta(traceMeta(tracePropagation), TurnOrigin.current(), ApprovedCallScope.isActive());
+        // approvesHere, not isActive: the approval of one conversation's call must not
+        // be stated on the MCP requests of a conversation that call runs inline.
+        return callContext -> withTurnOriginMeta(traceMeta(tracePropagation), TurnOrigin.current(), ApprovedCallScope.approvesHere());
     }
 
     /**

@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
@@ -240,6 +241,26 @@ class McpTracePropagationTest {
         assertEquals("false", headerSupplierFor(null).apply(toolCallWithMeta(plain)).get(TurnOrigin.APPROVED_HEADER));
         assertEquals("false", McpToolProviderManager.withTurnOriginHeader(Map.of(TurnOrigin.APPROVED_HEADER, "true"), toolCallWithMeta(plain))
                 .get(TurnOrigin.APPROVED_HEADER), "a configured value is replaced");
+    }
+
+    @Test
+    @DisplayName("an MCP call of a conversation that an approved call runs inline does not carry that approval")
+    void approvalIsNotStatedForANestedConversation() throws Exception {
+        var principals = new ResolutionPrincipalContext();
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+        Map<String, Object> own;
+        Map<String, Object> nested;
+        try {
+            principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+            own = ApprovedCallScope.run(protection, "conv-a",
+                    () -> ApprovedCallScope.inConversation("conv-a", () -> manager.traceMetaSupplier().apply(toolCallWithMeta(null))));
+            nested = ApprovedCallScope.run(protection, "conv-a",
+                    () -> ApprovedCallScope.inConversation("conv-b", () -> manager.traceMetaSupplier().apply(toolCallWithMeta(null))));
+        } finally {
+            principals.clear();
+        }
+        assertEquals("true", headerSupplierFor(null).apply(toolCallWithMeta(own)).get(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", headerSupplierFor(null).apply(toolCallWithMeta(nested)).get(TurnOrigin.APPROVED_HEADER));
     }
 
     @Test

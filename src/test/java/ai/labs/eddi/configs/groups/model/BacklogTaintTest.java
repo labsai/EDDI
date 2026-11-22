@@ -65,6 +65,44 @@ class BacklogTaintTest {
         assertEquals(TurnOrigin.EMAIL, backlog.findById(task.id()).origin(), "a positional copy");
     }
 
+    /**
+     * The record a lifecycle method returns is the one it stored: its own
+     * positional copy has no origin, and a caller that persists or forwards the
+     * returned record would otherwise drop the taint.
+     */
+    @Test
+    @DisplayName("every lifecycle transition returns the stored record, taint included")
+    void transitionsReturnTheStoredRecord() throws Exception {
+        SharedTaskList backlog = new SharedTaskList();
+        String id = backlog.addTask(new TaskItem("mail", "d", 1).taintedBy(TurnOrigin.EMAIL)).id();
+
+        assertEquals(TurnOrigin.EMAIL, backlog.assignTask(id, "agent-1", "Agent").origin(), "assign");
+        assertEquals(TurnOrigin.EMAIL, backlog.startTask(id).origin(), "start");
+        assertEquals(TurnOrigin.EMAIL, backlog.resetToAssigned(id).origin(), "resetToAssigned");
+        backlog.startTask(id);
+        assertEquals(TurnOrigin.EMAIL, backlog.submitForApproval(id, "draft").origin(), "submitForApproval");
+        assertEquals(TurnOrigin.EMAIL, backlog.rejectTask(id, "no").origin(), "reject");
+        assertEquals(TurnOrigin.EMAIL, backlog.resetFromAnyToAssigned(id, "again").origin(), "resetFromAnyToAssigned");
+        backlog.startTask(id);
+        backlog.submitForApproval(id, "draft");
+        assertEquals(TurnOrigin.EMAIL, backlog.approveTask(id, "alice").origin(), "approve");
+        assertEquals(TurnOrigin.EMAIL, backlog.verifyTask(id, true, "ok").origin(), "verify");
+
+        String second = backlog.addTask(new TaskItem("mail 2", "d", 1).taintedBy(TurnOrigin.EMAIL)).id();
+        backlog.assignTask(second, "agent-1", "Agent");
+        backlog.startTask(second);
+        assertEquals(TurnOrigin.EMAIL, backlog.completeTask(second, "done").origin(), "complete");
+
+        String third = backlog.addTask(new TaskItem("mail 3", "d", 1).taintedBy(TurnOrigin.EMAIL)).id();
+        assertEquals(TurnOrigin.EMAIL, backlog.failTask(third, "broken").origin(), "fail");
+
+        String fourth = backlog.addTask(new TaskItem("mail 4", "d", 1).taintedBy(TurnOrigin.EMAIL)).id();
+        backlog.assignTask(fourth, "agent-1", "Agent");
+        backlog.startTask(fourth);
+        backlog.submitForApproval(fourth, "draft");
+        assertEquals(TurnOrigin.EMAIL, backlog.approveTaskWithEditedResult(fourth, "edited", null).origin(), "approve with an edit");
+    }
+
     @Test
     @DisplayName("an untainted task that a tainted turn changes becomes tainted")
     void taintedChangeTaints() throws Exception {

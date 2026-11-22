@@ -1084,12 +1084,26 @@ class GroupConversationServiceTest {
             when(conversationStore.compareAndSetState("gc-1",
                     GroupConversationState.COMPLETED, GroupConversationState.IN_PROGRESS)).thenReturn(true);
             when(groupStore.getCurrentResourceId("group-1")).thenReturn(null);
+            // What the FIRST write carries, captured as it is made: the config lookup
+            // fails after it and the failure path writes the same mutable object again,
+            // so the object's final state says nothing about the round write itself.
+            var firstWrite = new ArrayList<String>();
+            doAnswer(inv -> {
+                GroupConversation written = inv.getArgument(0);
+                if (firstWrite.isEmpty()) {
+                    firstWrite.add(String.valueOf(written.getOrigin()));
+                    firstWrite.add(String.valueOf(written.getState()));
+                    firstWrite.add(String.valueOf(written.getRound()));
+                }
+                return null;
+            }).when(conversationStore).updateIfState(any(), any());
 
             try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
                 assertThrows(IResourceStore.ResourceNotFoundException.class, () -> service.continueDiscussion("gc-1", "next", null));
             }
 
-            assertEquals(TurnOrigin.EMAIL, inProgress.getOrigin());
+            assertEquals(List.of(TurnOrigin.EMAIL, GroupConversationState.IN_PROGRESS.name(), "2"), firstWrite,
+                    "the round write itself carries the taint");
             verify(conversationStore, atLeastOnce()).updateIfState(inProgress, GroupConversationState.IN_PROGRESS);
         }
 

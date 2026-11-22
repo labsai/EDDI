@@ -3526,7 +3526,7 @@
     "unknownGroup": "{{id}}（未找到）",
     "plaintextSecret": "请将 {{fields}} 存入密钥保险库，并以 ${vault:…} 引用 — 明文凭据不会被保存。",
     "confirmOpenTitle": "移除最后一个允许的发件人？",
-    "confirmOpenDesc": "允许列表为空时，任何发件人都能让该智能体运行，仅受发件人认证限制。此更改会记录在审计日志中。",
+    "confirmOpenDesc": "允许列表为空时，任何发件人都能让该智能体运行，仅受发件人认证限制，且仅在启用认证时如此。此更改会记录在审计日志中。",
     "confirmOpenConfirm": "保存并开放",
     "plaintextStored": "此渠道以明文存储 {{fields}}。请将其移入密钥保险库并保存，以替换为引用。"
   },
@@ -5585,7 +5585,7 @@
       "toolsWithoutApprovals": "已保存，但此集成指向的某个智能体有工具却没有工具审批。邮件内容是不可信的输入：请为会更改内容的工具添加 hitlConfig.toolApprovals。",
       "aiDisclosureDisabled": "已保存，但回复不再说明由 AI 撰写。欧盟《人工智能法案》等透明度规则要求人们知道自己在与 AI 交流。",
       "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。",
-      "allowlistEmptied": "已保存，但允许列表现在为空：任何发件人都能让该代理运行，仅受发件人认证的限制。",
+      "allowlistEmptied": "已保存，但允许列表现在为空：任何发件人都能让该代理运行，仅受发件人认证的限制，且仅在启用认证时如此。",
       "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",

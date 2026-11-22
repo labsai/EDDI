@@ -119,9 +119,8 @@ model's tool calls.
 
 ### Not covered
 
-- The in-engine approval is per thread: a nested turn that an approved call runs synchronously on the same thread
-  would share it for `OutboundHttp` (which has no conversation id); the tool and httpcall checks compare the
-  conversation.
+- ~~The in-engine approval is per thread: a nested turn that an approved call runs synchronously on the same thread
+  would share it for `OutboundHttp`.~~ Closed by the CodeRabbit round below (`ApprovedCallScope.approvesHere`).
 - The MCP binding reads the request through `CurrentVertxRequest`, which quarkus-mcp-server sets; the IT is what
   proves it, and fails if a release stops doing so.
 - The fail-closed branch (an active request context whose taint cannot be read) has no test.
@@ -143,4 +142,76 @@ model's tool calls.
 
 ```regression-note
 | 2026-11-22 | A mail-started conversation's write to an agent/workflow/extension store, snippets, variables, triggers, a group config, deploy/undeploy, setup or import, and its config MCP tools, now fail with "unless a person approves that call"; a full PUT of an email integration that empties a non-empty allowlist answers 400 without confirmOpen=true | Security review of the email escalation guard | Gate the tool with hitlConfig.toolApprovals so a person approves the call; add confirmOpen=true to the save | fix/email-guard-review |
+```
+
+## 🔒 fix(email): the guard after CodeRabbit's review of #1499 — pinning, approval scope, sticky schedules (2026-11-22)
+
+**Repo:** EDDI (`fix/pr1499-coderabbit`, onto `fix/email-guard-start-paths`, PR #1499) — CodeRabbit's review of
+`1c7010074f`: eight inline findings and one outside the diff.
+
+### What changed and why
+
+- **A gated `httpcalls` configuration write of a mail-started turn is pinned again (major).** The approval preview
+  (`ApiCallExecutor.resolve`) ran the escalation guard as an unapproved call: no approval exists at gate time, and the
+  resume re-check runs outside `ApprovedCallScope` too. So the preview was refused, and the call was approved unpinned,
+  on its tool name and arguments, not on the request that runs. A preview now judges the configuration write as the
+  approved execution would. It sends nothing, the guarded endpoints (channels, approvals) are still refused in it, and
+  the real build at execution still needs the approved scope. (An MCP configuration tool has no request resolver and
+  is approved on its name and arguments, as before.)
+- **An approval is stated only for its own conversation (major).** The MCP `approvedCall` meta, `OutboundHttp`'s
+  first hop and the internal loopback's `X-Eddi-Approved-Call` used the unscoped `ApprovedCallScope.isActive()`. A
+  conversation that an approved call starts or continues inline runs its tool calls on the same thread and inherited
+  the approval. `ToolExecutionService` now binds the conversation of every tool it runs
+  (`ApprovedCallScope.inConversation`). The three granting sites use `approvesHere()`, which needs the approval to
+  belong to that conversation. `isActive()` stays where it restricts (`checkOutgoing`).
+- **The schedule taint survives a concurrent clean edit (major).** Both stores' `updateSchedule` now keep a stored
+  `turnOrigin: email` inside the write. On Postgres a `CASE` in the `UPDATE` does it. On Mongo a clean write is
+  conditional on a clean row and is redone with the taint when it matches nothing. The REST merge alone read the row
+  first, so a clean save of an older copy could write the taint away. The match agrees with `TurnOrigin.normalise`
+  (case-insensitive, trimmed).
+- **Enabling or dismissing a schedule from a tainted request taints it (major).** This is done before the write, as
+  `retryDeadLetter` already did. Disabling stamps nothing.
+- **`PUT ?version=0` can no longer empty an email allowlist unconfirmed (major).** The sender-list baseline was read
+  with the raw `0`, which the store does not resolve. The read failed and the `confirmOpen` check and the audit entry
+  were skipped. The version is now resolved first, the audit records the resolved version, and a baseline that cannot
+  be read refuses the save (a missing version still gets the update's own 404/409).
+- **Backlog transitions return the stored task (minor).** All eleven `SharedTaskList` lifecycle methods returned their
+  own positional copy, which has no origin. They now return what `replaceTask` stored, taint included.
+- **A lesson-consolidation reschedule keeps the replaced schedule's taint (minor).** The old schedule is read before
+  it is deleted. A failed read leaves the old schedule in place.
+- **`EmailOriginTaintHttpIT` checks the tainted turns' responses.** An unrelated 404 or 500 left the request count
+  unchanged, so the test passed for the wrong reason.
+- **Manager wording.** The empty-allowlist confirmation and the notice after such a save say that sender
+  authentication limits who can run the agent only when it is enabled. Changed in all 11 locales and in both
+  fallbacks.
+- **Tests from the review's nitpicks.** The continuation test captures the first round write as it is made, and a
+  member-turn test runs a plain round and then a tainted one on the same discussion.
+
+### Design decisions
+
+- **Preview as approved, not a gate-time exemption.** The gate and the resume re-check must resolve the same
+  fingerprint. Exempting only the gate would make every pinned configuration write fail closed at resume.
+- **Bind the running conversation rather than suspend the approval in nested turns.** Suspending it would also drop
+  `SelfUngatingGuard` from the outer call's requests. The binding narrows only the places that grant.
+- **The sticky-taint rule lives in the stores**, so every caller of `updateSchedule` gets it (the REST stamp, retry,
+  enable and dismiss), not only the REST `PUT`.
+
+### Not covered
+
+- `stampTurnOrigin` (retry, enable, dismiss) still writes the whole row it read. The taint itself can no longer be
+  lost, but a concurrent configuration edit in that window is overwritten, as before.
+- `McpErrorResultInterceptor` (the MCP server side) still reads the unscoped `isActive()`. It runs on an inbound
+  request thread, where no approval is bound.
+- Nested pipeline work that is not a tool call (a loopback REST request from a pipeline task of a conversation that
+  an approved call runs inline) still sees the outer call's conversation as the one running.
+- The gate and the resume re-check resolve the pinned request under the same bound taint by construction; a real
+  pause and resume of a tainted configuration write is not exercised by a test.
+- Other delete-and-recreate schedule paths (`EmailPollScheduler`, `ConversationContinuations`) were not reviewed
+  for the reschedule rule applied to lesson consolidation here.
+
+### Decision log
+
+```decision-log
+| 2026-11-22 | An approval preview builds a gated call's request as its approved execution would, guarded endpoints still refused | A refused preview left mail-started configuration writes approved unpinned | Exempting the gate only (resume re-check fails closed); approving such calls unpinned |
+| 2026-11-22 | The engine states a person's approval only on requests of the tool call's own conversation (`ApprovedCallScope.approvesHere`) | A conversation an approved call ran inline inherited the approval over MCP, OutboundHttp and the loopback | Suspending the approval binding inside nested turns (drops the outer call's self-ungating check) |
 ```

@@ -446,8 +446,12 @@ refused above. Refused unless approved:
   not its workspace) and `/groupstore/templates`, and the legacy store names `LegacyPathRewriteFilter` still
   accepts — and to deploy, undeploy, the setup endpoints under `/administration/agents` and `/backup/import`.
 
-An approved call passes because a person saw it: in the engine the approval is bound around exactly that call's
-execution, for that conversation only, and never extends to a redirect. When the approved call goes through EDDI's
+An approved call passes because a person saw it. For an `httpcalls` tool whose request resolves ahead of execution,
+the approval card shows the request the call will send, and the approval is
+[pinned](hitl.md#request-pinning--approval-binds-to-a-request-not-a-tool-name) to it as for any other conversation; an
+MCP tool has no request to resolve and is approved on its name and arguments. In
+the engine the approval is bound around exactly that call's execution, for that conversation only (a conversation the
+approved call starts or continues inline does not inherit it), and never extends to a redirect. When the approved call goes through EDDI's
 own API, the request says so in `X-Eddi-Approved-Call: true`, which the engine sets itself and strips from every other
 request a tainted turn sends — no configuration can claim it, and a caller who forged it could as well have left the
 taint header off. These paths are matched anywhere in a URL, so a third-party API whose path happens to contain one

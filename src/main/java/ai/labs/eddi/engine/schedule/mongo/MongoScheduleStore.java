@@ -11,6 +11,7 @@ import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
 import ai.labs.eddi.datastore.serialization.IJsonSerialization;
@@ -267,10 +268,22 @@ public class MongoScheduleStore implements IScheduleStore {
             updates.add(set("maxCostPerFire", schedule.getMaxCostPerFire()));
             updates.add(set("allowSelfScheduling", schedule.isAllowSelfScheduling()));
             updates.add(set(NEXT_FIRE, schedule.getNextFire() == null ? null : epochMillis(schedule.getNextFire())));
-            updates.add(set(METADATA, schedule.getMetadata()));
             updates.add(set(UPDATED_AT, epochMillis(now)));
 
-            UpdateResult result = scheduleCollection.updateOne(eq(ID, scheduleId), combine(updates));
+            // The origin taint is sticky (email plan v3 §5.3), and the decision is the
+            // write's own: a caller's copy read before a tainted write landed must not
+            // write the taint away. A clean write is conditional on the stored row
+            // being clean; when it matches nothing, the row is missing or tainted, and
+            // the write is made again with the taint kept.
+            if (!TurnOrigin.EMAIL.equals(TurnOrigin.fromMetadata(schedule.getMetadata()))) {
+                UpdateResult clean = scheduleCollection.updateOne(and(eq(ID, scheduleId), not(storedTurnOriginIsEmail())),
+                        combine(withMetadata(updates, schedule.getMetadata())));
+                if (clean.getMatchedCount() > 0) {
+                    return;
+                }
+                schedule.setMetadata(TurnOrigin.stampMetadata(schedule.getMetadata(), TurnOrigin.EMAIL));
+            }
+            UpdateResult result = scheduleCollection.updateOne(eq(ID, scheduleId), combine(withMetadata(updates, schedule.getMetadata())));
             if (result.getMatchedCount() == 0) {
                 throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
             }
@@ -279,6 +292,21 @@ public class MongoScheduleStore implements IScheduleStore {
         } catch (Exception e) {
             throw new IResourceStore.ResourceStoreException("Failed to update schedule " + scheduleId, e);
         }
+    }
+
+    /**
+     * The stored {@code metadata.turnOrigin} names {@link TurnOrigin#EMAIL} as
+     * {@link TurnOrigin#normalise} reads it: case-insensitive, with what
+     * {@link String#trim} strips around it.
+     */
+    private static Bson storedTurnOriginIsEmail() {
+        return regex(METADATA + "." + TurnOrigin.CONTEXT_KEY, "^[\\x00-\\x20]*" + TurnOrigin.EMAIL + "[\\x00-\\x20]*$", "i");
+    }
+
+    private static List<Bson> withMetadata(List<Bson> updates, Map<String, Object> metadata) {
+        var all = new ArrayList<>(updates);
+        all.add(set(METADATA, metadata));
+        return all;
     }
 
     /**

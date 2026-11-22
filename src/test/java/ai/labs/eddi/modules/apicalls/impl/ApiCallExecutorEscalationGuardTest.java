@@ -37,6 +37,8 @@ import java.net.URI;
 import java.util.HashMap;
 import java.util.Optional;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -216,6 +218,34 @@ class ApiCallExecutorEscalationGuardTest {
         });
         verify(httpClient).newRequest(any(URI.class), any());
         verify(request).setHttpHeader(TurnOrigin.APPROVED_HEADER, "true");
+    }
+
+    /**
+     * Request pinning for a gated configuration write of a mail-started turn: the
+     * preview is built as the approved execution would build it, so the approval
+     * binds to the request — the gate and the resume re-check, both outside the
+     * approved scope, resolve the same fingerprint. Refusing the preview left the
+     * call approved unpinned, on its tool name and arguments alone.
+     */
+    @Test
+    @DisplayName("a tainted configuration write resolves to a pinnable request; the preview sends nothing and the guarded endpoints still refuse")
+    void taintedConfigWritePreviewIsPinned() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        var configWrite = call("PATCH", "/llmstore/llms/aabbccddee1122334455aa01");
+
+        var atGate = executor.resolve(configWrite, memory, new HashMap<>(), "https://graph.example.com");
+        var atResume = executor.resolve(configWrite, memory, new HashMap<>(), "https://graph.example.com");
+
+        assertNotNull(atGate.fingerprint(), "the approval must be pinned to the request");
+        assertEquals(atGate.fingerprint(), atResume.fingerprint());
+        verify(request, never()).send();
+        verify(request, never()).setHttpHeader(TurnOrigin.APPROVED_HEADER, "true");
+
+        assertThrows(Exception.class, () -> executor.resolve(call("POST", "/channelstore/channels/abc/email-senders"), memory, new HashMap<>(),
+                "https://graph.example.com"), "a guarded endpoint is refused in a preview too");
+        assertThrows(Exception.class, () -> executor.execute(configWrite, memory, new HashMap<>(), "https://graph.example.com"),
+                "the execution still needs the approved scope");
+        verify(request, never()).send();
     }
 
     @Test
