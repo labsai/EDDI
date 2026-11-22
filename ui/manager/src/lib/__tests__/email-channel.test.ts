@@ -10,6 +10,7 @@ import {
   isOpenTrigger,
   isPlusAddressOf,
   isSenderPattern,
+  repliesToThread,
   withEmailFixedKeys,
   withoutEmailTargetRules,
 } from "@/lib/email-channel";
@@ -156,6 +157,44 @@ describe("email conversation mode rules", () => {
     expect(saved.mode).toBe("conversation");
     expect(saved.smtpHost).toBe("smtp.example.com");
     expect(saved.honorReplyTo).toBe("true");
+  });
+});
+
+describe("email reply audience rules (email v2 plan §9.1)", () => {
+  const CONVERSATION = { ...VALID, mode: "conversation", smtpHost: "smtp.example.com" };
+  const THREAD = { ...CONVERSATION, actWhen: "addressed", replyAudience: "thread", replyAllowedRecipients: "*@example.com" };
+
+  it("accepts a thread audience with actWhen addressed and an allowlist", () => {
+    expect(emailConfigProblems(THREAD)).toEqual([]);
+    expect(repliesToThread(THREAD)).toBe(true);
+    expect(repliesToThread(CONVERSATION)).toBe(false);
+    expect(repliesToThread({ ...THREAD, mode: "trigger" })).toBe(false);
+  });
+
+  it("needs actWhen addressed, an allowlist and the default identity mode", () => {
+    expect(emailConfigProblems({ ...THREAD, actWhen: "always" })).toEqual(["replyAudienceNeedsAddressed"]);
+    expect(emailConfigProblems({ ...THREAD, replyAllowedRecipients: "" })).toEqual(["replyAllowedRecipientsRequired"]);
+    expect(emailConfigProblems({ ...THREAD, identityMode: "integration" })).toEqual(["replyAudienceIdentityMode"]);
+    expect(emailConfigProblems({ ...THREAD, identityMode: "perSender" })).toEqual([]);
+  });
+
+  it("checks the patterns and the copy limit as the backend does", () => {
+    expect(emailConfigProblems({ ...THREAD, replyAllowedRecipients: "*@*" })).toEqual(["replyAllowedRecipientsInvalid"]);
+    expect(emailConfigProblems({ ...THREAD, replyAllowedRecipients: "example.com" })).toEqual(["replyAllowedRecipientsInvalid"]);
+    expect(emailConfigProblems({ ...THREAD, listAddresses: "lists" })).toEqual(["listAddressesInvalid"]);
+    expect(emailConfigProblems({ ...THREAD, maxReplyRecipients: "51" })).toEqual(["maxReplyRecipients"]);
+    expect(emailConfigProblems({ ...THREAD, maxReplyRecipients: "50" })).toEqual([]);
+  });
+
+  it("drops the thread-only keys unless the audience is the thread", () => {
+    const sender = withEmailFixedKeys({ ...THREAD, replyAudience: "sender", listAddresses: "all@example.com", maxReplyRecipients: "3" });
+    expect(sender.replyAllowedRecipients).toBeUndefined();
+    expect(sender.listAddresses).toBeUndefined();
+    expect(sender.maxReplyRecipients).toBeUndefined();
+    expect(withEmailFixedKeys(THREAD).replyAllowedRecipients).toBe("*@example.com");
+    const trigger = withEmailFixedKeys({ ...THREAD, mode: "trigger" });
+    expect(trigger.replyAudience).toBeUndefined();
+    expect(trigger.replyAllowedRecipients).toBeUndefined();
   });
 });
 

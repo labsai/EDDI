@@ -13,6 +13,7 @@ import {
   EMAIL_IDENTITY_MODES,
   EMAIL_MODES,
   EMAIL_PORTS,
+  EMAIL_REPLY_AUDIENCES,
   EMAIL_REPLY_TEMPLATE_VARIABLES,
   EMAIL_SMTP_PORTS,
   EMAIL_TEMPLATE_VARIABLES,
@@ -21,6 +22,7 @@ import {
   emailConfigProblems,
   emailMode,
   isOpenTrigger,
+  repliesToThread,
   splitList,
   withEmailFixedKeys,
   type EmailProblem,
@@ -96,6 +98,15 @@ export function EmailPlatformFields({
   const requireAuthentication = conversation || (pc.requireAuthentication || EMAIL_DEFAULTS.requireAuthentication) !== "false";
   const disclosureOn = aiDisclosureEnabled(pc);
   const honorReplyTo = (pc.honorReplyTo || EMAIL_DEFAULTS.honorReplyTo) === "true";
+  const threadAudience = repliesToThread(pc);
+  // Choosing the thread audience preselects what it requires (actWhen
+  // addressed); going back to the sender drops the keys only the thread reads,
+  // which the backend refuses otherwise.
+  const setAudience = (next: string) => {
+    const updated: Record<string, string> = { ...pc, replyAudience: next };
+    if (next === "thread") updated.actWhen = "addressed";
+    onChange(withEmailFixedKeys(updated));
+  };
   // The other mode's keys go at once: the backend refuses them, and a hidden
   // field must not keep a value the user can no longer see.
   const setMode = (next: string) => onChange(withEmailFixedKeys({ ...pc, mode: next }));
@@ -426,6 +437,92 @@ export function EmailPlatformFields({
               </span>
             </div>
           )}
+          <div className="space-y-3 rounded-lg border border-border/50 p-3" data-testid="email-reply-audience-section">
+            <div className="space-y-1">
+              <label htmlFor={`${uid}-reply-audience`} className={labelClass}>{t("emailChannel.replyAudience", "Who reads a reply")}</label>
+              <select
+                id={`${uid}-reply-audience`}
+                data-testid="email-reply-audience"
+                className={selectClass}
+                value={threadAudience ? "thread" : "sender"}
+                onChange={(e) => setAudience(e.target.value)}
+              >
+                {EMAIL_REPLY_AUDIENCES.map((a) => (
+                  <option key={a} value={a}>
+                    {a === "thread"
+                      ? t("emailChannel.replyAudienceThread", "The sender, and the thread's internal recipients")
+                      : t("emailChannel.replyAudienceSender", "The sender only")}
+                  </option>
+                ))}
+              </select>
+              <p className={hintClass}>
+                {t(
+                  "emailChannel.replyAudienceHint",
+                  "The reply always goes To the authenticated sender. With the thread, the answered mail's other To and Cc recipients that match the allowed recipients are copied — never an address the model names.",
+                )}
+              </p>
+            </div>
+            {threadAudience && (
+              <>
+                <div className="flex items-start gap-2 rounded-lg border border-warning/40 bg-warning/5 p-3 text-xs" role="note" data-testid="email-reply-audience-warning">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+                  <span>
+                    {t(
+                      "emailChannel.replyAudienceWarning",
+                      "Everyone copied reads what the agent answers, including what its tools looked up. So these conversations run without long-term memory: nothing one person told the agent before reaches their colleagues.",
+                    )}
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <label htmlFor={`${uid}-reply-allowed`} className={labelClass}>{t("emailChannel.replyAllowedRecipients", "Allowed recipients")}</label>
+                    <Input
+                      id={`${uid}-reply-allowed`}
+                      data-testid="email-reply-allowed-recipients"
+                      value={pc.replyAllowedRecipients ?? ""}
+                      onChange={(e) => set("replyAllowedRecipients", e.target.value)}
+                      placeholder="*@example.com, *@*.example.com"
+                    />
+                    <p className={hintClass}>
+                      {t("emailChannel.replyAllowedRecipientsHint", "Required. Only recipients matching one of these are copied — keep it to your own domains.")}
+                    </p>
+                    {problemFor("replyAllowedRecipientsRequired", "replyAllowedRecipientsInvalid")}
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor={`${uid}-list-addresses`} className={labelClass}>{t("emailChannel.listAddresses", "Never copy")}</label>
+                    <Input
+                      id={`${uid}-list-addresses`}
+                      data-testid="email-list-addresses"
+                      value={pc.listAddresses ?? ""}
+                      onChange={(e) => set("listAddresses", e.target.value)}
+                      placeholder="all-staff@example.com"
+                    />
+                    <p className={hintClass}>
+                      {t("emailChannel.listAddressesHint", "Distribution lists and groups: never copied, even when they match the allowed recipients.")}
+                    </p>
+                    {problemFor("listAddressesInvalid")}
+                  </div>
+                  <div className="space-y-1">
+                    <label htmlFor={`${uid}-max-reply-recipients`} className={labelClass}>{t("emailChannel.maxReplyRecipients", "Most copies")}</label>
+                    <Input
+                      id={`${uid}-max-reply-recipients`}
+                      data-testid="email-max-reply-recipients"
+                      inputMode="numeric"
+                      value={pc.maxReplyRecipients ?? ""}
+                      onChange={(e) => set("maxReplyRecipients", e.target.value)}
+                      placeholder={EMAIL_DEFAULTS.maxReplyRecipients}
+                    />
+                    <p className={hintClass}>
+                      {t("emailChannel.maxReplyRecipientsHint", "1–50. A mail with more allowed recipients than this is answered to the sender alone.")}
+                    </p>
+                    {problemFor("maxReplyRecipients")}
+                  </div>
+                </div>
+                {problemFor("replyAudienceNeedsAddressed")}
+                {problemFor("replyAudienceIdentityMode")}
+              </>
+            )}
+          </div>
           <label className="flex items-start gap-2 text-xs">
             <input
               type="checkbox"
