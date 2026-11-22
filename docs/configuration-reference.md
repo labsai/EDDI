@@ -546,7 +546,7 @@ Bounds on reading the images a PDF embeds ([security.md](security.md#pdf-image-b
 
 | Property | Default | Description |
 |---|---|---|
-| `eddi.documents.images.max-pixels` | `40000000` (40 MP) | Most pixels one embedded image, or one of its masks, may declare. A larger one is refused before anything is allocated for it, as is one whose decoding would take more than the document's decode budget has left. Not a positive number means the default |
+| `eddi.documents.images.max-pixels` | `40000000` (40 MP) | Most pixels one embedded image may declare, and also each of its masks, the masked image PDFBox builds from them, and a CCITT image's decode buffer. A larger one is refused before PDFBox builds a raster or decode buffer for it. So is one whose decoding would take more than the document's decode budget has left. Not a positive number means the default |
 
 ---
 

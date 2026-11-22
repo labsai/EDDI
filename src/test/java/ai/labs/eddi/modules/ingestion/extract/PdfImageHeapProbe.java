@@ -18,7 +18,7 @@ import java.time.Instant;
 public final class PdfImageHeapProbe {
 
     /**
-     * 10,000 distinct 64 × 64 images, 1,000 per page: collected, then each
+     * 10,000 distinct 128 × 128 images, 1,000 per page: collected, then each
      * normalized.
      */
     static final String MANY_IMAGES = "many-images";
@@ -42,13 +42,13 @@ public final class PdfImageHeapProbe {
     }
 
     private static void manyImages() throws Exception {
-        byte[] pdf = PdfFixtures.imageBombMany(10_000, 1_000, 64);
+        byte[] pdf = PdfFixtures.imageBombMany(10_000, 1_000, 128);
         var normalizer = new ImageNormalizer();
         Instant deadline = Instant.now().plusSeconds(150);
         int encoded = 0;
-        // 10,000 × 12 KB of decoded samples: more than the default budget, so this
+        // 10,000 × 48 KB of decoded samples: more than the default budget, so this
         // read gets a larger one; the heap, not the budget, is what is under test
-        try (PDDocument document = Loader.loadPDF(pdf); var budget = PdfDecodeBudget.open(1L << 30)) {
+        try (PDDocument document = Loader.loadPDF(pdf); var budget = PdfDecodeBudget.open(2L << 30)) {
             Collection collection = PdfImageCollector.collect(document, 1, document.getNumberOfPages(), null,
                     deadline);
             if (collection.truncated()) {

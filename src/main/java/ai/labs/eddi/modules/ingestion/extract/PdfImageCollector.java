@@ -9,6 +9,7 @@ import org.apache.pdfbox.contentstream.operator.Operator;
 import org.apache.pdfbox.contentstream.operator.state.Concatenate;
 import org.apache.pdfbox.contentstream.operator.state.Restore;
 import org.apache.pdfbox.contentstream.operator.state.Save;
+import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
@@ -51,18 +52,23 @@ import java.util.Objects;
  * <p>
  * The page program is the file's, so every way it can run long is bounded:
  * <ul>
- * <li>form XObjects are followed {@value #MAX_FORM_DEPTH} deep at most, and a
- * form that draws itself, directly or through others, is not followed
- * again;</li>
+ * <li>a page's content is charged to the decode budget before it is parsed, as
+ * the text path charges it, and an unfiltered form on every draw: PDFBox reads
+ * those past its counted filters;</li>
+ * <li>form XObjects are followed {@value #MAX_FORM_DEPTH} deep at most, the
+ * deadline is checked on each, one PDFBox cannot read is skipped, and a form
+ * that draws itself, directly or through others, is not followed again;</li>
  * <li>every operator counts against {@link ImageLimits#maxOperators()} across
  * the whole collection, forms included however often they are drawn — so a
  * shallow tree of forms that each draw the next a hundred times cannot multiply
  * its way past the bound — and the deadline is checked every
  * {@value #OPERATORS_PER_DEADLINE_CHECK} operators;</li>
  * <li>at most {@link ImageLimits#maxImages()} draws are recorded;</li>
- * <li>{@code q} nests at most {@value #MAX_SAVE_DEPTH} deep: a saved graphics
- * state is a copy, and a stream of {@code q}s would otherwise copy one per two
- * bytes;</li>
+ * <li>{@code q} nests at most {@value #MAX_SAVE_DEPTH} deep within a page or a
+ * form, each keeping its own count: a saved graphics state is a copy, and a
+ * stream of {@code q}s would otherwise copy one per two bytes. A deeper
+ * {@code q} and the {@code Q} closing it are ignored, which keeps the read
+ * bounded at the price of positions in such a file;</li>
  * <li>an inline image keeps at most {@value #MAX_INLINE_BYTES} bytes, and one
  * collection at most {@value #MAX_INLINE_TOTAL_BYTES} bytes of inline images in
  * all; past that the draw is still recorded, without its bytes.</li>
@@ -312,6 +318,10 @@ public final class PdfImageCollector {
             ignoredSaves = 0;
             forms.clear();
             try {
+                // Page content PDFBox reads without a counted filter (unfiltered, or a
+                // single Flate stream it inflates on the fly) is charged up front, as the
+                // text path charges it: no page program is parsed outside the budget
+                BoundedTextStripper.chargePageContents(page);
                 processPage(page);
                 return true;
             } catch (Stop stop) {
@@ -378,12 +388,35 @@ public final class PdfImageCollector {
             if (forms.size() >= MAX_FORM_DEPTH || containsSame(forms, stream)) {
                 return;
             }
+            // Every draw of a form parses it again: the time is checked and an unfiltered
+            // form charged on each one (a filtered form is counted as its filter decodes)
+            requireBefore(deadline);
+            if (isUnfiltered(stream)) {
+                PdfDecodeBudget.charge(stream.getLength());
+            }
             forms.addLast(stream);
+            // A form starts with a graphics stack of its own, so it gets its own count of
+            // ignored saves: one of the page's must not swallow the form's Q
+            int outerIgnoredSaves = ignoredSaves;
+            ignoredSaves = 0;
             try {
                 showForm(new PDFormXObject(new PDStream(stream)));
+            } catch (IOException malformed) {
+                // As PDFBox does for Do: a form that cannot be read is skipped, not the page.
+                // The budget and the deadline are unchecked exceptions and pass through
             } finally {
+                ignoredSaves = outerIgnoredSaves;
                 forms.removeLast();
             }
+        }
+
+        /**
+         * Whether PDFBox reads the stream as stored, which no counted filter sees: a
+         * {@code /Filter} that is neither a name nor a non-empty array counts as none.
+         */
+        private static boolean isUnfiltered(COSStream stream) {
+            COSBase filters = stream.getFilters();
+            return !(filters instanceof COSName || (filters instanceof COSArray list && list.size() > 0));
         }
 
         private void inlineImage(Operator operator) {

@@ -144,7 +144,7 @@ class PdfImageCollectorTest {
         @Test
         @DisplayName("a fan-out of forms asking for 10^8 draws stops at the operator cap and says it was cut")
         void fanOut() throws IOException {
-            var limits = new ImageLimits(0, 0, 0, 0, 100_000);
+            var limits = new ImageLimits(0, 0, 0, Integer.MAX_VALUE, 100_000);
 
             Collection collection = assertTimeoutPreemptively(Duration.ofSeconds(20),
                     () -> collect(PdfFixtures.formFanOut(10, 8), 1, 1, limits));
@@ -188,6 +188,63 @@ class PdfImageCollectorTest {
 
             assertEquals(2, images.size());
             assertBox(images.get(1), 5, 792 - 27, 30, 20);
+        }
+
+        @Test
+        @DisplayName("past the q cap on the page, a form's own q … Q still restores its own state")
+        void formKeepsItsOwnSaves() throws IOException {
+            List<Placement> images = collect(PdfFixtures.formAfterSaves(PdfImageCollector.MAX_SAVE_DEPTH + 6), 1, 1,
+                    null).images();
+
+            assertEquals(1, images.size());
+            assertBox(images.getFirst(), 0, 782, 10, 10);
+        }
+
+        @Test
+        @DisplayName("a form PDFBox cannot read is skipped; the rest of the page is still listed")
+        void malformedForm() throws IOException {
+            Collection collection = collect(PdfFixtures.malformedForm(), 1, 1, null);
+
+            assertEquals(1, collection.images().size());
+            assertFalse(collection.truncated());
+        }
+
+        @Test
+        @DisplayName("the deadline is checked while the page runs, not only before it")
+        void deadlineDuringTheWork() throws IOException {
+            var limits = new ImageLimits(0, 0, 0, Integer.MAX_VALUE, Long.MAX_VALUE);
+            try (PDDocument document = Loader.loadPDF(PdfFixtures.formFanOut(10, 8));
+                    var budget = PdfDecodeBudget.open(ExtractionLimits.defaults().maxDecodedBytes())) {
+                Instant deadline = Instant.now().plusMillis(500);
+
+                assertTimeoutPreemptively(Duration.ofSeconds(20), () -> assertThrows(UnreadableDocumentException.class,
+                        () -> PdfImageCollector.collect(document, 1, 1, limits, deadline)));
+            }
+        }
+
+        @Test
+        @DisplayName("the deadline is checked on every form drawn, however few operators the forms hold")
+        void deadlineOnEveryForm() throws IOException {
+            // 1,000 draws of a 400 KB form of comments: 400 MB to parse in fewer operators
+            // than
+            // one deadline-check interval (1,024)
+            try (PDDocument document = Loader.loadPDF(PdfFixtures.formRepeated(1_000, 400_000));
+                    var budget = PdfDecodeBudget.open(1L << 30)) {
+                Instant deadline = Instant.now().plusMillis(200);
+
+                assertTimeoutPreemptively(Duration.ofSeconds(60), () -> assertThrows(UnreadableDocumentException.class,
+                        () -> PdfImageCollector.collect(document, 1, 1, null, deadline)));
+            }
+        }
+
+        @Test
+        @DisplayName("one collection keeps 16 MiB of inline images in all; past it a draw is listed without bytes")
+        void inlineTotal() throws IOException {
+            List<Placement> images = collect(PdfFixtures.inlineImages(17, 1000, 1000), 1, 1, null).images();
+
+            assertEquals(17, images.size());
+            assertTrue(images.subList(0, 16).stream().allMatch(image -> image.inlineData() != null));
+            assertNull(images.get(16).inlineData());
         }
 
         /** Swaps the single-image fixture's content stream for another. */

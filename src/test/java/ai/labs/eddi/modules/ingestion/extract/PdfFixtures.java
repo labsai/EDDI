@@ -938,6 +938,139 @@ public final class PdfFixtures {
         });
     }
 
+    /**
+     * One page drawing one inline image with exactly these parameters (between
+     * {@code BI} and {@code ID}) and data.
+     */
+    public static byte[] inlineRaw(String parameters, byte[] data) {
+        return build(document -> {
+            var page = new PDPage(PDRectangle.LETTER);
+            document.addPage(page);
+            var content = new ByteArrayOutputStream();
+            content.writeBytes(ascii("q 100 0 0 100 0 0 cm BI " + parameters + " ID "));
+            content.writeBytes(data);
+            content.writeBytes(ascii(" EI Q"));
+            setContent(document, page, content.toByteArray());
+        });
+    }
+
+    /**
+     * One page drawing {@code count} gray inline images of {@code width} ×
+     * {@code height}, one after the other.
+     */
+    public static byte[] inlineImages(int count, int width, int height) {
+        return build(document -> {
+            var page = new PDPage(PDRectangle.LETTER);
+            document.addPage(page);
+            var content = new ByteArrayOutputStream();
+            for (int i = 0; i < count; i++) {
+                content.writeBytes(ascii("q 10 0 0 10 0 0 cm BI /W " + width + " /H " + height + " /BPC 8 /CS /G ID "));
+                content.writeBytes(solid(width * height, (byte) 0x80));
+                content.writeBytes(ascii(" EI Q\n"));
+            }
+            setContent(document, page, content.toByteArray());
+        });
+    }
+
+    /**
+     * One page drawing a {@code width} × {@code height} RGB image whose
+     * {@code /SMask} declares {@code maskWidth} × {@code maskHeight} gray pixels.
+     */
+    public static byte[] imageBombMask(int width, int height, long maskWidth, long maskHeight) {
+        return build(document -> {
+            COSStream mask = document.getDocument().createCOSStream();
+            mask.setItem(COSName.TYPE, COSName.XOBJECT);
+            mask.setItem(COSName.SUBTYPE, COSName.IMAGE);
+            mask.setLong(COSName.WIDTH, maskWidth);
+            mask.setLong(COSName.HEIGHT, maskHeight);
+            mask.setInt(COSName.BITS_PER_COMPONENT, 8);
+            mask.setItem(COSName.COLORSPACE, COSName.DEVICEGRAY);
+            writeRaw(mask, zlib(new byte[100]), COSName.FLATE_DECODE);
+            COSStream image = imageXObject(document, width, height, 8, COSName.DEVICERGB, COSName.FLATE_DECODE,
+                    zlib(solid(width * height * 3, (byte) 1)));
+            image.setItem(COSName.SMASK, mask);
+            addImagePage(document, image);
+        });
+    }
+
+    /**
+     * One page whose Flate content inflates to {@code inflatedBytes} of operands
+     * ({@code "1 "}) and not one operator: nothing a content-stream interpreter
+     * counts in operators, all of it held as operands.
+     */
+    public static byte[] operandFlood(long inflatedBytes) {
+        byte[] content = zlibRepeated("1 ".getBytes(StandardCharsets.US_ASCII), inflatedBytes);
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"), ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Contents 4 0 R>>"),
+                stream(" /Filter /FlateDecode", content)));
+    }
+
+    /**
+     * One page that opens {@code saves} graphics states, then draws a form that
+     * scales by 2 inside its own {@code q … Q} and afterwards draws a 2 × 2 image
+     * at 10 × 10.
+     */
+    public static byte[] formAfterSaves(int saves) {
+        String form = "/Type /XObject /Subtype /Form /BBox [0 0 612 792]";
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"), ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</XObject<</Fm 5 0 R>>>>"
+                        + "/Contents 4 0 R>>"),
+                stream("", ascii("q ".repeat(saves) + "/Fm Do")),
+                stream(" " + form + " /Resources <</XObject <</Im 6 0 R>>>>",
+                        ascii("q 2 0 0 2 0 0 cm Q q 10 0 0 10 0 0 cm /Im Do Q")),
+                stream(" /Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8"
+                        + " /ColorSpace /DeviceRGB /Filter /FlateDecode", zlib(solid(12, (byte) 9)))));
+    }
+
+    /**
+     * One page drawing the same unfiltered form {@code draws} times, the form
+     * {@code formBytes} of comment and no operator: every draw parses it again.
+     */
+    public static byte[] formRepeated(int draws, int formBytes) {
+        byte[] form = ascii("%" + "x".repeat(Math.max(0, formBytes - 2)) + "\n");
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"), ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</XObject<</Fm 5 0 R>>>>"
+                        + "/Contents 4 0 R>>"),
+                stream("", ascii("/Fm Do ".repeat(draws))),
+                stream(" /Type /XObject /Subtype /Form /BBox [0 0 612 792]", form)));
+    }
+
+    /**
+     * One page drawing a form PDFBox cannot read (an unknown filter), then a 2 × 2
+     * image.
+     */
+    public static byte[] malformedForm() {
+        return rawPdf(List.of(ascii("<</Type/Catalog/Pages 2 0 R>>"), ascii("<</Type/Pages/Kids[3 0 R]/Count 1>>"),
+                ascii("<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]/Resources<</XObject<</Bad 5 0 R /Im 6 0 R>>>>"
+                        + "/Contents 4 0 R>>"),
+                stream("", ascii("/Bad Do q 10 0 0 10 0 0 cm /Im Do Q")),
+                stream(" /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Filter /NoSuchFilter", ascii("q Q")),
+                stream(" /Type /XObject /Subtype /Image /Width 2 /Height 2 /BitsPerComponent 8"
+                        + " /ColorSpace /DeviceRGB /Filter /FlateDecode", zlib(solid(12, (byte) 9)))));
+    }
+
+    /**
+     * {@code jpeg} with its first frame header rewritten: the given marker
+     * ({@code 0xC0}…), precision, width and height.
+     */
+    public static byte[] patchFrame(byte[] jpeg, int marker, int precision, int width, int height) {
+        byte[] patched = jpeg.clone();
+        for (int at = 2; at + 9 < patched.length;) {
+            int code = patched[at + 1] & 0xFF;
+            if (code >= 0xC0 && code <= 0xC3) {
+                patched[at + 1] = (byte) marker;
+                patched[at + 4] = (byte) precision;
+                patched[at + 5] = (byte) (height >> 8);
+                patched[at + 6] = (byte) height;
+                patched[at + 7] = (byte) (width >> 8);
+                patched[at + 8] = (byte) width;
+                return patched;
+            }
+            at += 2 + (((patched[at + 2] & 0xFF) << 8) | (patched[at + 3] & 0xFF));
+        }
+        throw new IllegalArgumentException("no frame header");
+    }
+
     /** {@code data}, zlib-compressed, for a test's own image stream. */
     static byte[] deflate(byte[] data) {
         return zlib(data);
@@ -1042,6 +1175,26 @@ public final class PdfFixtures {
             throw new UncheckedIOException(e);
         } finally {
             writer.dispose();
+        }
+        return out.toByteArray();
+    }
+
+    /** Zlib data inflating to {@code bytes} bytes of {@code unit} repeated. */
+    private static byte[] zlibRepeated(byte[] unit, long bytes) {
+        var out = new ByteArrayOutputStream();
+        var deflater = new Deflater(Deflater.BEST_COMPRESSION);
+        byte[] block = new byte[64 * 1024 / unit.length * unit.length];
+        for (int i = 0; i < block.length; i++) {
+            block[i] = unit[i % unit.length];
+        }
+        try (var zip = new DeflaterOutputStream(out, deflater, 64 * 1024)) {
+            for (long left = bytes; left > 0; left -= block.length) {
+                zip.write(block, 0, (int) Math.min(block.length, left));
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        } finally {
+            deflater.end();
         }
         return out.toByteArray();
     }

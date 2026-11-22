@@ -10,6 +10,8 @@ import org.apache.pdfbox.cos.COSArray;
 import org.apache.pdfbox.cos.COSBase;
 import org.apache.pdfbox.cos.COSDictionary;
 import org.apache.pdfbox.cos.COSName;
+import org.apache.pdfbox.cos.COSStream;
+import org.apache.pdfbox.pdmodel.PDResources;
 import org.apache.pdfbox.pdmodel.common.PDStream;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImage;
 import org.apache.pdfbox.pdmodel.graphics.image.PDImageXObject;
@@ -29,6 +31,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -42,14 +45,19 @@ import java.util.Objects;
  * <ol>
  * <li><b>Unsupported codecs</b> — JBIG2 and JPEG 2000 — are refused before
  * PDFBox is asked anything; no codec for them ships.</li>
- * <li><b>{@link ImageDecodeGuard}</b> checks the declared size of the image and
- * its masks against the pixel cap and what the budget has left, before anything
- * is allocated.</li>
- * <li><b>Pass-through:</b> a stream whose only filter is {@code DCTDecode},
- * declared gray or RGB, without masks or a {@code /Decode} array, whose JPEG
- * header confirms one or three components and the declared size, and which fits
- * {@link ImageLimits#maxEdgePx()} and {@link ImageLimits#maxEncodedBytes()}, is
- * returned byte for byte from the raw stream: nothing is decoded.</li>
+ * <li><b>{@link ImageDecodeGuard}</b> checks the declared size of the image,
+ * its masks and its decode buffers, read as PDFBox reads them, against the
+ * pixel cap and what the budget has left, before PDFBox builds a raster or
+ * buffer.</li>
+ * <li><b>A JPEG's frame header</b>, which is what its decoder sizes the raster
+ * from, must agree with the dictionary and pass the same checks — at full size
+ * for an inline image, which PDFBox decodes without subsampling.</li>
+ * <li><b>Pass-through:</b> a stream whose only filter is {@code DCTDecode}, an
+ * 8-bit baseline or progressive JPEG of one or three components in plain gray
+ * or RGB, with no masks, {@code /Decode} array, decode parameters or stencil
+ * flag, which fits {@link ImageLimits#maxEdgePx()} and
+ * {@link ImageLimits#maxEncodedBytes()}, is returned byte for byte from the raw
+ * stream: nothing is decoded.</li>
  * <li><b>Everything else</b> is decoded by PDFBox — subsampled when it is
  * larger than {@link ImageLimits#maxEdgePx()}, so the raster is built at
  * roughly the target size — scaled down to fit, and encoded: JPEG for an image
@@ -97,8 +105,13 @@ public final class ImageNormalizer {
     public enum Reason {
         /** JBIG2 or JPEG 2000: no codec for it ships. */
         UNSUPPORTED_FORMAT,
-        /** A dimension missing or not usable. */
+        /**
+         * A dimension missing or not usable, or a JPEG whose frame header disagrees
+         * with its dictionary.
+         */
         BAD_DIMENSIONS,
+        /** A colour space with more than 32 components. */
+        TOO_MANY_COMPONENTS,
         /** More pixels than {@link ImageLimits#maxPixels()}. */
         TOO_MANY_PIXELS,
         /** More than the decode budget has left. */
@@ -163,25 +176,48 @@ public final class ImageNormalizer {
         }
         requireBefore(deadline);
         COSDictionary dictionary = placement.dictionary();
-        List<String> filters = filters(dictionary);
+        boolean inline = placement.inline();
+        List<String> filters = filters(dictionary, inline);
         if (filters.contains("JBIG2Decode") || filters.contains("JPXDecode")) {
             return new Refused(Reason.UNSUPPORTED_FORMAT);
         }
-        if (placement.inline() && placement.inlineData() == null) {
+        if (inline && placement.inlineData() == null) {
             return new Refused(Reason.INLINE_TOO_LARGE);
         }
-        var declared = ImageDecodeGuard.declared(dictionary, placement.resources());
+        var declared = ImageDecodeGuard.declared(dictionary, inline, placement.resources());
         if (declared.isEmpty()) {
             return new Refused(Reason.BAD_DIMENSIONS);
         }
         int subsampling = subsampling(declared.get(), bounds.maxEdgePx());
-        var refusal = ImageDecodeGuard.check(dictionary, placement.resources(), bounds.maxPixels(), remaining,
-                subsampling);
+        var refusal = ImageDecodeGuard.check(dictionary, inline, filters, placement.resources(), bounds.maxPixels(),
+                remaining, subsampling);
         if (refusal.isPresent()) {
             return new Refused(reason(refusal.get()));
         }
         try {
-            Encoded passed = passThrough(placement, filters, declared.get(), bounds);
+            JpegHeader header = null;
+            if (filters.contains("DCTDecode")) {
+                // The JPEG decoder sizes its raster from the frame header, not the
+                // dictionary: the two must agree, and the header must pass the guard too —
+                // at full size for an inline image, which PDFBox decodes without subsampling
+                if (filters.indexOf("DCTDecode") != filters.size() - 1 || (inline && filters.size() > 1)) {
+                    return new Refused(Reason.UNSUPPORTED_FORMAT);
+                }
+                header = JpegHeader.read(jpegHead(placement, filters));
+                if (header == null || header.components() < 1 || header.components() > 4) {
+                    return new Refused(Reason.UNDECODABLE);
+                }
+                if (header.width() != declared.get().width() || header.height() != declared.get().height()) {
+                    return new Refused(Reason.BAD_DIMENSIONS);
+                }
+                var frame = new ImageDecodeGuard.Declared(header.width(), header.height(), header.components(), 8);
+                var frameRefusal = ImageDecodeGuard.check(frame, bounds.maxPixels(), PdfDecodeBudget.remaining(),
+                        inline ? 1 : subsampling);
+                if (frameRefusal.isPresent()) {
+                    return new Refused(reason(frameRefusal.get()));
+                }
+            }
+            Encoded passed = header == null ? null : passThrough(placement, filters, declared.get(), header, bounds);
             if (passed != null) {
                 return passed;
             }
@@ -205,6 +241,7 @@ public final class ImageNormalizer {
     private static Reason reason(Refusal refusal) {
         return switch (refusal) {
             case BAD_DIMENSIONS -> Reason.BAD_DIMENSIONS;
+            case TOO_MANY_COMPONENTS -> Reason.TOO_MANY_COMPONENTS;
             case TOO_MANY_PIXELS -> Reason.TOO_MANY_PIXELS;
             case OVER_BUDGET -> Reason.OVER_BUDGET;
         };
@@ -220,9 +257,13 @@ public final class ImageNormalizer {
         return (int) Math.max(1, Math.min(Integer.MAX_VALUE, longer / Math.max(1, maxEdgePx)));
     }
 
-    /** The filter chain, abbreviations expanded; empty when there is none. */
-    static List<String> filters(COSDictionary dictionary) {
-        COSBase filter = dictionary.getDictionaryObject(COSName.FILTER, COSName.F);
+    /**
+     * The filter chain, read as PDFBox reads it ({@code /F} first for an inline
+     * image; only {@code /Filter} for an XObject, where {@code /F} is a file
+     * specification), abbreviations expanded; empty when there is none.
+     */
+    static List<String> filters(COSDictionary dictionary, boolean inline) {
+        COSBase filter = ImageDecodeGuard.entry(dictionary, inline, COSName.FILTER, COSName.F);
         List<String> names = new ArrayList<>();
         if (filter instanceof COSName name) {
             names.add(name.getName());
@@ -238,19 +279,26 @@ public final class ImageNormalizer {
     }
 
     /**
-     * The embedded JPEG unchanged, when it can be sent as it is: the stream is
-     * nothing but a JPEG, of gray or RGB, unmasked and undecoded-to-anything-else,
-     * whose own header agrees with the dictionary, within the size limits. Else
-     * null, and the image is decoded.
+     * The embedded JPEG unchanged, when it can be sent as it is and look the same:
+     * the stream is nothing but a baseline or progressive 8-bit JPEG of one or
+     * three components; its colour space is plain gray or RGB (a device, calibrated
+     * or one- or three-component ICC space, with no default colour space in the
+     * resources replacing it); it has no masks, no {@code /Decode} array, no decode
+     * parameters and is no stencil; its frame header agrees with the dictionary;
+     * and it fits the size limits. Else null, and the image is decoded.
      */
     private static Encoded passThrough(Placement placement, List<String> filters, ImageDecodeGuard.Declared declared,
-                                       ImageLimits limits)
+                                       JpegHeader header, ImageLimits limits)
             throws IOException {
         COSDictionary dictionary = placement.dictionary();
-        if (!filters.equals(List.of("DCTDecode")) || declared.components() == 4
-                || dictionary.getDictionaryObject(COSName.DECODE, COSName.D) != null
-                || dictionary.getDictionaryObject(COSName.SMASK) != null
-                || dictionary.getDictionaryObject(COSName.MASK) != null
+        boolean inline = placement.inline();
+        if (!filters.equals(List.of("DCTDecode")) || !plainGrayOrRgb(dictionary, inline, placement.resources())
+                || header.components() != declared.components() || !header.baselineOrProgressive8Bit()
+                || ImageDecodeGuard.isStencil(dictionary, inline)
+                || ImageDecodeGuard.entry(dictionary, inline, COSName.DECODE, COSName.D) != null
+                || ImageDecodeGuard.entry(dictionary, inline, COSName.DECODE_PARMS, COSName.DP) != null
+                || (!inline && (dictionary.getDictionaryObject(COSName.SMASK) != null
+                        || dictionary.getDictionaryObject(COSName.MASK) != null))
                 || declared.width() > limits.maxEdgePx() || declared.height() > limits.maxEdgePx()) {
             return null;
         }
@@ -258,20 +306,63 @@ public final class ImageNormalizer {
         if (raw == null) {
             return null;
         }
-        JpegHeader header = JpegHeader.read(raw);
-        if (header == null || header.width() != declared.width() || header.height() != declared.height()
-                || (header.components() != 1 && header.components() != 3)
-                || header.components() != declared.components()) {
-            return null;
-        }
         return new Encoded(raw, "image/jpeg", header.width(), header.height(), true);
     }
 
-    /** The stream's stored bytes, or null when there are more than {@code max}. */
+    /**
+     * Whether the colour space is one whose JPEG samples a viewer shows as they
+     * are.
+     */
+    private static boolean plainGrayOrRgb(COSDictionary dictionary, boolean inline, PDResources resources) {
+        COSBase colorSpace = ImageDecodeGuard.entry(dictionary, inline, COSName.COLORSPACE, COSName.CS);
+        COSDictionary named = resources == null ? null : resources.getCOSObject().getCOSDictionary(COSName.COLORSPACE);
+        if (colorSpace instanceof COSName name) {
+            return switch (name.getName()) {
+                case "DeviceGray", "G" -> named == null || named.getDictionaryObject(COSName.DEFAULT_GRAY) == null;
+                case "DeviceRGB", "RGB" -> named == null || named.getDictionaryObject(COSName.DEFAULT_RGB) == null;
+                default -> false;
+            };
+        }
+        if (colorSpace instanceof COSArray array && array.size() > 1 && array.getObject(0) instanceof COSName family) {
+            return switch (family.getName()) {
+                case "CalGray", "CalRGB" -> true;
+                case "ICCBased" -> array.getObject(1) instanceof COSStream profile
+                        && (profile.getInt(COSName.N) == 1 || profile.getInt(COSName.N) == 3);
+                default -> false;
+            };
+        }
+        return false;
+    }
+
+    /**
+     * The first bytes of the JPEG inside the stream: the raw bytes when DCT is the
+     * only filter, else what the filters before it decode to (counted by the
+     * budget).
+     */
+    private static byte[] jpegHead(Placement placement, List<String> filters) throws IOException {
+        if (placement.inline()) {
+            byte[] data = placement.inlineData();
+            return data.length <= MAX_JPEG_HEADER_BYTES ? data : Arrays.copyOf(data, MAX_JPEG_HEADER_BYTES);
+        }
+        try (InputStream in = filters.size() == 1
+                ? placement.stream().createRawInputStream()
+                : new PDStream(placement.stream()).createInputStream(List.of(COSName.DCT_DECODE.getName()))) {
+            return in.readNBytes(MAX_JPEG_HEADER_BYTES);
+        }
+    }
+
+    /**
+     * The stream's stored bytes, or null when there are more than {@code max}. An
+     * inline image's bytes lose the whitespace PDFBox keeps before {@code EI}.
+     */
     private static byte[] rawBytes(Placement placement, long max) throws IOException {
         if (placement.inline()) {
             byte[] data = placement.inlineData();
-            return data.length <= max ? data : null;
+            int end = data.length;
+            while (end > 0 && isWhitespace(data[end - 1])) {
+                end--;
+            }
+            return end <= max ? Arrays.copyOf(data, end) : null;
         }
         int cap = (int) Math.min(Integer.MAX_VALUE - 8, max + 1);
         try (InputStream raw = placement.stream().createRawInputStream()) {
@@ -373,6 +464,10 @@ public final class ImageNormalizer {
         return out.toByteArray();
     }
 
+    private static boolean isWhitespace(byte b) {
+        return b == 0x20 || b == 0x0A || b == 0x0D || b == 0x09 || b == 0x0C || b == 0x00;
+    }
+
     private static void requireBefore(Instant deadline) {
         if (Instant.now().isAfter(deadline) || Thread.currentThread().isInterrupted()) {
             throw new UnreadableDocumentException(BoundedTextStripper.TOO_LONG);
@@ -383,7 +478,15 @@ public final class ImageNormalizer {
      * What a JPEG's frame header says: the size and the component count, read from
      * the first start-of-frame marker within {@value #MAX_JPEG_HEADER_BYTES} bytes.
      */
-    record JpegHeader(int width, int height, int components) {
+    record JpegHeader(int width, int height, int components, int frameMarker, int precision) {
+
+        /**
+         * A frame of the kinds every JPEG reader takes: baseline, extended or
+         * progressive, 8 bits.
+         */
+        boolean baselineOrProgressive8Bit() {
+            return frameMarker >= 0xC0 && frameMarker <= 0xC2 && precision == 8;
+        }
 
         /** The header, or null when the bytes are not a JPEG with a readable frame. */
         static JpegHeader read(byte[] jpeg) {
@@ -421,7 +524,9 @@ public final class ImageNormalizer {
                     int height = ((jpeg[at + 5] & 0xFF) << 8) | (jpeg[at + 6] & 0xFF);
                     int width = ((jpeg[at + 7] & 0xFF) << 8) | (jpeg[at + 8] & 0xFF);
                     int components = jpeg[at + 9] & 0xFF;
-                    return width > 0 && height > 0 ? new JpegHeader(width, height, components) : null;
+                    return width > 0 && height > 0
+                            ? new JpegHeader(width, height, components, marker, jpeg[at + 4] & 0xFF)
+                            : null;
                 }
                 at += 2 + length;
             }
