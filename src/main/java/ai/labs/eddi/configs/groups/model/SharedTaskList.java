@@ -521,7 +521,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -540,7 +540,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -560,7 +560,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), result,
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -577,7 +577,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 note, passed,
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -603,7 +603,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 reason, false,
                 existing.priority(), existing.createdAt(), when, existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -630,7 +630,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -660,7 +660,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         approvals.put(taskId, new TaskApproval(decidedBy, Instant.now().toString(), false));
         return u;
     }
@@ -673,7 +673,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 rejectionNote, false, t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -685,7 +685,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -711,7 +711,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
                 reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         // the next result is a new one: an edit (or approval) recorded against the
         // superseded result no longer describes it
         reviewerEdits.remove(taskId);
@@ -770,13 +770,21 @@ public class SharedTaskList {
         }
     }
 
-    private void replaceTask(String taskId, TaskItem replacement) {
+    /**
+     * Stores {@code replacement} in place of task {@code taskId} and returns what
+     * was stored — the replacement with the stored taint kept ({@link #sticky}),
+     * which a lifecycle method must return rather than its own positional copy:
+     * that copy has no origin, and a caller persisting it would drop the taint.
+     */
+    private TaskItem replaceTask(String taskId, TaskItem replacement) {
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).id().equals(taskId)) {
-                tasks.set(i, sticky(tasks.get(i), replacement));
-                return;
+                TaskItem stored = sticky(tasks.get(i), replacement);
+                tasks.set(i, stored);
+                return stored;
             }
         }
+        return replacement;
     }
 
     /**
@@ -910,7 +918,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), editedResult,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         if (edit != null) {
             reviewerEdits.put(taskId, edit);
         }
