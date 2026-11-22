@@ -34,7 +34,7 @@ import java.util.Optional;
  * {@code /Mask}), or the image PDFBox builds when it applies that mask — at the
  * larger of the two widths and the larger of the two heights — has more than
  * {@link ImageLimits#maxPixels()} pixels; or a CCITT image's decode buffer,
- * which PDFBox sizes from {@code /DecodeParms /Columns}, does;</li>
+ * which PDFBox sizes from the decode parameters' {@code /Columns}, does;</li>
  * <li>what decoding it would take — the decoded samples, which the budget will
  * count, plus the buffers and rasters built from them, which it will not — is
  * more than the thread's budget has left.</li>
@@ -70,6 +70,12 @@ final class ImageDecodeGuard {
     /** {@link #components} for a colour space with too many components. */
     static final int TOO_MANY = -1;
 
+    /** {@link #components} for a colour space name that resolves to nothing. */
+    static final int UNRESOLVED = -2;
+
+    /** How many names deep a colour space is followed through the resources. */
+    static final int MAX_COLOUR_SPACE_NAMES = 8;
+
     /** Bytes per pixel of the RGB(A) image PDFBox builds from any raster. */
     private static final int RGB_BYTES = 4;
 
@@ -93,6 +99,11 @@ final class ImageDecodeGuard {
         BAD_DIMENSIONS,
         /** A colour space with more than {@value #MAX_COMPONENTS} components. */
         TOO_MANY_COMPONENTS,
+        /**
+         * A colour space name with no entry in the resources, or chained deeper than
+         * {@value #MAX_COLOUR_SPACE_NAMES} names.
+         */
+        BAD_COLOUR_SPACE,
         /** More pixels than {@link ImageLimits#maxPixels()}. */
         TOO_MANY_PIXELS,
         /** More than the decode budget has left. */
@@ -180,14 +191,18 @@ final class ImageDecodeGuard {
             int ccitt = filters.indexOf("CCITTFaxDecode");
             if (ccitt >= 0) {
                 // PDFBox sizes this buffer from /Columns, whatever /Width says
-                long columns = ccittColumns(image, inline, ccitt);
+                long columns = ccittColumns(image, ccitt);
                 if (columns <= 0) {
                     return Optional.of(Refusal.BAD_DIMENSIONS);
                 }
-                if (Math.multiplyExact(columns, main.height()) > maxPixels) {
+                // Its rows come from /Height read long-first and /DecodeParms /Rows, which
+                // for an inline image need not be what the image itself reads: the largest
+                long rows = Math.max(main.height(), Math.max(image.getInt(COSName.HEIGHT, COSName.H, 0),
+                        decodeParams(image, ccitt).getInt(COSName.ROWS, 0)));
+                if (Math.multiplyExact(columns, rows) > maxPixels) {
                     return Optional.of(Refusal.TOO_MANY_PIXELS);
                 }
-                cost = Math.addExact(cost, Math.multiplyExact((columns + 7) / 8, main.height()));
+                cost = Math.addExact(cost, Math.multiplyExact((columns + 7) / 8, rows));
             }
             if (!inline) {
                 for (COSName key : new COSName[]{COSName.SMASK, COSName.MASK}) {
@@ -205,8 +220,9 @@ final class ImageDecodeGuard {
                         return Optional.of(Refusal.BAD_DIMENSIONS);
                     }
                     Declared masked = maskDeclared.get();
-                    if (masked.components() == TOO_MANY) {
-                        return Optional.of(Refusal.TOO_MANY_COMPONENTS);
+                    Optional<Refusal> maskComponents = componentRefusal(masked);
+                    if (maskComponents.isPresent()) {
+                        return maskComponents;
                     }
                     if (masked.pixels() > maxPixels) {
                         return Optional.of(Refusal.TOO_MANY_PIXELS);
@@ -235,8 +251,9 @@ final class ImageDecodeGuard {
      * plus rasters against the budget.
      */
     static Optional<Refusal> check(Declared declared, long maxPixels, long remainingBudget, int subsampling) {
-        if (declared.components() == TOO_MANY) {
-            return Optional.of(Refusal.TOO_MANY_COMPONENTS);
+        Optional<Refusal> components = componentRefusal(declared);
+        if (components.isPresent()) {
+            return components;
         }
         try {
             if (declared.pixels() > maxPixels) {
@@ -272,7 +289,7 @@ final class ImageDecodeGuard {
             }
             bitsPerComponent = (int) value;
         }
-        int components = components(entry(image, inline, COSName.COLORSPACE, COSName.CS), resources, true);
+        int components = components(entry(image, inline, COSName.COLORSPACE, COSName.CS), resources);
         return Optional.of(new Declared(width, height, components, bitsPerComponent));
     }
 
@@ -283,28 +300,37 @@ final class ImageDecodeGuard {
 
     /**
      * The component count of a colour space: 1..{@value #MAX_COMPONENTS},
-     * {@link #TOO_MANY} past that, {@value #UNKNOWN_COMPONENTS} where it cannot be
-     * told. A device space is replaced by the resources' default for it, and a name
-     * that is not a device space is looked up in the resources — once each, never
-     * further.
+     * {@link #TOO_MANY} past that, {@link #UNRESOLVED} for a name PDFBox could not
+     * resolve either (or one chained too deep), {@value #UNKNOWN_COMPONENTS} where
+     * the colour space does not say.
      */
-    static int components(COSBase colorSpace, PDResources resources, boolean mayLookUp) {
+    static int components(COSBase colorSpace, PDResources resources) {
+        COSDictionary named = resources == null ? null : resources.getCOSObject().getCOSDictionary(COSName.COLORSPACE);
+        return resolve(colorSpace, named, 0, false);
+    }
+
+    /**
+     * Follows a colour space the way {@code PDColorSpace.create} does: a device
+     * name first through its {@code /Default*} entry (once), any other name through
+     * the resources' {@code /ColorSpace} entry, as many names deep as the file
+     * chains them — here at most {@value #MAX_COLOUR_SPACE_NAMES}, past which, or
+     * on a name with no entry, the colour space is {@link #UNRESOLVED}.
+     */
+    private static int resolve(COSBase colorSpace, COSDictionary named, int depth, boolean wasDefault) {
+        if (depth > MAX_COLOUR_SPACE_NAMES) {
+            return UNRESOLVED;
+        }
         if (colorSpace instanceof COSName name) {
-            COSDictionary named = mayLookUp && resources != null
-                    ? resources.getCOSObject().getCOSDictionary(COSName.COLORSPACE)
-                    : null;
-            COSName defaultName = defaultFor(name.getName());
+            COSName defaultName = wasDefault ? null : defaultFor(name.getName());
             if (named != null && defaultName != null && named.getDictionaryObject(defaultName) != null) {
-                return components(named.getDictionaryObject(defaultName), null, false);
+                return resolve(named.getDictionaryObject(defaultName), named, depth + 1, true);
             }
             int device = deviceComponents(name.getName());
             if (device > 0) {
                 return device;
             }
-            if (named != null) {
-                return components(named.getDictionaryObject(name), null, false);
-            }
-            return UNKNOWN_COMPONENTS;
+            COSBase entry = named == null ? null : named.getDictionaryObject(name);
+            return entry == null ? UNRESOLVED : resolve(entry, named, depth + 1, wasDefault);
         }
         if (!(colorSpace instanceof COSArray array) || array.size() == 0
                 || !(array.getObject(0) instanceof COSName family)) {
@@ -348,21 +374,41 @@ final class ImageDecodeGuard {
         return components > MAX_COMPONENTS ? TOO_MANY : components;
     }
 
+    private static Optional<Refusal> componentRefusal(Declared declared) {
+        return switch (declared.components()) {
+            case TOO_MANY -> Optional.of(Refusal.TOO_MANY_COMPONENTS);
+            case UNRESOLVED -> Optional.of(Refusal.BAD_COLOUR_SPACE);
+            default -> Optional.empty();
+        };
+    }
+
     /**
-     * {@code /Columns} of the decode parameters belonging to the CCITT filter at
-     * {@code index}, as PDFBox reads them: 1,728 when absent; -1 when not a usable
-     * number.
+     * The decode parameters of the filter at {@code index}, exactly as PDFBox's
+     * {@code Filter.getDecodeParams} finds them, for an XObject as for an inline
+     * image: {@code /DP} before {@code /DecodeParms}, and a dictionary or an array
+     * according to whether {@code /F} or {@code /Filter} is one name or an array.
+     * Any other combination means none: an empty dictionary.
      */
-    private static long ccittColumns(COSDictionary image, boolean inline, int index) {
-        COSBase parameters = entry(image, inline, COSName.DECODE_PARMS, COSName.DP);
-        if (parameters instanceof COSArray array) {
-            parameters = index < array.size() ? array.getObject(index) : null;
+    static COSDictionary decodeParams(COSDictionary image, int index) {
+        COSBase filter = image.getDictionaryObject(COSName.F, COSName.FILTER);
+        COSBase parameters = image.getDictionaryObject(COSName.DP, COSName.DECODE_PARMS);
+        if (filter instanceof COSName && parameters instanceof COSDictionary dictionary) {
+            return dictionary;
         }
-        if (!(parameters instanceof COSDictionary dictionary)) {
-            return CCITT_DEFAULT_COLUMNS;
+        if (filter instanceof COSArray && parameters instanceof COSArray array && index < array.size()
+                && array.getObject(index) instanceof COSDictionary dictionary) {
+            return dictionary;
         }
-        COSBase columns = dictionary.getDictionaryObject(COSName.COLUMNS);
-        return columns == null ? CCITT_DEFAULT_COLUMNS : positiveWhole(columns);
+        return new COSDictionary();
+    }
+
+    /**
+     * {@code /Columns} of the CCITT filter at {@code index}, as
+     * {@code CCITTFaxFilter} reads it: {@code getInt} with a default of 1,728, so a
+     * value that is not a number is the default too.
+     */
+    private static long ccittColumns(COSDictionary image, int index) {
+        return decodeParams(image, index).getInt(COSName.COLUMNS, CCITT_DEFAULT_COLUMNS);
     }
 
     /** A positive whole number up to {@link Integer#MAX_VALUE}, else -1. */

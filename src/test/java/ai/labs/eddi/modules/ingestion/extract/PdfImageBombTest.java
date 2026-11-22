@@ -160,16 +160,16 @@ class PdfImageBombTest {
         @Test
         @DisplayName("components come from the colour space, bounded; unknown means four")
         void components() {
-            assertEquals(1, ImageDecodeGuard.components(COSName.DEVICEGRAY, null, true));
-            assertEquals(3, ImageDecodeGuard.components(COSName.DEVICERGB, null, true));
-            assertEquals(4, ImageDecodeGuard.components(COSName.DEVICECMYK, null, true));
-            assertEquals(4, ImageDecodeGuard.components(COSName.getPDFName("Unheard"), null, true));
-            assertEquals(4, ImageDecodeGuard.components(null, null, true));
-            assertEquals(4, ImageDecodeGuard.components(new COSString("RGB"), null, true));
+            assertEquals(1, ImageDecodeGuard.components(COSName.DEVICEGRAY, null));
+            assertEquals(3, ImageDecodeGuard.components(COSName.DEVICERGB, null));
+            assertEquals(4, ImageDecodeGuard.components(COSName.DEVICECMYK, null));
+            assertEquals(ImageDecodeGuard.UNRESOLVED, ImageDecodeGuard.components(COSName.getPDFName("Unheard"), null));
+            assertEquals(4, ImageDecodeGuard.components(null, null));
+            assertEquals(4, ImageDecodeGuard.components(new COSString("RGB"), null));
             var indexed = new COSArray();
             indexed.add(COSName.INDEXED);
             indexed.add(COSName.DEVICERGB);
-            assertEquals(1, ImageDecodeGuard.components(indexed, null, true));
+            assertEquals(1, ImageDecodeGuard.components(indexed, null));
             var deviceN = new COSArray();
             deviceN.add(COSName.DEVICEN);
             var names = new COSArray();
@@ -177,7 +177,7 @@ class PdfImageBombTest {
                 names.add(COSName.getPDFName("c" + i));
             }
             deviceN.add(names);
-            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(deviceN, null, true));
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(deviceN, null));
         }
 
         @Test
@@ -216,9 +216,9 @@ class PdfImageBombTest {
             resources.setItem(COSName.COLORSPACE, colourSpaces);
             var pdResources = new PDResources(resources);
 
-            assertEquals(1, ImageDecodeGuard.components(COSName.getPDFName("CS0"), pdResources, true));
-            assertEquals(4, ImageDecodeGuard.components(COSName.getPDFName("Loop"), pdResources, true));
-            assertEquals(4, ImageDecodeGuard.components(COSInteger.ONE, pdResources, true));
+            assertEquals(1, ImageDecodeGuard.components(COSName.getPDFName("CS0"), pdResources));
+            assertEquals(ImageDecodeGuard.UNRESOLVED, ImageDecodeGuard.components(COSName.getPDFName("Loop"), pdResources));
+            assertEquals(4, ImageDecodeGuard.components(COSInteger.ONE, pdResources));
         }
     }
 
@@ -330,6 +330,86 @@ class PdfImageBombTest {
         }
 
         @Test
+        @DisplayName("a JPEG behind another filter, named by the abbreviation /DCT, is not decoded to read its header")
+        void abbreviatedDctInAChain() throws IOException {
+            Decoder decoder = mock(Decoder.class);
+            byte[] lying = PdfFixtures.patchFrame(PdfFixtures.photoJpeg(), 0xC0, 8, 2_000, 2_000);
+            byte[] pdf = PdfFixtures.singleImage("/Width 64 /Height 48 /BitsPerComponent 8 /ColorSpace /DeviceRGB",
+                    PdfFixtures.deflate(lying), "[/FlateDecode /DCT]");
+
+            // Read from what Flate decodes, the header says 2,000 × 2,000: decoding the
+            // JPEG itself instead would leave no header to read
+            Result result = normalizeFirst(pdf, decoder, null, BUDGET);
+
+            assertEquals(Reason.BAD_DIMENSIONS, assertInstanceOf(Refused.class, result).reason());
+            verify(decoder, never()).decode(any(), anyInt());
+        }
+
+        @Test
+        @DisplayName("CCITT decode parameters are found as PDFBox finds them: /DP first, and by the filter's shape")
+        void ccittDecodeParamsAsPdfBoxFindsThem() throws IOException {
+            for (String entries : List.of(
+                    // /DP before /DecodeParms, on an XObject too
+                    "/Width 1 /Height 1000 /BitsPerComponent 1 /ColorSpace /DeviceGray /DP <</K -1 /Columns 2000000>>"
+                            + " /DecodeParms <</K -1 /Columns 1>>",
+                    // One filter name with an array of parameters: PDFBox ignores the array and
+                    // uses
+                    // 1,728 columns
+                    "/Width 1 /Height 1200000 /BitsPerComponent 1 /ColorSpace /DeviceGray"
+                            + " /DecodeParms [<</K -1 /Columns 1>>]")) {
+                Decoder decoder = mock(Decoder.class);
+                byte[] pdf = PdfFixtures.singleImage(entries, new byte[100], "/CCITTFaxDecode");
+
+                Result result = normalizeFirst(pdf, decoder, null, BUDGET);
+
+                assertEquals(Reason.TOO_MANY_PIXELS, assertInstanceOf(Refused.class, result).reason(), entries);
+                verify(decoder, never()).decode(any(), anyInt());
+            }
+        }
+
+        @Test
+        @DisplayName("a colour space named through other names is followed; a loop or a missing name is refused")
+        void namedColourSpaceChains() {
+            var deviceN = new COSArray();
+            deviceN.add(COSName.DEVICEN);
+            var names = new COSArray();
+            for (int i = 0; i < 1000; i++) {
+                names.add(COSName.getPDFName("c" + i));
+            }
+            deviceN.add(names);
+            var colourSpaces = new COSDictionary();
+            colourSpaces.setItem(COSName.getPDFName("CS0"), COSName.getPDFName("CS1"));
+            colourSpaces.setItem(COSName.getPDFName("CS1"), deviceN);
+            colourSpaces.setItem(COSName.getPDFName("A"), COSName.getPDFName("B"));
+            colourSpaces.setItem(COSName.getPDFName("B"), COSName.getPDFName("A"));
+            colourSpaces.setItem(COSName.DEFAULT_GRAY, COSName.getPDFName("CS1"));
+            colourSpaces.setItem(COSName.getPDFName("Rgb"), COSName.getPDFName("DeviceRGB"));
+            var resources = new COSDictionary();
+            resources.setItem(COSName.COLORSPACE, colourSpaces);
+            var pdResources = new PDResources(resources);
+
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(COSName.getPDFName("CS0"), pdResources));
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(COSName.DEVICEGRAY, pdResources));
+            assertEquals(3, ImageDecodeGuard.components(COSName.getPDFName("Rgb"), pdResources));
+            assertEquals(ImageDecodeGuard.UNRESOLVED, ImageDecodeGuard.components(COSName.getPDFName("A"), pdResources));
+            assertEquals(ImageDecodeGuard.UNRESOLVED,
+                    ImageDecodeGuard.components(COSName.getPDFName("Missing"), pdResources));
+        }
+
+        @Test
+        @DisplayName("an image in a colour space that loops is refused before PDFBox recurses into it")
+        void loopingColourSpaceImage() throws IOException {
+            Decoder decoder = mock(Decoder.class);
+            byte[] pdf = PdfFixtures.singleImage("/Width 10 /Height 10 /BitsPerComponent 8 /ColorSpace /Loop",
+                    PdfFixtures.deflate(new byte[100]), "/FlateDecode");
+
+            Result result = normalizeFirst(pdf, decoder, null, BUDGET);
+
+            assertEquals(Reason.BAD_COLOUR_SPACE, assertInstanceOf(Refused.class, result).reason());
+            verify(decoder, never()).decode(any(), anyInt());
+        }
+
+        @Test
         @DisplayName("a JPEG whose frame header is larger than its dictionary is refused, XObject or inline")
         void jpegFrameDisagrees() throws IOException {
             byte[] lying = PdfFixtures.patchFrame(PdfFixtures.photoJpeg(), 0xC0, 8, 20_000, 20_000);
@@ -392,9 +472,9 @@ class PdfImageBombTest {
             resources.setItem(COSName.COLORSPACE, colourSpaces);
             var pdResources = new PDResources(resources);
 
-            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(COSName.DEVICEGRAY, pdResources, true));
-            assertEquals(1, ImageDecodeGuard.components(COSName.DEVICERGB, pdResources, true));
-            assertEquals(4, ImageDecodeGuard.components(COSName.DEVICECMYK, pdResources, true));
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(COSName.DEVICEGRAY, pdResources));
+            assertEquals(1, ImageDecodeGuard.components(COSName.DEVICERGB, pdResources));
+            assertEquals(4, ImageDecodeGuard.components(COSName.DEVICECMYK, pdResources));
         }
 
         @Test

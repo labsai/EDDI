@@ -116,6 +116,8 @@ class ImageNormalizerTest {
             cases.put("Lab", PdfFixtures.singleImage(size + "/ColorSpace [/Lab <<>>]", photo, "/DCTDecode"));
             cases.put("decode parameters", PdfFixtures.singleImage(size + "/ColorSpace /DeviceRGB"
                     + " /DecodeParms <</ColorTransform 0>>", photo, "/DCTDecode"));
+            cases.put("abbreviated decode parameters", PdfFixtures.singleImage(size + "/ColorSpace /DeviceRGB"
+                    + " /DP <</ColorTransform 0>>", photo, "/DCTDecode"));
             cases.put("12-bit", PdfFixtures.singleImage(size + "/ColorSpace /DeviceRGB",
                     PdfFixtures.patchFrame(photo, 0xC0, 12, 64, 48), "/DCTDecode"));
             cases.put("lossless", PdfFixtures.singleImage(size + "/ColorSpace /DeviceRGB",
@@ -134,6 +136,38 @@ class ImageNormalizerTest {
             }
             byte[] plainRgb = PdfFixtures.singleImage(size + "/ColorSpace /DeviceRGB", photo, "/DCTDecode");
             assertTrue(assertInstanceOf(Encoded.class, normalizeAll(plainRgb, null).getFirst()).passThrough());
+        }
+
+        @Test
+        @DisplayName("a JPEG whose frame header follows 130 KB of APP segments is still read and passed through")
+        void frameHeaderPastLargeAppSegments() throws IOException {
+            byte[] camera = PdfFixtures.withAppSegments(PdfFixtures.photoJpeg(), 2, 65_000);
+            byte[] pdf = PdfFixtures.singleImage("/Width 64 /Height 48 /BitsPerComponent 8 /ColorSpace /DeviceRGB",
+                    camera, "/DCTDecode");
+
+            var encoded = assertInstanceOf(Encoded.class, normalizeAll(pdf, null).getFirst());
+
+            assertTrue(encoded.passThrough());
+            assertArrayEquals(camera, encoded.bytes());
+        }
+
+        @Test
+        @DisplayName("a JPEG after one line feed, which PDFBox skips, is decoded rather than refused or passed through")
+        void leadingLineFeed() throws IOException {
+            byte[] photo = PdfFixtures.photoJpeg();
+            byte[] fed = new byte[photo.length + 1];
+            fed[0] = 0x0A;
+            System.arraycopy(photo, 0, fed, 1, photo.length);
+            Decoder decoder = mock(Decoder.class);
+            when(decoder.decode(any(), anyInt())).thenReturn(new BufferedImage(64, 48, BufferedImage.TYPE_INT_RGB));
+            var normalizer = new ImageNormalizer(decoder::decode);
+            byte[] pdf = PdfFixtures.singleImage("/Width 64 /Height 48 /BitsPerComponent 8 /ColorSpace /DeviceRGB", fed,
+                    "/DCTDecode");
+
+            Result result = normalizeAll(pdf, ExtractionLimits.defaults().maxDecodedBytes(),
+                    placement -> normalizer.normalize(placement, null, Instant.now().plusSeconds(60))).getFirst();
+
+            assertFalse(assertInstanceOf(Encoded.class, result).passThrough());
         }
 
         @Test
@@ -313,7 +347,7 @@ class ImageNormalizerTest {
         @DisplayName("reads size and components from the frame header")
         void reads() {
             var header = ImageNormalizer.JpegHeader.read(PdfFixtures.photoJpeg());
-            assertEquals(new ImageNormalizer.JpegHeader(PdfFixtures.PHOTO_WIDTH, PdfFixtures.PHOTO_HEIGHT, 3, 0xC0, 8), header);
+            assertEquals(new ImageNormalizer.JpegHeader(PdfFixtures.PHOTO_WIDTH, PdfFixtures.PHOTO_HEIGHT, 3, 0xC0, 8, 0), header);
             assertEquals(4, ImageNormalizer.JpegHeader.read(PdfFixtures.cmykJpeg()).components());
         }
 

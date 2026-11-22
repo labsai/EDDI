@@ -1005,15 +1005,15 @@ A PDF's images are the part of the file whose declared size has least to do with
 The image reader (`PdfImageCollector`, `ImageDecodeGuard` and `ImageNormalizer` in `modules/ingestion/extract`) closes that gap. **Nothing calls it yet in this version.** Embedded images reach models in a later release, behind the agent's `documents.images` settings.
 
 Every size is checked as PDFBox reads it, because a check on one number and an allocation from another is no check:
-- An inline image's abbreviated keys are read first (`/W` before `/Width`, `/F` before `/Filter`), and an XObject's full keys only.
-- A device colour space counts as the resources' `/DefaultGray`, `/DefaultRGB` or `/DefaultCMYK` where those replace it.
+- An inline image's abbreviated keys are read first (`/W` before `/Width`, `/F` before `/Filter`), and an XObject's full keys only. Decode parameters are found as PDFBox's filters find them, for both: `/DP` before `/DecodeParms`, a dictionary for one filter name, an array for an array of filters, and none otherwise.
+- A colour space given by name is followed through the resources the way PDFBox follows it, up to 8 names deep, through `/DefaultGray`, `/DefaultRGB` or `/DefaultCMYK` where those replace a device space. A name that resolves to nothing, or a chain deeper than 8 (a loop, say), is refused.
 - A JPEG is checked against its own frame header as well as its dictionary.
 
 | Risk | Bound | On exceeding it |
 |---|---|---|
-| Huge declared image | Before PDFBox builds a raster or a decode buffer, `eddi.documents.images.max-pixels` (40 MP) caps each of these: the image's width × height, every mask it carries (`/SMask`, a stream `/Mask`), the image PDFBox builds when it applies a mask (at the larger width and the larger height of the two), and a CCITT image's buffer (sized from `/DecodeParms /Columns`). The decoded samples plus those buffers and rasters must also fit what the document's decode budget has left. The arithmetic is exact `long` arithmetic | That image is refused; the rest of the document is read |
+| Huge declared image | Before PDFBox builds a raster or a decode buffer, `eddi.documents.images.max-pixels` (40 MP) caps each of these: the image's width × height, every mask it carries (`/SMask`, a stream `/Mask`), the image PDFBox builds when it applies a mask (at the larger width and the larger height of the two), and a CCITT image's buffer (sized from its decode parameters' `/Columns`). The decoded samples plus those buffers and rasters must also fit what the document's decode budget has left. The arithmetic is exact `long` arithmetic | That image is refused; the rest of the document is read |
 | Colour spaces | The component count is read from the colour space. More than 32 (a DeviceN with more colourants, an ICC profile claiming more) is refused, not costed as 32. Four is assumed where the colour space does not say | That image is refused |
-| A JPEG's frame header disagreeing with its dictionary | The JPEG decoder sizes its raster from the frame header. The header must match the declared width and height and pass the same checks. An inline JPEG is checked at full size, because PDFBox decodes it without subsampling | That image is refused |
+| A JPEG's frame header disagreeing with its dictionary | The JPEG decoder sizes its raster from the frame header. The header must be found within the first 4 MiB, after one line feed at most, and must match the declared width and height and pass the same checks. The header is read without running the JPEG decoder, also behind another filter. An inline JPEG is checked at full size, because PDFBox decodes it without subsampling | That image is refused |
 | Flate bomb inside an image | The decode budget counts the image's decoded bytes like any other stream's | The document is refused, as for any PDF over its budget |
 | Page and form content | A page's content is charged to the decode budget before it is parsed, including the unfiltered and single-Flate streams PDFBox reads past its counted filters. An unfiltered form is charged again on every draw | The document is refused, as for any PDF over its budget |
 | Form XObjects drawing each other | Followed 8 deep at most. A form that is already being drawn is not drawn again. Every operator counts against one cap per read (5,000,000), forms included however often they are drawn. The deadline is checked every 1,024 operators and on every form drawn. A form PDFBox cannot read is skipped | Past the depth or on a cycle the form is skipped. Past the cap the read stops and says it was cut. Past the deadline the document is refused |
@@ -1024,7 +1024,9 @@ Every size is checked as PDFBox reads it, because a check on one number and an a
 
 Images are collected without decoding them. A collection keeps one small record and a stream handle per draw, plus at most 16 MiB of inline image bytes, never decoded pixels. A test reads 10,000 images of 128 × 128 in a JVM limited to 256 MB to prove it; holding their pixels would need about 650 MB. Text, fonts and Type 3 glyphs are never interpreted while images are collected.
 
-**Residual:** a page or form made of millions of operands and no operator is held by PDFBox's parser as one list. Its size is bounded only by the decode budget charged for that content, as on the text path.
+**Residual:**
+- A page or form made of millions of operands and no operator is held by PDFBox's parser as one list. Its size is bounded only by the decode budget charged for that content, as on the text path.
+- A progressive JPEG is decoded by the JDK's native decoder, which allocates its coefficient buffer at the full frame size, outside the Java heap and the budget. The pixel cap bounds that size to 40 MP.
 
 ---
 

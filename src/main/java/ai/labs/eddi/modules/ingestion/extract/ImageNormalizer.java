@@ -86,7 +86,7 @@ public final class ImageNormalizer {
     private static final int MAX_SHRINKS = 3;
 
     /** How far into a JPEG its header is looked for. */
-    private static final int MAX_JPEG_HEADER_BYTES = 64 * 1024;
+    private static final int MAX_JPEG_HEADER_BYTES = 4 * 1024 * 1024;
 
     private static final Map<String, String> FILTER_ABBREVIATIONS = Map.of("AHx", "ASCIIHexDecode", "A85",
             "ASCII85Decode", "LZW", "LZWDecode", "Fl", "FlateDecode", "RL", "RunLengthDecode", "CCF",
@@ -112,6 +112,8 @@ public final class ImageNormalizer {
         BAD_DIMENSIONS,
         /** A colour space with more than 32 components. */
         TOO_MANY_COMPONENTS,
+        /** A colour space name that resolves to nothing, or is chained too deep. */
+        BAD_COLOUR_SPACE,
         /** More pixels than {@link ImageLimits#maxPixels()}. */
         TOO_MANY_PIXELS,
         /** More than the decode budget has left. */
@@ -174,6 +176,7 @@ public final class ImageNormalizer {
         if (remaining < 0) {
             throw new IllegalStateException("Images are decoded only under an armed PdfDecodeBudget");
         }
+        PdfDecodeBudget.requireNotExceeded();
         requireBefore(deadline);
         COSDictionary dictionary = placement.dictionary();
         boolean inline = placement.inline();
@@ -242,6 +245,7 @@ public final class ImageNormalizer {
         return switch (refusal) {
             case BAD_DIMENSIONS -> Reason.BAD_DIMENSIONS;
             case TOO_MANY_COMPONENTS -> Reason.TOO_MANY_COMPONENTS;
+            case BAD_COLOUR_SPACE -> Reason.BAD_COLOUR_SPACE;
             case TOO_MANY_PIXELS -> Reason.TOO_MANY_PIXELS;
             case OVER_BUDGET -> Reason.OVER_BUDGET;
         };
@@ -293,10 +297,10 @@ public final class ImageNormalizer {
         COSDictionary dictionary = placement.dictionary();
         boolean inline = placement.inline();
         if (!filters.equals(List.of("DCTDecode")) || !plainGrayOrRgb(dictionary, inline, placement.resources())
-                || header.components() != declared.components() || !header.baselineOrProgressive8Bit()
+                || header.components() != declared.components() || !header.baselineOrProgressive8Bit() || header.offset() != 0
                 || ImageDecodeGuard.isStencil(dictionary, inline)
                 || ImageDecodeGuard.entry(dictionary, inline, COSName.DECODE, COSName.D) != null
-                || ImageDecodeGuard.entry(dictionary, inline, COSName.DECODE_PARMS, COSName.DP) != null
+                || dictionary.getDictionaryObject(COSName.DP, COSName.DECODE_PARMS) != null
                 || (!inline && (dictionary.getDictionaryObject(COSName.SMASK) != null
                         || dictionary.getDictionaryObject(COSName.MASK) != null))
                 || declared.width() > limits.maxEdgePx() || declared.height() > limits.maxEdgePx()) {
@@ -346,7 +350,7 @@ public final class ImageNormalizer {
         }
         try (InputStream in = filters.size() == 1
                 ? placement.stream().createRawInputStream()
-                : new PDStream(placement.stream()).createInputStream(List.of(COSName.DCT_DECODE.getName()))) {
+                : new PDStream(placement.stream()).createInputStream(List.of("DCTDecode", "DCT"))) {
             return in.readNBytes(MAX_JPEG_HEADER_BYTES);
         }
     }
@@ -476,9 +480,12 @@ public final class ImageNormalizer {
 
     /**
      * What a JPEG's frame header says: the size and the component count, read from
-     * the first start-of-frame marker within {@value #MAX_JPEG_HEADER_BYTES} bytes.
+     * the first start-of-frame marker within {@value #MAX_JPEG_HEADER_BYTES} bytes,
+     * segments skipped by their declared lengths. One line feed before the
+     * start-of-image marker is tolerated, as PDFBox's DCT filter tolerates it;
+     * {@code offset} is then 1.
      */
-    record JpegHeader(int width, int height, int components, int frameMarker, int precision) {
+    record JpegHeader(int width, int height, int components, int frameMarker, int precision, int offset) {
 
         /**
          * A frame of the kinds every JPEG reader takes: baseline, extended or
@@ -490,11 +497,12 @@ public final class ImageNormalizer {
 
         /** The header, or null when the bytes are not a JPEG with a readable frame. */
         static JpegHeader read(byte[] jpeg) {
-            if (jpeg.length < 4 || (jpeg[0] & 0xFF) != 0xFF || (jpeg[1] & 0xFF) != 0xD8) {
+            int offset = jpeg.length > 0 && jpeg[0] == 0x0A ? 1 : 0;
+            if (jpeg.length < offset + 4 || (jpeg[offset] & 0xFF) != 0xFF || (jpeg[offset + 1] & 0xFF) != 0xD8) {
                 return null;
             }
             int limit = Math.min(jpeg.length, MAX_JPEG_HEADER_BYTES);
-            int at = 2;
+            int at = offset + 2;
             while (at + 4 <= limit) {
                 if ((jpeg[at] & 0xFF) != 0xFF) {
                     return null;
@@ -525,7 +533,7 @@ public final class ImageNormalizer {
                     int width = ((jpeg[at + 7] & 0xFF) << 8) | (jpeg[at + 8] & 0xFF);
                     int components = jpeg[at + 9] & 0xFF;
                     return width > 0 && height > 0
-                            ? new JpegHeader(width, height, components, marker, jpeg[at + 4] & 0xFF)
+                            ? new JpegHeader(width, height, components, marker, jpeg[at + 4] & 0xFF, offset)
                             : null;
                 }
                 at += 2 + length;

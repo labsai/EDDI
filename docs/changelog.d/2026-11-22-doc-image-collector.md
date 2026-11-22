@@ -18,12 +18,12 @@
   - Inline images keep at most 1 MiB each and 16 MiB per collection.
   - Past the operator or draw cap the collection stops and says it was cut. Past the deadline the document is refused.
 - **`ImageDecodeGuard`** checks what an image declares before PDFBox builds a raster or decode buffer for it. This is the gap the two existing bounds leave: `PdfStreamBudget` skips image streams, and `PdfDecodeBudget` counts what a filter writes, not the raster PDFBox sizes from the dictionary.
-  - **Read as PDFBox reads it:** an inline image's abbreviated keys first (`/W` before `/Width`, `/F` before `/Filter`), and an XObject's full keys only. A device colour space counts as the resources' `/Default*` space that replaces it.
+  - **Read as PDFBox reads it:** an inline image's abbreviated keys first (`/W` before `/Width`, `/F` before `/Filter`), and an XObject's full keys only. Decode parameters `/DP` before `/DecodeParms` and by the filter's shape, as `Filter.getDecodeParams` finds them. A named colour space is followed through the resources up to 8 names deep, and a loop or missing name is refused. A device colour space counts as the resources' `/Default*` space that replaces it.
   - **Pixels:** `eddi.documents.images.max-pixels` (40 MP) caps each of these:
     - the image;
     - every mask it carries (`/SMask`, a stream `/Mask`);
     - the masked image PDFBox builds at the larger width and the larger height of the two;
-    - a CCITT image's buffer, which PDFBox sizes from `/DecodeParms /Columns`.
+    - a CCITT image's buffer, which PDFBox sizes from its decode parameters' `/Columns` (`/DP` or `/DecodeParms`).
   - **Budget:** decoded samples plus those buffers and rasters, at the subsampling decoding will use, against what the thread's decode budget has left. A colour-key mask is costed too.
   - **Components:** read from the colour space. More than 32 is refused, and 4 is assumed where the colour space does not say.
   - **Arithmetic:** exact `long` arithmetic, so an overflow is refused rather than wrapped.
@@ -44,7 +44,7 @@
   - every refusal and the arithmetic;
   - each way a size can be read differently from how PDFBox reads it: inline key order, mask scaling, frame headers, `/Default*` colour spaces and CCITT `/Columns`.
 
-  They also show that the raw pre-scan lets an image-stream Flate bomb through and the decode budget refuses it. Two child-JVM tests (`-Xmx256m`) decode 10,000 images of 128 × 128 and survive two million unclosed `q` operators. Every guard was mutation-checked: each bound removed in turn, 38 mutations in all, and a test fails for each.
+  They also show that the raw pre-scan lets an image-stream Flate bomb through and the decode budget refuses it. Two child-JVM tests (`-Xmx256m`) decode 10,000 images of 128 × 128 and survive two million unclosed `q` operators. Every guard was mutation-checked: each bound removed in turn, 46 mutations in all, and a test fails for each.
 - **Docs:** `docs/security.md` → PDF Image Bounds; `docs/configuration-reference.md` → Documents.
 
 ### What's next

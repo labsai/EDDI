@@ -270,6 +270,7 @@ public final class PdfImageCollector {
                 break;
             }
         }
+        PdfDecodeBudget.requireNotExceeded();
         return new Collection(engine.images, engine.truncated);
     }
 
@@ -403,7 +404,11 @@ public final class PdfImageCollector {
                 showForm(new PDFormXObject(new PDStream(stream)));
             } catch (IOException malformed) {
                 // As PDFBox does for Do: a form that cannot be read is skipped, not the page.
-                // The budget and the deadline are unchecked exceptions and pass through
+                // The budget and the deadline are unchecked exceptions and pass through; a
+                // budget
+                // passed inside PDFBox and reported as an IOException still refuses the
+                // document
+                PdfDecodeBudget.requireNotExceeded();
             } finally {
                 ignoredSaves = outerIgnoredSaves;
                 forms.removeLast();

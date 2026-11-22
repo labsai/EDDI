@@ -1071,6 +1071,26 @@ public final class PdfFixtures {
         throw new IllegalArgumentException("no frame header");
     }
 
+    /**
+     * {@code jpeg} with {@code count} APP15 segments of {@code bytes} each (at most
+     * 65,533) inserted after its start-of-image marker, as cameras put EXIF
+     * thumbnails and ICC profiles before the frame header.
+     */
+    public static byte[] withAppSegments(byte[] jpeg, int count, int bytes) {
+        var out = new ByteArrayOutputStream();
+        out.write(jpeg, 0, 2);
+        for (int i = 0; i < count; i++) {
+            int length = bytes + 2;
+            out.write(0xFF);
+            out.write(0xEF);
+            out.write(length >> 8);
+            out.write(length);
+            out.writeBytes(new byte[bytes]);
+        }
+        out.write(jpeg, 2, jpeg.length - 2);
+        return out.toByteArray();
+    }
+
     /** {@code data}, zlib-compressed, for a test's own image stream. */
     static byte[] deflate(byte[] data) {
         return zlib(data);

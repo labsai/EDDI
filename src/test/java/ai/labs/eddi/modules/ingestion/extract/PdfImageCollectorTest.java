@@ -213,12 +213,13 @@ class PdfImageCollectorTest {
         @DisplayName("the deadline is checked while the page runs, not only before it")
         void deadlineDuringTheWork() throws IOException {
             var limits = new ImageLimits(0, 0, 0, Integer.MAX_VALUE, Long.MAX_VALUE);
-            try (PDDocument document = Loader.loadPDF(PdfFixtures.formFanOut(10, 8));
-                    var budget = PdfDecodeBudget.open(ExtractionLimits.defaults().maxDecodedBytes())) {
+            try (PDDocument document = Loader.loadPDF(PdfFixtures.formFanOut(10, 8))) {
                 Instant deadline = Instant.now().plusMillis(500);
 
+                // Preemptive, so a missing check cannot hang the build; the budget is armed
+                // inside, on the thread that runs the collection
                 assertTimeoutPreemptively(Duration.ofSeconds(20), () -> assertThrows(UnreadableDocumentException.class,
-                        () -> PdfImageCollector.collect(document, 1, 1, limits, deadline)));
+                        () -> collectUnderBudget(document, limits, deadline, ExtractionLimits.defaults().maxDecodedBytes())));
             }
         }
 
@@ -228,12 +229,19 @@ class PdfImageCollectorTest {
             // 1,000 draws of a 400 KB form of comments: 400 MB to parse in fewer operators
             // than
             // one deadline-check interval (1,024)
-            try (PDDocument document = Loader.loadPDF(PdfFixtures.formRepeated(1_000, 400_000));
-                    var budget = PdfDecodeBudget.open(1L << 30)) {
+            try (PDDocument document = Loader.loadPDF(PdfFixtures.formRepeated(1_000, 400_000))) {
                 Instant deadline = Instant.now().plusMillis(200);
 
                 assertTimeoutPreemptively(Duration.ofSeconds(60), () -> assertThrows(UnreadableDocumentException.class,
-                        () -> PdfImageCollector.collect(document, 1, 1, null, deadline)));
+                        () -> collectUnderBudget(document, null, deadline, 1L << 30)));
+            }
+        }
+
+        private static Collection collectUnderBudget(PDDocument document, ImageLimits limits, Instant deadline,
+                                                     long maxDecodedBytes)
+                throws IOException {
+            try (var budget = PdfDecodeBudget.open(maxDecodedBytes)) {
+                return PdfImageCollector.collect(document, 1, 1, limits, deadline);
             }
         }
 
