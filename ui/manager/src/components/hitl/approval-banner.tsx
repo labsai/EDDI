@@ -10,6 +10,7 @@ import {
   ShieldAlert,
   Pencil,
   Hand,
+  Mail,
 } from "lucide-react";
 import { cn } from "@eddi/app-kit/lib/utils";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
@@ -786,6 +787,19 @@ export function ApprovalBanner({
             : rulePause.lastEditRefused.reason === "REDACTED_CONTENT"
               ? t("hitlReview.lastEditRedacted", "Your last edit was not applied: the answer contains concealed (redacted) content, so it can only be approved or rejected as it is.")
               : t("hitlReview.lastEditDrift", "Your last edit could not be applied because the agent changed — the original answer is up for review again.")}
+        </p>
+      )}
+      {rulePause?.replyReview && surface === "regular" && (
+        <p
+          className="flex items-start gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 py-1.5 text-xs"
+          data-testid="reply-review-notice"
+        >
+          <Mail className="h-3.5 w-3.5 shrink-0 mt-0.5" aria-hidden="true" />
+          <span>
+            <span className="font-medium">{t("hitlReview.replyReviewTitle", "Email reply waiting for review")}</span>
+            {" — "}
+            {t("hitlReview.replyReviewHint", "This is the whole reply EDDI will send to the mail's sender. Approve it, edit it and approve, or reject it; a rejected or expired review sends nothing. The recipient and the subject cannot be changed.")}
+          </span>
         </p>
       )}
       {editableAnswer && (

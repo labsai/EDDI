@@ -3670,7 +3670,9 @@
     "noReason": "Aucun motif",
     "reasonLabel": "Motif (d'un refus ou d'une modification)",
     "reviewerEdit": "Modification du relecteur",
-    "showOriginal": "Afficher l'original"
+    "showOriginal": "Afficher l'original",
+    "replyReviewTitle": "Réponse par e-mail en attente de relecture",
+    "replyReviewHint": "Voici la réponse complète qu'EDDI enverra à l'expéditeur de l'e-mail. Approuvez-la, modifiez-la puis approuvez-la, ou rejetez-la ; une relecture rejetée ou expirée n'envoie rien. Le destinataire et l'objet ne peuvent pas être modifiés."
   },
   "chatDrawer": {
     "deploying": "Déploiement de l'agent…",
@@ -5641,7 +5643,8 @@
       "allowlistBroad": "Enregistré, mais une entrée de la liste d'autorisation admet tout un suffixe public (comme *@*.co.uk) ou le propre domaine de cette intégration. Préférez des adresses exactes.",
       "approvalPolicyNone": "Enregistré, mais une cible dont l'agent peut agir n'a pas de politique d'approbation : les e-mails utilisent ses outils uniquement sous les approbations propres de l'agent. Envisagez « Approuver chaque action ».",
       "ruleCallsRefused": "Enregistré. Une cible avec une politique d'approbation a des appels HTTP ou MCP pilotés par des règles : un tour d'e-mail les refuse sauf si Outils en lecture seule les nomme.",
-      "readOnlyEverything": "Enregistré, mais un motif d'Outils en lecture seule d'une cible avec une politique d'approbation correspond à tous les outils (comme *) : aucun appel d'outil d'un tour d'e-mail n'attend d'approbation. Nommez plutôt les outils en lecture seule."
+      "readOnlyEverything": "Enregistré, mais un motif d'Outils en lecture seule d'une cible avec une politique d'approbation correspond à tous les outils (comme *) : aucun appel d'outil d'un tour d'e-mail n'attend d'approbation. Nommez plutôt les outils en lecture seule.",
+      "replyReviewNoInternalDomains": "Enregistré. La relecture porte sur les réponses externes, mais aucun domaine interne n'est indiqué : chaque réponse attend une relecture."
     },
     "defaultTargetHint": "La cible par défaut reçoit chaque e-mail dont le plus-tag (invoices+urgent@…) ou l'objet ne correspond au déclencheur d'aucune autre cible. Vous pourrez ajouter d'autres cibles après la création.",
     "triggerLabel": "Plus-tags ou mots de l'objet",
@@ -5694,6 +5697,26 @@
       "rejectedReplyLabel": "Réponse en cas de refus",
       "rejectedReplyPlaceholder": "Votre demande n'a pas été approuvée.",
       "rejectedReplyHint": "Envoyée en mode conversation uniquement ; le mode déclencheur ne répond jamais."
+    },
+    "replyReview": {
+      "title": "Relecture des réponses",
+      "triggerNote": "Le mode déclencheur ne répond jamais : il n'y a aucune réponse à relire.",
+      "modeLabel": "Relire les réponses avant leur envoi",
+      "mode": {
+        "never": "Jamais",
+        "always": "Chaque réponse",
+        "firstContact": "La réponse au premier e-mail d'un expéditeur",
+        "external": "Les réponses aux adresses externes"
+      },
+      "hint": {
+        "never": "Les réponses sont envoyées telles que l'agent les a écrites.",
+        "always": "Chaque réponse attend sur la page Approbations qu'une personne l'approuve, la modifie ou la rejette.",
+        "firstContact": "La réponse au premier e-mail d'un expéditeur vers une cible attend une relecture ; les réponses suivantes partent directement.",
+        "external": "Une réponse vers une adresse hors des domaines internes attend une relecture."
+      },
+      "internalDomainsLabel": "Domaines internes",
+      "internalDomainsHint": "Domaines dont les adresses sont internes, par exemple contoso.com ou *.contoso.com (sous-domaines uniquement). Sans domaine, tout destinataire est externe.",
+      "internalDomainInvalid": "Saisissez un domaine comme contoso.com, ou *.contoso.com pour ses sous-domaines."
     }
   },
   "emailSenders": {

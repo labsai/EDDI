@@ -3637,7 +3637,9 @@
     "noReason": "无原因",
     "reasonLabel": "原因（用于拒绝或修改）",
     "reviewerEdit": "审核人修改",
-    "showOriginal": "显示原文"
+    "showOriginal": "显示原文",
+    "replyReviewTitle": "等待审核的邮件回复",
+    "replyReviewHint": "这是 EDDI 将发送给邮件发件人的完整回复。批准、编辑后批准或拒绝；被拒绝或过期的审核不会发送任何内容。收件人和主题无法更改。"
   },
   "chatDrawer": {
     "deploying": "正在部署智能体…",
@@ -5589,7 +5591,8 @@
       "allowlistBroad": "已保存，但某个允许列表条目接纳了整个公共后缀（如 *@*.co.uk）或此集成自己的域名。请优先使用精确地址。",
       "approvalPolicyNone": "已保存，但一个智能体可执行操作的目标没有审批策略：邮件仅在智能体自身的工具审批范围内使用其工具。建议使用“审批每个操作”。",
       "ruleCallsRefused": "已保存。一个带审批策略的目标包含规则驱动的 HTTP 或 MCP 调用：除非只读工具中列出，否则邮件轮次会拒绝它们。",
-      "readOnlyEverything": "已保存，但一个带审批策略的目标的只读工具模式匹配所有工具（如 *）：邮件轮次的任何工具调用都不会等待审批。请改为列出只读工具。"
+      "readOnlyEverything": "已保存，但一个带审批策略的目标的只读工具模式匹配所有工具（如 *）：邮件轮次的任何工具调用都不会等待审批。请改为列出只读工具。",
+      "replyReviewNoInternalDomains": "已保存。回复审核设置为外部回复，但未列出内部域：每条回复都需要审核。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5642,6 +5645,26 @@
       "rejectedReplyLabel": "被拒绝时的回复",
       "rejectedReplyPlaceholder": "您的请求未获批准。",
       "rejectedReplyHint": "仅在会话模式下发送；触发模式从不回复。"
+    },
+    "replyReview": {
+      "title": "回复审核",
+      "triggerNote": "触发模式从不回复，因此没有需要审核的回复。",
+      "modeLabel": "发送前审核回复",
+      "mode": {
+        "never": "从不",
+        "always": "每条回复",
+        "firstContact": "对发件人首封邮件的回复",
+        "external": "发往外部地址的回复"
+      },
+      "hint": {
+        "never": "回复按代理撰写的内容发送。",
+        "always": "每条回复都会在审批页面等待，直到有人批准、编辑或拒绝。",
+        "firstContact": "发件人发往目标的首封邮件的回复需要审核；之后的回复直接发送。",
+        "external": "发往内部域以外地址的回复需要审核。"
+      },
+      "internalDomainsLabel": "内部域",
+      "internalDomainsHint": "其地址视为内部的域，例如 contoso.com 或 *.contoso.com（仅子域）。未设置时，所有收件人都是外部。",
+      "internalDomainInvalid": "请输入 contoso.com 这样的域，或用 *.contoso.com 表示其子域。"
     }
   },
   "emailSenders": {

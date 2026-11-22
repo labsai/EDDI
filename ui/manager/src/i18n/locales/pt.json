@@ -3670,7 +3670,9 @@
     "noReason": "Sem motivo",
     "reasonLabel": "Motivo (de uma rejeição ou alteração)",
     "reviewerEdit": "Alteração do revisor",
-    "showOriginal": "Mostrar o original"
+    "showOriginal": "Mostrar o original",
+    "replyReviewTitle": "Resposta por e-mail a aguardar revisão",
+    "replyReviewHint": "Esta é a resposta completa que o EDDI enviará ao remetente do e-mail. Aprove-a, edite-a e aprove-a, ou rejeite-a; uma revisão rejeitada ou expirada não envia nada. O destinatário e o assunto não podem ser alterados."
   },
   "chatDrawer": {
     "deploying": "Implantando agente…",
@@ -5641,7 +5643,8 @@
       "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos.",
       "approvalPolicyNone": "Guardado, mas um destino cujo agente pode agir não tem política de aprovação: o e-mail usa as suas ferramentas apenas sob as aprovações próprias do agente. Considere «Aprovar cada ação».",
       "ruleCallsRefused": "Guardado. Um destino com política de aprovação tem chamadas HTTP ou MCP guiadas por regras: um turno de e-mail recusa-as, a menos que Ferramentas somente leitura as nomeie.",
-      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura."
+      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura.",
+      "replyReviewNoInternalDomains": "Guardado. A revisão aplica-se a respostas externas, mas nenhum domínio interno está indicado: todas as respostas aguardam revisão."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5694,6 +5697,26 @@
       "rejectedReplyLabel": "Resposta quando rejeitado",
       "rejectedReplyPlaceholder": "O seu pedido não foi aprovado.",
       "rejectedReplyHint": "Enviada apenas no modo conversa; o modo gatilho nunca responde."
+    },
+    "replyReview": {
+      "title": "Revisão de respostas",
+      "triggerNote": "O modo de gatilho nunca responde, por isso não há resposta para rever.",
+      "modeLabel": "Rever as respostas antes de serem enviadas",
+      "mode": {
+        "never": "Nunca",
+        "always": "Todas as respostas",
+        "firstContact": "A resposta ao primeiro e-mail de um remetente",
+        "external": "Respostas para endereços externos"
+      },
+      "hint": {
+        "never": "As respostas são enviadas tal como o agente as escreveu.",
+        "always": "Cada resposta aguarda na página Aprovações até uma pessoa a aprovar, editar ou rejeitar.",
+        "firstContact": "A resposta ao primeiro e-mail de um remetente para um destino aguarda revisão; as seguintes são enviadas diretamente.",
+        "external": "Uma resposta para um endereço fora dos domínios internos aguarda revisão."
+      },
+      "internalDomainsLabel": "Domínios internos",
+      "internalDomainsHint": "Domínios cujos endereços contam como internos, como contoso.com ou *.contoso.com (apenas subdomínios). Sem nenhum, todos os destinatários são externos.",
+      "internalDomainInvalid": "Introduza um domínio como contoso.com, ou *.contoso.com para os seus subdomínios."
     }
   },
   "emailSenders": {

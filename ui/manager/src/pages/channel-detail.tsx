@@ -25,6 +25,7 @@ import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-chan
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
+import { EmailReplyReviewSection } from "@/components/channels/email-reply-review";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType, adoptStoredVersion, emptiesSenderAllowlist } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -635,7 +636,10 @@ export function ChannelDetailPage() {
               if (channelType === draft.channelType) return;
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
-              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+              const switched = { ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) };
+              // emailControl is email-only: the backend refuses it on any other type.
+              if (channelType !== "email") delete switched.emailControl;
+              setDraft(switched);
             }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>
@@ -714,6 +718,19 @@ export function ChannelDetailPage() {
         </div>
         )}
       </section>
+
+      {isEmail && (
+        <EmailReplyReviewSection
+          emailControl={draft.emailControl}
+          conversation={emailMode(draft.platformConfig ?? {}) === "conversation"}
+          onChange={(emailControl) => setDraft((prev) => {
+            if (!prev) return prev;
+            const next = { ...prev, emailControl };
+            if (emailControl === undefined) delete next.emailControl;
+            return next;
+          })}
+        />
+      )}
 
       {/* Email: no endpoint to show — EDDI polls the mailbox. */}
       {isEmail && (

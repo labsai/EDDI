@@ -252,6 +252,12 @@ export interface RulePauseDetails {
   editableAnswer?: EditableAnswer | null;
   /** The engine refused the last approved edit (a guardrail, or a changed config). */
   lastEditRefused?: { reason: string; guardrail?: string | null; at?: string } | null;
+  /**
+   * The pause holds an email reply for review (email `replyReview`):
+   * `editableAnswer` is then the whole reply, editable on every agent, and a
+   * rejection sends nothing.
+   */
+  replyReview?: boolean;
 }
 
 export type PauseDetails = ToolCallPauseDetails | RulePauseDetails;
