@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import ai.labs.eddi.datastore.IResourceStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
@@ -29,6 +31,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -54,7 +57,17 @@ class EmailLedgerGdprParticipantTest {
         Instance<IUserDirectoryStore> instance = mock(Instance.class);
         when(instance.isResolvable()).thenReturn(true);
         when(instance.get()).thenReturn(directory);
-        participant = new EmailLedgerGdprParticipant(ledger, instance);
+        // No conversation the rows name exists any more: nothing holds the erasure.
+        IConversationMemoryStore store = mock(IConversationMemoryStore.class);
+        try {
+            when(store.loadConversationMemorySnapshot(anyString())).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+        Instance<IConversationMemoryStore> stores = mock(Instance.class);
+        when(stores.isResolvable()).thenReturn(true);
+        when(stores.get()).thenReturn(store);
+        participant = new EmailLedgerGdprParticipant(ledger, instance, stores);
         ledger.insertIfAbsent(row("carol@example.com"));
         ledger.insertIfAbsent(row("carol@example.com"));
         ledger.insertIfAbsent(row("ops@example.com"));

@@ -8,6 +8,8 @@ import ai.labs.eddi.engine.gdpr.IGdprParticipant;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.IUserDirectoryStore;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.integrations.email.EmailThreadConversations;
 import ai.labs.eddi.integrations.email.EmailUserIdentity;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -49,11 +51,23 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
 
     private final IEmailMessageLedger ledger;
     private final Instance<IUserDirectoryStore> directory;
+    private final Instance<IConversationMemoryStore> conversations;
 
     @Inject
-    public EmailLedgerGdprParticipant(IEmailMessageLedger ledger, Instance<IUserDirectoryStore> directory) {
+    public EmailLedgerGdprParticipant(IEmailMessageLedger ledger, Instance<IUserDirectoryStore> directory,
+            Instance<IConversationMemoryStore> conversations) {
         this.ledger = ledger;
         this.directory = directory;
+        this.conversations = conversations;
+    }
+
+    /**
+     * Without the conversation store: rows naming a conversation are never erased
+     * here (the step fails), since it cannot tell whether they still lead to a
+     * thread conversation.
+     */
+    public EmailLedgerGdprParticipant(IEmailMessageLedger ledger, Instance<IUserDirectoryStore> directory) {
+        this(ledger, directory, null);
     }
 
     @Override
@@ -63,8 +77,18 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
 
     @Override
     public long erase(String userId) {
+        Set<String> addresses = addressesOf(userId);
+        // The rows are the only link to the thread conversations an address took part
+        // in (email v2 plan §9.5): while one is still there — the identity step that
+        // deletes them failed — the rows stay, so a retried erasure still reaches it.
+        for (String address : addresses) {
+            if (!EmailThreadConversations.threadConversations(conversations, EmailThreadConversations.namedBy(ledger, address)).isEmpty()) {
+                throw new IllegalStateException("Thread conversations of this address are still stored; its email ledger rows are kept for the "
+                        + "retry that erases them");
+            }
+        }
         long removed = 0;
-        for (String address : addressesOf(userId)) {
+        for (String address : addresses) {
             removed += ledger.deleteByRecipient(address);
         }
         return removed;
