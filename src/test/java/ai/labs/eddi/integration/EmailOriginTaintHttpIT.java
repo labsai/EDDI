@@ -85,6 +85,30 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
         return wireMock.countRequestsMatching(postRequestedFor(urlPathEqualTo(SENDERS_PATH)).build()).getCount();
     }
 
+    /**
+     * Sends the {@code senders} turn and checks that it was answered and reached
+     * the sender-edit action. Without this an unrelated 404 or 500 would leave the
+     * request count unchanged, and a tainted case would pass for the wrong reason.
+     */
+    private String sendSendersTurn(String conversationId) {
+        Response response = sendUserInput(agent.id(), conversationId, "senders", false, false);
+        String body = response.asString();
+        assertEquals(200, response.statusCode(), body);
+        assertTrue(body.contains("\"edit_senders\""), "the turn must reach the sender-edit action: " + body);
+        return body;
+    }
+
+    /**
+     * As {@link #sendSendersTurn}, for a tainted conversation: the httpcalls task
+     * failed the turn with the escalation guard's refusal, so the missing request
+     * is the guard's doing and nothing else's.
+     */
+    private void sendRefusedSendersTurn(String conversationId) {
+        String body = sendSendersTurn(conversationId);
+        assertTrue(body.contains("\"taskId\":\"ai.labs.httpcalls\"") && body.contains("this conversation was started by an email"),
+                "the tainted turn must report the guard's refusal of the httpcall: " + body);
+    }
+
     private String startConversation(String originHeader) {
         var request = given();
         if (originHeader != null) {
@@ -102,8 +126,9 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
         waitForConversationReady(agent.id(), conversationId);
         int before = senderEdits();
 
-        sendUserInput(agent.id(), conversationId, "senders", false, false).then().statusCode(200);
+        String body = sendSendersTurn(conversationId);
 
+        assertTrue(body.contains("tried") && !body.contains("taskErrors"), "the control turn must run to its output, error-free: " + body);
         assertEquals(before + 1, senderEdits(), "the control conversation must reach the endpoint, or the tainted cases prove nothing");
     }
 
@@ -114,7 +139,7 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
         waitForConversationReady(agent.id(), conversationId);
         int before = senderEdits();
 
-        sendUserInput(agent.id(), conversationId, "senders", false, false);
+        sendRefusedSendersTurn(conversationId);
 
         assertEquals(before, senderEdits(), "the tainted conversation must never send the sender edit");
     }
@@ -132,7 +157,7 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
         waitForConversationReady(agent.id(), conversationId);
         int before = senderEdits();
 
-        sendUserInput(agent.id(), conversationId, "senders", false, false);
+        sendRefusedSendersTurn(conversationId);
 
         assertEquals(before, senderEdits(), "the conversation an MCP call from a tainted request started must stay tainted");
     }
