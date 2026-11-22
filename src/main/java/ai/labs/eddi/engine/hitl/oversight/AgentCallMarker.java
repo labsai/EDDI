@@ -25,14 +25,15 @@ import java.util.Set;
  * tool call makes — even one that forwards the caller's token
  * ({@code ${caller:token}}).
  * <p>
- * Only requests to this deployment are marked: no EDDI-specific header reaches
- * a third-party API, and every other httpcall keeps its wire format. A target
- * is "this deployment" when it is on {@link SelfUrlResolver}'s origin
- * ({@code eddi.self.base-url}, or the derived listener address), on a loopback
- * address, or on a host listed in {@value #SELF_HOSTS_KEY} (the public or
- * in-cluster names the deployment is also reached by). On those requests the
- * header is set last, after the configured headers, so a configuration cannot
- * remove or replace it.
+ * Only requests to this deployment are marked: this header never reaches a
+ * third-party API (the email origin taint, {@code X-Eddi-Turn-Origin}, is the
+ * one EDDI header a mail-started turn sends to every target), and every other
+ * httpcall keeps its wire format. A target is "this deployment" when it is on
+ * {@link SelfUrlResolver}'s origin ({@code eddi.self.base-url}, or the derived
+ * listener address), on a loopback address, or on a host listed in
+ * {@value #SELF_HOSTS_KEY} (the public or in-cluster names the deployment is
+ * also reached by). On those requests the header is set last, after the
+ * configured headers, so a configuration cannot remove or replace it.
  *
  * @since 6.7.0
  */

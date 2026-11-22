@@ -996,7 +996,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
             // Note the absence of executePreRequestPropertyInstructions: it writes
             // to conversation memory, and previewing a call must not change the
             // conversation. See IApiCallExecutor#resolve for what that costs.
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory));
+            // A preview: built as the approved execution would build it, so a gated
+            // configuration write by a mail-started turn resolves and is pinned rather
+            // than approved on its tool name alone (see buildRequest).
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationPropertiesOf(memory), secretContextOf(memory),
+                    true);
             var requestMap = built.request().toMap();
             var headers = requestMap.get(IRequest.KEY_HEADERS) instanceof Map<?, ?> h ? (Map<String, ?>) h : Map.<String, Object>of();
             var queryParams = normalizeQueryParams(requestMap.get(IRequest.KEY_QUERY_PARAMS));
@@ -1296,6 +1300,37 @@ public class ApiCallExecutor implements IApiCallExecutor {
         LOGGER.info(httpCallsName + format(" Execution time: %sms", duration));
     }
 
+    /**
+     * Sets {@link TurnOrigin#HEADER} on {@code request} when the turn on this
+     * thread is tainted, replacing whatever a configuration put there.
+     */
+    static void applyTurnOrigin(IRequest request) {
+        applyTurnOrigin(request, false);
+    }
+
+    /**
+     * As {@link #applyTurnOrigin(IRequest)}, and on a tainted request also
+     * {@link TurnOrigin#APPROVED_HEADER}: {@code true} when this request is the
+     * approved execution of a gated call, {@code false} otherwise — replacing any
+     * configured value either way, so no configuration can claim an approval.
+     */
+    static void applyTurnOrigin(IRequest request, boolean approved) {
+        String origin = TurnOrigin.current();
+        if (request != null && origin != null) {
+            request.setHttpHeader(TurnOrigin.HEADER, origin);
+            request.setHttpHeader(TurnOrigin.APPROVED_HEADER, String.valueOf(approved));
+        }
+    }
+
+    /**
+     * The conversation a request is built for, from the template data's
+     * {@code conversationInfo}, or {@code null}.
+     */
+    static String conversationIdOf(Map<String, Object> templateDataObjects) {
+        return templateDataObjects != null && templateDataObjects.get("conversationInfo") instanceof Map<?, ?> info
+                && info.get("conversationId") != null ? String.valueOf(info.get("conversationId")) : null;
+    }
+
     // Package-private for unit testing of the backoff curve.
     static int getDelayInMillis(ApiCall call, boolean retryCall, int amountOfExecutions) {
         int delayInMillis = 0;
@@ -1549,9 +1584,21 @@ public class ApiCallExecutor implements IApiCallExecutor {
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext)
             throws ITemplatingEngine.TemplateEngineException {
+        return buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, false);
+    }
+
+    /**
+     * As the five-argument form; {@code preview} is {@code true} only for
+     * {@link #resolve}, which builds a gated call's request for its approval card
+     * and its pin, and never sends it.
+     */
+    private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
+                                      Map<String, Property> conversationProperties, Function<String, Context> secretContext, boolean preview)
+            throws ITemplatingEngine.TemplateEngineException {
         var resolvedSecrets = new ResolvedSecrets();
         try {
-            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets);
+            BuiltRequest built = buildRequest(targetServerUrl, call, templateDataObjects, conversationProperties, secretContext, resolvedSecrets,
+                    preview);
             if (ApprovedCallScope.isActive()) {
                 // A human-approved tool call: judge the request exactly as it will be
                 // sent, after preRequest.propertyInstructions ran — the preview the
@@ -1735,7 +1782,7 @@ public class ApiCallExecutor implements IApiCallExecutor {
 
     private BuiltRequest buildRequest(String targetServerUrl, ApiCall call, Map<String, Object> templateDataObjects,
                                       Map<String, Property> conversationProperties, Function<String, Context> secretContext,
-                                      ResolvedSecrets resolvedSecrets)
+                                      ResolvedSecrets resolvedSecrets, boolean preview)
             throws ITemplatingEngine.TemplateEngineException {
 
         Request requestConfig = call.getRequest();
@@ -1773,8 +1820,18 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase(Locale.ROOT));
         // The escalation guard (email plan v3 §5.3): a turn a mail started never
         // writes to EDDI's own channel or approval endpoints, whatever the tool or
-        // rule that sends the request is called.
-        Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri);
+        // rule that sends the request is called. A configuration write passes only as
+        // the approved execution of a gated call of this very conversation.
+        //
+        // A preview judges the configuration write as that approved execution would:
+        // it sends nothing, and it is what the approver sees and what the approval is
+        // pinned to. Refusing it here (no approval exists yet at gate time, and the
+        // resume re-check runs outside the approved scope too) left every such call
+        // approved unpinned — on its tool name and arguments, not on the request that
+        // runs. The guarded endpoints are refused in a preview as anywhere else, and
+        // the real build at execution still needs ApprovedCallScope.
+        Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri,
+                preview || ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
         if (escalation.isPresent()) {
             throw new IllegalArgumentException(escalation.get());
         }
@@ -1921,8 +1978,19 @@ public class ApiCallExecutor implements IApiCallExecutor {
         }
         // Engine-owned, set after the configured headers so no config can drop it — and
         // only
-        // on a call to this deployment, so no EDDI header reaches a third-party API.
+        // on a call to this deployment, so this marker never reaches a third-party API.
         AgentCallMarker.apply(agentCallMarker, request, targetUri);
+        // The origin taint (email plan v3 §5.3), engine-owned the same way: set last,
+        // so
+        // no configured header replaces it. Unlike the marker it goes to every target,
+        // not only those recognised as this deployment — EDDI reached under a name the
+        // self-check does not know would otherwise start an untainted conversation.
+        // The value says only that a mail started the turn, and only a tainted turn
+        // sends it (as A2A already does to any peer). With it goes whether a person
+        // approved this very call, which lets EDDI's own API take a configuration write
+        // from a tainted turn (EscalationGuard.CONFIG_PATHS) — engine-set, so no
+        // configuration can claim it.
+        applyTurnOrigin(request, ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

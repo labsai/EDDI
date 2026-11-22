@@ -198,6 +198,9 @@ class RestChannelIntegrationStoreEmailTest {
     @DisplayName("update re-checks against the deployment excluding itself and re-syncs the schedule")
     void updateEmail() throws Exception {
         var config = email(Map.of());
+        // The stored version the sender lists are compared with; a save whose stored
+        // version reads as nothing is refused.
+        when(channelStore.read(ID, 1)).thenReturn(email(Map.of()));
         when(channelStore.update(eq(ID), eq(1), any())).thenReturn(2);
 
         sut.updateChannel(ID, 1, config);

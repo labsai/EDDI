@@ -118,13 +118,26 @@ public class WorkspaceHandoffs {
      *            how it entered the backlog
      * @param reviewedAt
      *            when a human decided, for REVIEW items
+     * @param turnOrigin
+     *            the origin taint ({@code TurnOrigin#EMAIL}) of the turn that filed
+     *            the handoff, or {@code null}. A human accepting a REVIEW item does
+     *            not clear it: the task it becomes carries it on (email plan v3
+     *            §5.3). An old document reads as untainted.
      */
     public record HandoffOrigin(String handoffId, SourceKind sourceKind, String sourceId, Integer sourceVersion, String sourceConversationId,
             String sourceMemberAgentId, Trigger trigger, String decisionRef, String artifactId, String reference, int hop, List<String> lineage,
-            String dedupeKey, Instant filedAt, Intake intake, Instant reviewedAt) {
+            String dedupeKey, Instant filedAt, Intake intake, Instant reviewedAt, String turnOrigin) {
 
         public HandoffOrigin {
             lineage = lineage == null ? List.of() : List.copyOf(lineage);
+        }
+
+        /** The form that predates {@code turnOrigin}: an untainted handoff. */
+        public HandoffOrigin(String handoffId, SourceKind sourceKind, String sourceId, Integer sourceVersion, String sourceConversationId,
+                String sourceMemberAgentId, Trigger trigger, String decisionRef, String artifactId, String reference, int hop,
+                List<String> lineage, String dedupeKey, Instant filedAt, Intake intake, Instant reviewedAt) {
+            this(handoffId, sourceKind, sourceId, sourceVersion, sourceConversationId, sourceMemberAgentId, trigger, decisionRef, artifactId,
+                    reference, hop, lineage, dedupeKey, filedAt, intake, reviewedAt, null);
         }
 
         /** The {@code accept.from[].source} spelling of this origin's source. */
@@ -136,7 +149,7 @@ public class WorkspaceHandoffs {
         /** This origin after a human decided. */
         public HandoffOrigin reviewed(Intake decided, Instant at) {
             return new HandoffOrigin(handoffId, sourceKind, sourceId, sourceVersion, sourceConversationId, sourceMemberAgentId, trigger,
-                    decisionRef, artifactId, reference, hop, lineage, dedupeKey, filedAt, decided, at);
+                    decisionRef, artifactId, reference, hop, lineage, dedupeKey, filedAt, decided, at, turnOrigin);
         }
     }
 

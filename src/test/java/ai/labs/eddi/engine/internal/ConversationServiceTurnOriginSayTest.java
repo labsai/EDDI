@@ -38,6 +38,7 @@ import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.tenancy.TenantQuotaService;
 import ai.labs.eddi.engine.tenancy.model.QuotaCheckResult;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
@@ -179,6 +180,27 @@ class ConversationServiceTurnOriginSayTest {
         principals.bind(new ResolutionPrincipal("someone-else", Provenance.SELF_ASSERTED, TurnOrigin.EMAIL));
         say(new HashMap<>());
         principals.clear();
+        runQueuedTurn();
+
+        assertEquals(List.of(true), refusedInPipeline);
+        assertEquals(TurnOrigin.EMAIL, persistedSnapshot().getOrigin());
+    }
+
+    /**
+     * The httpcall (or MCP client) of a tainted turn that continues a conversation
+     * through EDDI's own API — {@code POST /agents/{conversationId}}, MCP
+     * {@code talk_to_agent} — arrives with {@code X-Eddi-Turn-Origin: email}; the
+     * turn it submits is refused the guarded tool, and the conversation stays
+     * tainted.
+     */
+    @Test
+    @DisplayName("a turn submitted for a request carrying X-Eddi-Turn-Origin taints the conversation and is refused update_email_senders")
+    void taintedRequestTaints() throws Exception {
+        doReturn(snapshot(null)).when(conversationMemoryStore).loadConversationMemorySnapshot(CONVERSATION_ID);
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            say(new HashMap<>());
+        }
         runQueuedTurn();
 
         assertEquals(List.of(true), refusedInPipeline);

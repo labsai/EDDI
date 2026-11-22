@@ -1379,11 +1379,15 @@ public class McpAdminTools {
 
     @Tool(name = "update_channel_integration", description = "Update an existing channel integration configuration. The body has "
             + "the same shape as create_channel_integration's; for email, switching mode between 'trigger' and 'conversation' keeps the "
-            + "mailbox and its cursor, and the other mode's keys must be removed. Returns save-time warnings when there are any.")
+            + "mailbox and its cursor, and the other mode's keys must be removed. For email, a body that empties a non-empty sender "
+            + "allowlist opens the integration to every sender and is refused unless confirmOpen is true; prefer update_email_senders "
+            + "for sender changes. Returns save-time warnings when there are any.")
     public String updateChannelIntegration(
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
-                                           @ToolArg(description = "Full JSON configuration body (required)") String config) {
+                                           @ToolArg(description = "Full JSON configuration body (required)") String config,
+                                           @ToolArg(description = "Email only: true confirms emptying a non-empty sender allowlist, which lets "
+                                                   + "every sender make the agent run (default false)", required = false) Boolean confirmOpen) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (resourceId == null || resourceId.isBlank())
             return errorJson("resourceId is required");
@@ -1398,7 +1402,8 @@ public class McpAdminTools {
             var channelConfig = parseConfig(config, ChannelIntegrationConfiguration.class);
             var channelStore = getRestStore(
                     IRestChannelIntegrationStore.class);
-            Response response = channelStore.updateChannel(resourceId, ver, channelConfig);
+            Response response = channelStore.updateChannel(resourceId, ver, Boolean.TRUE.equals(confirmOpen) ? Boolean.TRUE : null,
+                    channelConfig);
             String location = response.getHeaderString("Location");
             int newVersion = extractVersionFromLocation(location);
 

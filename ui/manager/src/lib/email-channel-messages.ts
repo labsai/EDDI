@@ -146,7 +146,7 @@ export function channelWarningMessage(code: string, t: TFunction): string {
     case "email.allowlist-emptied":
       return t(
         "emailChannel.warning.allowlistEmptied",
-        "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication.",
+        "Saved, but the allowlist is now empty: every sender can make the agent run, limited only by sender authentication, and only when it is enabled.",
       );
     case "email.allowlist-broad":
       return t(

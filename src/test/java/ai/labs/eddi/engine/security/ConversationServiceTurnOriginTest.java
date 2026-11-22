@@ -154,6 +154,49 @@ class ConversationServiceTurnOriginTest {
         assertEquals(TurnOrigin.EMAIL, boundDuringStart.get(), "a start-turn tool call must already run tainted");
     }
 
+    /**
+     * The gap C1 left: a tainted turn reaching EDDI's own API — an httpcall to
+     * {@code POST /agents/{id}/start}, an MCP client calling
+     * {@code chat_with_agent} or {@code create_conversation}, the OpenAI-compatible
+     * {@code /v1} endpoint — sends {@code X-Eddi-Turn-Origin: email}, and the
+     * conversation the request starts is tainted, with no taint in its context and
+     * under any user id.
+     */
+    @Test
+    @DisplayName("a start served for a request carrying X-Eddi-Turn-Origin is tainted, and its start turn cannot call update_email_senders")
+    void startFromTaintedRequestIsTainted() throws Exception {
+        ToolExecutionService tools = toolExecutionService();
+        var executed = new AtomicBoolean();
+        var resultInStart = new AtomicReference<String>();
+        doAnswer(invocation -> {
+            resultInStart.set(tools.executeToolWrapped("update_email_senders", "{}", null, CONVERSATION_ID, () -> {
+                executed.set(true);
+                return "updated";
+            }, false, false, false, 60));
+            IConversation conversation = mock(IConversation.class);
+            doReturn(memory).when(conversation).getConversationMemory();
+            return conversation;
+        }).when(agent).startConversation(anyString(), anyMap(), any(), isNull());
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            conversationService.startConversation(ENV, AGENT_ID, "admin", Map.of());
+        }
+
+        verify(memory).setOrigin(TurnOrigin.EMAIL);
+        assertFalse(executed.get(), "the guarded tool must never run in the started conversation");
+        assertTrue(resultInStart.get().contains("started by an email"), resultInStart.get());
+    }
+
+    @Test
+    @DisplayName("a start served for a request without the header stays untainted")
+    void startFromUntaintedRequestIsNotTainted() throws Exception {
+        try (var request = TurnOriginTestSupport.inboundRequest()) {
+            conversationService.startConversation(ENV, AGENT_ID, USER_ID, Map.of());
+        }
+
+        verify(memory).setOrigin(isNull());
+    }
+
     @Test
     @DisplayName("an ordinary start is not tainted")
     void ordinaryStartIsNotTainted() throws Exception {

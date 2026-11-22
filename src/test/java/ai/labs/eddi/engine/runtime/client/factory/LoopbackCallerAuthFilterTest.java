@@ -4,8 +4,14 @@
  */
 package ai.labs.eddi.engine.runtime.client.factory;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
+import ai.labs.eddi.engine.security.TurnOriginTestSupport;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
 import jakarta.ws.rs.client.ClientRequestContext;
 import jakarta.ws.rs.core.HttpHeaders;
 import jakarta.ws.rs.core.MultivaluedHashMap;
@@ -100,5 +106,107 @@ class LoopbackCallerAuthFilterTest {
         new LoopbackCallerAuthFilter(context).filter(requestWith(headers));
 
         assertFalse(headers.containsKey(HttpHeaders.AUTHORIZATION));
+    }
+
+    /**
+     * The internal loopback (MCP admin tools, setup-api) re-enters EDDI with no
+     * credential of its own: a tainted request's inner request carries the taint
+     * too, so the receiving side refuses or taints exactly as for the outer one —
+     * anonymous included.
+     */
+    @Test
+    @DisplayName("a tainted request's loopback carries X-Eddi-Turn-Origin, also without a token")
+    void forwardsTheTaint() throws Exception {
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            filterFor(null, null).filter(requestWith(headers));
+        }
+
+        assertEquals(TurnOrigin.EMAIL, headers.getFirst(TurnOrigin.HEADER));
+        assertFalse(headers.containsKey(HttpHeaders.AUTHORIZATION));
+    }
+
+    @Test
+    @DisplayName("a loopback states an approval only for the approved call's own conversation, not one it runs inline")
+    void approvalOnlyForTheApprovedConversation() throws Exception {
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+        MultivaluedMap<String, Object> own = new MultivaluedHashMap<>();
+        MultivaluedMap<String, Object> nested = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", () -> {
+                filterFor(null, null).filter(requestWith(own));
+                return null;
+            }));
+            ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-b", () -> {
+                filterFor(null, null).filter(requestWith(nested));
+                return null;
+            }));
+        }
+
+        assertEquals("true", own.getFirst(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", nested.getFirst(TurnOrigin.APPROVED_HEADER));
+    }
+
+    /**
+     * The inbound request's approval was given for the MCP call it carries, not for
+     * a conversation that call starts: a nested conversation's loopback states only
+     * the engine's own approval of a call of that conversation.
+     */
+    @Test
+    @DisplayName("an approved inbound request's approval does not reach a turn it starts: inside conv-b the loopback states false")
+    void inboundApprovalNotInheritedInsideATurn() throws Exception {
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+        MultivaluedMap<String, Object> outerBinding = new MultivaluedHashMap<>();
+        MultivaluedMap<String, Object> toolCall = new MultivaluedHashMap<>();
+        MultivaluedMap<String, Object> turn = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL);
+                var approved = TurnOriginTestSupport.inboundApproved(true)) {
+            ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-b", () -> {
+                filterFor(null, null).filter(requestWith(outerBinding));
+                return null;
+            }));
+            ApprovedCallScope.inConversation("conv-b", () -> {
+                filterFor(null, null).filter(requestWith(toolCall));
+                return null;
+            });
+            // A turn binds its conversation's principal for as long as it runs, tool call
+            // or not.
+            var principal = new ResolutionPrincipal("bob@contoso.com", ResolutionPrincipal.Provenance.VERIFIED, TurnOrigin.EMAIL);
+            new ResolutionPrincipalContext().withPrincipal(principal, () -> {
+                filterFor(null, null).filter(requestWith(turn));
+                return null;
+            }).call();
+        }
+
+        assertEquals("false", outerBinding.getFirst(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", toolCall.getFirst(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", turn.getFirst(TurnOrigin.APPROVED_HEADER));
+    }
+
+    @Test
+    @DisplayName("a direct MCP call that runs no turn passes the inbound approval on to its loopback")
+    void inboundApprovalReachesADirectCall() throws Exception {
+        MultivaluedMap<String, Object> approvedCall = new MultivaluedHashMap<>();
+        MultivaluedMap<String, Object> unapprovedCall = new MultivaluedHashMap<>();
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            try (var approved = TurnOriginTestSupport.inboundApproved(true)) {
+                filterFor(null, null).filter(requestWith(approvedCall));
+            }
+            try (var approved = TurnOriginTestSupport.inboundApproved(false)) {
+                filterFor(null, null).filter(requestWith(unapprovedCall));
+            }
+        }
+
+        assertEquals("true", approvedCall.getFirst(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", unapprovedCall.getFirst(TurnOrigin.APPROVED_HEADER));
+    }
+
+    @Test
+    @DisplayName("an untainted request's loopback carries no X-Eddi-Turn-Origin")
+    void untaintedForwardsNoTaint() {
+        MultivaluedMap<String, Object> headers = new MultivaluedHashMap<>();
+        filterFor(null, null).filter(requestWith(headers));
+
+        assertFalse(headers.containsKey(TurnOrigin.HEADER));
     }
 }

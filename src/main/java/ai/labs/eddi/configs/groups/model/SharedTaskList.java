@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.groups.model;
 
+import ai.labs.eddi.engine.security.TurnOrigin;
+
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -13,6 +15,7 @@ import java.util.Comparator;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
@@ -66,6 +69,13 @@ public class SharedTaskList {
      *            optional bet specification (hypothesis, metric, target, review
      *            date) - {@code null} for an ordinary task, so every stored task
      *            and every old config reads unchanged
+     * @param origin
+     *            the origin taint ({@code TurnOrigin#EMAIL}) of the turn that filed
+     *            or changed the task, or {@code null}: a mail, or a turn a mail
+     *            started, wrote it. Sticky — {@link SharedTaskList} never lets a
+     *            replacement clear it — and a cadence that pulls a tainted task
+     *            runs a tainted discussion (email plan v3 §5.3). An old document
+     *            reads as untainted.
      */
     public record TaskItem(
             String id,
@@ -82,7 +92,16 @@ public class SharedTaskList {
             Instant createdAt,
             Instant completedAt,
             String createdByAgentId,
-            Bet bet) {
+            Bet bet,
+            String origin) {
+
+        /** The 15-component form that predates {@code origin}: an untainted task. */
+        public TaskItem(String id, String subject, String description, TaskStatus status, String assignedAgentId,
+                String assignedDisplayName, List<String> dependsOnIds, String result, String verificationNote,
+                boolean verified, int priority, Instant createdAt, Instant completedAt, String createdByAgentId, Bet bet) {
+            this(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                    result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, bet, null);
+        }
 
         /**
          * Convenience constructor for creating a new pending task, authored by config
@@ -112,13 +131,26 @@ public class SharedTaskList {
         /** This task as filed by agent {@code agentId} (or by no agent). */
         public TaskItem filedBy(String agentId) {
             return new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
-                    result, verificationNote, verified, priority, createdAt, completedAt, agentId, bet);
+                    result, verificationNote, verified, priority, createdAt, completedAt, agentId, bet, origin);
         }
 
         /** This task with a different bet (or none). */
         public TaskItem withBet(Bet newBet) {
             return new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
-                    result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, newBet);
+                    result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, newBet, origin);
+        }
+
+        /**
+         * This task tainted by {@code taint} as well: the stronger of its own origin
+         * and {@code taint} ({@link TurnOrigin#combine}), so it can only ever add the
+         * taint, never remove it.
+         */
+        public TaskItem taintedBy(String taint) {
+            String combined = TurnOrigin.combine(origin, taint);
+            return Objects.equals(combined, origin)
+                    ? this
+                    : new TaskItem(id, subject, description, status, assignedAgentId, assignedDisplayName, dependsOnIds,
+                            result, verificationNote, verified, priority, createdAt, completedAt, createdByAgentId, bet, combined);
         }
 
         /**
@@ -324,8 +356,13 @@ public class SharedTaskList {
      * Add a task to the list. Returns the added task.
      */
     public synchronized TaskItem addTask(TaskItem task) {
-        tasks.add(task);
-        return task;
+        // Every backlog write is stamped with the taint of the turn making it (email
+        // plan v3 §5.3) — REST, MCP, a handoff, a member's task tool alike — so a
+        // cadence that later pulls the task cannot launder a mail's text into an
+        // untainted discussion.
+        TaskItem stamped = task.taintedBy(TurnOrigin.current());
+        tasks.add(stamped);
+        return stamped;
     }
 
     /**
@@ -450,7 +487,7 @@ public class SharedTaskList {
         var filed = new TaskItem(UUID.randomUUID().toString(), trimmedSubject, trimmedDescription,
                 assignedAgentId != null ? TaskStatus.ASSIGNED : TaskStatus.PENDING,
                 assignedAgentId, assignedDisplayName, List.copyOf(dependsOnIds), null, null, false,
-                priority, Instant.now(), null, createdByAgentId, bet);
+                priority, Instant.now(), null, createdByAgentId, bet, TurnOrigin.current());
         tasks.add(filed);
 
         // Cycles are only visible once the candidate is in the graph. Rolling back
@@ -484,7 +521,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -503,7 +540,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -523,7 +560,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), result,
                 existing.verificationNote(), existing.verified(),
                 existing.priority(), existing.createdAt(), Instant.now(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -540,7 +577,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 note, passed,
                 existing.priority(), existing.createdAt(), existing.completedAt(), existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -566,7 +603,7 @@ public class SharedTaskList {
                 existing.dependsOnIds(), existing.result(),
                 reason, false,
                 existing.priority(), existing.createdAt(), when, existing.createdByAgentId(), existing.bet());
-        replaceTask(taskId, updated);
+        updated = replaceTask(taskId, updated);
         return updated;
     }
 
@@ -593,7 +630,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.AWAITING_APPROVAL,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), result,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -623,7 +660,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         approvals.put(taskId, new TaskApproval(decidedBy, Instant.now().toString(), false));
         return u;
     }
@@ -636,7 +673,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.FAILED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 rejectionNote, false, t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -648,7 +685,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), t.result(),
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), t.completedAt(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         return u;
     }
 
@@ -674,7 +711,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.ASSIGNED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), null,
                 reviewerFeedback, false, t.priority(), t.createdAt(), null, t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         // the next result is a new one: an edit (or approval) recorded against the
         // superseded result no longer describes it
         reviewerEdits.remove(taskId);
@@ -723,7 +760,7 @@ public class SharedTaskList {
         boolean found = false;
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).id().equals(replacement.id())) {
-                tasks.set(i, replacement);
+                tasks.set(i, sticky(tasks.get(i), replacement));
                 found = true;
                 break;
             }
@@ -733,13 +770,30 @@ public class SharedTaskList {
         }
     }
 
-    private void replaceTask(String taskId, TaskItem replacement) {
+    /**
+     * Stores {@code replacement} in place of task {@code taskId} and returns what
+     * was stored — the replacement with the stored taint kept ({@link #sticky}),
+     * which a lifecycle method must return rather than its own positional copy:
+     * that copy has no origin, and a caller persisting it would drop the taint.
+     */
+    private TaskItem replaceTask(String taskId, TaskItem replacement) {
         for (int i = 0; i < tasks.size(); i++) {
             if (tasks.get(i).id().equals(taskId)) {
-                tasks.set(i, replacement);
-                return;
+                TaskItem stored = sticky(tasks.get(i), replacement);
+                tasks.set(i, stored);
+                return stored;
             }
         }
+        return replacement;
+    }
+
+    /**
+     * {@code replacement} as stored in place of {@code stored}: it keeps the stored
+     * taint (a copy built positionally does not carry it) and gains the taint of
+     * the turn making the change.
+     */
+    private static TaskItem sticky(TaskItem stored, TaskItem replacement) {
+        return replacement.taintedBy(TurnOrigin.combine(stored.origin(), TurnOrigin.current()));
     }
 
     private List<String> dfs(String taskId, Set<String> visited, List<String> recursionStack) {
@@ -864,7 +918,7 @@ public class SharedTaskList {
         TaskItem u = new TaskItem(t.id(), t.subject(), t.description(), TaskStatus.COMPLETED,
                 t.assignedAgentId(), t.assignedDisplayName(), t.dependsOnIds(), editedResult,
                 t.verificationNote(), t.verified(), t.priority(), t.createdAt(), Instant.now(), t.createdByAgentId(), t.bet());
-        replaceTask(taskId, u);
+        u = replaceTask(taskId, u);
         if (edit != null) {
             reviewerEdits.put(taskId, edit);
         }

@@ -1328,8 +1328,15 @@ public class GroupConversation {
         return origin;
     }
 
+    /**
+     * Sets the taint once: a set value is never cleared nor replaced (like
+     * {@code ConversationMemory#setOrigin}), so a caller that passes {@code null} —
+     * an untainted follow-up, a stale copy — cannot untaint the discussion.
+     */
     public void setOrigin(String origin) {
-        this.origin = origin;
+        if (this.origin == null) {
+            this.origin = origin;
+        }
     }
 
     public int getRound() {

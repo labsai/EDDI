@@ -122,6 +122,22 @@ public interface IScheduleStore {
      */
     void setPersistentConversationId(String scheduleId, String conversationId) throws IResourceStore.ResourceStoreException;
 
+    /**
+     * Atomically stamp the origin taint (email plan v3 §5.3) into the stored
+     * schedule's metadata: sets {@code metadata.turnOrigin} to {@code origin} and
+     * nothing else — every other metadata key and every configuration field stays
+     * as currently stored. A {@code null} origin writes nothing.
+     * <p>
+     * For the paths that taint a schedule they do not edit — a retry, a dismissal,
+     * an enable from a tainted turn. Writing the whole schedule back with
+     * {@link #updateSchedule} reverted a configuration edit committed between the
+     * read and the write.
+     *
+     * @throws IResourceStore.ResourceNotFoundException
+     *             when no schedule has {@code scheduleId}
+     */
+    void setTurnOrigin(String scheduleId, String origin) throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException;
+
     void deleteSchedule(String scheduleId) throws IResourceStore.ResourceStoreException;
 
     /**

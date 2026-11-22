@@ -53,11 +53,13 @@ export function useUpdateChannel() {
       id,
       version,
       config,
+      confirmOpen,
     }: {
       id: string;
       version: number;
       config: ChannelIntegrationConfiguration;
-    }) => updateChannel(id, version, config),
+      confirmOpen?: boolean;
+    }) => updateChannel(id, version, config, confirmOpen ?? false),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: CHANNELS_KEY });
     },

@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.httpclient.outbound;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
@@ -26,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 /**
@@ -102,5 +105,113 @@ class OutboundHttpEscalationGuardTest {
 
         assertEquals(200, facade(engine).send(post("https://eddi.example.com/channelstore/channels/abc/email-senders"), text()).status());
         assertEquals(1, engine.hops.size());
+    }
+
+    /**
+     * The sending half for every tool on {@code OutboundHttp}: each hop of a
+     * tainted turn's request carries {@code X-Eddi-Turn-Origin: email} — a
+     * cross-origin redirect hop too, where only the safe headers survive — so the
+     * EDDI it reaches taints what it starts.
+     */
+    @Test
+    @DisplayName("every hop of a tainted request carries X-Eddi-Turn-Origin, a cross-origin redirect hop included")
+    void taintedHopsCarryTheHeader() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine engine = new Engine().respond(307, Map.of("Location", List.of("https://eddi.example.com/agents/a1/start")))
+                .respond(200, Map.of());
+        OutboundRequest start = OutboundRequest.builder(Profile.DEFAULT, URI.create("https://api.example.com/start")).ssrf(SsrfPolicy.NONE)
+                .method("POST", RequestBody.ofString("{}")).header(TurnOrigin.HEADER, "none")
+                .redirects(RedirectPolicy.follow(3, MethodRule.JDK_SAFE)).build();
+
+        facade(engine).send(start, text());
+
+        assertEquals(2, engine.hops.size());
+        for (var hop : engine.hops) {
+            assertEquals(List.of(TurnOrigin.EMAIL), OutboundRequest.caseInsensitiveCopy(hop.headers()).get(TurnOrigin.HEADER), hop.uri().toString());
+        }
+    }
+
+    @Test
+    @DisplayName("a tainted configuration write is sent only as an approved call, says so, and never follows a redirect to one")
+    void configWriteNeedsApproval() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine refused = new Engine();
+        assertThrows(OutboundBlockedException.class,
+                () -> facade(refused).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text()));
+        assertEquals(0, refused.hops.size());
+
+        Engine approved = new Engine().respond(200, Map.of());
+        ApprovedCallScope.run("agent-1", () -> {
+            try {
+                return facade(approved).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertEquals(1, approved.hops.size());
+        assertEquals(List.of("true"), OutboundRequest.caseInsensitiveCopy(approved.hops.get(0).headers()).get(TurnOrigin.APPROVED_HEADER));
+
+        Engine redirected = new Engine().respond(307, Map.of("Location", List.of("https://eddi.example.com/llmstore/llms/x")));
+        assertThrows(IllegalStateException.class, () -> ApprovedCallScope.run("agent-1", () -> {
+            try {
+                return facade(redirected).send(post("https://api.example.com/orders"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }), "the approval covers the target the person saw, not a redirect");
+        assertEquals(1, redirected.hops.size());
+    }
+
+    @Test
+    @DisplayName("a tool call of a conversation an approved call runs inline does not inherit that approval")
+    void nestedConversationIsNotApproved() {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+
+        Engine nested = new Engine().respond(200, Map.of());
+        assertThrows(OutboundBlockedException.class, () -> ApprovedCallScope.run(protection, "conv-a",
+                () -> ApprovedCallScope.inConversation("conv-b", () -> {
+                    try {
+                        return facade(nested).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+                    } catch (OutboundBlockedException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                })));
+        assertEquals(0, nested.hops.size());
+
+        Engine own = new Engine().respond(200, Map.of());
+        ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", () -> {
+            try {
+                return facade(own).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }));
+        assertEquals(1, own.hops.size(), "the approved call's own tool call is sent");
+    }
+
+    @Test
+    @DisplayName("a configured X-Eddi-Approved-Call does not survive on a tainted request nobody approved")
+    void approvalHeaderCannotBeConfigured() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine engine = new Engine().respond(200, Map.of());
+        OutboundRequest start = OutboundRequest.builder(Profile.DEFAULT, URI.create("https://eddi.example.com/agents/a1/start"))
+                .ssrf(SsrfPolicy.NONE).method("POST", RequestBody.ofString("{}")).header(TurnOrigin.APPROVED_HEADER, "true").build();
+
+        facade(engine).send(start, text());
+
+        assertEquals(List.of("false"), OutboundRequest.caseInsensitiveCopy(engine.hops.get(0).headers()).get(TurnOrigin.APPROVED_HEADER));
+    }
+
+    @Test
+    @DisplayName("an untainted request carries no X-Eddi-Turn-Origin")
+    void untaintedCarriesNoHeader() throws Exception {
+        Engine engine = new Engine().respond(200, Map.of());
+
+        facade(engine).send(post("https://eddi.example.com/agents/a1/start"), text());
+
+        assertFalse(OutboundRequest.caseInsensitiveCopy(engine.hops.get(0).headers()).containsKey(TurnOrigin.HEADER));
     }
 }
