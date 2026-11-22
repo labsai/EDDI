@@ -214,6 +214,47 @@ class RestChannelIntegrationStoreEmailSendersTest {
     }
 
     @Test
+    @DisplayName("a full PUT that empties the allowlist is refused without confirmOpen, and with it warns and audits once")
+    void fullPutEmptyingTheAllowlist() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        var refused = assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 3, email(Map.of())));
+        assertTrue(refused.getMessage().contains("confirmOpen"));
+        assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 3, false, email(Map.of())));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+
+        Response response = sut.updateChannel(ID, 3, true, email(Map.of()));
+
+        assertTrue(response.getStatus() < 300, String.valueOf(response.getStatus()));
+        assertTrue(response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER).contains(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
+    }
+
+    @Test
+    @DisplayName("a full PUT that changes the lists is audited; one that leaves them as they were is not")
+    void fullPutAudits() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com", "senderBlocklist", "spam@contoso.com")));
+
+        sut.updateChannel(ID, 3, email(Map.of("senderAllowlist", "BOB@partner.com", "senderBlocklist", "spam@contoso.com")));
+        verify(support, never()).auditSenderListChange(any(), any(), any(), any(), any(), any(), anyBoolean());
+
+        sut.updateChannel(ID, 3, email(Map.of("senderAllowlist", "bob@partner.com,alice@partner.com")));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of("allow:alice@partner.com"), List.of("block:spam@contoso.com"), null, false);
+    }
+
+    @Test
+    @DisplayName("the targeted edit delegates to the full save: one audit entry, one warning")
+    void targetedEditAuditsOnce() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        Response response = sut.updateEmailSenders(ID,
+                new UpdateRequest(3, null, new Entries(List.of("bob@partner.com"), List.of()), "open it up", true));
+
+        verify(support).auditSenderListChange(any(), any(), any(), any(), any(), any(), anyBoolean());
+        assertEquals(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED, response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
+    }
+
+    @Test
     @DisplayName("an invalid entry, or one left on both lists, is a 400 and writes nothing")
     void invalidEntries() throws Exception {
         when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderBlocklist", "alice@partner.com")));

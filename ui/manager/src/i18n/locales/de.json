@@ -3525,6 +3525,9 @@
     "selectGroup": "Gruppe auswählen …",
     "unknownGroup": "{{id}} (nicht gefunden)",
     "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
+    "confirmOpenTitle": "Den letzten erlaubten Absender entfernen?",
+    "confirmOpenDesc": "Mit einer leeren Allowlist kann jeder Absender den Agenten auslösen, begrenzt nur durch die Absender-Authentifizierung. Die Änderung wird im Audit-Log festgehalten.",
+    "confirmOpenConfirm": "Speichern und öffnen",
     "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
   },
   "hitl": {
@@ -5631,7 +5634,7 @@
     "remove": "{{entry}} entfernen",
     "addLabel": "Zu {{list}} hinzufügen",
     "add": "Hinzufügen",
-    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. Eine Unterhaltung, die eine E-Mail gestartet hat, kann diese Listen nie ändern.",
+    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. EDDI verweigert einer Unterhaltung, die eine E-Mail gestartet hat, jede Änderung dieser Listen.",
     "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderlisten werden für sich angewendet.",
     "reason": "Warum (für das Audit-Log)",
     "reasonPlaceholder": "z. B. neuer Lieferant, Vertrag 2026-114",

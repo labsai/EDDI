@@ -279,21 +279,98 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     private final Object uniquenessLock = new Object();
 
     @Override
-    public Response updateChannel(String id, Integer version,
+    public Response updateChannel(String id, Integer version, Boolean confirmOpen,
                                   ChannelIntegrationConfiguration channelConfiguration) {
+        return saveChannel(id, version, channelConfiguration, confirmOpen, null, null);
+    }
+
+    /**
+     * Every save of an existing integration — a full {@code PUT}, the MCP
+     * {@code update_channel_integration}, the Manager's page Save and the targeted
+     * sender-list edit alike (email plan v3 §5.1). For an email integration the
+     * sender lists of the stored version are compared with the saved ones: emptying
+     * a non-empty allowlist (which opens the integration to every sender) is
+     * refused unless {@code confirmOpen}, and is then warned about; every change is
+     * one {@code EMAIL_SENDERS_CHANGED} ledger entry.
+     *
+     * @param reason
+     *            why the lists changed, recorded with the audit entry; {@code null}
+     *            for a whole-document save
+     * @param before
+     *            the lists the save starts from, when the caller already read them;
+     *            {@code null} reads them from the stored version
+     */
+    private Response saveChannel(String id, Integer version, ChannelIntegrationConfiguration channelConfiguration, Boolean confirmOpen,
+                                 String reason, EmailSenderLists.View before) {
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
             validateUniqueChannelId(channelConfiguration, id);
             refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
             validateUniqueName(channelConfiguration, id);
+            EmailSenderLists.Change senders = null;
             if (isEmail(channelConfiguration)) {
                 emailSupport().validateAgainstDeployment(channelConfiguration, id);
+                senders = before != null
+                        ? EmailSenderLists.diff(before, EmailSenderLists.read(null, channelConfiguration.getPlatformConfig()))
+                        : senderListChange(id, version, channelConfiguration);
+                if (senders != null && senders.allowlistEmptied() && !Boolean.TRUE.equals(confirmOpen)) {
+                    throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
+                }
             }
             Response response = restVersionInfo.update(id, version, channelConfiguration);
             syncDescriptor(id, channelConfiguration);
-            return withEmailFollowUp(id, channelConfiguration, response);
+            Response answered = withEmailFollowUp(id, channelConfiguration, response);
+            if (senders == null || !senders.changed() || answered.getStatus() >= 300) {
+                return answered;
+            }
+            var location = answered.getLocation() == null ? null : RestUtilities.extractResourceId(answered.getLocation());
+            emailSupport().auditSenderListChange(id, version, location == null ? null : location.getVersion(), senders.added(),
+                    senders.removed(), reason, senders.allowlistEmptied());
+            if (!senders.allowlistEmptied()) {
+                return answered;
+            }
+            LOG.warnf("Email integration '%s' no longer has a sender allowlist: every sender can now make its agent run",
+                    sanitize(id));
+            return withWarning(answered, EmailSenderLists.WARNING_ALLOWLIST_EMPTIED);
         }
+    }
+
+    /**
+     * How the sender lists of the stored version {@code version} differ from the
+     * ones in {@code saved}, or {@code null} when the stored version cannot be read
+     * (the update then fails on its own).
+     */
+    private EmailSenderLists.Change senderListChange(String id, Integer version, ChannelIntegrationConfiguration saved) {
+        if (id == null || version == null) {
+            return null;
+        }
+        ChannelIntegrationConfiguration stored;
+        try {
+            stored = channelStore.read(id, version);
+        } catch (Exception e) {
+            return null;
+        }
+        if (stored == null) {
+            return null;
+        }
+        return EmailSenderLists.diff(EmailSenderLists.read(version, isEmail(stored) ? stored.getPlatformConfig() : null),
+                EmailSenderLists.read(null, saved.getPlatformConfig()));
+    }
+
+    /** {@code response} with {@code code} added to its {@link #WARNINGS_HEADER}. */
+    private static Response withWarning(Response response, String code) {
+        String header = response.getHeaderString(WARNINGS_HEADER);
+        List<String> codes = new ArrayList<>();
+        codes.add(code);
+        if (header != null) {
+            for (String existing : header.split(",")) {
+                if (!existing.isBlank() && !codes.contains(existing.trim())) {
+                    codes.add(existing.trim());
+                }
+            }
+        }
+        return Response.fromResponse(response).header(WARNINGS_HEADER, null).header(WARNINGS_HEADER, String.join(",", codes)).build();
     }
 
     @Override
@@ -464,13 +541,12 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         List.of(), change.unchanged(), List.of())).build();
             }
             current.setPlatformConfig(EmailSenderLists.withLists(current.getPlatformConfig(), change.allow(), change.block()));
-            Response saved = updateChannel(id, version, current);
+            // The whole-document save makes the confirmOpen check, the warning and the
+            // audit entry, as it does for every save — this edit adds its reason.
+            Response saved = saveChannel(id, version, current, request.confirmOpen(), EmailSenderLists.cleanReason(request.reason()), before);
             var location = saved.getLocation() == null ? null : RestUtilities.extractResourceId(saved.getLocation());
             Integer newVersion = location == null ? null : location.getVersion();
             List<String> warnings = new ArrayList<>();
-            if (change.allowlistEmptied()) {
-                warnings.add(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED);
-            }
             String header = saved.getHeaderString(WARNINGS_HEADER);
             if (header != null && !header.isBlank()) {
                 for (String code : header.split(",")) {
@@ -479,8 +555,6 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                     }
                 }
             }
-            emailSupport().auditSenderListChange(id, version, newVersion, change.added(), change.removed(),
-                    EmailSenderLists.cleanReason(request.reason()), change.allowlistEmptied());
             var result = new EmailSenderLists.UpdateResult(version, newVersion, true, change.allow(), change.block(), change.added(),
                     change.removed(), change.unchanged(), warnings);
             Response.ResponseBuilder answer = Response.ok(result).type(MediaType.APPLICATION_JSON);

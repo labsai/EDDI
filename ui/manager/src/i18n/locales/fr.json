@@ -3558,6 +3558,9 @@
     "selectGroup": "Choisir un groupe…",
     "unknownGroup": "{{id}} (introuvable)",
     "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
+    "confirmOpenTitle": "Retirer le dernier expéditeur autorisé ?",
+    "confirmOpenDesc": "Avec une liste d'autorisation vide, tout expéditeur peut faire agir l'agent, dans la seule limite de l'authentification de l'expéditeur. La modification est consignée dans le journal d'audit.",
+    "confirmOpenConfirm": "Enregistrer et ouvrir",
     "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
   "hitl": {
@@ -5683,7 +5686,7 @@
     "remove": "Retirer {{entry}}",
     "addLabel": "Ajouter à {{list}}",
     "add": "Ajouter",
-    "hint": "Préférez des adresses exactes. Chaque modification appliquée est une nouvelle version de cette intégration et est consignée dans le journal d'audit avec sa raison. Une conversation lancée par un e-mail ne peut jamais modifier ces listes.",
+    "hint": "Préférez des adresses exactes. Chaque modification appliquée est une nouvelle version de cette intégration et est consignée dans le journal d'audit avec sa raison. EDDI refuse qu'une conversation lancée par un e-mail modifie ces listes.",
     "saveFirst": "Enregistrez ou abandonnez d'abord vos autres modifications ; les listes d'expéditeurs s'appliquent séparément.",
     "reason": "Pourquoi (pour le journal d'audit)",
     "reasonPlaceholder": "p. ex. nouveau fournisseur, contrat 2026-114",

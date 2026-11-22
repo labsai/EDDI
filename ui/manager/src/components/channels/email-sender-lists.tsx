@@ -221,7 +221,7 @@ export function EmailSenderListsEditor({
       <p className="text-[10px] text-muted-foreground">
         {t(
           "emailSenders.hint",
-          "Prefer exact addresses. Each applied change is a new version of this integration and is recorded in the audit log with its reason. A conversation that an email started can never change these lists.",
+          "Prefer exact addresses. Each applied change is a new version of this integration and is recorded in the audit log with its reason. EDDI refuses a conversation that an email started when it tries to change these lists.",
         )}
       </p>
       {disabled && (

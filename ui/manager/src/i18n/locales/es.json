@@ -3558,6 +3558,9 @@
     "selectGroup": "Selecciona un grupo…",
     "unknownGroup": "{{id}} (no encontrado)",
     "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
+    "confirmOpenTitle": "¿Quitar el último remitente permitido?",
+    "confirmOpenDesc": "Con una lista de permitidos vacía, cualquier remitente puede hacer que el agente se ejecute, limitado solo por la autenticación del remitente. El cambio queda registrado en el registro de auditoría.",
+    "confirmOpenConfirm": "Guardar y abrir",
     "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
   },
   "hitl": {
@@ -5683,7 +5686,7 @@
     "remove": "Quitar {{entry}}",
     "addLabel": "Añadir a {{list}}",
     "add": "Añadir",
-    "hint": "Prefiera direcciones exactas. Cada cambio aplicado es una nueva versión de esta integración y queda registrado en el registro de auditoría con su motivo. Una conversación iniciada por un correo nunca puede cambiar estas listas.",
+    "hint": "Prefiera direcciones exactas. Cada cambio aplicado es una nueva versión de esta integración y queda registrado en el registro de auditoría con su motivo. EDDI rechaza que una conversación iniciada por un correo cambie estas listas.",
     "saveFirst": "Guarde o descarte primero sus otros cambios; las listas de remitentes se aplican por separado.",
     "reason": "Por qué (para el registro de auditoría)",
     "reasonPlaceholder": "p. ej. nuevo proveedor, contrato 2026-114",

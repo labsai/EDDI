@@ -59,12 +59,24 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     @PUT
     @Path("/{id}")
     @Consumes(MediaType.APPLICATION_JSON)
-    @Operation(description = "Update channel integration configuration.")
+    @Operation(description = "Update channel integration configuration. For an email integration, a save that empties a non-empty "
+            + "sender allowlist opens the integration to every sender: it is refused with 400 unless confirmOpen=true, and then answered "
+            + "with the warning email.allowlist-emptied. Every change to the sender lists is recorded in the audit ledger.")
     Response updateChannel(
                            @PathParam("id") String id,
                            @Parameter(name = "version", required = true, example = "1")
                            @QueryParam("version") Integer version,
+                           @Parameter(name = "confirmOpen", description = "Confirms emptying a non-empty email sender allowlist.")
+                           @QueryParam("confirmOpen") Boolean confirmOpen,
                            ChannelIntegrationConfiguration channelConfiguration);
+
+    /**
+     * {@link #updateChannel(String, Integer, Boolean, ChannelIntegrationConfiguration)}
+     * without confirming an emptied allowlist.
+     */
+    default Response updateChannel(String id, Integer version, ChannelIntegrationConfiguration channelConfiguration) {
+        return updateChannel(id, version, null, channelConfiguration);
+    }
 
     @POST
     @Consumes(MediaType.APPLICATION_JSON)
