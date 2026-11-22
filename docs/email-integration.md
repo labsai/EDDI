@@ -462,11 +462,16 @@ cost); an unpriced model counts as zero.
 - **Erasure and export** by address (`DELETE /admin/gdpr/{address}` or the MCP tool) reach every
   `email:<integrationId>:<address>` identity — current integrations and those the address's ledger rows name — and the
   ledger rows, including the replies the address was copied on. See [gdpr-compliance.md](gdpr-compliance.md).
-- **Thread conversations** (`replyAudience: thread`) name no address. Erasing an address also reaches every
-  conversation its inbound ledger rows and reply-copy entries name whose user id is that integration's
-  `email-thread:` identity, and erases it **whole**: the address's mails cannot be separated from the rest of a shared
-  thread, and its other readers still have the mails themselves. Conversations under any other identity are never
-  reached this way. This is provisional — redacting only that person's turns instead is an open product decision.
+- **Thread conversations** (`replyAudience: thread`) run as an identity shared by the whole thread, so they are
+  reached **per conversation id** — the ids the address's own ledger rows name (its mails, the replies sent to it, the
+  replies it was copied on) — and only where the conversation runs as that integration's `email-thread:` identity;
+  never through the shared identity itself. **Export** lists, per such conversation, only the address's own mails and
+  the replies it was sent — nothing others wrote or were told. **Erasure** deletes each such conversation **whole**
+  (one audit entry `email.gdpr` per deleted conversation id): one person's turns cannot be cut out of a shared
+  conversation, and its other readers still have the mails themselves. Other conversations of the thread, and the
+  identity's audit entries, are left alone. If a conversation cannot be read or deleted, the erasure step fails and
+  the ledger rows that point at it are kept, so a retry still finds it. This is provisional — redacting only that
+  person's turns instead is an open product decision.
 - Every **refused** mail leaves an audit-ledger entry (`taskId: email.inbound`): integration, reason category, ledger
   row, Message-ID, and the sender only as `senderDomain` plus `senderPseudonym` — the audit ledger is write-once. The
   pseudonym is the GDPR token [HITL notifications](hitl.md#email-notifications) use — keyed with the audit ledger's key,
@@ -625,9 +630,8 @@ With `replyAudience: thread`, colleagues on a mail read EDDI's answer too. The r
 - **No long-term memory.** A person's long-term memory would otherwise reach whoever is copied, and later mails can
   add readers. So on such an integration every conversation runs as **`email-thread:<integrationId>:<digest of the
   thread root>`**, which reads and writes no long-term properties and gets no memory tools — the thread itself
-  (conversation memory) works as usual — note that someone copied once becomes a participant and can later continue a
-  conversation that also holds mails others sent to EDDI alone, and pause notices and continuations are copied like
-  any reply. Only a conversation that runs as this
+  (conversation memory) works as usual; who may continue it is limited to people who read all of it (below). Pause
+  notices and continuations are copied like any reply. Only a conversation that runs as this
   integration's thread identity is ever copied: one started before the switch to `thread` (as `email:<id>:<address>`,
   with that person's memory) still answers its sender alone.
 - **Settings only narrow between attempts.** A retry sends to the copies the reply was queued with, intersected with
@@ -639,12 +643,27 @@ With `replyAudience: thread`, colleagues on a mail read EDDI's answer too. The r
 per-person long-term memory on such an integration — is what the save warning `email.reply-audience-thread` says.
 
 **Who continues a thread.** Every conversation of the thread is found by a key of the thread alone, but a mail
-continues it only when its authenticated sender is a **participant**: the conversation's first sender, or an
-address a sent reply in it went to, `Cc` included (whatever `threadParticipants` says). This applies on every path that
-finds a conversation — a reply to EDDI's Message-ID, the thread key from `References`, and the race of two mails
-starting the same thread at once. Anyone else — a forwarded thread, `References` naming someone else's thread — gets a
-conversation of their own, as `email-thread:<id>:<digest of thread root and their address>`, and their answer copies
-nobody they were not on the mail with.
+continues it only when its authenticated sender is a **participant** — and a participant reads the conversation's
+history through the agent, so the rule is strict:
+
+- `threadParticipants: originalSenderOnly` (the default): only the conversation's first sender.
+- `threadParticipants: anyAuthenticatedParticipant`: anyone who was sent **every** reply the conversation has sent so
+  far (as `To` or `Cc`). Being copied once is not enough: after a reply someone was not sent — the first sender
+  following up without them, say — they cannot continue and ask the agent about it.
+
+This applies on every path that finds a conversation — a reply to EDDI's Message-ID, the thread key from `References`
+(also when that conversation has ended, so nobody takes a thread's key over), and the race of two mails starting the
+same thread at once. Anyone else — a forwarded thread, `References` naming someone else's thread, a colleague who
+missed a reply — gets a conversation of their own, as `email-thread:<id>:<digest of thread root and their address>`,
+and their answer copies nobody they were not on the mail with.
+
+**A refused copy does not cost the sender the answer.** When the relay refuses one copy's `RCPT TO` permanently (a
+dead colleague's address on the mail), nothing has been sent to anyone; EDDI drops the refused copies from that reply
+— header, envelope and record — and submits it once more to the rest. The address is not suppressed (a refusal can be
+the relay's policy, not a dead mailbox). A refused `To` fails the reply as before.
+
+*Follow-ups:* the Manager's conversation view does not yet show each reply's audience, and the Cc case is covered by
+unit tests, not yet by `EmailConversationModeIT`.
 
 **Loops.** Replies keep `Auto-Submitted: auto-replied`. Two integrations copied on one thread, both with
 `replyAudience: thread`, answer once each: the other's reply is refused by the loop guard.
@@ -707,8 +726,9 @@ list; a delay (4.x.x) is noted on the row. For one of a thread reply's **copies*
 no longer counts as a participant of the thread); the reply stays `SENT`. Anything else in a report is ignored — a
 report is untrusted mail, and it counts only for an id EDDI minted and only for a block naming one of that reply's own
 recipients. With copies, the Message-ID is known to everyone the reply went to, so one of them could forge a report
-that suppresses another — at worst that colleague stops getting replies until an admin clears the address; a report
-never adds a recipient. **No mail is sent to a suppressed address** (checked
+that suppresses another — the suppression stays within this integration and names only that one address, so at worst
+that colleague stops getting this integration's replies until an admin clears the address; a report never adds a
+recipient. **No mail is sent to a suppressed address** (checked
 when the reply is queued and again before every attempt).
 
 The list stores the SHA-256 of each address and its domain, not the address. An administrator (EDIT on the

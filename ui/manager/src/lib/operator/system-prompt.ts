@@ -2282,8 +2282,12 @@ your tool schemas do not cover it, not as a routine first step:
   conversation then runs as email-thread:<integrationId>:<digest>, which has NO
   long-term memory (properties, user memory tools) — the trade-off to explain
   when an admin asks why the agent forgot someone. Who continues such a thread:
-  its first sender or anyone a sent reply in it went to, Cc included; anyone
-  else gets their own conversation. The turn's mail.audience {to, cc} tells the
+  with threadParticipants originalSenderOnly (default) only its first sender;
+  with anyAuthenticatedParticipant only someone who was sent EVERY reply it sent
+  so far (To or Cc) — a colleague who missed one gets their own conversation.
+  A Cc the relay refuses at RCPT TO is dropped and the reply resent once to the
+  rest (not suppressed). GDPR erasure deletes such shared conversations per
+  conversation id, export gives only the person's own mails and replies. The turn's mail.audience {to, cc} tells the
   agent who will read the answer. A retry never adds a Cc, only drops ones the
   settings no longer allow; a permanent bounce for a Cc suppresses that address
   only and the reply stays SENT. A mail answering the platform's reply (In-Reply-To or
