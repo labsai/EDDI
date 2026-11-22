@@ -324,6 +324,10 @@ Besides the Java4Shell flag above, 6.7.1 changes these things a working 6.7.0 de
   the `>` and indent markers past the eighth level; on 6.7.0 one deeply quoted mail of a few hundred kilobytes could
   allocate hundreds of megabytes. A hiding rule inside `@media screen`, `@media all`, `@layer` or `@supports` now
   hides text from the model, as a top-level rule does. A crawled link with a raw space is now fetched.
+- **Web crawls: documents linked only through overlong URLs.** A document a source already holds, but that the crawl
+  reached only through a link longer than 8,192 characters once encoded, is now reported as an error whose content is
+  unknown: it is kept, not deleted, and the run counts as inconclusive. More than 1,000 such documents in one crawl
+  leave discovery incomplete, so that run reconciles no deletions.
 - **Import and sync.** A merge import or sync whose update the store refuses (an invalid dictionary regex, say) now
   fails with the store's error and rolls back (a refused prompt snippet is skipped instead, and the import
   continues); 6.7.0 reported success and stored the document as a duplicate. A

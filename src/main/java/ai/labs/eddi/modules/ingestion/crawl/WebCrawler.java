@@ -496,10 +496,20 @@ public class WebCrawler {
      * that looked complete, and deletion reconciliation counted it missed until it
      * was tombstoned — although nothing said it was gone. Each is reported as an
      * error whose content is unknown instead, the way a page that could not be
-     * fetched is. After the crawl, so a document some other link reached is not
-     * reported; and only one the sink {@linkplain CrawlSink#holds holds}, since an
-     * overlong link to something never ingested has nothing to protect, and
-     * reporting it would leave every run of that source inconclusive.
+     * fetched is.
+     *
+     * <p>
+     * Run only after a crawl that completed with discovery complete, the only kind
+     * that is reconciled. Not reported: a document the crawl queued, polled or
+     * delivered — a redirect delivers under the id it landed on, which was never
+     * queued — one a robots.txt the crawl read disallows, and one the sink does not
+     * {@linkplain CrawlSink#holds hold}, since an overlong link to something never
+     * ingested has nothing to protect and reporting it would leave every run of
+     * that source inconclusive. At most {@link #MAX_OVERSIZED_LINKS} documents are
+     * remembered at all; past that, discovery is incomplete. Cancellation,
+     * interruption or the time budget stops the report before its next lookup and
+     * leaves discovery incomplete, so the documents left unreported are not read as
+     * deleted.
      */
     private static void reportOversized(CrawlRequest request, CrawlSink sink, Frontier frontier,
                                         Map<String, RobotsPolicy> robotsByHost, Counters counters, Instant deadline) {

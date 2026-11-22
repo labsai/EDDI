@@ -781,6 +781,45 @@ class IngestionPipelineTest {
         }
 
         @Test
+        @DisplayName("a store that cannot record an unreachable page fails the run before it reconciles")
+        void failingRecordUnreachableFailsTheRunAndDeletesNothing() {
+            var armed = new boolean[1];
+            var flaky = new InMemoryIngestionStateStore() {
+                @Override
+                public synchronized void recordUnreachable(String sourceId, String documentId, String runId) {
+                    if (armed[0]) {
+                        throw new IngestionStateStoreException("database is unwell", new RuntimeException());
+                    }
+                    super.recordUnreachable(sourceId, documentId, runId);
+                }
+            };
+            IngestionSource strict = source();
+            var settings = new IngestionSource.IngestionSettings();
+            settings.setTombstoneAfterMissedRuns(1);
+            strict.setSettings(settings);
+            String sourceKey = IngestionPipeline.stateKey(KB_RESOURCE_ID, strict);
+
+            new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Seed."))
+                    .page(SITE + "/keep", pageWith("Still here."))),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+
+            // /keep answers 503, and the store cannot record that the run saw it.
+            armed[0] = true;
+            IngestionReport report = new IngestionPipeline(new WebCrawler(new FakeSite().page(SITE + "/", seedPage("Seed."))
+                    .status(SITE + "/keep", 503)),
+                    new HtmlToMarkdownConverter(), flaky, fileStore, extractors(), modelFactory, storeFactory,
+                    new SimpleMeterRegistry()).run(KB_RESOURCE_ID, knowledgeBase(), strict, Mode.INGEST);
+            armed[0] = false;
+
+            // Swallowed, the run would end covered and reconcile, and the page that only
+            // answered 503 would count as missed.
+            assertEquals(IngestionReport.Outcome.FAILED, report.outcome());
+            assertEquals(0, report.documentsTombstoned());
+            assertFalse(flaky.lookup(sourceKey, SITE + "/keep").orElseThrow().tombstoned());
+        }
+
+        @Test
         @DisplayName("embeddings discarded for lost ownership still count against the segment budget")
         void discardedEmbeddingsAreCharged() {
             var armed = new boolean[1];

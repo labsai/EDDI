@@ -1103,8 +1103,8 @@ public class IngestionPipeline {
                 return stateStore.lookup(sourceKey, documentId).filter(state -> !state.tombstoned()).isPresent();
             } catch (RuntimeException e) {
                 // Answered as held: the document is then reported as content unknown
-                // rather than skipped, and a store failure cannot fail a crawl that
-                // finished.
+                // rather than skipped. If the store also refuses to record that, the
+                // run fails in onError before it reconciles, so nothing is deleted.
                 holdsLookupFailed = true;
                 LOGGER.warnf("Could not look up documents of source '%s' (%s); for the rest of this run, every document "
                         + "linked only through a URL too long to fetch is treated as held", LogSanitizer.sanitize(sourceKey),
@@ -1223,14 +1223,7 @@ public class IngestionPipeline {
             // tail pages of a rate-limited site are deleted after
             // tombstoneAfterMissedRuns runs, with every run reporting success.
             unreachable++;
-            try {
-                stateStore.recordUnreachable(sourceKey, error.documentId(), runId);
-            } catch (RuntimeException e) {
-                // The same store may refuse this too. The run is inconclusive regardless,
-                // which keeps the orphan sweep away; a crawl that finished is not failed
-                // for it.
-                LOGGER.debugf(e, "Could not mark document %s unreachable", LogSanitizer.sanitize(error.documentId()));
-            }
+            stateStore.recordUnreachable(sourceKey, error.documentId(), runId);
         }
 
         @Override
