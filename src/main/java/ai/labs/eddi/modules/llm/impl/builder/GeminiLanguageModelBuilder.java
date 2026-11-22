@@ -248,7 +248,7 @@ public class GeminiLanguageModelBuilder implements ILanguageModelBuilder {
         if (stop != null)
             b.stopSequences(stop);
 
-        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high"));
+        String level = ModelParameterValues.enumValue(p, KEY_THINKING_LEVEL, List.of("minimal", "low", "medium", "high", "xhigh"));
         Integer budget = intValue(p, KEY_THINKING_BUDGET);
         if (level != null && budget != null) {
             LOGGER.warn("Gemini thinkingLevel and thinkingBudget are mutually exclusive - using thinkingLevel.");
