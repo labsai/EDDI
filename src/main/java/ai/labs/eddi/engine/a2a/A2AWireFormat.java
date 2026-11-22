@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.a2a.A2AModels.A2AMessage;
 import ai.labs.eddi.engine.a2a.A2AModels.A2ATask;
 import ai.labs.eddi.engine.a2a.A2AModels.Artifact;
 import ai.labs.eddi.engine.a2a.A2AModels.Dialect;
+import ai.labs.eddi.engine.a2a.A2AModels.FilePart;
 import ai.labs.eddi.engine.a2a.A2AModels.InvalidA2ARequestException;
 import ai.labs.eddi.engine.a2a.A2AModels.Part;
 import ai.labs.eddi.engine.a2a.A2AModels.TaskStatus;
@@ -75,6 +76,26 @@ public final class A2AWireFormat {
     private static final String KEY_DATA = "data";
     private static final String KEY_KIND = "kind";
     private static final String KEY_TYPE = "type";
+    private static final String KEY_FILE = "file";
+    /** A2A 1.0 file members, flat on the part. */
+    private static final String KEY_RAW = "raw";
+    private static final String KEY_URL = "url";
+    private static final String KEY_FILENAME = "filename";
+    private static final String KEY_MEDIA_TYPE = "mediaType";
+    /** 0.3 / pre-0.2 file members, nested under {@code file}. */
+    private static final String KEY_NAME = "name";
+    private static final String KEY_MIME_TYPE = "mimeType";
+    private static final String KEY_BYTES = "bytes";
+    private static final String KEY_URI = "uri";
+
+    /** Longest file name or media type accepted on a file part. */
+    static final int MAX_FILE_LABEL_LENGTH = 255;
+
+    /**
+     * Longest {@code uri} accepted on a file part. The URI is chosen by the peer
+     * and only ever fetched, so anything longer is not a real file location.
+     */
+    static final int MAX_FILE_URI_LENGTH = 2048;
 
     private A2AWireFormat() {
     }
@@ -156,9 +177,23 @@ public final class A2AWireFormat {
      *            how many history messages to return; null for the default
      * @param dialect
      *            the dialect the request arrived in
+     * @param files
+     *            the message's file parts, in order. Empty unless the request was
+     *            parsed with files accepted ({@code eddi.a2a.files.inbound} not
+     *            {@code off})
      */
     public record SendRequest(String text, String messageId, String contextId, String taskId, String legacyTaskId,
-            boolean returnImmediately, Integer historyLength, Dialect dialect) {
+            boolean returnImmediately, Integer historyLength, Dialect dialect, List<FilePart> files) {
+
+        public SendRequest {
+            files = files == null ? List.of() : List.copyOf(files);
+        }
+
+        /** A request without file parts. */
+        public SendRequest(String text, String messageId, String contextId, String taskId, String legacyTaskId,
+                boolean returnImmediately, Integer historyLength, Dialect dialect) {
+            this(text, messageId, contextId, taskId, legacyTaskId, returnImmediately, historyLength, dialect, List.of());
+        }
     }
 
     /**
@@ -168,13 +203,31 @@ public final class A2AWireFormat {
      *             when there is no message, or nothing in it EDDI can read
      */
     public static SendRequest parseSend(Map<String, Object> params, Dialect dialect) {
+        return parseSend(params, dialect, false);
+    }
+
+    /**
+     * Normalises the params of a send / stream call.
+     *
+     * @param acceptFiles
+     *            whether file parts are read ({@code eddi.a2a.files.inbound} not
+     *            {@code off}). When false the message is read exactly as without
+     *            file support: file parts are ignored, and a message made only of
+     *            them is refused with ContentTypeNotSupported. When true each file
+     *            part is collected into {@link SendRequest#files()}, a message may
+     *            consist of files alone, and a malformed file part is refused
+     * @throws InvalidA2ARequestException
+     *             when there is no message, or nothing in it EDDI can read
+     */
+    public static SendRequest parseSend(Map<String, Object> params, Dialect dialect, boolean acceptFiles) {
         if (params == null) {
             throw new InvalidA2ARequestException("Missing params");
         }
         if (!(params.get("message") instanceof Map<?, ?> message)) {
             throw new InvalidA2ARequestException("Missing 'message' in params");
         }
-        String text = extractText(message.get("parts"));
+        List<FilePart> files = new ArrayList<>();
+        String text = extractText(message.get("parts"), acceptFiles ? files : null);
 
         String contextId = optionalId(message.get("contextId"), "contextId");
         if (contextId == null) {
@@ -196,7 +249,7 @@ public final class A2AWireFormat {
         String legacyTaskId = dialect == Dialect.LEGACY ? optionalId(params.get("id"), "id") : null;
         String taskId = dialect == Dialect.LEGACY ? null : optionalId(message.get("taskId"), "taskId");
         return new SendRequest(text, optionalId(message.get("messageId"), "messageId"), contextId, taskId, legacyTaskId, returnImmediately,
-                historyLength, dialect);
+                historyLength, dialect, files);
     }
 
     /**
@@ -224,6 +277,15 @@ public final class A2AWireFormat {
      * run as an empty turn.
      */
     static String extractText(Object partsObj) {
+        return extractText(partsObj, null);
+    }
+
+    /**
+     * As {@link #extractText(Object)}. With a non-null {@code files} every file
+     * part is parsed into it, and a message whose only content is files reads as an
+     * empty text.
+     */
+    static String extractText(Object partsObj, List<FilePart> files) {
         if (!(partsObj instanceof List<?> parts) || parts.isEmpty()) {
             throw new InvalidA2ARequestException("No text content found in message parts");
         }
@@ -241,9 +303,14 @@ public final class A2AWireFormat {
                 }
             } else if (partMap.get(KEY_DATA) != null && (discriminator == null || KEY_DATA.equals(discriminator))) {
                 texts.add(toJson(partMap.get(KEY_DATA)));
+            } else if (files != null && isFilePart(partMap, discriminator)) {
+                files.add(filePart(partMap, discriminator));
             } else {
                 unreadable = true;
             }
+        }
+        if (files != null && !files.isEmpty()) {
+            return String.join("\n", texts);
         }
         if (texts.isEmpty()) {
             if (unreadable) {
@@ -253,6 +320,82 @@ public final class A2AWireFormat {
             throw new InvalidA2ARequestException("No text content found in message parts");
         }
         return String.join("\n", texts);
+    }
+
+    /**
+     * Whether a part is a file: {@code kind}/{@code type} {@code "file"} (0.3,
+     * pre-0.2), or no discriminator and a 1.0 {@code raw} or {@code url} member (or
+     * a nested {@code file} object from a 0.3 peer that left out the kind).
+     */
+    private static boolean isFilePart(Map<?, ?> part, Object discriminator) {
+        if (discriminator != null) {
+            return KEY_FILE.equals(discriminator);
+        }
+        return part.containsKey(KEY_RAW) || part.containsKey(KEY_URL) || part.get(KEY_FILE) instanceof Map<?, ?>;
+    }
+
+    /**
+     * Reads one file part in either shape.
+     *
+     * @throws InvalidA2ARequestException
+     *             unless it carries exactly one of inline bytes and a URI, each a
+     *             non-blank string, and any name or media type is a string of a
+     *             sane length
+     */
+    private static FilePart filePart(Map<?, ?> part, Object discriminator) {
+        String name;
+        String mimeType;
+        Object bytes;
+        Object uri;
+        if (part.get(KEY_FILE) instanceof Map<?, ?> file) {
+            // 0.3 / pre-0.2: {"kind": "file", "file": {name, mimeType, bytes | uri}}
+            name = fileLabel(file.get(KEY_NAME), "file.name");
+            mimeType = fileLabel(file.get(KEY_MIME_TYPE), "file.mimeType");
+            bytes = file.get(KEY_BYTES);
+            uri = file.get(KEY_URI);
+        } else if (discriminator == null) {
+            // 1.0: {"raw" | "url", "filename", "mediaType"}
+            name = fileLabel(part.get(KEY_FILENAME), "filename");
+            mimeType = fileLabel(part.get(KEY_MEDIA_TYPE), "mediaType");
+            bytes = part.get(KEY_RAW);
+            uri = part.get(KEY_URL);
+        } else {
+            throw new InvalidA2ARequestException("A file part carries no 'file' object");
+        }
+        if ((bytes == null) == (uri == null)) {
+            throw new InvalidA2ARequestException("A file part must carry exactly one of inline bytes and a URI");
+        }
+        if (bytes != null) {
+            if (!(bytes instanceof String encoded) || encoded.isBlank()) {
+                throw new InvalidA2ARequestException("A file part's bytes must be a non-empty base64 string");
+            }
+            return new FilePart(name, mimeType, encoded, null);
+        }
+        if (!(uri instanceof String location) || location.isBlank()) {
+            throw new InvalidA2ARequestException("A file part's URI must be a non-empty string");
+        }
+        if (location.length() > MAX_FILE_URI_LENGTH) {
+            throw new InvalidA2ARequestException("A file part's URI is longer than " + MAX_FILE_URI_LENGTH + " characters");
+        }
+        return new FilePart(name, mimeType, null, location.trim());
+    }
+
+    private static String fileLabel(Object raw, String field) {
+        if (raw == null) {
+            return null;
+        }
+        if (!(raw instanceof String value)) {
+            throw new InvalidA2ARequestException("A file part's '" + field + "' must be a string");
+        }
+        String trimmed = value.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.length() > MAX_FILE_LABEL_LENGTH || trimmed.chars().anyMatch(Character::isISOControl)) {
+            throw new InvalidA2ARequestException("A file part's '" + field + "' must be at most " + MAX_FILE_LABEL_LENGTH
+                    + " characters, without control characters");
+        }
+        return trimmed;
     }
 
     // === Results ===
@@ -386,6 +529,9 @@ public final class A2AWireFormat {
     }
 
     static Map<String, Object> part(Part part, Dialect dialect) {
+        if (part.file() != null) {
+            return filePartJson(part.file(), dialect);
+        }
         Map<String, Object> json = new LinkedHashMap<>();
         String kind = part.text() != null ? KEY_TEXT : KEY_DATA;
         if (dialect != Dialect.V1_0) {
@@ -399,6 +545,28 @@ public final class A2AWireFormat {
         } else {
             json.put(KEY_DATA, part.data());
         }
+        return json;
+    }
+
+    private static Map<String, Object> filePartJson(FilePart file, Dialect dialect) {
+        Map<String, Object> json = new LinkedHashMap<>();
+        if (dialect == Dialect.V1_0) {
+            putIfNotNull(json, KEY_RAW, file.bytes());
+            putIfNotNull(json, KEY_URL, file.uri());
+            putIfNotNull(json, KEY_FILENAME, file.name());
+            putIfNotNull(json, KEY_MEDIA_TYPE, file.mimeType());
+            return json;
+        }
+        json.put(KEY_KIND, KEY_FILE);
+        if (dialect == Dialect.LEGACY) {
+            json.put(KEY_TYPE, KEY_FILE);
+        }
+        Map<String, Object> nested = new LinkedHashMap<>();
+        putIfNotNull(nested, KEY_NAME, file.name());
+        putIfNotNull(nested, KEY_MIME_TYPE, file.mimeType());
+        putIfNotNull(nested, KEY_BYTES, file.bytes());
+        putIfNotNull(nested, KEY_URI, file.uri());
+        json.put(KEY_FILE, nested);
         return json;
     }
 

@@ -1015,6 +1015,7 @@ eddi_a2a_tool_schema_governed_total         # Peer tool parameter schemas change
 eddi_a2a_requests_total                     # A2A JSON-RPC calls; tags: method (send|stream|get|cancel|..., disabled when A2A is off), dialect (1.0|0.3|legacy|none), outcome (ok|error|invalid|busy)
 eddi_a2a_tasks_total                        # A2A tasks by the state their turn settled in; tag: state
 eddi_a2a_in_flight                          # A2A turns holding an in-flight slot (gauge; cap: eddi.a2a.max-concurrent-requests)
+eddi_a2a_files_total                        # Files taken in over A2A and stored (eddi.a2a.files.inbound); tag: direction (inbound)
 eddi_caller_identity_resolution_total       # Caller-identity resolutions; tags: outcome, reference
 eddi_httpcalls_context_reference_total      # ${context:<key>} header resolutions from secret context; tag: outcome (resolved|missing|not_secret|expired|cross_origin|insecure_transport|mixed|not_configured|misplaced)
 eddi_setup_api_total                        # setup-api dry runs and re-syncs; tags: operation (api_agent|sync), outcome (dry_run|synced|unchanged|dangling_reference|unmarked)

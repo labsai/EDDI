@@ -11,6 +11,7 @@ import java.io.Serial;
 import java.io.Serializable;
 import java.time.Instant;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -204,11 +205,16 @@ public final class A2AModels {
     }
 
     /**
-     * A content part. Exactly one of {@code text} and {@code data} is set; the
-     * dialect decides whether a discriminator is written next to it.
+     * A content part. Exactly one of {@code text}, {@code data} and {@code file} is
+     * set; the dialect decides whether a discriminator is written next to it.
      */
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    public record Part(String text, Object data) {
+    public record Part(String text, Object data, FilePart file) {
+
+        /** A text or data part. */
+        public Part(String text, Object data) {
+            this(text, data, null);
+        }
 
         public static Part textPart(String text) {
             return new Part(text, null);
@@ -217,6 +223,31 @@ public final class A2AModels {
         public static Part dataPart(Object data) {
             return new Part(null, data);
         }
+
+        public static Part filePart(FilePart file) {
+            return new Part(null, null, file);
+        }
+    }
+
+    /**
+     * A file, dialect-neutral. Exactly one of {@code bytes} and {@code uri} is set.
+     * <p>
+     * A2A 1.0 writes it flat on the part — {@code {"raw": …, "filename": …,
+     * "mediaType": …}} or {@code {"url": …}}; 0.3 and the pre-0.2 dialect nest it —
+     * {@code {"kind": "file", "file": {"name": …, "mimeType": …, "bytes": …}}} or
+     * {@code "uri"} in place of {@code "bytes"}.
+     *
+     * @param name
+     *            the file name the peer gave, or null
+     * @param mimeType
+     *            the media type the peer declared, or null
+     * @param bytes
+     *            the content, base64-encoded as it arrived
+     * @param uri
+     *            where the content can be fetched
+     */
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    public record FilePart(String name, String mimeType, String bytes, String uri) {
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -322,6 +353,41 @@ public final class A2AModels {
 
         public A2ABusyException(String message) {
             super(message);
+        }
+    }
+
+    /**
+     * How file parts of an inbound message are treated —
+     * {@code eddi.a2a.files.inbound}.
+     */
+    public enum InboundFileMode {
+        /**
+         * The default: file parts are not read. A message made only of file parts is
+         * refused with ContentTypeNotSupported, the file parts of any other message are
+         * ignored — exactly as before file parts were supported.
+         */
+        OFF,
+        /** File parts with inline bytes are stored; a part naming a URI is refused. */
+        INLINE,
+        /** Inline bytes are stored, and a URI is fetched (SSRF-checked) and stored. */
+        INLINE_AND_URI;
+
+        /**
+         * Reads the property value — {@code off}, {@code inline},
+         * {@code inline-and-uri}, in any case.
+         *
+         * @throws IllegalArgumentException
+         *             for anything else
+         */
+        public static InboundFileMode fromProperty(String raw) {
+            String value = raw == null ? "" : raw.trim().toLowerCase(Locale.ROOT).replace('_', '-');
+            return switch (value) {
+                case "", "off" -> OFF;
+                case "inline" -> INLINE;
+                case "inline-and-uri" -> INLINE_AND_URI;
+                default -> throw new IllegalArgumentException(
+                        "eddi.a2a.files.inbound must be off, inline or inline-and-uri, not '" + raw + "'");
+            };
         }
     }
 

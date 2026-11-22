@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.a2a.A2AModels.AgentCard;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentInterface;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentProvider;
 import ai.labs.eddi.engine.a2a.A2AModels.AgentSkill;
+import ai.labs.eddi.engine.a2a.A2AModels.InboundFileMode;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -32,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Supplier;
+import java.util.stream.Stream;
 
 import static ai.labs.eddi.utils.RuntimeUtilities.isNullOrEmpty;
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -96,6 +98,16 @@ public class AgentCardService {
     static final List<String> INPUT_MODES = List.of("text/plain", "application/json");
     static final List<String> OUTPUT_MODES = List.of("text/plain");
 
+    /**
+     * The file media types advertised next to {@link #INPUT_MODES} when inbound
+     * file parts are switched on ({@code eddi.a2a.files.inbound} not {@code off}):
+     * the types the attachment forwarder hands a model natively.
+     */
+    static final List<String> FILE_INPUT_MODES = List.of("application/pdf", "image/png", "image/jpeg", "image/gif", "image/webp");
+
+    /** The input modes every card advertises. */
+    private final List<String> inputModes;
+
     /** The name under which the card declares its Bearer scheme. */
     static final String BEARER_SCHEME = "bearer";
     static final String OIDC_SCHEME = "oidc";
@@ -108,15 +120,27 @@ public class AgentCardService {
             @ConfigProperty(name = "eddi.a2a.public-token-endpoint") Optional<String> publicTokenEndpoint,
             @ConfigProperty(name = "eddi.keycloak.public.url") Optional<String> keycloakPublicUrl,
             @ConfigProperty(name = "quarkus.application.version", defaultValue = "unknown") String applicationVersion,
-            BrandingService branding) {
+            BrandingService branding,
+            @ConfigProperty(name = "eddi.a2a.files.inbound", defaultValue = "off") String inboundFiles) {
         this(agentStore, documentDescriptorStore, baseUrl, authEnabled, oidcAuthServerUrl, publicTokenEndpoint, keycloakPublicUrl,
-                applicationVersion, () -> branding.current(BrandRequest.NONE).productName());
+                applicationVersion, () -> branding.current(BrandRequest.NONE).productName(), InboundFileMode.fromProperty(inboundFiles));
     }
 
     /** With the product name supplied directly — the constructor tests use. */
     AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, String baseUrl, boolean authEnabled,
             Optional<String> oidcAuthServerUrl, Optional<String> publicTokenEndpoint, Optional<String> keycloakPublicUrl,
             String applicationVersion, Supplier<String> productName) {
+        this(agentStore, documentDescriptorStore, baseUrl, authEnabled, oidcAuthServerUrl, publicTokenEndpoint, keycloakPublicUrl,
+                applicationVersion, productName, InboundFileMode.OFF);
+    }
+
+    /** With the inbound file mode supplied directly. */
+    AgentCardService(IAgentStore agentStore, IDocumentDescriptorStore documentDescriptorStore, String baseUrl, boolean authEnabled,
+            Optional<String> oidcAuthServerUrl, Optional<String> publicTokenEndpoint, Optional<String> keycloakPublicUrl,
+            String applicationVersion, Supplier<String> productName, InboundFileMode inboundFiles) {
+        this.inputModes = inboundFiles == InboundFileMode.OFF
+                ? INPUT_MODES
+                : Stream.concat(INPUT_MODES.stream(), FILE_INPUT_MODES.stream()).toList();
         this.productName = productName;
         this.applicationVersion = isNullOrEmpty(applicationVersion) ? "unknown" : applicationVersion;
         this.agentStore = agentStore;
@@ -419,7 +443,7 @@ public class AgentCardService {
         }
 
         return new AgentCard(name, description, agentUrl, A2AModels.LEGACY_CARD_PROTOCOL_VERSION, A2AModels.TRANSPORT_JSONRPC, interfaces,
-                new AgentProvider(product, baseUrl), applicationVersion, capabilities, securitySchemes, securityRequirements, INPUT_MODES,
+                new AgentProvider(product, baseUrl), applicationVersion, capabilities, securitySchemes, securityRequirements, inputModes,
                 OUTPUT_MODES, skills, authentication);
     }
 }
