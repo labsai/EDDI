@@ -111,6 +111,22 @@ describe("DriveFolderScope", () => {
     expect(screen.getByTestId("s-drive-picker-include-fOffers")).toBeDisabled();
   });
 
+  it("excluding a folder that is read replaces the include rather than keeping both", async () => {
+    const user = userEvent.setup();
+    listFolders.mockResolvedValue({ folders: [{ id: "fSales", name: "Sales" }], nextPageToken: null });
+    let state: GoogleDriveSource = {};
+    renderWithProviders(
+      <Harness initial={{ folderIds: ["fSales"], folders: [{ id: "fSales", label: "Sales" }] }} onState={(d) => (state = d)} />,
+    );
+
+    await user.click(screen.getByTestId("s-drive-scope-browse"));
+    await user.click(await screen.findByTestId("s-drive-picker-exclude-fSales"));
+
+    expect(state.excludeFolders).toEqual([{ id: "fSales", label: "Sales" }]);
+    expect(state.folders).toEqual([]);
+    expect(state.folderIds).toEqual([]);
+  });
+
   it("pages a large level with the token the server hands out", async () => {
     const user = userEvent.setup();
     listFolders

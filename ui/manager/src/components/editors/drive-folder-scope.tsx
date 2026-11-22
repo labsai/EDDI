@@ -78,7 +78,14 @@ export function DriveFolderScope({
       onChange({ folders: [...folders, folder] });
     } else {
       if (excluded.some((f) => sameFolder(f, folder))) return;
-      onChange({ excludeFolders: [...excluded, folder] });
+      // Excluding a folder that is also read replaces the include: both at once
+      // would make the server drop it, and if it was the only folder, refuse the run.
+      const keptFolders = folders.filter((f) => !sameFolder(f, folder));
+      const keptIds = folder.id ? legacyIds.filter((id) => id !== folder.id) : legacyIds;
+      const patch: Partial<GoogleDriveSource> = { excludeFolders: [...excluded, folder] };
+      if (keptFolders.length !== folders.length) patch.folders = keptFolders;
+      if (keptIds.length !== legacyIds.length) patch.folderIds = keptIds;
+      onChange(patch);
     }
   };
 

@@ -708,8 +708,11 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   When folders are removed from the scope or a folder is excluded, the next run
   that lists the whole new scope removes their documents at once, not after
   \`tombstoneAfterMissedRuns\` runs; a run that stops early (throttled, time
-  budget) removes nothing, and until a complete run the removed folder's
-  documents stay retrievable. The Manager's source panel has a folder picker
+  budget) removes nothing. Retrieval applies the current scope at once all the
+  same: chunks under a removed or excluded folder are not returned even before
+  that run. Two cases wait for a run: a newly typed path (by id or picked in the
+  Manager it applies at once), and chunks written before folder chains were
+  recorded, which are stamped on the next run. The Manager's source panel has a folder picker
   for this; you cannot browse a drive yourself.
 - Find one by name in the descriptor listing, then read it by id AND version —
   the by-id read needs both, and a name alone reaches nothing.

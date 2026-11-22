@@ -79,12 +79,31 @@ listing; the work queue, the change feed and the folder index are later phases.
   download or embedding failed, and the orphan-sweep marker. A source
   whose state predates the signature records one on its first run without fast-tracking.
 
+### Review fixes
+
+- **Retrieval applies the current scope** (§6.3, "effective at once"; `FolderScopeRetrievalFilter`,
+  `drive/DriveRetrievalScope`). Every Drive chunk now records `folderIds`, the chain of folder ids above
+  its file, as one scalar string. Agent retrieval (`RagContextProvider`) and Test Retrieval /
+  `/evaluate` (`KnowledgeBaseInspector.search`) over-fetch, then drop chunks under an excluded folder or
+  outside every folder to read, judged against the source's current configuration and resolved paths.
+  It is a post-filter, so it behaves the same on every store. The chain is part of the citation
+  fingerprint (`ContentHashes.citation(title, url, folderIds)`, unchanged when there is no chain), so a
+  moved file and pre-chain chunks are stamped in place on stores that can rewrite metadata. Stores that
+  cannot keep pre-chain chunks unstamped rather than re-embed. For Google-native files the chain is in
+  the version token, so each is exported once after the upgrade.
+- **A gone path exclusion stays recorded.** Before, the next run took the path for a typo and failed
+  for good.
+- **Id exclusions must be seen to exist.** An unknown id fails the run. One seen before that Drive now
+  answers 404 for stops the run as transient: a bare 404 is no proof, and reading on would embed the
+  subtree. A folder in the trash or another drive stays excluded.
+- Path names are trimmed (`Sales / Offers`). A shortcut to a folder that no longer exists is skipped
+  instead of leaving every listing incomplete. Excluding a folder in the picker replaces its include.
+
 ### Not done
 
-- **Retrieval does not filter on folder membership yet** (§6.3, "effective at once"). Until the next
-  complete listing, a removed folder's documents stay retrievable. A filter needs list-valued metadata,
-  which langchain4j's scalar `Metadata` lacks, an encoding that every configured store can filter on,
-  and stamping of the chunks that #1495 already wrote. Recording `parentId` at listing time is the first step.
+- **Retrieval filtering has two gaps** (see "Review fixes" below): a typed path that no run has resolved
+  yet, and chunks on stores without metadata updates that were written before chains were recorded.
+  Both are kept until the next complete listing.
 - **No Drive unit limiter.** The picker and the resolution requests go through `DriveApi`'s
   retry-and-backoff but are not counted against a quota; the limiter is phase Q.
 - `MAX_FOLDERS` stays 50; 500 needs the folder index (phase L).

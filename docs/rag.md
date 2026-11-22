@@ -914,11 +914,24 @@ Drive's listing query; the connection name is held to the connections framework'
   does a removal the vector store refuses. A rename is not a change; resolving a path to a different
   folder is. A source whose state predates the signature records one on its first run without
   fast-tracking anything.
-- **What a scope change does not do yet.** Until that complete listing, the removed folder's documents
-  stay retrievable: retrieval does not filter on folder membership yet (the large-scale ingestion
-  plan asks for it in §6.3; it is not built). The listing now records the
-  folder that holds each file (`parentId` in the document's metadata), but the pipeline does not copy
-  it onto the stored chunks yet, which such a filter would need.
+- **Retrieval applies the scope at once.** Every chunk records the chain of folders above its file
+  (`folderIds` metadata, `/top/…/parent/`). Agent retrieval, **Test Retrieval** and `/evaluate` drop
+  chunks of a Drive source that lie under an excluded folder, or under none of its folders to read,
+  judged against the source's **current** configuration — so a removed or excluded folder stops
+  answering as soon as the knowledge base is saved, also while a listing keeps stopping early (a source
+  that never completes a listing would otherwise answer from it for good). It is a post-filter, the same
+  on every vector store: the search asks for up to three times as many matches (at most 100 more) and
+  returns the first that pass, so a query whose best matches are mostly hidden can return fewer than
+  `maxResults`. What it cannot judge, it keeps until the next complete listing settles it:
+  - a **path** no run has resolved yet (a folder picked in the Manager is stored by id and applies at
+    once; a newly typed path waits for a run, and a typed root path lifts the root check meanwhile);
+  - chunks written **before chains were recorded**. The first run after the upgrade stamps them in
+    place (title, URL and chain are one citation fingerprint) on stores that can rewrite metadata —
+    in-memory and pgvector; other stores keep them unstamped rather than re-embed the source. Every
+    Google Doc, Sheet and Slides file is exported once on that run, because the chain is part of its
+    version token.
+  - A file reached through a **shortcut** carries the chain it was reached by; an exclusion of the
+    target's real parent, added later, hides it at the next complete listing rather than at once.
 
 **Picking folders.** `GET /ragstore/rags/{id}/sources/{sourceId}/drive/folders?version=N&parentId=root&pageToken=…`
 lists one level of the saved source's Shared Drive — `{"folders": [{"id", "name"}], "nextPageToken"}`,
