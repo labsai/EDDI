@@ -148,6 +148,15 @@ public class ConnectionResolver {
             countLookupFailure(e);
             throw e;
         }
+        return resolveLoaded(connection, targetUrl, principalOverride);
+    }
+
+    /**
+     * {@link #resolve} for a connection already loaded — so a caller that checked
+     * the document resolves from that same document, not from a second read an edit
+     * may have changed in between.
+     */
+    private ResolvedCredential resolveLoaded(ConnectionConfiguration connection, URI targetUrl, String principalOverride) {
         Timer.Sample sample = meterRegistry == null ? null : Timer.start(meterRegistry);
         try {
             requireTargetAllowed(connection, targetUrl);
@@ -328,8 +337,9 @@ public class ConnectionResolver {
      * {@code targetUrl} is given, its {@code baseUrlAllowlist} names that origin.
      * Without a fixed origin the allowlist must still be non-empty and list https
      * origins only, so a connection that could never be sent anywhere is refused
-     * where the author is waiting rather than on every send. The same allowlist
-     * rule is applied again on every send by {@link #resolveService}.
+     * where the author is waiting rather than on every send. On every send
+     * {@link #resolveService} re-checks the binding and auth type, refuses a
+     * non-https target, and checks the target against the allowlist.
      *
      * @param targetUrl
      *            the channel type's API origin; {@code null} when it is not fixed
@@ -363,11 +373,15 @@ public class ConnectionResolver {
      * rules {@link #requireServiceTarget} checked at save time: the connection may
      * have been edited since (bound {@code PER_USER}, given another auth type), and
      * a {@code PER_USER} connection resolved here would hand the token of whichever
-     * user's turn is bound to this thread to the chat platform.
+     * user's turn is bound to this thread to the chat platform. The checks and the
+     * resolution use one read of the connection, so an edit cannot land between
+     * them. The target must be https: a channel credential never travels in
+     * plaintext, whatever the allowlist would admit.
      *
      * @throws ConnectionException
      *             when the connection is no longer {@code SERVICE}-bound or of an
-     *             accepted auth type, or as {@link #resolve} does
+     *             accepted auth type, the target is not https, or as
+     *             {@link #resolve} does
      */
     public ResolvedCredential resolveService(String reference, URI targetUrl, Set<AuthType> acceptedAuthTypes) {
         ConnectionConfiguration connection;
@@ -378,7 +392,11 @@ public class ConnectionResolver {
             throw e;
         }
         requireServiceBinding(connection, acceptedAuthTypes);
-        return resolve(reference, targetUrl, null);
+        if (targetUrl == null || !"https".equalsIgnoreCase(targetUrl.getScheme())) {
+            throw new ConnectionException(ConnectionException.Reason.TARGET_NOT_ALLOWED,
+                    "A channel credential is only sent over https, not to " + (targetUrl == null ? "no target" : targetUrl.getScheme()) + ".");
+        }
+        return resolveLoaded(connection, targetUrl, null);
     }
 
     /**

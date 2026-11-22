@@ -128,13 +128,14 @@ public interface ChannelTypeDescriptor {
 
     /**
      * Whether the {@link #applicationId} must equal the OAuth client id of the
-     * connection the integration names — the proof that the integration's author
-     * holds that application's credential, and so may claim its traffic. A Teams
-     * bot's app id IS its Entra client id; a type that proves its application
-     * another way (Discord verifies requests with the application's public key)
-     * leaves this {@code false} and must check ownership in its own
-     * {@link #validate}. Without such a proof, whoever saved a channel-less
-     * integration for an application first would receive its direct messages.
+     * connection the integration names. This ties the application to a connection
+     * an administrator configured with that client id and the author may use; it
+     * does not prove the client secret, which connection saves never test. A
+     * channel-less integration, which claims the application's direct messages,
+     * additionally needs edit access to that connection. A Teams bot's app id IS
+     * its Entra client id; a type that proves its application another way (Discord
+     * verifies requests with the application's public key) leaves this
+     * {@code false} and must check ownership in its own {@link #validate}.
      */
     default boolean applicationIdIsConnectionClientId() {
         return false;
@@ -168,8 +169,17 @@ public interface ChannelTypeDescriptor {
         return keys;
     }
 
-    /** The routing key of an application identity. */
+    /**
+     * The routing key of an application identity.
+     *
+     * @throws IllegalArgumentException
+     *             for a null or blank id, which would otherwise become the key
+     *             {@code @app:null} or {@code @app:}
+     */
     static String applicationKey(String applicationId) {
+        if (applicationId == null || applicationId.isBlank()) {
+            throw new IllegalArgumentException("An application key needs an application id.");
+        }
         return APPLICATION_KEY_PREFIX + applicationId;
     }
 

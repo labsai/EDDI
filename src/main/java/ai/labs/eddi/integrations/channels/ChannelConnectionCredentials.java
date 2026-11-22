@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.channels;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.connections.IConnectionStore;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
@@ -133,15 +134,29 @@ public class ChannelConnectionCredentials {
             return reject(descriptor, "connections_unavailable",
                     "Connections are not available in this deployment, so platformConfig.connection cannot be checked.");
         }
-        String usable = requireMayUse(connection);
-        if (usable != null) {
-            return reject(descriptor, "connection_not_usable", usable);
+        UseCheck usable = requireMayUse(connection);
+        if (usable.refusal() != null) {
+            return reject(descriptor, "connection_not_usable", usable.refusal());
+        }
+        Optional<String> applicationId = descriptor.applicationId(platformConfig).filter(id -> !id.isBlank());
+        boolean claimsApplication = applicationId.isPresent() && descriptor.routingKeys(null, platformConfig)
+                .contains(ChannelTypeDescriptor.applicationKey(applicationId.get()));
+        if (claimsApplication && !mayEdit(usable.connectionId())) {
+            // USE lets someone send through a shared connection; it must not let them
+            // take over the application's direct messages. Existence is no secret here:
+            // the caller already passed the USE check.
+            return reject(descriptor, "application_needs_edit",
+                    "platformConfig.connection: a channel-less integration answers application '" + applicationId.get()
+                            + "''s direct messages, which needs edit access to connection '" + connection.name()
+                            + "', not only use access.");
         }
         String reference = connection.toReferenceString();
         URI origin = descriptor.apiOrigin().orElse(null);
         ConnectionResolver resolver = connectionResolver.get();
+        Optional<String> clientId;
         try {
             resolver.requireServiceTarget(reference, origin, descriptor.acceptedConnectionAuthTypes());
+            clientId = descriptor.applicationIdIsConnectionClientId() ? resolver.oauthClientIdOf(reference) : Optional.empty();
         } catch (ConnectionException e) {
             if (e.getReason() == ConnectionException.Reason.TARGET_NOT_ALLOWED && origin != null) {
                 return reject(descriptor, "connection_target", "platformConfig.connection: " + e.getMessage()
@@ -149,23 +164,32 @@ public class ChannelConnectionCredentials {
             }
             return reject(descriptor, "connection_invalid", "platformConfig.connection: " + e.getMessage());
         }
-        if (descriptor.applicationIdIsConnectionClientId()) {
-            Optional<String> applicationId = descriptor.applicationId(platformConfig).filter(id -> !id.isBlank());
-            Optional<String> clientId = resolver.oauthClientIdOf(reference);
-            if (applicationId.isPresent() && !clientId.filter(applicationId.get()::equals).isPresent()) {
-                return reject(descriptor, "application_not_owned", "The " + descriptor.id() + " application id must be the OAuth client id "
-                        + "of the connection in platformConfig.connection: that is the proof that this integration holds the "
-                        + "application's credential and may receive its messages.");
-            }
+        if (descriptor.applicationIdIsConnectionClientId() && applicationId.isPresent()
+                && !clientId.filter(applicationId.get()::equals).isPresent()) {
+            // Not proof of the secret — connection saves never test it — but the
+            // application id is tied to a connection an administrator configured with
+            // that client id, which this caller may use (and edit, when it claims DMs).
+            return reject(descriptor, "application_not_owned", "The " + descriptor.id() + " application id must be the OAuth client id "
+                    + "of the connection in platformConfig.connection.");
         }
         return List.of();
     }
 
     /**
-     * {@code null} when the caller may use the connection, else the one message a
+     * The outcome of {@link #requireMayUse}: the connection's id when the caller
+     * may use it, else the refusal.
+     */
+    private record UseCheck(String connectionId, String refusal) {
+        static UseCheck refused(String refusal) {
+            return new UseCheck(null, refusal);
+        }
+    }
+
+    /**
+     * The connection's id when the caller may use it, else the one message a
      * missing connection and a forbidden one share.
      */
-    private String requireMayUse(ConnectionReference connection) {
+    private UseCheck requireMayUse(ConnectionReference connection) {
         String uniform = "platformConfig.connection: no usable connection '" + connection.name() + "' — it does not exist, or you "
                 + "may not use it. Ask its owner to share it with you, or create your own.";
         String id;
@@ -173,19 +197,32 @@ public class ChannelConnectionCredentials {
             id = connectionStore == null ? null : connectionStore.idOfName(connection.tenantId(), connection.name());
         } catch (IResourceStore.ResourceStoreException e) {
             LOGGER.warnf("Could not look up connection '%s' for a channel save: %s", sanitize(connection.name()), e.getMessage());
-            return "platformConfig.connection could not be checked right now. Please retry.";
+            return UseCheck.refused("platformConfig.connection could not be checked right now. Please retry.");
         }
         if (id == null) {
-            return uniform;
+            return UseCheck.refused(uniform);
         }
         if (accessGuard != null) {
             try {
                 accessGuard.requireUseAccess(id, "connection");
             } catch (ForbiddenException e) {
-                return uniform;
+                return UseCheck.refused(uniform);
             }
         }
-        return null;
+        return new UseCheck(id, null);
+    }
+
+    /** Whether the caller holds EDIT on the connection with that id. */
+    private boolean mayEdit(String connectionId) {
+        if (accessGuard == null) {
+            return true;
+        }
+        try {
+            accessGuard.requireAccess(connectionId, AccessLevel.EDIT, "connection");
+            return true;
+        } catch (ForbiddenException e) {
+            return false;
+        }
     }
 
     private List<String> reject(ChannelTypeDescriptor descriptor, String reason, String message) {

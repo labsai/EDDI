@@ -7,6 +7,7 @@ package ai.labs.eddi.integrations.channels;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.connections.IConnectionStore;
 import ai.labs.eddi.configs.connections.model.AuthType;
+import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.ResolvedCredential;
@@ -158,6 +159,31 @@ class ChannelConnectionCredentialsTest {
 
             when(resolver.oauthClientIdOf("${connection:bot}")).thenReturn(Optional.of("app-1"));
             assertEquals(List.of(), credentials.validateForSave(owned, Map.of("connection", "bot", "appId", "app-1")));
+        }
+
+        @Test
+        @DisplayName("claiming an application's direct messages needs edit access to the connection, not only use")
+        void applicationClaimNeedsEdit() {
+            doThrow(new ForbiddenException("no")).when(accessGuard).requireAccess(CONNECTION_ID, AccessLevel.EDIT, "connection");
+            var errors = credentials.validateForSave(fake, Map.of("connection", "bot", "appId", "app-1"));
+            assertEquals(1, errors.size());
+            assertTrue(errors.get(0).contains("needs edit access to connection 'bot'"), errors.get(0));
+            assertEquals(1, rejected("fakechat", "application_needs_edit"));
+            verify(resolver, never()).requireServiceTarget(any(), any(), any());
+
+            assertEquals(List.of(), credentials.validateForSave(fake, Map.of("connection", "bot", "appId", "app-1", "channelId", "C1")),
+                    "a channel-bound integration claims no DMs, so use access is enough");
+        }
+
+        @Test
+        @DisplayName("a store failure while reading the client id is reported, not thrown past the save")
+        void clientIdLookupFailure() {
+            var owned = new FakeChatChannelType.OwnedByClientId();
+            when(resolver.oauthClientIdOf("${connection:bot}"))
+                    .thenThrow(new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "store down"));
+            var errors = credentials.validateForSave(owned, Map.of("connection", "bot", "appId", "app-1"));
+            assertEquals(1, errors.size(), errors.toString());
+            assertTrue(errors.get(0).startsWith("platformConfig.connection:"), errors.get(0));
         }
 
         @Test

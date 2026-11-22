@@ -17,6 +17,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
 import java.util.TreeMap;
@@ -109,37 +110,47 @@ public class ChannelTypeRegistry {
 
     /** Counts a save refused for {@code type}, by a short stable {@code reason}. */
     public void recordRejected(String type, String reason) {
-        count("eddi_channel_config_rejected_total", type, reason);
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi_channel_config_rejected_total", "type", typeTag(type), "reason", reasonTag(reason)).increment();
+        }
     }
 
     /** Counts a send whose connection could not be resolved. */
     public void recordCredentialRefused(String type, String reason) {
-        count("eddi_channel_credential_refused_total", type, reason);
+        if (meterRegistry != null) {
+            meterRegistry.counter("eddi_channel_credential_refused_total", "type", typeTag(type), "reason", reasonTag(reason)).increment();
+        }
     }
 
     /** Counts an undeclared key the router dropped from a stored document. */
     public void recordDroppedKey(String type) {
         if (meterRegistry != null) {
-            meterRegistry.counter("eddi_channel_config_keys_dropped_total", "type", tagValue(type)).increment();
-        }
-    }
-
-    private void count(String name, String type, String reason) {
-        if (meterRegistry != null) {
-            meterRegistry.counter(name, "type", tagValue(type), "reason", tagValue(reason)).increment();
+            meterRegistry.counter("eddi_channel_config_keys_dropped_total", "type", typeTag(type)).increment();
         }
     }
 
     /**
-     * Bounded tag values: only registered type ids, so a stored typo cannot add
-     * series.
+     * A bounded type tag: a registered type id, else {@code other}, so a stored
+     * typo or a raw request value cannot add series.
      */
-    private String tagValue(String value) {
-        if (value == null) {
+    private String typeTag(String type) {
+        if (type == null) {
             return "unknown";
         }
-        String lower = value.toLowerCase(Locale.ROOT);
-        return byId.containsKey(lower) || lower.matches("[a-z_]{1,40}") ? lower : "other";
+        String lower = type.toLowerCase(Locale.ROOT);
+        return byId.containsKey(lower) ? lower : "other";
+    }
+
+    /**
+     * A bounded reason tag. Callers pass constants or enum names; anything else
+     * collapses to {@code other}.
+     */
+    private static String reasonTag(String reason) {
+        if (reason == null) {
+            return "unknown";
+        }
+        String lower = reason.toLowerCase(Locale.ROOT);
+        return lower.matches("[a-z_]{1,40}") ? lower : "other";
     }
 
     /** The registered type ids, sorted. */
@@ -172,12 +183,14 @@ public class ChannelTypeRegistry {
         Map<String, String> pc = platformConfig == null ? Map.of() : platformConfig;
         if (descriptor.connectionBacked()) {
             Set<String> allowed = descriptor.allowedPlatformConfigKeys().orElse(Set.of());
-            for (var entry : new TreeMap<>(pc).entrySet()) {
-                String key = entry.getKey();
-                if (key == null || allowed.contains(key)) {
+            // Sorted for a stable message order; a null key (no JSON produces one) is
+            // skipped before sorting, which would otherwise throw.
+            List<String> keys = pc.keySet().stream().filter(Objects::nonNull).sorted().toList();
+            for (String key : keys) {
+                if (allowed.contains(key)) {
                     continue;
                 }
-                String value = entry.getValue();
+                String value = pc.get(key);
                 if (value != null && value.contains("${vault:")) {
                     errors.add("platformConfig." + key + " is not a " + descriptor.id() + " setting, and a " + descriptor.id()
                             + " integration holds no secrets, not even as a vault reference: put the credential in an EDDI "

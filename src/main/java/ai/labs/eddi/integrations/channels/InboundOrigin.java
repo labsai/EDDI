@@ -43,9 +43,13 @@ public record InboundOrigin(String channelType, String integrationName, String v
         return new InboundOrigin(channelType, null, verifiedApplicationId, null);
     }
 
-    /** Whether this origin carries any verified identity at all. */
+    /**
+     * Whether this origin carries a verified identity: an application id or a
+     * signing secret. A name alone does not count — it may come from a URL path or
+     * a request body.
+     */
     public boolean isVerified() {
-        return notBlank(integrationName) || notBlank(verifiedApplicationId) || notBlank(verifiedSigningSecret);
+        return notBlank(verifiedApplicationId) || notBlank(verifiedSigningSecret);
     }
 
     private static boolean notBlank(String value) {

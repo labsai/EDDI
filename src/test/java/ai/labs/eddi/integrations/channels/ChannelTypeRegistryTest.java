@@ -192,6 +192,8 @@ class ChannelTypeRegistryTest {
         void describe() {
             assertEquals("application id 'a'", ChannelTypeDescriptor.describeRoutingKey("@app:a"));
             assertEquals("channelId 'C1'", ChannelTypeDescriptor.describeRoutingKey("C1"));
+            assertThrows(IllegalArgumentException.class, () -> ChannelTypeDescriptor.applicationKey(null));
+            assertThrows(IllegalArgumentException.class, () -> ChannelTypeDescriptor.applicationKey(" "));
             assertEquals(Optional.empty(), new SlackChannelType().applicationId(Map.of("appId", "x")));
         }
     }
@@ -269,10 +271,14 @@ class ChannelTypeRegistryTest {
             var registry = new ChannelTypeRegistry(List.of(new FakeChatChannelType()), meters);
             registry.recordRejected("fakechat", "platform_config");
             registry.recordRejected("Not A Type!", "platform_config");
+            registry.recordRejected("teamz", "platform_config");
+            registry.recordRejected("fakechat", "Not A Reason!");
             registry.recordDroppedKey("fakechat");
             assertEquals(1, meters.find("eddi_channel_config_rejected_total").tags("type", "fakechat", "reason", "platform_config")
                     .counter().count());
-            assertEquals(1, meters.find("eddi_channel_config_rejected_total").tags("type", "other").counter().count());
+            assertEquals(2, meters.find("eddi_channel_config_rejected_total").tags("type", "other").counter().count(),
+                    "an unregistered type collapses to 'other', lower-case or not");
+            assertEquals(1, meters.find("eddi_channel_config_rejected_total").tags("type", "fakechat", "reason", "other").counter().count());
             assertEquals(1, meters.find("eddi_channel_config_keys_dropped_total").tags("type", "fakechat").counter().count());
             ChannelTypeRegistry.builtIns().recordRejected("slack", "x");
         }

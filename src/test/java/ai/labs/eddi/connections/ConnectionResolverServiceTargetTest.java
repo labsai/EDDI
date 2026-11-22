@@ -29,6 +29,9 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
@@ -106,7 +109,7 @@ class ConnectionResolverServiceTargetTest {
     }
 
     @Test
-    @DisplayName("with no fixed origin only existence, binding and auth type are checked")
+    @DisplayName("with no fixed origin an https-only allowlist passes, with binding and auth type checked")
     void noOrigin() {
         register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://smba.trafficmanager.net"));
         assertDoesNotThrow(() -> resolver.requireServiceTarget(REF, null, Set.of(AuthType.OAUTH2_CLIENT_CREDENTIALS)));
@@ -148,7 +151,8 @@ class ConnectionResolverServiceTargetTest {
     @DisplayName("a send re-checks the auth type")
     void resolveServiceRefusesWrongAuthType() {
         register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://discord.com"));
-        assertThrows(ConnectionException.class, () -> resolver.resolveService(REF, DISCORD, Set.of(AuthType.STATIC)));
+        var ex = assertThrows(ConnectionException.class, () -> resolver.resolveService(REF, DISCORD, Set.of(AuthType.STATIC)));
+        assertEquals(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, ex.getReason());
         verifyNoInteractions(accessTokenSupplier);
     }
 
@@ -158,6 +162,34 @@ class ConnectionResolverServiceTargetTest {
         var connection = register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://discord.com"));
         when(accessTokenSupplier.accessToken(eq(connection), any())).thenReturn("tok");
         assertEquals("Bearer tok", resolver.resolveService(REF, DISCORD, Set.of(AuthType.OAUTH2_CLIENT_CREDENTIALS)).headerValue());
+        verify(accessTokenSupplier).accessToken(connection, ConnectionResolver.SERVICE_PRINCIPAL);
+        verify(registry, times(1)).require(any(ConnectionReference.class));
+    }
+
+    @Test
+    @DisplayName("a send reads the connection once, so an edit cannot land between the checks and the resolution")
+    void resolveServiceReadsOnce() {
+        var service = register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://discord.com"));
+        var perUser = new ConnectionConfiguration();
+        perUser.setName("discord-bot");
+        perUser.setAuthType(AuthType.OAUTH2_CLIENT_CREDENTIALS);
+        perUser.setBinding(Binding.PER_USER);
+        perUser.setBaseUrlAllowlist(List.of("https://discord.com"));
+        when(registry.require(any(ConnectionReference.class))).thenReturn(service, perUser);
+        when(accessTokenSupplier.accessToken(eq(service), any())).thenReturn("tok");
+        assertEquals("Bearer tok", resolver.resolveService(REF, DISCORD, Set.of()).headerValue());
+        verify(accessTokenSupplier, never()).accessToken(eq(perUser), any());
+    }
+
+    @Test
+    @DisplayName("a send to a non-https target is refused, whatever the allowlist admits")
+    void resolveServiceRefusesPlaintext() {
+        register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("http://localhost:8080"));
+        var ex = assertThrows(ConnectionException.class,
+                () -> resolver.resolveService(REF, URI.create("http://localhost:8080/api"), Set.of()));
+        assertEquals(ConnectionException.Reason.TARGET_NOT_ALLOWED, ex.getReason());
+        assertThrows(ConnectionException.class, () -> resolver.resolveService(REF, null, Set.of()));
+        verifyNoInteractions(accessTokenSupplier);
     }
 
     @Test

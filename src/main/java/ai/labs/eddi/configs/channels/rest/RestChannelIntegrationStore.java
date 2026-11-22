@@ -384,8 +384,11 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 .anyMatch(key -> key != null && key.startsWith(ChannelTypeDescriptor.APPLICATION_KEY_PREFIX));
         if (claimsApplication) {
             channelTypes.recordRejected(descriptor.get().id(), "duplicate_claims_application");
-            throw new BadRequestException("A copy of this integration would answer its application's direct messages, because it has no "
-                    + "channel. Create a channel-less integration explicitly instead, or set a channel on the copy's source first.");
+            // A copy never keeps its source's channel (two integrations cannot share one),
+            // so a copy of an integration with an application id is always channel-less.
+            throw new BadRequestException("A " + descriptor.get().id() + " integration with an application id cannot be duplicated: "
+                    + "the copy would have no channel and would answer the application's direct messages. Create the new "
+                    + "integration directly instead.");
         }
     }
 
@@ -787,7 +790,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         if (channelId == null || channelId.isBlank() || channelId.equals(previousChannelId)) {
             return;
         }
-        // Legacy connectors only: validateUniqueChannelId has already judged the
+        // Legacy connectors only: validateUniqueRoutingKeys has already judged the
         // standalone integrations against the store. The router answers from the live
         // deployments, not its cache, and throws when it cannot read them.
         boolean servedByLegacyConnector;
@@ -871,7 +874,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      *            the resource id being updated (null on create)
      * @param subject
      *            what is checked, for the log and the 503 ({@code "name"},
-     *            {@code "channelId"})
+     *            {@code "routing key"})
      */
     private void forEachOtherIntegration(String excludeId, String subject,
                                          Consumer<ChannelIntegrationConfiguration> check) {
