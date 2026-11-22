@@ -441,6 +441,18 @@ exercised in Phase 0.
     the import report. A platform admin re-creates or confirms each one at the target. That
     re-checks the global uniqueness of hostnames and integration ids, and stops a bundle from
     claiming another org's routing.
+  - **Memberships and roles are never imported as trusted either** (decided 2026-11-21 by the
+    product owner, after CodeRabbit review). Org roles and teams come from `OrgMembership`
+    (LOCK 5), so a membership in a bundle is a grant of privilege. Each imported membership
+    is listed in the import report with its subject, roles and teams. It is imported
+    **inactive** and takes effect only when a platform admin confirms it at the target, one
+    by one or in bulk after reviewing the report. Until then the subject has no role in the
+    org.
+    - A valid signature, a registered export key or a subject that has no membership at the
+      target yet does not count as authorization. An M1 bundle's source is customer-run, so
+      its memberships say only what that instance claimed.
+    - Records that merely name a principal (owners, grants, `decidedBy`, user memories) are
+      imported as data. They give the subject no role by themselves.
 - **Versioning.**
   - A reader refuses an unknown **major** version.
   - Within a major version it ignores unknown fields and unknown store files, and lists them

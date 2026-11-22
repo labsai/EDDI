@@ -109,6 +109,14 @@ A review of the fold-in commit found more gaps, now closed in the ADR and the pl
   `SET SESSION AUTHORIZATION`.
 - **Validator.** Requires `orgId` as a string everywhere the plan mentions it.
 
+### CodeRabbit review
+
+CodeRabbit's review of the PR led to fixes in the plan, the threat model and the plan's
+changelog fragment. One finding added a rule to the accepted ADR, with the product owner's
+approval: **imported org memberships are inactive until a platform admin confirms them at the
+target** (decision 9). Org roles come from `OrgMembership`, so without the rule a signed bundle
+could grant a role the target never approved.
+
 ### What's next
 
 ADR 0001 is accepted. Phase 1 (context and stamping, the floor release) is next, one package

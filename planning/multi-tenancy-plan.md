@@ -1487,7 +1487,8 @@ Phase 0, 2026-11-21. Each entry is detailed in
   The record-level rewrite rules and the import trust rules are a proposal for Phase 6 to
   settle: export keys registered per move, an expiry, a checksum for every file including
   `sealed.bin`, archive-entry validation, and routing records re-created at the target rather
-  than imported.
+  than imported. Imported org memberships, with their roles and teams, take effect only after
+  a platform admin confirms them at the target (decided 2026-11-21).
 
 ---
 
