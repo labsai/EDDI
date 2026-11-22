@@ -71,7 +71,6 @@ public final class SlackHitlSupport {
      */
     public static final String PAUSE_TYPE_TOOL_CALL = "TOOL_CALL";
 
-    /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
     /** Shown in place of the buttons when no approver user ids are configured. */
     public static final String NO_APPROVERS_NOTE = "No approver user ids configured — approve or reject via the API.";
 
@@ -91,6 +90,7 @@ public final class SlackHitlSupport {
     public static final String UNKNOWN_GROUP_PAUSE_NOTE = "The pause could not be read, so this card has no buttons — approve or reject "
             + "via the API (REST or MCP).";
 
+    /** In-thread notice posted when a conversation enters AWAITING_HUMAN. */
     public static final String PAUSE_NOTICE = "⏸️ This conversation is awaiting human approval.";
 
     /** Notice when the user keeps messaging a paused conversation. */
@@ -109,17 +109,6 @@ public final class SlackHitlSupport {
     // ─── Action value (button payload) ───
 
     /**
-     * Build the approval button value {@code <integrationName>|<subject>|<cardId>},
-     * which binds a click to the owning integration and to the one card it was
-     * posted on. {@code subject} is a plain conversationId or
-     * {@code group:<groupConversationId>}; {@code cardId} is the id recorded for
-     * the card.
-     * <p>
-     * Without an integration name the bare subject is produced, and without a card
-     * id the card id part is left off. The interactivity handler refuses both, so
-     * such a value is only ever useful on a card that has no buttons.
-     */
-    /**
      * Whether an approval card of the integration named {@code integrationName} can
      * carry buttons: the name is the first field of the button value, so it must be
      * present and must not contain the {@code |} separator. The integration store
@@ -131,6 +120,17 @@ public final class SlackHitlSupport {
         return integrationName != null && !integrationName.isBlank() && !integrationName.contains(VALUE_SEPARATOR);
     }
 
+    /**
+     * Build the approval button value {@code <integrationName>|<subject>|<cardId>},
+     * which binds a click to the owning integration and to the one card it was
+     * posted on. {@code subject} is a plain conversationId or
+     * {@code group:<groupConversationId>}; {@code cardId} is the id recorded for
+     * the card.
+     * <p>
+     * Without an integration name the bare subject is produced, and without a card
+     * id the card id part is left off. The interactivity handler refuses both, so
+     * such a value is only ever useful on a card that has no buttons.
+     */
     public static String buildActionValue(String integrationName, String subject, String cardId) {
         return buildActionValue(integrationName, subject, cardId, null);
     }

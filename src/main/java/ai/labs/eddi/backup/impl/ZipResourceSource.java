@@ -55,10 +55,10 @@ import static ai.labs.eddi.backup.impl.AbstractBackupService.SNIPPET_EXT;
  *     &lt;snippetId&gt;.snippet.json
  * </pre>
  *
- * {@link #findVersionDir(String, String)} and {@link #findSnippetsDir()} also
- * accept an extra {@code <agentId>/} level above the workflow directories: that
- * is the shape a hand-built archive (or a differently-rooted ZIP) can have, and
- * accepting it costs one directory listing.
+ * The private lookups for a workflow's version directory and for the snippets
+ * directory also accept an extra {@code <agentId>/} level above the workflow
+ * directories: that is the shape a hand-built archive (or a differently-rooted
+ * ZIP) can have, and accepting it costs one directory listing.
  *
  * @since 6.0.0
  */

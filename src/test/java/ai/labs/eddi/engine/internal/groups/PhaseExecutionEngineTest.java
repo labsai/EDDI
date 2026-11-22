@@ -58,6 +58,8 @@ class PhaseExecutionEngineTest {
 
     private PhaseExecutionEngine engine() {
         memberTurnExecutor = mock(MemberTurnExecutor.class);
+        // As for a member that does not sign: the entry comes back as it went in.
+        when(memberTurnExecutor.sign(any(), any())).thenAnswer(inv -> inv.getArgument(1));
         contextBuilder = mock(GroupContextBuilder.class);
         // The 10-ARG overload (I9 added window + gc, I8's review round added
         // retroConfig) — the only one PhaseExecutionEngine calls. Stubbing a
@@ -581,6 +583,30 @@ class PhaseExecutionEngineTest {
         assertEquals(2, dissents, "the recruit gets a dissent turn like any other member");
         assertTrue(gc.getTranscript().stream()
                 .anyMatch(e -> e.type() == TranscriptEntryType.DISSENT && "recruit".equals(e.speakerAgentId())));
+    }
+
+    /**
+     * The signature covers the entry type, so a dissent is signed as a DISSENT
+     * rather than carrying the signature its reply got as the turn's own type.
+     */
+    @Test
+    void dissentRound_theDissentIsSignedAsADissent() throws Exception {
+        var engine = engine();
+        when(memberTurnExecutor.executeAgentTurn(any(), any(), any(), any(), anyInt(), any(), any(), any(), any(), any()))
+                .thenReturn(new TranscriptEntry("critic", "Critic", "I disagree", 1, "Judgment", TranscriptEntryType.SYNTHESIS,
+                        Instant.now(), null, null, "reply-sig", "reply-nonce", 1L, 1, 1));
+        var signed = new TranscriptEntry("critic", "Critic", "I disagree", 1, "Judgment", TranscriptEntryType.DISSENT, Instant.now(), null,
+                null, "dissent-sig", "dissent-nonce", 2L, 1, 1);
+        when(memberTurnExecutor.sign(any(), argThat(e -> e != null && e.type() == TranscriptEntryType.DISSENT))).thenReturn(signed);
+        var config = new AgentGroupConfiguration();
+        config.setMembers(List.of(member("critic")));
+        var gc = gcWithSynthesis("A synthesis everyone reacts to.");
+
+        engine.runDissentRound(gc, config, judgmentPhase(null), protocol(), 1, List.of(member("synthesizer")), null,
+                new AtomicInteger(0), 10);
+
+        var dissent = gc.getTranscript().stream().filter(e -> e.type() == TranscriptEntryType.DISSENT).findFirst().orElseThrow();
+        assertSame(signed, dissent);
     }
 
     @Test

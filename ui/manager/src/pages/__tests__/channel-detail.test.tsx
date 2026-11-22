@@ -2,13 +2,13 @@ import { describe, it, expect, vi } from "vitest";
 import { screen, waitFor, within } from "@testing-library/react";
 import { http, HttpResponse } from "msw";
 import { Toaster } from "sonner";
-import { server } from "@/test/mocks/server";
-import { renderPage, userEvent } from "@/test/test-utils";
+import { server } from "@eddi/app-kit/test/mocks/server";
+import { renderPage, userEvent } from "@eddi/app-kit/test/test-utils";
 import { ChannelDetailPage } from "@/pages/channel-detail";
 
 const guard = vi.hoisted(() => ({ allowNextNavigation: vi.fn() }));
-vi.mock("@/hooks/use-unsaved-changes-guard", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/hooks/use-unsaved-changes-guard")>();
+vi.mock("@eddi/app-kit/hooks/use-unsaved-changes-guard", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eddi/app-kit/hooks/use-unsaved-changes-guard")>();
   return {
     ...actual,
     allowNextNavigation: () => {
@@ -425,6 +425,93 @@ describe("ChannelDetailPage — email integration", () => {
   function useEmailChannel() {
     server.use(http.get("*/channelstore/channels/:id", () => HttpResponse.json(emailChannel)));
   }
+
+  it("edits the sender lists on their own, then reloads the version that change wrote", async () => {
+    // A targeted change is a new version: staying on the old one would let the
+    // next whole-document save write the old lists back.
+    const versions: string[] = [];
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) => {
+        const version = new URL(request.url).searchParams.get("version") ?? "";
+        versions.push(version);
+        // Version 2 is the one the sender change wrote: it carries the new list.
+        return HttpResponse.json(
+          version === "2"
+            ? { ...emailChannel, platformConfig: { ...emailChannel.platformConfig, senderAllowlist: "alice@partner.com" } }
+            : emailChannel,
+        );
+      }),
+    );
+    renderChannelDetail("mail1", 1);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-allow-input")).toBeInTheDocument());
+    expect(screen.queryByTestId("email-sender-allowlist")).toBeNull();
+
+    await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
+    await user.click(screen.getByTestId("email-senders-apply"));
+
+    await waitFor(() => expect(versions).toContain("2"));
+  });
+
+  it("blocks Save while the version a sender change wrote has not loaded, so the old lists are not written back", async () => {
+    let failedVersionReads = 0;
+    let updates = 0;
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) => {
+        if (new URL(request.url).searchParams.get("version") === "2") {
+          failedVersionReads += 1;
+          return HttpResponse.json({ error: "down" }, { status: 500 });
+        }
+        return HttpResponse.json(emailChannel);
+      }),
+      http.put("*/channelstore/channels/:id", () => {
+        updates += 1;
+        return new HttpResponse(null, { status: 200, headers: { Location: "/channelstore/channels/mail1?version=3" } });
+      }),
+    );
+    renderChannelDetail("mail1", 1);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-allow-input")).toBeInTheDocument());
+    expect(screen.getByTestId("save-channel-btn")).toBeEnabled();
+
+    await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
+    await user.click(screen.getByTestId("email-senders-apply"));
+
+    await waitFor(() => expect(failedVersionReads).toBeGreaterThan(0));
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeDisabled());
+    await user.click(screen.getByTestId("save-channel-btn"));
+    expect(updates).toBe(0);
+  });
+
+  it("adopts the stored version after a sender change, so the next save carries the stored host and the new lists", async () => {
+    let saved: { platformConfig?: Record<string, string> } | undefined;
+    server.use(
+      http.get("*/channelstore/channels/:id", ({ request }) =>
+        HttpResponse.json(
+          new URL(request.url).searchParams.get("version") === "2"
+            ? { ...emailChannel, platformConfig: { ...emailChannel.platformConfig, host: "stored-host.example.com", senderAllowlist: "alice@partner.com" } }
+            : emailChannel,
+        ),
+      ),
+      http.put("*/channelstore/channels/:id", async ({ request }) => {
+        saved = (await request.json()) as typeof saved;
+        return new HttpResponse(null, { status: 200, headers: { Location: "/channelstore/channels/mail1?version=3" } });
+      }),
+    );
+    renderChannelDetail("mail1", 1);
+    const user = userEvent.setup();
+    await waitFor(() => expect(screen.getByTestId("email-senders-allow-input")).toBeInTheDocument());
+
+    await user.type(screen.getByTestId("email-senders-allow-input"), "alice@partner.com{Enter}");
+    await user.click(screen.getByTestId("email-senders-apply"));
+    await waitFor(() => expect(screen.getByTestId("save-channel-btn")).toBeEnabled());
+    await waitFor(() => expect(screen.getByTestId("email-host")).toHaveValue("stored-host.example.com"));
+    await user.click(screen.getByTestId("save-channel-btn"));
+
+    await waitFor(() => expect(saved).toBeDefined());
+    expect(saved?.platformConfig?.host).toBe("stored-host.example.com");
+    expect(saved?.platformConfig?.senderAllowlist).toBe("alice@partner.com");
+  });
 
   it("shows the email form and setup notes instead of a webhook URL", async () => {
     useEmailChannel();

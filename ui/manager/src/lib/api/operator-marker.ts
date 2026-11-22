@@ -1,4 +1,4 @@
-import { updateDescriptor } from "./descriptors";
+import { updateDescriptor } from "@eddi/app-kit/lib/api/descriptors";
 
 /**
  * The token `provisionOperator` writes into the operator agent's descriptor

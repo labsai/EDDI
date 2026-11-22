@@ -49,8 +49,8 @@ public class ChannelIntegrationConfiguration {
 
     /**
      * Platform type. Validated server-side against registered adapters. Currently
-     * supported: {@code "slack"}, {@code "webhook"}. Future: {@code "teams"},
-     * {@code "discord"}.
+     * supported: {@code "slack"}, {@code "webhook"}, {@code "email"}. Future:
+     * {@code "teams"}, {@code "discord"}.
      * <p>
      * Deliberately a String (not an enum) so downstream forks can register custom
      * adapters without recompiling core.
@@ -77,9 +77,12 @@ public class ChannelIntegrationConfiguration {
      * {@code signatureScheme}, {@code signatureHeader}, {@code signatureEncoding},
      * {@code signaturePrefix}, {@code eventTypeHeader}, {@code eventTypePath},
      * {@code eventIdHeader}, {@code inputTemplate}, {@code conversationStrategy},
-     * {@code correlationKeyPath} — see {@link WebhookChannelSettings}. No
-     * {@code channelId}: a webhook integration is addressed by its resource
-     * id.</li>
+     * {@code correlationKeyPath}, {@code maxDeliveriesPerWindow} — see
+     * {@link WebhookChannelSettings}. No {@code channelId}: a webhook integration
+     * is addressed by its resource id.</li>
+     * <li><b>email:</b> {@code mode}, {@code connection}, {@code host},
+     * {@code address}, ... — see {@link EmailChannelSettings}. No secrets: the
+     * credentials come from the named connection.</li>
      * </ul>
      * Secret values should use vault references: {@code ${vault:key-name}}.
      * <p>

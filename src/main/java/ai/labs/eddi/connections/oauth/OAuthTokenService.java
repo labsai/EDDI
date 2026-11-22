@@ -144,7 +144,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
     public String accessToken(ConnectionConfiguration connection, String principal) {
         String tenantId = tenantOf(connection);
         Optional<ConnectionGrant> existing = grantStore.find(tenantId, connection.getName(), principal);
-        boolean serviceAccount = connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS;
+        boolean serviceAccount = connection.getAuthType() != null && connection.getAuthType().isServiceAccount();
 
         if (existing.isEmpty()) {
             if (serviceAccount) {
@@ -164,7 +164,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
         }
         if (grant.getStatus() == ConnectionGrant.Status.REFRESH_FAILED) {
             if (serviceAccount) {
-                // Re-authenticating IS the client_credentials renewal path — there is
+                // Re-authenticating IS the service-account renewal path — there is
                 // no refresh token that could have gone stale and no human to bring
                 // back. Left terminal, a single rejected mint (a rotated client secret,
                 // a provider returning invalid_client for a minute) parks a row that no
@@ -453,17 +453,17 @@ public class OAuthTokenService implements AccessTokenSupplier {
     }
 
     private RefreshResult requestNewToken(ConnectionConfiguration connection, String tenantId, ConnectionGrant grant) {
-        String clientSecret = resolveClientSecret(connection);
         String stored = storedRefreshToken(connection, tenantId, grant);
-        if (connection.getAuthType() == AuthType.OAUTH2_CLIENT_CREDENTIALS) {
+        if (connection.getAuthType().isServiceAccount()) {
             // A service account has no refresh token by design — it re-authenticates.
-            return carryForward(tokenClient.clientCredentials(connection, clientSecret), stored);
+            return carryForward(mintServiceToken(connection), stored);
         }
+        String clientCredential = resolveClientCredential(connection);
         if (stored == null) {
             throw new ConnectionException(ConnectionException.Reason.GRANT_UNUSABLE, "The grant for connection '" + connection.getName()
                     + "' has no refresh token, so its expired access token cannot be renewed. The user must reconnect.");
         }
-        return carryForward(tokenClient.refresh(connection, clientSecret, stored), stored);
+        return carryForward(tokenClient.refresh(connection, clientCredential, stored), stored);
     }
 
     /**
@@ -563,7 +563,7 @@ public class OAuthTokenService implements AccessTokenSupplier {
             throw new ConnectionException(ConnectionException.Reason.NOT_FOUND,
                     "Connection '" + connection.getName() + "' no longer exists; no token was requested for it.");
         }
-        TokenResponse token = tokenClient.clientCredentials(connection, resolveClientSecret(connection));
+        TokenResponse token = mintServiceToken(connection);
         ConnectionGrant stored = persistNew(connection, tenantId, principal, token, token.refreshToken());
         String afterWrite;
         try {
@@ -649,10 +649,27 @@ public class OAuthTokenService implements AccessTokenSupplier {
         return grant;
     }
 
-    private String resolveClientSecret(ConnectionConfiguration connection) {
-        // Checked against the token endpoint, where the client secret is sent.
-        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().getClientSecret(), connection.getOauth().getTokenUrl(),
-                connection.getName(), "client secret");
+    /**
+     * A fresh token for a service account: {@code client_credentials}, or the RFC
+     * 7523 JWT bearer grant signed with the connection's private key.
+     */
+    private TokenResponse mintServiceToken(ConnectionConfiguration connection) {
+        String clientCredential = resolveClientCredential(connection);
+        if (connection.getAuthType() == AuthType.OAUTH2_JWT_BEARER) {
+            return tokenClient.jwtBearer(connection, clientCredential);
+        }
+        return tokenClient.clientCredentials(connection, clientCredential);
+    }
+
+    /**
+     * The client secret, or the private key for a connection that signs, resolved
+     * from the vault. Checked against the token endpoint: a secret goes there, and
+     * an assertion signed by a key goes there too.
+     */
+    private String resolveClientCredential(ConnectionConfiguration connection) {
+        AuthType authType = connection.getAuthType();
+        return credentialReferenceResolver.resolveVaultBackedFor(connection.getOauth().clientCredentialReference(authType),
+                connection.getOauth().getTokenUrl(), connection.getName(), connection.getOauth().clientCredentialDescription(authType));
     }
 
     private List<ISecretProvider.SealedValue> sealTokens(String tenantId, String accessToken, String refreshToken,

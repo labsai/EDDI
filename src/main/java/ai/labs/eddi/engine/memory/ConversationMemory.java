@@ -76,6 +76,8 @@ public class ConversationMemory implements IConversationMemory {
     private final IConversationProperties conversationProperties = new ConversationProperties(this);
     private ConversationState conversationState;
     private ResolutionPrincipal.Provenance resolutionProvenance;
+    /** The origin taint (TurnOrigin), sticky once set. */
+    private String origin;
     private volatile boolean cancelled;
     /**
      * Cluster mode: whether this turn's lease is lost; see
@@ -126,6 +128,7 @@ public class ConversationMemory implements IConversationMemory {
      * Transient like the config beside it; {@code null} = derive from the config.
      */
     private transient Boolean memoryToolsEnabled;
+    private transient boolean peerVerificationRequired;
 
     public ConversationMemory(String conversationId, String agentId, Integer agentVersion, String userId) {
         this(agentId, agentVersion, userId);
@@ -463,6 +466,18 @@ public class ConversationMemory implements IConversationMemory {
     }
 
     @Override
+    public String getOrigin() {
+        return this.origin;
+    }
+
+    @Override
+    public void setOrigin(String origin) {
+        if (origin != null) {
+            this.origin = origin;
+        }
+    }
+
+    @Override
     public Integer getAgentVersion() {
         return agentVersion;
     }
@@ -650,6 +665,16 @@ public class ConversationMemory implements IConversationMemory {
     @Override
     public void setMemoryToolsEnabled(boolean memoryToolsEnabled) {
         this.memoryToolsEnabled = memoryToolsEnabled;
+    }
+
+    @Override
+    public boolean isPeerVerificationRequired() {
+        return peerVerificationRequired;
+    }
+
+    @Override
+    public void setPeerVerificationRequired(boolean peerVerificationRequired) {
+        this.peerVerificationRequired = peerVerificationRequired;
     }
 
     /**

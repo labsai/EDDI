@@ -61,9 +61,11 @@ import static com.mongodb.client.model.Updates.setOnInsert;
  * {@link #upsert} is a single {@code findOneAndUpdate} with {@code upsert} on
  * the unique {@code (conversationId, stepIndex)} index: {@code $set} for what
  * the rating says, {@code $setOnInsert} for {@code createdAt}, so a re-rating
- * keeps the original creation time. Two concurrent first ratings can both miss
- * and both try to insert; the loser gets a duplicate-key error (11000) and is
- * retried once, when it finds the winner's row and updates it.
+ * keeps the original creation time (it also puts the review state back to
+ * {@code NEW}, since a re-rating is a new opinion). Two concurrent first
+ * ratings can both miss and both try to insert; the loser gets a duplicate-key
+ * error (11000) and is retried once, when it finds the winner's row and updates
+ * it.
  * <p>
  * Summaries run as aggregation pipelines — the rows are never loaded.
  *

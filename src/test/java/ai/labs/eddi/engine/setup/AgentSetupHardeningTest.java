@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -188,9 +189,51 @@ class AgentSetupHardeningTest {
             when(ruleSetStore.createRuleSet(any())).thenThrow(new RuntimeException("ruleset store down"));
             when(parserStore.deleteParser(anyString(), anyInt(), any())).thenThrow(new RuntimeException("delete also down"));
 
-            var thrown = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(request("agent", "be helpful")));
+            var thrown = assertThrows(AgentSetupService.AgentSetupInternalException.class,
+                    () -> service.setupAgent(request("agent", "be helpful")));
 
-            assertTrue(thrown.getMessage().contains("ruleset store down"), thrown.getMessage());
+            // The original failure, not the rollback's, is what is thrown: it is the
+            // cause (and logged under the correlation id), never the delete error.
+            assertNotNull(thrown.getCause());
+            assertEquals("ruleset store down", thrown.getCause().getMessage());
+            assertFalse(thrown.getMessage().contains("delete also down"), thrown.getMessage());
+        }
+    }
+
+    @Nested
+    @DisplayName("internal failures")
+    class InternalFailures {
+
+        /** A store failure of the shape that used to reach the caller as a 400. */
+        private static final String STORE_DETAIL = "Command failed on mongodb://setup:hunter2@mongo-0.internal:27017";
+
+        /**
+         * A store throwing mid-setup is not the caller's fault, and its message was
+         * written for an operator. It used to come back as
+         * {@code 400 "Failed to set up agent: <that message>"}.
+         */
+        @Test
+        @DisplayName("a store failure is an internal setup failure whose message carries none of the cause's text")
+        void storeFailureIsInternalAndOpaque() {
+            when(parserStore.createParser(any())).thenThrow(new RuntimeException(STORE_DETAIL));
+
+            var thrown = assertThrows(AgentSetupService.AgentSetupInternalException.class,
+                    () -> service.setupAgent(request("agent", "be helpful")));
+
+            assertTrue(thrown.getMessage().startsWith("Failed to set up agent"), thrown.getMessage());
+            assertTrue(thrown.getMessage().contains("correlationId: " + thrown.correlationId()), thrown.getMessage());
+            assertFalse(thrown.getMessage().contains("hunter2"), thrown.getMessage());
+            assertFalse(thrown.getMessage().contains("mongo-0.internal"), thrown.getMessage());
+            assertEquals(STORE_DETAIL, thrown.getCause().getMessage());
+        }
+
+        @Test
+        @DisplayName("a validation failure is still a plain setup exception with its own message")
+        void validationFailureStaysPlain() {
+            var thrown = assertThrows(AgentSetupService.AgentSetupException.class, () -> service.setupAgent(request("agent", "")));
+
+            assertFalse(thrown instanceof AgentSetupService.AgentSetupInternalException, thrown.getMessage());
+            assertEquals("System prompt is required", thrown.getMessage());
         }
     }
 

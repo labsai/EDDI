@@ -416,16 +416,6 @@ public class RestRagStore implements IRestRagStore {
     }
 
     /**
-     * Gives every ingestion source a stable id.
-     *
-     * <p>
-     * The id is what the run, preview, history and purge endpoints address, and
-     * what ingestion state is keyed by — so a source that arrives without one (the
-     * normal case when the Manager adds it) must get one that then never changes.
-     * Falling back to the source's <em>name</em> would mean renaming a source
-     * orphaned everything it had ingested.
-     */
-    /**
      * Strips a copy's inherited ingestion identity: new ids, and no schedule until
      * an operator asks for one.
      */
@@ -465,6 +455,16 @@ public class RestRagStore implements IRestRagStore {
         sourceIngestionService.requireAllowedIntervals(ragConfiguration);
     }
 
+    /**
+     * Gives every ingestion source a stable id.
+     *
+     * <p>
+     * The id is what the run, preview, history and purge endpoints address, and
+     * what ingestion state is keyed by — so a source that arrives without one (the
+     * normal case when the Manager adds it) must get one that then never changes.
+     * Falling back to the source's <em>name</em> would mean renaming a source
+     * orphaned everything it had ingested.
+     */
     private void assignSourceIds(RagConfiguration ragConfiguration) {
         if (ragConfiguration.getSources() == null) {
             return;

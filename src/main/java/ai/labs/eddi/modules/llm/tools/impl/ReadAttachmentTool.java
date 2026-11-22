@@ -23,7 +23,7 @@ import java.util.Set;
  * earlier turn, is too large to inline, or needs a specific PDF page.
  * <p>
  * The conversation is implicit: the tool is constructed with the conversation
- * id by {@code AgentOrchestrator}, so the LLM never supplies a
+ * id by {@code ContextualToolsProvider}, so the LLM never supplies a
  * userId/conversationId — it can only see attachments belonging to (or granted
  * to) its own conversation, enforced by {@link IAttachmentStore}. Files of a
  * turn an input guardrail refused are left out (the {@code withheldRefs} the

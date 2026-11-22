@@ -1372,15 +1372,15 @@ public class VaultSecretProvider implements ISecretProvider {
         }
     }
 
+    /** Tenants already announced as holding unbound sealed data. */
+    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
+
     /**
      * Opens a value sealed through the generic {@code seal} API: bound form first,
      * then — for a value sealed before context binding existed — the unbound form.
      * A {@code null} context means the caller has none to give, so only the unbound
      * form is tried.
      */
-    /** Tenants already announced as holding unbound sealed data. */
-    private final Set<String> legacySealedDataLogged = ConcurrentHashMap.newKeySet();
-
     private String openSealedData(String tenantId, SealedValue sealed, String context) throws SecretProviderException {
         byte[] dek = dekFor(tenantId, sealed.dekId());
         if (context == null) {

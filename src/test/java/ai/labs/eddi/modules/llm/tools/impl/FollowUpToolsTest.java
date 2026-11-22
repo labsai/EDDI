@@ -11,6 +11,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import ai.labs.eddi.engine.security.ResolutionPrincipal;
+import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import org.mockito.ArgumentCaptor;
 
 import java.time.Clock;
@@ -85,6 +88,23 @@ class FollowUpToolsTest {
         assertFalse(schedule.isCreatorAdmin());
         assertEquals(List.of("team-a"), schedule.getCreatorTeams());
         assertEquals(FollowUpTools.METADATA_TYPE_VALUE, schedule.getMetadata().get(FollowUpTools.METADATA_TYPE_KEY));
+    }
+
+    @Test
+    void aCheckBackBookedByAMailStartedTurnCarriesTheTaint() throws Exception {
+        // Email plan v3 §5.3: a "new"-strategy check-back starts a conversation that
+        // must be as tainted as the turn that booked it.
+        var principals = new ResolutionPrincipalContext();
+        principals.bind(new ResolutionPrincipal("alice", ResolutionPrincipal.Provenance.SELF_ASSERTED, TurnOrigin.EMAIL));
+        try {
+            assertTrue(parse(tools().scheduleFollowup(SOON, "again", "agent")).get("booked").asBoolean());
+        } finally {
+            principals.clear();
+        }
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stored.get(0).getMetadata()));
+
+        assertTrue(parse(tools().scheduleFollowup(SOON, "again", "agent")).get("booked").asBoolean());
+        assertNull(TurnOrigin.fromMetadata(stored.get(1).getMetadata()), "an untainted booking carries none");
     }
 
     @Test

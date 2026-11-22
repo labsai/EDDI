@@ -1,8 +1,8 @@
-import { useId, useMemo } from "react";
+import { useId, useMemo, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertTriangle, Info, ShieldCheck } from "lucide-react";
-import { Input } from "@/components/ui/input";
-import { useConnectionDescriptors } from "@/hooks/use-connections";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { useConnectionDescriptors } from "@eddi/app-kit/hooks/use-connections";
 import {
   EMAIL_ATTACHMENT_MODES,
   EMAIL_DEFAULTS,
@@ -31,7 +31,7 @@ const hintClass = "text-[10px] text-muted-foreground";
 const labelClass = "text-xs font-medium";
 
 /** The connection auth types an IMAP login can use. */
-const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS"]);
+const MAIL_AUTH_TYPES = new Set(["BASIC", "OAUTH2_CLIENT_CREDENTIALS", "OAUTH2_JWT_BEARER"]);
 
 /**
  * Platform settings of an `email` channel integration: EDDI polls the mailbox
@@ -49,11 +49,18 @@ export function EmailPlatformFields({
   platformConfig: pc,
   onChange,
   advancedOpen = false,
+  senderLists,
 }: {
   platformConfig: Record<string, string>;
   onChange: (platformConfig: Record<string, string>) => void;
   /** Whether the advanced section starts expanded (the detail page), or collapsed (the create dialog). */
   advancedOpen?: boolean;
+  /**
+   * Shown instead of the two comma-separated sender fields — the detail page's
+   * targeted editor (`EmailSenderListsEditor`), which stores each change as its
+   * own version. The create dialog has no integration yet and keeps the fields.
+   */
+  senderLists?: ReactNode;
 }) {
   const { t } = useTranslation();
   const uid = useId();
@@ -245,17 +252,21 @@ export function EmailPlatformFields({
           </span>
         </label>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <div className="space-y-1">
-            <label htmlFor={`${uid}-allow`} className={labelClass}>{t("emailChannel.senderAllowlist", "Allowed senders")}</label>
-            <Input id={`${uid}-allow`} data-testid="email-sender-allowlist" value={pc.senderAllowlist ?? ""} onChange={(e) => set("senderAllowlist", e.target.value)} placeholder="*@example.com, ap@partner.com" />
-            <p className={hintClass}>{t("emailChannel.senderAllowlistHint", "Recommended. Comma-separated: user@domain, *@domain or *@*.domain.")}</p>
-            {problemFor("senderAllowlist")}
-          </div>
-          <div className="space-y-1">
-            <label htmlFor={`${uid}-block`} className={labelClass}>{t("emailChannel.senderBlocklist", "Blocked senders")}</label>
-            <Input id={`${uid}-block`} data-testid="email-sender-blocklist" value={pc.senderBlocklist ?? ""} onChange={(e) => set("senderBlocklist", e.target.value)} placeholder="*@*.spam.example" />
-            {problemFor("senderBlocklist")}
-          </div>
+          {senderLists ?? (
+            <>
+              <div className="space-y-1">
+                <label htmlFor={`${uid}-allow`} className={labelClass}>{t("emailChannel.senderAllowlist", "Allowed senders")}</label>
+                <Input id={`${uid}-allow`} data-testid="email-sender-allowlist" value={pc.senderAllowlist ?? ""} onChange={(e) => set("senderAllowlist", e.target.value)} placeholder="*@example.com, ap@partner.com" />
+                <p className={hintClass}>{t("emailChannel.senderAllowlistHint", "Recommended. Comma-separated: user@domain, *@domain or *@*.domain.")}</p>
+                {problemFor("senderAllowlist")}
+              </div>
+              <div className="space-y-1">
+                <label htmlFor={`${uid}-block`} className={labelClass}>{t("emailChannel.senderBlocklist", "Blocked senders")}</label>
+                <Input id={`${uid}-block`} data-testid="email-sender-blocklist" value={pc.senderBlocklist ?? ""} onChange={(e) => set("senderBlocklist", e.target.value)} placeholder="*@*.spam.example" />
+                {problemFor("senderBlocklist")}
+              </div>
+            </>
+          )}
           <div className="space-y-1">
             <label htmlFor={`${uid}-identity`} className={labelClass}>{t("emailChannel.identityMode", "Identity")}</label>
             <select id={`${uid}-identity`} data-testid="email-identity-mode" className={selectClass} value={pc.identityMode || EMAIL_DEFAULTS.identityMode} onChange={(e) => set("identityMode", e.target.value)}>

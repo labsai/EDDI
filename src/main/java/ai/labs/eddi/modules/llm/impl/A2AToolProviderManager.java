@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.httpclient.outbound.Profile;
 import ai.labs.eddi.engine.httpclient.outbound.RedirectPolicy;
 import ai.labs.eddi.engine.httpclient.outbound.RequestBody;
 import ai.labs.eddi.engine.httpclient.outbound.SsrfPolicy;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.modules.llm.governance.RemoteTextGovernor;
 import ai.labs.eddi.modules.llm.governance.ToolSchemaGovernor;
 import ai.labs.eddi.modules.llm.tools.spi.ToolRequestResolver;
@@ -304,7 +305,7 @@ public class A2AToolProviderManager {
         return new A2AToolsResult(toolSpecs, executors, requestResolvers);
     }
 
-    /** Number of cached agent connections. */
+    /** Number of Agent Cards currently cached (one per peer URL, 5 minute TTL). */
     public int getActiveConnectionCount() {
         return agentCache.size();
     }
@@ -868,6 +869,12 @@ public class A2AToolProviderManager {
                 .method("POST", RequestBody.ofString(body));
         if (endpoint.dialect() == RemoteDialect.V1_0) {
             requestBuilder.header("A2A-Version", "1.0");
+        }
+        // The origin taint (email plan v3 §5.3) goes with the call: a peer EDDI applies
+        // it to the conversation it runs, so a mail-started turn cannot shed it here.
+        String origin = TurnOrigin.current();
+        if (origin != null) {
+            requestBuilder.header(TurnOrigin.HEADER, origin);
         }
 
         applyCredential(requestBuilder, config, agentUrl);

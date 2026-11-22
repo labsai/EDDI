@@ -61,7 +61,7 @@ import static com.mongodb.client.model.Updates.unset;
  * insert with the same key fails with a duplicate-key error on whichever
  * replica runs it, and is turned into an increment of {@code duplicates}.
  *
- * @since 6.6.0
+ * @since 6.7.0
  */
 @ApplicationScoped
 @DefaultBean

@@ -523,4 +523,53 @@ class ToolCostTrackerTest {
         assertFalse(tracker.isWithinBudget("conv-cas", 0.0005),
                 "the shared total still reads $0, but this conversation already spent $0.001 on this node");
     }
+
+    @Nested
+    @DisplayName("websearch default price follows the configured provider")
+    class WebSearchProviderPrice {
+
+        @Test
+        void paidProvidersArePricedAtFiveDollarsPerThousand() {
+            assertEquals(0.005, ToolCostTracker.defaultPriceOf("websearch", "brave"));
+            assertEquals(0.005, ToolCostTracker.defaultPriceOf("websearch", " Google "));
+        }
+
+        @Test
+        void duckDuckGoAndUnknownProvidersKeepTheTableDefault() {
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "duckduckgo"));
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "bing"));
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", null));
+        }
+
+        @Test
+        void otherToolsIgnoreTheProvider() {
+            assertEquals(0.0005, ToolCostTracker.defaultPriceOf("weather", "brave"));
+            assertEquals(0.0, ToolCostTracker.defaultPriceOf("calculator", "brave"));
+        }
+
+        @Test
+        void configuredPriceReplacesTheProviderDefault() {
+            assertEquals(0.0012, ToolCostTracker.defaultPriceOf("websearch", "brave", "0.0012"));
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "google", " 0.001 "));
+            assertEquals(0.0, ToolCostTracker.defaultPriceOf("websearch", "brave", "0"));
+        }
+
+        @Test
+        void invalidConfiguredPriceFallsBackToTheProviderDefault() {
+            for (String bad : new String[]{"abc", "-1", "NaN", "Infinity", "", "  "}) {
+                assertEquals(0.005, ToolCostTracker.defaultPriceOf("websearch", "brave", bad), bad);
+            }
+            assertEquals(0.001, ToolCostTracker.defaultPriceOf("websearch", "duckduckgo", "-0.5"));
+        }
+
+        @Test
+        void configuredWebSearchPriceDoesNotAffectOtherTools() {
+            assertEquals(0.0005, ToolCostTracker.defaultPriceOf("weather", "brave", "9"));
+        }
+
+        @Test
+        void perAgentPricingStillWinsOverTheConfiguredPrice() {
+            assertEquals(0.02, ToolCostTracker.priceOf(new ToolInvocation("searchWeb", "websearch", 0.02)));
+        }
+    }
 }

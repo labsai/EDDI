@@ -15,13 +15,13 @@ import {
   X,
 } from "lucide-react";
 import { BackLink } from "@/components/shared/back-link";
-import { ChipInput } from "@/components/shared/chip-input";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
-import { AlertDialog } from "@/components/ui/alert-dialog";
-import { PermanentDeleteOption } from "@/components/shared/permanent-delete-option";
-import { UnsavedChangesDialog } from "@/components/ui/unsaved-changes-dialog";
+import { ChipInput } from "@eddi/app-kit/components/shared/chip-input";
+import { Button } from "@eddi/ui";
+import { Input } from "@eddi/app-kit/components/ui/input";
+import { Skeleton } from "@eddi/app-kit/components/ui/skeleton";
+import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
+import { PermanentDeleteOption } from "@eddi/app-kit/components/shared/permanent-delete-option";
+import { UnsavedChangesDialog } from "@eddi/app-kit/components/ui/unsaved-changes-dialog";
 import { ErrorState } from "@/components/shared/error-state";
 import { RefetchErrorNotice } from "@/components/shared/refetch-error-notice";
 import { ConnectionCredentialFields } from "@/components/connections/connection-credential-fields";
@@ -32,11 +32,11 @@ import {
   useConnection,
   useUpdateConnection,
   useDeleteConnection,
-} from "@/hooks/use-connections";
-import { allowNextNavigation, useUnsavedChangesGuard } from "@/hooks/use-unsaved-changes-guard";
-import { getErrorMessage } from "@/lib/api-client";
-import { commitPending } from "@/lib/chip-values";
-import { authTypeLabel } from "@/lib/connection-labels";
+} from "@eddi/app-kit/hooks/use-connections";
+import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
+import { getErrorMessage } from "@eddi/app-kit/lib/api-client";
+import { commitPending } from "@eddi/app-kit/lib/chip-values";
+import { authTypeLabel } from "@eddi/app-kit/lib/connection-labels";
 import {
   AUTH_TYPES,
   CLIENT_AUTH_METHODS,
@@ -48,7 +48,7 @@ import {
   type ConnectionConfiguration,
   type OAuthConfig,
   type StaticAuth,
-} from "@/lib/api/connections";
+} from "@eddi/app-kit/lib/api/connections";
 import {
   bindingFor,
   isOAuthType,
@@ -56,7 +56,7 @@ import {
   TIMEOUT_MS_MIN,
   validateConnection,
   type ValidationCode,
-} from "@/lib/connection-validation";
+} from "@eddi/app-kit/lib/connection-validation";
 
 /**
  * The connection editor.
@@ -713,6 +713,28 @@ export function ConnectionDetailPage() {
             />
 
             <div className="grid gap-4 sm:grid-cols-2">
+              {draft.authType === "OAUTH2_JWT_BEARER" ? (
+                <div className="space-y-1">
+                  <label className="text-xs font-medium" htmlFor="connection-audience">
+                    {t("connections.audience", "Assertion audience (optional)")}
+                  </label>
+                  <Input
+                    id="connection-audience"
+                    data-testid="connection-audience"
+                    className="font-mono text-xs"
+                    dir="ltr"
+                    value={draft.oauth?.audience ?? ""}
+                    onChange={(e) => patchOAuth({ audience: e.target.value || null })}
+                    placeholder={draft.oauth?.tokenUrl || "https://oauth2.googleapis.com/token"}
+                  />
+                  <p className="text-[11px] text-muted-foreground">
+                    {t(
+                      "connections.audienceHint",
+                      "The aud claim of the signed assertion. Leave empty to use the token URL, which is what Google expects.",
+                    )}
+                  </p>
+                </div>
+              ) : (
               <div className="space-y-1">
                 <label className="text-xs font-medium" htmlFor="connection-client-auth-method">
                   {t("connections.clientAuthMethod", "Client authentication")}
@@ -733,10 +755,11 @@ export function ConnectionDetailPage() {
                 <p className="text-[11px] text-muted-foreground">
                   {t(
                     "connections.clientAuthMethodHint",
-                    "How the client secret reaches the token endpoint. Guessing it wrong looks exactly like a wrong secret, so it is a setting rather than a fallback.",
+                    "How the client proves itself at the token endpoint: the client secret by Basic or in the body, or private_key_jwt — an assertion signed with a vaulted private key, for an app registered with a certificate. Guessing it wrong looks exactly like a wrong secret, so it is a setting rather than a fallback.",
                   )}
                 </p>
               </div>
+              )}
               <div className="space-y-1">
                 <label className="text-xs font-medium" htmlFor="connection-discovery-url">
                   {t("connections.discoveryUrl", "Discovery URL (optional)")}
@@ -757,12 +780,14 @@ export function ConnectionDetailPage() {
               </div>
             </div>
 
-            <ExtraParamsField
-              value={draft.oauth?.extraAuthParams ?? {}}
-              onChange={(extraAuthParams) => patchOAuth({ extraAuthParams })}
-              rowsStateRef={extraRowsRef}
-              error={fieldError("oauth.extraAuthParams")}
-            />
+            {draft.authType !== "OAUTH2_JWT_BEARER" && (
+              <ExtraParamsField
+                value={draft.oauth?.extraAuthParams ?? {}}
+                onChange={(extraAuthParams) => patchOAuth({ extraAuthParams })}
+                rowsStateRef={extraRowsRef}
+                error={fieldError("oauth.extraAuthParams")}
+              />
+            )}
 
             {perUser && (
               <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">

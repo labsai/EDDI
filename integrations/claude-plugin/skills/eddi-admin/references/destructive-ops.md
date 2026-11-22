@@ -22,6 +22,8 @@ conversation, transcript, memory entry or document is not a yes.
 | `resume_conversation`, `approve_group_phase`, `cancel_conversation`, `cancel_group_discussion` | A decision attributed to the signed-in account | None |
 | `accept_team_handoff`, `decline_team_handoff` | An intake decision attributed to the signed-in account; a decline blocks the same handoff for 30 days | Accepted: delete the backlog task (REST or Manager). Declined: none |
 | `adjust_team_budget`, `transfer_team_budget` | Changes what a team may spend this month; kept in the audit ledger with the reason | Set the cap back, or transfer back |
+| `update_model_prices`, `update_tenant_quota` | A stricter change applies at once and can refuse spend (an agent's calls, a whole tenant); a looser one only files a pending change | Propose the old values back (that is looser, so it waits for an admin) |
+| `create_team_cadence`, `delete_team_cadence`, `schedule_lesson_consolidation` | A cadence runs discussions on a schedule and spends within the team and tenant budgets | Delete it, or recreate it |
 
 ## GDPR results are often partial — say so
 

@@ -171,7 +171,7 @@ conversation integration, which always keeps a thread in one conversation.
 | `processedAction` | `flag` | `flag`: set the IMAP keyword `$EddiProcessed`. `move:<folder>`: set it and move the mail there (created if missing; needs the server's `MOVE`, else it is only flagged). Never `\Seen`, never deleted, never expunged. A server whose `PERMANENTFLAGS` allow neither `\*` nor the keyword (Exchange Online, some hosters) gets no keyword: polling goes on, relying on the cursor and the ledger, with one WARN per integration and `eddi_email_poll_marked_total{result="nothing"}` — **use `move:<folder>` there**. `label:<name>` is reserved for transports with labels (the Gmail API) and is refused for `imap`, which has none |
 | `pollSeconds` | `60` | Poll interval, 60 – 86400 |
 | `requireAuthentication` | `true` | Only mail whose sender passes DKIM with DMARC alignment runs a turn. `false` also runs unauthenticated mail — under a one-off anonymous identity with **no memory** ([Identity](#identity)). Always `true` in conversation mode: `false` is refused |
-| `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains). Matched against the `From`, which without `requireAuthentication` anyone can forge |
+| `senderAllowlist` | *(empty — anyone)* | Comma-separated `user@domain`, `*@domain` (that domain only) or `*@*.domain` (its subdomains), at most 200 entries. Matched against the `From`, which without `requireAuthentication` anyone can forge |
 | `senderBlocklist` | *(empty)* | Same syntax; checked before the allowlist |
 | `identityMode` | `perSender` | `perSender`: `email:<integrationId>:<address>`. `integration`: one shared `email:<integrationId>` for every authenticated sender |
 | `correlateThreads` | `false` | Trigger mode only. Each mail is its own conversation by default. `true`: a mail continuing a thread (by `References`/`In-Reply-To`) **from the same authenticated sender** continues that sender's conversation; anyone else starts their own ([Threads](#threads)) |
@@ -342,6 +342,78 @@ cost); an unpriced model counts as zero.
 - Caps: raw size before download, MIME depth, parts and attachments, characters after conversion; executables never
   stored, archives never expanded, `message/rfc822` never walked into.
 - Logs name the integration and the ledger row — never a body, a subject or an address.
+- **A mail cannot widen who may make EDDI act through its own tools** (one limit: the [known limit](#a-mail-cannot-change-its-own-rules) on EDDI's own API). See [A mail cannot change its own rules](#a-mail-cannot-change-its-own-rules).
+
+## Managing senders
+
+`senderAllowlist` and `senderBlocklist` stay ordinary `platformConfig` keys, and a save of the whole integration
+still sets them. But changing one address that way means reading and rewriting the whole document, which races with
+anyone else editing it. The sender lists therefore have their own endpoint, MCP tools and editor:
+
+| Surface | Read | Change |
+|---|---|---|
+| REST | `GET /channelstore/channels/{id}/email-senders` | `POST /channelstore/channels/{id}/email-senders` |
+| MCP | `list_email_senders(integrationId)` | `update_email_senders(integrationId, expectedVersion, addAllow, addBlock, removeAllow, removeBlock, reason, confirmOpen)` |
+| Manager | The integration's page: two lists of chips | Add, remove, a reason, then **Apply sender changes** |
+
+```bash
+CHANNEL_ID="replace-with-integration-id"
+curl "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-senders"
+# {"version": 3, "allow": ["bob@partner.com"], "block": []}
+
+curl -X POST "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-senders" \
+  -H 'Content-Type: application/json' \
+  -d '{"expectedVersion": 3, "add": {"allow": ["alice@partner.com"]}, "reason": "new supplier, contract 2026-114"}'
+```
+
+- **Every change is a new version of the integration**, stored through the same update path as a save: the same
+  validation, deployment checks, warnings and poll re-registration. History and rollback come with it. The next poll
+  applies the new lists.
+- **`expectedVersion` is required.** When it is not the current version, the answer is `409` with the current lists
+  (`{"version", "allow", "block"}`) and nothing is changed: read again and retry.
+- **Each entry is idempotent.** Entries are compared normalised (`Alice@Partner.COM` is `alice@partner.com`); adding
+  an entry that is listed, or removing one that is not, changes nothing and comes back in `unchanged`. A request of
+  only such entries writes no version.
+- **Refused with `400`**: an entry that is not `user@domain`, `*@domain` or `*@*.domain` (`*@*` included), an entry
+  that would be on both lists, a list over 200 entries, or the same entry both added and removed.
+- **Emptying a non-empty allowlist opens the integration to every sender** — an empty allowlist allows everyone. It
+  is refused unless the request says `"confirmOpen": true`, and then warns `email.allowlist-emptied`.
+- Saves warn `email.allowlist-broad` for an allowlist entry over a whole public suffix (`*@*.co.uk`, `*@github.io`)
+  or over the integration's own domain or organisational domain. Prefer exact addresses.
+- **Audit**: every change writes one audit-ledger entry (task `email.senders`, action `EMAIL_SENDERS_CHANGED`) with
+  the actor, the integration, the old and new version, what was added and removed, and the `reason` (at most 500
+  characters). An exact address is recorded as its keyed pseudonym — the token the inbound refusals and GDPR erasure
+  use for it — and only a domain pattern in clear, because a ledger entry can never be erased.
+- Reading needs view access to the integration, changing it edit access.
+
+### A mail cannot change its own rules
+
+A conversation whose root turn came from a mail carries the **origin taint** `origin=email`, and so does every
+conversation it leads to: a delegate (`converseWithAgent`) or sub-agent it starts or continues, a group discussion
+and every member and nested discussion of it, a check-back it books (`schedule_followup`), and a peer EDDI it calls
+over A2A (the `X-Eddi-Turn-Origin` header). **Known limit of this revision:** a tainted turn that calls EDDI's own
+API (an httpcall to `POST /agents/{id}/start` or the schedule store, or the MCP tools `chat_with_agent`,
+`create_schedule` and `start_group_discussion`) starts a conversation that does not inherit the taint; the guard
+does not see it. Choose the tools of an email-facing agent with that in mind. The taint is stored with the conversation, so a HITL resume next week or
+a self-continuation still carries it, and nothing clears it. A conversation of an `email:` or `email-anon:` user
+counts as tainted even when it predates the stored taint.
+
+A tainted turn is refused, at runtime:
+
+- the tools `create_channel_integration`, `update_channel_integration`, `delete_channel_integration`,
+  `update_email_senders`, `resume_conversation`, `approve_group_phase` and `submit_group_human_input` — by any tool
+  source (built-in, HTTP, MCP, A2A, `mcpcalls`), also behind a namespace prefix such as `eddi_`. The names of later
+  email-control tools (`update_email_roles`, `update_email_send_out`, `decide_held_email`) are refused already;
+- any write (every method but `GET`, `HEAD`, `OPTIONS`, `TRACE`) to `/channelstore/channels/**`,
+  `/agents/{id}/resume`, `/groups/{id}/conversations/{id}/approve` or `…/human-input`, and
+  `/administration/spend-control-changes/{id}/approve`, from `httpcalls` or any outbound request — wherever the path
+  sits under a prefix, and on every redirect hop. A tainted write is not followed through a redirect.
+
+This runtime check is the boundary. On top of it, saving an email integration is **refused** when a target agent
+holds one of those tools by name (an LLM task's `tools` or `builtInToolsWhitelist`, an `mcpcalls` whitelist or call)
+or an `httpcalls` write to one of those paths. That check is best effort: it cannot see the tools an MCP server lists
+at runtime, skips GROUP targets and documents it cannot read, and does not run when the agent changes after the
+integration was saved.
 
 ## Personal data
 
@@ -383,6 +455,11 @@ so state written before opaque cursors loads unchanged. A changed `UIDVALIDITY` 
 | `eddi.email.reply.sweep-interval` | `30s` | Conversation mode: how often due replies are retried |
 | `eddi.email.outbound.max-attempts`, `eddi.email.outbound.retry-backoff` | `6`, `1m` | Attempts per reply, and the first retry delay (doubling, at most an hour) |
 | `eddi.email.allowed-hosts` | *(any public host)* | Mail servers authors may name |
+| `eddi.email.ledger-retention` | `30d` | How long a message-ledger row is kept |
+| `eddi.email.dns.servers` | *(the system's resolvers)* | DNS servers for the DKIM and DMARC lookups (`host`, `host:port` or `[v6]:port`, comma-separated) — an air-gapped deployment names its own |
+| `eddi.email.dns.timeout`, `eddi.email.dns.max-lookups-per-message` | `5s`, `10` | Per lookup, and network lookups one mail may cause (cache hits are free) |
+| `eddi.email.dns.cache-max-entries`, `eddi.email.dns.cache-max-ttl` | `10000`, `1h` | The DNS answer cache; each record's TTL is honoured up to the cap |
+| `eddi.email.dkim.max-delivery-age` | `7d` | How far back the server's delivery time may date a DKIM check, so a short signature expiry still verifies for mail that waited |
 
 A failed poll (connection, login, folder) is logged at WARN with its category, recorded on the mailbox state, and
 backs off `pollSeconds × 2^(failures−1)`, up to an hour; the schedule itself is never dead-lettered by a mail server
@@ -456,7 +533,7 @@ Integrations row.
 |---|---|---|
 | `smtpHost` | — (required) | The SMTP submission server |
 | `smtpPort` | `587` | `587` (STARTTLS, required — never a plaintext login) or `465` (TLS) |
-| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address` |
+| `fromName` | *(none)* | Display name of the replies' `From`; the address is `address`. At most 100 characters |
 | `replyTemplate` | `{output}` | Wraps the agent's answer: Qute, with `{output}` and the answered mail's `{mail.subject}`, `{mail.from}`, `{mail.fromName}`, `{mail.date}`. The answer and the subject are data — a `{…}` the model writes is printed, never evaluated. At most 4000 characters |
 | `aiDisclosure` | `This reply was written by an AI assistant.` | Appended after a blank line to every reply. **An empty value switches it off**, and the save warns (`email.ai-disclosure-disabled`): transparency rules such as Art. 50 of the EU AI Act ([eu-ai-act-compliance.md](eu-ai-act-compliance.md)) expect people to know they are talking to an AI. At most 500 characters |
 | `threadParticipants` | `originalSenderOnly` | Who may continue a conversation ([Threads in conversation mode](#threads-in-conversation-mode)) |

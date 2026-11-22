@@ -8,9 +8,9 @@ import {
   getDefaultBaseUrl,
   getKeyPlaceholder,
   getProviderRegions,
-} from "@/lib/llm-provider-catalog";
-import { LLM_PROVIDERS } from "@/lib/api/agent-setup";
-import { MODEL_SUGGESTIONS } from "@/lib/model-suggestions";
+} from "@eddi/app-kit/lib/llm-provider-catalog";
+import { LLM_PROVIDERS } from "@eddi/app-kit/lib/api/agent-setup";
+import { MODEL_SUGGESTIONS } from "@eddi/app-kit/lib/model-suggestions";
 
 /**
  * The backend catalog is the single source of truth for the named

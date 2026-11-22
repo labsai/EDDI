@@ -44,6 +44,7 @@ import ai.labs.eddi.engine.model.ClusterAdminModels.PeerView;
 import ai.labs.eddi.engine.model.ClusterAdminModels.StreamView;
 import ai.labs.eddi.engine.model.DeadLetterEntry;
 import ai.labs.eddi.engine.model.InputData;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.runtime.IAgentDeploymentManagement;
 import ai.labs.eddi.engine.runtime.IConversationCoordinator;
 import ai.labs.eddi.engine.runtime.internal.ClusterConversationCoordinator;
@@ -603,6 +604,21 @@ class ClusterAdminServiceTest {
             assertEquals(ClusterAdminService.AUDIT_TRAIL, entry.getValue().conversationId());
             assertEquals("admin-1", entry.getValue().userId());
             assertEquals(List.of("deadletters.replay"), entry.getValue().actions());
+        }
+
+        @Test
+        @DisplayName("a dead letter that recorded the email origin is replayed under the same taint")
+        void replayKeepsEmailOrigin() throws Exception {
+            Map<String, Object> mailTurn = turn("a1", "hi");
+            mailTurn.put("origin", TurnOrigin.EMAIL);
+            when(coordinator.getDeadLetter("m")).thenReturn(Optional.of(entry("m", "failed", "n1", mailTurn)));
+            replayedTurnsCommit();
+
+            service.replay(List.of("m"), "admin-1");
+
+            ArgumentCaptor<InputData> input = ArgumentCaptor.forClass(InputData.class);
+            verify(conversationService).say(eq("conv-m"), any(), any(), any(), input.capture(), eq(false), any());
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromContext(input.getValue().getContext()));
         }
 
         @Test

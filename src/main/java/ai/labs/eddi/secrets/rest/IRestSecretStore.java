@@ -40,8 +40,10 @@ public interface IRestSecretStore {
      * @param body
      *            the request body containing the plaintext value, description, and
      *            optional agent access list
-     * @return 201 Created or 200 OK if updated; 409 when a create's grant leaves
-     *         out a deployed agent that already references the secret
+     * @return 201 Created or 200 OK if updated; 400 for an invalid id, an empty
+     *         value, a malformed grant, or a create missing a required
+     *         {@code allowedAgents}/{@code allowedHosts}; 409 when a create's grant
+     *         leaves out a deployed agent that already references the secret
      */
     @PUT
     @Path("/{tenantId}/{keyName}")
@@ -163,7 +165,8 @@ public interface IRestSecretStore {
      *            the tenant namespace
      * @param keyName
      *            the secret key name
-     * @return metadata (timestamps, checksum, description, allowedAgents)
+     * @return metadata (tenantId, keyName, timestamps, description, allowedAgents,
+     *         allowedHosts); the checksum is withheld
      */
     @GET
     @Path("/{tenantId}/{keyName}")
@@ -176,7 +179,9 @@ public interface IRestSecretStore {
      *
      * @param tenantId
      *            the tenant namespace
-     * @return list of secret metadata
+     * @return a {@link SecretListing} per secret: its metadata without the
+     *         checksum, plus {@code unrestrictedDestination} and, once a startup
+     *         scan has run, {@code referencedBy}
      */
     @GET
     @Path("/{tenantId}")

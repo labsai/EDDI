@@ -108,14 +108,14 @@ class InputParserTaskTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             when(parser.getConfig()).thenReturn(config);
-            when(parser.normalize(eq("Hello World"), isNull())).thenReturn("hello world");
-            when(parser.parse(eq("hello world"), isNull(), anyList()))
+            when(parser.normalize(eq("Hello World"), eq("en"))).thenReturn("hello world");
+            when(parser.parse(eq("hello world"), eq("en"), anyList()))
                     .thenReturn(Collections.emptyList());
 
             task.execute(ctx.memory(), parser);
 
-            verify(parser).normalize(eq("Hello World"), isNull());
-            verify(parser).parse(eq("hello world"), isNull(), anyList());
+            verify(parser).normalize(eq("Hello World"), eq("en"));
+            verify(parser).parse(eq("hello world"), eq("en"), anyList());
             // Verify normalized input was stored
             verify(ctx.currentStep()).storeData(argThat(data -> "input:normalized".equals(data.getKey()) && "hello world".equals(data.getResult())));
         }
@@ -127,7 +127,7 @@ class InputParserTaskTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             when(parser.getConfig()).thenReturn(config);
-            when(parser.normalize(eq("hi there"), isNull())).thenReturn("hi there");
+            when(parser.normalize(eq("hi there"), eq("en"))).thenReturn("hi there");
 
             // Create a raw solution
             RawSolution rawSolution = mock(RawSolution.class);
@@ -138,7 +138,7 @@ class InputParserTaskTest {
             when(foundWord.getExpressions()).thenReturn(foundExpressions);
             when(foundWord.isWord()).thenReturn(true);
             when(rawSolution.getDictionaryEntries()).thenReturn(List.of(foundWord));
-            when(parser.parse(eq("hi there"), isNull(), anyList()))
+            when(parser.parse(eq("hi there"), eq("en"), anyList()))
                     .thenReturn(List.of(rawSolution));
 
             // Also set up getLatestData for expressions:parsed to return null (no append)
@@ -155,7 +155,7 @@ class InputParserTaskTest {
         void execute_parseInterrupted_returnsGracefully() throws Exception {
             MemoryContext ctx = TestMemoryFactory.createWithInput("test input");
             IInputParser parser = mock(IInputParser.class);
-            when(parser.normalize(eq("test input"), isNull())).thenThrow(new InterruptedException("test interrupt"));
+            when(parser.normalize(eq("test input"), eq("en"))).thenThrow(new InterruptedException("test interrupt"));
 
             // Should not throw
             task.execute(ctx.memory(), parser);
@@ -171,8 +171,8 @@ class InputParserTaskTest {
             IInputParser parser = mock(IInputParser.class);
             var config = new IInputParser.Config(true, true, true);
             when(parser.getConfig()).thenReturn(config);
-            when(parser.normalize(eq("option1"), isNull())).thenReturn("option1");
-            when(parser.parse(eq("option1"), isNull(), anyList()))
+            when(parser.normalize(eq("option1"), eq("en"))).thenReturn("option1");
+            when(parser.parse(eq("option1"), eq("en"), anyList()))
                     .thenReturn(Collections.emptyList());
 
             // Set up conversation outputs with previous quickReplies
@@ -188,7 +188,7 @@ class InputParserTaskTest {
 
             task.execute(ctx.memory(), parser);
 
-            verify(parser).parse(eq("option1"), isNull(), anyList());
+            verify(parser).parse(eq("option1"), eq("en"), anyList());
         }
     }
 

@@ -1,0 +1,19 @@
+{
+  "id": "entra-app-certificate",
+  "label": "Microsoft Entra app with a certificate",
+  "description": "An Entra app registration that authenticates with a certificate instead of a client secret (private_key_jwt). Replace <tenant-id> in the token URL, fill in the application (client) ID and the certificate's thumbprint, and store the certificate's private key as an unencrypted PKCS#8 PEM in the vault. Add https://login.microsoftonline.com to the credential endpoint allowlist.",
+  "connection": {
+    "authType": "OAUTH2_CLIENT_CREDENTIALS",
+    "binding": "SERVICE",
+    "oauth": {
+      "tokenUrl": "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token",
+      "clientId": "",
+      "clientAuthMethod": "private_key_jwt",
+      "privateKey": "${vault:entra-app-private-key}",
+      "certificateThumbprint": "",
+      "certificateThumbprintHeader": "x5t#S256",
+      "scopes": ["https://graph.microsoft.com/.default"]
+    },
+    "baseUrlAllowlist": ["https://graph.microsoft.com"]
+  }
+}

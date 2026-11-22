@@ -3,7 +3,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 /**
- * The chat-scale markdown rhythm lives once, in `index.css`.
+ * The chat-scale markdown rhythm lives once, in the shared stylesheet
+ * (`@eddi/app-kit/styles/app.css`, which each app's `index.css` imports).
  *
  * Twelve surfaces render model-written markdown, and each had grown its own
  * hand-rolled subset of the same repairs as arbitrary-variant utilities. The
@@ -49,8 +50,16 @@ function proseClassLists(source: string): string[] {
   return [...source.matchAll(/"prose\s[^"]*"/g)].map((m) => m[0]);
 }
 
+/**
+ * The shared stylesheet (@eddi/app-kit) owns the rhythm for every prose surface
+ * of both signed-in apps, so the scan covers the Manager, that package and
+ * Workforce: a surface restating the rhythm in either app drifts all the same.
+ * Read as text, not imported — the Manager still never imports Workforce code.
+ */
+const SHARED_CSS = "../packages/app-kit/src/styles/app.css";
+
 describe("chat prose rhythm is defined once", () => {
-  const files = tsxFiles("src");
+  const files = ["src", "../packages/app-kit/src", "../workforce/src"].flatMap(tsxFiles);
 
   it("finds the prose surfaces at all, so the scan cannot pass vacuously", () => {
     const withProse = files.filter((f) => proseClassLists(readFileSync(f, "utf8")).length > 0);
@@ -70,10 +79,10 @@ describe("chat prose rhythm is defined once", () => {
     expect(offenders).toEqual([]);
   });
 
-  it("index.css actually carries what the call sites gave up", () => {
+  it("the shared stylesheet actually carries what the call sites gave up", () => {
     // Otherwise the rule above is satisfied by deleting the styling rather than
     // by moving it, and every message loses its wrapping instead of sharing it.
-    const css = readFileSync("src/index.css", "utf8");
+    const css = readFileSync(SHARED_CSS, "utf8");
     expect(css).toContain("overflow-wrap: break-word");
     expect(css).toMatch(/\.prose pre \{[^}]*overflow-x: auto/);
     expect(css).toMatch(/\.prose > :first-child \{[^}]*margin-top: 0/);
@@ -85,7 +94,7 @@ describe("chat prose rhythm is defined once", () => {
     // Tailwind v4 ranks every utility above every layered rule regardless of
     // specificity, so moving these into `@layer components` would silently
     // restore the document-scale spacing they exist to replace.
-    const css = readFileSync("src/index.css", "utf8");
+    const css = readFileSync(SHARED_CSS, "utf8");
     const selector = ".prose :is(p, ul, ol, blockquote)";
     expect(css).toContain(selector);
     const rhythmAt = css.indexOf(selector);

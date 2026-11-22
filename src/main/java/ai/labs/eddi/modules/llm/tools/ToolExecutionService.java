@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.tools;
 
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.EscalationGuard;
 import ai.labs.eddi.modules.llm.impl.LlmTelemetryListener;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaGate;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaService;
@@ -44,7 +45,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  *
  * <p>
  * The single entry point is {@link #executeToolWrapped}, called from
- * {@code AgentOrchestrator} once per tool call the model requests. It is
+ * {@code ToolLoopRunner} once per tool call the model requests. It is
  * name-based on purpose: agent-mode tools are dispatched by langchain4j through
  * {@code ToolExecutor.execute(ToolExecutionRequest, memoryId)}, which yields a
  * {@code (name, jsonArguments)} pair — MCP, A2A and dynamic tools have no Java
@@ -61,7 +62,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code ToolExecutionRequest} — so it was deleted rather than wired, together
  * with its {@code eddi.tool.execution.parallel*} meters, which could only ever
  * report zero. Re-introducing concurrent tool calls means batching at the
- * {@code AgentOrchestrator} dispatch loop, not resurrecting reflection.
+ * {@code ToolLoopRunner} dispatch loop, not resurrecting reflection.
  * </p>
  *
  * <p>
@@ -354,6 +355,19 @@ public class ToolExecutionService {
         String toolName = invocation.dispatchName();
         long startTime = System.currentTimeMillis();
 
+        // The escalation guard (email plan v3 §5.3), first and unconditionally: a turn
+        // a mail started never changes a channel integration or its senders, and never
+        // decides an approval. Every tool source passes through here — the LLM tool
+        // loop, the HITL resume loop, mcpcalls — so this is the boundary; the
+        // save-time check in EmailAgentToolsInspector is best effort on top of it.
+        Optional<String> escalation = EscalationGuard.refuseTool(toolName);
+        if (escalation.isPresent()) {
+            meterRegistry.counter("eddi.tool.execution.escalation_refused", "tool", toolName).increment();
+            LOGGER.warnf("Refused tool %s in conversation %s: the turn was started by an email", sanitize(toolName),
+                    sanitize(conversationId));
+            return "Error: " + escalation.get();
+        }
+
         // Caching additionally requires a scope tag to partition the entry by. When
         // one cannot be resolved the cache is skipped on both the read and the write
         // side, so an unattributable result is neither served nor stored.
@@ -401,7 +415,7 @@ public class ToolExecutionService {
             //
             // This is the step that had no bound at all: a tool that never returned
             // held the conversation turn open for as long as it felt like. The wait
-            // is bounded here rather than in each of the seven tool sources because
+            // is bounded here rather than in each of the tool sources because
             // this is the one place all of them pass through.
             span.setAttribute(ATTR_CACHE_HIT, false);
             if (quotaGate != null) {

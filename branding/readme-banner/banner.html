@@ -1,0 +1,131 @@
+<!doctype html>
+<!--
+  Source of screenshots/eddi-banner.jpg, the image at the top of README.md.
+  Rendered at 1280x380 CSS pixels, device scale factor 2, by
+  ui/manager/scripts/capture-readme-images.mjs. Edit this file and re-run the
+  script; do not edit the image.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>EDDI README banner</title>
+<style>
+  :root {
+    --bg: #0c0a09;
+    --panel: #1c1917;
+    --line: #292524;
+    --text: #fafaf9;
+    --muted: #a8a29e;
+    --amber: #f59e0b;
+    --amber-soft: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1280px; height: 380px; background: var(--bg); }
+  body {
+    position: relative;
+    overflow: hidden;
+    font-family: "Noto Sans", "Segoe UI", system-ui, -apple-system, sans-serif;
+    color: var(--text);
+  }
+  /* Amber glow behind the pipeline, and a faint grid over the whole canvas. */
+  .glow {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(620px 420px at 82% 46%, rgba(245, 158, 11, 0.20), transparent 70%),
+      radial-gradient(520px 320px at 8% 110%, rgba(245, 158, 11, 0.08), transparent 70%);
+  }
+  .grid {
+    position: absolute; inset: 0;
+    background-image:
+      linear-gradient(rgba(250, 250, 249, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(250, 250, 249, 0.035) 1px, transparent 1px);
+    background-size: 40px 40px;
+    mask-image: linear-gradient(90deg, transparent 0%, #000 45%, #000 100%);
+  }
+  .left {
+    position: absolute; left: 64px; top: 0; bottom: 0; width: 540px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .wordmark { height: 58px; width: auto; align-self: flex-start; margin-left: -4px; }
+  h1 {
+    margin-top: 30px;
+    font-size: 34px; line-height: 1.22; font-weight: 600; letter-spacing: -0.01em;
+  }
+  .tags {
+    margin-top: 22px;
+    font-size: 17px; font-weight: 500; letter-spacing: 0.03em; color: var(--amber-soft);
+  }
+  .tags span { color: #57534e; padding: 0 9px; }
+
+  /* What an agent is: a config document, and what the engine adds around it. */
+  .right {
+    position: absolute; right: 56px; top: 0; bottom: 0; width: 580px;
+    display: flex; flex-direction: column; justify-content: center;
+  }
+  .card {
+    background: rgba(28, 25, 23, 0.86);
+    border: 1px solid var(--line);
+    border-radius: 16px;
+    padding: 22px 24px 20px;
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  }
+  .card-title {
+    font-size: 13px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--muted);
+  }
+  .steps { margin-top: 16px; display: flex; align-items: center; justify-content: space-between; }
+  .step {
+    flex: 0 0 auto;
+    padding: 10px 14px;
+    border: 1px solid #44403c; border-radius: 10px;
+    background: #0c0a09;
+    font-size: 16px; font-weight: 500; white-space: nowrap; color: #e7e5e4;
+  }
+  .step.rules { border-color: var(--amber); color: var(--amber-soft); background: rgba(245, 158, 11, 0.10); }
+  .arrow { flex: 1 1 auto; height: 1px; min-width: 10px; background: #57534e; position: relative; }
+  .arrow::after {
+    content: ""; position: absolute; right: -1px; top: -3px;
+    border-left: 6px solid #57534e; border-top: 3.5px solid transparent; border-bottom: 3.5px solid transparent;
+  }
+  .memory {
+    margin-top: 14px; padding: 8px 13px;
+    border: 1px dashed #44403c; border-radius: 10px;
+    font-size: 15px; color: var(--muted); text-align: center; letter-spacing: 0.02em;
+  }
+  pre {
+    margin-top: 16px; padding: 13px 15px;
+    background: #0c0a09; border: 1px solid var(--line); border-radius: 10px;
+    font-family: "Cascadia Code", "JetBrains Mono", Consolas, monospace;
+    font-size: 14.5px; line-height: 1.65; color: #d6d3d1;
+  }
+  .c { color: #78716c; font-style: italic; } .k { color: #7dd3fc; } .s { color: var(--amber-soft); } .p { color: #78716c; }
+</style>
+</head>
+<body>
+  <div class="glow"></div>
+  <div class="grid"></div>
+
+  <div class="left">
+    <img class="wordmark" src="../../ui/packages/app-kit/src/assets/logo_eddi.png" alt="E.D.D.I" />
+    <h1>The open-source AI agent management system</h1>
+    <div class="tags">Run<span>·</span>Limit<span>·</span>Approve<span>·</span>Record</div>
+  </div>
+
+  <div class="right">
+    <div class="card">
+      <div class="card-title">Agents are configuration</div>
+<pre><span class="k">"type"</span><span class="p">:</span> <span class="s">"anthropic"</span><span class="p">,</span>   <span class="c">// or openai, gemini, ollama …</span>
+<span class="k">"modelName"</span><span class="p">:</span> <span class="s">"claude-sonnet-5-5"</span><span class="p">,</span>
+<span class="k">"systemMessage"</span><span class="p">:</span> <span class="s">"You are a helpful assistant…"</span><span class="p">,</span>
+<span class="k">"builtInToolsWhitelist"</span><span class="p">:</span> <span class="p">[</span><span class="s">"calculator"</span><span class="p">,</span> <span class="s">"websearch"</span><span class="p">]</span></pre>
+      <div class="steps">
+        <div class="step">Tools</div>
+        <div class="step">Memory</div>
+        <div class="step">RAG</div>
+        <div class="step">Approvals</div>
+        <div class="step">Audit</div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -60,9 +60,8 @@ import static ai.labs.eddi.engine.memory.model.ConversationState.ENDED;
 /**
  * MongoDB implementation of {@link IConversationMemoryStore}.
  * <p>
- * Annotated {@code @DefaultBean} so that future database backends (e.g.,
- * PostgreSQL) can provide an alternative implementation activated via
- * {@code @LookupIfProperty(name = "eddi.datastore.type", stringValue = "postgres")}.
+ * {@code DataStoreProducers} picks this store or
+ * {@code PostgresConversationMemoryStore} by {@code eddi.datastore.type}.
  *
  * @author ginccc
  */
@@ -1244,14 +1243,14 @@ public class ConversationMemoryStore implements IConversationMemoryStore, IResou
         return ids;
     }
 
+    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
+
     /**
      * Projected fields for pending-approval summaries — never the full document.
      * {@code hitlPendingToolCalls.calls.toolName} pulls in ONLY the tool names
      * (never {@code argumentsRaw}/{@code argumentsRedacted}) so this bulk listing
      * stays cheap and never risks exposing tool-call arguments.
      */
-    private static final String KEY_HITL_PAUSED_AT = "hitlPausedAt";
-
     private static final Bson PENDING_SUMMARY_PROJECTION = Projections.include(KEY_AGENT_ID, "userId",
             KEY_HITL_PAUSED_AT, "hitlPauseReason", "hitlTimeoutPolicy", "hitlApprovalTimeout",
             "hitlPauseType", "hitlPendingToolCalls.calls.toolName");

@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
 import ai.labs.eddi.configs.channels.model.ObserveConfig;
 import ai.labs.eddi.configs.channels.model.WebhookChannelSettings;
@@ -33,10 +34,12 @@ import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.ServiceUnavailableException;
+import jakarta.ws.rs.core.MediaType;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
 
 import java.net.URI;
+import java.util.ArrayList;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
@@ -64,9 +67,9 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
      * {@code webhook} is the signed inbound webhook channel ({@code POST
      * /integrations/webhook/{id}}); its {@code platformConfig} is validated by
      * {@link WebhookChannelSettings#validate}. {@code email} is the mailbox channel
-     * (trigger mode: a polled IMAP mailbox starts turns, nothing is sent back),
-     * validated by {@link EmailChannelSettings#validate} and, against the
-     * deployment, by {@link EmailChannelSupport}.
+     * (a polled mailbox starts turns; in conversation mode the agent also replies
+     * over SMTP), validated by {@link EmailChannelSettings#validate} and, against
+     * the deployment, by {@link EmailChannelSupport}.
      */
     private static final Set<String> REGISTERED_CHANNEL_TYPES = Set.of("slack", WebhookChannelSettings.CHANNEL_TYPE,
             EmailChannelSettings.CHANNEL_TYPE);
@@ -421,6 +424,103 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 : Response.status(Response.Status.NOT_FOUND).build();
     }
 
+    @Override
+    public EmailSenderLists.View readEmailSenders(String id) {
+        restVersionInfo.requireViewAccess(id);
+        int version = currentVersion(id);
+        ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+        return EmailSenderLists.read(version, current.getPlatformConfig());
+    }
+
+    /**
+     * A targeted edit of the sender lists (email plan v3 §5.1). The read, the
+     * version check and the write are one step under {@link #uniquenessLock}, and
+     * the write is {@link #updateChannel} itself: the same validation, deployment
+     * checks, warnings and poll re-registration as a save of the whole document.
+     * The document is read from the store, not through {@link #readChannel}, whose
+     * redacted copy the redaction-marker guard would refuse to store.
+     */
+    @Override
+    public Response updateEmailSenders(String id, EmailSenderLists.UpdateRequest request) {
+        if (request == null || request.expectedVersion() == null) {
+            throw new BadRequestException("The body must name the version it was read from: {\"expectedVersion\": <n>, ...}.");
+        }
+        restVersionInfo.requireEditAccess(id);
+        synchronized (uniquenessLock) {
+            int version = currentVersion(id);
+            ChannelIntegrationConfiguration current = readEmailIntegration(id, version);
+            EmailSenderLists.View before = EmailSenderLists.read(version, current.getPlatformConfig());
+            if (request.expectedVersion() != version) {
+                return Response.status(Response.Status.CONFLICT).type(MediaType.APPLICATION_JSON).entity(before).build();
+            }
+            EmailSenderLists.Change change;
+            try {
+                change = EmailSenderLists.apply(before.allow(), before.block(), request);
+            } catch (EmailSenderLists.InvalidChange e) {
+                throw new BadRequestException(e.getMessage());
+            }
+            if (!change.changed()) {
+                return Response.ok(new EmailSenderLists.UpdateResult(version, version, false, before.allow(), before.block(), List.of(),
+                        List.of(), change.unchanged(), List.of())).build();
+            }
+            current.setPlatformConfig(EmailSenderLists.withLists(current.getPlatformConfig(), change.allow(), change.block()));
+            Response saved = updateChannel(id, version, current);
+            var location = saved.getLocation() == null ? null : RestUtilities.extractResourceId(saved.getLocation());
+            Integer newVersion = location == null ? null : location.getVersion();
+            List<String> warnings = new ArrayList<>();
+            if (change.allowlistEmptied()) {
+                warnings.add(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED);
+            }
+            String header = saved.getHeaderString(WARNINGS_HEADER);
+            if (header != null && !header.isBlank()) {
+                for (String code : header.split(",")) {
+                    if (!code.isBlank() && !warnings.contains(code.trim())) {
+                        warnings.add(code.trim());
+                    }
+                }
+            }
+            emailSupport().auditSenderListChange(id, version, newVersion, change.added(), change.removed(),
+                    EmailSenderLists.cleanReason(request.reason()), change.allowlistEmptied());
+            var result = new EmailSenderLists.UpdateResult(version, newVersion, true, change.allow(), change.block(), change.added(),
+                    change.removed(), change.unchanged(), warnings);
+            Response.ResponseBuilder answer = Response.ok(result).type(MediaType.APPLICATION_JSON);
+            if (saved.getLocation() != null) {
+                answer.location(saved.getLocation());
+            }
+            if (!warnings.isEmpty()) {
+                answer.header(WARNINGS_HEADER, String.join(",", warnings));
+            }
+            return answer.build();
+        }
+    }
+
+    private int currentVersion(String id) {
+        try {
+            IResourceStore.IResourceId currentId = channelStore.getCurrentResourceId(id);
+            if (currentId == null || currentId.getVersion() == null) {
+                throw new NotFoundException("No channel integration " + id + ".");
+            }
+            return currentId.getVersion();
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        }
+    }
+
+    private ChannelIntegrationConfiguration readEmailIntegration(String id, int version) {
+        ChannelIntegrationConfiguration current;
+        try {
+            current = channelStore.read(id, version);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            throw new NotFoundException("No channel integration " + id + ".");
+        } catch (IResourceStore.ResourceStoreException e) {
+            throw new InternalServerErrorException("The channel store could not be read.");
+        }
+        if (!isEmail(current)) {
+            throw new NotFoundException("Channel integration " + id + " is not an email integration.");
+        }
+        return current;
+    }
+
     /**
      * The suppression list belongs to the integration: whoever may edit it may read
      * and clear it. A channel that is not an email integration has none (404).
@@ -458,16 +558,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     // ─── Validation ────────────────────────────────────────────────────────────
 
-    // Visible for testing
     /**
      * {@code platformConfig} keys that hold credentials.
      * <p>
-     * A channel's bot token or signing secret is stored, and returned by
-     * {@code GET /channelstore/channels/&#123;id&#125;}, exactly as it was written
-     * — so a plaintext value is readable by anyone who can read the configuration,
-     * and lands in ZIP exports and backups too. {@code ChannelTargetRouter}
-     * resolves {@code ${vault:...}} references at send time, so the vault is
-     * available here; nothing was telling operators to use it.
+     * A channel's bot token or signing secret is stored exactly as it was written,
+     * and an administrator reading
+     * {@code GET /channelstore/channels/&#123;id&#125;} gets it back as stored
+     * (everyone else reads a redacted copy, see {@link #readChannel}) — so a
+     * plaintext value is readable by administrators, and lands in ZIP exports and
+     * backups too. {@code ChannelTargetRouter} resolves {@code ${vault:...}}
+     * references at send time, so the vault is available here; nothing was telling
+     * operators to use it.
      */
     private static final Set<String> SECRET_PLATFORM_CONFIG_KEYS = Set.of(
             "bottoken", "signingsecret", "clientsecret", "apikey", "apisecret", "token",

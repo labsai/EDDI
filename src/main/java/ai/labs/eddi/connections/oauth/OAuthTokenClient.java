@@ -27,6 +27,7 @@ import java.net.URI;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -100,32 +101,61 @@ public class OAuthTokenClient {
         this.endpointAllowlist = endpointAllowlist;
     }
 
-    /** RFC 6749 §4.4.2 — the service-account flow. */
-    public TokenResponse clientCredentials(ConnectionConfiguration connection, String clientSecret) {
+    /**
+     * RFC 6749 §4.4.2 — the service-account flow.
+     *
+     * @param clientCredential
+     *            the resolved client secret, or — for a {@code private_key_jwt}
+     *            client — the resolved private key material
+     */
+    public TokenResponse clientCredentials(ConnectionConfiguration connection, String clientCredential) {
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "client_credentials");
         addScopes(form, connection.getOauth());
-        return exchange(connection, clientSecret, form);
+        return exchange(connection, clientCredential, form, true);
+    }
+
+    /**
+     * RFC 7523 §2.1 — a service account presenting a signed assertion as its grant.
+     * <p>
+     * No client authentication accompanies it: the assertion's signature is the
+     * proof, and RFC 7523 §3.1 makes client authentication optional here. Google
+     * expects none.
+     *
+     * @param keyMaterial
+     *            the resolved {@code oauth.privateKey}: a PKCS#8 PEM or a
+     *            service-account JSON key file
+     */
+    public TokenResponse jwtBearer(ConnectionConfiguration connection, String keyMaterial) {
+        // The token URL is checked before anything is signed: an assertion is a
+        // bearer credential for its lifetime, and minting one for an endpoint that
+        // will be refused is minting one for nobody.
+        requireUsableTokenEndpoint(connection);
+        SigningKey key = SigningKey.parse(keyMaterial, connection.getName());
+        Map<String, String> form = new LinkedHashMap<>();
+        form.put("grant_type", JwtAssertions.JWT_BEARER_GRANT_TYPE);
+        form.put("assertion", JwtAssertions.jwtBearerGrant(connection, key, Instant.now()));
+        return exchange(connection, null, form, false);
     }
 
     /** RFC 6749 §4.1.3 plus RFC 7636 — redeeming an authorization code. */
-    public TokenResponse authorizationCode(ConnectionConfiguration connection, String clientSecret, String code, String codeVerifier,
+    public TokenResponse authorizationCode(ConnectionConfiguration connection, String clientCredential, String code, String codeVerifier,
                                            String redirectUri) {
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "authorization_code");
         form.put("code", code);
         form.put("redirect_uri", redirectUri);
         form.put("code_verifier", codeVerifier);
-        return exchange(connection, clientSecret, form);
+        return exchange(connection, clientCredential, form, true);
     }
 
     /** RFC 6749 §6. */
-    public TokenResponse refresh(ConnectionConfiguration connection, String clientSecret, String refreshToken) {
+    public TokenResponse refresh(ConnectionConfiguration connection, String clientCredential, String refreshToken) {
         Map<String, String> form = new LinkedHashMap<>();
         form.put("grant_type", "refresh_token");
         form.put("refresh_token", refreshToken);
         addScopes(form, connection.getOauth());
-        return exchange(connection, clientSecret, form);
+        return exchange(connection, clientCredential, form, true);
     }
 
     private static void addScopes(Map<String, String> form, OAuthConfig oauth) {
@@ -134,7 +164,12 @@ public class OAuthTokenClient {
         }
     }
 
-    private TokenResponse exchange(ConnectionConfiguration connection, String clientSecret, Map<String, String> form) {
+    /**
+     * The token endpoint as a URI, once it has passed both checks a credential must
+     * pass before it leaves the process: the operator's allowlist, and https (or
+     * loopback http).
+     */
+    private URI requireUsableTokenEndpoint(ConnectionConfiguration connection) {
         OAuthConfig oauth = connection.getOauth();
         // Re-checked here, not only at write time. A document can reach the database
         // by import or by a direct write, and this is the last point before the
@@ -168,6 +203,21 @@ public class OAuthTokenClient {
                     + "loopback host (localhost, 127.0.0.1, [::1]). Nothing was sent. Got: " + tokenUri.getScheme() + "://"
                     + tokenUri.getHost());
         }
+        return tokenUri;
+    }
+
+    /**
+     * @param clientCredential
+     *            the client secret, or the private key material of a
+     *            {@code private_key_jwt} client; ignored when
+     *            {@code authenticateClient} is false
+     * @param authenticateClient
+     *            false only for the JWT bearer grant, whose assertion already is
+     *            the proof
+     */
+    private TokenResponse exchange(ConnectionConfiguration connection, String clientCredential, Map<String, String> form,
+                                   boolean authenticateClient) {
+        URI tokenUri = requireUsableTokenEndpoint(connection);
 
         // The allowlist above is the gate (it may name a private host the SSRF rules
         // would refuse), and no redirect is ever followed.
@@ -178,14 +228,8 @@ public class OAuthTokenClient {
                 .header("Content-Type", "application/x-www-form-urlencoded").header("Accept", "application/json");
 
         Map<String, String> body = new LinkedHashMap<>(form);
-        if (OAuthConfig.CLIENT_AUTH_POST.equals(oauth.getClientAuthMethod())) {
-            body.put("client_id", oauth.getClientId());
-            body.put("client_secret", clientSecret);
-        } else {
-            // HTTP Basic is the default because RFC 6749 §2.3.1 says servers MUST
-            // support it, while client_secret_post is optional.
-            String credentials = urlEncode(oauth.getClientId()) + ":" + urlEncode(clientSecret);
-            request.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)));
+        if (authenticateClient) {
+            authenticateClient(connection, clientCredential, body, request);
         }
 
         OutboundResponse<String> response;
@@ -224,6 +268,32 @@ public class OAuthTokenClient {
                     + "endpoint's final address. The grant is unchanged.");
         }
         throw errorFor(connection, response);
+    }
+
+    /**
+     * Adds the client's proof of identity: a signed assertion for
+     * {@code private_key_jwt}, otherwise the client secret by HTTP Basic or in the
+     * form body.
+     */
+    private static void authenticateClient(ConnectionConfiguration connection, String clientCredential, Map<String, String> body,
+                                           OutboundRequest.Builder request) {
+        OAuthConfig oauth = connection.getOauth();
+        if (oauth.usesPrivateKeyJwt()) {
+            // RFC 7523 §2.2. A fresh assertion per request, so its jti is never reused;
+            // client_id travels beside it because Entra requires it.
+            SigningKey key = SigningKey.parse(clientCredential, connection.getName());
+            body.put("client_id", oauth.getClientId());
+            body.put("client_assertion_type", JwtAssertions.CLIENT_ASSERTION_TYPE);
+            body.put("client_assertion", JwtAssertions.clientAssertion(connection, key, Instant.now()));
+        } else if (OAuthConfig.CLIENT_AUTH_POST.equals(oauth.getClientAuthMethod())) {
+            body.put("client_id", oauth.getClientId());
+            body.put("client_secret", clientCredential);
+        } else {
+            // HTTP Basic is the default because RFC 6749 §2.3.1 says servers MUST
+            // support it, while client_secret_post is optional.
+            String credentials = urlEncode(oauth.getClientId()) + ":" + urlEncode(clientCredential);
+            request.header("Authorization", "Basic " + Base64.getEncoder().encodeToString(credentials.getBytes(StandardCharsets.UTF_8)));
+        }
     }
 
     /**

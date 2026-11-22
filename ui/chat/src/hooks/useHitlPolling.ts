@@ -13,8 +13,8 @@ import {
   isSettledState,
   nextPollDelay,
   nextUnobservedPollDelay,
-} from "@/api/hitl-api";
-import type { ApprovalStatus } from "@/api/hitl-api";
+} from "@eddi/core";
+import type { ApprovalStatus } from "@eddi/core";
 
 interface UseHitlPollingArgs {
   conversationId: string | null;

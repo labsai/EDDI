@@ -12,12 +12,14 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextScope;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.ContextWindowConfig;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.DiscussionPhase;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
+import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.MemberType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.PhaseType;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.VoteConfig;
 import ai.labs.eddi.configs.groups.model.DiscussionStylePresets;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntry;
 import ai.labs.eddi.configs.groups.model.GroupConversation.TranscriptEntryType;
+import ai.labs.eddi.configs.groups.mongo.AgentGroupStore;
 import ai.labs.eddi.engine.memory.ConversationOutputExtractor;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.modules.llm.impl.SummarizationService;
@@ -51,12 +53,26 @@ public class GroupContextBuilder {
 
     private static final Logger LOGGER = Logger.getLogger(GroupContextBuilder.class);
 
+    /** The speaker every entry is shown under in ANONYMOUS scope. */
+    private static final String ANONYMOUS_SPEAKER_NAME = "Anonymous";
+    /**
+     * The ANONYMOUS name of an entry shown under a non-agent name
+     * ({@link GroupSigningGuard#isShownAsNonAgent}): it says no agent wrote it, and
+     * nothing about who did.
+     */
+    private static final String ANONYMOUS_NON_AGENT_NAME = ANONYMOUS_SPEAKER_NAME + AgentGroupStore.NOT_AN_AGENT_SUFFIX;
+
     private final ITemplatingEngine templatingEngine;
     /**
      * Group id to the outcome digest a RETRO phase quotes; {@code null} (every
      * caller that never wires one) quotes nothing.
      */
     private volatile Function<String, String> outcomeDigestProvider;
+    /**
+     * Withholds unverified peer entries from members that require peer
+     * verification; {@code null} (callers that never wire one) shows every entry.
+     */
+    private volatile GroupSigningGuard signingGuard;
 
     public GroupContextBuilder(ITemplatingEngine templatingEngine) {
         this.templatingEngine = templatingEngine;
@@ -65,6 +81,14 @@ public class GroupContextBuilder {
     /** Wires the source of the real-world outcomes a RETRO phase quotes. */
     public void setOutcomeDigestProvider(Function<String, String> provider) {
         this.outcomeDigestProvider = provider;
+    }
+
+    /**
+     * Wires the guard that decides which transcript entries a member requiring peer
+     * verification may see (see {@link GroupSigningGuard#visibleTo}).
+     */
+    public void setSigningGuard(GroupSigningGuard signingGuard) {
+        this.signingGuard = signingGuard;
     }
 
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
@@ -81,11 +105,11 @@ public class GroupContextBuilder {
      * @param allMembers
      *            the full group roster, used only by {@code ARGUE}/{@code
      *            REBUTTAL} to resolve which transcript entries came from the
-     *            opposing team rather than merely "not me" (see
-     *            {@link #opposingArguments}). {@code null} or empty falls back to
-     *            the not-me filter, which is only correct for a 2-member debate —
-     *            existing callers that never reach those two phase types are
-     *            unaffected either way.
+     *            opposing team rather than merely "not me" (see the
+     *            {@code opposingArguments} template key). {@code null} or empty
+     *            falls back to the not-me filter, which is only correct for a
+     *            2-member debate — existing callers that never reach those two
+     *            phase types are unaffected either way.
      * @param window
      *            I9 transcript windowing, applied to the FULL/ANONYMOUS
      *            scope-filtered context only. {@code null} disables windowing
@@ -106,10 +130,24 @@ public class GroupContextBuilder {
      *            {@code null} falls back to the default cap — review finding: the
      *            template always quoted the DEFAULT, so a group configured above it
      *            could never obtain its configured number of lessons.
+     *            <p>
+     *            When a signing guard is wired and {@code gc} is given, an AGENT
+     *            speaker that requires peer verification, or a GROUP speaker one of
+     *            whose agents does (this prompt becomes the question each of them
+     *            is asked), is shown the transcript with every unverified peer
+     *            entry withheld, before anything else reads it, and is never shown
+     *            the stored window summary.
      */
     public String buildPhaseInput(DiscussionPhase phase, GroupMember speaker, String question, List<TranscriptEntry> transcript, int phaseIdx,
                                   GroupMember target, List<GroupMember> allMembers, ContextWindowConfig window, GroupConversation gc,
                                   AgentGroupConfiguration.RetroConfig retroConfig) {
+        boolean verifying = false;
+        GroupSigningGuard guard = signingGuard;
+        if (guard != null && gc != null && (speaker.memberType() == MemberType.AGENT || speaker.memberType() == MemberType.GROUP)) {
+            var view = guard.viewFor(speaker.agentId(), gc, transcript);
+            transcript = view.transcript();
+            verifying = view.requirement() != GroupSigningGuard.Requirement.NOT_REQUIRED;
+        }
 
         String template = phase.inputTemplate() != null
                 ? phase.inputTemplate()
@@ -128,7 +166,7 @@ public class GroupContextBuilder {
         // Phase-type specific variables
         switch (phase.type()) {
             case OPINION -> {
-                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker, window, gc);
+                List<Map<String, Object>> prev = filterByScope(transcript, phase.contextScope(), phaseIdx, speaker, window, gc, !verifying);
                 data.put("previousResponses", prev);
             }
             case CRITIQUE -> {
@@ -242,7 +280,13 @@ public class GroupContextBuilder {
             case VOTE -> {
                 // I14: the ballot prompt renders the options and the JSON contract.
                 // Scope is NONE (save-time enforced), so no transcript context rides
-                // along — blindness is structural, not this template's doing.
+                // along — blindness is structural, not this template's doing. The
+                // options come from the voter's own view: a synthesis withheld from a
+                // verifying voter offers it none, and the tally then has none either,
+                // since it counts only entries that verify once any reader requires it.
+                // EXPLICIT options are shown as they are: the author's config, or a
+                // facilitator's vote, which is called only while the facilitator signs
+                // verifiably once a reader verifies (FacilitatorEngine.executeCallVote).
                 var voteConfig = phase.voteConfig() != null ? phase.voteConfig() : new VoteConfig();
                 data.put("options", VoteTallyEngine.resolveOptions(voteConfig, transcript));
                 data.put("ballotContract", VoteTallyEngine.ballotContract(voteConfig.method()));
@@ -324,20 +368,6 @@ public class GroupContextBuilder {
     }
 
     /**
-     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
-     * flags them on every run; removing them breaks the build. Characterization
-     * tests reach this method through
-     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
-     * which resolves by exact parameter types, so a narrower signature is not
-     * findable — and those tests are the regression net this whole refactor leans
-     * on.
-     * <p>
-     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
-     * needs the speaker and the roster to decide, and a method that can only see
-     * the transcript would have to guess at both. See {@link #isDebateJudgment},
-     * which {@link #buildPhaseInput} consults first.
-     */
-    /**
      * The latest response of every peer except {@code speaker}, for a CRITIQUE
      * phase without {@code targetEachPeer}. Peers come from the roster when it is
      * known, otherwise from who has spoken; a peer with no response yet is left
@@ -371,6 +401,20 @@ public class GroupContextBuilder {
         return peers;
     }
 
+    /**
+     * {@code transcript} and {@code phaseIdx} are unused, and stay. Static analysis
+     * flags them on every run; removing them breaks the build. Characterization
+     * tests reach this method through
+     * {@code getDeclaredMethod("selectDefaultTemplate", DiscussionPhase.class, List.class, int.class)},
+     * which resolves by exact parameter types, so a narrower signature is not
+     * findable — and those tests are the regression net this whole refactor leans
+     * on.
+     * <p>
+     * I3's debate-judgment selection deliberately does <em>not</em> live here: it
+     * needs the speaker and the roster to decide, and a method that can only see
+     * the transcript would have to guess at both. See {@link #isDebateJudgment},
+     * which {@link #buildPhaseInput} consults first.
+     */
     public String selectDefaultTemplate(DiscussionPhase phase, List<TranscriptEntry> transcript, int phaseIdx) {
         if (phase.type() == PhaseType.OPINION) {
             // Use independent template if no context, or context template if
@@ -465,6 +509,17 @@ public class GroupContextBuilder {
      */
     public List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker,
                                                    ContextWindowConfig window, GroupConversation gc) {
+        return filterByScope(transcript, scope, currentPhaseIdx, speaker, window, gc, true);
+    }
+
+    /**
+     * @param showStoredSummary
+     *            {@code false} for a member that requires peer verification: the
+     *            stored summary is free text in the conversation document that no
+     *            signature covers, so it gets the truncation marker instead
+     */
+    private List<Map<String, Object>> filterByScope(List<TranscriptEntry> transcript, ContextScope scope, int currentPhaseIdx, GroupMember speaker,
+                                                    ContextWindowConfig window, GroupConversation gc, boolean showStoredSummary) {
         if (scope == null || scope == ContextScope.NONE) {
             return List.of();
         }
@@ -502,7 +557,7 @@ public class GroupContextBuilder {
         String summary = scope == ContextScope.ANONYMOUS ? gc.getAnonymousTranscriptSummary() : gc.getTranscriptSummary();
         int summaryUpTo = scope == ContextScope.ANONYMOUS ? gc.getAnonymousSummaryUpToIndex() : gc.getSummaryUpToIndex();
 
-        if (summary != null && !summary.isBlank() && summaryUpTo > 0) {
+        if (showStoredSummary && summary != null && !summary.isBlank() && summaryUpTo > 0) {
             // Verbatim tail = everything the summary does not cover. Split on the raw
             // boundary rather than "last maxRecentEntries" so there is never a gap
             // (entries neither summarized nor shown) and never duplication (entries
@@ -540,7 +595,7 @@ public class GroupContextBuilder {
         return entries.stream().map(e -> {
             Map<String, Object> entry = new LinkedHashMap<>();
             if (scope == ContextScope.ANONYMOUS) {
-                entry.put("speaker", "Anonymous");
+                entry.put("speaker", GroupSigningGuard.isShownAsNonAgent(e) ? ANONYMOUS_NON_AGENT_NAME : ANONYMOUS_SPEAKER_NAME);
             } else {
                 entry.put("speaker", e.speakerDisplayName());
             }
@@ -724,7 +779,7 @@ public class GroupContextBuilder {
             if (!isSummarizable(e)) {
                 continue;
             }
-            String label = anonymous ? "Anonymous" : e.speakerDisplayName();
+            String label = anonymous ? ANONYMOUS_SPEAKER_NAME : e.speakerDisplayName();
             sb.append("- ").append(label);
             if (e.phaseName() != null) {
                 sb.append(" (").append(e.phaseName()).append(')');
@@ -761,7 +816,9 @@ public class GroupContextBuilder {
      * {@code SYNTHESIS} and {@code RETRO} keep the whole transcript, as their
      * rendered prompts do. Under {@code FULL} the raw entries are kept (error and
      * skip records included, as before) minus those not yet visible to peers.
-     * {@code ANONYMOUS} entries lose speaker, target and signature fields.
+     * {@code ANONYMOUS} entries lose speaker, target and signature fields; one
+     * shown under a non-agent name is named "Anonymous (not an agent, unverified)",
+     * as in the rendered prompt.
      */
     public List<TranscriptEntry> scopedTranscript(List<TranscriptEntry> snapshot, DiscussionPhase phase, int currentPhaseIdx,
                                                   GroupMember speaker) {
@@ -781,7 +838,8 @@ public class GroupContextBuilder {
                 continue;
             }
             scoped.add(scope == ContextScope.ANONYMOUS
-                    ? new TranscriptEntry(null, null, e.content(), e.phaseIndex(), e.phaseName(), e.type(), e.timestamp(), null, null)
+                    ? new TranscriptEntry(null, GroupSigningGuard.isShownAsNonAgent(e) ? ANONYMOUS_NON_AGENT_NAME : null, e.content(),
+                            e.phaseIndex(), e.phaseName(), e.type(), e.timestamp(), null, null)
                     : e);
         }
         return List.copyOf(scoped);

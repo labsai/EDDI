@@ -20,6 +20,7 @@ import jakarta.ws.rs.core.Response;
 import jakarta.ws.rs.sse.Sse;
 import jakarta.ws.rs.sse.SseEventSink;
 import org.eclipse.microprofile.openapi.annotations.Operation;
+import org.eclipse.microprofile.openapi.annotations.parameters.Parameter;
 import org.eclipse.microprofile.openapi.annotations.responses.APIResponse;
 import org.eclipse.microprofile.openapi.annotations.tags.Tag;
 
@@ -135,7 +136,18 @@ public interface IRestGroupConversation {
     List<GroupConversation> listGroupConversations(@PathParam("groupId") String groupId, @QueryParam("index")
     @DefaultValue("0") Integer index,
                                                    @QueryParam("limit")
-                                                   @DefaultValue("20") Integer limit);
+                                                   @DefaultValue("20") Integer limit,
+                                                   @Parameter(description = "Only the caller's own sessions, for an admin too (since 6.7.0)")
+                                                   @QueryParam("mine")
+                                                   @DefaultValue("false") Boolean mine);
+
+    /**
+     * The listing without {@code mine}, for in-process callers. Not a resource
+     * method.
+     */
+    default List<GroupConversation> listGroupConversations(String groupId, Integer index, Integer limit) {
+        return listGroupConversations(groupId, index, limit, false);
+    }
 
     @POST
     @Path("/{groupId}/conversations/{groupConversationId}/followup")
@@ -187,11 +199,9 @@ public interface IRestGroupConversation {
                description = "Re-run all discussion phases with SSE event streaming for progress. "
                        + "Emits round_start (new round marker) followed by the same events as the "
                        + "initial stream (phase_start, speaker_start, speaker_complete, phase_complete, "
-                       + "synthesis_start, group_complete, group_error), plus the HITL events "
+                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL events "
                        + "(awaiting_approval, hitl_resume, cancelled, member_pause_skipped, "
                        + "human_input_requested). NOTE: "
-                       + "synthesis_start, group_complete, group_error, artifact_updated), plus the HITL "
-                       + "events (awaiting_approval, hitl_resume, cancelled, member_pause_skipped). NOTE: "
                        + "'attachments' are NOT supported on a continuation and are rejected with a "
                        + "terminal group_error event rather than silently ignored.")
     @APIResponse(responseCode = "200", description = "SSE event stream of continuation progress.")

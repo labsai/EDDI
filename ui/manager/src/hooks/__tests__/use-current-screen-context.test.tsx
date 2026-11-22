@@ -59,39 +59,12 @@ describe("useCurrentScreenContext", () => {
     expect(renderAt("/manage/agents/wizard").result.current).toEqual({ screen: "agent-wizard" });
   });
 
-  it("checks the deeper workforce path before its own prefix", () => {
-    expect(renderAt("/workforce/board-1/thread/member-1").result.current).toEqual({
-      screen: "workforce-thread",
-      boardId: "board-1",
-      memberId: "member-1",
-    });
-    expect(renderAt("/workforce/board-1/settings").result.current).toEqual({
-      screen: "workforce-settings",
-      boardId: "board-1",
-    });
-    expect(renderAt("/workforce/board-1/history").result.current).toEqual({
-      screen: "workforce-history",
-      boardId: "board-1",
-    });
-    expect(renderAt("/workforce/board-1").result.current).toEqual({
-      screen: "workforce-board",
-      boardId: "board-1",
-    });
-  });
-
-  it("checks workforce's literal routes before the :boardId pattern they collide with", () => {
-    expect(renderAt("/workforce/new").result.current).toEqual({ screen: "workforce-wizard" });
-    expect(renderAt("/workforce/analytics").result.current).toEqual({ screen: "workforce-analytics" });
-    expect(renderAt("/workforce/chat").result.current).toEqual({ screen: "workforce-chat" });
-  });
-
   it("resolves param-free routes with no id fields set", () => {
     expect(renderAt("/manage").result.current).toEqual({ screen: "dashboard" });
     expect(renderAt("/manage/agents").result.current).toEqual({ screen: "agents" });
     expect(renderAt("/manage/operator").result.current).toEqual({ screen: "operator" });
     expect(renderAt("/manage/updates").result.current).toEqual({ screen: "updates" });
     expect(renderAt("/manage/branding").result.current).toEqual({ screen: "branding" });
-    expect(renderAt("/workforce").result.current).toEqual({ screen: "workforce-dashboard" });
   });
 
   it("checks /manage/conversations/monitoring before the plain conversations route", () => {
@@ -173,13 +146,11 @@ describe("toContextPayload — only known context keys", () => {
     expect(
       Object.keys(
         toContextPayload({
-          screen: "workforce-thread",
-          boardId: "board-1",
-          memberId: "member-1",
+          screen: "resource-detail",
           resourceType: "agents",
           resourceId: "res-1",
         }),
       ).sort(),
-    ).toEqual(["boardId", "memberId", "resourceId", "resourceType", "screen"]);
+    ).toEqual(["resourceId", "resourceType", "screen"]);
   });
 });

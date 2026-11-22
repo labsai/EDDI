@@ -194,8 +194,8 @@ public class RestCoordinatorAdmin implements IRestCoordinatorAdmin {
 
     /**
      * Start the SSE poller that broadcasts coordinator status to all connected
-     * clients. Polls every 2 seconds and sends status snapshots + dead-letter count
-     * changes.
+     * clients. Polls every 2 seconds and sends a {@code status} snapshot (which
+     * carries the dead-letter count) to every open client.
      */
     private synchronized void ensurePollerStarted(Sse sse) {
         if (pollerStarted)

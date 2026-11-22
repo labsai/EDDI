@@ -18,6 +18,7 @@ import ai.labs.eddi.configs.apicalls.IRestApiCallsStore;
 import ai.labs.eddi.configs.apicalls.model.ApiCallsConfiguration;
 import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.mcpcalls.IRestMcpCallsStore;
 import ai.labs.eddi.configs.mcpcalls.model.McpCallsConfiguration;
 import ai.labs.eddi.configs.llm.IRestLlmStore;
@@ -48,6 +49,7 @@ import io.quarkiverse.mcp.server.ToolArg;
 import io.quarkus.security.identity.SecurityIdentity;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.ws.rs.WebApplicationException;
 import jakarta.ws.rs.core.Response;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -64,7 +66,7 @@ import java.util.Map;
 import static ai.labs.eddi.engine.mcp.McpToolUtils.*;
 
 /**
- * MCP tools for administering EDDI agents, packages, and resources. Exposes
+ * MCP tools for administering EDDI agents, workflows, and resources. Exposes
  * deploy, undeploy, CRUD, batch cascade, and introspection as MCP-compliant
  * tools via the Quarkus MCP Server extension.
  *
@@ -308,12 +310,12 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "create_agent", description = "Create a new Agent with a given name and optional packages. "
+    @Tool(name = "create_agent", description = "Create a new Agent with a given name and optional workflows. "
             + "The Agent is created and its descriptor is updated with the provided name and description. "
             + "Returns the Agent ID and Location URI of the newly created agent.")
     public String createAgent(@ToolArg(description = "Agent name (required)") String name,
                               @ToolArg(description = "Agent description (optional)", required = false) String description,
-                              @ToolArg(description = "Comma-separated list of package URIs to include (optional, format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)",
+                              @ToolArg(description = "Comma-separated list of workflow URIs to include (optional, format: eddi://ai.labs.workflow/workflowstore/workflows/ID?version=1)",
                                        required = false) String workflowUris) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         if (name == null || name.isBlank())
@@ -361,12 +363,12 @@ public class McpAdminTools {
         }
     }
 
-    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced packages and resources.")
+    @Tool(name = "delete_agent", description = "Delete a agent. Optionally cascade-delete all referenced workflows and resources.")
     public String deleteAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
                               @ToolArg(description = "Permanently delete? (default: false)", required = false,
                                        defaultValue = "false") Boolean permanent,
-                              @ToolArg(description = "Cascade-delete packages and resources? (default: false)", required = false,
+                              @ToolArg(description = "Cascade-delete workflows and resources? (default: false)", required = false,
                                        defaultValue = "false") Boolean cascade) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
         try {
@@ -382,7 +384,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "update_agent", description = "Update an agent's name and/or description, and optionally redeploy. "
-            + "For structural changes (adding/removing packages, modifying resources), use the "
+            + "For structural changes (adding/removing workflows, modifying resources), use the "
             + "individual resource tools (read_workflow, read_resource) and the REST API directly.")
     public String updateAgent(@ToolArg(description = "Agent ID (required)") String agentId,
                               @ToolArg(description = "Version number (required)") Integer version,
@@ -437,7 +439,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "read_workflow", description = "Read a workflow's full workflow configuration. "
-            + "Returns the list of package extensions (parser, behavior, langchain, httpcalls, output, etc.) "
+            + "Returns the list of workflow steps (parser, behavior, langchain, httpcalls, output, etc.) "
             + "with their types and resource URIs. Use this to understand what's inside an agent's workflow.")
     public String readWorkflow(@ToolArg(description = "Workflow ID (required)") String workflowId,
                                @ToolArg(description = "Version number (default: latest)", required = false) Integer version) {
@@ -642,9 +644,9 @@ public class McpAdminTools {
     }
 
     @Tool(name = "apply_agent_changes", description = "Batch-cascade multiple resource URI changes through "
-            + "package → Agent in ONE pass. After updating resources with update_resource, use this to wire "
-            + "the new versions into the agent's packages and optionally redeploy. "
-            + "This replaces ALL URIs in-memory and saves each package/agent ONCE — no wasteful intermediate versions. "
+            + "workflow → Agent in ONE pass. After updating resources with update_resource, use this to wire "
+            + "the new versions into the agent's workflows and optionally redeploy. "
+            + "This replaces ALL URIs in-memory and saves each workflow/agent ONCE — no wasteful intermediate versions. "
             + "Each oldUri must be a reference the agent actually holds (a workflow step's resource or the workflow itself), "
             + "and newUri the same kind of resource with a version; otherwise nothing is written. Shared with the REST "
             + "endpoint POST /agentstore/agents/{id}/cascade.")
@@ -688,7 +690,7 @@ public class McpAdminTools {
     }
 
     @Tool(name = "list_agent_resources", description = "Get a complete inventory of all resources in an agent's workflow. "
-            + "Walks Agent → packages → extensions and returns a flat summary with all resource IDs, types, and URIs. "
+            + "Walks Agent → workflows → steps and returns a flat summary with all resource IDs, types, and URIs. "
             + "This is the fastest way to understand an agent's full configuration before making changes.")
     public String listAgentResources(@ToolArg(description = "Agent ID (required)") String agentId,
                                      @ToolArg(description = "Agent version (default: latest)", required = false) Integer version) {
@@ -1428,6 +1430,10 @@ public class McpAdminTools {
                         + "(EU AI Act Art. 50 transparency)";
                 case "email.honor-reply-to" -> trimmed + ": replies go to the Reply-To, which DMARC does not authenticate — anyone who can "
                         + "send authenticated mail from an allowed domain chooses where the reply goes";
+                case "email.allowlist-emptied" -> trimmed + ": the allowlist is now empty, so every sender can make the agent run "
+                        + "(subject only to requireAuthentication)";
+                case "email.allowlist-broad" -> trimmed + ": an allowlist entry admits a whole public suffix (such as *@*.co.uk) or the "
+                        + "integration's own domain; prefer exact addresses";
                 default -> trimmed;
             });
         }
@@ -1460,5 +1466,108 @@ public class McpAdminTools {
         } catch (Exception e) {
             return toolFailure(LOGGER, "delete_channel_integration", "Failed to delete channel integration", e);
         }
+    }
+
+    @Tool(name = "list_email_senders", description = "Read the sender allowlist and blocklist of an email integration: "
+            + "{version, allow, block} of its current version. An empty allowlist allows every sender (subject to "
+            + "requireAuthentication). Pass the version to update_email_senders as expectedVersion.")
+    public String listEmailSenders(@ToolArg(description = "Email integration resource ID (required)") String integrationId) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        try {
+            var view = getRestStore(IRestChannelIntegrationStore.class).readEmailSenders(integrationId);
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("version", view.version());
+            result.put("allow", view.allow());
+            result.put("block", view.block());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "list_email_senders", "Failed to read the sender lists", e);
+        }
+    }
+
+    @Tool(name = "update_email_senders", description = "Add or remove entries of an email integration's sender allowlist and "
+            + "blocklist without rewriting the integration. Every change creates a new version of the integration (history and "
+            + "rollback as for any save) and an audit entry with the reason. Prefer exact addresses (alice@partner.com) over "
+            + "domains (*@partner.com) and subdomain patterns (*@*.partner.com). Entries that change nothing are reported, not "
+            + "refused. A stale expectedVersion is refused with the current lists: read them again with list_email_senders. "
+            + "Removing the last allowlist entry opens the integration to every sender and needs confirmOpen true. Never callable "
+            + "from a conversation an email started.")
+    public String updateEmailSenders(
+                                     @ToolArg(description = "Email integration resource ID (required)") String integrationId,
+                                     @ToolArg(description = "The version list_email_senders returned (required)") Integer expectedVersion,
+                                     @ToolArg(description = "Comma-separated entries to add to the allowlist", required = false) String addAllow,
+                                     @ToolArg(description = "Comma-separated entries to add to the blocklist", required = false) String addBlock,
+                                     @ToolArg(description = "Comma-separated entries to remove from the allowlist",
+                                              required = false) String removeAllow,
+                                     @ToolArg(description = "Comma-separated entries to remove from the blocklist",
+                                              required = false) String removeBlock,
+                                     @ToolArg(description = "Why, for the audit trail", required = false) String reason,
+                                     @ToolArg(description = "true to allow removing the last allowlist entry (default: false)", required = false,
+                                              defaultValue = "false") Boolean confirmOpen) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        if (expectedVersion == null)
+            return errorJson("expectedVersion is required: read it with list_email_senders");
+        try {
+            var request = new EmailSenderLists.UpdateRequest(expectedVersion,
+                    new EmailSenderLists.Entries(commaSeparated(addAllow), commaSeparated(addBlock)),
+                    new EmailSenderLists.Entries(commaSeparated(removeAllow), commaSeparated(removeBlock)), reason,
+                    Boolean.TRUE.equals(confirmOpen));
+            Response response;
+            try {
+                response = getRestStore(IRestChannelIntegrationStore.class).updateEmailSenders(integrationId, request);
+            } catch (WebApplicationException refused) {
+                // A client that throws on a 4xx instead of handing the response back.
+                if (refused.getResponse() == null || refused.getResponse().getStatus() != Response.Status.CONFLICT.getStatusCode()) {
+                    throw refused;
+                }
+                response = refused.getResponse();
+            }
+            Object body = entityOf(response);
+            if (response.getStatus() == Response.Status.CONFLICT.getStatusCode()) {
+                return errorJson("expectedVersion " + expectedVersion + " is not the current version; nothing was changed. Read the "
+                        + "lists again with list_email_senders and retry. Current: " + jsonSerialization.serialize(body), "CONFLICT", null);
+            }
+            var result = new LinkedHashMap<String, Object>();
+            result.put("integrationId", integrationId);
+            result.put("status", response.getStatus());
+            result.put("result", body);
+            putWarnings(result, response);
+            return resultJson("updated", result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "update_email_senders", "Failed to update the sender lists", e);
+        }
+    }
+
+    private static List<String> commaSeparated(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        List<String> entries = new ArrayList<>();
+        for (String part : value.split(",")) {
+            if (!part.isBlank()) {
+                entries.add(part.trim());
+            }
+        }
+        return entries;
+    }
+
+    /**
+     * The body of a response: read when it came over the loopback client, as built
+     * when it did not.
+     */
+    private static Object entityOf(Response response) {
+        try {
+            if (response.hasEntity()) {
+                return response.readEntity(Map.class);
+            }
+        } catch (RuntimeException e) {
+            // A server-built response (in-process, or a test): its entity is the object.
+        }
+        return response.getEntity();
     }
 }

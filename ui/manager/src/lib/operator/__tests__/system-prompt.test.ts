@@ -7,7 +7,7 @@ import {
   safetyPreambleForScope,
   promptSafeName,
 } from "../system-prompt";
-import { setBrand, DEFAULT_BRAND } from "@/lib/brand";
+import { setBrand, DEFAULT_BRAND } from "@eddi/app-kit/lib/brand";
 import {
   READ_ENDPOINTS,
   WRITE_ENDPOINTS,
@@ -1339,5 +1339,25 @@ describe("6.7 feature knowledge in the quick reference (no endpoint needed)", ()
     ]) {
       expect(body).toContain(page);
     }
+  });
+});
+
+describe("Qute namespace safety of the whole prompt body", () => {
+  // The backend renders the body as a Qute template on every turn. `{name: ...}`
+  // is read as a namespace expression, and a namespace the engine has no resolver
+  // for fails the render, so the model receives the prompt unrendered. #1318 wrote
+  // a metric as `eddi_..._total{outcome: match, no_match}` and broke the Operator
+  // Activation E2E on main. Describe a metric tag in words, never as `{tag: ...}`.
+  const KNOWN_NAMESPACES = new Set(["vault", "connection", "caller"]);
+
+  it.each([
+    ["read-only grants", READ_ENDPOINTS],
+    ["read and write grants", [...READ_ENDPOINTS, ...WRITE_ENDPOINTS]],
+  ])("opens no brace with an unknown `name:` namespace (%s)", (_label, endpoints) => {
+    const body = buildOperatorPromptBody(endpoints);
+    const unknown = [...body.matchAll(/\{\s*([A-Za-z_][\w-]*)\s*:/g)]
+      .map((m) => m[1] ?? "")
+      .filter((ns) => !KNOWN_NAMESPACES.has(ns));
+    expect(unknown).toEqual([]);
   });
 });

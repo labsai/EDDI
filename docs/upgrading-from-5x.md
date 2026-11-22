@@ -76,7 +76,7 @@ reason `idle`.
 ### Ending a backlog of idle conversations in one call
 
 After a migration, 5.x can leave tens of thousands of conversations open. To end them without
-waiting for the daily job, an admin can run one database operation:
+waiting for the daily job, an admin can run one database operation (from 6.6.0):
 
 ```
 POST /conversationstore/conversations/end-inactive?inactiveForDays=90
@@ -88,7 +88,7 @@ It ends every `READY` conversation whose last interaction is older than `inactiv
 `dryRun=true` ends nothing and returns what it would end: run it first. The role is `eddi-admin`,
 `inactiveForDays` must be at least 1, and every call is written to the audit ledger.
 
-**Ending conversations can make them eligible for deletion by the next retention run** (see [retention](#3-retention-decide-before-the-first-boot) below), so check `deleteEndedConversationsOnceOlderThanDays` before you run it for real.
+**Ending conversations can make them eligible for deletion by the next retention run** (see [retention](#3-retention-decide-before-the-first-boot) above), so check `deleteEndedConversationsOnceOlderThanDays` before you run it for real.
 
 - A conversation paused for human approval (`AWAITING_HUMAN`), one in the middle of a turn
   (`IN_PROGRESS`) and one with no timestamp at all are left alone.
@@ -391,11 +391,10 @@ configuration at the vault reference.
 than leaving them to the idle sweep ([section 3](#3-retention-decide-before-the-first-boot)):
 
 1. Keep idle-ending off for the first boot, as in section 3.
-2. After the migration, end the inactive ones in bulk with the **end-inactive** operation of the
-   conversation store REST API (`POST` on the `end-inactive` sub-resource of the
-   `/conversationstore/conversations` collection, available in releases that include it). It ends
-   by inactivity age, so you can start with a generous cut-off and tighten it. Check the API
-   reference of your release for its parameters.
+2. After the migration, end the inactive ones in bulk with
+   `POST /conversationstore/conversations/end-inactive` (from 6.6.0; parameters in
+   [Ending a backlog of idle conversations in one call](#ending-a-backlog-of-idle-conversations-in-one-call)).
+   It ends by inactivity age, so you can start with a generous cut-off and tighten it.
 3. Then enable the retention settings from section 3 so the remaining ones are handled by the
    normal sweep.
 

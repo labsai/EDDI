@@ -31,12 +31,12 @@ spacing (`p-5`, `gap-2`), radius
 (`rounded-lg`, `rounded-xl`), text (`text-sm`, `font-medium`), flex/grid.
 Dark mode: add the `dark` class to a root ancestor — tokens flip automatically.
 Many components forward `className` to extend their styling (merged with `cn()`),
-but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
+but not all (e.g. `BackLink` only takes `to`/`label`/`onNavigate`) — check each component's
 `.d.ts` for whether `className` is in its props.
 
 ## Variant props (don't restyle — use the prop)
 
-- **Button** — `variant`: `primary` | `secondary` | `destructive` | `warning` | `outline` | `ghost` | `link`; `size`: `sm` | `md` | `lg` | `icon`. Put a lucide icon as a child for an icon+label button.
+- **Button** — `variant`: `primary` | `secondary` | `destructive` | `warning` | `outline` | `ghost` | `link`; `size`: `sm` | `md` | `lg` | `icon` | `iconSm`. Put a lucide icon as a child for an icon+label button.
 - **Badge** — `variant`: `default` | `secondary` | `success` | `warning` | `destructive` | `outline`.
 - **Card** — compose `Card` > `CardHeader` (`CardTitle`, `CardDescription`) + `CardContent` + `CardFooter`.
 
@@ -45,17 +45,20 @@ but not all (e.g. `BackLink` only takes `to`/`label`) — check each component's
 The synced surface includes EDDI's real page chrome, so a full screen is composed from
 it rather than reimplemented:
 
-- **`Sidebar`** — `collapsed` / `onToggle`. The nav rail: brand mark, Manager/Workforce
+- **`Sidebar`** — `collapsed` / `onToggle` (and optional `showLanguage`, the footer language picker for the phone drawer). The nav rail: brand mark, Manager/Workforce
   switcher, collapsible sections, external links, version footer. It fills its parent's
   height, so give it a height-constrained flex container.
 - **`TopBar`** — `onMenuClick` / `sidebarVisible`. Breadcrumb (derived from the router),
   platform-status pill, and the theme/language controls.
 - **`PlatformStatus`**, **`PageLoader`**, **`MockDataBanner`** — the connectivity pill, a
-  route-level skeleton, and the demo-mode strip. All take no props.
+  route-level skeleton, and the demo-mode strip. `PageLoader` and `MockDataBanner` take no
+  props; `PlatformStatus` takes only an optional `compact`.
+- **`BrandWordmark`** / **`BrandIcon`** — the deployment's logo and icon (EDDI's when
+  unbranded); **`AboutDialog`** — `open` / `onOpenChange` / `version`.
 
 There is no `AppLayout` in the bundle — it is deliberately excluded. Build the frame as a
 full-height flex row: `Sidebar` beside a column of `TopBar` + your `<main>`, and give that
-main region `p-6` yourself (the app's layout supplies it, so pages never repeat it).
+main region `p-4 md:p-6` yourself (the app's layout supplies it, so pages never repeat it).
 
 Also available beyond the leaf components: **`DropdownMenu`** (Radix wrapper — compose
 `DropdownMenuTrigger` / `Content` / `Item` / `Separator` / `Label`), **`ModeSwitcher`**, and

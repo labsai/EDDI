@@ -40,7 +40,12 @@ export function DecisionSummary({ decision }: { decision: SubmittedDecision }) {
               data-testid={`approval-decision-summary-call-${item.id}`}
               data-outcome={item.outcome}
             >
-              <span className="font-mono text-foreground">{item.label}</span>
+              <span
+                className={item.toolName ? "font-medium text-foreground" : "font-mono text-foreground"}
+                title={item.toolName}
+              >
+                {item.label}
+              </span>
               <span className={item.outcome === "APPROVED" ? "text-emerald-600" : "text-destructive"}>
                 {item.outcome === "APPROVED"
                   ? t("hitl.decisionSummaryCallApproved", "approved")

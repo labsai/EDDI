@@ -13,6 +13,9 @@ import ai.labs.eddi.engine.schedule.ScheduleOwnerScope;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.engine.security.spaces.directory.DirectoryUser;
 import ai.labs.eddi.engine.security.spaces.directory.UserDirectory;
+import ai.labs.eddi.engine.userevents.UserEvent;
+import ai.labs.eddi.engine.userevents.UserEventAudience;
+import ai.labs.eddi.engine.userevents.UserEventPublisher;
 import ai.labs.eddi.engine.schedule.IScheduleStore;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
@@ -20,6 +23,7 @@ import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.integrations.email.EmailMailboxPoller;
 import ai.labs.eddi.integrations.email.EmailPollSchedules;
 import ai.labs.eddi.engine.api.IConversationService;
@@ -72,6 +76,15 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * self-continuing conversation ({@link ContinuationFireHandler}); a turn, but
  * one whose input, identity and once-only check are the engine's, not a
  * schedule's</li>
+ * <li>{@code hitlAutonomyType=maintenance} — HITL oversight maintenance (sample
+ * expiry, earned-autonomy evaluation, retention)</li>
+ * <li>{@code emailPoll=true} — a mailbox poll of an email channel
+ * integration</li>
+ * <li>{@code ragIngestion=true} — a crawl of a knowledge base's source</li>
+ * <li>{@code teamCadenceType=team_cadence} — a backlog pull into a group
+ * discussion ({@link TeamCadenceService})</li>
+ * <li>{@code lessonType=lesson_consolidation} — a team's retro-lesson
+ * consolidation ({@link LessonConsolidationService})</li>
  * </ul>
  * All of them still run under the poller's cluster-wide claim, lease,
  * retry/backoff and fire-log machinery.
@@ -80,7 +93,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <ul>
  * <li>{@code TenantQuotaService} — API call and cost quotas</li>
  * <li>{@code AuditLedgerService} — HMAC-SHA256 audit trail</li>
- * <li>{@code ConversationCoordinator} — ordered processing</li>
+ * <li>{@code IConversationCoordinator} — ordered processing</li>
  * </ul>
  *
  * @author ginccc
@@ -162,6 +175,14 @@ public class ScheduleFireExecutor {
 
     @Inject
     IConversationMemoryStore conversationMemoryStore;
+
+    /**
+     * Announces finished and failed runs on the owner's event stream.
+     * Field-injected like the rest; {@code null} in tests that build this class by
+     * hand.
+     */
+    @Inject
+    UserEventPublisher userEventPublisher;
 
     /**
      * Steps after which a {@code conversationStrategy=persistent} schedule rolls
@@ -308,6 +329,9 @@ public class ScheduleFireExecutor {
         double cost = 0.0;
         boolean interrupted = false;
         double costBefore = 0.0;
+        // The turn ran but ended paused on a human approval: the run is not over, and
+        // the pause announces itself (approval.pending), so no run_completed.
+        boolean awaitingHuman = false;
 
         try {
             Environment env = resolveEnvironment(schedule.getEnvironment());
@@ -403,6 +427,7 @@ public class ScheduleFireExecutor {
                         schedule.getId(), conversationId, state);
             } else {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
+                awaitingHuman = state == ConversationState.AWAITING_HUMAN;
                 LOGGER.infof("[SCHEDULE] Fired schedule '%s' (id=%s, type=%s) for Agent %s → conversation %s", schedule.getName(),
                         schedule.getId(), schedule.getTriggerType(), schedule.getAgentId(), conversationId);
             }
@@ -448,9 +473,52 @@ public class ScheduleFireExecutor {
         // quantities; see ScheduleFireLog#cost and docs/scheduling.md.
         cost = Math.max(0.0, conversationCost(conversationId) - costBefore);
 
+        // Before the fire log: recordFire re-asserts a remembered interrupt, which
+        // would
+        // fail the owner lookup.
+        if (!awaitingHuman) {
+            announceFire(schedule, conversationId, status, UserEvent.JOB_SCHEDULE);
+        }
+
         // 4. Log the fire attempt (Fix #4: use caller-provided attemptNumber)
         return recordFire(fireLogId, schedule, startedAt, status, instanceId, conversationId, errorMessage, attemptNumber, cost, "conversation",
                 interrupted);
+    }
+
+    /**
+     * Tells the conversation's owner, on {@code GET /me/events}, that a scheduled
+     * run completed or that a scheduled run or a continuation turn failed. The
+     * owner is read from the conversation's descriptor — the record every ownership
+     * check reads — never taken from the schedule. A completed continuation turn
+     * announces nothing here: whether the job goes on is decided when that turn
+     * commits ({@code job.finished}, from {@code ConversationContinuations}). A
+     * skipped fire announces nothing, and neither does a scheduled run whose turn
+     * ended paused on a human approval (its {@code approval.pending} says so; the
+     * run has not completed). Never throws.
+     */
+    private void announceFire(ScheduleConfiguration schedule, String conversationId, String status, String jobKind) {
+        UserEventPublisher publisher = userEventPublisher;
+        if (publisher == null || conversationId == null) {
+            return;
+        }
+        String kind;
+        if (ScheduleConfiguration.FireStatus.FAILED.name().equals(status)) {
+            kind = UserEvent.KIND_JOB_FAILED;
+        } else if (ScheduleConfiguration.FireStatus.COMPLETED.name().equals(status) && UserEvent.JOB_SCHEDULE.equals(jobKind)) {
+            kind = UserEvent.KIND_JOB_RUN_COMPLETED;
+        } else {
+            return;
+        }
+        try {
+            UserEventPublisher.ConversationOwner owner = publisher.conversationOwner(conversationId);
+            if (owner == null) {
+                return;
+            }
+            publisher.publish(UserEvent.of(kind).withSurface(UserEvent.SURFACE_REGULAR).withConversation(conversationId, owner.agentId())
+                    .withJob(jobKind, schedule.getId()).withState(status), UserEventAudience.principal(owner.userId()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("[SCHEDULE] Could not announce the fire of schedule %s: %s", sanitize(schedule.getId()), e.getMessage());
+        }
     }
 
     private ScheduleFireLog fireContinuation(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
@@ -464,6 +532,7 @@ public class ScheduleFireExecutor {
         // The handler re-asserts an interrupt it caught; park it across the fire-log
         // write (a set flag can fail the store's connection checkout), as fire() does.
         boolean interrupted = Thread.interrupted();
+        announceFire(schedule, conversationId, result.status(), UserEvent.JOB_CONTINUATION);
         return recordFire(null, schedule, startedAt, result.status(), instanceId, conversationId, result.error(), attemptNumber, 0.0,
                 "continuation", interrupted);
     }
@@ -925,9 +994,12 @@ public class ScheduleFireExecutor {
     /**
      * Run one team-cadence pull (I13) and record the fire. Mirrors
      * {@link #fireDreamConsolidation}: a deliberate skip (backlog empty, previous
-     * discussion still running, lost claim) is COMPLETED with the reason in the
-     * log; a real failure is FAILED so it retries with backoff and eventually
-     * dead-letters instead of appearing to run while doing nothing.
+     * discussion still running, lost claim, only handed-off tasks the team cannot
+     * verify left) is COMPLETED with the reason in the fire log's
+     * {@code errorMessage}, as a skipped conversation fire carries its own, so the
+     * fire history says why a team did nothing; a real failure is FAILED so it
+     * retries with backoff and eventually dead-letters instead of appearing to run
+     * while doing nothing.
      */
     private ScheduleFireLog fireTeamCadence(ScheduleConfiguration schedule, String instanceId, int attemptNumber) {
         Instant startedAt = Instant.now();
@@ -942,6 +1014,7 @@ public class ScheduleFireExecutor {
             if (result.isSuccess()) {
                 status = ScheduleConfiguration.FireStatus.COMPLETED.name();
                 if (result.skippedReason() != null) {
+                    errorMessage = result.skippedReason();
                     LOGGER.infof("[SCHEDULE] Team cadence '%s' (id=%s) skipped: %s", schedule.getName(), schedule.getId(),
                             result.skippedReason());
                 } else {
@@ -1037,6 +1110,9 @@ public class ScheduleFireExecutor {
         if (allowance > 0 && Double.isFinite(allowance)) {
             context.put(ScheduleConfiguration.CONTEXT_MAX_COST_PER_FIRE, new Context(Context.ContextType.object, allowance));
         }
+        // A check-back a mail-started turn booked starts a conversation that is just as
+        // tainted (email plan v3 §5.3).
+        context = TurnOrigin.withOrigin(context, TurnOrigin.fromMetadata(schedule.getMetadata()));
 
         var result = conversationService.startConversation(env, schedule.getAgentId(), userId, context);
 
@@ -1358,6 +1434,10 @@ public class ScheduleFireExecutor {
         // Set userId context
         String userId = schedule.getUserId() != null ? schedule.getUserId() : DreamService.SCHEDULER_PLACEHOLDER_USER_ID;
         contextMap.put("userId", new Context(Context.ContextType.string, userId));
+        String origin = TurnOrigin.fromMetadata(schedule.getMetadata());
+        if (origin != null) {
+            contextMap.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, origin));
+        }
 
         inputData.setContext(contextMap);
         return inputData;

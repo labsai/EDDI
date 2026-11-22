@@ -12,7 +12,7 @@ import {
   validateHeaderTemplate,
   validateOrigin,
   validateParamValue,
-} from "@/lib/connection-validation";
+} from "@eddi/app-kit/lib/connection-validation";
 
 /**
  * These rules are a mirror of EDDI's `ConnectionConfiguration.validate()`.

@@ -6,6 +6,7 @@ package ai.labs.eddi.engine.internal;
 import ai.labs.eddi.configs.agents.IAgentStore;
 
 import ai.labs.eddi.engine.security.CallerIdentityContext;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.IGroupConversationStore;
 import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration;
@@ -83,7 +84,7 @@ class GroupConversationServiceExtendedTest {
         service = new GroupConversationService(groupStore, conversationStore,
                 conversationService, agentFactory, templatingEngine,
                 jsonSerialization, new SimpleMeterRegistry(),
-                null, agentStore, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                null, agentStore, null, null, new CallerIdentityContext(null, null), "default", 3);
 
         when(conversationStore.create(any())).thenReturn("gc-1");
 
@@ -172,6 +173,27 @@ class GroupConversationServiceExtendedTest {
             c.setProtocol(new ProtocolConfig(60, ProtocolConfig.MemberFailurePolicy.SKIP, 2,
                     ProtocolConfig.MemberUnavailablePolicy.SKIP));
             return c;
+        }
+
+        /**
+         * Email plan v3 §5.3: a discussion started under the email taint (the poller
+         * binds it; a nested discussion gets its parent's) stores it and hands it to
+         * every member conversation it starts.
+         */
+        @Test
+        void discussionStartedUnderTheEmailTaint_storesItAndTaintsEveryMember() throws Exception {
+            setupStore(voteConfig(AgentGroupConfiguration.TiePolicy.NO_DECISION));
+            stubAgent("a1", "{\"vote\": \"Ship it\"}");
+            stubAgent("a2", "{\"vote\": \"Ship it\"}");
+            stubAgent("a3", "{\"vote\": \"Hold it\"}");
+
+            GroupConversation gc = TurnOrigin.callWith(TurnOrigin.EMAIL,
+                    () -> service.discuss(GROUP_ID, "Release?", USER_ID, 0, mock(GroupDiscussionEventListener.class)));
+
+            assertEquals(TurnOrigin.EMAIL, gc.getOrigin());
+            verify(conversationService, times(3)).startConversation(any(), any(), any(),
+                    argThat(context -> TurnOrigin.EMAIL.equals(TurnOrigin.fromContext(context))));
+            assertNull(TurnOrigin.current(), "the binding ends with the call");
         }
 
         @Test
@@ -1327,7 +1349,7 @@ class GroupConversationServiceExtendedTest {
             var svc = new GroupConversationService(groupStore, conversationStore,
                     conversationService, agentFactory, templatingEngine,
                     jsonSerialization, new SimpleMeterRegistry(),
-                    null, null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
+                    null, null, null, null, new CallerIdentityContext(null, null), "default", 3);
 
             assertDoesNotThrow(svc::shutdown);
         }

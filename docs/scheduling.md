@@ -152,6 +152,7 @@ Heartbeats are **drift-proof** — the next fire is the time this fire was *due*
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
+| `name` | string | — | Display name. Engine-minted schedules are named `hitl-timeout-<conversationId>` and `continuation-<conversationId>` |
 | `agentId` | string | required | Agent to trigger |
 | `agentVersion` | int | `0` (latest) | Agent version (0 = latest deployed) |
 | `triggerType` | enum | `CRON` | `CRON` or `HEARTBEAT` |
@@ -386,6 +387,13 @@ curl http://localhost:7070/schedulestore/schedules/admin/failed?limit=50
 > against others on the same path, and use `maxCostPerFire` / `maxCostPerRun`
 > rather than the logged number to bound spend.
 
+> **A team cadence fire that runs nothing says why.** A skip (the backlog has no
+> executable task, the previous run still holds the workspace, the team's
+> monthly budget is spent, another fire won the claim, or the only executable
+> tasks are handed-off ones the team cannot verify) logs `COMPLETED` with the
+> reason in `errorMessage`, as a `SKIPPED` conversation fire carries its own. It
+> is not a failure: it never retries or dead-letters.
+
 > **A RAG ingestion fire starts a run; it does not wait for it.** The fire claims
 > the source's run and hands it to a worker of its own, then logs `COMPLETED` —
 > a crawl outlasts the scheduler's lease, and running it inside the fire meant
@@ -517,9 +525,9 @@ variables — Quarkus maps `eddi.schedule.poll-interval` to
 | `eddi.schedule.poll-batch-size` | `100` | Max due schedules looked at per poll cycle. Claimed schedules dispatch concurrently on virtual threads; raise it to drain large bursts (e.g. many one-shot HITL approval timeouts expiring together) |
 | `eddi.schedule.max-concurrent-fires` | `100` | Most fires one instance runs at once. A poll takes a free slot before it claims a schedule, so nothing is claimed that cannot start; the rest stay due for the next cycle or another instance |
 | `eddi.schedule.lease-timeout` | `10m` | How long a claimed schedule is considered owned before another instance may re-claim it. It must outlast `fire-timeout` plus a 30 s grace, or a schedule becomes reclaimable while its fire is still running and fires twice; a shorter value is raised at startup to `fire-timeout + 30s + 1m`, with a warning |
-| `eddi.schedule.max-retries` | `5` | Attempts before a fire is `DEAD_LETTERED` |
+| `eddi.schedule.max-retries` | `5` | Failed attempts before a fire is `DEAD_LETTERED`: the fifth consecutive failure dead-letters instead of retrying |
 | `eddi.schedule.backoff-base-seconds` | `15` | Retry delay = `base × multiplier^(attempt-1)` seconds |
-| `eddi.schedule.backoff-multiplier` | `4` | With the defaults: 15s, 60s, 4m, 16m, 64m |
+| `eddi.schedule.backoff-multiplier` | `4` | With the defaults the retries wait 15s, 60s, 4m and 16m; the next failure dead-letters |
 | `eddi.schedule.min-interval-seconds` | `60` | Smallest cron interval a schedule may request. Guards against schedule bombing; a rejected create returns a message naming this property |
 | `eddi.schedule.instance-id` | *(hostname)* | Identity used for cluster claim tracking |
 | `eddi.schedule.default-timezone` | `UTC` | IANA zone applied to schedules that do not name one |

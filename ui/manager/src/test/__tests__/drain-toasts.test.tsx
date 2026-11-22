@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, it, expect } from "vitest";
 import { render, screen } from "@testing-library/react";
 import { Toaster, toast } from "sonner";
-import { drainToasts, TOASTER } from "../drain-toasts";
+import { drainToasts, TOASTER } from "@eddi/app-kit/test/drain-toasts";
 
 const TOAST = "[data-sonner-toast]";
 

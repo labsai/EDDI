@@ -1,0 +1,36 @@
+# Overlay for the operator activation E2E tier (e2e/operator/). Layered on top
+# of the integration compose file, so it is the same EDDI + MongoDB the
+# full-stack tier tests, plus a deterministic model server:
+#
+#   docker compose -f docker-compose.integration.yml \
+#                  -f docker-compose.integration-operator.yml up -d --wait
+#   npm run test:e2e:operator
+#
+# The Platform Operator is provisioned with the `openai-compatible` provider
+# pointed at `llm-stub` (e2e/operator/llm-stub.mjs), so activation, both
+# canaries and a chat turn run against the real backend with no paid model.
+# EDDI reaches the stub by its service name; the browser never talks to it.
+services:
+  eddi:
+    depends_on:
+      llm-stub:
+        condition: service_healthy
+
+  llm-stub:
+    # The Node NODE_VERSION in ci.yml pins. The stub uses nothing beyond
+    # node:http, so any current Node runs it.
+    image: node:26.13.0-alpine
+    command: ["node", "/stub/llm-stub.mjs"]
+    environment:
+      PORT: "8089"
+    ports:
+      # Loopback only, for the spec's GET /__e2e/tools (the tools the model was
+      # offered). EDDI reaches the stub over the compose network, not this port.
+      - "127.0.0.1:8089:8089"
+    volumes:
+      - ./e2e/operator/llm-stub.mjs:/stub/llm-stub.mjs:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8089/health"]
+      interval: 2s
+      timeout: 2s
+      retries: 15

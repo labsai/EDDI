@@ -1,8 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
-import { renderWithProviders, userEvent } from "@/test/test-utils";
-import { SecretKeyPicker } from "../secret-key-picker";
-import { server } from "@/test/mocks/server";
+import { renderWithProviders, userEvent } from "@eddi/app-kit/test/test-utils";
+import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
+import { server } from "@eddi/app-kit/test/mocks/server";
 import { http, HttpResponse } from "msw";
 
 describe("SecretKeyPicker", () => {

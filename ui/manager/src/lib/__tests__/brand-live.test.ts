@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyBrandRevision } from "@/lib/brand-live";
-import { getBrand, setBrand } from "@/lib/brand";
+import { getBrand, setBrand } from "@eddi/app-kit/lib/brand";
 
 /** The shell's own tags, as manage.html carries them. */
 function mountShell() {
