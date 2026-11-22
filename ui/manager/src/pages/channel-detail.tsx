@@ -703,7 +703,7 @@ export function ChannelDetailPage() {
         title={t("channelDetail.confirmOpenTitle", "Remove the last allowed sender?")}
         description={t(
           "channelDetail.confirmOpenDesc",
-          "With an empty allowlist every sender can make the agent run, limited only by sender authentication. The change is recorded in the audit log.",
+          "With an empty allowlist every sender can make the agent run, limited only by sender authentication, and only when it is enabled. The change is recorded in the audit log.",
         )}
         onConfirm={() => {
           setConfirmOpenSave(false);

@@ -3559,7 +3559,7 @@
     "unknownGroup": "{{id}} (no encontrado)",
     "plaintextSecret": "Guarda {{fields}} en la bóveda de secretos y haz referencia con ${vault:…}: las credenciales en texto plano no se guardan.",
     "confirmOpenTitle": "¿Quitar el último remitente permitido?",
-    "confirmOpenDesc": "Con una lista de permitidos vacía, cualquier remitente puede hacer que el agente se ejecute, limitado solo por la autenticación del remitente. El cambio queda registrado en el registro de auditoría.",
+    "confirmOpenDesc": "Con una lista de permitidos vacía, cualquier remitente puede hacer que el agente se ejecute, limitado solo por la autenticación del remitente, y solo si está activada. El cambio queda registrado en el registro de auditoría.",
     "confirmOpenConfirm": "Guardar y abrir",
     "plaintextStored": "Este canal guarda {{fields}} en texto plano. Muévelo a la bóveda de secretos y guarda para sustituirlo por una referencia."
   },
@@ -5637,7 +5637,7 @@
       "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas.",
       "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
       "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta.",
-      "allowlistEmptied": "Guardado, pero la lista de permitidos está vacía: cualquier remitente puede hacer que el agente actúe, limitado solo por la autenticación del remitente.",
+      "allowlistEmptied": "Guardado, pero la lista de permitidos está vacía: cualquier remitente puede hacer que el agente actúe, limitado solo por la autenticación del remitente, y solo si está activada.",
       "allowlistBroad": "Guardado, pero una entrada de la lista de permitidos admite todo un sufijo público (como *@*.co.uk) o el propio dominio de esta integración. Prefiera direcciones exactas."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",

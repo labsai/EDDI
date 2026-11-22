@@ -3559,7 +3559,7 @@
     "unknownGroup": "{{id}} (introuvable)",
     "plaintextSecret": "Stockez {{fields}} dans le coffre à secrets et référencez-le avec ${vault:…} — les identifiants en clair ne sont pas enregistrés.",
     "confirmOpenTitle": "Retirer le dernier expéditeur autorisé ?",
-    "confirmOpenDesc": "Avec une liste d'autorisation vide, tout expéditeur peut faire agir l'agent, dans la seule limite de l'authentification de l'expéditeur. La modification est consignée dans le journal d'audit.",
+    "confirmOpenDesc": "Avec une liste d'autorisation vide, tout expéditeur peut faire agir l'agent, dans la seule limite de l'authentification de l'expéditeur, et seulement si elle est activée. La modification est consignée dans le journal d'audit.",
     "confirmOpenConfirm": "Enregistrer et ouvrir",
     "plaintextStored": "Ce canal stocke {{fields}} en clair. Déplacez-le dans le coffre à secrets et enregistrez pour le remplacer par une référence."
   },
@@ -5637,7 +5637,7 @@
       "toolsWithoutApprovals": "Enregistré, mais un agent ciblé par cette intégration a des outils sans approbation d'outils. Le contenu des e-mails est une entrée non fiable : ajoutez hitlConfig.toolApprovals pour les outils qui modifient des choses.",
       "aiDisclosureDisabled": "Enregistré, mais les réponses n'indiquent plus qu'une IA les a rédigées. Les règles de transparence comme l'AI Act européen attendent que les gens sachent qu'ils parlent à une IA.",
       "honorReplyTo": "Enregistré, mais les réponses vont à l'adresse Reply-To, que DMARC n'authentifie pas : quiconque peut envoyer un e-mail authentifié depuis un domaine autorisé décide où va la réponse.",
-      "allowlistEmptied": "Enregistré, mais la liste d'autorisation est désormais vide : tout expéditeur peut faire agir l'agent, limité seulement par l'authentification de l'expéditeur.",
+      "allowlistEmptied": "Enregistré, mais la liste d'autorisation est désormais vide : tout expéditeur peut faire agir l'agent, limité seulement par l'authentification de l'expéditeur, et seulement si elle est activée.",
       "allowlistBroad": "Enregistré, mais une entrée de la liste d'autorisation admet tout un suffixe public (comme *@*.co.uk) ou le propre domaine de cette intégration. Préférez des adresses exactes."
     },
     "defaultTargetHint": "La cible par défaut reçoit chaque e-mail dont le plus-tag (invoices+urgent@…) ou l'objet ne correspond au déclencheur d'aucune autre cible. Vous pourrez ajouter d'autres cibles après la création.",
