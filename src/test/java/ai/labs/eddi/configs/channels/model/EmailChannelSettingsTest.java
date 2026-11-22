@@ -316,6 +316,106 @@ class EmailChannelSettingsTest {
         }
     }
 
+    @Nested
+    @DisplayName("replyAudience and its keys (email v2 plan §9.1)")
+    class Audience {
+
+        private Map<String, String> thread() {
+            Map<String, String> pc = conversation();
+            pc.put("actWhen", "addressed");
+            pc.put("replyAudience", "thread");
+            pc.put("replyAllowedRecipients", "*@contoso.com, *@*.contoso.com");
+            return pc;
+        }
+
+        @Test
+        @DisplayName("defaults: the sender only, 10 Cc at most, no patterns; nothing changes for existing integrations")
+        void defaults() {
+            var settings = EmailChannelSettings.from(conversation());
+            assertEquals(EmailChannelSettings.ReplyAudience.SENDER, settings.replyAudience());
+            assertFalse(settings.repliesToThread());
+            assertEquals(10, settings.maxReplyRecipients());
+            assertEquals(List.of(), settings.replyAllowedRecipients());
+            assertEquals(List.of(), settings.listAddresses());
+            assertFalse(EmailChannelSettings.warnings(settings).contains(EmailChannelSettings.WARNING_REPLY_AUDIENCE_THREAD));
+        }
+
+        @Test
+        @DisplayName("a thread audience validates with actWhen addressed and an allowlist, and warns")
+        void threadAudience() {
+            Map<String, String> pc = thread();
+            pc.put("maxReplyRecipients", "5");
+            pc.put("listAddresses", "all-staff@contoso.com");
+            assertEquals(List.of(), EmailChannelSettings.validate(pc));
+            var settings = EmailChannelSettings.from(pc);
+            assertTrue(settings.repliesToThread());
+            assertEquals(5, settings.maxReplyRecipients());
+            assertEquals(List.of("*@contoso.com", "*@*.contoso.com"), settings.replyAllowedRecipients());
+            assertEquals(List.of("all-staff@contoso.com"), settings.listAddresses());
+            assertTrue(EmailChannelSettings.warnings(settings).contains(EmailChannelSettings.WARNING_REPLY_AUDIENCE_THREAD));
+        }
+
+        @Test
+        @DisplayName("a thread audience needs actWhen addressed, an allowlist and the default identityMode")
+        void threadPreconditions() {
+            Map<String, String> always = thread();
+            always.remove("actWhen");
+            assertTrue(refused(always, "requires platformConfig.actWhen 'addressed'"));
+            Map<String, String> open = thread();
+            open.remove("replyAllowedRecipients");
+            assertTrue(refused(open, "requires platformConfig.replyAllowedRecipients"));
+            Map<String, String> shared = thread();
+            shared.put("identityMode", "integration");
+            assertTrue(refused(shared, "identityMode must stay perSender"));
+            Map<String, String> explicitDefault = thread();
+            explicitDefault.put("identityMode", "perSender");
+            assertEquals(List.of(), EmailChannelSettings.validate(explicitDefault), "the default spelled out is fine");
+        }
+
+        @Test
+        @DisplayName("patterns use the sender-list syntax (no *@*), at most 50; the cap is 1 to 50")
+        void patterns() {
+            Map<String, String> everyone = thread();
+            everyone.put("replyAllowedRecipients", "*@*");
+            assertTrue(refused(everyone, "replyAllowedRecipients entry 1 must be"));
+            Map<String, String> badList = thread();
+            badList.put("listAddresses", "lists");
+            assertTrue(refused(badList, "listAddresses entry 1 must be"));
+            StringBuilder many = new StringBuilder();
+            for (int i = 0; i <= EmailChannelSettings.MAX_REPLY_RECIPIENT_PATTERNS; i++) {
+                many.append("u").append(i).append("@contoso.com,");
+            }
+            Map<String, String> tooMany = thread();
+            tooMany.put("replyAllowedRecipients", many.toString());
+            assertTrue(refused(tooMany, "has more than 50 entries"));
+            for (String cap : List.of("0", "51", "x")) {
+                Map<String, String> pc = thread();
+                pc.put("maxReplyRecipients", cap);
+                assertTrue(refused(pc, "maxReplyRecipients must be a whole number from 1 to 50"), cap);
+            }
+        }
+
+        @Test
+        @DisplayName("the audience keys belong to conversation mode, and to the thread audience")
+        void scope() {
+            assertTrue(refused(with("replyAudience", "thread"), "belongs to email conversation mode"));
+            assertTrue(refused(conversationWith("replyAllowedRecipients", "*@contoso.com"), "only applies with platformConfig.replyAudience"));
+            assertTrue(refused(conversationWith("maxReplyRecipients", "3"), "only applies with platformConfig.replyAudience"));
+            assertTrue(refused(conversationWith("listAddresses", "all@contoso.com"), "only applies with platformConfig.replyAudience"));
+            assertFalse(EmailChannelSettings.from(with("replyAudience", "thread")).repliesToThread(), "trigger mode never replies");
+        }
+
+        @Test
+        @DisplayName("an unknown audience is refused, and reads as the narrower 'sender' if it is stored anyway")
+        void unknownAudience() {
+            Map<String, String> pc = thread();
+            pc.put("replyAudience", "everyone");
+            assertTrue(refused(pc, "Unknown platformConfig.replyAudience 'everyone'"));
+            assertEquals(EmailChannelSettings.ReplyAudience.SENDER, EmailChannelSettings.from(pc).replyAudience());
+            assertFalse(EmailChannelSettings.from(pc).repliesToThread());
+        }
+    }
+
     @Test
     @DisplayName("the open-trigger warning: no allowlist and no authentication requirement")
     void openTriggerWarning() {

@@ -56,6 +56,9 @@ public final class ReservedPrincipals {
             EmailUserIdentity.PREFIX,
             // Unauthenticated email senders, one-off and memory-less: email-anon:<random>
             EmailUserIdentity.ANONYMOUS_PREFIX,
+            // Conversations of an email integration whose replies copy the thread,
+            // memory-less: email-thread:<integrationId>:<digest>
+            EmailUserIdentity.THREAD_PREFIX,
             // Agent test-harness conversations (PR #1065), which switch tool mocking on
             "agent-test:",
             // A group's shared (team) memory owner: group:<groupId>
@@ -105,13 +108,18 @@ public final class ReservedPrincipals {
 
     /**
      * Whether conversations of {@code userId} must neither read nor write long-term
-     * user memory: the one-off identity of an unauthenticated email sender. Its
-     * {@code From} is a claim anyone can make, so whatever such a turn remembered
-     * would be readable by the next forger — and nothing it could recall belongs to
-     * it.
+     * user memory:
+     * <ul>
+     * <li>the one-off identity of an unauthenticated email sender. Its {@code From}
+     * is a claim anyone can make, so whatever such a turn remembered would be
+     * readable by the next forger — and nothing it could recall belongs to it;</li>
+     * <li>the identity of an email conversation whose replies copy the thread
+     * ({@code email-thread:}): colleagues read the answer, so one person's memory
+     * must not be in it (email v2 plan §9.2).</li>
+     * </ul>
      */
     public static boolean hasNoPersistentMemory(String userId) {
-        return userId != null && userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX);
+        return userId != null && (userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX) || userId.startsWith(EmailUserIdentity.THREAD_PREFIX));
     }
 
     /** Whether {@code principal} is in a namespace EDDI reserves for itself. */
