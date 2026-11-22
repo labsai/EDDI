@@ -5,8 +5,11 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
+import ai.labs.eddi.engine.mail.SmimeTestCertificates;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
 import ai.labs.eddi.integrations.email.ledger.IEmailSuppressionStore;
@@ -14,6 +17,7 @@ import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
+import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.net.URI;
@@ -107,6 +111,80 @@ class EmailChannelSupportTest {
 
         verify(connector, never()).resolve(anyString(), anyInt(), eq(SafeSocketConnector.Protocol.SMTP));
         verify(resolver, never()).requireMailLoginTarget(anyString(), eq(URI.create("smtp://null:587")));
+    }
+
+    @Nested
+    @DisplayName("emailControl.smime against the deployment")
+    class Smime {
+
+        @SuppressWarnings("unchecked")
+        void certificate(String issuedTo) throws Exception {
+            String pem = SmimeTestCertificates.pem(SmimeTestCertificates.issue(SmimeTestCertificates.Leaf.valid(issuedTo)));
+            when(resolver.resolveSmimeSigning(eq("${connection:cert}"), any())).thenReturn(new ConnectionResolver.SmimeMaterial("cert", pem, null));
+            Instance<EmailSmimeSigning> signing = mock(Instance.class);
+            when(signing.isResolvable()).thenReturn(true);
+            EmailSmimeSigning real = new EmailSmimeSigning(mockResolvers());
+            when(signing.get()).thenReturn(real);
+            support.smimeSigning = signing;
+        }
+
+        @SuppressWarnings("unchecked")
+        Instance<ConnectionResolver> mockResolvers() {
+            Instance<ConnectionResolver> resolvers = mock(Instance.class);
+            when(resolvers.isResolvable()).thenReturn(true);
+            when(resolvers.get()).thenReturn(resolver);
+            return resolvers;
+        }
+
+        ChannelIntegrationConfiguration signed(EmailControl.SignMode sign) {
+            var configuration = conversation();
+            configuration.setEmailControl(new EmailControl(new EmailControl.Smime(sign, "cert")));
+            return configuration;
+        }
+
+        @Test
+        @DisplayName("under 'required' a certificate for another address refuses the save (SAN mismatch)")
+        void requiredMismatchRefused() throws Exception {
+            certificate("ceo@contoso.com");
+            var error = assertThrows(BadRequestException.class,
+                    () -> support.validateAgainstDeployment(signed(EmailControl.SignMode.REQUIRED), null));
+            assertTrue(error.getMessage().contains("issued to ceo@contoso.com"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("under 'true' the same certificate saves with a warning")
+        void onMismatchWarns() throws Exception {
+            certificate("ceo@contoso.com");
+            assertDoesNotThrow(() -> support.validateAgainstDeployment(signed(EmailControl.SignMode.TRUE), null));
+            assertTrue(support.warnings(signed(EmailControl.SignMode.TRUE)).contains(EmailChannelSettings.WARNING_SMIME_CERTIFICATE_UNUSABLE));
+        }
+
+        @Test
+        @DisplayName("a certificate for the mailbox saves under 'required'; its private CA is reported as untrusted")
+        void requiredMatchSaves() throws Exception {
+            certificate("invoices@contoso.com");
+            assertDoesNotThrow(() -> support.validateAgainstDeployment(signed(EmailControl.SignMode.REQUIRED), null));
+            var warnings = support.warnings(signed(EmailControl.SignMode.REQUIRED));
+            assertTrue(warnings.contains(EmailChannelSettings.WARNING_SMIME_UNTRUSTED_CHAIN), warnings.toString());
+            assertFalse(warnings.contains(EmailChannelSettings.WARNING_SMIME_CERTIFICATE_UNUSABLE), warnings.toString());
+        }
+
+        @Test
+        @DisplayName("a connection that is not SMIME_SIGNING, or does not allow the relay, refuses the save")
+        void wrongConnection() {
+            doThrow(new ConnectionException(ConnectionException.Reason.UNSUPPORTED_PLACEMENT, "Connection 'cert' is BASIC, not SMIME_SIGNING"))
+                    .when(resolver).requireSmimeSigningTarget(eq("${connection:cert}"), any());
+            var error = assertThrows(BadRequestException.class, () -> support.validateAgainstDeployment(signed(EmailControl.SignMode.TRUE), null));
+            assertTrue(error.getMessage().contains("emailControl.smime.connection"), error.getMessage());
+        }
+
+        @Test
+        @DisplayName("a trigger-mode integration with an smtpHost checks the relay for its self-test")
+        void triggerModeWithRelay() throws Exception {
+            support.validateAgainstDeployment(EmailInboundProcessorTest.integration(Map.of("smtpHost", "smtp.contoso.com")), null);
+            verify(connector).resolve("smtp.contoso.com", 587, SafeSocketConnector.Protocol.SMTP);
+            verify(resolver).requireMailLoginTarget("${connection:mailbox}", URI.create("smtp://smtp.contoso.com:587"));
+        }
     }
 
     @Test

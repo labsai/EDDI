@@ -10,6 +10,7 @@ import ai.labs.eddi.configs.agents.model.AgentConfiguration.ChannelConnector;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
 import ai.labs.eddi.engine.api.IDeploymentStatusReader;
@@ -564,6 +565,20 @@ class ChannelTargetRouterRefreshTest {
 
             assertTrue(result.isPresent());
             assertEquals("resolved-bot-token", result.get().getPlatformConfig().get("botToken"));
+        }
+
+        @Test
+        @DisplayName("the copy keeps emailControl, as its own object")
+        void copiesEmailControl() throws Exception {
+            var original = setupNewStyleConfig(CHANNEL_ID, "token", "secret");
+            original.setEmailControl(new EmailControl(new EmailControl.Smime(EmailControl.SignMode.REQUIRED, "cert")));
+
+            ChannelIntegrationConfiguration copy = router.getIntegration("slack", CHANNEL_ID).orElseThrow();
+
+            assertEquals(original.getEmailControl(), copy.getEmailControl());
+            assertNotSame(original.getEmailControl(), copy.getEmailControl());
+            copy.getEmailControl().getSmime().setConnection("other");
+            assertEquals("cert", original.getEmailControl().getSmime().getConnection());
         }
     }
 

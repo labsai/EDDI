@@ -178,6 +178,10 @@ public class EmailReplySender {
     private final Executor executor;
     private final Duration retention;
     private final LedgerRetry retry;
+    /**
+     * How long a reply held for its S/MIME signature waits before it is given up.
+     */
+    private final Duration smimeMaxHold;
 
     /**
      * What this node's group replies were built from, by row id, so a retry can
@@ -195,9 +199,19 @@ public class EmailReplySender {
             Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry, ManagedExecutor executor,
             @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d") Duration retention,
             @ConfigProperty(name = "eddi.email.outbound.max-attempts", defaultValue = "6") int maxAttempts,
-            @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff) {
+            @ConfigProperty(name = "eddi.email.outbound.retry-backoff", defaultValue = "1m") Duration retryBackoff,
+            @ConfigProperty(name = "eddi.email.smime.max-hold", defaultValue = "72h") Duration smimeMaxHold) {
         this(ledger, suppressions, directory, conversationService, (MailTransport) transport, composer, ownerNotifier, auditLedger, pseudonymizer,
-                meterRegistry, (Executor) executor, retention, maxAttempts, retryBackoff);
+                meterRegistry, (Executor) executor, retention, maxAttempts, retryBackoff, smimeMaxHold);
+    }
+
+    /** For tests: as below, with the default {@link #DEFAULT_SMIME_MAX_HOLD}. */
+    public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
+            IConversationService conversationService, MailTransport transport, EmailReplyComposer composer, EmailOwnerNotifier ownerNotifier,
+            Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry, Executor executor,
+            Duration retention, int maxAttempts, Duration retryBackoff) {
+        this(ledger, suppressions, directory, conversationService, transport, composer, ownerNotifier, auditLedger, pseudonymizer, meterRegistry,
+                executor, retention, maxAttempts, retryBackoff, DEFAULT_SMIME_MAX_HOLD);
     }
 
     /**
@@ -207,7 +221,7 @@ public class EmailReplySender {
     public EmailReplySender(IEmailMessageLedger ledger, IEmailSuppressionStore suppressions, EmailIntegrationDirectory directory,
             IConversationService conversationService, MailTransport transport, EmailReplyComposer composer, EmailOwnerNotifier ownerNotifier,
             Instance<AuditLedgerService> auditLedger, GdprPseudonymizer pseudonymizer, MeterRegistry meterRegistry, Executor executor,
-            Duration retention, int maxAttempts, Duration retryBackoff) {
+            Duration retention, int maxAttempts, Duration retryBackoff, Duration smimeMaxHold) {
         this.ledger = ledger;
         this.suppressions = suppressions;
         this.directory = directory;
@@ -219,12 +233,15 @@ public class EmailReplySender {
         this.pseudonymizer = pseudonymizer;
         this.metrics = new EmailMetrics(meterRegistry);
         this.executor = executor;
-        this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
+        this.retention = retention == null || retention.isZero() || retention.isNegative()
+                ? Duration.ofDays(30)
+                : retention.compareTo(MIN_RETENTION) < 0 ? MIN_RETENTION : retention;
         this.retry = new LedgerRetry(ledger, maxAttempts, retryBackoff);
+        this.smimeMaxHold = saneMaxHold(smimeMaxHold, this.retention);
         // Every attempt can hold its lease and then wait the longest backoff. The
         // direct executor runs eviction on the writing thread, not some time later.
         this.groupReplies = Caffeine.newBuilder().maximumSize(MAX_CACHED_GROUP_REPLIES)
-                .expireAfterWrite(LEASE.plus(LedgerRetry.MAX_BACKOFF).multipliedBy(retry.maxAttempts())).executor(Runnable::run).build();
+                .expireAfterWrite(groupReplyLifetime(retry.maxAttempts(), this.smimeMaxHold)).executor(Runnable::run).build();
     }
 
     // --- Entry points --------------------------------------------------------
@@ -653,7 +670,7 @@ public class EmailReplySender {
             groupReplies.put(row.id(), request);
         }
         try {
-            executor.execute(() -> attempt(row, prepared));
+            executor.execute(() -> attempt(row, prepared, now));
         } catch (RejectedExecutionException e) {
             // The lease runs out and the sweep makes the attempt.
             LOGGER.debugf("Reply %s queued for the sweep: %s", row.id(), e.getMessage());
@@ -661,9 +678,11 @@ public class EmailReplySender {
         return Optional.of(row);
     }
 
-    /** One attempt of a claimed row. Never throws. */
-    void attempt(LedgerEntry row, Prepared prepared) {
-        Instant now = Instant.now();
+    /**
+     * One attempt of a claimed row, at {@code now} (the sweep's time, or the time
+     * the row was written for its first attempt). Never throws.
+     */
+    void attempt(LedgerEntry row, Prepared prepared, Instant now) {
         try {
             if (suppressions.isSuppressed(row.integrationId(), row.recipient())) {
                 if (ledger.complete(row.id(), row.claimToken(), State.SUPPRESSED, null, SUPPRESSED_RECIPIENT, now)) {
@@ -672,16 +691,22 @@ public class EmailReplySender {
                 }
                 return;
             }
-            String provider = transport.send(row.integrationId(), prepared.settings(), prepared.mail().mime(), row.recipient());
-            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, now)) {
-                metrics.reply("sent");
-                metrics.replyLatency(Duration.between(row.createdAt(), now));
+            MailTransport.Sent sent = transport.sendMail(row.integrationId(), prepared.settings(), prepared.mail().mime(), row.recipient());
+            String provider = sent.providerResponse();
+            if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, sent.signed(), now)) {
+                metrics.reply("sent", sent.signed());
+                // Wall clock: the first attempt runs with the time the row was written.
+                metrics.replyLatency(Duration.between(row.createdAt(), Instant.now()));
                 audit(row, "sent", provider, null);
                 groupReplies.invalidate(row.id());
                 LOGGER.infof("Email integration %s: reply %s for conversation %s sent", sanitize(row.integrationId()), row.id(),
                         sanitize(row.conversationId()));
             }
         } catch (MailSendException e) {
+            if (e.getCategory() == MailSendException.Category.SIGNING) {
+                hold(row, prepared.settings(), e, now);
+                return;
+            }
             String error = e.getCategory() + ": " + truncate(e.getMessage());
             retry.deferOrFail(row, error, e.isPermanent(), now, () -> fail(row, prepared.settings(), error, now), () -> {
                 metrics.reply("retry");
@@ -692,6 +717,102 @@ public class EmailReplySender {
             LOGGER.warnf(e, "Email integration %s: reply %s failed unexpectedly", sanitize(row.integrationId()), row.id());
             String error = "OTHER: " + e.getClass().getSimpleName();
             retry.deferOrFail(row, error, false, now, () -> fail(row, prepared.settings(), error, now), () -> metrics.reply("retry"));
+        }
+    }
+
+    /**
+     * How long a reply held for its S/MIME certificate waits before it is tried
+     * again.
+     */
+    static final Duration SMIME_HOLD = Duration.ofHours(1);
+
+    /**
+     * The shortest ledger retention the sender runs with: two holds' worth of slack
+     * plus one hold, so a held row always reaches its give-up step before the
+     * ledger removes it. A smaller {@code eddi.email.ledger-retention} is raised.
+     */
+    static final Duration MIN_RETENTION = SMIME_HOLD.multipliedBy(3);
+
+    /**
+     * How long a group reply's content stays retrievable: every retry attempt can
+     * hold its lease and wait the longest backoff, and a reply held for its S/MIME
+     * certificate must still be there when the hold ends.
+     */
+    static Duration groupReplyLifetime(int maxAttempts, Duration maxHold) {
+        return LEASE.plus(LedgerRetry.MAX_BACKOFF).multipliedBy(maxAttempts).plus(maxHold);
+    }
+
+    /** The default of {@code eddi.email.smime.max-hold}. */
+    public static final Duration DEFAULT_SMIME_MAX_HOLD = Duration.ofHours(72);
+
+    /** The {@code lastError} of a reply given up after its hold. */
+    public static final String SMIME_HOLD_EXPIRED = "smime_unavailable:expired";
+
+    /**
+     * The configured maximum hold, made sane: the default when unset or not
+     * positive, at least one {@link #SMIME_HOLD}, and short enough that the ledger
+     * retention never removes a held row before it is given up — which would end it
+     * with no FAILED row, no audit entry and no notice.
+     */
+    static Duration saneMaxHold(Duration configured, Duration retention) {
+        Duration hold = configured == null || configured.isZero() || configured.isNegative() ? DEFAULT_SMIME_MAX_HOLD : configured;
+        if (hold.compareTo(SMIME_HOLD) < 0) {
+            hold = SMIME_HOLD;
+        }
+        Duration ceiling = retention.minus(SMIME_HOLD.multipliedBy(2));
+        if (ceiling.compareTo(SMIME_HOLD) < 0) {
+            ceiling = SMIME_HOLD; // a retention below MIN_RETENTION; the constructor raises it, this keeps the
+                                  // method total
+        }
+        if (hold.compareTo(ceiling) > 0) {
+            LOGGER.warnf("eddi.email.smime.max-hold (%s) is not shorter than eddi.email.ledger-retention (%s); held replies are given up "
+                    + "after %s instead, before retention removes them.", hold, retention, ceiling);
+            hold = ceiling;
+        }
+        return hold;
+    }
+
+    /**
+     * {@code sign: required} and the reply cannot be signed: it is never sent
+     * unsigned. The row waits (without spending an attempt) and is tried again
+     * hourly, so it leaves as soon as the certificate is fixed; the owners hear
+     * about it once a day. A reply still unsigned {@code eddi.email.smime.max-hold}
+     * (72h by default) after it was written is given up: FAILED with
+     * {@value #SMIME_HOLD_EXPIRED}, audited, and the owners get a final notice. The
+     * signature is always tried first, so a certificate fixed in time still sends
+     * the reply, however late.
+     */
+    private void hold(LedgerEntry row, EmailChannelSettings settings, MailSendException e, Instant now) {
+        String reason = truncate(e.getMessage() != null && e.getMessage().startsWith("smime_unavailable")
+                ? e.getMessage()
+                : "smime_unavailable: " + e.getMessage());
+        Instant giveUpAt = row.createdAt().plus(smimeMaxHold);
+        if (!now.isBefore(giveUpAt)) {
+            expireHold(row, settings, reason, now);
+            return;
+        }
+        Instant next = now.plus(SMIME_HOLD);
+        if (next.isAfter(giveUpAt)) {
+            next = giveUpAt;
+        }
+        if (ledger.hold(row.id(), row.claimToken(), next, reason, now)) {
+            metrics.reply("held");
+            LOGGER.warnf("Email integration %s: reply %s held, it cannot be S/MIME-signed and signing is required: %s",
+                    sanitize(row.integrationId()), row.id(), reason);
+            notifyOwners(row.integrationId(), settings, EmailOwnerNotifier.Reason.SMIME_UNAVAILABLE, now);
+        }
+    }
+
+    /** The end of a hold: FAILED, audited, the owners told. */
+    private void expireHold(LedgerEntry row, EmailChannelSettings settings, String reason, Instant now) {
+        String error = truncate(SMIME_HOLD_EXPIRED + " (held " + smimeMaxHold.toHours() + "h; " + reason + ")");
+        if (ledger.complete(row.id(), row.claimToken(), State.FAILED, null, error, now)) {
+            metrics.reply("failed");
+            audit(row, "failed", null, error);
+            groupReplies.invalidate(row.id());
+            LOGGER.warnf("Email integration %s: reply %s for conversation %s given up after %s held for its S/MIME signature: %s",
+                    sanitize(row.integrationId()), row.id(), sanitize(row.conversationId()), smimeMaxHold, reason);
+            notifyOwners(row.integrationId(), settings, EmailOwnerNotifier.Reason.SMIME_HOLD_EXPIRED, now);
         }
     }
 
@@ -771,7 +892,7 @@ public class EmailReplySender {
                 failTerminal(row, settings, "RENDER: " + truncate(e.getMessage()), now);
                 return;
             }
-            attempt(row, new Prepared(settings, rendered));
+            attempt(row, new Prepared(settings, rendered), now);
             return;
         }
         Optional<LedgerEntry> inbound = ledger.findById(ref[0]);
@@ -810,7 +931,7 @@ public class EmailReplySender {
             failTerminal(row, settings, "RENDER: " + truncate(e.getMessage()), now);
             return;
         }
-        attempt(row, new Prepared(settings, mail));
+        attempt(row, new Prepared(settings, mail), now);
     }
 
     private Optional<Request> replyRequest(Located located, SimpleConversationMemorySnapshot snapshot, String stepText) {

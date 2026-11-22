@@ -243,7 +243,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(121, measured.size());
+        assertEquals(122, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {

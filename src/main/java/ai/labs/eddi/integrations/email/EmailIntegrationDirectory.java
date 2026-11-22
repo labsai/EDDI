@@ -77,7 +77,7 @@ public class EmailIntegrationDirectory {
             if (configuration == null || !EmailChannelSettings.CHANNEL_TYPE.equalsIgnoreCase(configuration.getChannelType())) {
                 return Optional.empty();
             }
-            return Optional.of(new EmailIntegration(id, configuration, EmailChannelSettings.from(configuration.getPlatformConfig())));
+            return Optional.of(new EmailIntegration(id, configuration, EmailChannelSettings.from(configuration)));
         } catch (IResourceStore.ResourceNotFoundException e) {
             return Optional.empty();
         } catch (IResourceStore.ResourceStoreException e) {

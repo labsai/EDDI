@@ -28,7 +28,7 @@ EDDI is built around the four things you need before an agent is allowed to act:
 Two design choices make that practical:
 
 - **Agents are configuration.** Models, prompts, tools, API calls and knowledge bases are versioned JSON documents. Change an agent without rebuilding or restarting EDDI, diff it, export it as a ZIP, or sync it to another instance.
-- **Open protocols.** EDDI is an [MCP](docs/mcp-server.md) server (122 tools) and an MCP client, speaks [A2A](docs/a2a-protocol.md), and can serve deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md) (off by default).
+- **Open protocols.** EDDI is an [MCP](docs/mcp-server.md) server (123 tools) and an MCP client, speaks [A2A](docs/a2a-protocol.md), and can serve deployed agents through an [OpenAI-compatible `/v1` API](docs/open-webui-integration.md) (off by default).
 
 EDDI is a service you deploy, not a library you import. If you want agent logic inside your own Java application, a library such as [LangChain4j](https://github.com/langchain4j/langchain4j), which EDDI itself builds on, is the closer fit. The [project philosophy](docs/project-philosophy.md) explains the design: "the engine is strict so the AI can be creative."
 
@@ -260,7 +260,7 @@ Everything in one place, for reading or searching without leaving the page. Each
 
 | Standard | Role | What it gives you |
 | --- | --- | --- |
-| [MCP](docs/mcp-server.md) | Server (122 tools) and [client](docs/mcp-client.md) | Operate EDDI from Claude Desktop, Cursor or any MCP client, and connect agents to external MCP tool servers |
+| [MCP](docs/mcp-server.md) | Server (123 tools) and [client](docs/mcp-client.md) | Operate EDDI from Claude Desktop, Cursor or any MCP client, and connect agents to external MCP tool servers |
 | [A2A](docs/a2a-protocol.md) | Full implementation | Agent-to-agent communication across platforms, Agent Cards and skill discovery |
 | OpenAPI 3.1 | Generation and consumption | A generated spec for EDDI, and an API-calling agent from any OpenAPI spec you paste |
 | OAuth 2.0 / OIDC | Keycloak integration | Authentication and authorization. [Connections](docs/connections.md) give agents per-user OAuth grants to external systems |

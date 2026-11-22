@@ -56,6 +56,7 @@ class McpToolFilterTest {
             "list_channel_integrations", "read_channel_integration",
             "create_channel_integration", "update_channel_integration",
             "delete_channel_integration", "list_email_senders", "update_email_senders",
+            "run_email_self_test",
             // HITL approval surface (McpHitlTools)
             "list_pending_approvals", "get_approval_status", "resume_conversation",
             "cancel_conversation", "list_group_pending_approvals",

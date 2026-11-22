@@ -22,7 +22,7 @@ EDDI uses **Streamable HTTP** transport, served by the Quarkus MCP Server extens
   completed on the server. Check first (`list_agents`, `list_groups`, …) before
   retrying, or you get a duplicate.
 
-## Available Tools (122)
+## Available Tools (123)
 
 ### Argument contract
 
@@ -318,6 +318,7 @@ See [GDPR / CCPA Compliance](gdpr-compliance.md) for data erasure, export, and r
 | `delete_channel_integration`    | Delete a channel integration (soft or permanent)                                                                |
 | `list_email_senders`            | Read an email integration's sender allowlist and blocklist, with the version to edit                            |
 | `update_email_senders`          | Add or remove sender-list entries of an email integration with `expectedVersion`; a new version, audited — [Managing senders](email-integration.md#managing-senders) |
+| `run_email_self_test`           | Start an email integration's sending-health self-test (no `token`), or read its result (`token`): DKIM, alignment, S/MIME, DMARC |
 
 See [Slack Integration](slack-integration.md) for Slack-specific setup and multi-agent thread discussions.
 
@@ -775,7 +776,7 @@ quarkus.mcp.server.support-langchain4j-annotations=false
 
 EDDI uses a **whitelist-based `ToolFilter`** (`McpToolFilter.java`) to control which tools are exposed via MCP.
 
-**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 122 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **HITL oversight** (`McpOversightTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`), the **alert inbox** (`McpAlertTools`), the **price catalog** (`McpPricingTools`), **team handoffs** (`McpTeamHandoffTools`) and **team budgets** (`McpTeamBudgetTools`).
+**Why?** EDDI's langchain4j integration registers internal agent tools (calculator, datetime, websearch, etc.) that are meant ONLY for agent pipeline execution — not for external MCP clients. The extension's discovery of langchain4j `@Tool` beans is switched off (`quarkus.mcp.server.support-langchain4j-annotations=false`), so those tools are not registered at all; the filter remains as a second line of defence. The `ToolFilter` SPI only sees a tool's *name* (not its declaring class or annotation type), so the whitelist is by name. It currently exposes all 123 intended tools — conversation, admin/resource/schedule/channel, setup, **build identity** (`McpVersionTools`), group, **HITL approvals** (`McpHitlTools`), **HITL oversight** (`McpOversightTools`), **persistent user memory** (`McpMemoryTools`), **GDPR/CCPA** (`McpGdprTools`), **docs** (`McpDocTools`), **agent tests** (`McpAgentTestTools`), **conversation ratings** (`McpRatingTools`), the **alert inbox** (`McpAlertTools`), the **price catalog** (`McpPricingTools`), **team handoffs** (`McpTeamHandoffTools`) and **team budgets** (`McpTeamBudgetTools`).
 
 To add a new MCP tool: add its name to the `MCP_TOOLS` set in `McpToolFilter.java`. A quarkus-MCP `@Tool` has no other invocation path, so a tool that is *not* whitelisted is unreachable dead code. `McpToolFilterTest.test_allMcpToolMethods_areWhitelisted()` auto-discovers every `@Tool` in the `engine.mcp` package and fails the build if any is missing from the whitelist — so forgetting this step is caught by CI.
 
@@ -811,7 +812,7 @@ Deployment notes:
 
 **The realm ships the client this uses: `eddi-mcp`.** Public, authorization code + PKCE (`S256` required), no direct access grant, and carrying the same protocol mappers as `eddi-frontend`. That last part is not a detail — the realm defines no `roles` client scope, so **a client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because EDDI reads roles from `realm_access/roles`. If you provision your realm by hand, copy those mappers.
 
-Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.8.0, the version every compose, Kubernetes and Helm stack and the auth E2E tier pin: both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
+Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.8.0 (every compose, Kubernetes and Helm stack and the auth E2E tier now pin 26.8.2, a patch release of the same line): both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
 
 - **Point your client at the client id.** Discovery names the authorization server, not which client to be, so each client has to be told:
   - **Claude Code** — `claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp`. The callback port is worth fixing: without it Claude Code picks a random one, and while `eddi-mcp`'s redirect URIs are wildcards that accept any port, a realm hardened to a single redirect URI would not. **[ext]** Some Claude Code versions attempt dynamic registration even with a client id configured, and fail with "Incompatible auth server: does not support dynamic client registration" — if you hit that, the hand-pasted token below is the fallback.

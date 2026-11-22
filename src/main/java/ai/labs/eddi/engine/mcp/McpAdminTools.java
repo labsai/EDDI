@@ -1328,13 +1328,18 @@ public class McpAdminTools {
             + "DKIM/DMARC-aligned senders run turns; always true in conversation mode), senderAllowlist / senderBlocklist (user@domain, "
             + "*@domain, *@*.domain), identityMode (perSender | integration), attachments (drop | metadata | store), "
             + "attachmentMimeTypes (required for store), maxMessageBytes, stripQuotedHistory (true), inputTemplate, "
-            + "maxTurnsPerSenderPerDay (50), dailyCostBudgetUsd, ownerNotifyAddresses. Trigger mode only: correlateThreads (false). "
-            + "Conversation mode only: smtpHost (required), smtpPort (587 STARTTLS | 465 TLS), fromName, replyTemplate ('{output}'), "
+            + "maxTurnsPerSenderPerDay (50), dailyCostBudgetUsd, ownerNotifyAddresses, smtpHost (required in conversation mode; in "
+            + "trigger mode optional, used only by run_email_self_test), smtpPort (587 STARTTLS | 465 TLS), fromName. Trigger mode only: "
+            + "correlateThreads (false). Conversation mode only: replyTemplate ('{output}'), "
             + "aiDisclosure (a default sentence; empty switches it off and warns), threadParticipants (originalSenderOnly | "
             + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5), honorReplyTo (false; warns). For email, "
-            + "targets[].triggers match the address plus-tag or a subject word. Returns the new resource ID and URI, for a webhook "
+            + "targets[].triggers match the address plus-tag or a subject word. Email only, next to platformConfig: emailControl "
+            + "{smime: {sign: true (default) | \"required\" | false, connection: <name of an SMIME_SIGNING connection>}} — S/MIME-signs "
+            + "the mail the integration sends; 'required' holds mail rather than send it unsigned. Returns the new resource ID and URI, "
+            + "for a webhook "
             + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
-            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
+            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to, email.smime-no-certificate, "
+            + "email.smime-certificate-unusable, email.smime-certificate-expiring, email.smime-untrusted-chain) when there are any.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
@@ -1373,7 +1378,8 @@ public class McpAdminTools {
             + "the same shape as create_channel_integration's; for email, switching mode between 'trigger' and 'conversation' keeps the "
             + "mailbox and its cursor, and the other mode's keys must be removed. For email, a body that empties a non-empty sender "
             + "allowlist opens the integration to every sender and is refused unless confirmOpen is true; prefer update_email_senders "
-            + "for sender changes. Returns save-time warnings when there are any.")
+            + "for sender changes. Send emailControl back unchanged unless you mean to change it: the body replaces the whole "
+            + "document. Returns save-time warnings when there are any.")
     public String updateChannelIntegration(
                                            @ToolArg(description = "Channel integration resource ID (required)") String resourceId,
                                            @ToolArg(description = "Current version number (required)") Integer version,
@@ -1580,5 +1586,31 @@ public class McpAdminTools {
             // A server-built response (in-process, or a test): its entity is the object.
         }
         return response.getEntity();
+    }
+
+    @Tool(name = "run_email_self_test", description = "Run or read the sending-health self-test of an email channel integration. "
+            + "Without token: sends one short mail from the integration to its own address through its SMTP relay (platformConfig.smtpHost, "
+            + "trigger mode too), S/MIME-signed as emailControl.smime says, and returns {status: 'waiting', token, expiresAt}; the token "
+            + "is shown only once and is valid for 15 minutes. With token: returns the result once the mailbox poll picked the mail up "
+            + "(status waiting | done | expired | send_failed) — the DKIM verdict and signing domain, DMARC alignment, whether the "
+            + "S/MIME signature verified and whether the domain publishes DMARC, each as a plain-language finding with what to do. On "
+            + "Microsoft 365 an unsigned result is 'inconclusive'. The test mail never starts an agent turn. At most 5 tests per "
+            + "integration per hour. Needs edit access to the integration.")
+    public String runEmailSelfTest(
+                                   @ToolArg(description = "Email channel integration resource ID (required)") String integrationId,
+                                   @ToolArg(description = "The token a previous call returned, to read that test's result (omit to start a "
+                                           + "new test)", required = false) String token) {
+        requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);
+        if (integrationId == null || integrationId.isBlank())
+            return errorJson("integrationId is required");
+        try {
+            var channelStore = getRestStore(IRestChannelIntegrationStore.class);
+            var result = token == null || token.isBlank()
+                    ? channelStore.startEmailSelfTest(integrationId)
+                    : channelStore.readEmailSelfTest(integrationId, token.trim());
+            return jsonSerialization.serialize(result);
+        } catch (Exception e) {
+            return toolFailure(LOGGER, "run_email_self_test", "Failed to run the email self-test", e);
+        }
     }
 }

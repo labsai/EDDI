@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.transport;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.configs.connections.model.AuthType;
@@ -13,6 +14,7 @@ import ai.labs.eddi.engine.mail.MailSendException;
 import ai.labs.eddi.engine.mail.SmtpSubmitter;
 import ai.labs.eddi.engine.net.SafeSocketConnector;
 import ai.labs.eddi.engine.net.SocketPolicyException;
+import ai.labs.eddi.integrations.email.EmailSmimeSigning;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
@@ -120,12 +122,51 @@ public class ImapMailTransport implements MailTransport {
         this.connectionResolver = connectionResolver;
     }
 
+    /**
+     * Signs outgoing mail as {@code emailControl.smime} says. Field-injected so the
+     * test constructors stay as they are; a transport built without it sends
+     * unsigned, except under {@code sign: required}, where it sends nothing.
+     */
+    @Inject
+    Instance<EmailSmimeSigning> smimeSigning;
+
     @Override
     public String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        return sendMail(integrationId, settings, mime, recipient).providerResponse();
+    }
+
+    @Override
+    public Sent sendMail(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
         if (settings == null || !settings.replies()) {
             // Trigger mode sends nothing, whoever asks.
             throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true,
                     "Email integration " + integrationId + " is not in conversation mode and never sends mail.", null);
+        }
+        return submit(integrationId, settings, mime, recipient);
+    }
+
+    @Override
+    public Sent sendSelfTest(String integrationId, EmailChannelSettings settings, byte[] mime) throws MailSendException {
+        if (settings == null || !settings.hasSmtp() || settings.address() == null) {
+            throw new MailSendException(MailSendException.Category.NOT_CONFIGURED, true,
+                    "Email integration " + integrationId + " has no smtpHost, so it has no relay to test.", null);
+        }
+        // Always to the mailbox itself, never to an address a caller chose.
+        return submit(integrationId, settings, mime, settings.address());
+    }
+
+    /**
+     * Signs (right before submission, after the body is final) and submits.
+     */
+    private Sent submit(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        EmailSmimeSigning.Prepared prepared;
+        if (smimeSigning != null && smimeSigning.isResolvable()) {
+            prepared = smimeSigning.get().prepare(integrationId, settings, mime);
+        } else if (settings.smimeSign() == EmailControl.SignMode.REQUIRED) {
+            throw new MailSendException(MailSendException.Category.SIGNING, false,
+                    "smime_unavailable: S/MIME signing is not available on this node, and emailControl.smime.sign is required.", null);
+        } else {
+            prepared = new EmailSmimeSigning.Prepared(mime, false);
         }
         SafeSocketConnector.Endpoint endpoint;
         try {
@@ -141,7 +182,9 @@ public class ImapMailTransport implements MailTransport {
                     null);
         }
         SmtpSubmitter.Login login = smtpLogin(settings, endpoint);
-        return SmtpSubmitter.submit(connector, endpoint, settings.address(), login, mime, List.of(new MailAddress(recipient, null)));
+        String provider = SmtpSubmitter.submit(connector, endpoint, settings.address(), login, prepared.mime(),
+                List.of(new MailAddress(recipient, null)));
+        return new Sent(provider, prepared.signed());
     }
 
     /** The SMTP login from the integration's connection, for the SMTP origin. */

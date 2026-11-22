@@ -55,7 +55,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         for (LedgerEntry r : due) {
             LedgerEntry next = new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                     r.idempotencyKey(), r.recipient(), r.state(), r.attempts() + 1, leaseUntil, UUID.randomUUID().toString(), r.providerId(),
-                    r.lastError(), r.createdAt(), now, r.expiresAt()).withApprovalOf(r);
+                    r.lastError(), r.createdAt(), now, r.expiresAt(), r.signed()).withApprovalOf(r);
             rows.put(r.id(), next);
             claimed.add(next);
         }
@@ -64,13 +64,19 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public synchronized boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Instant now) {
+        return complete(id, claimToken, terminal, providerId, lastError, null, now);
+    }
+
+    @Override
+    public synchronized boolean complete(String id, String claimToken, State terminal, String providerId, String lastError, Boolean signed,
+                                         Instant now) {
         LedgerEntry r = rows.get(id);
         if (r == null || r.state() != State.PENDING || claimToken == null || !claimToken.equals(r.claimToken())) {
             return false;
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), terminal, r.attempts(), r.nextAttemptAt(), null, providerId, lastError, r.createdAt(), now,
-                r.expiresAt()).withApprovalOf(r));
+                r.expiresAt(), signed != null ? signed : r.signed()).withApprovalOf(r));
         return true;
     }
 
@@ -82,7 +88,19 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), nextAttemptAt, null, r.providerId(), lastError, r.createdAt(), now,
-                r.expiresAt()).withApprovalOf(r));
+                r.expiresAt(), r.signed()).withApprovalOf(r));
+        return true;
+    }
+
+    @Override
+    public synchronized boolean hold(String id, String claimToken, Instant nextAttemptAt, String reason, Instant now) {
+        LedgerEntry r = rows.get(id);
+        if (r == null || r.state() != State.PENDING || claimToken == null || !claimToken.equals(r.claimToken())) {
+            return false;
+        }
+        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+                r.idempotencyKey(), r.recipient(), r.state(), Math.max(0, r.attempts() - 1), nextAttemptAt, null, r.providerId(), reason,
+                r.createdAt(), now, r.expiresAt(), r.signed()).withApprovalOf(r));
         return true;
     }
 
@@ -124,8 +142,8 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(),
                 conversationId != null ? conversationId : r.conversationId(), r.sourceRef(), r.idempotencyKey(), r.recipient(), to,
-                r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt())
-                .withApprovalOf(r));
+                r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt(),
+                r.signed()).withApprovalOf(r));
         return true;
     }
 

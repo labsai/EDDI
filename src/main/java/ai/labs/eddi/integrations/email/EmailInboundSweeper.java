@@ -396,7 +396,7 @@ public class EmailInboundSweeper {
         for (EmailIntegration integration : directory.scan()) {
             EmailChannelSettings settings = integration.settings();
             if (settings.mode() == null
-                    || !EmailChannelSettings.validate(integration.configuration().getPlatformConfig()).isEmpty()) {
+                    || !EmailChannelSettings.validate(integration.configuration()).isEmpty()) {
                 continue;
             }
             try {
