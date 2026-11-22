@@ -30,7 +30,9 @@ Its core decisions:
   reads get no predicate. Backfill, index and unique-key switches, RLS and per-org keys all
   happen in an explicit enablement step that runs while still in single mode. It uses a
   two-step marker with a cluster presence barrier. A **floor release** with
-  `DataLayoutGuard` prevents an unsafe rollback.
+  `DataLayoutGuard` prevents an unsafe rollback to the floor release or newer. Rolling back
+  **below** the floor stays forbidden: an older Mongo binary can read the shared layout
+  without org filters, and no guard in the older binary can stop that.
 - **Postgres RLS** is the backstop, set per connection by an Agroal pool interceptor. A
   connection never spans a binding change.
 - **Roles.** Platform roles are separate client roles. Org roles and teams come from an

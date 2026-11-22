@@ -295,8 +295,13 @@ single mode**, where `eddi-admin` holds platform rights.
 - It runs under a cluster lease and is resumable.
 - When it finishes: set `mode=multi` and restart.
 
-**Precondition:** every live member advertises `org-layout-1` (§5.4). A single node
-without NATS passes trivially.
+**Preconditions:**
+
+- Every live member advertises `org-layout-1` (§5.4). A single node without NATS passes
+  trivially.
+- If NATS is used, a signing key is configured (§8.9). Without one the new rules stop
+  unsigned sending at `SWITCHING` and cluster messages stop flowing, so enablement is
+  **refused** until the key is set. Deployments without NATS skip this check.
 
 **Steps** (each is idempotent and checkpointed in the migration log):
 
@@ -533,12 +538,17 @@ compare-and-set claim.
 
 - **Before the marker:** run today's query unchanged.
 - **After the marker,** inside `OrgScope.platform("job:<name>", …)`:
-  - **Postgres:** select candidate ids from the oldest `:scan` due rows (default 20 × batch),
-    apply `row_number() OVER (PARTITION BY org_id ORDER BY due)` with
-    `rn <= :cap` (`eddi.org.jobs.max-per-org-per-tick`, default 50), and limit to `:batch`.
+  - **Postgres:** each org contributes its own oldest due rows **before** any global limit,
+    so a backlog in one org cannot push another org's rows out of the window. Select
+    `row_number() OVER (PARTITION BY org_id ORDER BY due)` over due rows, keep
+    `rn <= :cap` (`eddi.org.jobs.max-per-org-per-tick`, default 50), then limit to `:batch`.
+    The `(org_id, status, due)` index serves the partitions; if a deployment measures that
+    scan as too costly, bound it per org rather than globally.
     **Close the connection.** No `FOR UPDATE`.
-  - **Mongo:** an aggregation over the same bounded window: `$match` → `$sort {due:1}` →
-    `$limit :scan` → `$group {_id:"$orgId", ids:{$topN:{n:cap, sortBy:{due:1}, output:"$_id"}}}`.
+  - **Mongo:** an aggregation that is also per org: `$match` due → `$group
+    {_id:"$orgId", ids:{$topN:{n:cap, sortBy:{due:1}, output:"$_id"}}}`. The cap applies
+    inside each group, before the global `:batch` limit. There is no global `$limit` ahead of
+    the group.
   - Rotate the starting org each tick, round-robin over the group results.
   - For each id: `OrgContext.runAs(item.orgId, …)`, then the CAS claim and the processing,
     on a **new** connection.
@@ -759,6 +769,13 @@ three things:
   dedicated org.
 - **Before the marker,** existing names keep working
   ([`docs/rag.md`](../docs/rag.md#knowledge-base-isolation)).
+- **Existing stores survive enablement.** Enablement neither renames nor refuses them. For
+  the `default` org, the physical name of every existing knowledge base is recorded as a
+  grandfathered mapping (`ragConfigId` → physical name, in `OrgSettings`) in the enablement
+  checkpoint, and the integrity step (§5.3 step 6) verifies that each mapped store is still
+  reachable. The refusal above applies to newly created knowledge bases and to every org
+  other than `default`. Moving a grandfathered store to a derived name is an explicit
+  re-ingest, never an implicit side effect of enabling.
 - **External providers** use the org's own credentials.
 
 ### 8.9 NATS and cluster
@@ -1081,8 +1098,12 @@ The bundle is signed with the source deployment's export key.
    the report), activate the org at the target, and keep the source **suspended, not
    deleted**, for a retention window (`eddi.org.move.source-retention-days`, default 14).
 
-**Rollback** before the retention window ends: reactivate the source and revert the
-routing. This is a single command.
+**Rollback** before the retention window ends: **freeze writes at the target**, copy
+everything written there since cutover (new conversations, memories, edits) back to the
+source and verify it as in step 4, then reactivate the source and revert the routing. If
+the target's writes cannot be reconciled, rollback is **refused** and the operator is told
+what would be lost. Otherwise a conversation created after cutover would vanish from the
+active org. It is still a single command; the reconcile is part of it.
 
 **Operator surface.** The same operation is exposed through:
 - REST: `POST /platform/orgs/{orgId}/moves`, `GET /platform/orgs/{orgId}/moves/{moveId}`
@@ -1146,6 +1167,9 @@ Runs with Testcontainers on Mongo **and** Postgres, in multi mode with the `ENAB
      wrapper also disabled, `OrgReadVerifier` refuses foreign documents.
    Every probe must end in 404, an empty result or a `[SECURITY]` refusal, never in another
    org's data.
+5. **Job fairness.** Org A holds more than `:scan` older due jobs and org B holds one due job.
+   B's job must be claimed and run within the bound §7.4 defines (one tick plus rotation),
+   on both datastores. The noisy-neighbour test covers request load, not job selection.
 
 ### 14.2 Build guards
 

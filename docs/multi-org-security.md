@@ -134,7 +134,7 @@ service, **E**levation of privilege. The § numbers point at the plan.
 | D | One org's backlog starves the others' jobs | Per-org caps per tick, round-robin start org (§7.4) |
 | S/T | A NATS message with a forged org header | Signature v2 covers `Eddi-Org`. Signing is mandatory in multi mode, and messages without the header are rejected (§8.9) |
 | I | Cluster admin and dead-letter views show other orgs | These are platform-plane views. An org admin sees only their own org's entries (§8.9) |
-| I | Shared archive bucket | Object names are `<org>/<file>`, with per-org byte caps and a purge on deletion (§8.9) |
+| I | Shared archive bucket | Object names are `<org>/<file>`, with per-org byte caps and a purge on deletion (§8.9). `ClusterArchiveStore.fetch` takes a name and no caller identity, so archive reads and listings must derive the name from the bound org or validate the requested name against it before the fetch. The cross-org probe in plan §14.1 (an export archive is in its setup) covers this read side |
 
 ### 4.7 Agent author and LLM (configs and tool calls)
 
@@ -161,7 +161,7 @@ service, **E**levation of privilege. The § numbers point at the plan.
 | I | A binary below the floor reads every org unfiltered on Mongo | **Not preventable by code**: a binary older than the floor release has no guard (§5.4). `DataLayoutGuard` stops binaries from the floor release onwards when `layout.required` is above what they support (Spike C: exit 1 before any write, on both datastores; on PostgreSQL, where it was probed, HTTP was not yet listening). Rollback below the floor is therefore forbidden, and documented in the release notes and `docs/multi-org.md`. The guard reads with primary read preference and majority read concern, so a lagging secondary cannot hide a raised layout (ADR DV-11) |
 | I | A pre-floor binary on Postgres | Contained only if it connects as `eddi_app` (NOBYPASSRLS) against `FORCE`d tables. This is why DV-1 makes the role split mandatory |
 | T | Enablement interrupted halfway | Leased, checkpointed and idempotent steps. The switch has a presence barrier (§5.3) |
-| T/I | Org bundle tampered with in transit, replayed, or crafted (moves M1–M5) | An Ed25519 signature over the manifest, which carries a SHA-256 for every file, `sealed.bin` included. Signature, checksums and `notAfter` are verified before any write. Only export keys a platform admin registered are accepted. Archive entries are validated (no `..`, no absolute paths, no unlisted entries). Secrets travel only re-encrypted for the target (ADR decision 9) |
+| T/I | Org bundle tampered with in transit, replayed, or crafted (moves M1–M5) | An Ed25519 signature over the manifest, which carries a SHA-256 for every file, `sealed.bin` included. Signature, checksums and `notAfter` are verified before any write. Only export keys a platform admin registered are accepted. Archive entries are validated (no `..`, no absolute paths, no unlisted entries). Each `bundleId` is persisted when imported and a bundle whose id was already imported is refused, so a valid bundle cannot be replayed before `notAfter`. Secrets travel only re-encrypted for the target (ADR decision 9) |
 | S/E | A bundle claims another org's hostnames, `/v1` keys, integrations or Keycloak org | Routing records are never imported as trusted: they are listed in the report and re-created or confirmed by a platform admin, which re-checks their global uniqueness (ADR decision 9) |
 
 ## 5. Residual risks
@@ -173,6 +173,7 @@ service, **E**levation of privilege. The § numbers point at the plan.
 | SQL injection defeats RLS (`set_config` is callable by the app role) | Parameterised SQL only, plus build guards. RLS is a backstop for missed filters, not for injection |
 | Mongo aggregations and counts have one runtime layer | Allow-listed call sites, conformance suite, mutation checks (ADR DV-5) |
 | PgBouncer transaction pooling breaks session GUCs | Session mode, or `eddi.org.postgres-rls=off-i-understand` with a WARN, as a STOP decision per deployment (§8.4) |
+| `eddi.org.postgres-rls=off-i-understand` removes the database backstop | Only the application filter remains: this is a **single-layer** case, like the Mongo aggregations above. Treat it as a per-deployment STOP decision and prefer session-mode pooling to keep RLS on (§8.4) |
 | Revocation latency | Bounded by the 60 s membership cache and the 3-minute OIDC token cache (§9.3) |
 
 ## 6. Verification
