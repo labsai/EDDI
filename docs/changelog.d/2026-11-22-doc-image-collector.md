@@ -44,7 +44,7 @@
   - every refusal and the arithmetic;
   - each way a size can be read differently from how PDFBox reads it: inline key order, mask scaling, frame headers, `/Default*` colour spaces and CCITT `/Columns`.
 
-  They also show that the raw pre-scan lets an image-stream Flate bomb through and the decode budget refuses it. Two child-JVM tests (`-Xmx256m`) decode 10,000 images of 128 × 128 and survive two million unclosed `q` operators. Every guard was mutation-checked: each bound removed in turn, 49 mutations in all, and a test fails for each.
+  They also show that the raw pre-scan lets an image-stream Flate bomb through and the decode budget refuses it. Two child-JVM tests (`-Xmx256m`) decode 10,000 images of 128 × 128 and survive two million unclosed `q` operators. The bounds were mutation-checked: 49 mutations, each removing one bound, and a test fails for each.
 - **Docs:** `docs/security.md` → PDF Image Bounds; `docs/configuration-reference.md` → Documents.
 
 ### What's next
