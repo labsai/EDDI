@@ -305,26 +305,28 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         validateConfiguration(channelConfiguration);
         requireUseOnTargets(channelConfiguration);
         synchronized (uniquenessLock) {
+            // The one version this save is judged against, compared at, audited at and
+            // written to: ?version=0 names the current one, and resolving it again for
+            // the write could land on a version a concurrent save (another node, which
+            // this lock does not serialise) created after the comparison. Writing the
+            // resolved version instead makes such a stale save the update's 409.
+            Integer baseVersion = id == null || version == null ? version : restVersionInfo.validateParameters(id, version);
             validateUniqueChannelId(channelConfiguration, id);
-            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
+            refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, baseVersion));
             validateUniqueName(channelConfiguration, id);
             EmailSenderLists.Change senders = null;
-            // The version the lists are compared against and audited at: ?version=0
-            // names the current one, and the raw store read does not resolve it.
-            Integer baseVersion = version;
             if (isEmail(channelConfiguration)) {
                 emailSupport().validateAgainstDeployment(channelConfiguration, id);
                 if (before != null) {
                     senders = EmailSenderLists.diff(before, EmailSenderLists.read(null, channelConfiguration.getPlatformConfig()));
                 } else {
-                    baseVersion = id == null || version == null ? version : restVersionInfo.validateParameters(id, version);
                     senders = senderListChange(id, baseVersion, channelConfiguration);
                 }
                 if (senders != null && senders.allowlistEmptied() && !Boolean.TRUE.equals(confirmOpen)) {
                     throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
                 }
             }
-            Response response = restVersionInfo.update(id, version, channelConfiguration);
+            Response response = restVersionInfo.update(id, baseVersion, channelConfiguration);
             syncDescriptor(id, channelConfiguration);
             Response answered = withEmailFollowUp(id, channelConfiguration, response);
             if (senders == null || !senders.changed() || answered.getStatus() >= 300) {
