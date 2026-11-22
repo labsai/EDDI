@@ -357,8 +357,8 @@ curl -X POST "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-send
   that would be on both lists, a list over 200 entries, or the same entry both added and removed.
 - **Emptying a non-empty allowlist opens the integration to every sender** — an empty allowlist allows everyone. It
   is refused unless the request says `"confirmOpen": true`, and then warns `email.allowlist-emptied`. The same holds
-  for a save of the whole integration, which is where a page Save, a raw-JSON edit or an import-style rewrite would
-  otherwise empty it unnoticed: `PUT /channelstore/channels/{id}?version=n` answers `400` unless it carries
+  for a save of the whole integration, where a page Save or a script that rewrites the document would otherwise
+  empty it unnoticed: `PUT /channelstore/channels/{id}?version=n` answers `400` unless it carries
   `&confirmOpen=true`, the MCP `update_channel_integration` takes a `confirmOpen` argument, and the Manager asks
   before such a Save.
 - Saves warn `email.allowlist-broad` for an allowlist entry over a whole public suffix (`*@*.co.uk`, `*@github.io`)
@@ -443,9 +443,8 @@ refused above. Refused unless approved:
   `/mcpcallsstore`, `/ragstore` (ingestion included), `/rulestore`, `/outputstore`, `/propertysetterstore`,
   `/snippetstore`, `/variablestore`, `/spacestore/variables`, `/dictionarystore`, `/parserstore`, `/extensionstore`,
   `/AgentTriggerStore`, `/deploymentstore`, a group's configuration (`/groupstore/groups`, `/groupstore/groups/{id}`,
-  not its workspace) and `/groupstore/templates`, and their v5 names (`/botstore`, `/packagestore`,
-  `/langchainstore`, `/httpcallsstore`, `/behaviorstore`, `/regulardictionarystore`, `/bottriggerstore`) — and to
-  deploy, undeploy, the setup endpoints under `/administration/agents` and `/backup/import`.
+  not its workspace) and `/groupstore/templates`, and the legacy store names `LegacyPathRewriteFilter` still
+  accepts — and to deploy, undeploy, the setup endpoints under `/administration/agents` and `/backup/import`.
 
 An approved call passes because a person saw it: in the engine the approval is bound around exactly that call's
 execution, for that conversation only, and never extends to a redirect. When the approved call goes through EDDI's

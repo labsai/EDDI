@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.client.factory;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentity;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.TurnOrigin;
@@ -73,6 +74,12 @@ public class LoopbackCallerAuthFilter implements ClientRequestFilter {
         String origin = TurnOrigin.current();
         if (origin != null) {
             requestContext.getHeaders().putSingle(TurnOrigin.HEADER, origin);
+            // So is a person's approval of the call that makes the loopback request: an
+            // approved update_resource or deploy_agent from a tainted MCP request writes
+            // through here, and TaintedRequestFilter would refuse it without this.
+            // Engine-owned like the taint, always set, so it is never inherited.
+            requestContext.getHeaders().putSingle(TurnOrigin.APPROVED_HEADER,
+                    String.valueOf(ApprovedCallScope.isActive() || TurnOrigin.inboundApproved()));
         }
         if (requestContext.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
             // An explicit header wins. Nothing sets one today, but a caller that does

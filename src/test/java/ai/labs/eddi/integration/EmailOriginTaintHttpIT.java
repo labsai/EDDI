@@ -26,6 +26,7 @@ import static com.github.tomakehurst.wiremock.client.WireMock.urlPathEqualTo;
 import static com.github.tomakehurst.wiremock.core.WireMockConfiguration.options;
 import static io.restassured.RestAssured.given;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -162,6 +163,30 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
         assertTrue(answer.getString("result.content[0].text").contains("EMAIL_ORIGIN"), answer.prettify());
     }
 
+    @Test
+    @DisplayName("MCP configuration tool: refused from a tainted request, run through the loopback when the call was approved")
+    void mcpConfigurationToolNeedsApproval() {
+        ResourceId output = extractResourceId(createResource(OUTPUT_SET, "/outputstore/outputsets"));
+        String arguments = "{\"resourceType\":\"output\",\"resourceId\":\"%s\",\"version\":%d,\"config\":%s}".formatted(output.id(),
+                output.version(), quoted(OUTPUT_SET));
+
+        String session = mcpSession("email");
+        JsonPath refused = mcpCall(session, "email", false, "update_resource", arguments);
+        assertTrue(refused.getBoolean("result.isError"), refused.prettify());
+        assertTrue(refused.getString("result.content[0].text").contains("EMAIL_ORIGIN"), refused.prettify());
+
+        JsonPath approved = mcpCall(session, "email", true, "update_resource", arguments);
+        String text = approved.getString("result.content[0].text");
+        assertFalse(text.contains("EMAIL_ORIGIN"), "the approved call, and its loopback write, must pass: " + approved.prettify());
+        assertNotEquals(Boolean.TRUE, approved.get("result.isError"), approved.prettify());
+    }
+
+    private static final String OUTPUT_SET = "{\"outputSet\": [{\"action\": \"x\", \"timesOccurred\": 0, \"outputs\": []}]}";
+
+    private static String quoted(String json) {
+        return "\"" + json.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", " ") + "\"";
+    }
+
     // ------------------------------------------------------------------ MCP
 
     /** Opens a streamable-HTTP MCP session; every request carries the taint. */
@@ -181,7 +206,12 @@ class EmailOriginTaintHttpIT extends BaseIntegrationIT {
     }
 
     private JsonPath mcpCall(String session, String origin, String tool, String arguments) {
-        Response response = given().header(TurnOrigin.HEADER, origin).header("Mcp-Session-Id", session).contentType(ContentType.JSON)
+        return mcpCall(session, origin, false, tool, arguments);
+    }
+
+    private JsonPath mcpCall(String session, String origin, boolean approved, String tool, String arguments) {
+        Response response = given().header(TurnOrigin.HEADER, origin).header(TurnOrigin.APPROVED_HEADER, String.valueOf(approved))
+                .header("Mcp-Session-Id", session).contentType(ContentType.JSON)
                 .accept("application/json, text/event-stream")
                 .body("{\"jsonrpc\":\"2.0\",\"id\":%d,\"method\":\"tools/call\",\"params\":{\"name\":\"%s\",\"arguments\":%s}}"
                         .formatted(RPC_IDS.getAndIncrement(), tool, arguments))
