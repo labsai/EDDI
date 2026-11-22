@@ -1318,7 +1318,7 @@ public class McpAdminTools {
             + "correlationKeyPath. For webhook, targets[].triggers are event types (exact, or a 'prefix*'). "
             + "Or 'email': EDDI polls an IMAP mailbox and every new mail starts an agent turn. mode 'trigger' sends nothing back, "
             + "ever; mode 'conversation' replies in the thread over SMTP, to the DKIM/DMARC-authenticated From, or with honorReplyTo "
-            + "true to the mail's single Reply-To instead (never Cc, never an unauthenticated sender). platformConfig: mode (required: trigger | conversation), transport 'imap' "
+            + "true to the mail's single Reply-To instead (never an unauthenticated sender; Cc only with replyAudience thread). platformConfig: mode (required: trigger | conversation), transport 'imap' "
             + "(required), connection (required: name of a BASIC app-password or OAUTH2_CLIENT_CREDENTIALS/XOAUTH2 connection whose "
             + "baseUrlAllowlist contains imaps://<host>, and in conversation mode also smtp://<smtpHost>:587 or smtps://<smtpHost>), "
             + "host (required), port (993 | 143), address (required, unique per deployment; the From of replies), "
@@ -1332,7 +1332,11 @@ public class McpAdminTools {
             + "is refused as EDDI's own). Trigger mode only: correlateThreads (false). "
             + "Conversation mode only: smtpHost (required), smtpPort (587 STARTTLS | 465 TLS), fromName, replyTemplate ('{output}'), "
             + "aiDisclosure (a default sentence; empty switches it off and warns), threadParticipants (originalSenderOnly | "
-            + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5, counted per mail thread), honorReplyTo (false; warns). "
+            + "anyAuthenticatedParticipant), maxRepliesPerThreadPerHour (5, counted per mail thread), honorReplyTo (false; warns), "
+            + "replyAudience (sender | thread: also Cc the answered mail's signed To/Cc recipients matching replyAllowedRecipients; "
+            + "needs actWhen addressed, replyAllowedRecipients and the default identityMode; conversations then run as a memory-less "
+            + "email-thread: identity and only thread participants continue them; warns), replyAllowedRecipients (sender patterns, "
+            + "max 50), listAddresses (patterns never Cc'd), maxReplyRecipients (10, 1-50; more: sender only). "
             + "For email, routing reads DKIM-signed headers only and goes: targets[].addresses (aliases or plus-addresses of address, "
             + "To before Cc), the address plus-tag, targets[].mentions (handles written as @handle in the sender's own text, never in "
             + "quotes or signatures; max 10 per target, unique), targets[].triggers as a subject word, then the default target. "
@@ -1340,7 +1344,8 @@ public class McpAdminTools {
             + "are refused blocked:target_not_allowed, never rerouted. mentions, addresses and allowedSenders are email-only. "
             + "Returns the new resource ID and URI, for a webhook "
             + "its endpoint path POST /integrations/webhook/{resourceId}, and save-time warnings (e.g. email.open-trigger, "
-            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to) when there are any.")
+            + "email.tools-without-approvals, email.ai-disclosure-disabled, email.honor-reply-to, email.reply-audience-thread) when "
+            + "there are any.")
     public String createChannelIntegration(
                                            @ToolArg(description = "Full JSON configuration body (required)") String config) {
         requireAnyRole(identity, authEnabled, McpRoles.AUTHOR);

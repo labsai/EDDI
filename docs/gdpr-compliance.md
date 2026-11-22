@@ -171,7 +171,12 @@ principal, not a user: erasing or exporting it is refused with 400.
     the address's inbound ledger rows name. Export collects the same
     identities. A nested erasure that is incomplete fails the step. The one-off
     `email-anon:` identities of unauthenticated senders hold no memory and are not
-    linked to an address. All of it is
+    linked to an address. A thread conversation (`replyAudience: thread`, an
+    `email-thread:` identity that names no address) is reached through the
+    ledger: every conversation the address's inbound rows or reply-copy entries
+    name whose user id is that integration's thread identity is erased whole
+    (provisional; see [email-integration.md](email-integration.md#personal-data)).
+    The reply copies themselves (`email_reply_recipients`) go with the ledger rows. All of it is
     **permanently deleted**. Each reports under its own step name
     (`userDirectory`, `workspaceNotifications`, `a2aTasks`, `emailLedger`, `emailSuppressions`, `emailIdentities`).
     The exception is the `groupOutcomes` participant: team outcome events describe a team's work, so
