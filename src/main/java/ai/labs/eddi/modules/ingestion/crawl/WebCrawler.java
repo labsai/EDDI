@@ -265,7 +265,7 @@ public class WebCrawler {
         // Only a crawl that covered its source is reconciled, so only then can an
         // unreported document be counted missed, and only then is the work worth it.
         if (stopReason == StopReason.COMPLETED && !counters.discoveryIncomplete) {
-            reportOversized(request, sink, frontier, robotsByHost, counters, deadline);
+            reportOversized(sink, frontier, counters, deadline);
         }
         if (stopReason == StopReason.PAGE_LIMIT && counters.sitemapPages > 0) {
             // Sitemap pages are queued at depth 0, so maxDepth does not narrow them. A
@@ -476,7 +476,11 @@ public class WebCrawler {
     private void noteOversized(String url, String seedHost, CrawlRequest request, List<UrlPattern> excludes,
                                Frontier frontier, Counters counters) {
         String canonical = CrawlUrls.canonicalize(url);
-        if (canonical.isEmpty() || frontier.queued.contains(canonical) || frontier.oversized.contains(canonical)
+        // Already reached (a redirect target is delivered without being queued), so
+        // it would never be reported and must not count against the cap. A link seen
+        // before its target is reached is skipped again in reportOversized.
+        if (canonical.isEmpty() || frontier.queued.contains(canonical) || frontier.visited.contains(canonical)
+                || frontier.delivered.contains(canonical) || frontier.oversized.contains(canonical)
                 || !isInScope(canonical, seedHost, request, excludes)) {
             return;
         }
@@ -502,31 +506,27 @@ public class WebCrawler {
      * Run only after a crawl that completed with discovery complete, the only kind
      * that is reconciled. Not reported: a document the crawl queued, polled or
      * delivered — a redirect delivers under the id it landed on, which was never
-     * queued — one a robots.txt the crawl read disallows, and one the sink does not
-     * {@linkplain CrawlSink#holds hold}, since an overlong link to something never
-     * ingested has nothing to protect and reporting it would leave every run of
-     * that source inconclusive. At most {@link #MAX_OVERSIZED_LINKS} documents are
-     * remembered at all; past that, discovery is incomplete. Cancellation,
-     * interruption or the time budget stops the report before its next lookup and
-     * leaves discovery incomplete, so the documents left unreported are not read as
-     * deleted.
+     * queued — and one the sink does not {@linkplain CrawlSink#holds hold}, since
+     * an overlong link to something never ingested has nothing to protect and
+     * reporting it would leave every run of that source inconclusive. At most
+     * {@link #MAX_OVERSIZED_LINKS} documents are remembered at all; past that,
+     * discovery is incomplete. Cancellation, interruption or the time budget stops
+     * the report before its next lookup and leaves discovery incomplete, so the
+     * documents left unreported are not read as deleted.
+     *
+     * <p>
+     * robots.txt is not consulted. Canonicalizing drops tracking parameters, so the
+     * id is not the URL a rule would be matched against, and judged by the id a
+     * document the real link may reach could be skipped and then deleted. Reported
+     * instead, it is kept: the safe direction for a link that is never fetched.
      */
-    private static void reportOversized(CrawlRequest request, CrawlSink sink, Frontier frontier,
-                                        Map<String, RobotsPolicy> robotsByHost, Counters counters, Instant deadline) {
+    private static void reportOversized(CrawlSink sink, Frontier frontier, Counters counters, Instant deadline) {
         for (String documentId : frontier.oversized) {
             // Queued, polled or delivered: a redirect delivers under the id it landed
             // on, which was never queued, and that too means another link reached it.
             if (frontier.queued.contains(documentId) || frontier.visited.contains(documentId)
                     || frontier.delivered.contains(documentId)) {
                 continue;
-            }
-            // Queued, a page robots.txt disallows is skipped rather than reported; the
-            // same here, for a host whose robots.txt this crawl has read.
-            if (request.politeness().respectRobots()) {
-                RobotsPolicy robots = CrawlUrls.host(documentId).map(robotsByHost::get).orElse(null);
-                if (robots != null && !robots.isAllowed(CrawlUrls.pathAndQuery(documentId))) {
-                    continue;
-                }
             }
             // Checked before each lookup, the one step here that costs anything.
             if (sink.isCancelled() || Thread.currentThread().isInterrupted() || Instant.now().isAfter(deadline)) {

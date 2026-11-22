@@ -422,6 +422,61 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("overlong links to documents redirects already delivered do not count against the cap")
+        void overlongLinksToRedirectTargetsDoNotFillTheCap() {
+            // The seed's redirects are followed first, so the targets are delivered
+            // before the late pages that link them through overlong URLs are read.
+            int total = WebCrawler.MAX_OVERSIZED_LINKS + 1;
+            String padding = "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            String[] late = {SITE + "/late-0", SITE + "/late-1", SITE + "/late-2"};
+            List<String> seedLinks = new ArrayList<>();
+            FakeSite site = new FakeSite();
+            for (int i = 0; i < total; i++) {
+                seedLinks.add(SITE + "/r" + i);
+                site.redirect(SITE + "/r" + i, SITE + "/t" + i, "<html><body>T</body></html>");
+            }
+            seedLinks.addAll(List.of(late));
+            site.page(SITE + "/", linkTo(seedLinks.toArray(String[]::new)));
+            for (int page = 0; page < late.length; page++) {
+                List<String> links = new ArrayList<>();
+                for (int i = page; i < total; i += late.length) {
+                    links.add(SITE + "/t" + i + "?utm_source=" + padding);
+                }
+                site.page(late[page], linkTo(links.toArray(String[]::new)));
+            }
+            RecordingSink sink = new RecordingSink();
+            Limits roomy = new Limits(2 * total, 3 * total, 5L * 1024 * 1024, 512L * 1024 * 1024, Duration.ofMinutes(5),
+                    Duration.ofSeconds(5));
+
+            CrawlSummary summary = new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), roomy), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/t" + (total - 1)), "the redirects were followed");
+            assertFalse(summary.discoveryIncomplete(), "every overlong link named a document the crawl had reached");
+            assertTrue(summary.coveredWholeSource());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("a held document linked only through an overlong URL is reported even when robots.txt seems to disallow it")
+        void overlongLinkIsReportedWhateverRobotsSays() {
+            // The rule names the canonical id; the real link carries a tracking parameter,
+            // so judging by the id could skip a document the link reaches and delete it.
+            String overlong = SITE + "/held?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH) + "&a=1";
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Disallow: /held?a=1")
+                    .page(SITE + "/", linkTo(overlong));
+            RecordingSink sink = new RecordingSink().knows(SITE + "/held?a=1", null, null);
+
+            new WebCrawler(site).crawl(new CrawlRequest(SITE + "/", Scope.defaults(), Limits.defaults(),
+                    new Politeness(Duration.ZERO, "EDDI-Crawler/1.0", true)), sink);
+
+            assertEquals(1, sink.errors().size(), sink.errors().toString());
+            assertEquals(SITE + "/held?a=1", sink.errors().get(0).documentId());
+            assertTrue(sink.errors().get(0).contentUnknown());
+        }
+
+        @Test
         @DisplayName("past MAX_OVERSIZED_LINKS, discovery is incomplete and nothing is looked up")
         void tooManyOversizedLinksMakeDiscoveryIncomplete() {
             RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
