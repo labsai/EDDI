@@ -618,8 +618,9 @@ conversation. A mail for a conversation that is busy or waiting for an approval 
 mail names another target — by address, plus-tag or mention (`@legal can you check?` in a reply to the finance
 agent). The turn runs in the owner's conversation, and `mail.route.redirectRefused` names the target it asked for
 (logged at INFO), so the agent can tell the sender to write to that target in a new mail. A subject word or the default
-never counts as asking. The `allowedSenders` of the conversation's own target apply as well as those of the routed
-one. In trigger mode with `correlateThreads`, the thread key includes the routed agent, so a mail routed to another
+never counts as asking. Who may continue is decided by the conversation's agent, not by the routed target: the
+sender passes when any target of that agent admits it, and only when no target names the agent any more does the routed
+target decide ([Per-target senders](#per-target-senders)). In trigger mode with `correlateThreads`, the thread key includes the routed agent, so a mail routed to another
 target starts that agent's own conversation instead.
 
 ### Delivery, retries, limits

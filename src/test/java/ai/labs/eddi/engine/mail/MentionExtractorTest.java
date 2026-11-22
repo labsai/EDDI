@@ -205,6 +205,17 @@ class MentionExtractorTest {
         }
 
         @Test
+        @DisplayName("a letter outside the BMP on either side keeps the handle part of a longer word")
+        void supplementaryLetters() {
+            String bold = Character.toString(0x1D400); // MATHEMATICAL BOLD CAPITAL A, a surrogate pair
+            assertEquals(List.of(), handles("@finance" + bold + " please"));
+            assertEquals(List.of(), handles("@finance." + bold + "x please"));
+            assertEquals(List.of(), handles(bold + "@finance please"));
+            assertEquals(List.of("finance"), handles("@finance. Thanks"));
+            assertEquals(List.of("finance"), handles("@finance, " + bold));
+        }
+
+        @Test
         @DisplayName("a no-break space before the @ opens a mention, in text and in HTML-only mail (&nbsp;)")
         void noBreakSpace() throws Exception {
             assertEquals(List.of("finance"), handles("Hi" + (char) 0xA0 + "@finance please"));

@@ -200,17 +200,18 @@ public final class MentionExtractor {
     /**
      * Whether the handle ending at {@code end} is a whole mention: not part of an
      * address ({@code @finance@x}), a domain ({@code @finance.com}) or a longer
-     * word in another script.
+     * word in another script. Reads code points, so a letter outside the Basic
+     * Multilingual Plane (a surrogate pair) also continues the word.
      */
     private static boolean endsMention(String line, int end) {
         if (end >= line.length()) {
             return true;
         }
-        char c = line.charAt(end);
+        int c = line.codePointAt(end);
         if (c == '@' || Character.isLetterOrDigit(c)) {
             return false;
         }
-        return !(c == '.' && end + 1 < line.length() && Character.isLetterOrDigit(line.charAt(end + 1)));
+        return !(c == '.' && end + 1 < line.length() && Character.isLetterOrDigit(line.codePointAt(end + 1)));
     }
 
     private static boolean isHandleChar(char c) {
