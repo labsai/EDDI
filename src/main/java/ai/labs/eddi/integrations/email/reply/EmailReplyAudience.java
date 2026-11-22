@@ -33,7 +33,8 @@ import java.util.Set;
  * (written by the inbound processor from the <em>signed view</em>, so a
  * {@code Cc} added unsigned to a replayed mail is not in it):
  * <ol>
- * <li>normalised; one that does not parse is dropped;</li>
+ * <li>normalised; one that does not parse, or whose local part routes onward
+ * ({@code %}, {@code !}), is dropped;</li>
  * <li>minus the integration's own address, its aliases and their plus-addresses
  * (a reply there would come back, and an alias that is a list would mail all
  * its members);</li>
@@ -127,7 +128,7 @@ public final class EmailReplyAudience {
             }
             for (Object value : addresses) {
                 String address = value instanceof String s ? AddressNormalizer.tryNormalize(s).orElse(null) : null;
-                if (address == null) {
+                if (address == null || routesOnward(address)) {
                     dropped.add(INVALID);
                 } else if (EmailReplyRecipients.isOwn(settings, address)) {
                     dropped.add(OWN);
@@ -148,6 +149,18 @@ public final class EmailReplyAudience {
             return new Audience(to, List.of(), dropped, true);
         }
         return new Audience(to, List.copyOf(cc), dropped, false);
+    }
+
+    /**
+     * Whether the local part asks the receiving server to relay the mail on
+     * ({@code user%other@host}, {@code host!user@relay}): such an address could
+     * match an allowed domain and still deliver somewhere else, so it is never
+     * copied.
+     */
+    static boolean routesOnward(String address) {
+        int at = address.lastIndexOf('@');
+        String local = at < 0 ? address : address.substring(0, at);
+        return local.indexOf('%') >= 0 || local.indexOf('!') >= 0;
     }
 
     /**

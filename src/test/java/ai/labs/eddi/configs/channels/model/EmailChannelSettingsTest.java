@@ -406,6 +406,25 @@ class EmailChannelSettingsTest {
         }
 
         @Test
+        @DisplayName("stored around the validation, a thread audience missing what it needs reads as the sender; the cap is clamped")
+        void readTimeGates() {
+            Map<String, String> always = thread();
+            always.put("actWhen", "always");
+            assertFalse(EmailChannelSettings.from(always).repliesToThread());
+            Map<String, String> open = thread();
+            open.remove("replyAllowedRecipients");
+            assertFalse(EmailChannelSettings.from(open).repliesToThread());
+            Map<String, String> shared = thread();
+            shared.put("identityMode", "integration");
+            assertFalse(EmailChannelSettings.from(shared).repliesToThread());
+            Map<String, String> huge = thread();
+            huge.put("maxReplyRecipients", "5000");
+            assertEquals(50, EmailChannelSettings.from(huge).maxReplyRecipients());
+            huge.put("maxReplyRecipients", "-3");
+            assertEquals(1, EmailChannelSettings.from(huge).maxReplyRecipients());
+        }
+
+        @Test
         @DisplayName("an unknown audience is refused, and reads as the narrower 'sender' if it is stored anyway")
         void unknownAudience() {
             Map<String, String> pc = thread();

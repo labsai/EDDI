@@ -489,9 +489,25 @@ public record EmailChannelSettings(
                 (int) longValue(pc.get(KEY_MAX_REPLIES_PER_THREAD_PER_HOUR), DEFAULT_MAX_REPLIES_PER_THREAD_PER_HOUR),
                 bool(pc.get(KEY_HONOR_REPLY_TO), false), actWhenOrDefault(pc.get(KEY_ACT_WHEN)),
                 normalizedAddresses(list(pc.get(KEY_ALIASES)), normalizedAddress),
-                conversation ? replyAudienceOrDefault(pc.get(KEY_REPLY_AUDIENCE)) : ReplyAudience.SENDER,
-                list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)),
-                (int) longValue(pc.get(KEY_MAX_REPLY_RECIPIENTS), DEFAULT_MAX_REPLY_RECIPIENTS), list(pc.get(KEY_LIST_ADDRESSES)));
+                conversation ? effectiveAudience(pc) : ReplyAudience.SENDER, list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)),
+                (int) Math.max(1, Math.min(MAX_MAX_REPLY_RECIPIENTS, longValue(pc.get(KEY_MAX_REPLY_RECIPIENTS), DEFAULT_MAX_REPLY_RECIPIENTS))),
+                list(pc.get(KEY_LIST_ADDRESSES)));
+    }
+
+    /**
+     * {@code thread} only when everything it requires holds at read time too —
+     * {@code actWhen: addressed}, a non-empty {@code replyAllowedRecipients}, the
+     * default {@code identityMode} — not only at save: a document written around
+     * the validation replies to the sender alone.
+     */
+    private static ReplyAudience effectiveAudience(Map<String, String> pc) {
+        if (replyAudienceOrDefault(pc.get(KEY_REPLY_AUDIENCE)) != ReplyAudience.THREAD) {
+            return ReplyAudience.SENDER;
+        }
+        boolean addressed = actWhenOrDefault(pc.get(KEY_ACT_WHEN)) == ActWhen.ADDRESSED;
+        boolean allowlisted = !list(pc.get(KEY_REPLY_ALLOWED_RECIPIENTS)).isEmpty();
+        boolean perSender = IdentityMode.fromId(pc.get(KEY_IDENTITY_MODE)) == IdentityMode.PER_SENDER;
+        return addressed && allowlisted && perSender ? ReplyAudience.THREAD : ReplyAudience.SENDER;
     }
 
     /**

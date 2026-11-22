@@ -72,6 +72,16 @@ class EmailReplyAudienceTest {
     }
 
     @Test
+    @DisplayName("a local part that routes onward (% or !) is never copied, even under an allowed domain")
+    void sourceRoutedDropped() {
+        var audience = compute(thread(Map.of()),
+                mailTo(List.of(MAILBOX), List.of("eve%evil.com@supplier.com", "evil.com!eve@supplier.com", COLLEAGUE)),
+                THREAD);
+        assertEquals(List.of(COLLEAGUE), audience.cc());
+        assertEquals(List.of(EmailReplyAudience.OWN, EmailReplyAudience.INVALID, EmailReplyAudience.INVALID), audience.dropped());
+    }
+
+    @Test
     @DisplayName("a list address is never copied, even when it is internal")
     void listDropped() {
         var audience = compute(thread(Map.of("listAddresses", "all-staff@supplier.com")),
