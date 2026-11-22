@@ -1131,12 +1131,35 @@ class RagSourceIngestionServiceTest {
             String key = keyOf(source);
             when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
             when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
+            when(pipeline.forgetRun(anyString(), any(), any(), anyString())).thenReturn(true);
 
             service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
 
             verify(pipeline).forgetRun(eq(KB_ID), any(), argThat(s -> "src-files".equals(s.getId())), eq("run-ended"));
             verify(pipeline, never()).forgetSource(anyString(), any(), any());
             assertTrue(stateStore.activeRun(key).isEmpty(), "the cleanup's claim went with the purge");
+            // The purge took the claim's row; releasing it again only logs a "reaped"
+            // warning.
+            verify(pipeline, never()).releaseClaim(anyString(), any(), anyString());
+        }
+
+        @Test
+        @DisplayName("when the run's chunks could not be removed, the state is kept for the orphan sweep and the claim is released")
+        void aFailedChunkRemovalKeepsTheState() throws Exception {
+            var source = uploadSource("src-files");
+            String key = keyOf(source);
+            // The save purged the state, then the run recorded a document before it
+            // stopped.
+            stateStore.recordIngested(key, "late.md", "hash", null, null, "run-ended");
+            when(ragStore.getCurrentResourceId(KB_ID)).thenReturn(resourceId(3));
+            when(ragStore.read(KB_ID, 3)).thenReturn(knowledgeBase());
+            when(pipeline.forgetRun(anyString(), any(), any(), anyString())).thenReturn(false);
+
+            service.cleanUpAfterRun(KB_ID, knowledgeBase(source), source, "run-ended");
+
+            assertTrue(stateStore.lookup(key, "late.md").isPresent(),
+                    "state that still describes retrievable chunks must not be purged");
+            verify(pipeline).releaseClaim(eq(KB_ID), any(), anyString());
         }
 
         @Test

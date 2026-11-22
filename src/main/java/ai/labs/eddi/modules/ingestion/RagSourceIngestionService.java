@@ -362,16 +362,27 @@ public class RagSourceIngestionService {
                                         String runId) {
         String sourceKey = IngestionPipeline.stateKey(ragConfigId, source);
         Optional<String> claim = pipeline.claimForMaintenance(ragConfigId, source);
+        boolean purged = false;
         try {
             History history = claim.map(claimId -> historySince(sourceKey, runId, claimId)).orElse(History.ANOTHER_RUN);
             if (history == History.THIS_RUN_NEWEST) {
-                discardSourceContent(ragConfigId, ranWith, source);
+                purged = discardSourceContent(ragConfigId, ranWith, source);
                 return;
             }
-            pipeline.forgetRun(ragConfigId, ranWith, source, runId);
+            boolean removed = pipeline.forgetRun(ragConfigId, ranWith, source, runId);
             if (history == History.NO_RUNS) {
-                // Takes the claim's own row with it, which is what releases the claim.
-                stateStore.purgeSource(sourceKey);
+                if (removed) {
+                    // Takes the claim's own row with it, which is what releases the claim.
+                    stateStore.purgeSource(sourceKey);
+                    purged = true;
+                } else {
+                    // The chunks are still there: purging the state now would leave them
+                    // retrievable and unlisted. The state stays, and the orphan sweep
+                    // reconciles the two.
+                    LOGGER.warnf("Source '%s' of knowledge base %s: could not remove what run %s wrote, so its "
+                            + "state is kept for the orphan sweep to reconcile", LogSanitizer.sanitize(source.getName()),
+                            LogSanitizer.sanitize(ragConfigId), LogSanitizer.sanitize(runId));
+                }
                 return;
             }
             LOGGER.warnf("Source '%s' of knowledge base %s has been run again since it changed; removed only what "
@@ -380,10 +391,13 @@ public class RagSourceIngestionService {
                     LogSanitizer.sanitize(runId));
             stateStore.invalidateContent(sourceKey);
         } finally {
-            // A no-op when a purge above already took the claim's row with it; not one
-            // when the vector removal failed before the purge, which would otherwise
-            // leave the source blocked until the claim is reaped.
-            claim.ifPresent(claimId -> pipeline.releaseClaim(ragConfigId, source, claimId));
+            // Skipped once a purge took the claim's row with it: releasing a row that is
+            // gone only logs a misleading "reaped" warning. Still done when the purge
+            // did not happen, which would otherwise leave the source blocked until the
+            // claim is reaped.
+            if (!purged) {
+                claim.ifPresent(claimId -> pipeline.releaseClaim(ragConfigId, source, claimId));
+            }
         }
     }
 
@@ -1099,15 +1113,16 @@ public class RagSourceIngestionService {
      * Vectors and ingestion state first, then — for a file source — the files that
      * produced them.
      */
-    private void discardSourceContent(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+    private boolean discardSourceContent(String ragConfigId, RagConfiguration knowledgeBase, IngestionSource source) {
+        boolean forgotten = false;
         try {
-            pipeline.forgetSource(ragConfigId, knowledgeBase, source);
+            forgotten = pipeline.forgetSource(ragConfigId, knowledgeBase, source);
         } catch (RuntimeException e) {
             LOGGER.errorf(e, "Could not remove what source %s put into knowledge base %s; its chunks stay "
                     + "retrievable", LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
         if (!source.isUpload()) {
-            return;
+            return forgotten;
         }
         try {
             long deleted = fileStore.deleteAll(IngestionPipeline.stateKey(ragConfigId, source));
@@ -1119,6 +1134,7 @@ public class RagSourceIngestionService {
             LOGGER.errorf(e, "Could not delete the uploaded files of source %s of knowledge base %s",
                     LogSanitizer.sanitize(source.getName()), LogSanitizer.sanitize(ragConfigId));
         }
+        return forgotten;
     }
 
     private static ScheduleConfiguration buildSchedule(String ragConfigId, Integer version, String sourceId,
