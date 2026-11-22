@@ -80,4 +80,31 @@ public class DocumentSettings {
     }
 
     // --- WP-0.1: the mechanism only; later packages append below ---
+
+    // --- WP-2b.2a: the pixel cap on embedded images ---
+
+    /** The most pixels one embedded image may declare before it is decoded. */
+    public static final String IMAGES_MAX_PIXELS = "eddi.documents.images.max-pixels";
+
+    /** {@link #IMAGES_MAX_PIXELS} unless set: 40 megapixels. */
+    public static final long DEFAULT_IMAGES_MAX_PIXELS = 40_000_000L;
+
+    /**
+     * {@link #IMAGES_MAX_PIXELS}: an image that declares more pixels, or a mask
+     * that does, is refused before anything is allocated for it. A CDI instance
+     * reads the deployment's configuration on every call, and a value that is not a
+     * positive number falls back to the default; explicit settings ({@link #of},
+     * {@link #none}) return the default.
+     */
+    public long imagesMaxPixels() {
+        if (bounds != null) {
+            return DEFAULT_IMAGES_MAX_PIXELS;
+        }
+        try {
+            return ConfigProvider.getConfig().getOptionalValue("eddi.documents.images.max-pixels", Long.class)
+                    .filter(pixels -> pixels > 0).orElse(DEFAULT_IMAGES_MAX_PIXELS);
+        } catch (IllegalArgumentException notANumber) {
+            return DEFAULT_IMAGES_MAX_PIXELS;
+        }
+    }
 }

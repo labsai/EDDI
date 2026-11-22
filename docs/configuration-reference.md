@@ -542,6 +542,12 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 
 Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
 
+Bounds on reading the images a PDF embeds ([security.md](security.md#pdf-image-bounds)). Nothing extracts images yet in this version.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.images.max-pixels` | `40000000` (40 MP) | Most pixels one embedded image, or one of its masks, may declare. A larger one is refused before anything is allocated for it, as is one whose decoding would take more than the document's decode budget has left. Not a positive number means the default |
+
 ---
 
 ## Backup, export & import

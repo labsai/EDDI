@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.documents;
 
+import ai.labs.eddi.modules.ingestion.extract.ImageLimits;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -45,4 +46,25 @@ class DocumentSettingsDefaultsTest {
     }
 
     // --- WP-0.1: later packages append one block per property below ---
+
+    // --- WP-2b.2a ---
+
+    @Test
+    @DisplayName("WP-2b.2a: images.max-pixels is 40 MP unless the operator sets a positive number")
+    void imagesMaxPixels() {
+        assertEquals(40_000_000L, DocumentSettings.none().imagesMaxPixels());
+        assertEquals(ImageLimits.DEFAULT_MAX_PIXELS, DocumentSettings.DEFAULT_IMAGES_MAX_PIXELS);
+        var cdi = new DocumentSettings();
+        assertEquals(40_000_000L, cdi.imagesMaxPixels());
+        try {
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "1000000");
+            assertEquals(1_000_000L, cdi.imagesMaxPixels());
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "0");
+            assertEquals(40_000_000L, cdi.imagesMaxPixels());
+            System.setProperty(DocumentSettings.IMAGES_MAX_PIXELS, "lots");
+            assertEquals(40_000_000L, cdi.imagesMaxPixels());
+        } finally {
+            System.clearProperty(DocumentSettings.IMAGES_MAX_PIXELS);
+        }
+    }
 }

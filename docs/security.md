@@ -998,6 +998,25 @@ A task that nevertheless overflows the stack — an `Error`, which the pipeline'
 
 ---
 
+## PDF Image Bounds
+
+A PDF's images are the part of the file whose declared size has least to do with its real size: a hundred bytes of dictionary can declare a 100,000 × 100,000 raster, a few hundred kilobytes of Flate data can decompress to gigabytes, and a page can draw a form that draws itself. Every PDF read already runs under two bounds: a raw-byte pre-scan of its compressed streams, and a decode budget that counts every byte PDFBox decodes (64 MB per stream, 128 MB per document by default). Neither covers image rasters. The pre-scan skips image streams, and the budget counts what a filter writes, not the raster PDFBox then allocates from `/Width` and `/Height`.
+
+The image reader (`PdfImageCollector`, `ImageDecodeGuard` and `ImageNormalizer` in `modules/ingestion/extract`) closes that gap. **Nothing calls it yet in this version.** Embedded images reach models in a later release, behind the agent's `documents.images` settings.
+
+| Risk | Bound | On exceeding it |
+|---|---|---|
+| Huge declared image | Before PDFBox allocates anything, the declared width × height of the image and of every mask it carries (`/SMask`, a stream `/Mask`) is checked against `eddi.documents.images.max-pixels` (40 MP). The decoded samples plus the rasters built from them are checked against what the document's decode budget has left. The arithmetic is exact `long` arithmetic. The component count is read from the colour space and capped at 32, and four is assumed where the colour space does not say | That image is refused; the rest of the document is read |
+| Flate bomb inside an image | The decode budget counts the image's decoded bytes like any other stream's | The document is refused, as for any PDF over its budget |
+| Form XObjects drawing each other | Followed 8 deep at most. A form that is already being drawn is not drawn again. Every operator counts against one cap per read (5,000,000), forms included however often they are drawn, and the deadline is checked every 1,024 operators | Past the depth or on a cycle the form is skipped. Past the cap the read stops and says it was cut. Past the deadline the document is refused |
+| Many images | At most 10,000 draws are recorded per read. `q` nests at most 64 deep. An inline image keeps at most 1 MiB of its bytes, and a read keeps 16 MiB of inline images in all | The read stops and says it was cut. Over the inline caps the draw is listed without its pixels |
+| Codecs without a decoder | JBIG2 and JPEG 2000 are refused before PDFBox is asked anything | That image is refused |
+| Re-encoding | Images are decoded subsampled to near 1,568 px on the longer edge, scaled to fit it and encoded to at most 10 MiB. A gray or RGB JPEG whose own header matches its dictionary is passed through byte for byte, without being decoded | That image is refused |
+
+Images are collected without decoding them. A collection keeps stream handles, never decoded pixels, so its heap cost does not grow with the images it lists. A test reads 10,000 images in a JVM limited to 256 MB to prove it. Text, fonts and Type 3 glyphs are never interpreted while images are collected.
+
+---
+
 ## Tool Execution Pipeline
 
 All tool invocations — both built-in and HTTP-call-based — are routed through `ToolExecutionService.executeToolWrapped()`. This ensures consistent security and operational controls:
