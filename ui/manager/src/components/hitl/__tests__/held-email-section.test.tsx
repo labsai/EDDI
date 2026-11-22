@@ -74,6 +74,23 @@ describe("HeldEmailDecisionDialog", () => {
 });
 
 describe("HeldEmailSection", () => {
+  it("lists the held mail of every integration the reviewer may see, and opens the decision dialog", async () => {
+    const forged = item({ rowId: "row-9", authVerdict: "fail", heldFor: ["unauthenticated"], runAndAllowOffered: false, runsAnonymously: true });
+    server.use(
+      http.get("*/channelstore/channels/email-held", () =>
+        HttpResponse.json([{ integrationId: "mail1", integrationName: "Invoices", items: [forged], truncated: false }]),
+      ),
+    );
+    preview(forged);
+    renderWithProviders(<HeldEmailSection />);
+    await waitFor(() => expect(screen.getByTestId("held-email-row-row-9")).toBeInTheDocument());
+    expect(screen.getByText("Invoices")).toBeInTheDocument();
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("held-email-review-row-9"));
+    expect(screen.getByTestId("held-email-dialog")).toBeInTheDocument();
+    expect(screen.getByTestId("held-email-anonymous-warning")).toBeInTheDocument();
+  });
+
   it("renders nothing when no integration holds mail", async () => {
     renderWithProviders(<HeldEmailSection />);
     await new Promise((resolve) => setTimeout(resolve, 50));

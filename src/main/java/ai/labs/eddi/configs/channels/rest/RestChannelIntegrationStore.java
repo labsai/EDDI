@@ -27,6 +27,7 @@ import ai.labs.eddi.configs.descriptors.model.AccessLevel;
 import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.integrations.email.EmailHeldMailReview;
+import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
@@ -188,6 +189,29 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
 
     // --- Held mail (email channel v3 plan §7) ----------------------------------
 
+    /** The email integrations, for the cross-integration held-mail read. */
+    @Inject
+    Instance<EmailIntegrationDirectory> emailDirectory;
+
+    @Override
+    public List<EmailHeldMailView.Queue> readAllHeldEmail(Integer limit) {
+        if (emailDirectory == null || !emailDirectory.isResolvable()) {
+            throw new ServiceUnavailableException("Held mail is not available on this node.");
+        }
+        List<EmailHeldMailView.Queue> queues = new ArrayList<>();
+        for (EmailIntegrationDirectory.EmailIntegration integration : emailDirectory.get().scan()) {
+            boolean reviewer = resourceAccessGuard == null || resourceAccessGuard.hasAccess(integration.id(), AccessLevel.EDIT)
+                    || mayReview(integration.settings().reviewers());
+            if (!reviewer) {
+                continue;
+            }
+            EmailHeldMailView.Queue queue = heldMail().queue(integration.id(), integration.configuration(), limit == null ? 50 : limit);
+            if (!queue.items().isEmpty()) {
+                queues.add(queue);
+            }
+        }
+        return queues;
+    }
     @Override
     public EmailHeldMailView.Queue readHeldEmail(String id, Integer limit) {
         ChannelIntegrationConfiguration current = requireReviewer(id);

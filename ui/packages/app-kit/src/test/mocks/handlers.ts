@@ -5710,6 +5710,7 @@ export const backupSyncHandlers = [
 
   // Held mail (email plan v3 §7): an empty review queue by default; a test that
   // needs held rows overrides these with server.use.
+  http.get("*/channelstore/channels/email-held", () => HttpResponse.json([])),
   http.get("*/channelstore/channels/:id/email-held", ({ params }) =>
     HttpResponse.json({ integrationId: params.id, integrationName: null, items: [], truncated: false }),
   ),

@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.channels.rest;
 import ai.labs.eddi.configs.channels.IChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.EmailHeldMailView;
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
@@ -18,6 +19,7 @@ import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import ai.labs.eddi.integrations.email.EmailHeldMailReview;
+import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
 import ai.labs.eddi.integrations.email.EmailSenderListAudit;
 import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
@@ -141,8 +143,11 @@ class RestChannelIntegrationStoreHeldMailTest {
     }
 
     /** A held row of the integration with this verdict. */
+    private int created;
+
     private LedgerEntry held(String integrationId, String authVerdict) {
-        Instant now = Instant.now();
+        // Distinct arrival times: the queue is ordered by them.
+        Instant now = Instant.now().minusSeconds(100 - created++);
         LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.TRIGGER, Direction.IN,
                 "<" + UUID.randomUUID() + "@partner.com>", null, "imap:INBOX:1:1", "in:" + UUID.randomUUID(), STRANGER, State.RECEIVED, 0, null,
                 null, null, null, now, now, now.plus(Duration.ofDays(30)));
@@ -275,5 +280,46 @@ class RestChannelIntegrationStoreHeldMailTest {
                 () -> sut.decideHeldEmail(ID, row.id(), decision("runOnce"))));
 
         assertEquals(State.HELD, ledger.findById(row.id()).orElseThrow().state());
+    }
+
+    @Test
+    @DisplayName("runAndAllow by an approver without EDIT is a 403 before anything else is looked at - also for a forged sender")
+    void approverForgedRunAndAllowIsForbidden() throws Exception {
+        when(guard.hasAccess(ID, AccessLevel.EDIT)).thenReturn(false);
+        when(identity.hasRole("eddi-approver")).thenReturn(true);
+        doThrow(new ForbiddenException("no edit")).when(guard).requireAccess(eq(ID), eq(AccessLevel.EDIT), any());
+        LedgerEntry forged = held(ID, "fail");
+
+        assertThrows(ForbiddenException.class, () -> sut.decideHeldEmail(ID, forged.id(), decision("runAndAllow")));
+        assertEquals(State.HELD, ledger.findById(forged.id()).orElseThrow().state());
+    }
+
+    @Test
+    @DisplayName("the cross-integration read lists the queues the caller reviews, and only non-empty ones")
+    @SuppressWarnings("unchecked")
+    void allHeld() throws Exception {
+        String other = "ffffffffffffffffffffffff";
+        String empty = "eeeeeeeeeeeeeeeeeeeeeeee";
+        held(ID, "aligned-pass");
+        held(other, "fail");
+        when(guard.hasAccess(ID, AccessLevel.EDIT)).thenReturn(false);
+        when(guard.hasAccess(other, AccessLevel.EDIT)).thenReturn(false);
+        when(guard.hasAccess(empty, AccessLevel.EDIT)).thenReturn(true);
+        when(identity.hasRole("eddi-approver")).thenReturn(true);
+        var directory = mock(EmailIntegrationDirectory.class);
+        var withReviewers = email(List.of("dave"));
+        when(directory.scan())
+                .thenReturn(List.of(new EmailIntegrationDirectory.EmailIntegration(ID, email(null), EmailChannelSettings.from(email(null))),
+                        new EmailIntegrationDirectory.EmailIntegration(other, withReviewers, EmailChannelSettings.from(withReviewers)),
+                        new EmailIntegrationDirectory.EmailIntegration(empty, email(null), EmailChannelSettings.from(email(null)))));
+        Instance<EmailIntegrationDirectory> instance = mock(Instance.class);
+        when(instance.isResolvable()).thenReturn(true);
+        when(instance.get()).thenReturn(directory);
+        sut.emailDirectory = instance;
+
+        var queues = sut.readAllHeldEmail(50);
+
+        assertEquals(List.of(ID), queues.stream().map(EmailHeldMailView.Queue::integrationId).toList(),
+                "the approver default reviews the first; the second names its own reviewers; the third holds nothing");
     }
 }

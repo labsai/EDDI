@@ -299,6 +299,21 @@ class EmailInboundProcessorHeldMailTest {
     }
 
     @Test
+    @DisplayName("held as forged, passing on the run: the stored verdict decides - still anonymous and read-only (fail closed)")
+    void storedFailVerdictWins() throws Exception {
+        verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null);
+        EmailTestMail mail = EmailTestMail.mail().from(STRANGER);
+        IntegrationContext ctx = context(review("review", "review"), Map.of());
+        processor.process(ctx, once(mail), Instant.now());
+        release(mail, EmailReviewState.RUN_ONCE);
+        verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "partner.com");
+
+        processor.process(ctx, once(mail), Instant.now());
+
+        assertTrue(startUserId().startsWith(EmailUserIdentity.ANONYMOUS_PREFIX));
+        assertEquals(true, gateOf(inputs.get(0).getContext()).get("readOnlyOnly"));
+    }
+    @Test
     @DisplayName("a stored aligned pass that does not hold any more on the run: anonymous, and refused where authentication is required")
     void liveVerdictMustAgree() throws Exception {
         EmailTestMail mail = EmailTestMail.mail().from(STRANGER);

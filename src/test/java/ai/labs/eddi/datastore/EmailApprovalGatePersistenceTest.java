@@ -187,4 +187,31 @@ class EmailApprovalGatePersistenceTest extends MongoTestBase {
         assertEquals("actions", gate.policy(), backend);
         assertTrue(gate.readOnlyTools().isEmpty(), backend);
     }
+
+    @ParameterizedTest(name = "{0}")
+    @MethodSource("conversationStores")
+    @DisplayName("a released, unauthenticated held mail stays read-only-only after a reload, also for a later turn (v3 §7.3)")
+    void readOnlyOnlySurvivesTheStores(String backend, Supplier<IConversationMemoryStore> factory) throws Exception {
+        var store = factory.get();
+        var memory = new ConversationMemory("agent-mail", 1, "email-anon:abc");
+        memory.setOrigin(TurnOrigin.EMAIL);
+        var step = memory.getCurrentStep();
+        step.storeData(new Data<>("context:" + TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL)));
+        step.storeData(new Data<>(EmailApprovalGate.INTEGRATION_STEP_KEY, new Context(Context.ContextType.string, "int1")));
+        Context gate = EmailApprovalGate.contextValue("none", List.of("http.get:*"), false, null, null, null, true);
+        step.storeData(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, gate));
+        EmailApprovalGate.record(memory, List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, gate)));
+        memory.setConversationState(ConversationState.READY);
+        String conversationId = store.storeConversationMemorySnapshot(ConversationMemoryUtilities.convertConversationMemory(memory));
+
+        IConversationMemory loaded = load(store, conversationId);
+        assertTrue(EmailApprovalGate.of(loaded).readOnlyOnly(), backend + ": the mail's own step");
+        if (loaded instanceof ConversationMemory reloaded) {
+            reloaded.startNextStep();
+        }
+        EmailApprovalGate.Policy later = EmailApprovalGate.of(loaded);
+        assertNotNull(later, backend);
+        assertTrue(later.readOnlyOnly(), backend + ": a later turn of the conversation stays restricted");
+        assertEquals(List.of("http.get:*"), later.readOnlyTools(), backend);
+    }
 }

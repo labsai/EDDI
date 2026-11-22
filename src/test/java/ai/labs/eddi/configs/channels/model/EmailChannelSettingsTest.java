@@ -273,7 +273,8 @@ class EmailChannelSettingsTest {
         assertEquals(List.of(EmailChannelSettings.WARNING_OPEN_TRIGGER, EmailChannelSettings.WARNING_ANONYMOUS_TOOLS),
                 EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
         open.put("senderAllowlist", "*@supplier.com");
-        // Unauthenticated mail from an allowed domain still runs with every tool (v3 §7.3).
+        // Unauthenticated mail from an allowed domain still runs with every tool (v3
+        // §7.3).
         assertEquals(List.of(EmailChannelSettings.WARNING_ANONYMOUS_TOOLS), EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
     }
 }

@@ -309,6 +309,14 @@ export interface HeldEmailDecisionResult {
   warnings: string[];
 }
 
+/**
+ * The held mail of every email integration the caller may review — the queues
+ * that hold any. An `eddi-approver`, the default reviewer, cannot list the
+ * integrations themselves, so the approvals page reads this.
+ */
+export function getAllHeldEmail(limit = 50): Promise<HeldEmailQueue[]> {
+  return api.get<HeldEmailQueue[]>(`/channelstore/channels/email-held?limit=${limit}`);
+}
 export function getHeldEmail(id: string, limit = 50): Promise<HeldEmailQueue> {
   return api.get<HeldEmailQueue>(`/channelstore/channels/${seg(id)}/email-held?limit=${limit}`);
 }

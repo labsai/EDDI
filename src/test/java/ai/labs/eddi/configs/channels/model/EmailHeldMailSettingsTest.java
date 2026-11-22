@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.configs.channels.model;
 
+import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
@@ -104,5 +106,17 @@ class EmailHeldMailSettingsTest {
                 .contains(EmailChannelSettings.WARNING_ANONYMOUS_TOOLS));
         assertFalse(EmailChannelSettings.warnings(EmailChannelSettings.from(trigger(Map.of()), null))
                 .contains(EmailChannelSettings.WARNING_ANONYMOUS_TOOLS));
+    }
+
+    @Test
+    @DisplayName("onRefused and review round-trip through the store mapper; an unknown stored action still loads and reads as drop")
+    void jsonRoundTrip() throws Exception {
+        ObjectMapper mapper = SerializationCustomizer.configureObjectMapper(new ObjectMapper(), false);
+        EmailControl control = control(new EmailControl.OnRefused("review", "drop", null), new EmailControl.Review("P2D", 10, 2, List.of("alice")));
+        EmailControl read = mapper.readValue(mapper.writeValueAsString(control), EmailControl.class);
+        assertEquals(control, read);
+        EmailControl odd = mapper.readValue("{\"onRefused\":{\"notAllowlisted\":\"quarantine\"}}", EmailControl.class);
+        assertFalse(EmailChannelSettings.from(trigger(Map.of()), odd).reviewsNotAllowlisted());
+        assertFalse(EmailChannelSettings.validate(trigger(Map.of()), odd).isEmpty(), "but a write with it is refused");
     }
 }

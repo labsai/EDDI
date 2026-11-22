@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.GdprDeletionResult;
 import ai.labs.eddi.engine.mail.MailAddress;
+import ai.labs.eddi.engine.mail.PlainTextMailRenderer;
 import ai.labs.eddi.engine.mail.SystemMailer;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
@@ -23,7 +24,9 @@ import jakarta.enterprise.inject.Instance;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -137,6 +140,32 @@ class EmailChannelPiecesTest {
             assertTrue(ledger.all().stream().allMatch(r -> "ops@contoso.com".equals(r.recipient())), "outside the sender's domain: not mailed");
         }
 
+        @Test
+        @DisplayName("held mail (v3 §7.2): one notice per batch and hour, counts only - never a sender or a subject")
+        void notifyHeld() throws Exception {
+            SystemMailer mailer = mock(SystemMailer.class);
+            when(mailer.isEnabled()).thenReturn(true);
+            when(mailer.from()).thenReturn(Optional.of(new MailAddress("eddi@contoso.com", "EDDI")));
+            when(mailer.send(any(), anyList())).thenReturn(new SystemMailer.SendResult("250 OK"));
+            var ledger = new InMemoryEmailMessageLedger();
+            var notifier = new EmailOwnerNotifier(mailer, new InMemoryEmailMailboxStateStore(), ledger, new SimpleMeterRegistry(), Optional.empty(),
+                    Duration.ofDays(30));
+            var settings = EmailChannelSettings.from(Map.of("mode", "trigger", "transport", "imap", "connection", "c", "host", "imap.x.com",
+                    "address", "invoices@contoso.com", "ownerNotifyAddresses", "ops@contoso.com"));
+            Instant now = Instant.parse("2026-11-22T14:10:00Z");
+
+            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 2, 3, now));
+            assertFalse(notifier.notifyHeld("int1", "Invoices", settings, 1, 4, now.plusSeconds(600)), "the same hour: no second notice");
+            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 1, 4, now.plusSeconds(3600)), "the next hour");
+            assertTrue(notifier.notifyOnce("int1", "Invoices", settings, EmailOwnerNotifier.Reason.BUDGET, now), "daily notices are unaffected");
+
+            ArgumentCaptor<PlainTextMailRenderer.RenderedMail> sent = ArgumentCaptor.forClass(PlainTextMailRenderer.RenderedMail.class);
+            verify(mailer, times(3)).send(sent.capture(), anyList());
+            String text = new String(sent.getAllValues().get(0).mime(), StandardCharsets.UTF_8);
+            assertTrue(text.contains("held 2 mail(s)"), text);
+            assertTrue(text.contains("3 are waiting"), text);
+            assertEquals(3, ledger.all().stream().filter(r -> r.kind() == Kind.NOTICE).count());
+        }
         @Test
         @DisplayName("without a system mailer the notice is a log line only")
         void noMailer() throws Exception {

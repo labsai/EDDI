@@ -642,6 +642,7 @@ names a sender or a subject. The reviewer principals' own addresses are not used
 
 | | |
 |---|---|
+| `GET /channelstore/channels/email-held` | The queues of every integration the caller may review (what the Approvals page reads: an `eddi-approver` cannot list integrations) |
 | `GET /channelstore/channels/{id}/email-held` | The queue: `rowId`, sender, `authVerdict`, `heldFor`, `heldAt`, `expiresAt`, `runAndAllowOffered`, `runsAnonymously` |
 | `GET /channelstore/channels/{id}/email-held/{rowId}` | A **live** preview: the mail is re-read from the mailbox by its Message-ID (polled, move and Held folders) and shown only when it hashes as the mail that was held. Sender, verdict, subject, the first 4,000 characters of the text (quoted history stripped), attachment names. Never stored or cached |
 | `POST /channelstore/channels/{id}/email-held/{rowId}/decision` | `{"decision": "discard" \| "runOnce" \| "runAndAllow", "note": "..."}` |
@@ -663,7 +664,7 @@ names a sender or a subject. The reviewer principals' own addresses are not used
   "process it", not "do what it asks".
 - Every decision leaves an audit entry (`taskId: email.held`): who, which row, what, the reasons, the verdict, and the
   sender only as domain plus pseudonym.
-- Who may decide: the integration's editors, plus `emailControl.review.reviewers` (default `eddi-approver`). A
+- Who may decide: the integration's editors, plus `emailControl.review.reviewers` (default `eddi-approver`). A listed user id or role reaches the endpoints only if the caller also holds `eddi-admin`, `eddi-editor` or `eddi-approver` — the roles the held-mail endpoints admit. A
   conversation an email started can never decide held mail: `decide_held_email` and the decision endpoint are on the
   [escalation guard's](#a-mail-cannot-change-its-own-rules) lists.
 

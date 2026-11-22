@@ -142,6 +142,7 @@
     "GET /catalog/agents",
     "GET /catalog/groups",
     "GET /channelstore/channels/descriptors",
+    "GET /channelstore/channels/email-held",
     "GET /channelstore/channels/{id}",
     "GET /channelstore/channels/{id}/currentversion",
     "GET /channelstore/channels/{id}/email-held",

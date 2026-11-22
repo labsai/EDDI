@@ -636,7 +636,7 @@ export function ChannelDetailPage() {
               if (channelType === draft.channelType) return;
               // Keys of the old type must not reach the new type's save: the
               // email backend refuses unknown keys outright.
-              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig) });
+              setDraft({ ...draft, channelType, platformConfig: platformConfigForType(channelType, draft.channelType, draft.platformConfig), emailControl: channelType === "email" ? draft.emailControl : undefined });
             }}>
               {CHANNEL_TYPES.map((ct) => (<option key={ct} value={ct}>{ct.charAt(0).toUpperCase() + ct.slice(1)}</option>))}
             </select>

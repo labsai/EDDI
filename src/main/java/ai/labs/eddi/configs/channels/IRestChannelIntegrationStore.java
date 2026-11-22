@@ -137,6 +137,16 @@ public interface IRestChannelIntegrationStore extends IRestVersionInfo {
     Response updateEmailSenders(@PathParam("id") String id, EmailSenderLists.UpdateRequest request);
 
     @GET
+    @Path("/email-held")
+    @Produces(MediaType.APPLICATION_JSON)
+    @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})
+    @Operation(description = "The held mail of every email integration the caller may review (its editors, or its "
+            + "emailControl.review.reviewers; by default eddi-approver) — one queue per integration that holds any, as GET "
+            + ".../{id}/email-held answers it. What the Manager's approvals page lists; an approver cannot list the integrations "
+            + "themselves.")
+    List<EmailHeldMailView.Queue> readAllHeldEmail(@QueryParam("limit")
+    @DefaultValue("50") Integer limit);
+    @GET
     @Path("/{id}/email-held")
     @Produces(MediaType.APPLICATION_JSON)
     @RolesAllowed({"eddi-admin", "eddi-editor", "eddi-approver"})

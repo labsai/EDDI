@@ -1,4 +1,4 @@
-import { useQuery, useQueries, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getEnrichedChannelDescriptors,
   getChannel,
@@ -8,7 +8,7 @@ import {
   duplicateChannel,
   getEmailSenders,
   updateEmailSenders,
-  getHeldEmail,
+  getAllHeldEmail,
   getHeldEmailPreview,
   decideHeldEmail,
   type HeldEmailDecision,
@@ -131,29 +131,21 @@ export function useUpdateEmailSenders() {
 const HELD_EMAIL_KEY = ["held-email"] as const;
 
 /**
- * The held mail of every email integration the caller can see — the approvals
- * page lists it as its own kind. One request per email integration; an
- * integration the caller may not review answers 403 and is left out.
+ * The held mail of every email integration the caller may review, in one read
+ * (an approver cannot list the integrations) — the approvals page lists it as
+ * its own kind.
  */
 export function useAllHeldEmail(enabled = true) {
-  const { data: channels, isLoading: channelsLoading } = useEnrichedChannelDescriptors(100);
-  const emailIds = (channels ?? []).filter((c) => c.channelType === "email").map((c) => c.id);
-  const results = useQueries({
-    queries: emailIds.map((id) => ({
-      queryKey: [...HELD_EMAIL_KEY, id],
-      queryFn: () => getHeldEmail(id),
-      enabled,
-      retry: false,
-      refetchInterval: 30_000,
-    })),
+  const query = useQuery({
+    queryKey: [...HELD_EMAIL_KEY, "all"],
+    queryFn: () => getAllHeldEmail(),
+    enabled,
+    retry: false,
+    refetchInterval: 30_000,
   });
-  const queues: HeldEmailQueue[] = results.flatMap((r) => (r.data ? [r.data] : []));
-  return {
-    queues,
-    isLoading: channelsLoading || results.some((r) => r.isLoading),
-  };
+  const queues: HeldEmailQueue[] = query.data ?? [];
+  return { queues, isLoading: query.isLoading };
 }
-
 export function useHeldEmailPreview(id: string, rowId: string, enabled = true) {
   return useQuery({
     queryKey: [...HELD_EMAIL_KEY, id, rowId, "preview"],
