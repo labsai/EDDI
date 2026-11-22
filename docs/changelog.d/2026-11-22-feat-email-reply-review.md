@@ -25,7 +25,10 @@ reply).
   a resume that ran the rest of the turn (an approved tool call, an approved pre-run hold), and after a revision — an
   armed turn with something to send pauses as a RULE pause after the last workflow. The step keeps the draft
   (`emailGate:replyReview`: the whole text the reply would carry, `CONVERSATION_START`'s output included for a first
-  mail) and the conversation output `emailReplyReview: pending`.
+  mail) and the conversation output `emailReplyReview: pending`. A turn that ends its conversation
+  (`CONVERSATION_END`, `STOP_CONVERSATION`) waits for its review first; the decision ends the conversation —
+  `checkActionsForConversationEnd` skips while a review is pending, which would otherwise have left an undecidable
+  pause and dropped the reply. MCP `get_approval_status` reports `replyReview: true`.
 - **The decision** (`Conversation.decideReplyReview`) runs no task again: `approved`, `edited` (the approver's text in
   the conversation output `emailReplyText`; the step's `emailGate:replyReviewDecision` keeps digests and sizes) or
   `rejected`. It goes through the usual resume — REST `POST /agents/{conversationId}/resume`, MCP

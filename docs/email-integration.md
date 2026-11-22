@@ -634,8 +634,9 @@ not know reads as `always`.
 the reply — the conversation pauses: a rule pause, so the Manager's **Approvals** page, the approval banner, the
 [notification](hitl.md#email-notifications), REST `GET /agents/{conversationId}/approval-status` and
 `POST /agents/{conversationId}/resume`, and MCP `get_approval_status` / `list_pending_approvals` /
-`resume_conversation` handle it as any other. `pauseDetails.replyReview` is `true`, and the approval context's first
-item, `Reply`, shows the reply with credential shapes redacted.
+`resume_conversation` handle it as any other. REST `approval-status` says `pauseDetails.replyReview: true`, MCP
+`get_approval_status` `replyReview: true`, and on both the approval context's first item, `Reply`, shows the reply
+with credential shapes redacted (its first 3,000 characters).
 
 - **The draft is the whole reply**: everything the mail is answered with (for the first mail of a conversation, what
   `CONVERSATION_START` said too). `pauseDetails.editableAnswer` serves it on every agent, whatever its own
