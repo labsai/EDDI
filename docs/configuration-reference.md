@@ -534,9 +534,23 @@ Full guide: [attachments-guide.md](attachments-guide.md).
 | `eddi.attachments.extraction.max-chars` | `50000` | Cap on text extracted from a document |
 | `eddi.attachments.extraction.max-pages` | `500` | Cap on PDF pages extracted before truncation, bounding a many-page document — for a page range (`readAttachment`, `PdfReaderTool`) too, counted from its first page. Every PDF read for an attachment or a tool also runs under the ingestion path's decode budgets: one compressed stream may expand to at most 64 MB and the whole document to 128 MB |
 
+Per-source caps on **derived files** — the views EDDI stores of an uploaded file (structure, page text, images, slices). Only images, tables, audio and embedded files count toward the owner's byte quotas above; text views and slices never do. `0` or a negative value disables a cap. See [attachments-guide.md → Derived files](attachments-guide.md#derived-files).
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.attachments.derived.max-per-source` | `200` | Images, tables, audio and embedded files of one uploaded file together; the next one is refused |
+| `eddi.attachments.derived.max-total-bytes-per-source` | `52428800` (50 MB) | The same four kinds, in bytes |
+| `eddi.attachments.derived.max-text-bytes-per-source` | `209715200` (200 MB) | Text views of one uploaded file (structure, page text, summaries, descriptions) |
+| `eddi.attachments.derived.max-slices-per-source` | `20` | Page-range PDF slices of one uploaded file. A rebuildable cache: at the cap the least recently used slice is deleted to make room |
+| `eddi.attachments.derived.max-slice-bytes-per-source` | `52428800` (50 MB) | The same slices in bytes, evicted the same way; a single slice larger than this is refused |
+
 > The upload cap and the forward cap are different numbers on purpose: a 20 MB
 > PDF may be stored and read on demand via the `readAttachment` tool without
 > being inlined into every prompt.
+
+### Documents
+
+Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
 
 ---
 

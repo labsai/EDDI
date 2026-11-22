@@ -43,12 +43,32 @@ public final class AttachmentQuotas {
      */
     public static void check(String scope, long count, long totalBytes, long incomingBytes, long maxCount, long maxBytes)
             throws AttachmentQuotaExceededException {
-        if (maxCount > 0 && count >= maxCount) {
+        check(scope, count, totalBytes, 1, incomingBytes, maxCount, maxBytes);
+    }
+
+    /**
+     * Throw when {@code incomingCount} more files of {@code incomingBytes} in total
+     * would exceed a quota — the check of a {@linkplain QuotaReservation
+     * reservation}, which may hold several files, or none (bytes only).
+     *
+     * @param count
+     *            files the scope holds now, live reservations included
+     * @param totalBytes
+     *            bytes the scope holds now, live reservations included
+     * @param incomingCount
+     *            files to add; zero skips the file limit
+     */
+    public static void check(String scope, long count, long totalBytes, long incomingCount, long incomingBytes, long maxCount,
+                             long maxBytes)
+            throws AttachmentQuotaExceededException {
+        // Compared as "incoming > limit - used", which cannot overflow for usage
+        // within the limit; usage already over it fails on the first clause.
+        if (maxCount > 0 && incomingCount > 0 && (count >= maxCount || incomingCount > maxCount - count)) {
             throw new AttachmentQuotaExceededException(scope,
                     "Attachment quota exceeded for %s: %d/%d files. Delete some attachments first."
                             .formatted(scope, count, maxCount));
         }
-        if (maxBytes > 0 && totalBytes + incomingBytes > maxBytes) {
+        if (maxBytes > 0 && (totalBytes > maxBytes || incomingBytes > maxBytes - totalBytes)) {
             throw new AttachmentQuotaExceededException(scope,
                     "Attachment storage quota exceeded for %s: %d + %d bytes exceeds limit of %d. Delete some attachments first."
                             .formatted(scope, totalBytes, incomingBytes, maxBytes));

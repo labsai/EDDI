@@ -116,7 +116,44 @@ principal, not a user: erasing or exporting it is refused with 400.
    under one of those ids fails, step 8 **keeps** the discussion documents (reported
    as `groupConversations`, "kept until their attachments are erased"): they are the
    only record of the ids the blobs are stored under, so deleting them would leave a
-   re-run unable to reach the blobs. Re-run the erasure once the store is back
+   re-run unable to reach the blobs. Re-run the erasure once the store is back.
+   The same per-conversation delete removes the read grants on those blobs, and the
+   grants those conversations held on other users' blobs (in `attachment_grants`
+   and in the legacy per-blob list), so no grant keeps the erased conversation's id.
+   Grant rows can still keep an erased conversation's id in these cases:
+   - **A node of the previous release deletes a blob** during a rolling upgrade,
+     without its `attachment_grants` rows. The next start of an upgraded node removes
+     every grant row whose blob is gone.
+   - **A node of the previous release erases a conversation** during a rolling
+     upgrade. It removes the id from the legacy per-blob lists but not from
+     `attachment_grants`.
+   - **A grant races the erasure** on an upgraded node: a grant to the conversation
+     written while its erasure runs, or a backfill copy whose re-check of the grantee
+     fails (the backfill keeps a row it cannot prove dead, and later starts skip a
+     grant already copied).
+
+   In the last two cases nothing removes the row automatically: it stays until its
+   blob is deleted, which removes every grant on it. Such a row authorizes nothing,
+   because no conversation has that id any more. To clear the id sooner, delete the
+   rows whose `conversationId` (`conversation_id` on PostgreSQL) is the erased id from
+   `attachment_grants`
+
+   **Derived files** (views EDDI stores of an uploaded file: its structure, page text,
+   images, slices) belong to the uploaded file's owner and are stored under its
+   conversation, so the same per-conversation delete removes every view of the user's
+   files. A view the user's conversation produced of *someone else's* file — one it was
+   granted — belongs to that file's owner and stays; the user's grant on it goes, and
+   with it the user's access. `attachmentsDeleted` counts uploaded files; their
+   views are deleted with them and not counted.
+
+   **Quota reservations** (`attachment_reservations`: quota held by a write still in
+   flight, with the conversation and user it counts against) go with the same
+   per-conversation delete, so an erasure during an upload leaves nothing reserved.
+   They are deleted before the files, so a write still in flight can no longer
+   convert its reservation and has to delete its file. They are not counted. One
+   that a racing write creates after the delete stops counting when it expires (at
+   most 24 hours), and the row is then removed by the next reservation anywhere on
+   the deployment, or on MongoDB by the TTL index.
 3. HITL tool execution journal entries — **permanently deleted**
 4. Conversation descriptors — **permanently deleted**
 5. Conversation memory checkpoints — **permanently deleted**

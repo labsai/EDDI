@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.attachments;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Storage abstraction for multimodal attachments (images, PDFs, audio, etc.).
@@ -20,6 +22,14 @@ import java.util.List;
  * ({@link #delete}) is restricted to the owner (a blob that records no owner
  * stays deletable). GDPR/conversation erasure cascades via
  * {@link #deleteByConversation(String)}, which also removes the blob's grants.
+ * <p>
+ * <strong>Lineage:</strong> an uploaded blob is a <em>root</em>; the views
+ * stored of it ({@link #storeDerived}) are <em>derived</em> blobs. A derived
+ * blob has its root's owner, and access to it is decided on its root: whoever
+ * may read the root may read every view of it, and a grant is always on the
+ * root ({@link #grantAccess} given a derived ref grants its root). Deleting a
+ * root deletes its lineage, then announces {@link AttachmentRootDeleted}.
+ * Listings and file-count quotas see roots only.
  * <p>
  * This is the single blob-store abstraction for EDDI; the former
  * {@code IAttachmentStorage} was folded into it so uploads, LLM forwarding,
@@ -62,7 +72,8 @@ public interface IAttachmentStore {
      * the optional per-user quota ({@code eddi.attachments.max-per-user},
      * {@code max-total-bytes-per-user}) are checked and the blob inserted under one
      * lock per quota scope, so concurrent uploads cannot each pass the check and
-     * together exceed the limit.
+     * together exceed the limit. Usage is the stored blobs plus the live
+     * {@linkplain #reserve reservations} of the scope.
      *
      * @param userId
      *            the user the blob counts against — the owner of the conversation;
@@ -113,7 +124,8 @@ public interface IAttachmentStore {
      * server-side orchestration (e.g. {@code GroupConversationService} at member
      * fan-out) — never from client-supplied context — since it widens the access
      * boundary of the blob. The grant lives with the blob and dies when the blob is
-     * deleted.
+     * deleted. A grant is always on a root: given a derived ref, the grant is
+     * written on its root, which is what authorizes the view anyway.
      *
      * @param storageRef
      *            the storage reference of the blob to share
@@ -126,7 +138,9 @@ public interface IAttachmentStore {
 
     /**
      * Delete a single attachment. Restricted to the owning conversation — a grantee
-     * cannot delete another conversation's blob.
+     * cannot delete another conversation's blob. Deleting a root deletes its whole
+     * lineage and its grants, then fires one {@link AttachmentRootDeleted};
+     * deleting a derived blob deletes that blob only and fires nothing.
      *
      * @param storageRef
      *            the storage reference
@@ -139,16 +153,25 @@ public interface IAttachmentStore {
     boolean delete(String storageRef, String requestingConversationId) throws AttachmentStoreException;
 
     /**
-     * Delete all attachments for a conversation (GDPR/conversation erasure).
+     * Delete all attachments for a conversation (GDPR/conversation erasure),
+     * together with the grants on them <em>and</em> the grants this conversation
+     * held on other conversations' blobs — so grants never outlive either side. The
+     * lineage of every root it owned goes with it (derived blobs are stored under
+     * their root owner's conversation), and one {@link AttachmentRootDeleted} is
+     * fired per root, after the delete. Views this conversation produced of a root
+     * it was only granted belong to that root's owner and stay. The
+     * {@linkplain #reserve quota reservations} held for the conversation go too, so
+     * an erasure during an upload leaves no quota held.
      *
      * @param conversationId
      *            the conversation ID
-     * @return number of attachments deleted
+     * @return number of uploaded attachments (roots) deleted; derived blobs are not
+     *         counted
      */
     long deleteByConversation(String conversationId);
 
     /**
-     * List attachments <em>owned</em> by a conversation.
+     * List the uploaded attachments (roots) <em>owned</em> by a conversation.
      *
      * @param conversationId
      *            the conversation ID
@@ -160,13 +183,218 @@ public interface IAttachmentStore {
      * List all attachments a conversation can <em>read</em> — those it owns plus
      * those it has been {@linkplain #grantAccess granted}. Used by the
      * {@code readAttachment} tool so group members can enumerate blobs shared with
-     * them (owned by the group conversation, granted to the member).
+     * them (owned by the group conversation, granted to the member). Roots only:
+     * derived blobs are listed by {@link #listDerived}.
      *
      * @param conversationId
      *            the requesting conversation ID
      * @return owned + granted attachment metadata
      */
     List<Attachment> listAccessible(String conversationId);
+
+    // ------------------------------------------------------------------ lineage
+
+    /**
+     * Stores a derived blob — a view of an uploaded file (a manifest, a page
+     * window's text, an image, a slice).
+     * <p>
+     * <b>The owner is the root's</b>, copied from the root inside the same lock
+     * (and on PostgreSQL the same transaction), never the caller's: a view a
+     * grantee conversation extracts belongs to the root's owner, is readable by
+     * every reader of the root and survives the grantee's deletion. The caller must
+     * be able to read the root.
+     * <p>
+     * The write takes the root's source lock, after the owner's quota locks when
+     * the kind counts toward the owner's byte quota (lock order: conversation →
+     * user → source). Under it: the root is re-read (gone → not found); identical
+     * bytes already stored for the same owner and root are returned instead of
+     * stored again (dedup on {@code (ownerKey, rootRef, sha256)}, the existing
+     * blob's derivation unchanged); the per-source caps of {@link DerivedCaps}
+     * apply, evicting least recently used slices; media kinds are checked against
+     * the owner's byte quotas. A derived blob never counts toward a file-count
+     * quota and is never listed by {@link #listByConversation} or
+     * {@link #listAccessible}.
+     *
+     * @param derivation
+     *            where it comes from. Its {@code rootRef} or {@code parentRef} may
+     *            name a derived blob; the store records the lineage's original root
+     *            and the direct parent. Its {@code sha256} is ignored — the store
+     *            computes it
+     * @param requestingConversationId
+     *            the conversation whose work produced the view; must be able to
+     *            read the root
+     * @return the stored (or deduplicated) blob; its {@code conversationId} is the
+     *         root owner's
+     * @throws AttachmentDerivedCapException
+     *             if a per-source cap would be exceeded
+     * @throws AttachmentQuotaExceededException
+     *             if a media kind would exceed the owner's byte quota
+     * @throws AttachmentNotFoundException
+     *             if the root does not exist or the caller cannot read it
+     */
+    Attachment storeDerived(byte[] bytes, String mimeType, String filename, Derivation derivation,
+                            String requestingConversationId)
+            throws AttachmentStoreException;
+
+    /**
+     * Where a blob comes from: empty for a root.
+     *
+     * @throws AttachmentNotFoundException
+     *             if it does not exist or the caller cannot read its root
+     */
+    Optional<Derivation> getDerivation(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * The derived blobs of a root, oldest first.
+     *
+     * @param kind
+     *            only this kind, or {@code null} for all
+     * @throws AttachmentNotFoundException
+     *             if the root does not exist or the caller cannot read it
+     */
+    List<Attachment> listDerived(String rootRef, Derivation.Kind kind, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * Exact lookup by the {@code (kind, unitId)} key a producer chose — the cache
+     * primitive for manifests, slices and summaries. When the key was written more
+     * than once (bytes that changed between writes), the most recent match wins. A
+     * blob deduplicated under another key is not found here.
+     *
+     * @throws AttachmentNotFoundException
+     *             if the root does not exist or the caller cannot read it
+     */
+    Optional<Attachment> findDerived(String rootRef, Derivation.Kind kind, String unitId, String requestingConversationId)
+            throws AttachmentStoreException;
+
+    /**
+     * The root of a blob's lineage: the blob itself for a root.
+     *
+     * @throws AttachmentNotFoundException
+     *             if it does not exist or the caller cannot read its root — the
+     *             same answer for both, so it is no oracle
+     */
+    String rootOf(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * The owner of a blob's lineage — for a derived blob, its root's.
+     *
+     * @throws AttachmentNotFoundException
+     *             if it does not exist or the caller cannot read its root
+     */
+    OwnerRef ownerOf(String storageRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * A root's page count, as recorded by {@link #setPageCount}; {@code null} when
+     * unknown. For a derived ref, its root's.
+     *
+     * @throws AttachmentNotFoundException
+     *             if it does not exist or the caller cannot read its root
+     */
+    Integer pageCount(String rootRef, String requestingConversationId) throws AttachmentStoreException;
+
+    /**
+     * Records a root's page count. <b>Trusted callers only</b> (an extractor that
+     * opened the file); a derived ref or a missing root is ignored.
+     */
+    void setPageCount(String rootRef, int pages);
+
+    // ------------------------------------------------------- quota reservations
+
+    /**
+     * Holds quota for a write that runs too long to hold the quota lock — a
+     * streaming upload, a job producing a file. The reservation is written under
+     * the bucket locks after the same check an upload makes, and from then on
+     * <b>counts as usage</b> of its buckets — for uploads, derived media and other
+     * reservations alike — until it is {@linkplain #convert converted},
+     * {@linkplain #release released} or expires. Expired reservations count for
+     * nothing and are swept from the buckets being reserved in.
+     * <p>
+     * <b>Lock order.</b> Every store takes its locks in one fixed order,
+     * conversation → user → team → source ({@link AttachmentLockOrder}); the stores
+     * have always locked conversation before user, so the scopes added since come
+     * after them and an old and a new node can never wait on each other in a cycle.
+     * <p>
+     * Expiry is decided by the database's clock, never a node's, so clock skew
+     * between nodes cannot stretch or cut a reservation.
+     * <p>
+     * Only {@link OwnerScope#CONVERSATION} owners can reserve in this release: the
+     * library buckets of {@link OwnerScope#USER} and {@link OwnerScope#TEAM} owners
+     * do not exist yet.
+     *
+     * @param owner
+     *            the bucket's owner; for a conversation owner its key is the
+     *            conversation id
+     * @param conversationId
+     *            the conversation the write is for; must be the owner's key
+     * @param userId
+     *            the user the write counts against; {@code null} when unknown,
+     *            which exempts it from the per-user quota, as for an upload
+     * @param bytes
+     *            the bytes to hold (may be zero when {@code count} is not)
+     * @param count
+     *            the files to hold (zero for bytes only, e.g. a job's output)
+     * @param ttl
+     *            how long it counts at most; at most
+     *            {@link QuotaReservation#MAX_TTL}
+     * @return the reservation, with its expiry by the database's clock
+     * @throws AttachmentQuotaExceededException
+     *             if the reservation would exceed a quota; nothing is held then
+     * @throws AttachmentStoreException
+     *             if the store fails or the locks cannot be taken in time
+     * @throws IllegalArgumentException
+     *             for an owner other than a conversation, a conversation that is
+     *             not the owner's, or amounts and a lifetime
+     *             {@link QuotaReservation#validateRequest} refuses
+     */
+    QuotaReservation reserve(OwnerRef owner, String conversationId, String userId, long bytes, int count, Duration ttl)
+            throws AttachmentStoreException;
+
+    /**
+     * Gives a reservation's quota back. Idempotent: an unknown, expired, released
+     * or converted reservation is ignored.
+     */
+    void release(String reservationId);
+
+    /**
+     * Completes a reservation with the blob it was taken for: the reservation stops
+     * counting and the blob counts in its place, under the same bucket locks the
+     * reservation was taken under.
+     * <p>
+     * The blob must be stored first, without being charged again: a write against a
+     * reservation stores its blob uncharged and then converts — on PostgreSQL in
+     * the same transaction. Converting only once the blob is visible is what keeps
+     * usage from ever reading "neither": in between it reads "both", which can
+     * refuse a concurrent upload but never admits one over the quota. No write
+     * stores against a reservation yet; the streaming store will.
+     *
+     * @param reservationId
+     *            the reservation
+     * @param storageRef
+     *            the uploaded blob (a root) the reservation was taken for
+     * @throws AttachmentNotFoundException
+     *             if the blob does not exist, is not a root, or is not in the
+     *             reservation's conversation and user buckets
+     * @throws AttachmentQuotaExceededException
+     *             if the reservation expired or was released before the write
+     *             completed (the blob was then never covered by quota, and the
+     *             writer must delete it), or the blob is larger than the bytes
+     *             reserved
+     */
+    void convert(String reservationId, String storageRef) throws AttachmentStoreException;
+
+    /**
+     * The owner of a lineage.
+     *
+     * @param scope
+     *            whom it belongs to
+     * @param ownerKey
+     *            the key everything owned by it is stored under (the conversation
+     *            id for {@link OwnerScope#CONVERSATION})
+     * @param ownerUserId
+     *            the user who uploaded or contributed it; {@code null} when unknown
+     */
+    record OwnerRef(OwnerScope scope, String ownerKey, String ownerUserId) {
+    }
 
     /**
      * Attachment metadata record.
@@ -198,11 +426,14 @@ public interface IAttachmentStore {
 
     /**
      * Thrown when storing a blob would exceed a quota. {@link #getScope()} says
-     * which: {@code "conversation"} or {@code "user"}.
+     * which: {@code "conversation"} or {@code "user"} — or {@code "reservation"}
+     * when a write outgrew, or outlived, the {@linkplain #convert reservation} that
+     * covered it.
      */
     class AttachmentQuotaExceededException extends AttachmentStoreException {
         public static final String SCOPE_CONVERSATION = "conversation";
         public static final String SCOPE_USER = "user";
+        public static final String SCOPE_RESERVATION = "reservation";
 
         private final String scope;
 
@@ -213,6 +444,25 @@ public interface IAttachmentStore {
 
         public String getScope() {
             return scope;
+        }
+    }
+
+    /**
+     * Thrown when a derived blob would exceed a per-source cap of its root
+     * ({@link DerivedCaps}). {@link #getCap()} names it, e.g.
+     * {@code "max-per-source"}. The producer degrades the block to a placeholder
+     * rather than failing the turn.
+     */
+    class AttachmentDerivedCapException extends AttachmentStoreException {
+        private final String cap;
+
+        public AttachmentDerivedCapException(String cap, String message) {
+            super(message);
+            this.cap = cap;
+        }
+
+        public String getCap() {
+            return cap;
         }
     }
 
