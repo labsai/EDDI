@@ -52,7 +52,7 @@ Two attacks follow from that:
 | Outbound TLS (LLM providers, HTTP calls, MCP, A2A, Slack, agent sync) | JDK JSSE (`java.net.http.HttpClient`) and Vert.x | — | ❌ Classical key exchange |
 | Database and NATS TLS | MongoDB, PostgreSQL and NATS drivers on JDK JSSE | Connection strings | ❌ Classical key exchange |
 
-All algorithms come from the JDK's own providers. BouncyCastle is on the classpath only as a transitive dependency of the NATS client, and EDDI does not request it.
+All algorithms come from the JDK's own providers: EDDI never registers BouncyCastle as a JCA provider and never names it in a `getInstance` call. BouncyCastle is on the classpath in two roles. It arrives transitively through the NATS client. And `bcprov`, `bcpkix`, `bcutil` and `bcjmail` are declared directly in `pom.xml` for S/MIME, as a library for reading PEM and PKCS#12 material and building and verifying the CMS and S/MIME structures; the signature and digest calls under them still run on the JDK providers. The one exception is the decryption of an encrypted PKCS#8 PEM key, which uses a private `BouncyCastleProvider` instance that is not registered.
 
 ## What is quantum-safe today
 
