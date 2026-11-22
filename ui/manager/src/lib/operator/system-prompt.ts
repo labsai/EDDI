@@ -693,6 +693,23 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   member of the Shared Drive. Every conversation of an agent using the
   knowledge base can retrieve what it indexed, whatever each file's sharing
   says. A preview of it lists the drive without downloading anything.
+- A \`googleDrive\` source's scope: \`folders\` lists folders to read, each as
+  \`{"path": "Sales/Offers"}\` (from the drive's root) or \`{"id": "1xY…"}\`, and
+  \`excludeFolders\` lists subtrees to leave out, in the same two forms; the
+  older \`folderIds\` list still works as \`id\` entries. No folder at all reads
+  the whole drive. Exclusion wins over inclusion at any depth, including over a
+  folder named in \`folders\`. A path is resolved to an id on the first run and
+  the id is kept in the source's ingestion state, never written back to the
+  document — so a folder renamed or moved later is still read, and the run
+  history's message says "'Sales/Offers' is now 'Sales/Quotes'". A path that
+  does not exist, or names two folders of the same name at one level, fails the
+  run with an error naming the ids; the fix is to name the folder by \`id\`.
+  When folders are removed from the scope or a folder is excluded, the next run
+  that lists the whole new scope removes their documents at once, not after
+  \`tombstoneAfterMissedRuns\` runs; a run that stops early (throttled, time
+  budget) removes nothing, and until a complete run the removed folder's
+  documents stay retrievable. The Manager's source panel has a folder picker
+  for this; you cannot browse a drive yourself.
 - Find one by name in the descriptor listing, then read it by id AND version —
   the by-id read needs both, and a name alone reaches nothing.
 - An agent retrieves from a knowledge base only when THREE things line up, and

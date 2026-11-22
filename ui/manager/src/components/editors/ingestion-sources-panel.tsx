@@ -32,6 +32,7 @@ import { IngestionFilesPanel } from "@/components/editors/ingestion-files-panel"
 import { RunHistory, RunProgress } from "@/components/editors/ingestion-run-history";
 import { CronField, ScheduleStatus } from "@/components/editors/ingestion-schedule";
 import { SourceContents } from "@/components/editors/ingestion-source-contents";
+import { DriveFolderScope } from "@/components/editors/drive-folder-scope";
 import { describeCron } from "@/lib/ingestion-schedule";
 import { GOOGLE_DRIVE_FORMATS } from "@/lib/api/ingestion-sources";
 import type { IngestionReport, IngestionSource } from "@/lib/api/ingestion-sources";
@@ -624,20 +625,16 @@ function SourceCard({
 
           {isDrive && (
             <>
-              <Field
-                label={t("ragEditor.sources.driveFolderIds", "Folders")}
-                hint={t(
-                  "ragEditor.sources.driveFolderIdsHint",
-                  "Folder IDs of this drive to read, comma separated. Empty reads the whole drive",
-                )}
-              >
-                <PatternListInput
-                  patterns={source.googleDrive?.folderIds ?? []}
-                  onCommit={(folderIds) => onChangeGoogleDrive({ folderIds })}
-                  disabled={readOnly}
-                  testId={`${testId}-drive-folder-ids`}
-                />
-              </Field>
+              <DriveFolderScope
+                drive={source.googleDrive}
+                onChange={onChangeGoogleDrive}
+                kbId={kbId}
+                sourceId={source.id}
+                version={version}
+                readOnly={readOnly}
+                hasUnsavedChanges={hasUnsavedChanges}
+                testId={testId}
+              />
               <Field
                 label={t("ragEditor.sources.driveFormats", "Formats")}
                 hint={t("ragEditor.sources.driveFormatsHint", "Comma separated. Empty reads all of: {{formats}}", {
