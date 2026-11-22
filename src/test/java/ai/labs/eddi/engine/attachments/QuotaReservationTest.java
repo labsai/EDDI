@@ -54,6 +54,33 @@ class QuotaReservationTest {
     }
 
     @Test
+    void aReservationIsCappedSoNoQuotaSumOverflows() {
+        assertDoesNotThrow(() -> QuotaReservation.validateRequest(OWNER, CONVERSATION, QuotaReservation.MAX_BYTES, QuotaReservation.MAX_COUNT, TTL));
+        assertThrows(IllegalArgumentException.class,
+                () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, QuotaReservation.MAX_BYTES + 1, 1, TTL));
+        assertThrows(IllegalArgumentException.class, () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, Long.MAX_VALUE, 1, TTL));
+        assertThrows(IllegalArgumentException.class,
+                () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, 1, QuotaReservation.MAX_COUNT + 1, TTL));
+    }
+
+    @Test
+    void aLifetimeTooLongToCountInMillisecondsIsRefusedNotThrownAsAnOverflow() {
+        assertThrows(IllegalArgumentException.class,
+                () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, 10, 1, Duration.ofSeconds(Long.MAX_VALUE)));
+    }
+
+    @Test
+    void theQuotaArithmeticDoesNotOverflow() throws Exception {
+        String scope = AttachmentQuotaExceededException.SCOPE_CONVERSATION;
+        assertThrows(AttachmentQuotaExceededException.class, () -> AttachmentQuotas.check(scope, 0, 60, 0, Long.MAX_VALUE, 0, 100),
+                "60 + Long.MAX_VALUE wraps negative and would pass a naive sum");
+        assertThrows(AttachmentQuotaExceededException.class, () -> AttachmentQuotas.check(scope, 3, 0, Long.MAX_VALUE, 0, 5, 0));
+        assertThrows(AttachmentQuotaExceededException.class, () -> AttachmentQuotas.check(scope, 0, 101, 0, 0, 0, 100),
+                "usage already over the limit");
+        assertDoesNotThrow(() -> AttachmentQuotas.check(scope, 0, 60, 0, 40, 0, 100));
+    }
+
+    @Test
     void theLifetimeIsBetweenOneMillisecondAndTheMaximum() {
         assertThrows(IllegalArgumentException.class, () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, 10, 1, null));
         assertThrows(IllegalArgumentException.class, () -> QuotaReservation.validateRequest(OWNER, CONVERSATION, 10, 1, Duration.ZERO));

@@ -703,6 +703,12 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
     public long deleteByConversation(String conversationId) {
         List<String> deletedRefs = new ArrayList<>();
         List<AttachmentRootDeleted> roots = new ArrayList<>();
+        // The quota this conversation's writes in flight held, before the blobs:
+        // deleted after them, a blob stored after the scan below could still be
+        // converted and would survive the erasure. Deleted first, every later convert
+        // is refused and its writer deletes the blob, and a blob converted before
+        // this line was stored before it, so the scan sees it.
+        reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
         for (GridFSFile file : primaryReadBucket.find(Filters.eq("metadata." + META_CONVERSATION_ID, conversationId))) {
             gridFSBucket.delete(file.getObjectId());
             String ref = canonicalRef(file);
@@ -726,9 +732,6 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
             grantsCollection.deleteMany(Filters.in(GRANT_STORAGE_REF, deletedRefs));
         }
         long held = grantsCollection.deleteMany(Filters.eq(GRANT_CONVERSATION_ID, conversationId)).getDeletedCount();
-        // The quota this conversation's writes in flight held: an erasure during an
-        // upload leaves nothing reserved.
-        reservationsCollection.deleteMany(Filters.eq(META_CONVERSATION_ID, conversationId));
         filesCollection.updateMany(Filters.eq("metadata." + META_GRANTS, conversationId), Updates.pull("metadata." + META_GRANTS, conversationId));
         if (!deletedRefs.isEmpty() || held > 0) {
             LOGGER.debugf("Deleted %d attachments (%d roots) and %d held grants for conversation '%s'", deletedRefs.size(), roots.size(), held,
@@ -1103,15 +1106,16 @@ public class GridFsAttachmentStore implements IAttachmentStore, IAttachmentGrant
         List<String[]> held = new ArrayList<>();
         try {
             lockAll(bucketLocks(conversationQuota ? conversationId : null, userQuota ? userId : null), held);
-            // Only the buckets whose locks are held.
+            // Every reserve sweeps, whether quotas are on or not; the TTL index is only
+            // the backstop, as its monitor runs once a minute. Expired reservations no
+            // longer count, so this keeps the collection small, not the quota right.
+            reservationsCollection.deleteMany(EXPIRED_RESERVATION);
             if (conversationQuota) {
-                reservationsCollection.deleteMany(Filters.and(Filters.eq(META_CONVERSATION_ID, conversationId), EXPIRED_RESERVATION));
                 long[] usage = usage(META_CONVERSATION_ID, conversationId);
                 AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes, maxPerConversation,
                         maxTotalBytesPerConversation);
             }
             if (userQuota) {
-                reservationsCollection.deleteMany(Filters.and(Filters.eq(META_USER_ID, userId), EXPIRED_RESERVATION));
                 long[] usage = usage(META_USER_ID, userId);
                 AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, usage[0], usage[1], count, bytes, maxPerUser,
                         maxTotalBytesPerUser);

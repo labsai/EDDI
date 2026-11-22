@@ -30,6 +30,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -135,6 +136,21 @@ class PostgresAttachmentStoreIT extends PostgresTestBase implements AttachmentSt
     @Override
     public void expireReservations() {
         execute("UPDATE attachment_reservations SET expires_at = NOW() - INTERVAL '1 second'");
+    }
+
+    @Override
+    public Duration storedLifetime(String reservationId) {
+        try (Connection conn = DATA_SOURCE.getConnection();
+                PreparedStatement ps = conn.prepareStatement(
+                        "SELECT (EXTRACT(EPOCH FROM (expires_at - created_at)) * 1000)::bigint FROM attachment_reservations WHERE id = ?")) {
+            ps.setString(1, reservationId);
+            try (ResultSet rs = ps.executeQuery()) {
+                assertTrue(rs.next(), "no reservation " + reservationId);
+                return Duration.ofMillis(rs.getLong(1));
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException(e);
+        }
     }
 
     @Override

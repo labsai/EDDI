@@ -166,6 +166,9 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             """;
     private static final String CREATE_INDEX_RESERVATIONS_CONV = "CREATE INDEX IF NOT EXISTS idx_attach_resv_conv ON attachment_reservations (conversation_id)";
     private static final String CREATE_INDEX_RESERVATIONS_USER = "CREATE INDEX IF NOT EXISTS idx_attach_resv_user ON attachment_reservations (user_id)";
+    private static final String CREATE_INDEX_RESERVATIONS_EXPIRY = "CREATE INDEX IF NOT EXISTS idx_attach_resv_expiry ON attachment_reservations (expires_at)";
+    /** The most expired reservations one reserve deletes. */
+    static final int SWEEP_BATCH = 100;
     /**
      * A blob joined to the root of its lineage ({@code a} = the blob, {@code r} =
      * its root; the same row for a root), with whether the requester holds a
@@ -257,6 +260,7 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
             stmt.execute(CREATE_RESERVATIONS_TABLE);
             stmt.execute(CREATE_INDEX_RESERVATIONS_CONV);
             stmt.execute(CREATE_INDEX_RESERVATIONS_USER);
+            stmt.execute(CREATE_INDEX_RESERVATIONS_EXPIRY);
             schemaInitialized = true;
         } catch (SQLException e) {
             throw new RuntimeException("Failed to initialize attachments table", e);
@@ -646,6 +650,17 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         try (Connection conn = dataSourceInstance.get().getConnection()) {
             List<String> refs = new ArrayList<>();
             int held = inTransaction(conn, () -> {
+                // The quota this conversation's writes in flight held, before the blobs.
+                // Deleted after them, a blob committed after the blob DELETE's snapshot
+                // could still be converted, and would survive the erasure. Deleted
+                // first, every later convert is refused and its writer deletes the
+                // blob; a convert that already holds the row commits before this
+                // statement returns, and the blob DELETE below, a new statement, sees
+                // its blob.
+                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE conversation_id = ?")) {
+                    ps.setString(1, conversationId);
+                    ps.executeUpdate();
+                }
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachments WHERE conversation_id = ? RETURNING storage_ref, root_ref, owner_scope, owner_key, user_id")) {
                     ps.setString(1, conversationId);
@@ -667,12 +682,6 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                         ps.setArray(1, conn.createArrayOf("text", roots.stream().map(AttachmentRootDeleted::rootRef).toArray()));
                         ps.executeUpdate();
                     }
-                }
-                // The quota this conversation's writes in flight held: an erasure during
-                // an upload leaves nothing reserved.
-                try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE conversation_id = ?")) {
-                    ps.setString(1, conversationId);
-                    ps.executeUpdate();
                 }
                 try (PreparedStatement ps = conn.prepareStatement(
                         "DELETE FROM attachment_grants WHERE conversation_id = ? OR storage_ref = ANY(?)")) {
@@ -1207,16 +1216,13 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
                     locks.add(new Lock(AttachmentLockOrder.Scope.USER, userId));
                 }
                 lockAll(conn, locks);
-                // Only the buckets whose locks are held: a sweep of other buckets could
-                // meet a concurrent sweep's row locks in the opposite order.
+                sweepExpired(conn);
                 if (conversationQuota) {
-                    sweepExpired(conn, "conversation_id = ?", conversationId);
                     long[] usage = usage(conn, "conversation_id = ?", conversationId);
                     AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_CONVERSATION, usage[0], usage[1], count, bytes,
                             maxPerConversation, maxTotalBytesPerConversation);
                 }
                 if (userQuota) {
-                    sweepExpired(conn, "user_id = ?", userId);
                     long[] usage = usage(conn, "user_id = ?", userId);
                     AttachmentQuotas.check(AttachmentQuotaExceededException.SCOPE_USER, usage[0], usage[1], count, bytes, maxPerUser,
                             maxTotalBytesPerUser);
@@ -1242,10 +1248,18 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         }
     }
 
-    private static void sweepExpired(Connection conn, String where, String value) throws SQLException {
-        try (PreparedStatement ps = conn.prepareStatement(
-                "DELETE FROM attachment_reservations WHERE " + where + " AND expires_at <= NOW()")) {
-            ps.setString(1, value);
+    /**
+     * Deletes up to {@value #SWEEP_BATCH} expired reservations of any bucket. An
+     * expired row no longer counts, so this only keeps the table from growing:
+     * every reserve sweeps, whether quotas are on or not, so the rows of writers
+     * that crashed are removed by the next writer anywhere. {@code SKIP LOCKED}
+     * leaves rows a concurrent sweep or {@code convert} holds to them, so two
+     * sweeps never wait on each other.
+     */
+    private static void sweepExpired(Connection conn) throws SQLException {
+        try (PreparedStatement ps = conn.prepareStatement("DELETE FROM attachment_reservations WHERE id IN "
+                + "(SELECT id FROM attachment_reservations WHERE expires_at <= NOW() LIMIT " + SWEEP_BATCH
+                + " FOR UPDATE SKIP LOCKED)")) {
             ps.executeUpdate();
         }
     }
@@ -1295,7 +1309,10 @@ public class PostgresAttachmentStore implements IAttachmentStore, IAttachmentGra
         lockAll(conn, locks);
         long reserved;
         try (PreparedStatement ps = conn.prepareStatement(
-                "SELECT bytes FROM attachment_reservations WHERE id = ? AND expires_at > NOW() FOR UPDATE")) {
+                // clock_timestamp(), not NOW(): NOW() is when the transaction began, and
+                // the locks above may have been waited on for longer than the
+                // reservation had left.
+                "SELECT bytes FROM attachment_reservations WHERE id = ? AND expires_at > clock_timestamp() FOR UPDATE")) {
             ps.setString(1, reservationId);
             try (ResultSet rs = ps.executeQuery()) {
                 if (!rs.next()) {

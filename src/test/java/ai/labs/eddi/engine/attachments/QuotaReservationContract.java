@@ -63,6 +63,12 @@ public interface QuotaReservationContract {
      */
     String storeUncharged(String conversationId, String userId, byte[] bytes);
 
+    /**
+     * The lifetime the store wrote for a reservation: its expiry minus the time it
+     * was written, both as the database recorded them.
+     */
+    Duration storedLifetime(String reservationId);
+
     String CONVERSATION = "6aba70011a25f8be7920e101";
     String OTHER_CONVERSATION = "6aba70011a25f8be7920e102";
     String RESERVING_USER = "user-6aba70011a25f8bf";
@@ -160,6 +166,7 @@ public interface QuotaReservationContract {
         // Loose bounds: the database's clock, not this JVM's, set it.
         assertTrue(reservation.expiresAt().isAfter(before.plus(TTL).minusSeconds(60)), reservation.expiresAt().toString());
         assertTrue(reservation.expiresAt().isBefore(Instant.now().plus(TTL).plusSeconds(60)), reservation.expiresAt().toString());
+        assertEquals(TTL, storedLifetime(reservation.id()), "exactly the lifetime asked for, on the database's clock");
     }
 
     // -------------------------------------------------- expiry and release
@@ -173,7 +180,18 @@ public interface QuotaReservationContract {
         assertNotNull(upload(CONVERSATION, RESERVING_USER, 50));
         assertEquals(1, reservationRows(), "uploads do not sweep");
         reserve(CONVERSATION, RESERVING_USER, 50, 1);
-        assertEquals(1, reservationRows(), "the expired reservation was swept from the bucket reserved in");
+        assertEquals(1, reservationRows(), "the expired reservation was swept");
+    }
+
+    @Test
+    default void everyReserveSweepsExpiredReservationsOfAnyBucketEvenWithQuotasOff() throws Exception {
+        reserve(CONVERSATION, RESERVING_USER, 90, 1);
+        reserve(OTHER_CONVERSATION, null, 90, 1);
+        expireReservations();
+
+        reserve(OTHER_CONVERSATION, "user-6aba70011a25f8c0", 5, 1);
+
+        assertEquals(1, reservationRows(), "both expired rows were swept, though no quota is on and neither is in the bucket reserved in");
     }
 
     @Test

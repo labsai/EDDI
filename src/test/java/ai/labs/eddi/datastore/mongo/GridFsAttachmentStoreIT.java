@@ -31,6 +31,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Date;
 import java.util.List;
@@ -120,6 +121,14 @@ class GridFsAttachmentStoreIT extends MongoTestBase implements AttachmentStoreCo
         // The server's clock, as the store reads it.
         reservations().updateMany(new Document(), List.of(new Document("$set",
                 new Document(GridFsAttachmentStore.RESERVATION_EXPIRES_AT, new Document("$subtract", List.of("$$NOW", 1000L))))));
+    }
+
+    @Override
+    public Duration storedLifetime(String reservationId) {
+        Document stored = reservations().find(new Document("_id", reservationId)).first();
+        assertTrue(stored != null, "no reservation " + reservationId);
+        return Duration.ofMillis(stored.getDate(GridFsAttachmentStore.RESERVATION_EXPIRES_AT).getTime()
+                - stored.getDate(GridFsAttachmentStore.RESERVATION_CREATED_AT).getTime());
     }
 
     @Override
