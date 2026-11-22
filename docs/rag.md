@@ -894,11 +894,12 @@ Drive's listing query; the connection name is held to the connections framework'
   id it resolved to in the source's **ingestion state** (`rag_ingestion_sources.resolved_scope` on
   PostgreSQL, `resolvedScope` on MongoDB) — never in the knowledge-base document, which a run does not
   write. Later runs read the recorded id, so a folder renamed or moved within the drive keeps being read,
-  and the run's summary says where it is now: `'Sales/Offers' is now 'Sales/Quotes'`. Only when the
+  and the run logs where it is now: `'Sales/Offers' is now 'Sales/Quotes'` (a preview's message says it
+  too; the run history does not carry it). Only when the
   recorded folder is gone — deleted, in the trash, moved to another drive — is the path resolved again; a
   path that then resolves nowhere fails the run. Purging the source's state forgets the recorded ids.
 - **Exclusion wins.** An excluded folder is never listed, nor is anything under it. A folder in
-  `folders` that lies inside an excluded one is not read (the summary says so), and a shortcut whose
+  `folders` that lies inside an excluded one is not read (the log and a preview say so), and a shortcut whose
   target lies inside one is not followed — judged by where the target really is in the drive, which
   costs one `files.get` per folder on its way up, and only when something is excluded. If every folder
   in `folders` is excluded the run fails rather than list nothing. An exclusion whose path never
@@ -915,8 +916,9 @@ Drive's listing query; the connection name is held to the connections framework'
   fast-tracking anything.
 - **What a scope change does not do yet.** Until that complete listing, the removed folder's documents
   stay retrievable: retrieval does not filter on folder membership yet (the large-scale ingestion
-  plan asks for it in §6.3; it is not built). Each chunk records the folder
-  that held its file (`parentId` metadata) from now on, which is where that filter starts.
+  plan asks for it in §6.3; it is not built). The listing now records the
+  folder that holds each file (`parentId` in the document's metadata), but the pipeline does not copy
+  it onto the stored chunks yet, which such a filter would need.
 
 **Picking folders.** `GET /ragstore/rags/{id}/sources/{sourceId}/drive/folders?version=N&parentId=root&pageToken=…`
 lists one level of the saved source's Shared Drive — `{"folders": [{"id", "name"}], "nextPageToken"}`,

@@ -57,6 +57,9 @@ class GoogleDriveScopeChangePipelineTest {
     private IngestionSource source;
     private GoogleDriveSource config;
 
+    /** Text that makes the embedding model fail, as a throttled provider would. */
+    private String failOn;
+
     @BeforeEach
     void setUp() {
         drive = new FakeDrive(DRIVE);
@@ -70,6 +73,9 @@ class GoogleDriveScopeChangePipelineTest {
         when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class))).thenReturn(model);
         when(model.embedAll(any())).thenAnswer(invocation -> {
             List<TextSegment> segments = invocation.getArgument(0);
+            if (failOn != null && segments.stream().anyMatch(segment -> segment.text().contains(failOn))) {
+                throw new IllegalStateException("429 RESOURCE_EXHAUSTED");
+            }
             return Response.from(segments.stream().map(segment -> Embedding.from(new float[]{0.1f})).toList());
         });
 
@@ -134,6 +140,22 @@ class GoogleDriveScopeChangePipelineTest {
         assertFalse(live("l1"));
         assertTrue(live("s1") && live("s2"), "the folder that stayed keeps its documents");
         assertTrue(stateStore.lookup(key(), "l1").orElseThrow().tombstoned());
+    }
+
+    @Test
+    @DisplayName("a kept document that fails to embed in the scope-changed run keeps its vectors")
+    void failedKeptDocumentIsNotRemoved() {
+        run(Mode.INGEST);
+        config.setFolders(List.of(DriveFolder.ofPath("Sales")));
+        drive.file("s1", "offer.txt", "text/plain", "fSales", "The offer is now valid for sixty days.");
+        failOn = "sixty";
+
+        IngestionReport second = run(Mode.INGEST);
+
+        assertEquals(1, second.documentsTombstoned(), "only the removed folder's document goes: " + second);
+        assertFalse(live("l1"));
+        assertTrue(live("s1"), "listed in the new scope, so its old vectors stay although this embedding failed");
+        assertFalse(stateStore.lookup(key(), "s1").orElseThrow().tombstoned());
     }
 
     @Test

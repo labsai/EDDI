@@ -701,7 +701,8 @@ const BODY_KNOWLEDGE_BASES = `Knowledge bases (RAG):
   folder named in \`folders\`. A path is resolved to an id on the first run and
   the id is kept in the source's ingestion state, never written back to the
   document — so a folder renamed or moved later is still read, and the run
-  history's message says "'Sales/Offers' is now 'Sales/Quotes'". A path that
+  server log (and a preview's message) says "'Sales/Offers' is now
+  'Sales/Quotes'"; the recorded runs do not carry it. A path that
   does not exist, or names two folders of the same name at one level, fails the
   run with an error naming the ids; the fix is to name the folder by \`id\`.
   When folders are removed from the scope or a folder is excluded, the next run

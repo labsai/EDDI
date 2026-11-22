@@ -19,13 +19,14 @@ listing; the work queue, the change feed and the folder index are later phases.
   in Unicode NFC, exactly first and then ignoring case. Two matching folders at one level are an error
   naming both ids, and a missing path fails the run. The resolved id is recorded in the source's
   ingestion state (`resolved_scope`) and read by later runs, so a renamed or moved folder stays in
-  scope and the run summary says `'Sales/Offers' is now 'Sales/Quotes'`. A recorded folder that is gone
+  scope. The run's log line, and a preview's message, say `'Sales/Offers' is now 'Sales/Quotes'`; the
+  run history has no field for it. A recorded folder that is gone
   is resolved again.
 - **Exclusion wins over inclusion at any depth.** An excluded folder is never listed. A configured
   folder inside an excluded one is dropped with a warning. A shortcut whose target lies inside one is
   not followed, judged by the target's real ancestors (`files.get … parents`, memoised per run). A
   scope where every folder is excluded is refused, not listed as empty.
-- **Scope changes** (`IngestionPipeline.reconcileDeletions`): a discovery now returns a scope
+- **Scope changes** (`IngestionPipeline.reconcileDeletions`), sparing every document this run listed: a discovery now returns a scope
   signature (`DiscoveryResult.scopeSignature`) over the root ids, the excluded ids and
   `includeSubfolders`. When it differs from the one the last completed reconciliation applied
   (`scope_signature`), the documents the complete listing did not see are removed at once instead of
@@ -43,7 +44,9 @@ listing; the work queue, the change feed and the folder index are later phases.
   Drive id checked against `DRIVE_ID`, and a folder of another drive is refused. The page token is
   capped at 2048 printable characters. Drive's refusals map to 400, 404, 422 (not 403), 429 with
   `Retry-After`, and 503.
-- **Chunks** carry `parentId`, the folder that held the file (`SourceMetadataKeys.PARENT_ID`).
+- **Parent folder recorded:** each listed file carries `parentId`, the folder that holds it
+  (`SourceMetadataKeys.PARENT_ID`), in its work item and document metadata. The pipeline does not copy
+  it onto stored chunks yet.
 - **Manager** (`ui/manager/src/components/editors/drive-folder-scope.tsx`, new): the folders to read
   and to leave out as chips, a path field, and a **Browse the drive** dialog. The dialog is a lazy tree
   loaded one level and 200 folders at a time, with Include and Exclude per folder. A picked folder is
@@ -72,7 +75,8 @@ listing; the work queue, the change feed and the folder index are later phases.
 - **Full-listing equivalent of §6.3.** The plan sets `missed_runs` to the threshold for documents
   outside the new roots. On a full listing, every document a complete listing of the new scope did not
   see is outside it or deleted, so the scope-changed run reconciles with a threshold of one. Two
-  exceptions keep their grace: rows this run marked unreachable, and the orphan-sweep marker. A source
+  exceptions keep their grace: any document this run listed (or marked unreachable), even when its
+  download or embedding failed, and the orphan-sweep marker. A source
   whose state predates the signature records one on its first run without fast-tracking.
 
 ### Not done
@@ -80,7 +84,7 @@ listing; the work queue, the change feed and the folder index are later phases.
 - **Retrieval does not filter on folder membership yet** (§6.3, "effective at once"). Until the next
   complete listing, a removed folder's documents stay retrievable. A filter needs list-valued metadata,
   which langchain4j's scalar `Metadata` lacks, an encoding that every configured store can filter on,
-  and stamping of the chunks that #1495 already wrote. `parentId` on new chunks is the first step.
+  and stamping of the chunks that #1495 already wrote. Recording `parentId` at listing time is the first step.
 - **No Drive unit limiter.** The picker and the resolution requests go through `DriveApi`'s
   retry-and-backoff but are not counted against a quota; the limiter is phase Q.
 - `MAX_FOLDERS` stays 50; 500 needs the folder index (phase L).

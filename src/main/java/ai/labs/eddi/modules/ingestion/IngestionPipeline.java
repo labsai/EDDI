@@ -475,7 +475,7 @@ public class IngestionPipeline {
         boolean scopeChanged = scopeChanged(source, sourceKey, sourceRun);
         List<DocumentState> gone = stateStore.bumpAndFindMissing(sourceKey, runId, scopeChanged ? 1 : threshold);
         if (scopeChanged) {
-            gone = outsideTheNewScope(gone, runId, threshold);
+            gone = outsideTheNewScope(gone, runId, threshold, collector.listed);
         }
         if (gone.isEmpty()) {
             recordAppliedScope(sourceKey, sourceRun);
@@ -558,10 +558,13 @@ public class IngestionPipeline {
      * not about the scope.
      */
     private static List<DocumentState> outsideTheNewScope(List<DocumentState> missing, String runId,
-                                                          int threshold) {
+                                                          int threshold, Set<String> listed) {
         List<DocumentState> gone = new ArrayList<>();
         for (DocumentState document : missing) {
-            if (runId.equals(document.lastRunId())) {
+            if (runId.equals(document.lastRunId()) || listed.contains(document.documentId())) {
+                // Listed by this run, so inside the new scope whatever became of it
+                // after: a download or an embedding that failed is no reason to drop
+                // its old vectors early, even when marking it unreachable failed too.
                 continue;
             }
             if (SWEEP_MARKER.equals(document.documentId()) && document.missedRuns() < threshold) {
@@ -1214,6 +1217,11 @@ public class IngestionPipeline {
          */
         private boolean reembedAll;
         /**
+         * Every document discovery handed over this run. A scope-changed reconciliation
+         * removes only documents outside it.
+         */
+        private final Set<String> listed = new HashSet<>();
+        /**
          * Why the in-memory store refused this run's writes, once it has; the run stops
          * there rather than failing every remaining document the same way.
          */
@@ -1356,6 +1364,9 @@ public class IngestionPipeline {
          * One discovered document, handled before discovery moves on.
          */
         void process(WorkItem item, SourceConnector connector, SourceContext context) {
+            if (item.action() != WorkItem.Action.DELETE) {
+                listed.add(item.documentId());
+            }
             switch (item.action()) {
                 case UNCHANGED -> onUnchanged(item.documentId());
                 case DELETE -> onDeleted(item.documentId());
