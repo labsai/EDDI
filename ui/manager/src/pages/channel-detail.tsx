@@ -25,6 +25,7 @@ import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-chan
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
 import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
+import { EmailHeldMailFields } from "@/components/channels/email-held-settings";
 import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
 import { platformConfigForType, adoptStoredVersion, emptiesSenderAllowlist } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
@@ -667,7 +668,14 @@ export function ChannelDetailPage() {
               ) : undefined
             }
           />
-        ) : isWebhook ? (
+        ) : null}
+        {isEmail && (
+          <EmailHeldMailFields
+            emailControl={draft.emailControl}
+            onChange={(emailControl) => setDraft((prev) => (prev ? { ...prev, emailControl } : prev))}
+          />
+        )}
+        {isEmail ? null : isWebhook ? (
           <WebhookPlatformFields draft={draft} onChange={(platformConfig) => setDraft((prev) => prev ? { ...prev, platformConfig } : prev)} />
         ) : (
         <div className="space-y-3">

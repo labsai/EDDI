@@ -132,6 +132,11 @@ export function channelWarningMessage(code: string, t: TFunction): string {
         "emailChannel.warning.ruleCallsRefused",
         "Saved. A target with an approval policy has rule-driven HTTP or MCP calls: a mail turn refuses them unless Read-only tools names them.",
       );
+    case "email.anonymous-tools":
+      return t(
+        "emailChannel.warning.anonymousTools",
+        "Saved. Unauthenticated mail is processed: it runs anonymously with every tool the target's agent has. Mail released from review never does — it is limited to Read-only tools.",
+      );
     case "email.read-only-everything":
       return t(
         "emailChannel.warning.readOnlyEverything",

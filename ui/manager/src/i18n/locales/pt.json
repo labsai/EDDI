@@ -5641,7 +5641,8 @@
       "allowlistBroad": "Salvo, mas uma entrada da lista de permitidos admite todo um sufixo público (como *@*.co.uk) ou o próprio domínio desta integração. Prefira endereços exatos.",
       "approvalPolicyNone": "Guardado, mas um destino cujo agente pode agir não tem política de aprovação: o e-mail usa as suas ferramentas apenas sob as aprovações próprias do agente. Considere «Aprovar cada ação».",
       "ruleCallsRefused": "Guardado. Um destino com política de aprovação tem chamadas HTTP ou MCP guiadas por regras: um turno de e-mail recusa-as, a menos que Ferramentas somente leitura as nomeie.",
-      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura."
+      "readOnlyEverything": "Guardado, mas um padrão de Ferramentas somente leitura de um destino com política de aprovação corresponde a todas as ferramentas (como *): nenhuma chamada de ferramenta de um turno de e-mail aguarda aprovação. Nomeie antes as ferramentas somente leitura.",
+      "anonymousTools": "Salvo. E-mails não autenticados são processados: rodam anonimamente com todas as ferramentas do agente de destino. E-mails liberados da revisão nunca — ficam limitados às ferramentas somente leitura."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -6029,5 +6030,48 @@
     "approved": "Alteração aprovada e aplicada",
     "rejected": "Alteração rejeitada; nada foi aplicado",
     "approveBlockedDirty": "Guarde primeiro as suas alterações à quota ou recarregue a página para as descartar: guardá-las depois de uma aprovação substituiria a quota aprovada."
+  },
+  "heldEmail": {
+    "title": "E-mails retidos",
+    "subtitle": "E-mails que uma integração de e-mail teria descartado: o remetente não está na lista de permitidos ou não se autenticou. Decida se serão processados.",
+    "integration": "Integração",
+    "sender": "Remetente",
+    "reason": "Retido porque",
+    "expires": "Descartado em",
+    "review": "Revisar",
+    "unauthenticated": "não autenticado",
+    "reasonNotAllowlisted": "não está na lista de permitidos",
+    "reasonUnauthenticated": "remetente não autenticado",
+    "discarded": "Descartado.",
+    "releasedAllowed": "Liberado, e o remetente agora está na lista de permitidos. Será executado na próxima verificação.",
+    "released": "Liberado. Será executado na próxima verificação.",
+    "dialogTitle": "E-mail retido",
+    "from": "De",
+    "loadingPreview": "Lendo o e-mail da caixa…",
+    "previewUnavailable": "Não foi possível ler o e-mail da caixa:",
+    "noSubject": "(sem assunto)",
+    "attachments": "Anexos",
+    "truncated": "Apenas o início do texto é mostrado.",
+    "untrusted": "O e-mail é uma entrada não confiável. Liberá-lo significa \"processá-lo\", não \"fazer o que ele pede\": a política de aprovação do destino continua valendo.",
+    "anonymousWarning": "Este remetente não se autenticou, então o From pode ser falso. Se você executá-lo, ele roda anonimamente, só pode usar as ferramentas somente leitura do destino e nada é enviado a ninguém por causa dele. Ele não pode ser permitido.",
+    "note": "Nota (para o log de auditoria)",
+    "discard": "Descartar",
+    "runOnce": "Executar uma vez",
+    "runAndAllow": "Executar e permitir este remetente"
+  },
+  "emailHeld": {
+    "title": "E-mails retidos: revisar em vez de descartar",
+    "hint": "E-mails que seriam recusados podem ser retidos para uma pessoa, que os descarta, executa uma vez ou executa e permite o remetente. Loops, devoluções, a lista de bloqueio e limites nunca são revisáveis.",
+    "notAllowlisted": "Remetente fora da lista de permitidos",
+    "drop": "Descartar",
+    "review": "Reter para revisão",
+    "unauthenticated": "Remetente não autenticado",
+    "unauthenticatedHint": "Um e-mail não autenticado liberado roda anonimamente, apenas com ferramentas somente leitura, e nunca gera e-mail de saída.",
+    "expiry": "Descartar e-mails não decididos após",
+    "expiryHint": "Uma duração ISO-8601 de PT1H a P90D, no máximo a retenção do registro menos um dia.",
+    "maxPerDay": "E-mails retidos por dia no máximo",
+    "maxPerDomain": "No máximo por domínio remetente e dia",
+    "reviewers": "Revisores",
+    "reviewersHint": "IDs de usuário ou role:<nome>, além dos editores desta integração. Vazio: eddi-approver. Executar e permitir sempre exige permissão de edição."
   }
 }

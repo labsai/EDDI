@@ -2238,7 +2238,26 @@ your tool schemas do not cover it, not as a routine first step:
   confirmOpen true: only when the admin asked for exactly that. Each change
   is a new version; no-op entries come back as unchanged. Warnings
   email.allowlist-emptied and email.allowlist-broad (a whole public suffix
-  or the integration's own domain). A conversation that an email started —
+  or the integration's own domain). Held mail: with emailControl.onRefused
+  {notAllowlisted, unauthenticated} set to "review" (default "drop"; the
+  Manager preselects notAllowlisted review for new integrations), mail
+  refused for those reasons is held (ledger state HELD) instead of dropped;
+  loops, bounces, the blocklist, the own address, no single sender, oversize
+  and limits are never reviewable. emailControl.review: expiry (ISO-8601,
+  default P7D, at most the ledger retention minus a day; then review_expired),
+  maxHeldPerDay (50) and maxHeldPerSenderDomainPerDay (5; beyond: refused
+  review_full), reviewers (user ids or role:<name>; default the editors and
+  eddi-approver). List it with GET /channelstore/channels/{id}/email-held
+  (rowId, sender, authVerdict, heldFor, expiresAt, runAndAllowOffered,
+  runsAnonymously). You do not read held mail's content and never decide it:
+  that is a person's decision, on the Manager's Approvals page (or MCP
+  decide_held_email): discard, runOnce, or runAndAllow (adds the exact sender
+  to the allowlist; needs edit access and an aligned DKIM pass). A release
+  without an aligned pass runs anonymously with the target's readOnlyTools
+  only and never sends any mail; a release still meets the target's
+  approvalPolicy. Reviewers get one notice per poll batch (at most hourly) at
+  ownerNotifyAddresses. Save warning email.anonymous-tools: trigger mode with
+  requireAuthentication false runs unauthenticated mail with every tool. A conversation that an email started —
   or one it led to, a team backlog task it filed included — can never change
   channel integrations or sender lists, decide an approval, or change shares,
   secrets, secret grants, connections or workspace settings: refused at

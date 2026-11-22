@@ -5708,6 +5708,22 @@ export const backupSyncHandlers = [
     HttpResponse.json({ version: 1, allow: ["bob@partner.com"], block: [] }),
   ),
 
+  // Held mail (email plan v3 §7): an empty review queue by default; a test that
+  // needs held rows overrides these with server.use.
+  http.get("*/channelstore/channels/:id/email-held", ({ params }) =>
+    HttpResponse.json({ integrationId: params.id, integrationName: null, items: [], truncated: false }),
+  ),
+  http.get("*/channelstore/channels/:id/email-held/:rowId", () => HttpResponse.json({ error: "not held" }, { status: 404 })),
+  http.post("*/channelstore/channels/:id/email-held/:rowId/decision", async ({ params, request }) => {
+    const body = (await request.json()) as { decision: string };
+    return HttpResponse.json({
+      rowId: params.rowId,
+      decision: body.decision,
+      state: body.decision === "discard" ? "REFUSED" : "RECEIVED",
+      allowlistVersion: body.decision === "runAndAllow" ? 2 : null,
+      warnings: [],
+    });
+  }),
   http.post("*/channelstore/channels/:id/email-senders", async ({ request }) => {
     const change = (await request.json()) as {
       expectedVersion: number;

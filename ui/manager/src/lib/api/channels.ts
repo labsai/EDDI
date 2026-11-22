@@ -76,10 +76,22 @@ export function withoutEmailApproval(target: ChannelTarget): ChannelTarget {
   return copy;
 }
 
+/** `drop` (the default) or `review`: what happens to a mail refused for a reviewable reason. */
+export type EmailRefusalAction = "drop" | "review";
+
+/** `emailControl` — the typed email settings next to `platformConfig` (email channel v3). */
+export interface EmailControl {
+  smime?: { sign?: boolean | "required"; connection?: string };
+  onRefused?: { notAllowlisted?: EmailRefusalAction; unauthenticated?: EmailRefusalAction; notAddressed?: EmailRefusalAction };
+  review?: { expiry?: string; maxHeldPerDay?: number; maxHeldPerSenderDomainPerDay?: number; reviewers?: string[] };
+}
+
 export interface ChannelIntegrationConfiguration {
   name: string;
   channelType: string;
   platformConfig: Record<string, string>;
+  /** Email only; send it back unchanged unless you mean to change it. */
+  emailControl?: EmailControl | null;
   targets: ChannelTarget[];
   defaultTargetName: string;
 }
@@ -250,6 +262,71 @@ export function getEmailSenders(id: string): Promise<EmailSenderLists> {
  */
 export function updateEmailSenders(id: string, change: EmailSenderChange): Promise<EmailSenderChangeResult> {
   return api.post<EmailSenderChangeResult>(`/channelstore/channels/${seg(id)}/email-senders`, change);
+}
+
+// ─── Held mail (email channel v3 §7) ────────────────────────────
+
+/** A mail held for review instead of dropped. No content: open a preview for that. */
+export interface HeldEmailItem {
+  rowId: string;
+  integrationId: string;
+  sender: string | null;
+  authVerdict: string | null;
+  /** `not_allowlisted`, `unauthenticated`. */
+  heldFor: string[];
+  heldAt: string;
+  expiresAt: string | null;
+  /** Only for an aligned DKIM pass: a forged From may not be allowed. */
+  runAndAllowOffered: boolean;
+  /** A release runs anonymously, with read-only tools only, and sends no mail. */
+  runsAnonymously: boolean;
+}
+
+export interface HeldEmailQueue {
+  integrationId: string;
+  integrationName: string | null;
+  items: HeldEmailItem[];
+  truncated: boolean;
+}
+
+/** A live preview, re-read from the mailbox; never stored. */
+export interface HeldEmailPreview {
+  item: HeldEmailItem;
+  fromName: string | null;
+  subject: string | null;
+  text: string;
+  textTruncated: boolean;
+  attachments: string[];
+}
+
+export type HeldEmailDecision = "discard" | "runOnce" | "runAndAllow";
+
+export interface HeldEmailDecisionResult {
+  rowId: string;
+  decision: HeldEmailDecision;
+  state: string;
+  allowlistVersion: number | null;
+  warnings: string[];
+}
+
+export function getHeldEmail(id: string, limit = 50): Promise<HeldEmailQueue> {
+  return api.get<HeldEmailQueue>(`/channelstore/channels/${seg(id)}/email-held?limit=${limit}`);
+}
+
+export function getHeldEmailPreview(id: string, rowId: string): Promise<HeldEmailPreview> {
+  return api.get<HeldEmailPreview>(`/channelstore/channels/${seg(id)}/email-held/${seg(rowId)}`);
+}
+
+export function decideHeldEmail(
+  id: string,
+  rowId: string,
+  decision: HeldEmailDecision,
+  note?: string,
+): Promise<HeldEmailDecisionResult> {
+  return api.post<HeldEmailDecisionResult>(`/channelstore/channels/${seg(id)}/email-held/${seg(rowId)}/decision`, {
+    decision,
+    note: note?.trim() || undefined,
+  });
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

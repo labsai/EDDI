@@ -599,6 +599,79 @@ sender counts as new again once their rows expire (`eddi.email.ledger-retention`
 A conversation that a mail turn starts — a delegate, a group member — is tainted ([above](#a-mail-cannot-change-its-own-rules))
 but carries no target, so it has no email gate of its own; the delegating tool call itself is gated.
 
+## Held mail: review instead of drop
+
+By default a mail from a sender who is not on a non-empty allowlist, or who did not authenticate while
+`requireAuthentication` is on, is refused and dropped (`blocked:not_allowlisted`, `unauthenticated:<verdict>`). With
+`emailControl.onRefused` such a mail is **held for a person instead**, who decides whether it is processed at all.
+Both modes.
+
+```json
+"emailControl": {
+  "onRefused": { "notAllowlisted": "review", "unauthenticated": "review" },
+  "review": { "expiry": "P7D", "maxHeldPerDay": 50, "maxHeldPerSenderDomainPerDay": 5, "reviewers": ["role:mail-desk"] }
+}
+```
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `emailControl.onRefused.notAllowlisted` | `drop` | `drop` or `review` for `blocked:not_allowlisted` |
+| `emailControl.onRefused.unauthenticated` | `drop` | `drop` or `review` for `unauthenticated:*` |
+| `emailControl.onRefused.notAddressed` | `drop` | Reserved for mail that does not address the integration. It needs addressing (email channel v2 phase 3), which this version does not have yet, so only `drop` is accepted |
+| `emailControl.review.expiry` | `P7D` | ISO-8601 duration (`PT1H` to `P90D`). Undecided held mail is dropped (`review_expired`). At most the ledger retention (`eddi.email.ledger-retention`) minus one day: the save says so |
+| `emailControl.review.maxHeldPerDay` | `50` | Per integration and UTC day; beyond it mail is refused as `review_full` and the owners hear once that day |
+| `emailControl.review.maxHeldPerSenderDomainPerDay` | `5` | So one sender cannot fill the queue for everyone; beyond it `review_full:sender_domain`. A discard does not free a place |
+| `emailControl.review.reviewers` | *(none)* | Who may decide besides the integration's editors: EDDI user ids, or `role:<name>`. Empty: the editors and `eddi-approver` |
+
+**Never reviewable:** loops and bounces, `blocked:no_single_sender`, `blocked:blocklist` (which also covers mail from
+the integration's own address), oversize mail, the per-sender limit, the daily budget and tenant quotas. These are
+refused exactly as before, whatever `onRefused` says.
+
+**Holding.** The processor evaluates both reviewable checks. When one fails and **every failing one** is set to
+`review`, the ledger row becomes `HELD` with every failing reason (`held:not_allowlisted+unauthenticated`), the
+sender's authentication verdict (`authVerdict`) and a SHA-256 of the raw mail. No body is stored. The mail is marked
+processed — moved to a sibling `Held` folder of the move folder (`move:EDDI/Processed` → `EDDI/Held`) when processed
+mail is moved — so the poll cursor advances: a held mail never stops the mailbox. A failing check set to `drop` refuses
+the mail as before.
+
+**Notification.** One notice per poll batch that held mail, at most one per integration and hour, goes to
+`ownerNotifyAddresses` through the system mailer, with the count and a link to the Manager's Approvals page. It never
+names a sender or a subject. The reviewer principals' own addresses are not used: EDDI cannot look up a user's address.
+
+**Reviewing.** The Manager's **Approvals** page lists held mail as its own kind next to the pauses. Over REST and MCP:
+
+| | |
+|---|---|
+| `GET /channelstore/channels/{id}/email-held` | The queue: `rowId`, sender, `authVerdict`, `heldFor`, `heldAt`, `expiresAt`, `runAndAllowOffered`, `runsAnonymously` |
+| `GET /channelstore/channels/{id}/email-held/{rowId}` | A **live** preview: the mail is re-read from the mailbox by its Message-ID (polled, move and Held folders) and shown only when it hashes as the mail that was held. Sender, verdict, subject, the first 4,000 characters of the text (quoted history stripped), attachment names. Never stored or cached |
+| `POST /channelstore/channels/{id}/email-held/{rowId}/decision` | `{"decision": "discard" \| "runOnce" \| "runAndAllow", "note": "..."}` |
+| MCP `list_held_email`, `decide_held_email` | The same, for an agent or the Platform Operator |
+
+- `discard` drops the mail (`REFUSED`, `review_discarded`).
+- `runOnce` puts the row back to `RECEIVED`, due now; the next poll finds the mail by its Message-ID and runs it. On
+  that run **only the checks that held it are skipped**; every other check runs again, and a reviewable check that now
+  fails (a signature that no longer verifies) refuses it.
+- `runAndAllow` is `runOnce` plus the **exact sender address** added to the allowlist through the
+  [sender-list path](#managing-senders): a new version, audited, the note as its reason. It needs edit access to the
+  integration and is offered **only when the stored verdict is an aligned pass** — a forged From fails the allowlist
+  before authentication is looked at, so the reason alone cannot tell.
+- **A mail released without an aligned pass** runs as an `email-anon:` identity (no memory), **never causes outgoing
+  mail** — no reply, no pause notice, no rejected reply — and its turn may use **only the target's `readOnlyTools`**:
+  every other tool call is refused, not paused, even under `approvalPolicy: none`, and no approval can widen it. A
+  GROUP target has no `readOnlyTools`, so such a release to a group is refused.
+- A released mail still meets the target's [`approvalPolicy`](#the-approval-gate-of-a-target): releasing means
+  "process it", not "do what it asks".
+- Every decision leaves an audit entry (`taskId: email.held`): who, which row, what, the reasons, the verdict, and the
+  sender only as domain plus pseudonym.
+- Who may decide: the integration's editors, plus `emailControl.review.reviewers` (default `eddi-approver`). A
+  conversation an email started can never decide held mail: `decide_held_email` and the decision endpoint are on the
+  [escalation guard's](#a-mail-cannot-change-its-own-rules) lists.
+
+Existing integrations with `requireAuthentication: false` keep today's behaviour — unauthenticated mail runs
+anonymously with every tool its agent has — and saving one warns `email.anonymous-tools`.
+
+**Not in this version:** the mail log's state filter and the owner digest's "held" count (the mail log and digest are
+not on this base yet), and held-mail cards in Slack.
 ## Personal data
 
 - **No raw mail is stored.** The rendered input enters conversation memory like any user input; attachments are
@@ -624,7 +697,7 @@ but carries no target, so it has no email gate of its own; the delegating tool c
 ## The message ledger
 
 One row per inbound mail per integration (`email_message_ledger`):
-`RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED`, the refusal or deferral reason in `lastError`. A deferred mail
+`RECEIVED → CLAIMED → TURN_SUBMITTED → DONE | REFUSED`, the refusal or deferral reason in `lastError`. A mail held for review is `HELD` (not terminal, never due for a poll) until a reviewer releases it (`RECEIVED`) or discards it, or its review expires (`REFUSED`); its review stands in `review` / `review_state`, its verdict in `authVerdict` / `auth_verdict`. A deferred mail
 is `RECEIVED` with the time of its next attempt. A mail whose turn was refused after its conversation had started (a
 quota, a busy executor, a failed submission) keeps that conversation on its row, and the retry sends the turn there:
 the conversation's `CONVERSATION_START` runs once per mail, not once per attempt. Per mailbox, `email_mailbox_state` keeps the poll cursor, the poll back-off and the day's spend. The cursor is opaque

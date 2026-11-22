@@ -5641,7 +5641,8 @@
       "allowlistBroad": "Enregistré, mais une entrée de la liste d'autorisation admet tout un suffixe public (comme *@*.co.uk) ou le propre domaine de cette intégration. Préférez des adresses exactes.",
       "approvalPolicyNone": "Enregistré, mais une cible dont l'agent peut agir n'a pas de politique d'approbation : les e-mails utilisent ses outils uniquement sous les approbations propres de l'agent. Envisagez « Approuver chaque action ».",
       "ruleCallsRefused": "Enregistré. Une cible avec une politique d'approbation a des appels HTTP ou MCP pilotés par des règles : un tour d'e-mail les refuse sauf si Outils en lecture seule les nomme.",
-      "readOnlyEverything": "Enregistré, mais un motif d'Outils en lecture seule d'une cible avec une politique d'approbation correspond à tous les outils (comme *) : aucun appel d'outil d'un tour d'e-mail n'attend d'approbation. Nommez plutôt les outils en lecture seule."
+      "readOnlyEverything": "Enregistré, mais un motif d'Outils en lecture seule d'une cible avec une politique d'approbation correspond à tous les outils (comme *) : aucun appel d'outil d'un tour d'e-mail n'attend d'approbation. Nommez plutôt les outils en lecture seule.",
+      "anonymousTools": "Enregistré. Les courriels non authentifiés sont traités : ils s'exécutent anonymement avec tous les outils de l'agent cible. Un courriel libéré après examen jamais — il est limité aux outils en lecture seule."
     },
     "defaultTargetHint": "La cible par défaut reçoit chaque e-mail dont le plus-tag (invoices+urgent@…) ou l'objet ne correspond au déclencheur d'aucune autre cible. Vous pourrez ajouter d'autres cibles après la création.",
     "triggerLabel": "Plus-tags ou mots de l'objet",
@@ -6029,5 +6030,48 @@
     "approved": "Modification approuvée et appliquée",
     "rejected": "Modification rejetée ; rien n'a été appliqué",
     "approveBlockedDirty": "Enregistrez d'abord vos modifications du quota, ou rechargez la page pour les abandonner : les enregistrer après une approbation écraserait le quota approuvé."
+  },
+  "heldEmail": {
+    "title": "Courriels retenus",
+    "subtitle": "Courriels qu'une intégration e-mail aurait rejetés : l'expéditeur n'est pas sur sa liste d'autorisation ou ne s'est pas authentifié. Décidez s'ils sont traités.",
+    "integration": "Intégration",
+    "sender": "Expéditeur",
+    "reason": "Retenu car",
+    "expires": "Supprimé le",
+    "review": "Examiner",
+    "unauthenticated": "non authentifié",
+    "reasonNotAllowlisted": "pas sur la liste d'autorisation",
+    "reasonUnauthenticated": "expéditeur non authentifié",
+    "discarded": "Supprimé.",
+    "releasedAllowed": "Libéré, et l'expéditeur est désormais sur la liste d'autorisation. Il sera traité au prochain relevé.",
+    "released": "Libéré. Il sera traité au prochain relevé.",
+    "dialogTitle": "Courriel retenu",
+    "from": "De",
+    "loadingPreview": "Lecture du courriel dans la boîte…",
+    "previewUnavailable": "Le courriel n'a pas pu être lu dans la boîte :",
+    "noSubject": "(sans objet)",
+    "attachments": "Pièces jointes",
+    "truncated": "Seul le début du texte est affiché.",
+    "untrusted": "Le courriel est une entrée non fiable. Le libérer signifie « le traiter », pas « faire ce qu'il demande » : la politique d'approbation de la cible s'applique toujours.",
+    "anonymousWarning": "Cet expéditeur ne s'est pas authentifié : l'adresse From peut être falsifiée. Si vous l'exécutez, il s'exécute anonymement, ne peut utiliser que les outils en lecture seule de la cible, et rien n'est jamais envoyé à cause de lui. Il ne peut pas être autorisé.",
+    "note": "Note (pour le journal d'audit)",
+    "discard": "Supprimer",
+    "runOnce": "Exécuter une fois",
+    "runAndAllow": "Exécuter et autoriser cet expéditeur"
+  },
+  "emailHeld": {
+    "title": "Courriels retenus : examiner au lieu de supprimer",
+    "hint": "Les courriels qui seraient refusés peuvent être retenus pour une personne, qui les supprime, les exécute une fois ou les exécute et autorise l'expéditeur. Les boucles, rebonds, la liste de blocage et les limites ne sont jamais examinables.",
+    "notAllowlisted": "Expéditeur hors liste d'autorisation",
+    "drop": "Supprimer",
+    "review": "Retenir pour examen",
+    "unauthenticated": "Expéditeur non authentifié",
+    "unauthenticatedHint": "Un courriel non authentifié libéré s'exécute anonymement, avec les seuls outils en lecture seule, et ne provoque jamais d'envoi.",
+    "expiry": "Supprimer les courriels non décidés après",
+    "expiryHint": "Une durée ISO-8601 de PT1H à P90D, au plus la conservation du registre moins un jour.",
+    "maxPerDay": "Courriels retenus par jour au maximum",
+    "maxPerDomain": "Au maximum par domaine d'expéditeur et par jour",
+    "reviewers": "Réviseurs",
+    "reviewersHint": "Identifiants d'utilisateur ou role:<nom>, en plus des éditeurs de cette intégration. Vide : eddi-approver. Exécuter et autoriser exige toujours le droit de modification."
   }
 }

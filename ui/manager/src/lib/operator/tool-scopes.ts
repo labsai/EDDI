@@ -153,6 +153,11 @@ export const READ_ENDPOINTS: readonly string[] = [
   // credential included. The descriptors give the operator the id from a name.
   "GET /channelstore/channels/descriptors",
   "GET /channelstore/channels/{id}/email-senders",
+  // The held-mail queue (email control plan v3 §7): who and why, no content.
+  // Deliberately NOT the preview (`.../email-held/{rowId}`), which carries the
+  // untrusted mail text, nor the decision POST: deciding held mail is a person's
+  // decision, made on the Approvals page.
+  "GET /channelstore/channels/{id}/email-held",
   // Agents
   "GET /agentstore/agents/descriptors",
   "GET /agentstore/agents/{id}",

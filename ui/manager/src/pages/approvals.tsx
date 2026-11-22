@@ -23,6 +23,7 @@ import { findBlockedCalls } from "@/lib/operator/blocked-calls";
 import { AlertDialog } from "@eddi/app-kit/components/ui/alert-dialog";
 import { Button } from "@eddi/ui";
 import { ApprovalCard } from "@/components/hitl/approval-card";
+import { HeldEmailSection } from "@/components/hitl/held-email-section";
 import { RequestPreview } from "@/components/operator/request-preview";
 import {
   usePendingApprovals,
@@ -1137,6 +1138,9 @@ export function ApprovalsPage() {
           </table>
         </div>
       )}
+
+      {/* Held mail (email channel v3 §7): its own kind, next to the pauses. */}
+      <HeldEmailSection />
 
       {/* Confirmation gate — no queue action fires on a single click. */}
       {confirmDialog && (
