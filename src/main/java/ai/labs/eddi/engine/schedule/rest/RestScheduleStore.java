@@ -785,6 +785,9 @@ public class RestScheduleStore implements IRestScheduleStore {
     /**
      * Writes the origin taint of the request into the stored schedule's metadata
      * when the request is tainted and the schedule is not yet; otherwise nothing.
+     * The write sets the origin alone ({@link IScheduleStore#setTurnOrigin}): the
+     * copy read here only decides whether to write, so a configuration edit
+     * committed since that read is not reverted.
      */
     private void stampTurnOrigin(String scheduleId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         String origin = TurnOrigin.current();
@@ -795,8 +798,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (stored == null || origin.equals(TurnOrigin.fromMetadata(stored.getMetadata()))) {
             return;
         }
-        stored.setMetadata(TurnOrigin.stampMetadata(stored.getMetadata(), origin));
-        scheduleStore.updateSchedule(scheduleId, stored);
+        scheduleStore.setTurnOrigin(scheduleId, origin);
     }
 
     /**

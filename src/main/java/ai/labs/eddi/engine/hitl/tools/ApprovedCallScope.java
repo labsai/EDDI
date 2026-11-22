@@ -52,7 +52,15 @@ public final class ApprovedCallScope {
      * apart where an approval is stated to a receiving side
      * ({@link #approvesHere}).
      */
-    private static final ThreadLocal<String> EXECUTING_CONVERSATION = new ThreadLocal<>();
+    private static final ThreadLocal<Executing> EXECUTING_CONVERSATION = new ThreadLocal<>();
+
+    /**
+     * A tool call executing on this thread, of conversation {@code conversationId}
+     * ({@code null}: of no conversation) — a holder, so "a tool call of no
+     * conversation" and "no tool call" stay apart.
+     */
+    private record Executing(String conversationId) {
+    }
 
     /** The reason a request aimed at the running conversation is refused with. */
     public static final String OWN_CONVERSATION_REASON = "the request targets the conversation the agent is running in";
@@ -127,8 +135,8 @@ public final class ApprovedCallScope {
      * conversation never covers.
      */
     public static <T> T inConversation(String conversationId, Supplier<T> work) {
-        String previous = EXECUTING_CONVERSATION.get();
-        EXECUTING_CONVERSATION.set(conversationId);
+        Executing previous = EXECUTING_CONVERSATION.get();
+        EXECUTING_CONVERSATION.set(new Executing(conversationId));
         try {
             return work.get();
         } finally {
@@ -152,7 +160,18 @@ public final class ApprovedCallScope {
      */
     public static boolean approvesHere() {
         Binding binding = ACTING_AGENT.get();
-        return binding != null && (binding.conversationId() == null || binding.conversationId().equals(EXECUTING_CONVERSATION.get()));
+        Executing executing = EXECUTING_CONVERSATION.get();
+        return binding != null && (binding.conversationId() == null
+                || binding.conversationId().equals(executing == null ? null : executing.conversationId()));
+    }
+
+    /**
+     * Whether a tool call of some conversation ({@link #inConversation}) is
+     * executing on this thread — work inside a turn, where an approval is only ever
+     * the one {@link #approvesHere} states, never the inbound request's.
+     */
+    public static boolean inToolCall() {
+        return EXECUTING_CONVERSATION.get() != null;
     }
 
     /**

@@ -244,6 +244,29 @@ class RestChannelIntegrationStoreEmailSendersTest {
         verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
     }
 
+    /**
+     * A save on another node lands between the comparison and the write: version 3
+     * had no allowlist, the concurrent version 4 adds one. Resolving
+     * {@code ?version=0} a second time for the write would empty version 4's
+     * allowlist without {@code confirmOpen}, judged against version 3. The write
+     * goes to the version that was compared, which the store refuses as stale.
+     */
+    @Test
+    @DisplayName("PUT ?version=0 writes the version it compared: a save landing in between is a 409, not an unchecked overwrite")
+    void versionZeroIsResolvedOnce() throws Exception {
+        when(channelStore.getCurrentResourceId(ID)).thenReturn(resourceId(3), resourceId(4));
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of()));
+        when(channelStore.read(ID, 4)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+        when(channelStore.update(eq(ID), eq(3), any())).thenThrow(new IResourceStore.ResourceModifiedException("version 3 is not current"));
+        when(channelStore.update(eq(ID), eq(4), any())).thenReturn(5);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> sut.updateChannel(ID, 0, email(Map.of())));
+
+        verify(channelStore).update(eq(ID), eq(3), any());
+        verify(channelStore, never()).update(eq(ID), eq(4), any());
+        verify(support, never()).auditSenderListChange(anyString(), any(), any(), any(), any(), any(), anyBoolean());
+    }
+
     @Test
     @DisplayName("a save whose stored sender lists cannot be read is refused, not saved unchecked")
     void unreadableBaselineRefuses() throws Exception {
