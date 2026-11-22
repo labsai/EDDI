@@ -33,6 +33,7 @@ import java.util.Map;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -40,6 +41,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -158,6 +160,47 @@ class RagContextProviderIsolationTest {
 
         assertNotNull(context);
         assertTrue(context.contains("ALPHA-LEGIT"), context);
+    }
+
+    @Test
+    @DisplayName("an ordinary knowledge base never retrieves a document chunk, even from a store it shares")
+    void documentChunksAreInvisibleToOrdinaryRetrieval() throws Exception {
+        add("ALPHA-BY-ID about apples", ALPHA_ID);
+        add("DOCLIB-SECRET about apples", KnowledgeBaseStorage.docLibKbId(ALPHA_ID));
+
+        String context = retrieve(alpha("id"));
+
+        assertNotNull(context);
+        assertTrue(context.contains("ALPHA-BY-ID"), context);
+        assertFalse(context.contains("DOCLIB-SECRET"), context);
+    }
+
+    @Test
+    @DisplayName("a workflow step naming a document index is skipped — its store is never opened")
+    void documentIndexStepIsSkippedOnWorkflowDiscovery() throws Exception {
+        add("ALPHA-BY-ID about apples", ALPHA_ID);
+        add("DOCLIB-SECRET about apples", KnowledgeBaseStorage.docLibKbId(ALPHA_ID));
+        var forced = alpha("id");
+        forced.setDocumentIndex(true);
+
+        assertNull(retrieve(forced));
+        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any());
+    }
+
+    @Test
+    @DisplayName("a knowledge-base reference by name cannot reach a document index either")
+    void documentIndexStepIsSkippedForAnExplicitReference() throws Exception {
+        add("ALPHA-BY-ID about apples", ALPHA_ID);
+        var forced = alpha("id");
+        forced.setDocumentIndex(true);
+        when(resourceClientLibrary.getResource(any(URI.class), eq(RagConfiguration.class))).thenReturn(forced);
+        var reference = new LlmConfiguration.KnowledgeBaseReference();
+        reference.setName("alpha");
+        var task = new LlmConfiguration.Task();
+        task.setKnowledgeBases(List.of(reference));
+
+        assertNull(provider.retrieveContext(memory, task, "apples"));
+        verify(embeddingStoreFactory, never()).getOrCreate(anyString(), any());
     }
 
     @Test

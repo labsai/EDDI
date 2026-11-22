@@ -13,6 +13,7 @@ import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.rest.RestVersionInfo;
 import ai.labs.eddi.configs.schema.IJsonSchemaCreator;
+import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.datastore.IResourceStore.IResourceId;
 import ai.labs.eddi.modules.ingestion.RagIngestionSchedules;
 import ai.labs.eddi.modules.ingestion.RagSourceIngestionService;
@@ -24,6 +25,7 @@ import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import ai.labs.eddi.configs.rest.RedactionMarkerGuard;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import jakarta.inject.Provider;
 import jakarta.ws.rs.BadRequestException;
 import jakarta.ws.rs.core.Response;
 import org.jboss.logging.Logger;
@@ -68,6 +70,16 @@ public class RestRagStore implements IRestRagStore {
         // Built here from collaborators this class already has, rather than injected,
         // so every way of constructing it applies the same storage rules.
         this.storageGuard = new KnowledgeBaseStorageGuard(ragStore, documentDescriptorStore, resourceAccessGuard);
+    }
+
+    /**
+     * Hands the guard the workflow lookup that decides whether
+     * {@code documentIndex} may be turned on. A provider: workflows reach back to
+     * RAG configurations.
+     */
+    @Inject
+    void useWorkflowStore(Provider<IWorkflowStore> workflowStore) {
+        storageGuard.useWorkflowStore(workflowStore);
     }
 
     @Override

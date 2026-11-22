@@ -1468,7 +1468,7 @@ These tools are assembled from the conversation or the group rather than from th
 | `group_tasks` | Group task list and bids | The group's `taskListConfig` is set with `allowAgentTaskCreation: true` |
 | `team_handoff` | `handoff_to_team` | The task's `teamHandoff` (or the group's handoff policy) names at least one target; see [Cross-Team Handoff](team-handoff.md) |
 | `team_scorecard`, `propose_team_budget`, `schedule_followup` | Agent-operations tools | Only when the whitelist names them — an omitted whitelist does not include them; see [Agent-ops tools](agent-ops-tools.md) |
-| `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted |
+| `create_sub_agent`, `converse_with_agent`, `find_agents_by_capability`, `recruit_agent`, `teardown_agent` | Dynamic agents | Only under a governing group policy, even when the whitelist is omitted. `converse_with_agent` takes an `attachments` argument when [`documents.sharing.delegation`](#handing-files-to-a-delegated-agent) is on |
 
 An omitted whitelist therefore means the standard built-in tools plus user memory and recall, and also the artifact, group-task and handoff tools when their policy enables them (and dynamic-agent tools under a governing group policy); never the agent-operations tools. If you must exclude any of those, set an explicit whitelist. `listAttachments` and `readAttachment` are never gated by the whitelist or by `enableBuiltInTools`; see the [Attachments Guide](attachments-guide.md).
 
@@ -1798,10 +1798,10 @@ The LLM task supports advanced pre-request and post-response processing for fine
 
 An LLM task can carry a `documents` block that says how the agent treats PDF documents: their structure, splitting them into chapters ("units"), handing files to other agents, a personal or team library, and documents too large to forward whole. It ships one capability at a time.
 
-**Nothing in the block is available yet.** The block exists in the configuration model so that the shape is stable, but every key is refused when the configuration is saved:
+**Only the delegation-sharing keys are available so far** ([Handing files to a delegated agent](#handing-files-to-a-delegated-agent)). The block exists in full in the configuration model so that the shape is stable, but every other key is refused when the configuration is saved:
 
 ```
-langchain.task[0].documents.sharing.delegation is not available in this version
+langchain.task[0].documents.sharing.handoff is not available in this version
 ```
 
 An absent block, `{}` and empty nested blocks (`"split": {}`) are accepted and change nothing. An agent that configures nothing behaves exactly as before, including for large PDFs.
@@ -1837,7 +1837,38 @@ The full shape, with every key at its default:
 
 | Key | Available since |
 |---|---|
-| *(none yet)* | — |
+| `sharing.delegation`, `sharing.maxFilesPerShare`, `sharing.maxSharesPerTurn`, `sharing.maxDepth` | 6.7.0 |
+
+### Handing files to a delegated agent
+
+With `sharing.delegation: true`, `converse_with_agent` gains a fourth, optional argument, `attachments`: names of files of the calling conversation to hand to the agent it talks to. The delegate receives them exactly as if its own user had attached them — its forwarder sends a PDF natively to a model that reads PDFs and extracts its text for one that does not, and it gets `readAttachment` for later turns.
+
+```json
+"documents": {
+  "sharing": { "delegation": true, "maxFilesPerShare": 3, "maxSharesPerTurn": 6, "maxDepth": 2 }
+}
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `sharing.delegation` | `false` | Whether `converse_with_agent` may hand files on. Off: the tool keeps its three arguments |
+| `sharing.maxFilesPerShare` | `5` | Most files one call shares; never more than `eddi.attachments.max-per-turn`, since the delegate's turn takes no more |
+| `sharing.maxSharesPerTurn` | `10` | Most files the conversation shares in one turn, across every call and every LLM task of the turn |
+| `sharing.maxDepth` | `3` | How many hops a file may travel: with 3, A→B→C→D works and D cannot pass the file on |
+
+The three counts have operator bounds (`eddi.documents.sharing.*`, see the [configuration reference](configuration-reference.md#documents)); a higher value is refused at save. `sharing.delegation` is an extra switch on top of the delegation policy: delegation itself (`allowDelegation`, the allowed targets, depth and per-task limits) is unchanged, and refuses before anything is shared.
+
+The rules the tool follows:
+
+- **The argument appears only when it can be used.** The four-argument tool is assembled when `sharing.delegation` is on, delegation is allowed, and the conversation's memory shows a stored file on this or an earlier turn; otherwise the tool and its specification are exactly the three-argument one. A turn without files never reads the attachment store.
+- **The model names files, never references.** Names resolve against the conversation's own files (owned or granted, minus files of a turn an input guardrail refused — including the current turn, when an earlier LLM task of it refused the input), by exact name or 1-based number, as described in [Sharing between agents — the rule](attachments-guide.md#sharing-between-agents--the-rule). A name that matches nothing is `not found`, whether the file exists elsewhere or not.
+- **Only to a conversation this one started.** Files go to the conversation the call starts, or to one this conversation started earlier with `converse_with_agent` (recorded on its own steps under `delegation:started` while `sharing.delegation` is on). Continuing any other conversation — even one of the same user — delivers the message but no file, and the result says why.
+- **The result says what happened**: which files were shared, which were refused and why, then the delegate's answer.
+- **Depth travels with the files** in the reserved context key `attachmentShareDepth`, which clients cannot set ([reserved context keys](passing-context-information.md#reserved-context-keys)). An operator who lists it in `eddi.conversation.client-context.permitted-reserved-keys` lets clients reset it — the warning on that property applies.
+
+- **A continued conversation must still run the named agent.** If `agentId` is not the agent of the `conversationId` given, no file is shared.
+
+A share grants the delegate's conversation read access to the whole file, is audited in the calling conversation's ledger and counted in `eddi_attachment_shared_total{path="delegation"}`. The grant is made before the message is sent: if the delegate's turn does not run — the conversation is busy, or paused for an approval — the delegate keeps the grant but receives the file only on a later call that names it again. Parts of a file (a chapter, a page range) cannot be handed on yet.
 
 ## Conversation Window Management
 

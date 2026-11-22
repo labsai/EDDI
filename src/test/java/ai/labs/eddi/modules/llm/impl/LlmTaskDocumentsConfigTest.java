@@ -38,14 +38,14 @@ class LlmTaskDocumentsConfigTest {
     void storedNonLiveKeyWarnsOnce() throws Exception {
         var config = MAPPER.readValue("""
                 {"tasks":[{"actions":["help"],"id":"answer","type":"openai",
-                  "documents":{"sharing":{"delegation":true}}}]}
+                  "documents":{"sharing":{"handoff":true}}}]}
                 """, LlmConfiguration.class);
 
         List<String> logged = assertDoesNotThrow(() -> LlmTask.warnOnDocumentsConfig(config, null));
 
         assertEquals(1, logged.size(), logged.toString());
         String text = logged.get(0);
-        assertTrue(text.contains("'answer'") && text.contains("documents.sharing.delegation is not available"), text);
+        assertTrue(text.contains("'answer'") && text.contains("documents.sharing.handoff is not available"), text);
     }
 
     @Test
@@ -64,11 +64,11 @@ class LlmTaskDocumentsConfigTest {
     @DisplayName("an operator default for an unavailable key is reported for a task without a block")
     void operatorDefaultReportedWithoutBlock() throws Exception {
         var config = MAPPER.readValue("{\"tasks\":[{\"actions\":[\"a\"],\"id\":\"plain\",\"type\":\"openai\"}]}", LlmConfiguration.class);
-        var settings = DocumentSettings.of(Map.of("sharing.delegation", "true"), DocumentBounds.none());
+        var settings = DocumentSettings.of(Map.of("sharing.handoff", "true"), DocumentBounds.none());
 
         List<String> logged = LlmTask.warnOnDocumentsConfig(config, settings);
 
         assertEquals(1, logged.size(), logged.toString());
-        assertTrue(logged.get(0).contains("'plain'") && logged.get(0).contains("eddi.documents.defaults.sharing.delegation"), logged.get(0));
+        assertTrue(logged.get(0).contains("'plain'") && logged.get(0).contains("eddi.documents.defaults.sharing.handoff"), logged.get(0));
     }
 }
