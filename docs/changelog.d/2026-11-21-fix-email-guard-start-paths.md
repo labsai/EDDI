@@ -115,7 +115,7 @@ model's tool calls.
   `email.allowlist-emptied`, and every change writes `EMAIL_SENDERS_CHANGED`; `updateEmailSenders` delegates, so it
   audits once. The Manager's page Save asks before such a save.
 - `GroupConversation.setOrigin` never clears or replaces a set taint. Docs: the header goes to third parties on
-  purpose; a relay that drops it sheds the taint. Operator revision 83.
+  purpose; a relay that drops it sheds the taint. Operator revision 84.
 
 ### Not covered
 

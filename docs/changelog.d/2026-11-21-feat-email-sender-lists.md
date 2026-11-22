@@ -53,7 +53,7 @@ start and the turn it runs. "Consult" is not a separate feature on `main`; consu
 so the draft is reseeded and a later save cannot write the old lists back; the editor is disabled while the page has
 unsaved changes. The create dialog keeps the comma-separated fields.
 
-**Platform Operator** (revision 82): `GET /channelstore/channels/descriptors`, `GET …/email-senders` and the gated
+**Platform Operator** (revision 83): `GET /channelstore/channels/descriptors`, `GET …/email-senders` and the gated
 `POST …/email-senders` are on the allow-list — the one channelstore write, narrowing the exclusion in
 `planning/operator-write-scope-plan.md` to exactly this endpoint — and the prompt says how to use them.
 
