@@ -179,9 +179,16 @@ public class KnowledgeBaseInspector {
                 ? null
                 : metadataKey(IngestionPipeline.METADATA_SOURCE_KEY)
                         .isEqualTo(IngestionPipeline.stateKey(ragConfigId, source));
-        return search(ragConfigId, knowledgeBase, query, filter, clamp(maxResults, 1, MAX_SEARCH_RESULTS),
+        // The same folder scope an agent's retrieval applies, so a search shows what
+        // an agent would get.
+        int wanted = clamp(maxResults, 1, MAX_SEARCH_RESULTS);
+        FolderScopeRetrievalFilter.Scopes scopes = new FolderScopeRetrievalFilter(stateStore)
+                .forKnowledgeBase(ragConfigId, knowledgeBase);
+        return search(ragConfigId, knowledgeBase, query, filter, scopes.fetchSize(wanted),
                 Math.max(0.0, Math.min(1.0, minScore)))
                 .stream()
+                .filter(match -> match.embedded() == null || scopes.admits(match.embedded().metadata()))
+                .limit(wanted)
                 .map(match -> toChunk(match, true))
                 .toList();
     }

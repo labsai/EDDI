@@ -22,6 +22,7 @@ import ai.labs.eddi.modules.ingestion.connector.SourceDocument;
 import ai.labs.eddi.modules.ingestion.connector.SourceDocument.Content;
 import ai.labs.eddi.modules.ingestion.connector.SourceError;
 import ai.labs.eddi.modules.ingestion.connector.SourceException;
+import ai.labs.eddi.modules.ingestion.connector.SourceMetadataKeys;
 import ai.labs.eddi.modules.ingestion.connector.WorkItem;
 import ai.labs.eddi.modules.ingestion.crawl.WebCrawler;
 import ai.labs.eddi.modules.ingestion.crawl.WebSourceConnector;
@@ -1217,6 +1218,12 @@ public class IngestionPipeline {
          */
         private boolean reembedAll;
         /**
+         * The folder chain of the document being processed, for its chunks and its
+         * citation fingerprint; null for a document without one. Documents are
+         * processed one at a time, on the run's own thread.
+         */
+        private String currentFolderIds;
+        /**
          * Every document discovery handed over this run. A scope-changed reconciliation
          * removes only documents outside it.
          */
@@ -1375,6 +1382,15 @@ public class IngestionPipeline {
         }
 
         private void upsert(WorkItem item, SourceConnector connector, SourceContext context) {
+            currentFolderIds = item.citation() == null ? null : item.citation().folderIds();
+            try {
+                upsertDocument(item, connector, context);
+            } finally {
+                currentFolderIds = null;
+            }
+        }
+
+        private void upsertDocument(WorkItem item, SourceConnector connector, SourceContext context) {
             SourceDocument document = item.prefetched();
             if (document == null) {
                 // Asked before the content is fetched: an unchanged document needs
@@ -1404,6 +1420,12 @@ public class IngestionPipeline {
                     throw new IllegalStateException("Source type '" + connector.type() + "' fetched document '"
                             + document.documentId() + "' for work item '" + item.documentId() + "'");
                 }
+            }
+            Object folders = document.metadata() == null
+                    ? null
+                    : document.metadata().get(SourceMetadataKeys.FOLDER_IDS);
+            if (folders != null) {
+                currentFolderIds = folders.toString();
             }
             switch (document.content()) {
                 case Content.HtmlPage page -> onPage(document, page);
@@ -1449,7 +1471,7 @@ public class IngestionPipeline {
          */
         private CitationCheck refreshCitation(DocumentState known, String title, String url) {
             String chunkTitle = cap(title, MAX_TITLE_LENGTH);
-            String current = ContentHashes.citation(chunkTitle, url);
+            String current = ContentHashes.citation(chunkTitle, url, currentFolderIds);
             if (mode != Mode.INGEST || current.equals(known.citationHash())) {
                 return CitationCheck.CURRENT;
             }
@@ -1459,6 +1481,14 @@ public class IngestionPipeline {
                 return CitationCheck.CURRENT;
             }
             if (!(store() instanceof SegmentMetadataUpdates updates)) {
+                if (currentFolderIds != null
+                        && ContentHashes.citation(chunkTitle, url).equals(known.citationHash())) {
+                    // Only the folder chain is new — chunks written before chains were
+                    // recorded. A store that cannot rewrite metadata would re-embed the
+                    // whole source for it; the chunks stay without a chain instead, which
+                    // retrieval keeps until the next complete listing decides.
+                    return CitationCheck.CURRENT;
+                }
                 return CitationCheck.REEMBED;
             }
             if (!stillOwnsRun(true)) {
@@ -1468,6 +1498,9 @@ public class IngestionPipeline {
             Map<String, String> values = new HashMap<>();
             values.put(METADATA_TITLE, chunkTitle);
             values.put(METADATA_URL, url);
+            if (currentFolderIds != null) {
+                values.put(SourceMetadataKeys.FOLDER_IDS, currentFolderIds);
+            }
             int updated;
             try {
                 updated = updates.updateMetadata(
@@ -1814,7 +1847,7 @@ public class IngestionPipeline {
             // while deciding whether to ingest, as the draft did — means one
             // provider timeout marks a page done forever.
             stateStore.recordIngested(sourceKey, documentId, changeKey, etag, lastModified, runId,
-                    ContentHashes.citation(cap(title, MAX_TITLE_LENGTH), url));
+                    ContentHashes.citation(cap(title, MAX_TITLE_LENGTH), url, currentFolderIds));
 
             if (segments + discardedSegments >= source.settings().maxSegmentsPerRunOrDefault()) {
                 budgetExhausted = true;
@@ -1899,6 +1932,11 @@ public class IngestionPipeline {
                     // What retrieval filters on in the per-id layout. Without it a
                     // crawled chunk would be invisible to its own knowledge base.
                     .put(KnowledgeBaseStorage.METADATA_KB_ID, chunkKbId);
+            if (currentFolderIds != null) {
+                // Where the document sits, so retrieval can apply the source's current
+                // folder scope before the next complete listing has.
+                metadata.put(SourceMetadataKeys.FOLDER_IDS, currentFolderIds);
+            }
 
             var splitter = DocumentSplitters.recursive(
                     knowledgeBase.chunkSizeOrDefault(), knowledgeBase.chunkOverlapOrDefault());

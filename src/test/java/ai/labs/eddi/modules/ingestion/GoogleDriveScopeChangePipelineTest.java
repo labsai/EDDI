@@ -13,6 +13,7 @@ import ai.labs.eddi.modules.ingestion.IngestionPipeline.IngestionReport;
 import ai.labs.eddi.modules.ingestion.IngestionPipeline.Mode;
 import ai.labs.eddi.modules.ingestion.connector.SourceConnectors;
 import ai.labs.eddi.modules.ingestion.drive.FakeDrive;
+import ai.labs.eddi.modules.ingestion.files.IIngestedFileStore;
 import ai.labs.eddi.modules.ingestion.drive.GoogleDriveSourceConnector;
 import ai.labs.eddi.modules.ingestion.extract.DocumentExtractors;
 import ai.labs.eddi.modules.ingestion.extract.PlainTextExtractor;
@@ -29,6 +30,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -57,6 +59,9 @@ class GoogleDriveScopeChangePipelineTest {
     private IngestionSource source;
     private GoogleDriveSource config;
 
+    private EmbeddingStoreFactory storeFactory;
+    private EmbeddingModelFactory modelFactory;
+
     /** Text that makes the embedding model fail, as a throttled provider would. */
     private String failOn;
 
@@ -65,9 +70,11 @@ class GoogleDriveScopeChangePipelineTest {
         drive = new FakeDrive(DRIVE);
         stateStore = new InMemoryIngestionStateStore();
         embeddingStore = new RecordingEmbeddingStore();
-        EmbeddingStoreFactory storeFactory = mock(EmbeddingStoreFactory.class);
-        EmbeddingModelFactory modelFactory = mock(EmbeddingModelFactory.class);
+        embeddingStore.searchingEverything();
+        storeFactory = mock(EmbeddingStoreFactory.class);
+        modelFactory = mock(EmbeddingModelFactory.class);
         EmbeddingModel model = mock(EmbeddingModel.class);
+        when(model.embed(anyString())).thenReturn(Response.from(Embedding.from(new float[]{0.1f})));
         when(storeFactory.getOrCreate(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
         when(storeFactory.getOrCreateForIngestion(anyString(), any(RagConfiguration.class))).thenReturn(embeddingStore);
         when(modelFactory.getOrCreate(any(RagConfiguration.class), any(EmbeddingInputType.class))).thenReturn(model);
@@ -140,6 +147,72 @@ class GoogleDriveScopeChangePipelineTest {
         assertFalse(live("l1"));
         assertTrue(live("s1") && live("s2"), "the folder that stayed keeps its documents");
         assertTrue(stateStore.lookup(key(), "l1").orElseThrow().tombstoned());
+    }
+
+    /**
+     * The documents a search answers, the way the Manager's Test Retrieval asks.
+     */
+    private List<String> searchHits() {
+        var inspector = new KnowledgeBaseInspector(stateStore, mock(IIngestedFileStore.class), storeFactory, modelFactory);
+        return inspector.search(KB_RESOURCE_ID, knowledgeBaseWith(source), null, "offer", 10, 0.0).stream()
+                .map(chunk -> String.valueOf(chunk.metadata().get(IngestionPipeline.METADATA_DOCUMENT_ID)))
+                .distinct().sorted().toList();
+    }
+
+    private static RagConfiguration knowledgeBaseWith(IngestionSource source) {
+        RagConfiguration config = knowledgeBase();
+        config.setSources(List.of(source));
+        return config;
+    }
+
+    @Test
+    @DisplayName("a removed folder stops answering at once: hidden during an incomplete listing and after a complete one")
+    void retrievalAppliesTheCurrentScope() {
+        run(Mode.INGEST);
+        assertEquals(List.of("l1", "s1", "s2"), searchHits());
+
+        config.setFolders(List.of(DriveFolder.ofPath("Sales")));
+        assertEquals(List.of("s1", "s2"), searchHits(), "hidden as soon as the scope changes, before any run");
+
+        drive.script("%27fArchive%27", FakeDrive.error(429, "rateLimitExceeded", "Rate limit exceeded", "600"));
+        IngestionReport throttled = run(Mode.INGEST);
+        assertEquals(0, throttled.documentsTombstoned());
+        assertTrue(live("l1"), "the vectors are still stored");
+        assertEquals(List.of("s1", "s2"), searchHits(), "but not retrieved during the incomplete listing");
+
+        run(Mode.INGEST);
+        assertFalse(live("l1"));
+        assertEquals(List.of("s1", "s2"), searchHits(), "and still not after the complete one removed them");
+    }
+
+    @Test
+    @DisplayName("a new exclusion hides its subtree at once, and chunks carry their folder chain")
+    void exclusionHidesAtOnce() {
+        run(Mode.INGEST);
+        assertEquals("/fSales/fArchive/",
+                embeddingStore.segmentsOf("s2").getFirst().metadata().getString("folderIds"));
+
+        config.setExcludeFolders(List.of(DriveFolder.ofId("fArchive")));
+
+        assertEquals(List.of("l1", "s1"), searchHits());
+    }
+
+    @Test
+    @DisplayName("chunks written before chains were recorded are stamped in place, without embedding again")
+    void legacyChunksAreStamped() {
+        run(Mode.INGEST);
+        embeddingStore.segments().forEach(segment -> segment.metadata().remove("folderIds"));
+        // As written by the previous build: the citation fingerprint without a chain.
+        Map.of("s1", "offer.txt", "s2", "old.txt", "l1", "terms.txt").forEach((id, name) -> stateStore.recordCitation(
+                key(), id, stateStore.lookup(key(), id).orElseThrow().lastRunId(),
+                ContentHashes.citation(name, "https://docs.google.com/fake/" + id)));
+        int segments = embeddingStore.segments().size();
+
+        IngestionReport second = run(Mode.INGEST);
+
+        assertEquals(0, second.documentsIngested(), String.valueOf(second));
+        assertEquals(segments, embeddingStore.segments().size());
+        assertEquals("/fLegal/", embeddingStore.segmentsOf("l1").getFirst().metadata().getString("folderIds"));
     }
 
     @Test

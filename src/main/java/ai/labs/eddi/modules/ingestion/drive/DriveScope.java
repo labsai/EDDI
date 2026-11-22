@@ -77,8 +77,11 @@ final class DriveScope {
     /** Folders above any folder of a drive; a deeper chain is refused. */
     static final int MAX_ANCESTRY = 64;
 
-    private static final String INCLUDE = "include:";
-    private static final String EXCLUDE = "exclude:";
+    static final String INCLUDE = "include:";
+    static final String EXCLUDE = "exclude:";
+
+    /** An exclusion by id, recorded once it has been seen to exist. */
+    static final String EXCLUDE_ID = "exclude-id:";
     private static final ObjectMapper JSON = new ObjectMapper();
 
     /** A folder this run reads from, and how the configuration named it. */
@@ -87,7 +90,11 @@ final class DriveScope {
 
     /** Whether a folder found during the listing may be read. */
     enum Admission {
-        ADMIT, EXCLUDED, UNKNOWN
+        ADMIT, EXCLUDED, UNKNOWN,
+        /**
+         * The target does not exist: there is nothing to read and nothing to exclude.
+         */
+        GONE
     }
 
     private final DriveApi api;
@@ -198,7 +205,11 @@ final class DriveScope {
         try {
             admission = underExclusion(folderId) ? Admission.EXCLUDED : Admission.ADMIT;
         } catch (SourceException e) {
-            admission = Admission.UNKNOWN;
+            // A target that does not exist cannot lie inside an exclusion of this
+            // drive; anything else leaves its place in the drive unknown.
+            admission = e.error().kind() == SourceError.Kind.NOT_FOUND && !metadata.containsKey(folderId)
+                    ? Admission.GONE
+                    : Admission.UNKNOWN;
         }
         admissions.put(folderId, admission);
         return admission;
@@ -212,18 +223,69 @@ final class DriveScope {
                     throw rejected("googleDrive.excludeFolders names the Shared Drive itself, which excludes "
                             + "everything");
                 }
-                Optional<JsonNode> meta = existingFolder(id);
-                if (meta.isEmpty()) {
-                    warnings.add("excluded folder " + id + " no longer exists in the drive; nothing is excluded for it");
-                    continue;
-                }
-                excluded.add(id);
+                excludeById(id);
             } else {
                 String key = EXCLUDE + nfc(folder.normalizedPath());
                 Optional<String> id = resolveRecordedOrFresh(folder, key, false);
                 id.ifPresent(excluded::add);
             }
         }
+    }
+
+    /**
+     * An exclusion named by id. It must be seen to exist once; after that a folder
+     * Drive still shows — even in the trash or moved to another drive — stays
+     * excluded, and one Drive answers 404 for stops the run: a 404 is not proof
+     * that the folder is gone, and reading on would embed what was meant to stay
+     * out.
+     */
+    private void excludeById(String id) throws SourceException {
+        String key = EXCLUDE_ID + id;
+        JsonNode node;
+        try {
+            node = meta(id);
+        } catch (DriveApiException e) {
+            if (e.error().kind() != SourceError.Kind.NOT_FOUND) {
+                throw e;
+            }
+            if (recorded.containsKey(key)) {
+                throw new SourceException(new SourceError.Transient("Excluded folder " + id + " was seen by an "
+                        + "earlier run and Drive now answers that it does not exist. The run stops rather than read "
+                        + "what was meant to stay out; if the folder was deleted for good, remove it from "
+                        + "googleDrive.excludeFolders."), e);
+            }
+            throw rejected("googleDrive.excludeFolders names " + id + ", which does not exist in Shared Drive "
+                    + drive.getSharedDriveId() + " or is not visible to the service account");
+        }
+        if (!DriveFormat.FOLDER_MIME.equals(node.path("mimeType").asText())) {
+            throw rejected("googleDrive.excludeFolders names " + id + ", which is a file, not a folder");
+        }
+        if (node.path("trashed").asBoolean(false) || !drive.getSharedDriveId().equals(node.path("driveId").asText())) {
+            warnings.add("excluded folder " + id + " is in the trash or in another drive; it stays excluded");
+        }
+        excluded.add(id);
+        resolved.put(key, id);
+    }
+
+    /**
+     * The folder's place in the drive as a chain of ids from the top-level folder
+     * down, {@code /a/b/}; {@code /} for the drive's root. What each chunk records,
+     * so retrieval can apply the current scope before a listing has.
+     */
+    String chainOf(String folderId) throws SourceException {
+        StringBuilder chain = new StringBuilder("/");
+        if (folderId.equals(drive.getSharedDriveId())) {
+            return chain.toString();
+        }
+        for (JsonNode node : ancestry(folderId)) {
+            chain.append(node.path("id").asText()).append('/');
+        }
+        return chain.toString();
+    }
+
+    /** What an earlier run recorded, for retrieval to read the same way. */
+    static Map<String, String> recordedPaths(String state) {
+        return parseRecorded(state);
     }
 
     private void resolveRoots() throws SourceException {
@@ -310,8 +372,11 @@ final class DriveScope {
                         + recordedId + ") was deleted, moved out of the Shared Drive or put in the trash, and no "
                         + "folder has that path now. Restore it, or remove it from " + field + "."));
             }
-            warnings.add("The excluded folder '" + path + "' is gone from the drive; nothing is excluded for it");
-            return Optional.empty();
+            // Kept recorded: without it the next run would take the path for a typo
+            // and fail for good. The old id stays excluded, which costs nothing.
+            warnings.add("The excluded folder '" + path + "' is gone from the drive; nothing is left to exclude");
+            resolved.put(key, recordedId);
+            return Optional.of(recordedId);
         }
         String id = resolvePath(path, field, true).orElseThrow();
         if (required) {

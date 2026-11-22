@@ -7,6 +7,7 @@ package ai.labs.eddi.modules.ingestion.drive;
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.IngestionSource.GoogleDriveSource;
 import ai.labs.eddi.connections.ResolvedCredential;
+import ai.labs.eddi.modules.ingestion.ContentHashes;
 import ai.labs.eddi.modules.ingestion.connector.Coverage;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryContext;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryResult;
@@ -52,6 +53,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class GoogleDriveSourceConnectorTest {
 
     private static final String DRIVE = "0AdriveAAA";
+    private static final String CHAIN_AT_TOP = "#" + ContentHashes.sha256("/").substring(0, 12);
     private static final ResolvedCredential TOKEN = new ResolvedCredential("Authorization", "Bearer fixture-token");
 
     private FakeDrive fake;
@@ -358,7 +360,8 @@ class GoogleDriveSourceConnectorTest {
         void nativeUnchanged() throws SourceException {
             fake.nativeFile("d1", "Handbook", FakeDrive.DOC, DRIVE, 7, Map.of("text/markdown", utf8("# H")));
             Recorder recorder = new Recorder(context(false));
-            recorder.known.put("d1", new KnownVersion("hash", "v:7@26214400", null));
+            // The folder chain is part of a native file's token: "/" at the drive's top.
+            recorder.known.put("d1", new KnownVersion("hash", "v:7@26214400" + CHAIN_AT_TOP, null));
 
             connector.discover(recorder);
 
@@ -391,7 +394,7 @@ class GoogleDriveSourceConnectorTest {
             assertEquals(WorkItem.Action.UPSERT, item.action());
             assertNull(item.versionToken());
             assertNull(document.versionToken(), "the hash of the export is the change key");
-            assertEquals("v:8@26214400", document.validators().etag());
+            assertEquals("v:8@26214400" + CHAIN_AT_TOP, document.validators().etag());
         }
     }
 

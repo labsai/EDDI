@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.ingestion.drive;
 
 import ai.labs.eddi.configs.rag.model.IngestionSource;
 import ai.labs.eddi.configs.rag.model.IngestionSource.GoogleDriveSource;
+import ai.labs.eddi.modules.ingestion.ContentHashes;
 import ai.labs.eddi.modules.ingestion.connector.Coverage;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryContext;
 import ai.labs.eddi.modules.ingestion.connector.DiscoveryResult;
@@ -108,6 +109,13 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     static final String HINT_AUTHOR = "author";
     static final String HINT_VERSION = "version";
     static final String HINT_PARENT = "parentId";
+    static final String HINT_FOLDERS = "folderIds";
+
+    /**
+     * A folder chain longer than this is not recorded; retrieval keeps such a
+     * chunk.
+     */
+    static final int MAX_CHAIN_LENGTH = 4096;
 
     /** Folders one picker page shows at most. */
     static final int PICKER_PAGE_SIZE = 200;
@@ -193,7 +201,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         Set<String> visited = new HashSet<>();
         for (DriveScope.Root root : scope.roots()) {
             if (visited.add(root.id())) {
-                queue.add(new Folder(root.id(), "", true));
+                queue.add(new Folder(root.id(), "", true, true, false, scope.chainOf(root.id())));
             }
         }
 
@@ -564,7 +572,8 @@ public class GoogleDriveSourceConnector implements SourceConnector {
      * an unchanged checksum gets its new name without being downloaded.
      */
     static Citation citationOf(String documentId, Map<String, String> hints) {
-        return new Citation(hints.getOrDefault(HINT_NAME, documentId), citationUrl(documentId, hints));
+        return new Citation(hints.getOrDefault(HINT_NAME, documentId), citationUrl(documentId, hints),
+                hints.get(HINT_FOLDERS));
     }
 
     /**
@@ -589,6 +598,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         metadata.put(SourceMetadataKeys.MODIFIED_AT, hints.get(HINT_MODIFIED));
         metadata.put(SourceMetadataKeys.PARTITION_ID, drive.getSharedDriveId());
         metadata.put(SourceMetadataKeys.PARENT_ID, hints.get(HINT_PARENT));
+        metadata.put(SourceMetadataKeys.FOLDER_IDS, hints.get(HINT_FOLDERS));
         metadata.put(SourceMetadataKeys.PROVIDER, IngestionSource.TYPE_GOOGLE_DRIVE);
         return metadata;
     }
@@ -687,14 +697,18 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     }
 
     /** A folder waiting to be listed, and the path to it from its root. */
-    private record Folder(String id, String path, boolean root, boolean listable, boolean verify) {
+    private record Folder(String id, String path, boolean root, boolean listable, boolean verify, String chain) {
 
-        Folder(String id, String path, boolean root, boolean listable) {
-            this(id, path, root, listable, false);
-        }
-
-        Folder(String id, String path, boolean root) {
-            this(id, path, root, true);
+        /**
+         * The chain of a folder below this one: the walk's own path, so a folder
+         * reached through a shortcut carries the folder it was reached from. Exclusions
+         * by the target's real place in the drive are applied at listing time.
+         */
+        String childChain(String childId) {
+            if (chain == null || chain.length() + childId.length() + 1 > MAX_CHAIN_LENGTH) {
+                return null;
+            }
+            return chain + childId + "/";
         }
 
         String label() {
@@ -762,7 +776,8 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     return true;
                 }
                 if (visited.add(file.id())) {
-                    queue.add(new Folder(file.id(), folder.child(name), false, Boolean.TRUE.equals(file.canListChildren())));
+                    queue.add(new Folder(file.id(), folder.child(name), false, Boolean.TRUE.equals(file.canListChildren()),
+                            false, folder.childChain(file.id())));
                 }
                 return true;
             }
@@ -780,6 +795,11 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                         excludedFolders++;
                         return true;
                     }
+                    if (admission == DriveScope.Admission.GONE) {
+                        skippedShortcuts++;
+                        context.reportSkipped(file.id(), "a shortcut to a folder that no longer exists");
+                        return true;
+                    }
                     if (admission == DriveScope.Admission.UNKNOWN) {
                         incompleteReason = "could not establish whether the target of shortcut " + file.id()
                                 + " lies inside an excluded folder";
@@ -788,7 +808,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                     // A shortcut back to a folder already listed is how Drive makes a
                     // cycle; the visited set is what stops the listing going round it.
                     if (visited.add(target)) {
-                        queue.add(new Folder(target, folder.child(name), false, true, true));
+                        queue.add(new Folder(target, folder.child(name), false, true, true, folder.childChain(target)));
                     } else {
                         repeatedFolders++;
                     }
@@ -833,6 +853,17 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             }
             Map<String, String> hints = hints(file, name, folder.child(name), drive.maxFileBytesOrDefault());
             hints.put(HINT_PARENT, folder.id());
+            if (folder.chain() != null) {
+                hints.put(HINT_FOLDERS, folder.chain());
+                String version = hints.get(HINT_VERSION);
+                if (version != null) {
+                    // The chain is part of a Google-native file's token: a file moved
+                    // between folders is exported once more, so its chunks get the new
+                    // chain — and so does every native file once, on the first run that
+                    // records chains.
+                    hints.put(HINT_VERSION, version + "#" + ContentHashes.sha256(folder.chain()).substring(0, 12));
+                }
+            }
             if (format.isNative()) {
                 String version = hints.get(HINT_VERSION);
                 Optional<KnownVersion> known = context.knownVersion(file.id());

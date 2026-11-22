@@ -47,6 +47,15 @@ public final class ContentHashes {
         return sha256(part(title) + part(url));
     }
 
+    /**
+     * {@link #citation(String, String)} with the document's folder chain. Without
+     * one it is exactly the two-value hash, so a source that records no chain —
+     * every web and upload source — keeps the fingerprints it has.
+     */
+    public static String citation(String title, String url, String folderIds) {
+        return folderIds == null ? citation(title, url) : sha256(part(title) + part(url) + part(folderIds));
+    }
+
     private static String part(String value) {
         return value == null ? "-;" : value.length() + ":" + value + ";";
     }

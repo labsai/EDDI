@@ -946,8 +946,10 @@ public class IngestionSource {
 
         /**
          * The folder names of a path, from the drive's root down. A leading or trailing
-         * {@code /} is ignored; an empty name, a control character or a path deeper or
-         * longer than the limits is refused.
+         * {@code /} is ignored, and so are spaces around each name
+         * ({@code Sales / Offers} is {@code Sales/Offers}; a folder whose own name
+         * starts or ends with a space is named by its id). An empty name, a control
+         * character or a path deeper or longer than the limits is refused.
          *
          * @throws IllegalArgumentException
          *             naming what is wrong with the path
@@ -985,7 +987,7 @@ public class IngestionSource {
                     throw new IllegalArgumentException("a folder name may be at most " + MAX_SEGMENT_LENGTH
                             + " characters");
                 }
-                segments.add(part);
+                segments.add(part.strip());
             }
             return segments;
         }

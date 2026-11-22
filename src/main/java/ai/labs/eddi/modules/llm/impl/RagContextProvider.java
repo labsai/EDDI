@@ -22,6 +22,7 @@ import dev.langchain4j.rag.content.retriever.ContentRetriever;
 import dev.langchain4j.rag.content.retriever.EmbeddingStoreContentRetriever;
 import dev.langchain4j.rag.query.Query;
 import dev.langchain4j.store.embedding.EmbeddingStore;
+import ai.labs.eddi.modules.ingestion.FolderScopeRetrievalFilter;
 import dev.langchain4j.store.embedding.filter.Filter;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.utils.RestUtilities;
@@ -56,6 +57,13 @@ public class RagContextProvider {
     private final EmbeddingModelFactory embeddingModelFactory;
     private final EmbeddingStoreFactory embeddingStoreFactory;
     private final IDataFactory dataFactory;
+
+    /**
+     * Applies each Google Drive source's current folder scope to what is retrieved.
+     * Field-injected so a hand-built provider keeps working without it.
+     */
+    @Inject
+    FolderScopeRetrievalFilter folderScopes;
 
     @Inject
     public RagContextProvider(IAgentStore agentStore, IWorkflowStore workflowStore, IResourceClientLibrary resourceClientLibrary,
@@ -169,8 +177,15 @@ public class RagContextProvider {
                 EmbeddingModel embeddingModel = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.QUERY);
                 EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig);
 
+                // A folder taken out of a Drive source's scope stops answering at once,
+                // not only once a complete listing has removed its vectors: matches
+                // outside the current scope are dropped, so more are asked for.
+                FolderScopeRetrievalFilter.Scopes scopes = folderScopes == null
+                        ? null
+                        : folderScopes.forKnowledgeBase(ragConfigId, ragConfig);
+                int fetch = scopes == null ? maxResults : scopes.fetchSize(maxResults);
                 var retrieverBuilder = EmbeddingStoreContentRetriever.builder().embeddingStore(store).embeddingModel(embeddingModel)
-                        .maxResults(maxResults).minScore(minScore);
+                        .maxResults(fetch).minScore(minScore);
                 // Isolation at read time as well as at write time: a knowledge base in
                 // the per-id layout only ever sees chunks tagged with its own id, even
                 // in a physical table it shares.
@@ -182,6 +197,13 @@ public class RagContextProvider {
 
                 // Step 5: Retrieve
                 List<Content> relevant = retriever.retrieve(Query.from(userQuery));
+                if (scopes != null && scopes.active()) {
+                    relevant = relevant.stream()
+                            .filter(content -> content.textSegment() == null
+                                    || scopes.admits(content.textSegment().metadata()))
+                            .limit(maxResults)
+                            .toList();
+                }
 
                 LOGGER.debugf("RAG retrieval from KB '%s': %d results (maxResults=%d, minScore=%.2f)", kbName, relevant.size(), maxResults, minScore);
 

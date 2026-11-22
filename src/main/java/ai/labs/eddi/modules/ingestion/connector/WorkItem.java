@@ -43,14 +43,23 @@ public record WorkItem(String documentId, String versionToken, Action action, St
         Map<String, String> hints, SourceDocument prefetched, Citation citation) {
 
     /**
-     * What a document is cited as: the title and URL stored on each of its chunks.
-     * Either may be null.
+     * What a document is cited as: the title and URL stored on each of its chunks,
+     * and — for a source with folders — the chain of folder ids above it
+     * ({@link SourceMetadataKeys#FOLDER_IDS}). Any may be null.
      */
-    public record Citation(String title, String url) {
+    public record Citation(String title, String url, String folderIds) {
+
+        /** A citation without a folder chain. */
+        public Citation(String title, String url) {
+            this(title, url, null);
+        }
 
         /** The citation a document carries, read from its metadata. */
         public static Citation of(SourceDocument document) {
-            return new Citation(document.title(), document.citationUrl());
+            Object folders = document.metadata() == null
+                    ? null
+                    : document.metadata().get(SourceMetadataKeys.FOLDER_IDS);
+            return new Citation(document.title(), document.citationUrl(), folders == null ? null : folders.toString());
         }
     }
 

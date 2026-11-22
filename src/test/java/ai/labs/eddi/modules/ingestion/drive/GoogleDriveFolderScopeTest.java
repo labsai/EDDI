@@ -127,6 +127,26 @@ class GoogleDriveFolderScopeTest {
         }
 
         @Test
+        @DisplayName("spaces around each name are ignored")
+        void trimmedSegments() throws SourceException {
+            config.setFolders(List.of(path(" Sales / Offers ")));
+
+            assertEquals(List.of("q1", "q0"), discover().acceptedIds());
+        }
+
+        @Test
+        @DisplayName("each file carries the chain of folders above it, from the drive's top down")
+        void folderChain() throws SourceException {
+            config.setFolders(List.of(path("Sales/Offers")));
+
+            Recorder run = discover();
+
+            assertEquals("/fSales/fOffers/", run.item("q1").hints().get(GoogleDriveSourceConnector.HINT_FOLDERS));
+            assertEquals("/fSales/fOffers/fOld/", run.item("q0").hints().get(GoogleDriveSourceConnector.HINT_FOLDERS));
+            assertEquals("/fSales/fOffers/", run.item("q1").citation().folderIds());
+        }
+
+        @Test
         @DisplayName("names compare in NFC and, failing an exact match, ignoring case")
         void unicodeAndCase() throws SourceException {
             // "Café" stored decomposed (e + combining acute), configured composed and
@@ -376,6 +396,64 @@ class GoogleDriveFolderScopeTest {
             assertTrue(run.result.summary().contains("The excluded folder 'Sales/Archive' is gone"),
                     run.result.summary());
             assertEquals(Coverage.FULL_LISTING, run.result.coverage());
+
+            // And every run after: the gone exclusion stays recorded, so its path is
+            // not taken for a typo that fails the source for good.
+            Recorder third = discover();
+
+            assertEquals(Coverage.FULL_LISTING, third.result.coverage());
+            assertTrue(third.result.summary().contains("is gone"), third.result.summary());
+        }
+
+        @Test
+        @DisplayName("an id exclusion that never existed fails the run instead of reading its subtree")
+        void unknownIdExclusion() {
+            config.setExcludeFolders(List.of(id("fNoSuchFolder")));
+
+            SourceError error = failure(() -> {
+            });
+
+            assertInstanceOf(SourceError.Rejected.class, error);
+            assertTrue(error.reason().contains("fNoSuchFolder"), error.reason());
+        }
+
+        @Test
+        @DisplayName("an id exclusion seen before that Drive now answers 404 for stops the run; a bare 404 is no proof")
+        void seenIdExclusionThen404() throws SourceException {
+            config.setExcludeFolders(List.of(id("fArchive")));
+            discover();
+            fake.script("/drive/v3/files/fArchive?", FakeDrive.error(404, "notFound", "File not found: fArchive"));
+
+            SourceError error = failure(() -> {
+            });
+
+            assertInstanceOf(SourceError.Transient.class, error);
+        }
+
+        @Test
+        @DisplayName("an id exclusion in the trash stays excluded")
+        void trashedIdExclusion() throws SourceException {
+            config.setExcludeFolders(List.of(id("fArchive")));
+            discover();
+            fake.trash("fArchive");
+            fake.shortcut("sDeep", "to deep", DRIVE, "fDeep", FakeDrive.FOLDER);
+
+            Recorder run = discover();
+
+            assertFalse(run.acceptedIds().contains("d"), "the subtree stays out, also through a shortcut");
+            assertEquals(Coverage.FULL_LISTING, run.result.coverage());
+        }
+
+        @Test
+        @DisplayName("a shortcut to a folder that no longer exists is skipped and does not block coverage")
+        void danglingShortcut() throws SourceException {
+            fake.shortcut("sGone", "to nowhere", "fLegal", "fVanished", FakeDrive.FOLDER);
+            config.setExcludeFolders(List.of(path("Sales/Archive")));
+
+            Recorder run = discover();
+
+            assertEquals(Coverage.FULL_LISTING, run.result.coverage(), String.valueOf(run.result.incompleteReason()));
+            assertTrue(run.skipped.contains("sGone"));
         }
 
         @Test
@@ -387,6 +465,17 @@ class GoogleDriveFolderScopeTest {
             config.setExcludeFolders(List.of(path("Sales/Archive")));
 
             assertNotEquals(before, discover().result.scopeSignature());
+        }
+
+        @Test
+        @DisplayName("folderIds and folders by id are the same scope")
+        void legacyIdsSameSignature() throws SourceException {
+            config.setFolderIds(List.of("fLegal"));
+            String legacy = discover().result.scopeSignature();
+            config.setFolderIds(List.of());
+            config.setFolders(List.of(id("fLegal")));
+
+            assertEquals(legacy, discover().result.scopeSignature());
         }
 
         @Test
@@ -492,6 +581,7 @@ class GoogleDriveFolderScopeTest {
 
         private final SourceContext source;
         final List<WorkItem> accepted = new ArrayList<>();
+        final List<String> skipped = new ArrayList<>();
         int recordings;
         DiscoveryResult result;
 
@@ -539,6 +629,11 @@ class GoogleDriveFolderScopeTest {
 
         @Override
         public void reportFailure(String documentId, String location, SourceError error) {
+        }
+
+        @Override
+        public void reportSkipped(String documentId, String reason) {
+            skipped.add(documentId);
         }
 
         @Override
