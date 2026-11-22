@@ -1301,10 +1301,30 @@ public class ApiCallExecutor implements IApiCallExecutor {
      * thread is tainted, replacing whatever a configuration put there.
      */
     static void applyTurnOrigin(IRequest request) {
+        applyTurnOrigin(request, false);
+    }
+
+    /**
+     * As {@link #applyTurnOrigin(IRequest)}, and on a tainted request also
+     * {@link TurnOrigin#APPROVED_HEADER}: {@code true} when this request is the
+     * approved execution of a gated call, {@code false} otherwise — replacing any
+     * configured value either way, so no configuration can claim an approval.
+     */
+    static void applyTurnOrigin(IRequest request, boolean approved) {
         String origin = TurnOrigin.current();
         if (request != null && origin != null) {
             request.setHttpHeader(TurnOrigin.HEADER, origin);
+            request.setHttpHeader(TurnOrigin.APPROVED_HEADER, String.valueOf(approved));
         }
+    }
+
+    /**
+     * The conversation a request is built for, from the template data's
+     * {@code conversationInfo}, or {@code null}.
+     */
+    static String conversationIdOf(Map<String, Object> templateDataObjects) {
+        return templateDataObjects != null && templateDataObjects.get("conversationInfo") instanceof Map<?, ?> info
+                && info.get("conversationId") != null ? String.valueOf(info.get("conversationId")) : null;
     }
 
     // Package-private for unit testing of the backoff curve.
@@ -1784,8 +1804,10 @@ public class ApiCallExecutor implements IApiCallExecutor {
         var method = IHttpClient.Method.valueOf(requestConfig.getMethod().toUpperCase(Locale.ROOT));
         // The escalation guard (email plan v3 §5.3): a turn a mail started never
         // writes to EDDI's own channel or approval endpoints, whatever the tool or
-        // rule that sends the request is called.
-        Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri);
+        // rule that sends the request is called. A configuration write passes only as
+        // the approved execution of a gated call of this very conversation.
+        Optional<String> escalation = EscalationGuard.refuseRequest(method.name(), targetUri,
+                ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
         if (escalation.isPresent()) {
             throw new IllegalArgumentException(escalation.get());
         }
@@ -1940,8 +1962,11 @@ public class ApiCallExecutor implements IApiCallExecutor {
         // not only those recognised as this deployment — EDDI reached under a name the
         // self-check does not know would otherwise start an untainted conversation.
         // The value says only that a mail started the turn, and only a tainted turn
-        // sends it (as A2A already does to any peer).
-        applyTurnOrigin(request);
+        // sends it (as A2A already does to any peer). With it goes whether a person
+        // approved this very call, which lets EDDI's own API take a configuration write
+        // from a tainted turn (EscalationGuard.CONFIG_PATHS) — engine-set, so no
+        // configuration can claim it.
+        applyTurnOrigin(request, ApprovedCallScope.isActiveFor(conversationIdOf(templateDataObjects)));
 
         // A resolved credential in any header must never be replayed to another
         // origin by a redirect. When ssrf-protection is on, redirects are already

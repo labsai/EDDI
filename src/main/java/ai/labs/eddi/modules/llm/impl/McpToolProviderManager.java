@@ -9,6 +9,7 @@ import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
 import ai.labs.eddi.connections.McpAuthChallengeParser;
 import ai.labs.eddi.connections.model.ConnectionReference;
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.CallerIdentityContext;
 import ai.labs.eddi.engine.security.CallerIdentityResolver;
 import ai.labs.eddi.engine.security.TurnOrigin;
@@ -1301,8 +1302,16 @@ public class McpToolProviderManager {
      * calls its meta supplier synchronously before the transport is involved.
      */
     McpMetaSupplier traceMetaSupplier() {
-        return callContext -> withTurnOriginMeta(traceMeta(tracePropagation), TurnOrigin.current());
+        return callContext -> withTurnOriginMeta(traceMeta(tracePropagation), TurnOrigin.current(), ApprovedCallScope.isActive());
     }
+
+    /**
+     * The {@code params._meta} key that says the call is the approved execution of
+     * a gated tool call ({@code ApprovedCallScope}), written on the calling thread
+     * next to {@link #META_TURN_ORIGIN}; {@link #withTurnOriginHeader} sends it as
+     * {@link TurnOrigin#APPROVED_HEADER}.
+     */
+    static final String META_APPROVED_CALL = "ai.labs.eddi/approvedCall";
 
     /**
      * The {@code params._meta} key the origin taint (email plan v3 §5.3) of the
@@ -1313,11 +1322,22 @@ public class McpToolProviderManager {
 
     /** {@code meta} plus {@link #META_TURN_ORIGIN} when {@code origin} is set. */
     static Map<String, Object> withTurnOriginMeta(Map<String, Object> meta, String origin) {
+        return withTurnOriginMeta(meta, origin, false);
+    }
+
+    /**
+     * {@code meta} plus {@link #META_TURN_ORIGIN} when {@code origin} is set, and
+     * then {@link #META_APPROVED_CALL} when {@code approved}.
+     */
+    static Map<String, Object> withTurnOriginMeta(Map<String, Object> meta, String origin, boolean approved) {
         if (origin == null) {
             return meta;
         }
         Map<String, Object> tainted = new LinkedHashMap<>(meta);
         tainted.put(META_TURN_ORIGIN, origin);
+        if (approved) {
+            tainted.put(META_APPROVED_CALL, Boolean.TRUE);
+        }
         return tainted;
     }
 
@@ -1330,20 +1350,27 @@ public class McpToolProviderManager {
      */
     static Map<String, String> withTurnOriginHeader(Map<String, String> headers, McpCallContext callContext) {
         String origin = TurnOrigin.current();
+        boolean approved = false;
         if (callContext != null && callContext.message() instanceof McpClientRequest request && request.getParams() != null
-                && request.getParams().getMeta() != null && request.getParams().getMeta().get(META_TURN_ORIGIN) instanceof String value) {
-            origin = TurnOrigin.combine(origin, TurnOrigin.normalise(value));
+                && request.getParams().getMeta() != null) {
+            if (request.getParams().getMeta().get(META_TURN_ORIGIN) instanceof String value) {
+                origin = TurnOrigin.combine(origin, TurnOrigin.normalise(value));
+            }
+            approved = Boolean.TRUE.equals(request.getParams().getMeta().get(META_APPROVED_CALL));
         }
         if (origin == null) {
             return headers;
         }
+        // The approval header is engine-owned like the taint: a configured value is
+        // dropped, and only the approved execution of a gated call says true.
         Map<String, String> tainted = new LinkedHashMap<>();
         headers.forEach((name, value) -> {
-            if (!TurnOrigin.HEADER.equalsIgnoreCase(name)) {
+            if (!TurnOrigin.HEADER.equalsIgnoreCase(name) && !TurnOrigin.APPROVED_HEADER.equalsIgnoreCase(name)) {
                 tainted.put(name, value);
             }
         });
         tainted.put(TurnOrigin.HEADER, origin);
+        tainted.put(TurnOrigin.APPROVED_HEADER, String.valueOf(approved));
         return tainted;
     }
 

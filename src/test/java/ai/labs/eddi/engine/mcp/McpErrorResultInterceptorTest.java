@@ -56,6 +56,28 @@ class McpErrorResultInterceptorTest {
         public String accept_team_handoff() {
             return "";
         }
+
+        @Tool(name = "update_resource", description = "x")
+        public String updateResource() {
+            return "";
+        }
+    }
+
+    @Test
+    @DisplayName("a configuration tool from a tainted MCP request needs X-Eddi-Approved-Call; approval never unlocks a guarded tool")
+    void configurationToolNeedsApproval() throws Exception {
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            InvocationContext refused = invocation("updateResource", "{\"ok\":true}");
+            var thrown = assertThrows(ToolCallException.class, () -> interceptor.toToolError(refused));
+            assertTrue(thrown.getMessage().contains("unless a person approves"), thrown.getMessage());
+            verify(refused, never()).proceed();
+
+            try (var approved = TurnOriginTestSupport.inboundApproved(true)) {
+                assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("updateResource", "{\"ok\":true}")));
+                assertThrows(ToolCallException.class, () -> interceptor.toToolError(invocation("updateEmailSenders", "{\"ok\":true}")));
+            }
+        }
+        assertEquals("{\"ok\":true}", interceptor.toToolError(invocation("updateResource", "{\"ok\":true}")), "untainted");
     }
 
     private static InvocationContext invocation(String methodName, Object result) throws Exception {

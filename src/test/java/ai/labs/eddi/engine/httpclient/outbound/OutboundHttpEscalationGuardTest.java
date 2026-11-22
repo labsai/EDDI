@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.httpclient.outbound;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
@@ -127,6 +128,50 @@ class OutboundHttpEscalationGuardTest {
         for (var hop : engine.hops) {
             assertEquals(List.of(TurnOrigin.EMAIL), OutboundRequest.caseInsensitiveCopy(hop.headers()).get(TurnOrigin.HEADER), hop.uri().toString());
         }
+    }
+
+    @Test
+    @DisplayName("a tainted configuration write is sent only as an approved call, says so, and never follows a redirect to one")
+    void configWriteNeedsApproval() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine refused = new Engine();
+        assertThrows(OutboundBlockedException.class,
+                () -> facade(refused).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text()));
+        assertEquals(0, refused.hops.size());
+
+        Engine approved = new Engine().respond(200, Map.of());
+        ApprovedCallScope.run("agent-1", () -> {
+            try {
+                return facade(approved).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        });
+        assertEquals(1, approved.hops.size());
+        assertEquals(List.of("true"), OutboundRequest.caseInsensitiveCopy(approved.hops.get(0).headers()).get(TurnOrigin.APPROVED_HEADER));
+
+        Engine redirected = new Engine().respond(307, Map.of("Location", List.of("https://eddi.example.com/llmstore/llms/x")));
+        assertThrows(IllegalStateException.class, () -> ApprovedCallScope.run("agent-1", () -> {
+            try {
+                return facade(redirected).send(post("https://api.example.com/orders"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }), "the approval covers the target the person saw, not a redirect");
+        assertEquals(1, redirected.hops.size());
+    }
+
+    @Test
+    @DisplayName("a configured X-Eddi-Approved-Call does not survive on a tainted request nobody approved")
+    void approvalHeaderCannotBeConfigured() throws Exception {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        Engine engine = new Engine().respond(200, Map.of());
+        OutboundRequest start = OutboundRequest.builder(Profile.DEFAULT, URI.create("https://eddi.example.com/agents/a1/start"))
+                .ssrf(SsrfPolicy.NONE).method("POST", RequestBody.ofString("{}")).header(TurnOrigin.APPROVED_HEADER, "true").build();
+
+        facade(engine).send(start, text());
+
+        assertEquals(List.of("false"), OutboundRequest.caseInsensitiveCopy(engine.hops.get(0).headers()).get(TurnOrigin.APPROVED_HEADER));
     }
 
     @Test

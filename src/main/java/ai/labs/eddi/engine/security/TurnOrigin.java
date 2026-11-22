@@ -58,8 +58,28 @@ public final class TurnOrigin {
     /** The context key carrying the taint into a conversation start or a turn. */
     public static final String CONTEXT_KEY = "turnOrigin";
 
-    /** The request header an outbound A2A call carries the taint in. */
+    /**
+     * The request header every outbound request of a tainted turn carries the taint
+     * in — httpcalls, {@code OutboundHttp}, MCP, A2A, the internal loopback — to
+     * EDDI's own API and to third-party APIs alike. It tells a third party no more
+     * than "an email drove this request", which is a deliberate departure from
+     * {@code AgentCallMarker}, sent only to this deployment: EDDI reached under a
+     * host name the self-check does not recognise would otherwise start an
+     * untainted conversation. A relay that drops the header sheds the taint.
+     */
     public static final String HEADER = "X-Eddi-Turn-Origin";
+
+    /**
+     * The request header with which a tainted turn states that a person approved
+     * this very call through the HITL tool-approval gate, so the receiving side
+     * allows a configuration write ({@link EscalationGuard#CONFIG_PATHS},
+     * {@link EscalationGuard#CONFIG_TOOLS}). It counts only next to
+     * {@link #HEADER}. The engine owns it: every path that sets the taint header
+     * strips a configured value and sets this one only during the approved
+     * execution ({@code ApprovedCallScope}). Forging it buys nothing a caller could
+     * not have by leaving the taint header off.
+     */
+    public static final String APPROVED_HEADER = "X-Eddi-Approved-Call";
 
     private static final ResolutionPrincipalContext PRINCIPALS = new ResolutionPrincipalContext();
 
@@ -76,6 +96,12 @@ public final class TurnOrigin {
      * only by tests ({@link #useRequestSource}).
      */
     private static volatile Supplier<String> requestSource = TurnOrigin::fromActiveRequest;
+
+    /**
+     * Where {@link #inboundApproved()} reads the inbound request's approval from;
+     * replaced only by tests ({@link #useApprovedSource}).
+     */
+    private static volatile Supplier<Boolean> approvedSource = TurnOrigin::approvedFromActiveRequest;
 
     private TurnOrigin() {
     }
@@ -94,7 +120,10 @@ public final class TurnOrigin {
     /**
      * The taint the inbound request served on this thread carries in
      * {@link #HEADER}, or {@code null} — also when there is no request at all (a
-     * pool thread, the poller, a unit test).
+     * pool thread, the poller, a unit test). It is bound explicitly where the
+     * request enters ({@link #bindInbound}: {@code TaintedRequestFilter} for REST,
+     * {@code McpErrorResultInterceptor} for MCP) and read back from the request
+     * context; a request context whose taint cannot be read counts as tainted.
      * <p>
      * Taken from any caller, authenticated or not, because it can only restrict:
      * the internal loopback carries no credential, and a request without the header
@@ -126,26 +155,113 @@ public final class TurnOrigin {
     }
 
     /**
-     * The request's taint, read from the {@link CurrentVertxRequest} of the active
-     * request context. Quarkus REST sets it for every resource method, and the MCP
-     * HTTP transport sets it when it activates the request context for a tool call
-     * ({@code ContextSupport.requestContextActivated}).
+     * The request's taint: what {@link #bindInbound} bound on the
+     * {@link InboundTurnOrigin} of the active request context, combined with the
+     * header of the {@link CurrentVertxRequest} as a second source. No active
+     * request context is no request — untainted. An active one whose taint cannot
+     * be read fails closed: tainted.
      */
     private static String fromActiveRequest() {
         ArcContainer container = Arc.container();
         if (container == null || !container.isRunning() || !container.requestContext().isActive()) {
             return null;
         }
+        try {
+            InboundTurnOrigin bound = inboundHolder(container);
+            return combine(bound == null ? null : bound.origin(), fromHeaderValues(currentRequestHeader(container, HEADER)));
+        } catch (RuntimeException e) {
+            return EMAIL;
+        }
+    }
+
+    /**
+     * Binds the taint and approval an inbound request carries on its request
+     * context ({@link InboundTurnOrigin}). Does nothing without an active request
+     * context; an active one it cannot bind on is an error, so the caller can
+     * refuse the request instead of serving it untainted.
+     *
+     * @return the bound taint
+     */
+    public static String bindInbound(List<String> originHeaderValues, List<String> approvedHeaderValues) {
+        String origin = fromHeaderValues(originHeaderValues);
+        ArcContainer container = Arc.container();
+        if (origin == null || container == null || !container.isRunning() || !container.requestContext().isActive()) {
+            return origin;
+        }
+        InboundTurnOrigin holder = inboundHolder(container);
+        if (holder == null) {
+            throw new IllegalStateException("The request's origin taint cannot be bound: no InboundTurnOrigin in the request context");
+        }
+        holder.bind(origin, approvedFromHeaderValues(approvedHeaderValues));
+        return origin;
+    }
+
+    /**
+     * As {@link #bindInbound(List, List)}, for the HTTP request the active request
+     * context serves ({@link CurrentVertxRequest}) — the MCP HTTP transport, which
+     * no JAX-RS filter sees, sets it for every tool call.
+     */
+    public static String bindInboundFromActiveRequest() {
+        ArcContainer container = Arc.container();
+        if (container == null || !container.isRunning() || !container.requestContext().isActive()) {
+            return null;
+        }
+        return bindInbound(currentRequestHeader(container, HEADER), currentRequestHeader(container, APPROVED_HEADER));
+    }
+
+    /**
+     * Whether the inbound request served on this thread is tainted and its sender
+     * stated that a person approved the call ({@link #APPROVED_HEADER}). Read only
+     * by the receiving side's checks, never inside a turn: there the approval is
+     * the engine's own {@code ApprovedCallScope}.
+     */
+    public static boolean inboundApproved() {
+        try {
+            return approvedSource.get();
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    /**
+     * Whether any of the {@link #APPROVED_HEADER} values is {@code true} (ignoring
+     * case and blanks).
+     */
+    public static boolean approvedFromHeaderValues(List<String> values) {
+        if (values == null) {
+            return false;
+        }
+        for (String value : values) {
+            if (value != null && "true".equalsIgnoreCase(value.trim())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean approvedFromActiveRequest() {
+        ArcContainer container = Arc.container();
+        if (container == null || !container.isRunning() || !container.requestContext().isActive()) {
+            return false;
+        }
+        InboundTurnOrigin bound = inboundHolder(container);
+        return bound != null && bound.approved();
+    }
+
+    private static InboundTurnOrigin inboundHolder(ArcContainer container) {
         // Not closed: the bean is request-scoped, and closing a handle may destroy the
         // contextual instance the rest of the request still uses.
+        InstanceHandle<InboundTurnOrigin> handle = container.instance(InboundTurnOrigin.class);
+        return handle.isAvailable() ? handle.get() : null;
+    }
+
+    private static List<String> currentRequestHeader(ArcContainer container, String name) {
         InstanceHandle<CurrentVertxRequest> handle = container.instance(CurrentVertxRequest.class);
         if (!handle.isAvailable()) {
             return null;
         }
         RoutingContext routingContext = handle.get().getCurrent();
-        return routingContext == null || routingContext.request() == null
-                ? null
-                : fromHeaderValues(routingContext.request().headers().getAll(HEADER));
+        return routingContext == null || routingContext.request() == null ? null : routingContext.request().headers().getAll(name);
     }
 
     /**
@@ -156,6 +272,16 @@ public final class TurnOrigin {
         Supplier<String> previous = requestSource;
         requestSource = source;
         return () -> requestSource = previous;
+    }
+
+    /**
+     * Test seam: {@link #inboundApproved()} answers from {@code source} until the
+     * returned handle is closed.
+     */
+    static AutoCloseable useApprovedSource(Supplier<Boolean> source) {
+        Supplier<Boolean> previous = approvedSource;
+        approvedSource = source;
+        return () -> approvedSource = previous;
     }
 
     /**

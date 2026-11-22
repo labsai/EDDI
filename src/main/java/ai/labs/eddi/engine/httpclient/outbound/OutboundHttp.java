@@ -8,6 +8,7 @@ import ai.labs.eddi.engine.tracing.TracePropagation;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.modules.llm.tools.UrlValidationUtils;
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.EscalationGuard;
 import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -387,14 +388,17 @@ public class OutboundHttp {
             // The escalation guard (email plan v3 §5.3), on every hop: a turn a mail
             // started never writes to EDDI's own channel or approval endpoints, also not
             // by way of a redirect that keeps the method.
-            Optional<String> escalation = EscalationGuard.refuseRequest(method, uri);
+            // A configuration write passes only as the approved execution of a gated call,
+            // and only to the target the person saw: never through a redirect.
+            boolean approved = hops == 0 && ApprovedCallScope.isActive();
+            Optional<String> escalation = EscalationGuard.refuseRequest(method, uri, approved);
             if (escalation.isPresent()) {
                 throw new OutboundBlockedException(escalation.get());
             }
             // ...and the taint goes with every hop, a cross-origin one included (where
             // redirectHeaders keeps only the safe headers), so whatever EDDI the request
             // reaches starts a tainted conversation, never an untainted one.
-            headers = withTurnOrigin(headers, TurnOrigin.current());
+            headers = withTurnOrigin(headers, TurnOrigin.current(), approved);
             Received received = engine.send(new Hop(request.profile(), method, uri, headers, body, hopTimeout, deadlineNanos, peerCheck));
             recheckAfterExchange(check, uri, received);
             int status = received.status();
@@ -556,12 +560,22 @@ public class OutboundHttp {
      * is {@code null}.
      */
     static Map<String, List<String>> withTurnOrigin(Map<String, List<String>> headers, String origin) {
+        return withTurnOrigin(headers, origin, false);
+    }
+
+    /**
+     * As {@link #withTurnOrigin(Map, String)}, and on a tainted request also
+     * {@link TurnOrigin#APPROVED_HEADER}, set to {@code approved} whatever the
+     * caller put there.
+     */
+    static Map<String, List<String>> withTurnOrigin(Map<String, List<String>> headers, String origin, boolean approved) {
         if (origin == null) {
             return headers;
         }
         TreeMap<String, List<String>> tainted = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         tainted.putAll(headers);
         tainted.put(TurnOrigin.HEADER, List.of(origin));
+        tainted.put(TurnOrigin.APPROVED_HEADER, List.of(String.valueOf(approved)));
         return tainted;
     }
 

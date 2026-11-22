@@ -5,6 +5,7 @@
 package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.variables.GlobalVariableResolver;
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
@@ -220,6 +221,25 @@ class McpTracePropagationTest {
         Map<String, String> withKey = headerSupplierFor("sk-static").apply(toolCallWithMeta(meta));
         assertEquals(TurnOrigin.EMAIL, withKey.get(TurnOrigin.HEADER));
         assertEquals("Bearer sk-static", withKey.get("Authorization"));
+    }
+
+    @Test
+    @DisplayName("an approved call of a tainted turn says so in X-Eddi-Approved-Call; any other tainted call says false")
+    void approvalTravelsInMetaAndHeader() throws Exception {
+        var principals = new ResolutionPrincipalContext();
+        Map<String, Object> approved;
+        Map<String, Object> plain;
+        try {
+            principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+            approved = ApprovedCallScope.run("agent-1", () -> manager.traceMetaSupplier().apply(toolCallWithMeta(null)));
+            plain = manager.traceMetaSupplier().apply(toolCallWithMeta(null));
+        } finally {
+            principals.clear();
+        }
+        assertEquals("true", headerSupplierFor(null).apply(toolCallWithMeta(approved)).get(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", headerSupplierFor(null).apply(toolCallWithMeta(plain)).get(TurnOrigin.APPROVED_HEADER));
+        assertEquals("false", McpToolProviderManager.withTurnOriginHeader(Map.of(TurnOrigin.APPROVED_HEADER, "true"), toolCallWithMeta(plain))
+                .get(TurnOrigin.APPROVED_HEADER), "a configured value is replaced");
     }
 
     @Test

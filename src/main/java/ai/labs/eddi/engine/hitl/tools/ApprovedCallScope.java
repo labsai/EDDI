@@ -106,6 +106,17 @@ public final class ApprovedCallScope {
     }
 
     /**
+     * Whether an approved call of conversation {@code conversationId} is executing
+     * on this thread: a binding made for another conversation does not count, so
+     * the approval of one call never extends to a turn that call happens to run on
+     * the same thread. A binding without a conversation counts for any.
+     */
+    public static boolean isActiveFor(String conversationId) {
+        Binding binding = ACTING_AGENT.get();
+        return binding != null && (binding.conversationId() == null || binding.conversationId().equals(conversationId));
+    }
+
+    /**
      * Refuses a request about to be sent during an approved execution when
      * {@link SelfUngatingGuard} would refuse it. Does nothing outside one.
      *
