@@ -365,14 +365,43 @@ class WebCrawlerTest {
             // canonicalize() strips utm_*, leaving a short id: the bound must see the URL
             // that is fetched
             String overlong = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
-            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong)).page(overlong, "<html><body>Long</body></html>")
+            FakeSite site = new FakeSite().page(SITE + "/", linkTo(overlong, SITE + "/b"))
+                    .page(SITE + "/b", linkTo(overlong))
+                    .page(overlong, "<html><body>Long</body></html>")
                     .page(SITE + "/ok", "<html><body>OK</body></html>");
-            RecordingSink sink = new RecordingSink();
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
+
+            CrawlSummary summary = new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertFalse(site.wasRequested(overlong));
+            // Skipped silently, the document went unseen on a run that looked complete,
+            // and reconciliation counted it missed until it was tombstoned.
+            assertEquals(1, sink.errors().size(), "reported once, however many pages link it: " + sink.errors());
+            var error = sink.errors().get(0);
+            assertEquals(SITE + "/ok", error.documentId());
+            assertTrue(error.contentUnknown(), "an unfetched page says nothing about whether it still exists");
+            assertEquals(1, summary.unreachableErrors());
+        }
+
+        @Test
+        @DisplayName("an oversized link is not reported when the document is also linked fetchably, or was never held")
+        void overlongLinkReportedOnlyForAHeldDocumentNothingElseReached() {
+            String overlongToOk = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            String overlongToNew = SITE + "/new?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite()
+                    // The oversized link comes first: what counts is what the crawl reached.
+                    .page(SITE + "/", linkTo(overlongToOk, SITE + "/ok", overlongToNew))
+                    .page(SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
 
             new WebCrawler(site)
                     .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
 
-            assertFalse(site.wasRequested(overlong));
+            assertTrue(sink.documentIds().contains(SITE + "/ok"), sink.documentIds().toString());
+            // /new was never ingested, so there is nothing for reconciliation to delete,
+            // and reporting it would leave every run inconclusive.
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
         }
 
         @Test
@@ -965,6 +994,29 @@ class WebCrawlerTest {
             assertEquals(1, site.requestCount(SITE + "/my%20doc.html"), site.requestedUrls().toString());
             assertTrue(sink.documentIds().contains(SITE + "/my%20doc.html"), sink.documentIds().toString());
             assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("a sitemap URL too long to fetch is reported as content unknown, not skipped silently")
+        void overlongSitemapUrlIsReportedUnknown() {
+            // A sitemap <loc> over MAX_SITEMAP_URL_LENGTH is dropped as it is parsed, so
+            // this
+            // one is short as written and only too long once encoded: 1,000 emoji are 2,000
+            // chars and 12,000 encoded. The space is what makes it need encoding at all.
+            String overlong = SITE + "/listed?utm_source=a%20b " + "\uD83D\uDE00".repeat(1_000);
+            assertTrue(overlong.length() <= WebCrawler.MAX_SITEMAP_URL_LENGTH);
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *\nSitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", overlong)
+                    .page(SITE + "/", "<html><body>no links here</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/listed", null, null);
+
+            new WebCrawler(site).crawl(politeRequest(SITE + "/"), sink);
+
+            assertFalse(site.wasRequested(overlong));
+            assertEquals(1, sink.errors().size(), sink.errors().toString());
+            assertEquals(SITE + "/listed", sink.errors().get(0).documentId());
+            assertTrue(sink.errors().get(0).contentUnknown());
         }
 
         @Test

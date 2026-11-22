@@ -444,15 +444,20 @@ public class WorkspaceSettings {
             return new Snapshot(validated(store.read(TENANT).orElse(null)), now, false, started);
         } catch (RuntimeException e) {
             // A failed read learns nothing, so it keeps what is served as it fails —
-            // which may be newer than what was served when it began.
+            // which may be newer than what was served when it began. It keeps that
+            // snapshot's sequence too, not its own: stamped with its own, it would
+            // outrank a read that started before it and is still answering, and that
+            // read's fresh values would then be refused as older.
             Snapshot previous = snapshot.get();
             if (previous != null) {
                 LOGGER.warnf("Could not read the stored workspace settings (%s); keeping the values last read.", e.getClass().getSimpleName());
-                return new Snapshot(previous.stored(), now, previous.unreadable(), started);
+                return new Snapshot(previous.stored(), now, previous.unreadable(), previous.sequence());
             }
             LOGGER.warnf("Could not read the stored workspace settings (%s); pinned properties apply, and unowned resources stay "
                     + "admin-only, until they can be read.", e.getClass().getSimpleName());
-            return new Snapshot(null, now, true, started);
+            // Nothing is known, so it ranks below every read and write: any that
+            // succeeds replaces it, whenever it started.
+            return new Snapshot(null, now, true, 0L);
         }
     }
 }

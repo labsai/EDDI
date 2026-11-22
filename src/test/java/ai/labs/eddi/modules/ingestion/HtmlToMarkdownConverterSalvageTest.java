@@ -235,7 +235,8 @@ class HtmlToMarkdownConverterSalvageTest {
         var threadBean = ManagementFactory.getThreadMXBean();
         assumeTrue(threadBean instanceof ThreadMXBean, "allocation counters are a HotSpot extension");
         var hotspot = (ThreadMXBean) threadBean;
-        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not enabled");
+        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not supported");
+        assumeTrue(hotspot.isThreadAllocatedMemoryEnabled(), "allocation counters are not enabled");
 
         int depth = 200;
         String text = "x".repeat(200);
@@ -344,7 +345,8 @@ class HtmlToMarkdownConverterSalvageTest {
         var threadBean = ManagementFactory.getThreadMXBean();
         assumeTrue(threadBean instanceof ThreadMXBean, "allocation counters are a HotSpot extension");
         var hotspot = (ThreadMXBean) threadBean;
-        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not enabled");
+        assumeTrue(hotspot.isThreadAllocatedMemorySupported(), "allocation counters are not supported");
+        assumeTrue(hotspot.isThreadAllocatedMemoryEnabled(), "allocation counters are not enabled");
 
         conversion.run();
         long threadId = Thread.currentThread().threadId();

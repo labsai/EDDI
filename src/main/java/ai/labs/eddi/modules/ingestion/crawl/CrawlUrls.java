@@ -85,14 +85,18 @@ public final class CrawlUrls {
 
     private static String encodeIllegal(String url) {
         StringBuilder encoded = new StringBuilder(url.length() + 8);
-        for (int i = 0; i < url.length(); i++) {
-            char c = url.charAt(i);
+        // By code point: a character outside the BMP is two chars, and either half
+        // encoded alone is not UTF-8 — String.getBytes turns each into "?", so an
+        // emoji went out as %3F%3F.
+        for (int i = 0; i < url.length();) {
+            int c = url.codePointAt(i);
+            i += Character.charCount(c);
             boolean mustEncode = c <= 0x20 || c >= 0x7F || ILLEGAL_IN_URI.indexOf(c) >= 0;
             if (!mustEncode) {
-                encoded.append(c);
+                encoded.append((char) c);
                 continue;
             }
-            for (byte b : String.valueOf(c).getBytes(StandardCharsets.UTF_8)) {
+            for (byte b : Character.toString(c).getBytes(StandardCharsets.UTF_8)) {
                 encoded.append('%').append(HEX[(b >> 4) & 0xF]).append(HEX[b & 0xF]);
             }
         }

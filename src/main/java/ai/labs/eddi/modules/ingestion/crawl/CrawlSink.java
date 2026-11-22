@@ -26,6 +26,14 @@ public interface CrawlSink {
         return ConditionalHeaders.none();
     }
 
+    /**
+     * Whether the sink holds a live copy of this document from a previous run — one
+     * that reconciliation would count as missed if this crawl did not report it.
+     */
+    default boolean holds(String documentId) {
+        return false;
+    }
+
     /** A page was fetched and parsed. */
     void onPage(CrawledPage page);
 

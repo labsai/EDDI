@@ -39,6 +39,11 @@ final class RecordingSink implements CrawlSink {
     }
 
     @Override
+    public boolean holds(String documentId) {
+        return knownValidators.containsKey(documentId);
+    }
+
+    @Override
     public void onPage(CrawledPage page) {
         pages.add(page);
     }

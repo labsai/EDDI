@@ -90,6 +90,8 @@ class HiddenContentFilterTest {
                 "<style>@media not print{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
                 "<style>@media {.a{display:none}}</style><div class=\"a\">INJECTED</div>",
                 "<style>@media /* x */ scr\\65 en{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media only/**/screen{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
+                "<style>@media not/**/print{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
                 "<style>@layer{.a{display:none}}</style><div class=\"a\">INJECTED</div>",
                 "<style>@layer base, theme; @layer theme{.a{visibility:hidden}}</style><div class=\"a\">INJECTED</div>",
                 "<style>@supports (display:block){.a{display:none}}</style><div class=\"a\">INJECTED</div>",

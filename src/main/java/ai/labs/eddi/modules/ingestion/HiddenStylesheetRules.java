@@ -316,7 +316,10 @@ final class HiddenStylesheetRules {
                 return i + 1;
             }
             if (c == '{') {
-                String prelude = stripComments(css.substring(keywordEnd[0], i));
+                // A comment separates tokens, so only/**/screen is "only screen" to a
+                // browser. Removed without a separator, it read as one unknown word and
+                // the block's hiding rules were skipped.
+                String prelude = stripComments(css.substring(keywordEnd[0], i), " ");
                 return appliesOnScreen(keyword, prelude) ? i + 1 : skipBlock(css, i);
             }
             if (c == '/' && i + 1 < length && css.charAt(i + 1) == '*') {
@@ -449,6 +452,11 @@ final class HiddenStylesheetRules {
     }
 
     private static String stripComments(String css) {
+        return stripComments(css, "");
+    }
+
+    /** {@code css} with each comment replaced by {@code separator}. */
+    private static String stripComments(String css, String separator) {
         if (!css.contains("/*")) {
             return css;
         }
@@ -460,7 +468,7 @@ final class HiddenStylesheetRules {
                 out.append(css, i, css.length());
                 break;
             }
-            out.append(css, i, open);
+            out.append(css, i, open).append(separator);
             int end = css.indexOf("*/", open + 2);
             i = end < 0 ? css.length() : end + 2;
         }

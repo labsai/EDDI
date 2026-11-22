@@ -415,6 +415,90 @@ class RuntimeWorkspaceSettingsTest {
         }
 
         @Test
+        @DisplayName("a re-read that fails first does not make an earlier-started re-read's fresh values look older")
+        void failedRereadDoesNotOutrankEarlierPendingRead() throws Exception {
+            store.write("default", stored("engineering", "admin-only"));
+            var s = settings(null, null);
+            s.admitsLegacy();
+
+            store.write("default", stored("finance", "shared"));
+            HeldRead succeeding = store.holdNextRead();
+            expireCache();
+            Thread accessCheck = refreshInBackground(s);
+            HeldRead failing = null;
+            Thread settingsPage = null;
+            try {
+                assertTrue(succeeding.entered.await(5, TimeUnit.SECONDS), "the access check reached the store");
+                store.failing = true;
+                failing = store.holdNextRead();
+                settingsPage = new Thread(s::refresh, "settings-page");
+                settingsPage.setDaemon(true);
+                settingsPage.start();
+                assertTrue(failing.entered.await(5, TimeUnit.SECONDS), "the settings page reached the store");
+
+                // The later read fails first; the earlier one then answers with fresh values.
+                failing.release();
+                settingsPage.join(5_000);
+                succeeding.release();
+                accessCheck.join(5_000);
+            } finally {
+                succeeding.release();
+                accessCheck.join(5_000);
+                if (failing != null) {
+                    failing.release();
+                }
+                if (settingsPage != null) {
+                    settingsPage.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "a failed read must not discard what an earlier read then learns");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
+        @DisplayName("a first read that fails does not outrank a first read that started before it and succeeds")
+        void failedFirstReadDoesNotOutrankEarlierPendingRead() throws Exception {
+            store.write("default", stored("finance", "shared"));
+            var s = settings(null, null);
+
+            HeldRead succeeding = store.holdNextRead();
+            Thread first = new Thread(s::refresh, "first-refresh");
+            first.setDaemon(true);
+            first.start();
+            HeldRead failing = null;
+            Thread second = null;
+            try {
+                assertTrue(succeeding.entered.await(5, TimeUnit.SECONDS), "the first read reached the store");
+                store.failing = true;
+                failing = store.holdNextRead();
+                second = new Thread(s::refresh, "second-refresh");
+                second.setDaemon(true);
+                second.start();
+                assertTrue(failing.entered.await(5, TimeUnit.SECONDS), "the second read reached the store");
+
+                // Nothing was ever read: the failure installs the fail-closed snapshot,
+                // which the earlier read's values must still replace.
+                failing.release();
+                second.join(5_000);
+                succeeding.release();
+                first.join(5_000);
+            } finally {
+                succeeding.release();
+                first.join(5_000);
+                if (failing != null) {
+                    failing.release();
+                }
+                if (second != null) {
+                    second.join(5_000);
+                }
+            }
+
+            assertEquals(Optional.of("finance"), s.getDefaultSpaceTeam(), "what the store answered is served, not the fail-closed default");
+            assertTrue(s.admitsLegacy());
+        }
+
+        @Test
         @DisplayName("team names are normalised whichever way they are written")
         void normalisesTeam() {
             assertEquals("engineering", WorkspaceSettings.normalizeTeam(" /engineering/ "));

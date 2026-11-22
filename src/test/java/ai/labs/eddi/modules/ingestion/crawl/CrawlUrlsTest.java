@@ -216,6 +216,17 @@ class CrawlUrlsTest {
     }
 
     @Test
+    @DisplayName("a character outside the BMP is encoded as its UTF-8 bytes, not as one ? per surrogate")
+    void fetchableEncodesSupplementaryCharacters() {
+        // U+1F600; the space is what sends the URL through encodeIllegal at all
+        assertEquals("https://example.com/%F0%9F%98%80%20report.html",
+                CrawlUrls.fetchable("https://example.com/\uD83D\uDE00 report.html"));
+        // An existing escape is kept as it is
+        assertEquals("https://example.com/a%20b/%F0%9F%98%80%20c",
+                CrawlUrls.fetchable("https://example.com/a%20b/\uD83D\uDE00 c"));
+    }
+
+    @Test
     @DisplayName("an already valid URL is fetched exactly as written, never encoded twice")
     void fetchableLeavesValidUrlsAlone() {
         // Unlike canonicalize, nothing is lowercased, reordered or stripped: the

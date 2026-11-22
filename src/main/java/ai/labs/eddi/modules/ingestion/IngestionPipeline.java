@@ -1081,6 +1081,13 @@ public class IngestionPipeline {
         }
 
         @Override
+        public boolean holds(String documentId) {
+            // Only an ingest run reconciles, and only a live document can be missed.
+            return mode == Mode.INGEST
+                    && stateStore.lookup(sourceKey, documentId).filter(state -> !state.tombstoned()).isPresent();
+        }
+
+        @Override
         public boolean isCancelled() {
             return budgetExhausted || storeRefused != null || !stillOwnsRun(false);
         }
