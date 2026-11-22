@@ -7,13 +7,7 @@ import { Button } from "@eddi/ui";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import { SchemeHint } from "./webhook-settings";
 import { EmailPlatformFields } from "./email-settings";
-import {
-  emailConfigProblems,
-  emailControlProblems,
-  initialEmailPlatformConfig,
-  withEmailFixedKeys,
-  type EmailControlLike,
-} from "@/lib/email-channel";
+import { emailConfigProblems, initialEmailPlatformConfig, withEmailFixedKeys } from "@/lib/email-channel";
 import { toastChannelWarnings } from "@/lib/email-channel-messages";
 import { SecretKeyPicker } from "@eddi/app-kit/components/shared/secret-key-picker";
 import { isEmptyOrReference } from "@/lib/channel-secrets";
@@ -53,7 +47,6 @@ export function CreateChannelDialog({
   const [signingSecret, setSigningSecret] = useState("");
   const [signatureScheme, setSignatureScheme] = useState("eddi-v1");
   const [emailConfig, setEmailConfig] = useState<Record<string, string>>(initialEmailPlatformConfig);
-  const [emailControl, setEmailControl] = useState<EmailControlLike | null>(null);
   const [targetAgentId, setTargetAgentId] = useState(defaultAgentId ?? "");
 
   const reset = useCallback(() => {
@@ -65,7 +58,6 @@ export function CreateChannelDialog({
     setSigningSecret("");
     setSignatureScheme("eddi-v1");
     setEmailConfig(initialEmailPlatformConfig());
-    setEmailControl(null);
     setTargetAgentId(defaultAgentId ?? "");
   }, [defaultAgentId]);
 
@@ -85,7 +77,7 @@ export function CreateChannelDialog({
         // required (the backend refuses to save one without it).
         if (isWebhook) return signingSecret.trim().length > 0 && isEmptyOrReference(signingSecret);
         // The backend re-checks every rule; this only spares a round trip.
-        if (isEmail) return emailConfigProblems(emailConfig).length === 0 && emailControlProblems(emailControl).length === 0;
+        if (isEmail) return emailConfigProblems(emailConfig).length === 0;
         return channelId.trim().length > 0 && isEmptyOrReference(botToken) && isEmptyOrReference(signingSecret);
       case "target": return targetAgentId.trim().length > 0;
     }
@@ -107,7 +99,6 @@ export function CreateChannelDialog({
             botToken: botToken.trim(),
             signingSecret: signingSecret.trim(),
           },
-      ...(isEmail && emailControl ? { emailControl } : {}),
       targets: [createDefaultTarget(targetAgentId.trim())],
       defaultTargetName: "default",
     };
@@ -214,12 +205,7 @@ export function CreateChannelDialog({
             </>
           )}
           {step === "credentials" && isEmail && (
-            <EmailPlatformFields
-              platformConfig={emailConfig}
-              onChange={setEmailConfig}
-              emailControl={emailControl}
-              onEmailControlChange={setEmailControl}
-            />
+            <EmailPlatformFields platformConfig={emailConfig} onChange={setEmailConfig} />
           )}
           {step === "credentials" && !isWebhook && !isEmail && (
             <>

@@ -960,16 +960,14 @@
       "basic": "ユーザー名とパスワード",
       "clientCredentials": "OAuth サービスアカウント",
       "authorizationCode": "OAuth ユーザーログイン",
-      "jwtBearer": "署名鍵サービスアカウント",
-      "smimeSigning": "メール署名証明書"
+      "jwtBearer": "署名鍵サービスアカウント"
     },
     "choice": {
       "staticBody": "全員に共通の固定ヘッダー — X-Api-Key、または Authorization: Bearer …",
       "basicBody": "HTTP Basic。エンコードは {{productName}} が行うため、パスワードは Vault の独立した項目として単独でローテーションできます。",
       "clientCredentialsBody": "エージェント自身としてログインします。全員で共有する 1 つのアクセストークンが自動更新されます。",
       "authorizationCodeBody": "各自が自分のアカウントを連携し、エージェントはその人として振る舞います。ログインの有効化と Vault が必要です。",
-      "jwtBearerBody": "エージェントはシークレットの代わりに秘密鍵を使って自身としてサインインします（例: Google のサービスアカウント）。全員で 1 つのアクセストークンを共有します。",
-      "smimeSigningBody": "メール連携が送信メールに署名するための S/MIME 証明書です。どこにも送信されません。署名に含まれるのは公開証明書だけです。"
+      "jwtBearerBody": "エージェントはシークレットの代わりに秘密鍵を使って自身としてサインインします（例: Google のサービスアカウント）。全員で 1 つのアクセストークンを共有します。"
     },
     "binding": {
       "perUser": "ユーザーごと",

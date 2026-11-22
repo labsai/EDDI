@@ -960,16 +960,14 @@
       "basic": "아이디와 비밀번호",
       "clientCredentials": "OAuth 서비스 계정",
       "authorizationCode": "OAuth 사용자 로그인",
-      "jwtBearer": "서명 키 서비스 계정",
-      "smimeSigning": "이메일 서명 인증서"
+      "jwtBearer": "서명 키 서비스 계정"
     },
     "choice": {
       "staticBody": "모두에게 동일한 고정 헤더 하나 — X-Api-Key 또는 Authorization: Bearer …",
       "basicBody": "HTTP Basic. 인코딩은 {{productName}}(이)가 처리하므로 비밀번호는 볼트의 별도 항목으로 남아 따로 교체할 수 있습니다.",
       "clientCredentialsBody": "에이전트가 자기 자신으로 로그인합니다. 모두가 공유하는 액세스 토큰 하나가 자동으로 갱신됩니다.",
       "authorizationCodeBody": "각자 자기 계정을 연결하고 에이전트가 그 사람으로서 행동합니다. 로그인 활성화와 볼트가 필요합니다.",
-      "jwtBearerBody": "에이전트가 시크릿 대신 개인 키로 자기 자신으로 로그인합니다 — 예를 들어 Google 서비스 계정. 모두가 하나의 액세스 토큰을 공유합니다.",
-      "smimeSigningBody": "이메일 통합이 보내는 메일에 서명하는 S/MIME 인증서입니다. 어디로도 전송되지 않으며, 서명에는 공개 인증서만 포함됩니다."
+      "jwtBearerBody": "에이전트가 시크릿 대신 개인 키로 자기 자신으로 로그인합니다 — 예를 들어 Google 서비스 계정. 모두가 하나의 액세스 토큰을 공유합니다."
     },
     "binding": {
       "perUser": "사용자별",

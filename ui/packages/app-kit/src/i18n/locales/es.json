@@ -968,16 +968,14 @@
       "basic": "Usuario y contraseña",
       "clientCredentials": "Cuenta de servicio OAuth",
       "authorizationCode": "Inicio de sesión OAuth",
-      "jwtBearer": "Cuenta de servicio con clave de firma",
-      "smimeSigning": "Certificado de firma de correo"
+      "jwtBearer": "Cuenta de servicio con clave de firma"
     },
     "choice": {
       "staticBody": "Una cabecera fija, la misma para todos — X-Api-Key, o Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} se encarga de la codificación, así la contraseña sigue siendo una entrada aparte de la bóveda que puede rotar por su cuenta.",
       "clientCredentialsBody": "El agente se identifica como sí mismo. Un token de acceso compartido por todos, renovado automáticamente.",
       "authorizationCodeBody": "Cada persona vincula su propia cuenta y el agente actúa en su nombre. Requiere el inicio de sesión activado y una bóveda.",
-      "jwtBearerBody": "El agente inicia sesión como sí mismo con una clave privada en lugar de un secreto — por ejemplo, una cuenta de servicio de Google. Un único token de acceso compartido por todos.",
-      "smimeSigningBody": "Un certificado S/MIME con el que una integración de correo firma su correo saliente. Nunca se envía a ningún sitio: solo el certificado público viaja en la firma."
+      "jwtBearerBody": "El agente inicia sesión como sí mismo con una clave privada en lugar de un secreto — por ejemplo, una cuenta de servicio de Google. Un único token de acceso compartido por todos."
     },
     "binding": {
       "perUser": "Por persona",

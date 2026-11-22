@@ -4546,8 +4546,7 @@
       "paramValueTooLong": "매개변수 값은 최대 512자입니다.",
       "paramValueCredentialShaped": "이 값 중 하나가 키나 토큰처럼 보입니다. 이 맵은 평문으로 저장되고 URL로 전송됩니다. 비밀이 아닌 프로토콜 매개변수만 여기에 둘 수 있습니다.",
       "thumbprintFormat": "올바른 길이의 지문이 아닙니다. x5t#S256에는 SHA-256 지문, x5t에는 SHA-1 지문이 필요합니다 — 16진수 또는 base64url로 입력하세요.",
-      "thumbprintRequiredEntra": "Microsoft Entra는 인증서 지문으로만 키를 식별합니다. 앱 등록에 업로드한 인증서의 지문을 붙여 넣으세요.",
-      "originNotSmtp": "서명 인증서에는 서명할 메일의 SMTP 릴레이를 나열합니다: smtps://host 또는 smtp://host:587."
+      "thumbprintRequiredEntra": "Microsoft Entra는 인증서 지문으로만 키를 식별합니다. 앱 등록에 업로드한 인증서의 지문을 붙여 넣으세요."
     },
     "backToList": "연결 목록으로 돌아가기",
     "headerSecret": "저장된 비밀 값",
@@ -4593,11 +4592,7 @@
         "label": "Google 서비스 계정(JSON 키)",
         "description": "서비스 계정으로 Google API를 사용하며, 해당 계정의 개인 키로 서명합니다(RFC 7523 JWT 베어러). 다운로드한 JSON 키 파일을 볼트의 항목 하나로 저장하고 개인 키로 참조하세요. 발급자와 키 ID는 그 파일에서 읽습니다. https://oauth2.googleapis.com을 자격 증명 엔드포인트 허용 목록에 추가하세요. 도메인 전체 위임이 없으면 계정은 자신과 공유된 항목만 볼 수 있습니다."
       }
-    },
-    "smimeHint": "먼저 인증서를 볼트에 저장하세요. base64로 인코딩된 PKCS#12(.p12/.pfx) 키 저장소이거나, 개인 키 뒤에 인증서 체인이 이어지는 PEM 텍스트입니다. 인증서는 이 인증서로 서명하는 메일함 주소로 발급되어야 합니다.",
-    "smimeCertificate": "인증서와 개인 키",
-    "smimePassword": "키 저장소 또는 키 비밀번호(선택)",
-    "smimeOriginsHint": "이 인증서가 서명할 수 있는 메일의 SMTP 릴레이를 나열하세요. 예: smtp://smtp.office365.com:587 또는 smtps://smtp.gmail.com."
+    }
   },
   "workspaces": {
     "allSpaces": "모든 작업 공간",
@@ -5580,19 +5575,13 @@
       "fromNameInvalid": "발신자 이름은 줄바꿈 없이 최대 {{max}}자까지 가능합니다.",
       "replyTemplateTooLong": "답장 템플릿은 최대 {{max}}자까지 가능합니다.",
       "aiDisclosureTooLong": "AI 고지는 최대 {{max}}자까지 가능합니다.",
-      "maxRepliesPerThreadPerHour": "답장 한도는 1에서 1000 사이의 정수여야 합니다.",
-      "smimeConnectionRequired": "서명 'required'에는 서명 연결이 필요합니다. 없으면 보내는 모든 메일이 보류됩니다.",
-      "smimeConnectionInvalid": "연결 이름에는 문자, 숫자, '.', '_', '-'만 쓸 수 있습니다."
+      "maxRepliesPerThreadPerHour": "답장 한도는 1에서 1000 사이의 정수여야 합니다."
     },
     "warning": {
       "openTrigger": "저장했지만 인터넷의 누구나 이 에이전트를 실행시킬 수 있습니다. 발신자 허용 목록이 없고 인증되지 않은 메일도 처리됩니다.",
       "toolsWithoutApprovals": "저장했지만 이 통합이 대상으로 하는 에이전트에 도구가 있고 도구 승인이 없습니다. 메일 내용은 신뢰할 수 없는 입력이므로, 무언가를 변경하는 도구에 hitlConfig.toolApprovals를 추가하세요.",
       "aiDisclosureDisabled": "저장했지만 답장에 더 이상 AI가 작성했다는 내용이 표시되지 않습니다. EU AI 법과 같은 투명성 규정은 사람들이 AI와 대화하고 있음을 알아야 한다고 요구합니다.",
-      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다.",
-      "smimeNoCertificate": "저장했지만 메일이 서명 없이 나갑니다. S/MIME 서명이 켜져 있으나 SMIME_SIGNING 연결이 지정되지 않았습니다. S/MIME 서명에서 연결을 추가하거나 서명을 끄세요.",
-      "smimeCertificateUnusable": "저장했지만 S/MIME 인증서로 이 메일함의 메일에 서명할 수 없습니다(주소 불일치, 키 용도 누락, 만료 또는 불완전한 체인). 그래서 메일이 서명 없이 나갑니다.",
-      "smimeCertificateExpiring": "저장했습니다. S/MIME 인증서가 30일 이내에 만료됩니다. 갱신하고 SMIME_SIGNING 연결을 업데이트하세요.",
-      "smimeUntrustedChain": "저장했지만 S/MIME 인증서가 공개적으로 신뢰할 수 있는 루트로 이어지지 않아, 수신자의 메일 클라이언트에서 서명이 신뢰할 수 없다고 표시됩니다."
+      "honorReplyTo": "저장했지만 답장이 DMARC가 인증하지 않는 Reply-To 주소로 갑니다: 허용된 도메인에서 인증된 메일을 보낼 수 있는 사람은 누구나 답장이 갈 곳을 정할 수 있습니다."
     },
     "defaultTargetHint": "기본 대상은 플러스 태그(invoices+urgent@…)나 제목이 다른 대상의 트리거와 일치하지 않는 모든 메일을 받습니다. 생성 후 대상을 더 추가할 수 있습니다.",
     "triggerLabel": "플러스 태그 또는 제목 단어",
@@ -5625,50 +5614,7 @@
     "replyTemplate": "답장 템플릿",
     "replyTemplateHint": "에이전트의 답변을 감쌉니다. 답변은 텍스트로 삽입되며 템플릿으로 실행되지 않습니다. 변수:",
     "noteDkim": "답장에는 메일함 도메인에 대해 발신 메일에 DKIM 서명을 하는 메일 서버와 해당 도메인의 DMARC 레코드가 필요합니다. {{productName}}은(는) 서명하지 않습니다. 이것이 없으면 답장이 스팸으로 분류되거나 거부됩니다. Exchange Online과 대부분의 호스팅 업체는 도메인에 DKIM을 활성화하면 제출된 메일에 서명합니다.",
-    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear).",
-    "selfTest": {
-      "finding": {
-        "dkimAligned": "DKIM이 사용자의 도메인으로 서명합니다",
-        "dkimUnaligned": "DKIM이 다른 도메인으로 서명합니다",
-        "dkimMissing": "DKIM 서명 없음",
-        "dkimInconclusive": "DKIM: Microsoft 365 내부에서는 판단할 수 없음",
-        "dkimFailed": "DKIM 서명을 검증할 수 없음",
-        "dkimDnsTemporary": "DNS 조회 실패",
-        "smimeVerified": "S/MIME 서명 검증됨",
-        "smimeMissing": "S/MIME 서명이 필요했지만 도착하지 않음",
-        "smimeOff": "S/MIME 서명 없음",
-        "smimeInvalid": "S/MIME 서명을 검증할 수 없음",
-        "smimeWrongSigner": "S/MIME 인증서가 다른 주소용임",
-        "dmarcPresent": "DMARC 레코드가 게시됨",
-        "dmarcAbsent": "DMARC 레코드 없음",
-        "dmarcUnknown": "DMARC를 확인할 수 없음",
-        "sendFailed": "테스트 메일을 보낼 수 없음",
-        "testExpired": "테스트 메일이 돌아오지 않음"
-      },
-      "rateLimited": "자체 테스트는 시간당 최대 5회입니다. 나중에 다시 시도하세요.",
-      "hint": "메일함에서 자신에게 SMTP 릴레이를 통해 짧은 메일 한 통을 보내고, 다음 폴링에서 읽어 들여 공급자가 어떻게 서명하는지(DKIM, DMARC)와 S/MIME 서명이 유효한지 알려 줍니다. 에이전트 대화는 시작하지 않습니다.",
-      "noSmtp": "먼저 SMTP 호스트를 설정하고 저장하세요. 테스트는 이를 통해 전송됩니다.",
-      "unsaved": "테스트는 저장된 설정을 사용합니다. 변경 사항을 테스트하려면 먼저 저장하세요.",
-      "run": "자체 테스트 실행",
-      "waiting": "테스트 메일을 보냈습니다. 다음 메일함 폴링에서 읽어 들이기를 기다리는 중…",
-      "done": "테스트 메일이 돌아왔습니다.",
-      "expired": "테스트 메일이 15분 안에 돌아오지 않았습니다.",
-      "sendFailed": "테스트 메일을 보낼 수 없었습니다.",
-      "sentSigned": "(S/MIME 서명하여 보냄)",
-      "sentUnsigned": "(서명 없이 보냄)",
-      "title": "발송 상태 자체 테스트"
-    },
-    "sendingSection": "발송(SMTP)",
-    "smtpTriggerHint": "답장하지 않는 트리거 모드에서는 선택 사항이며, 릴레이는 발송 상태 자체 테스트에만 사용됩니다.",
-    "smimeSection": "S/MIME 서명",
-    "smimeSign": "보내는 메일에 서명",
-    "smimeSignOn": "켜짐 — 인증서가 구성되어 있으면 서명(기본값)",
-    "smimeSignRequired": "필수 — 서명 없는 메일은 절대 보내지 않음",
-    "smimeSignOff": "꺼짐",
-    "smimeSignRequiredHint": "인증서가 없거나 만료되었거나 일치하지 않으면 보내는 메일을 보류하고 소유자에게 알립니다. 서명 없이 나가는 메일은 없습니다.",
-    "smimeSignHint": "수신자의 메일 클라이언트는 서명된 메일을 이 메일함에서 온 것으로 표시합니다. 시스템 메일러가 보내는 메일(소유자 알림)은 서명되지 않습니다.",
-    "smimeConnection": "서명 인증서 연결",
-    "smimeConnectionHint": "메일함 주소로 발급된 인증서를 담은 SMIME_SIGNING 연결의 이름입니다. 해당 허용 목록에 SMTP 출처가 있어야 합니다."
+    "noteBounces": "영구적으로 반송된 답장은 해당 주소를 이 통합의 수신 거부 목록에 추가하며, 관리자가 해제할 때까지 {{productName}}은(는) 그 주소로 아무것도 보내지 않습니다(POST /channelstore/channels/<id>/email-suppressions/clear)."
   },
   "feedback": {
     "title": "피드백",

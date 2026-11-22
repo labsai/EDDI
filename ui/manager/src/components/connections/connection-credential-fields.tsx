@@ -17,7 +17,6 @@ import {
   type ConnectionConfiguration,
   type StaticAuth,
   type OAuthConfig,
-  type SmimeSigningConfig,
 } from "@eddi/app-kit/lib/api/connections";
 
 /** The header an integrating system sends a caller-supplied credential in. */
@@ -27,8 +26,6 @@ interface ConnectionCredentialFieldsProps {
   draft: ConnectionConfiguration;
   onPatchStatic: (patch: Partial<StaticAuth>) => void;
   onPatchOAuth: (patch: Partial<OAuthConfig>) => void;
-  /** `SMIME_SIGNING` connections: the certificate and its password. */
-  onPatchSmime?: (patch: Partial<SmimeSigningConfig>) => void;
   /**
    * Where a STATIC connection's key comes from — shared, or handed over by the
    * caller per request. The only auth type with a choice; omitting the handler
@@ -62,7 +59,6 @@ export function ConnectionCredentialFields({
   draft,
   onPatchStatic,
   onPatchOAuth,
-  onPatchSmime,
   onBindingChange,
   errors,
   idPrefix,
@@ -75,57 +71,6 @@ export function ConnectionCredentialFields({
   const unique = useId();
   const fieldId = (name: string) => `${idPrefix}-${name}-${unique}`;
   const labelClass = dense ? "text-xs font-medium" : "text-sm font-medium text-foreground";
-
-  if (draft.authType === "SMIME_SIGNING") {
-    return (
-      <div className="space-y-4" data-testid={`${idPrefix}-smime-fields`}>
-        <p className="text-xs text-muted-foreground">
-          {t(
-            "connections.smimeHint",
-            "Store the certificate in the vault first: a base64 PKCS#12 (.p12/.pfx) keystore, or PEM text with the private key followed by the certificate chain. The certificate must be issued to the mailbox address that signs with it.",
-          )}
-        </p>
-        <div className="space-y-1.5">
-          <label className={labelClass} htmlFor={fieldId("smime-certificate")}>
-            {t("connections.smimeCertificate", "Certificate and private key")}
-          </label>
-          <SecretKeyPicker
-            id={fieldId("smime-certificate")}
-            value={draft.smimeSigning?.certificate ?? ""}
-            onChange={(certificate) => onPatchSmime?.({ certificate })}
-            referenceOnly
-            readOnly={readOnly || !onPatchSmime}
-            aria-describedby={fieldId("smime-certificate-error")}
-            testId={`${idPrefix}-smime-certificate`}
-          />
-          <ValidationMessage
-            code={errors["smimeSigning.certificate"]}
-            id={fieldId("smime-certificate-error")}
-            testId={`${idPrefix}-smime-certificate-error`}
-          />
-        </div>
-        <div className="space-y-1.5">
-          <label className={labelClass} htmlFor={fieldId("smime-password")}>
-            {t("connections.smimePassword", "Keystore or key password (optional)")}
-          </label>
-          <SecretKeyPicker
-            id={fieldId("smime-password")}
-            value={draft.smimeSigning?.password ?? ""}
-            onChange={(password) => onPatchSmime?.({ password })}
-            referenceOnly
-            readOnly={readOnly || !onPatchSmime}
-            aria-describedby={fieldId("smime-password-error")}
-            testId={`${idPrefix}-smime-password`}
-          />
-          <ValidationMessage
-            code={errors["smimeSigning.password"]}
-            id={fieldId("smime-password-error")}
-            testId={`${idPrefix}-smime-password-error`}
-          />
-        </div>
-      </div>
-    );
-  }
 
   if (!isOAuthType(draft.authType)) {
     const callerSupplied =

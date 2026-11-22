@@ -45,29 +45,10 @@ export interface ChannelTarget {
   observeConfig: ObserveConfig | null;
 }
 
-/** `emailControl.smime.sign`: on (the default), required, or off. */
-export type EmailSmimeSign = true | false | "required";
-
-/**
- * The typed settings of an email integration that the flat `platformConfig`
- * cannot hold. Email integrations only — the backend refuses it on any other
- * channel type. Sections later phases add are kept as they are (round-tripped).
- */
-export interface EmailControl {
-  smime?: {
-    sign?: EmailSmimeSign;
-    /** Name of an `SMIME_SIGNING` connection. */
-    connection?: string;
-  };
-  [section: string]: unknown;
-}
-
 export interface ChannelIntegrationConfiguration {
   name: string;
   channelType: string;
   platformConfig: Record<string, string>;
-  /** Email integrations only; absent means every default. */
-  emailControl?: EmailControl | null;
   targets: ChannelTarget[];
   defaultTargetName: string;
 }
@@ -176,42 +157,6 @@ export function duplicateChannel(
   return api.post<{ location: string }>(
     `/channelstore/channels/${seg(id)}?version=${version}`,
   );
-}
-
-// ─── Email self-test ────────────────────────────────────────────
-
-export type EmailSelfTestStatus = "waiting" | "done" | "expired" | "send_failed";
-export type EmailSelfTestLevel = "ok" | "warning" | "problem" | "inconclusive";
-
-export interface EmailSelfTestFinding {
-  /** Stable, e.g. `dkim.unaligned`, `smime.verified`, `dmarc.absent`. */
-  code: string;
-  level: EmailSelfTestLevel;
-  /** The finding in plain English, with what to do. */
-  text: string;
-}
-
-export interface EmailSelfTestResult {
-  status: EmailSelfTestStatus;
-  /** Only in the answer that started the test. */
-  token?: string;
-  expiresAt?: string;
-  signed?: boolean;
-  checks?: Record<string, unknown>;
-  findings?: EmailSelfTestFinding[];
-}
-
-/**
- * Starts the sending-health self-test: one mail from the integration to its
- * own address, through its SMTP relay. 429 when five ran in the last hour.
- */
-export function startEmailSelfTest(id: string): Promise<EmailSelfTestResult> {
-  return api.post<EmailSelfTestResult>(`/channelstore/channels/${seg(id)}/email-self-test`);
-}
-
-/** Where a self-test stands, once its mail was (or was not) read back. */
-export function getEmailSelfTest(id: string, token: string): Promise<EmailSelfTestResult> {
-  return api.get<EmailSelfTestResult>(`/channelstore/channels/${seg(id)}/email-self-test/${seg(token)}`);
 }
 
 // ─── Helpers ────────────────────────────────────────────────────

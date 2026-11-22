@@ -17,12 +17,11 @@ export const EMAIL_FIXED_KEYS = { transport: "imap" } as const;
 export const EMAIL_MODES = ["trigger", "conversation"] as const;
 export type EmailMode = (typeof EMAIL_MODES)[number];
 
-/**
- * Keys only conversation mode reads; the backend refuses them with a value in
- * trigger mode. `smtpHost`, `smtpPort` and `fromName` are common keys: trigger
- * mode never replies, but it sends its sending-health self-test through them.
- */
+/** Keys only conversation mode reads; the backend refuses them with a value in trigger mode. */
 export const EMAIL_CONVERSATION_KEYS = [
+  "smtpHost",
+  "smtpPort",
+  "fromName",
   "replyTemplate",
   "aiDisclosure",
   "threadParticipants",
@@ -234,75 +233,24 @@ export function emailConfigProblems(pc: Record<string, string>): EmailProblem[] 
   if (owners.length > EMAIL_MAX_OWNER_ADDRESSES) problems.push("ownerNotifyTooMany");
   else if (!owners.every((a) => EMAIL_RE.test(a))) problems.push("ownerNotifyInvalid");
 
-  problems.push(...smtpProblems(pc, emailMode(pc) === "conversation"));
   if (emailMode(pc) === "conversation") problems.push(...conversationProblems(pc));
   return problems;
-}
-
-/** `emailControl.smime.sign`, the backend default (`true`) applied. */
-export function smimeSign(control: EmailControlLike | null | undefined): true | false | "required" {
-  const sign = control?.smime?.sign;
-  return sign === false || sign === "required" ? sign : true;
-}
-
-/** The structural shape of `emailControl` these helpers read. */
-export interface EmailControlLike {
-  smime?: { sign?: boolean | "required"; connection?: string };
-  [section: string]: unknown;
-}
-
-/** Problem codes of an `emailControl`; mirrors the backend's save-time rules. */
-export type EmailControlProblem = "smimeConnectionRequired" | "smimeConnectionInvalid";
-
-const CONNECTION_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
-
-export function emailControlProblems(control: EmailControlLike | null | undefined): EmailControlProblem[] {
-  const problems: EmailControlProblem[] = [];
-  const connection = (control?.smime?.connection ?? "").trim();
-  if (connection && !CONNECTION_NAME_RE.test(connection)) problems.push("smimeConnectionInvalid");
-  if (smimeSign(control) === "required" && !connection) problems.push("smimeConnectionRequired");
-  return problems;
-}
-
-/**
- * `control` with the S/MIME section changed; an S/MIME section left at every
- * default is removed, and an `emailControl` left empty becomes `null`, so an
- * untouched integration keeps saving without one. Other sections are kept.
- */
-export function withSmime(
-  control: EmailControlLike | null | undefined,
-  smime: { sign?: true | false | "required"; connection?: string },
-): EmailControlLike | null {
-  const next: EmailControlLike = { ...(control ?? {}) };
-  const cleaned: { sign?: boolean | "required"; connection?: string } = {};
-  if (smime.sign !== undefined && smime.sign !== true) cleaned.sign = smime.sign;
-  if (smime.connection && smime.connection.trim()) cleaned.connection = smime.connection.trim();
-  if (Object.keys(cleaned).length === 0) delete next.smime;
-  else next.smime = cleaned;
-  return Object.keys(next).length === 0 ? null : next;
 }
 
 // eslint-disable-next-line no-control-regex -- control characters are exactly what a header value may not hold
 const CONTROL_RE = /[\u0000-\u001f\u007f\u2028\u2029]/;
 
-/** The SMTP relay: required in conversation mode, optional (self-test only) in trigger mode. */
-function smtpProblems(pc: Record<string, string>, conversation: boolean): EmailProblem[] {
+function conversationProblems(pc: Record<string, string>): EmailProblem[] {
   const problems: EmailProblem[] = [];
   const smtpHost = (pc.smtpHost ?? "").trim();
-  if (!smtpHost) {
-    if (conversation) problems.push("smtpHostRequired");
-  } else if (IPV4_RE.test(smtpHost) || smtpHost.includes(":") || smtpHost.startsWith("[")) problems.push("smtpHostIpLiteral");
+  if (!smtpHost) problems.push("smtpHostRequired");
+  else if (IPV4_RE.test(smtpHost) || smtpHost.includes(":") || smtpHost.startsWith("[")) problems.push("smtpHostIpLiteral");
   else if (!HOST_RE.test(smtpHost)) problems.push("smtpHostInvalid");
   if (pc.smtpPort !== undefined && pc.smtpPort.trim() !== "" && !(EMAIL_SMTP_PORTS as readonly string[]).includes(pc.smtpPort.trim())) {
     problems.push("smtpPort");
   }
   const fromName = pc.fromName ?? "";
   if (fromName.length > EMAIL_MAX_FROM_NAME_CHARS || CONTROL_RE.test(fromName)) problems.push("fromNameInvalid");
-  return problems;
-}
-
-function conversationProblems(pc: Record<string, string>): EmailProblem[] {
-  const problems: EmailProblem[] = [];
   if ((pc.replyTemplate ?? "").length > EMAIL_MAX_REPLY_TEMPLATE_CHARS) problems.push("replyTemplateTooLong");
   if ((pc.aiDisclosure ?? "").length > EMAIL_MAX_AI_DISCLOSURE_CHARS) problems.push("aiDisclosureTooLong");
   if (!intInRange(pc.maxRepliesPerThreadPerHour, 1, 1000)) problems.push("maxRepliesPerThreadPerHour");

@@ -1,5 +1,5 @@
 import { useTranslation } from "react-i18next";
-import { FileKey, KeyRound, Lock, Server, UserCheck, HelpCircle, UserRoundKey, MailCheck } from "lucide-react";
+import { FileKey, KeyRound, Lock, Server, UserCheck, HelpCircle, UserRoundKey } from "lucide-react";
 import { Badge } from "@eddi/ui";
 import { authTypeLabel, bindingLabel, grantStatusLabel } from "@eddi/app-kit/lib/connection-labels";
 import type { AuthType, Binding, GrantStatus } from "@eddi/app-kit/lib/api/connections";
@@ -19,7 +19,6 @@ const AUTH_TYPE_ICONS = {
   OAUTH2_CLIENT_CREDENTIALS: Server,
   OAUTH2_JWT_BEARER: FileKey,
   OAUTH2_AUTHORIZATION_CODE: UserCheck,
-  SMIME_SIGNING: MailCheck,
 } as const;
 
 interface AuthTypeBadgeProps {

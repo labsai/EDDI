@@ -7,7 +7,6 @@ import {
   FileKey,
   KeyRound,
   Lock,
-  MailCheck,
   Server,
   UserCheck,
   type LucideIcon,
@@ -33,7 +32,6 @@ import {
   type Binding,
   type ConnectionConfiguration,
   type OAuthConfig,
-  type SmimeSigningConfig,
   type StaticAuth,
 } from "@eddi/app-kit/lib/api/connections";
 import { validateConnection } from "@eddi/app-kit/lib/connection-validation";
@@ -121,9 +119,7 @@ export function CreateConnectionDialog({
     JSON.stringify(draft.staticAuth) !==
       JSON.stringify(emptyConnection(draft.authType, draft.binding).staticAuth) ||
     JSON.stringify(draft.oauth) !==
-      JSON.stringify(emptyConnection(draft.authType, draft.binding).oauth) ||
-    JSON.stringify(draft.smimeSigning ?? null) !==
-      JSON.stringify(emptyConnection(draft.authType, draft.binding).smimeSigning ?? null);
+      JSON.stringify(emptyConnection(draft.authType, draft.binding).oauth);
 
   const reset = useCallback(() => {
     setStep("basics");
@@ -204,9 +200,6 @@ export function CreateConnectionDialog({
 
   const patchOAuth = (patch: Partial<OAuthConfig>) =>
     setDraft((prev) => ({ ...prev, oauth: { ...prev.oauth, ...patch } }));
-
-  const patchSmime = (patch: Partial<SmimeSigningConfig>) =>
-    setDraft((prev) => ({ ...prev, smimeSigning: { ...prev.smimeSigning, ...patch } }));
 
   const stepIndex = STEPS.indexOf(step);
   const isFirst = stepIndex === 0;
@@ -395,7 +388,6 @@ export function CreateConnectionDialog({
                 draft={draft}
                 onPatchStatic={patchStatic}
                 onPatchOAuth={patchOAuth}
-                onPatchSmime={patchSmime}
                 onBindingChange={changeBinding}
                 errors={touched ? errors : {}}
                 idPrefix="create-connection"
@@ -408,15 +400,10 @@ export function CreateConnectionDialog({
                   {t("connections.allowedOrigins", "Where the credential may be sent")}
                 </label>
                 <p className="text-xs text-muted-foreground">
-                  {draft.authType === "SMIME_SIGNING"
-                    ? t(
-                        "connections.smimeOriginsHint",
-                        "List the SMTP relays whose mail this certificate may sign, e.g. smtp://smtp.office365.com:587 or smtps://smtp.gmail.com.",
-                      )
-                    : t(
-                        "connections.allowedOriginsHint",
-                        "List every origin this credential is allowed to reach. Anything not listed is refused, so a later config edit cannot redirect it somewhere else.",
-                      )}
+                  {t(
+                    "connections.allowedOriginsHint",
+                    "List every origin this credential is allowed to reach. Anything not listed is refused, so a later config edit cannot redirect it somewhere else.",
+                  )}
                 </p>
                 <OriginAllowlistField
                   value={draft.baseUrlAllowlist}
@@ -484,11 +471,10 @@ const AUTH_TYPE_ICONS: Record<AuthType, LucideIcon> = {
   OAUTH2_CLIENT_CREDENTIALS: Server,
   OAUTH2_JWT_BEARER: FileKey,
   OAUTH2_AUTHORIZATION_CODE: UserCheck,
-  SMIME_SIGNING: MailCheck,
 };
 
 /**
- * The six auth types as a real radio group.
+ * The five auth types as a real radio group.
  *
  * `role="radio"` without an owning `radiogroup` is invalid ARIA: the options
  * are announced as four unrelated toggles with no group name and no "1 of 4",

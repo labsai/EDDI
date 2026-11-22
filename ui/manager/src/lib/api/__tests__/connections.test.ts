@@ -501,31 +501,3 @@ describe("deleteConnection — soft by default (review 2026-10-02 #7)", () => {
     expect(urls[0]!.searchParams.get("permanent")).toBe("true");
   });
 });
-
-describe("SMIME_SIGNING documents", () => {
-  it("an empty one carries only the signing block, and a stored one drops every other block", async () => {
-    const { emptyConnection, toStoredConnection } = await import("@eddi/app-kit/lib/api/connections");
-    const empty = emptyConnection("SMIME_SIGNING");
-    expect(empty.binding).toBe("SERVICE");
-    expect(empty.smimeSigning).toEqual({ certificate: "", password: null });
-    expect(empty.staticAuth).toBeNull();
-
-    const stored = toStoredConnection({
-      ...empty,
-      name: " cert ",
-      staticAuth: { headerName: "Authorization", valueTemplate: "Bearer ${vault:k}" },
-      oauth: { tokenUrl: "https://login.example.com/token" },
-      smimeSigning: { certificate: "${vault:c}", password: "  " },
-    });
-    expect(stored.name).toBe("cert");
-    expect(stored.staticAuth).toBeNull();
-    expect(stored.oauth).toBeNull();
-    expect(stored.smimeSigning).toEqual({ certificate: "${vault:c}", password: null });
-  });
-
-  it("another type stores no signing block", async () => {
-    const { emptyConnection, toStoredConnection } = await import("@eddi/app-kit/lib/api/connections");
-    const stored = toStoredConnection({ ...emptyConnection("STATIC"), smimeSigning: { certificate: "${vault:c}" } });
-    expect(stored.smimeSigning).toBeNull();
-  });
-});

@@ -47,7 +47,6 @@ import {
   type Binding,
   type ConnectionConfiguration,
   type OAuthConfig,
-  type SmimeSigningConfig,
   type StaticAuth,
 } from "@eddi/app-kit/lib/api/connections";
 import {
@@ -322,7 +321,6 @@ export function ConnectionDetailPage() {
         allowUnverifiedPrincipal,
         staticAuth: prev.staticAuth ?? blank.staticAuth,
         oauth: prev.oauth ?? blank.oauth,
-        smimeSigning: prev.smimeSigning ?? blank.smimeSigning,
       };
     });
   }, []);
@@ -459,14 +457,6 @@ export function ConnectionDetailPage() {
     (patch: Partial<OAuthConfig>) =>
       setDraft((prev) =>
         prev ? { ...prev, oauth: { ...prev.oauth, ...patch } } : prev,
-      ),
-    [],
-  );
-
-  const patchSmime = useCallback(
-    (patch: Partial<SmimeSigningConfig>) =>
-      setDraft((prev) =>
-        prev ? { ...prev, smimeSigning: { ...prev.smimeSigning, ...patch } } : prev,
       ),
     [],
   );
@@ -707,7 +697,6 @@ export function ConnectionDetailPage() {
           draft={draft}
           onPatchStatic={patchStatic}
           onPatchOAuth={patchOAuth}
-          onPatchSmime={patchSmime}
           onBindingChange={requestBindingChange}
           errors={showErrors ? errors : {}}
           idPrefix="connection"

@@ -117,11 +117,6 @@ function messageFor(
       );
     case "originHost":
       return t("connections.validation.originHost", "An origin needs a host name.");
-    case "originNotSmtp":
-      return t(
-        "connections.validation.originNotSmtp",
-        "A signing certificate lists the SMTP relays whose mail it signs: smtps://host or smtp://host:587.",
-      );
     case "headerNameRequired":
       return t(
         "connections.validation.headerNameRequired",

@@ -41,8 +41,6 @@ export type ConnectionField =
   | "oauth.privateKey"
   | "oauth.certificateThumbprint"
   | "oauth.extraAuthParams"
-  | "smimeSigning.certificate"
-  | "smimeSigning.password"
   | "timeoutMs";
 
 /**
@@ -61,7 +59,6 @@ export type ValidationCode =
   | "originNotBare"
   | "originScheme"
   | "originHost"
-  | "originNotSmtp"
   | "headerNameRequired"
   | "templateRequired"
   | "templateNoReference"
@@ -472,10 +469,6 @@ export interface ValidatableConnection {
     certificateThumbprintHeader?: string | null;
     extraAuthParams?: Record<string, string> | null;
   } | null;
-  smimeSigning?: {
-    certificate?: string | null;
-    password?: string | null;
-  } | null;
   timeoutMs?: number | null;
 }
 
@@ -538,20 +531,7 @@ export function validateConnection(config: ValidatableConnection): ConnectionErr
     errors.binding = "bindingMismatch";
   }
 
-  if (authType === "SMIME_SIGNING") {
-    // The allowlist names the SMTP relays whose mail it may sign; an http
-    // origin here could only be a mistake, and the backend refuses it.
-    if (!errors.baseUrlAllowlist && allowlist.some((o) => !/^smtps?:/i.test(o.trim()))) {
-      errors.baseUrlAllowlist = "originNotSmtp";
-    }
-    const smime = config.smimeSigning ?? {};
-    if (!isReference(smime.certificate)) {
-      errors["smimeSigning.certificate"] = "secretMustBeReference";
-    }
-    if ((smime.password ?? "").trim() && !isReference(smime.password)) {
-      errors["smimeSigning.password"] = "secretMustBeReference";
-    }
-  } else if (authType === "STATIC" || authType === "BASIC") {
+  if (authType === "STATIC" || authType === "BASIC") {
     const staticAuth = config.staticAuth ?? {};
     if (!(staticAuth.headerName ?? "").trim()) {
       errors["staticAuth.headerName"] = "headerNameRequired";

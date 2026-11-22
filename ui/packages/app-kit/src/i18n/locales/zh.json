@@ -960,16 +960,14 @@
       "basic": "用户名与密码",
       "clientCredentials": "OAuth 服务账户",
       "authorizationCode": "OAuth 用户登录",
-      "jwtBearer": "签名密钥服务账号",
-      "smimeSigning": "邮件签名证书"
+      "jwtBearer": "签名密钥服务账号"
     },
     "choice": {
       "staticBody": "一个固定请求头，对所有人相同 —— X-Api-Key，或 Authorization: Bearer …",
       "basicBody": "HTTP Basic。编码由 {{productName}} 完成，因此密码仍是保险库中的独立条目，可以单独轮换。",
       "clientCredentialsBody": "智能体以自身身份登录。一个访问令牌供所有人共享，并自动续期。",
       "authorizationCodeBody": "每个人关联自己的账户，智能体以该用户身份行事。需要开启登录并配置保险库。",
-      "jwtBearerBody": "代理使用私钥而非密钥以自身身份登录——例如 Google 服务账号。所有人共用一个访问令牌。",
-      "smimeSigningBody": "电子邮件集成用来为外发邮件签名的 S/MIME 证书。它不会被发送到任何地方：签名中只携带公钥证书。"
+      "jwtBearerBody": "代理使用私钥而非密钥以自身身份登录——例如 Google 服务账号。所有人共用一个访问令牌。"
     },
     "binding": {
       "perUser": "按用户",
