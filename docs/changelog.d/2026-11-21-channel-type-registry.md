@@ -63,7 +63,7 @@ Phase 0.4–0.5 of the same plan.
 - application-scoped thread credentials;
 - Slack secret equivalence and redaction.
 
-Twelve mutants across both commits were checked against a no-op control (which survived); each one fails the test written for it. The 970 channel, Slack, webhook, email, connection and alert tests all pass, as do the repo-wide guards (431 tests).
+Twelve mutants across both commits were checked against a no-op control (which survived); each one fails the test written for it. The second review round added 13 more mutants, one per fix, and each is killed as well. The 995 channel, Slack, webhook, email, connection and alert tests all pass, as do the repo-wide guards.
 
 ### What's next
 
