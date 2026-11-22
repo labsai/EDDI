@@ -123,6 +123,23 @@ public class EmailChannelSupport {
                 break;
             }
         }
+        for (EmailIntegration other : others) {
+            if (other.id().equals(excludeId)) {
+                continue;
+            }
+            // An address is one integration's own: mail from it is refused as a loop, and
+            // mail to it addresses that integration. Two claiming it would each treat the
+            // other's mail as their own. Checked both ways: this integration's aliases
+            // against the other's address and aliases, and its address against the other's
+            // aliases.
+            boolean clash = settings.aliases().stream().anyMatch(other.settings()::isOwnAddress)
+                    || (settings.address() != null && other.settings().aliases().contains(settings.address()));
+            if (clash) {
+                errors.add("An address in platformConfig.aliases (or platformConfig.address) is already the address or an alias of "
+                        + "another email integration. Each address belongs to one integration.");
+                break;
+            }
+        }
         // Email plan v3 §5.3, best effort: an agent a mail can reach must not hold a
         // tool that changes channel integrations or decides approvals. The runtime
         // refusal is the boundary; this tells the author at save time.

@@ -23,9 +23,16 @@ import { useEnrichedGroupDescriptors } from "@eddi/app-kit/hooks/use-groups";
 import { allowNextNavigation, useUnsavedChangesGuard } from "@eddi/app-kit/hooks/use-unsaved-changes-guard";
 import { useChannel, useUpdateChannel, useDeleteChannel } from "@/hooks/use-channels";
 import { WebhookPlatformFields, WebhookSigningInstructions } from "@/components/channels/webhook-settings";
-import { EmailPlatformFields, EmailSecurityNotes } from "@/components/channels/email-settings";
+import { EmailPlatformFields, EmailSecurityNotes, EmailTargetRules } from "@/components/channels/email-settings";
 import { EmailSenderListsEditor } from "@/components/channels/email-sender-lists";
-import { emailConfigProblems, emailMode, withEmailFixedKeys } from "@/lib/email-channel";
+import {
+  EMAIL_TARGET_RULE_FIELDS,
+  emailConfigProblems,
+  emailMode,
+  emailTargetProblems,
+  withEmailFixedKeys,
+  withoutEmailTargetRules,
+} from "@/lib/email-channel";
 import { platformConfigForType, adoptStoredVersion } from "@/lib/channel-platform-config";
 import { emailProblemMessage, toastChannelWarnings } from "@/lib/email-channel-messages";
 import {
@@ -162,6 +169,14 @@ function TargetCard({
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={addTrigger}>{t("common.add", "Add")}</Button>
             </div>
           </div>
+
+          {mailTriggers && (
+            <EmailTargetRules
+              target={target}
+              index={index}
+              onChange={(rules) => onUpdate({ ...withoutEmailTargetRules(target), ...rules })}
+            />
+          )}
 
           {/* Observe Mode — hidden until backend implements support */}
 
@@ -331,12 +346,16 @@ export function ChannelDetailPage() {
     // spares the round trip. Its fixed keys are written whatever was loaded.
     let toSave = draft;
     if (isEmail) {
-      const problems = emailConfigProblems(draft.platformConfig);
+      const problems = [...emailConfigProblems(draft.platformConfig), ...emailTargetProblems(draft.targets, draft.platformConfig)];
       if (problems.length > 0) {
         toast.error(emailProblemMessage(problems[0]!, t));
         return;
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
+    } else if (draft.targets.some((target) => EMAIL_TARGET_RULE_FIELDS.some((field) => target[field] !== undefined))) {
+      // Email-only target rules left over from a switch of the channel type: the
+      // backend refuses them on any other type.
+      toSave = { ...draft, targets: draft.targets.map(withoutEmailTargetRules) };
     }
     try {
       const result = await updateMutation.mutateAsync({ id, version, config: toSave });

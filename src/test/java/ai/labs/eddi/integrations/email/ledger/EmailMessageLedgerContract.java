@@ -42,7 +42,7 @@ interface EmailMessageLedgerContract {
     /** Every field a row may store — and no body, subject or MIME. */
     Set<String> ALLOWED_FIELDS = Set.of("id", "integrationid", "kind", "direction", "messageid", "conversationid", "sourceref",
             "idempotencykey", "recipient", "state", "attempts", "nextattemptat", "claimtoken", "providerid", "lasterror", "createdat",
-            "updatedat", "expiresat");
+            "updatedat", "expiresat", "threadkey");
 
     IEmailMessageLedger ledger();
 
@@ -429,6 +429,40 @@ interface EmailMessageLedgerContract {
         return new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.REPLY, Direction.OUT, "<eddi." + UUID.randomUUID() + "@contoso.com>",
                 conversationId, "row-1|1|reply", key, recipient, state, 1, createdAt, null, null, null, createdAt, createdAt,
                 createdAt.plus(Duration.ofDays(30)));
+    }
+
+    static LedgerEntry threadReply(String integrationId, String conversationId, String threadKey, State state, Instant createdAt) {
+        return new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.REPLY, Direction.OUT, "<eddi." + UUID.randomUUID() + "@contoso.com>",
+                conversationId, "row-1|1|reply", UUID.randomUUID().toString(), "alice@example.com", state, 1, createdAt, null, null, null, createdAt,
+                createdAt, createdAt.plus(Duration.ofDays(30)), threadKey);
+    }
+
+    @Test
+    @DisplayName("replies: the thread key is stored, survives transitions, and counts a thread's replies across its conversations")
+    default void threadKeyCount() {
+        Instant since = NOW.minus(Duration.ofHours(1));
+        LedgerEntry first = threadReply("int-1", "conv-a", "t-1", State.SENT, NOW.minusSeconds(30));
+        LedgerEntry second = threadReply("int-1", "conv-b", "t-1", State.PENDING, NOW.minusSeconds(20));
+        LedgerEntry suppressed = threadReply("int-1", "conv-c", "t-1", State.SUPPRESSED, NOW.minusSeconds(10));
+        LedgerEntry old = threadReply("int-1", "conv-a", "t-1", State.SENT, NOW.minus(Duration.ofHours(2)));
+        LedgerEntry otherThread = threadReply("int-1", "conv-a", "t-2", State.SENT, NOW);
+        LedgerEntry otherIntegration = threadReply("int-2", "conv-z", "t-1", State.SENT, NOW);
+        LedgerEntry legacy = threadReply("int-1", "conv-a", null, State.SENT, NOW);
+        for (LedgerEntry row : List.of(first, second, suppressed, old, otherThread, otherIntegration, legacy)) {
+            assertTrue(ledger().insertIfAbsent(row));
+        }
+
+        assertEquals("t-1", ledger().findById(first.id()).orElseThrow().threadKey());
+        assertNull(ledger().findById(legacy.id()).orElseThrow().threadKey(), "rows written before the key existed have none");
+        assertEquals(2, ledger().countByThreadSince("int-1", "t-1", Kind.REPLY, since), "two conversations, one thread");
+        assertEquals(0, ledger().countByThreadSince("int-1", "t-1", Kind.NOTIFY, since));
+        assertEquals(1, ledger().countByThreadSince("int-2", "t-1", Kind.REPLY, since), "the key is per integration");
+        assertEquals(0, ledger().countByThreadSince("int-1", null, Kind.REPLY, since), "no key, no count");
+
+        assertTrue(ledger().transition(first.id(), State.SENT, State.FAILED, null, null, "BOUNCED", false, NOW));
+        assertEquals("t-1", ledger().findById(first.id()).orElseThrow().threadKey(), "a transition keeps the key");
+        List<LedgerEntry> claimed = ledger().claimDue(Kind.REPLY, NOW, NOW.plusSeconds(300), 10);
+        assertTrue(claimed.stream().anyMatch(r -> r.id().equals(second.id()) && "t-1".equals(r.threadKey())), "a claim returns the key");
     }
 
     @Test

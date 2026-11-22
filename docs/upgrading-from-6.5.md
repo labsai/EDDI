@@ -364,7 +364,7 @@ Manager and Chat UI. Nothing to do besides pulling the new image.
 
 ### Java4Shell (CVE-2026-114938): the images start the JVM with `-XX:-UseBASE64Intrinsics`
 
-The EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak service in the compose `auth` overlay, Helm (chart 2.14.3) and the kustomize `auth` overlay sets it on `JAVA_OPTS_APPEND`. This is an interim mitigation for a pre-authentication code-execution flaw in the JDK's Base64 decoder, until the base images ship a fixed JDK. If you set `JDK_JAVA_OPTIONS` yourself, add the flag to your value. If you run 6.7.0 or earlier and cannot upgrade yet, add it by hand. [Security → Java4Shell](security.md#jvm-advisory-java4shell-cve-2026-114938) has the details and how to check that the running JVM has it.
+The EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak service in the compose `auth` overlay, Helm (chart 2.14.3) and the kustomize `auth` overlay sets it on `JAVA_OPTS_APPEND`. This is an interim mitigation for a pre-authentication code-execution flaw in the JDK's Base64 decoder, until the base images ship a fixed JDK. They do now: EDDI images built from these pins and the demo image run OpenJDK 25.0.5.1, and the bundled Keycloak moves to 26.8.2, pinned by digest, with OpenJDK 21.0.13.1 (Helm chart 2.14.4). The flag stays as a second line of defence. If you set `JDK_JAVA_OPTIONS` yourself, add the flag to your value. If you run 6.7.0 or earlier and cannot upgrade yet, add it by hand. [Security → Java4Shell](security.md#jvm-advisory-java4shell-cve-2026-114938) has the details and how to check that the running JVM has it.
 
 ### The default `websearch` price now follows the search provider
 
@@ -427,3 +427,18 @@ DNS lookups made by this check now give up after `eddi.security.ssrf-protection.
 count as "does not resolve", so with protection on a call to a host whose name server answers slower than that is
 refused instead of waiting for the operating system's resolver. Raise the property if your resolver is that slow.
 See [security.md](security.md#ssrf-protection--urlvalidationutils) and [httpcalls.md](httpcalls.md).
+
+### Email: `maxRepliesPerThreadPerHour` counts the mail thread
+
+In email conversation mode, `maxRepliesPerThreadPerHour` used to count the replies of one *conversation*. A thread
+with several allowed senders has one conversation per sender, so it could get that many times the cap. It now counts
+the replies of the mail *thread* (its first `References` id, else `In-Reply-To`, else the mail itself) across all of
+its conversations, and a conversation's own count still applies as well. The cap can only get stricter: a busy
+thread with several participants may now get fewer replies per hour than before. Replies written before the upgrade
+carry no thread key and do not count, so the first hour after the upgrade allows at most one extra round. Nothing to
+migrate: PostgreSQL adds the `thread_key` column and its index on start, MongoDB the index. See
+[Email Integration](email-integration.md#delivery-retries-limits).
+
+Everything else of the email addressing release is opt-in: `actWhen` defaults to `always` (every mail runs, as
+before), and the new per-target `mentions`, `addresses` and `allowedSenders` do nothing until set. The Manager
+preselects `actWhen: addressed` for **new** email integrations only.

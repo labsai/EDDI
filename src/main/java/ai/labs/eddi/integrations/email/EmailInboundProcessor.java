@@ -25,6 +25,8 @@ import ai.labs.eddi.engine.mail.MailAttachment;
 import ai.labs.eddi.engine.mail.MailAuthentication;
 import ai.labs.eddi.engine.mail.MailLimits;
 import ai.labs.eddi.engine.mail.MailParseException;
+import ai.labs.eddi.engine.mail.MentionExtractor;
+import ai.labs.eddi.engine.mail.MentionExtractor.MentionHit;
 import ai.labs.eddi.engine.mail.MessageIds;
 import ai.labs.eddi.engine.mail.MimeMessageParser;
 import ai.labs.eddi.engine.mail.SenderAuthenticator;
@@ -37,7 +39,9 @@ import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.tenancy.QuotaExceededException;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
+import ai.labs.eddi.integrations.email.EmailAddressing.Addressing;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier.Reason;
+import ai.labs.eddi.integrations.email.EmailTargetRouting.RouteDecision;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
@@ -67,6 +71,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -94,6 +99,10 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * <li>Loop guard, blocklist (the integration's own address always), allowlist,
  * then {@code requireAuthentication}: refusals are recorded ({@code REFUSED}
  * with the reason), counted, and never answered.</li>
+ * <li>Addressing (email v2 plan §7): with {@code actWhen: addressed} a mail
+ * that does not address the integration is refused {@code not_addressed}. Then
+ * the route ({@link EmailTargetRouting}) and the target's
+ * {@code allowedSenders}. Both read the signed view only.</li>
  * <li>Budgets: the integration's daily cost budget, the per-sender daily turns,
  * tenant quotas. Over a limit the mail stays in the mailbox for later and the
  * owners hear about it once a day ({@link EmailOwnerNotifier}).</li>
@@ -316,7 +325,7 @@ public class EmailInboundProcessor {
         // feedback for the ledger, never input for a turn. Both read the mail as
         // received: a header that only makes it refused is safe to believe unsigned.
         boolean bounce = asReceived.deliveryReport() != null && applyDeliveryReport(id, asReceived, now);
-        Optional<String> loop = EmailLoopGuard.check(asReceived, id, settings.address(), ctx.otherIntegrationAddresses(), ledger);
+        Optional<String> loop = EmailLoopGuard.check(asReceived, id, ownSenders(settings), ctx.otherIntegrationAddresses(), ledger);
         if (loop.isPresent()) {
             return refuse(ctx, row, loop.get(), bounce ? EmailMetrics.BOUNCE : EmailMetrics.LOOP, now);
         }
@@ -329,7 +338,7 @@ public class EmailInboundProcessor {
         if (sender == null) {
             return refuse(ctx, row, "blocked:no_single_sender", EmailMetrics.BLOCKED, now);
         }
-        if (sender.equals(settings.address()) || SenderPatterns.matchesAny(sender, settings.senderBlocklist())) {
+        if (settings.isOwnAddress(sender) || SenderPatterns.matchesAny(sender, settings.senderBlocklist())) {
             return refuse(ctx, row, "blocked:blocklist", EmailMetrics.BLOCKED, now);
         }
         if (!settings.senderAllowlist().isEmpty() && !SenderPatterns.matchesAny(sender, settings.senderAllowlist())) {
@@ -351,40 +360,48 @@ public class EmailInboundProcessor {
             }
         }
 
-        // 7. Budgets. Over one, the mail waits in the mailbox; no sender hears
-        // anything.
-        if (dailyBudgetExhausted(id, settings, now)) {
-            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.BUDGET, now);
-            defer(ctx, row, now.plus(RETRY_BUDGET), "budget", EmailMetrics.BUDGET, now);
-            return Disposition.STOP;
-        }
-        if (settings.maxTurnsPerSenderPerDay() > 0
-                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= settings.maxTurnsPerSenderPerDay()) {
-            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.THROTTLED, now);
-            return defer(ctx, row, startOfUtcDay(now).plus(Duration.ofDays(1)), "throttled", EmailMetrics.THROTTLED, now);
+        // 7. Addressed? Read from the signed view only, and after every refusal above
+        // (so those reasons win, and a replayed copy is refused as a replay rather
+        // than judged on headers its holder may have added), but before the budgets:
+        // a mail EDDI was not asked into must not use up the sender's turns.
+        List<MentionHit> mentions = MentionExtractor.extract(parsed.text(), parsed.anomalies(),
+                EmailTargetRouting.mentionHandles(ctx.integration()));
+        Addressing addressing = EmailAddressing.evaluate(id, parsed, EmailAddressing.OwnAddresses.of(settings, ctx.integration()), ledger,
+                mentions);
+        if (settings.actWhen() == EmailChannelSettings.ActWhen.ADDRESSED && !addressing.addressed()) {
+            return refuse(ctx, row, "not_addressed", EmailMetrics.NOT_ADDRESSED, now);
         }
 
-        // 8. Identity and route.
+        // 8. Route. Whether this sender may reach the target is decided in step 12,
+        // once it is known whether the mail continues a conversation: a new
+        // conversation needs the routed target's admission, a continuation its owner
+        // agent's. A refusal there is final: no fallback to the default target, which
+        // would turn it into a silent reroute.
+        RouteDecision route = EmailTargetRouting.route(ctx.integration(), settings.address(), parsed, mentions);
+        ChannelTarget target = route.target();
+        if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
+            return refuse(ctx, row, "unroutable", EmailMetrics.UNROUTABLE, now);
+        }
+
+        // 10. Identity.
         String userId = !authenticated
                 ? EmailUserIdentity.anonymous()
                 : settings.identityMode() == EmailChannelSettings.IdentityMode.INTEGRATION
                         ? EmailUserIdentity.integration(id)
                         : EmailUserIdentity.perSender(id, sender);
-        ChannelTarget target = EmailTargetRouting.route(ctx.integration(), settings.address(), parsed);
-        if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
-            return refuse(ctx, row, "unroutable", EmailMetrics.UNROUTABLE, now);
-        }
 
-        // 9. Correlation (opt-in, authenticated senders only; sender is part of the
-        // key).
+        // 11. Correlation (opt-in, authenticated senders only; sender is part of the
+        // key). Keyed by the routed agent, so a mail routed elsewhere starts that
+        // agent's own conversation rather than continuing this one.
         String intent = settings.correlateThreads() && authenticated && target.getType() != ChannelTarget.TargetType.GROUP
                 ? correlationIntent(id, target.getTargetId(), threadRoot(parsed), sender)
                 : null;
         String existingConversation = null;
         // A row that already names a conversation was handed back after the
         // conversation was started (a failed turn submission, or the stranded sweep
-        // finding the mail's turn never ran): the mail belongs to that conversation.
-        if (row.conversationId() != null && target.getType() != ChannelTarget.TargetType.GROUP) {
+        // finding the mail's turn never ran): the mail belongs to that conversation,
+        // whatever the route says now.
+        if (row.conversationId() != null) {
             ConversationState recorded = stateOf(row.conversationId());
             if (recorded == ConversationState.IN_PROGRESS || recorded == ConversationState.AWAITING_HUMAN) {
                 return defer(ctx, row, now.plus(RETRY_SHORT), "conversation_busy", EmailMetrics.DEFERRED, now);
@@ -393,7 +410,9 @@ public class EmailInboundProcessor {
                 existingConversation = row.conversationId();
             }
         }
-        if (existingConversation == null && settings.replies() && authenticated && target.getType() != ChannelTarget.TargetType.GROUP) {
+        // A reply in a thread EDDI answered continues that conversation whatever the
+        // route says: the conversation's agent stays its owner (see below).
+        if (existingConversation == null && settings.replies() && authenticated) {
             String continued = continuedConversation(id, settings, parsed, sender);
             if (continued != null) {
                 ConversationState state = stateOf(continued);
@@ -426,7 +445,7 @@ public class EmailInboundProcessor {
         // A retry of a mail whose conversation an earlier attempt started (the turn
         // then failed and the row was given back): the turn goes into that
         // conversation, so its CONVERSATION_START never runs twice for one mail.
-        if (existingConversation == null && row.conversationId() != null && target.getType() != ChannelTarget.TargetType.GROUP) {
+        if (existingConversation == null && row.conversationId() != null) {
             ConversationState state = stateOf(row.conversationId());
             if (state == ConversationState.IN_PROGRESS || state == ConversationState.AWAITING_HUMAN) {
                 return defer(ctx, row, now.plus(RETRY_SHORT), "conversation_busy", EmailMetrics.DEFERRED, now);
@@ -436,7 +455,51 @@ public class EmailInboundProcessor {
             }
         }
 
-        // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
+        // 12. Whether this sender may reach the agent the mail runs with. A new
+        // conversation needs the routed target's allowedSenders. An existing one keeps
+        // its agent (email v2 plan §7.5) and needs only that agent's: the mail runs in
+        // the owner's conversation, so the routed target (often the default one, since
+        // EDDI's replies leave from the integration's address) guards nothing. A mail
+        // that explicitly named another target runs here with that recorded as
+        // mail.route.redirectRefused.
+        Map<String, Object> routeData = route.toMap();
+        Owner owner = null;
+        if (existingConversation == null) {
+            if (!mayReach(target, sender, authenticated)) {
+                return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
+            }
+        } else {
+            owner = ownerOf(existingConversation);
+            // Without the owner's agent its allowedSenders cannot be checked: when any
+            // target restricts its senders, the mail waits rather than skip the check.
+            if (owner.unreadable() || (owner.agentId() == null && anyTargetRestrictsSenders(ctx.integration()))) {
+                return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
+            }
+            if (!ownerAdmits(ctx.integration(), owner.agentId(), target, sender, authenticated)) {
+                return refuse(ctx, row, "blocked:target_not_allowed", EmailMetrics.BLOCKED, now);
+            }
+            if (owner.agentId() != null && route.source().explicit() && !owner.agentId().equals(target.getTargetId())) {
+                routeData.put("redirectRefused", target.getName());
+                LOGGER.infof("Email integration %s: mail %s addressed target %s but continues conversation %s of another agent", sanitize(id),
+                        row.id(), sanitize(target.getName()), sanitize(existingConversation));
+            }
+        }
+        Map<String, Object> addressed = Map.of(ADDRESSING_KEY, addressing.toMap(), ROUTE_KEY, routeData);
+
+        // 12a. Budgets, after every refusal. Over one, the mail waits in the mailbox;
+        // no sender hears anything.
+        if (dailyBudgetExhausted(id, settings, now)) {
+            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.BUDGET, now);
+            defer(ctx, row, now.plus(RETRY_BUDGET), "budget", EmailMetrics.BUDGET, now);
+            return Disposition.STOP;
+        }
+        if (settings.maxTurnsPerSenderPerDay() > 0
+                && ledger.countInboundTurns(id, sender, startOfUtcDay(now)) >= settings.maxTurnsPerSenderPerDay()) {
+            ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.THROTTLED, now);
+            return defer(ctx, row, startOfUtcDay(now).plus(Duration.ofDays(1)), "throttled", EmailMetrics.THROTTLED, now);
+        }
+
+        // 13. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
         Instant deadline = now.plus(strandedAfter);
         if (!ledger.transition(row.id(), State.RECEIVED, State.CLAIMED, null, deadline, null, true, now)) {
@@ -444,8 +507,8 @@ public class EmailInboundProcessor {
             return Disposition.DEFERRED;
         }
         int attempt = row.attempts() + 1;
-        String input = renderInput(settings.inputTemplate(), mailData(parsed, List.of(), true));
-        // 11. The point of no return, immediately before the first side effect (a
+        String input = renderInput(settings.inputTemplate(), mailData(parsed, List.of(), true, addressed));
+        // 14. The point of no return, immediately before the first side effect (a
         // conversation's CONVERSATION_START turn, a group discussion, the turn). From
         // here on the mail runs at most once.
         if (!ledger.transition(row.id(), State.CLAIMED, State.TURN_SUBMITTED, null, deadline, null, false, now)) {
@@ -453,12 +516,12 @@ public class EmailInboundProcessor {
             return Disposition.DEFERRED;
         }
         try {
-            if (target.getType() == ChannelTarget.TargetType.GROUP) {
+            if (existingConversation == null && target.getType() == ChannelTarget.TargetType.GROUP) {
                 // A group takes a question, not a context map: the rendered input is all
                 // its members see of the mail.
                 // The poller runs no turn, so the taint (email plan v3 §5.3) is bound for the
                 // discussion it creates; the discussion hands it to every member.
-                var replyListener = settings.replies() ? groupReplyListener(ctx, row, userId, mailData(parsed, List.of(), false)) : null;
+                var replyListener = settings.replies() ? groupReplyListener(ctx, row, userId, mailData(parsed, List.of(), false, addressed)) : null;
                 String groupId = target.getTargetId();
                 String groupUserId = userId;
                 String groupInput = input;
@@ -470,23 +533,21 @@ public class EmailInboundProcessor {
                 return Disposition.SETTLED;
             }
             String conversationId = existingConversation;
-            double costBefore = 0.0;
+            double costBefore = owner != null ? owner.cost() : 0.0;
             if (conversationId == null) {
                 conversationId = startConversation(target.getTargetId(), userId, id, intent);
-            } else {
-                costBefore = conversationCost(conversationId);
             }
             ledger.transition(row.id(), State.TURN_SUBMITTED, State.TURN_SUBMITTED, conversationId, deadline, null, false, now);
             List<Map<String, Object>> attachmentData = new ArrayList<>();
             Map<String, Context> context = new LinkedHashMap<>();
             storeAttachments(ctx, parsed, conversationId, userId, attachmentData, context);
-            Map<String, Object> mail = mailData(parsed, attachmentData, false);
+            Map<String, Object> mail = mailData(parsed, attachmentData, false, addressed);
             context.put(MAIL_CONTEXT_KEY, new Context(Context.ContextType.object, mail));
             context.put(INTEGRATION_CONTEXT_KEY, new Context(Context.ContextType.string, id));
             // Every mail turn re-asserts the taint, also on a conversation that is older
             // than the stored taint.
             context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
-            input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true));
+            input = renderInput(settings.inputTemplate(), mailData(parsed, attachmentData, true, addressed));
             InputData inputData = new InputData(input, context);
             // The turn carries the mail's ledger key: a turn submitted again for the same
             // mail (stranded-turn recovery) is recognised by the conversation instead of
@@ -805,6 +866,17 @@ public class EmailInboundProcessor {
      * not into the context (the rendered input already carries it).
      */
     static Map<String, Object> mailData(InboundMail mail, List<Map<String, Object>> attachments, boolean withText) {
+        return mailData(mail, attachments, withText, Map.of());
+    }
+
+    /**
+     * {@link #mailData(InboundMail, List, boolean)} plus what EDDI decided about
+     * the mail: {@code addressing} ({@code addressed}, {@code why}) and
+     * {@code route} ({@code target}, {@code source}, {@code alsoAddressed}, and
+     * {@code redirectRefused} when the mail continues another agent's
+     * conversation).
+     */
+    static Map<String, Object> mailData(InboundMail mail, List<Map<String, Object>> attachments, boolean withText, Map<String, Object> decided) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("from", mail.fromAddress());
         data.put("fromName", mail.fromName());
@@ -821,6 +893,7 @@ public class EmailInboundProcessor {
         data.put("quotedHistoryRemoved", mail.quotedHistoryRemoved());
         data.put("attachments", attachments);
         data.put("anomalies", mail.anomalies().stream().map(a -> a.name().toLowerCase(Locale.ROOT)).sorted().toList());
+        data.putAll(decided);
         if (withText) {
             data.put("text", mail.text());
         }
@@ -845,6 +918,97 @@ public class EmailInboundProcessor {
         }
     }
 
+    /** Key of {@link EmailAddressing.Addressing#toMap()} in the mail map. */
+    static final String ADDRESSING_KEY = "addressing";
+    /** Key of {@link RouteDecision#toMap()} in the mail map. */
+    static final String ROUTE_KEY = "route";
+
+    /** Every address mail from which is this integration's own. */
+    private static Set<String> ownSenders(EmailChannelSettings settings) {
+        Set<String> own = new LinkedHashSet<>(settings.aliases());
+        if (settings.address() != null) {
+            own.add(settings.address());
+        }
+        return own;
+    }
+
+    /**
+     * Whether {@code sender} may reach {@code target}: always, unless the target
+     * names {@code allowedSenders} — then only an authenticated sender matching one
+     * (email v2 plan §7.6).
+     */
+    static boolean mayReach(ChannelTarget target, String sender, boolean authenticated) {
+        List<String> allowed = target.getAllowedSenders();
+        if (allowed == null || allowed.isEmpty()) {
+            return true;
+        }
+        return authenticated && SenderPatterns.matchesAny(sender, allowed);
+    }
+
+    /** Whether any target of the integration names {@code allowedSenders}. */
+    static boolean anyTargetRestrictsSenders(ChannelIntegrationConfiguration integration) {
+        if (integration == null || integration.getTargets() == null) {
+            return false;
+        }
+        return integration.getTargets().stream()
+                .anyMatch(target -> target != null && target.getAllowedSenders() != null && !target.getAllowedSenders().isEmpty());
+    }
+
+    /**
+     * The agent a conversation belongs to and what it has cost so far;
+     * {@code unreadable} when its memory could not be read for a reason other than
+     * its absence.
+     */
+    record Owner(String agentId, double cost, boolean unreadable) {
+    }
+
+    private Owner ownerOf(String conversationId) {
+        try {
+            var snapshot = conversationService.readConversation(conversationId, false, true, List.of());
+            if (snapshot == null) {
+                return new Owner(null, 0.0, false);
+            }
+            return new Owner(snapshot.getAgentId(), snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0, false);
+        } catch (IResourceStore.ResourceNotFoundException e) {
+            return new Owner(null, 0.0, false);
+        } catch (Exception e) {
+            return new Owner(null, 0.0, true);
+        }
+    }
+
+    /**
+     * Whether the sender may reach the conversation's owner agent {@code agentId}
+     * through any addressable agent target of the integration that is that agent's.
+     * Several targets can name one agent with different {@code allowedSenders}, and
+     * which of them started the conversation is not recorded, so the sender passes
+     * when one of them admits it: they could reach the agent through that target
+     * directly. The target the mail was routed to does not decide it, even when it
+     * is one of the agent's (a plain reply routes to the default target). Only when
+     * no target is that agent's any more (the conversation outlived its target)
+     * does {@code routed} decide, as it would for a new conversation. True when the
+     * owner is unknown (the caller defers instead when any target restricts its
+     * senders).
+     */
+    static boolean ownerAdmits(ChannelIntegrationConfiguration integration, String agentId, ChannelTarget routed, String sender,
+                               boolean authenticated) {
+        if (agentId == null) {
+            return true;
+        }
+        boolean any = false;
+        if (integration != null && integration.getTargets() != null) {
+            for (ChannelTarget candidate : integration.getTargets()) {
+                if (candidate != null && !candidate.isObserveMode() && candidate.getType() != ChannelTarget.TargetType.GROUP
+                        && agentId.equals(candidate.getTargetId())) {
+                    if (mayReach(candidate, sender, authenticated)) {
+                        return true;
+                    }
+                    any = true;
+                }
+            }
+        }
+        return !any && (routed == null || mayReach(routed, sender, authenticated));
+    }
+
     static String verdictId(MailAuthentication authentication) {
         return authentication.verdict().name().toLowerCase(Locale.ROOT).replace('_', '-');
     }
@@ -854,10 +1018,7 @@ public class EmailInboundProcessor {
      * subjects.
      */
     static String threadRoot(InboundMail mail) {
-        if (!mail.references().isEmpty()) {
-            return mail.references().get(0);
-        }
-        return mail.inReplyTo() != null ? mail.inReplyTo() : mail.messageId();
+        return EmailThreads.threadRoot(mail);
     }
 
     /**
@@ -992,15 +1153,6 @@ public class EmailInboundProcessor {
             return null;
         } catch (RuntimeException e) {
             return ConversationState.IN_PROGRESS;
-        }
-    }
-
-    private double conversationCost(String conversationId) {
-        try {
-            var snapshot = conversationService.readConversation(conversationId, false, true, List.of());
-            return snapshot != null && snapshot.getConversationCost() != null ? snapshot.getConversationCost() : 0.0;
-        } catch (Exception e) {
-            return 0.0;
         }
     }
 

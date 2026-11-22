@@ -216,6 +216,95 @@ class RestChannelIntegrationStoreEmailTest {
         verify(support).afterDelete(ID);
     }
 
+    private static ChannelTarget second(String name) {
+        var target = new ChannelTarget();
+        target.setName(name);
+        target.setType(ChannelTarget.TargetType.AGENT);
+        target.setTargetId("agent-2");
+        return target;
+    }
+
+    private static String refusal(ChannelIntegrationConfiguration config, RestChannelIntegrationStore sut) {
+        return assertThrows(BadRequestException.class, () -> sut.createChannel(config)).getMessage();
+    }
+
+    @Test
+    @DisplayName("email targets: mentions, addresses and allowedSenders are stored normalised")
+    void emailTargetRulesNormalised() {
+        var config = email(Map.of("aliases", "finance-agent@contoso.com"));
+        var intake = config.getTargets().get(0);
+        intake.setMentions(List.of(" Finance ", "AP-team"));
+        intake.setAddresses(List.of("Finance-Agent@Contoso.com", "invoices+Urgent@contoso.com"));
+        intake.setAllowedSenders(List.of(" *@supplier.com ", "boss@contoso.com"));
+
+        assertEquals(201, sut.createChannel(config).getStatus());
+
+        assertEquals(List.of("finance", "ap-team"), intake.getMentions());
+        assertEquals(List.of("finance-agent@contoso.com", "invoices+urgent@contoso.com"), intake.getAddresses());
+        assertEquals(List.of("*@supplier.com", "boss@contoso.com"), intake.getAllowedSenders());
+    }
+
+    @Test
+    @DisplayName("email targets: bad or duplicate mentions, addresses the mailbox does not receive, bad sender patterns are refused")
+    void emailTargetRulesRefused() throws Exception {
+        var badHandle = email(Map.of());
+        badHandle.getTargets().get(0).setMentions(List.of("@finance"));
+        assertTrue(refusal(badHandle, sut).contains("mention '@finance' must be"));
+
+        var tooMany = email(Map.of());
+        tooMany.getTargets().get(0).setMentions(List.of("a1", "a2", "a3", "a4", "a5", "a6", "a7", "a8", "a9", "a10", "a11"));
+        assertTrue(refusal(tooMany, sut).contains("at most 10 mentions"));
+
+        var duplicate = email(Map.of());
+        duplicate.getTargets().get(0).setMentions(List.of("finance"));
+        var other = second("other");
+        other.setMentions(List.of("FINANCE"));
+        duplicate.setTargets(List.of(duplicate.getTargets().get(0), other));
+        assertTrue(refusal(duplicate, sut).contains("Duplicate mention: 'finance'"));
+
+        var notReceived = email(Map.of());
+        notReceived.getTargets().get(0).setAddresses(List.of("finance@contoso.com"));
+        assertTrue(refusal(notReceived, sut).contains("must be listed in platformConfig.aliases or be a plus-address"));
+
+        var notAnAddress = email(Map.of());
+        notAnAddress.getTargets().get(0).setAddresses(List.of("finance"));
+        assertTrue(refusal(notAnAddress, sut).contains("is not a plain email address"));
+
+        var sharedAddress = email(Map.of());
+        sharedAddress.getTargets().get(0).setAddresses(List.of("invoices+x@contoso.com"));
+        var twin = second("twin");
+        twin.setAddresses(List.of("Invoices+X@contoso.com"));
+        sharedAddress.setTargets(List.of(sharedAddress.getTargets().get(0), twin));
+        assertTrue(refusal(sharedAddress, sut).contains("Duplicate target address"));
+
+        var badSender = email(Map.of());
+        badSender.getTargets().get(0).setAllowedSenders(List.of("supplier.com"));
+        assertTrue(refusal(badSender, sut).contains("allowedSenders entry 'supplier.com'"));
+        verify(channelStore, never()).create(any());
+    }
+
+    @Test
+    @DisplayName("mentions, addresses and allowedSenders are email-only: refused on another channel type")
+    void emailTargetRulesOnlyForEmail() {
+        for (int i = 0; i < 3; i++) {
+            var slack = email(Map.of());
+            slack.setChannelType("slack");
+            slack.setPlatformConfig(new HashMap<>(Map.of("channelId", "C1")));
+            var target = slack.getTargets().get(0);
+            switch (i) {
+                case 0 -> target.setMentions(List.of("finance"));
+                case 1 -> target.setAddresses(List.of("a@contoso.com"));
+                default -> target.setAllowedSenders(List.of("*@contoso.com"));
+            }
+            assertTrue(refusal(slack, sut).contains("only supported for email integrations"));
+        }
+        var empty = email(Map.of());
+        empty.setChannelType("slack");
+        empty.setPlatformConfig(new HashMap<>(Map.of("channelId", "C1")));
+        empty.getTargets().get(0).setMentions(List.of());
+        assertEquals(201, sut.createChannel(empty).getStatus(), "an empty list says nothing");
+    }
+
     @Test
     @DisplayName("a Slack integration never touches email support")
     void slackUntouched() throws Exception {

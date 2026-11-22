@@ -65,7 +65,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: keycloak
-          image: quay.io/keycloak/keycloak:26.8.0
+          image: quay.io/keycloak/keycloak:26.8.2@sha256:7e66a96e4739239070aeaf72e4c5decf0f7f682cfc725b9f7ea2b336eaba38b3
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -119,7 +119,8 @@ spec:
             - name: KC_HEALTH_ENABLED
               value: "true"
             # Java4Shell (CVE-2026-114938) interim mitigation: Keycloak decodes Base64
-            # before any login. Remove once the pinned image ships a fixed JDK.
+            # before any login. The pinned image carries the fixed JDK (21.0.13.1, confirmed with
+            # `java -version`); the flag stays as a safeguard for an overridden or earlier image.
             - name: JAVA_OPTS_APPEND
               value: "-XX:-UseBASE64Intrinsics"
             # ⚠️  Must equal the URL the BROWSER uses to reach KEYCLOAK, because
