@@ -408,4 +408,38 @@ class EmailApprovalGateTest {
             when(memory.getAllSteps()).thenReturn(steps);
         }
     }
+
+    @Nested
+    @DisplayName("read-only-only (a held mail released without an aligned pass, v3 plan §7.3)")
+    class ReadOnlyOnly {
+
+        @Test
+        @DisplayName("arms the gate even under policy none, and survives parsing and the sticky record")
+        void armedAndSticky() {
+            Context value = EmailApprovalGate.contextValue("none", List.of("http.get:*"), false, null, null, null, true);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> map = (Map<String, Object>) value.getValue();
+            assertEquals("actions", map.get("policy"));
+            assertEquals(true, map.get("readOnlyOnly"));
+            EmailApprovalGate.Policy parsed = EmailApprovalGate.parse(value);
+            assertNotNull(parsed);
+            assertTrue(parsed.readOnlyOnly());
+            assertTrue(EmailApprovalGate.parse(EmailApprovalGate.recordable(parsed)).readOnlyOnly(), "later turns stay restricted");
+            assertFalse(EmailApprovalGate.parse(EmailApprovalGate.contextValue("actions", List.of(), false, null, null)).readOnlyOnly());
+            assertNull(EmailApprovalGate.parse(EmailApprovalGate.contextValue("none", List.of(), false, null, null, null, false)));
+        }
+
+        @Test
+        @DisplayName("every gated call is refused, none paused; an ordinary gate refuses nothing")
+        void refusesGated() {
+            ToolExecutionRequest call = ToolExecutionRequest.builder().id("c1").name("calculate").arguments("{}").build();
+            var result = new ToolApprovalGate.GateResult(List.of(call), List.of(), Map.of());
+            EmailApprovalGate.Policy restricted = EmailApprovalGate.parse(EmailApprovalGate.contextValue("actions", List.of(), false, null, null,
+                    null, true));
+            assertEquals(List.of(call), EmailApprovalGate.refusedAsReadOnlyOnly(restricted, result));
+            assertTrue(EmailApprovalGate.refusedAsReadOnlyOnly(EmailApprovalGate.parse(EmailApprovalGate.contextValue("actions", List.of(), false,
+                    null, null)), result).isEmpty());
+            assertTrue(EmailApprovalGate.refusedAsReadOnlyOnly(null, result).isEmpty());
+        }
+    }
 }

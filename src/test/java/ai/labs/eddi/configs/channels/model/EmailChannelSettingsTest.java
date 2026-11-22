@@ -270,8 +270,10 @@ class EmailChannelSettingsTest {
     void openTriggerWarning() {
         assertEquals(List.of(), EmailChannelSettings.warnings(EmailChannelSettings.from(minimal())));
         Map<String, String> open = with("requireAuthentication", "false");
-        assertEquals(List.of(EmailChannelSettings.WARNING_OPEN_TRIGGER), EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
+        assertEquals(List.of(EmailChannelSettings.WARNING_OPEN_TRIGGER, EmailChannelSettings.WARNING_ANONYMOUS_TOOLS),
+                EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
         open.put("senderAllowlist", "*@supplier.com");
-        assertEquals(List.of(), EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
+        // Unauthenticated mail from an allowed domain still runs with every tool (v3 §7.3).
+        assertEquals(List.of(EmailChannelSettings.WARNING_ANONYMOUS_TOOLS), EmailChannelSettings.warnings(EmailChannelSettings.from(open)));
     }
 }

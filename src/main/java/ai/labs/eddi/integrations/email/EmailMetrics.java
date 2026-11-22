@@ -61,6 +61,10 @@ public final class EmailMetrics {
     public static final String FAILED = "failed";
     /** The integration's own sending-health self-test came back. */
     public static final String SELF_TEST = "self_test";
+    /** Held for a reviewer instead of dropped (v3 plan §7). */
+    public static final String HELD = "held";
+    /** Would have been held, but the review queue's daily cap is reached. */
+    public static final String REVIEW_FULL = "review_full";
 
     private final MeterRegistry registry;
 

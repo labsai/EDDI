@@ -9,6 +9,7 @@ import ai.labs.eddi.integrations.email.EmailInboundProcessor.Disposition;
 import ai.labs.eddi.integrations.email.EmailInboundProcessor.IntegrationContext;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier.Reason;
+import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore.MailboxState;
 import ai.labs.eddi.integrations.email.ledger.LedgerRetry;
@@ -194,6 +195,7 @@ public class EmailMailboxPoller {
             int processed = 0;
             int marked = 0;
             int deferred = 0;
+            int held = 0;
             Instant deadline = started.plus(maxDuration);
             for (Entry entry : batch.entries()) {
                 if (processed >= maxMessagesPerPoll || Instant.now().isAfter(deadline)) {
@@ -213,7 +215,19 @@ public class EmailMailboxPoller {
                         processed++;
                     }
                 }
-                if (disposition == Disposition.SETTLED) {
+                if (disposition == Disposition.HELD) {
+                    // Held for review (v3 plan §7.2): marked like processed mail, moved to the
+                    // Held folder when processed mail is moved. A held mail never pins the cursor.
+                    held++;
+                    try {
+                        var result = session.markHeld(message, settings);
+                        metrics.marked(id, settings, result.name().toLowerCase(Locale.ROOT));
+                        marked++;
+                    } catch (MailboxException e) {
+                        LOGGER.warnf("Email integration %s: could not mark a held message (%s); the ledger keeps it from running", sanitize(id),
+                                e.getCategory());
+                    }
+                } else if (disposition == Disposition.SETTLED) {
                     // Only now: the ledger row exists, so a re-poll can never re-run it.
                     try {
                         var result = session.markProcessed(message, settings);
@@ -224,7 +238,7 @@ public class EmailMailboxPoller {
                                 + "again", sanitize(id), e.getCategory());
                     }
                 }
-                if (disposition == null || disposition == Disposition.SETTLED) {
+                if (disposition == null || disposition == Disposition.SETTLED || disposition == Disposition.HELD) {
                     if (contiguous) {
                         settledUpTo = entry.settles();
                     }
@@ -242,8 +256,10 @@ public class EmailMailboxPoller {
                 settledUpTo = batch.end();
             }
             stateStore.saveCursor(id, settings.folder(), settledUpTo, since, Instant.now());
+            // One notice for the batch, not one per held mail.
+            processor.notifyHeld(context, held, Instant.now());
             return new PollReport(false,
-                    processed + " processed, " + marked + " marked, " + deferred + " deferred"
+                    processed + " processed, " + marked + " marked, " + deferred + " deferred" + (held > 0 ? ", " + held + " held" : "")
                             + (resubmitted > 0 ? ", " + resubmitted + " resubmitted" : ""));
         }
     }
@@ -276,7 +292,10 @@ public class EmailMailboxPoller {
                 processor.resubmissionTooLarge(context, row, Instant.now());
                 continue;
             }
-            if (found.isEmpty()) {
+            if (found.isEmpty()
+                    || EmailReviewState.isReleased(row.review()) && !found.get().sha256().equalsIgnoreCase(String.valueOf(row.contentHash()))) {
+                // A released mail runs only as the mail that was reviewed: another mail
+                // carrying its Message-ID is not it.
                 processor.resubmissionLost(context, row, Instant.now());
                 continue;
             }

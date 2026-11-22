@@ -158,7 +158,8 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     public synchronized List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit) {
         return rows.values().stream()
                 .filter(r -> r.integrationId().equals(integrationId) && r.state() == State.RECEIVED && r.kind() == Kind.TRIGGER
-                        && r.conversationId() != null && r.nextAttemptAt() != null && !r.nextAttemptAt().isAfter(now))
+                        && (r.conversationId() != null || EmailReviewState.isReleased(r.review())) && r.nextAttemptAt() != null
+                        && !r.nextAttemptAt().isAfter(now))
                 .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt)).limit(limit).toList();
     }
 
@@ -170,8 +171,37 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), r.nextAttemptAt(), r.claimToken(), r.providerId(), r.lastError(),
-                r.createdAt(), now, r.expiresAt(), to, contentHash != null ? contentHash : r.contentHash()));
+                r.createdAt(), now, r.expiresAt(), to, contentHash != null ? contentHash : r.contentHash(), r.signed(), r.authVerdict(), r.review()));
         return true;
+    }
+
+    @Override
+    public synchronized boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash,
+                                                 Instant nextAttemptAt, String lastError, Instant now) {
+        LedgerEntry r = rows.get(id);
+        if (r == null || r.state() != from) {
+            return false;
+        }
+        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+                r.idempotencyKey(), r.recipient(), to, r.attempts(), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now,
+                r.expiresAt(), r.approvalState(), contentHash != null ? contentHash : r.contentHash(), r.signed(),
+                authVerdict != null ? authVerdict : r.authVerdict(), review));
+        return true;
+    }
+
+    @Override
+    public synchronized List<LedgerEntry> findHeld(String integrationId, int limit) {
+        return rows.values().stream().filter(r -> r.integrationId().equals(integrationId) && r.state() == State.HELD && r.kind() == Kind.TRIGGER)
+                .sorted(Comparator.comparing(LedgerEntry::createdAt).thenComparing(LedgerEntry::id)).limit(limit).toList();
+    }
+
+    @Override
+    public synchronized long countHeldSince(String integrationId, String senderDomain, Instant since) {
+        return rows.values().stream()
+                .filter(r -> r.integrationId().equals(integrationId) && r.kind() == Kind.TRIGGER && !r.createdAt().isBefore(since)
+                        && r.review() != null
+                        && (senderDomain == null || r.recipient() != null && r.recipient().endsWith("@" + senderDomain)))
+                .count();
     }
 
     @Override

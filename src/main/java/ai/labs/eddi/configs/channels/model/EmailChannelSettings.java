@@ -8,6 +8,8 @@ import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.mail.PublicSuffixList;
 
 import java.math.BigDecimal;
+import java.time.Duration;
+import java.time.format.DateTimeParseException;
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
 import java.util.List;
@@ -373,6 +375,109 @@ public record EmailChannelSettings(
         return smime == null ? null : connectionName(blankToNull(smime.getConnection()));
     }
 
+    /** Default of {@code emailControl.review.expiry}. */
+    public static final Duration DEFAULT_REVIEW_EXPIRY = Duration.ofDays(7);
+    /** The shortest {@code emailControl.review.expiry}. */
+    public static final Duration MIN_REVIEW_EXPIRY = Duration.ofHours(1);
+    /**
+     * The longest {@code emailControl.review.expiry} the document may name; the
+     * deployment's ledger retention minus one day caps it further at runtime.
+     */
+    public static final Duration MAX_REVIEW_EXPIRY = Duration.ofDays(90);
+    public static final int DEFAULT_MAX_HELD_PER_DAY = 50;
+    public static final int MAX_MAX_HELD_PER_DAY = 1000;
+    public static final int DEFAULT_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY = 5;
+    public static final int MAX_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY = 100;
+    public static final int MAX_REVIEWERS = 20;
+    /** Prefix of a {@code reviewers} entry that names a role. */
+    public static final String REVIEWER_ROLE_PREFIX = "role:";
+
+    /** Whether mail refused as not allowlisted is held for review. */
+    public boolean reviewsNotAllowlisted() {
+        EmailControl.OnRefused onRefused = emailControl == null ? null : emailControl.getOnRefused();
+        return onRefused != null && EmailControl.OnRefused.REVIEW.equalsIgnoreCase(String.valueOf(onRefused.getNotAllowlisted()).trim());
+    }
+
+    /**
+     * Whether mail refused as unauthenticated is held for review. Only meaningful
+     * while {@code requireAuthentication} is true (otherwise it is not refused).
+     */
+    public boolean reviewsUnauthenticated() {
+        EmailControl.OnRefused onRefused = emailControl == null ? null : emailControl.getOnRefused();
+        return onRefused != null && EmailControl.OnRefused.REVIEW.equalsIgnoreCase(String.valueOf(onRefused.getUnauthenticated()).trim());
+    }
+
+    /**
+     * {@code emailControl.review.expiry}, default 7 days; a value that does not
+     * parse reads as the default ({@link #validate} reports it).
+     */
+    public Duration reviewExpiry() {
+        EmailControl.Review review = emailControl == null ? null : emailControl.getReview();
+        Duration parsed = review == null ? null : parseDuration(review.getExpiry());
+        return parsed == null || parsed.compareTo(MIN_REVIEW_EXPIRY) < 0 || parsed.compareTo(MAX_REVIEW_EXPIRY) > 0 ? DEFAULT_REVIEW_EXPIRY : parsed;
+    }
+
+    /** {@code emailControl.review.maxHeldPerDay}, default 50. */
+    public int maxHeldPerDay() {
+        EmailControl.Review review = emailControl == null ? null : emailControl.getReview();
+        Integer value = review == null ? null : review.getMaxHeldPerDay();
+        return value == null || value < 1 || value > MAX_MAX_HELD_PER_DAY ? DEFAULT_MAX_HELD_PER_DAY : value;
+    }
+
+    /** {@code emailControl.review.maxHeldPerSenderDomainPerDay}, default 5. */
+    public int maxHeldPerSenderDomainPerDay() {
+        EmailControl.Review review = emailControl == null ? null : emailControl.getReview();
+        Integer value = review == null ? null : review.getMaxHeldPerSenderDomainPerDay();
+        return value == null || value < 1 || value > MAX_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY ? DEFAULT_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY : value;
+    }
+
+    /**
+     * {@code emailControl.review.reviewers}, trimmed; empty means the default (EDIT
+     * holders and {@code eddi-approver}).
+     */
+    public List<String> reviewers() {
+        EmailControl.Review review = emailControl == null ? null : emailControl.getReview();
+        if (review == null || review.getReviewers() == null) {
+            return List.of();
+        }
+        List<String> reviewers = new ArrayList<>();
+        for (String reviewer : review.getReviewers()) {
+            if (reviewer != null && !reviewer.isBlank()) {
+                reviewers.add(reviewer.trim());
+            }
+        }
+        return List.copyOf(reviewers);
+    }
+
+    /**
+     * The folder held mail is moved to when processed mail is moved: a sibling
+     * named {@code Held} of the move folder ({@code EDDI/Processed} →
+     * {@code EDDI/Held}), with the same separator; {@code EDDI/Held} next to a
+     * top-level move folder. Null when processed mail is only flagged.
+     */
+    public String heldFolder() {
+        String moveTo = moveToFolder();
+        if (moveTo == null) {
+            return null;
+        }
+        int slash = Math.max(moveTo.lastIndexOf('/'), moveTo.lastIndexOf('.'));
+        if (slash <= 0) {
+            return "EDDI/Held";
+        }
+        return moveTo.substring(0, slash + 1) + "Held";
+    }
+
+    static Duration parseDuration(String value) {
+        if (value == null || value.isBlank()) {
+            return null;
+        }
+        try {
+            return Duration.parse(value.trim().toUpperCase(Locale.ROOT));
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
     /**
      * Whether mail this integration sends is to be signed: {@code sign} is
      * {@code true} and a signing connection is named, or {@code sign} is
@@ -657,7 +762,11 @@ public record EmailChannelSettings(
      * ({@code EmailChannelSupport}).
      */
     private static void validateEmailControl(List<String> errors, EmailControl emailControl) {
-        if (emailControl == null || emailControl.getSmime() == null) {
+        if (emailControl == null) {
+            return;
+        }
+        validateReview(errors, emailControl);
+        if (emailControl.getSmime() == null) {
             return;
         }
         EmailControl.Smime smime = emailControl.getSmime();
@@ -668,6 +777,62 @@ public record EmailChannelSettings(
         if (smime.getSign() == EmailControl.SignMode.REQUIRED && connection == null) {
             errors.add("emailControl.smime.sign 'required' needs emailControl.smime.connection: the name of an SMIME_SIGNING connection "
                     + "holding the mailbox's certificate. Without one every outgoing mail would be held.");
+        }
+    }
+
+    /**
+     * {@code emailControl.onRefused} and {@code emailControl.review} (plan §7.1).
+     */
+    private static void validateReview(List<String> errors, EmailControl emailControl) {
+        EmailControl.OnRefused onRefused = emailControl.getOnRefused();
+        if (onRefused != null) {
+            refusalAction(errors, "notAllowlisted", onRefused.getNotAllowlisted());
+            refusalAction(errors, "unauthenticated", onRefused.getUnauthenticated());
+            String notAddressed = blankToNull(onRefused.getNotAddressed());
+            if (notAddressed != null && !EmailControl.OnRefused.DROP.equalsIgnoreCase(notAddressed.trim())) {
+                errors.add("emailControl.onRefused.notAddressed can only be 'drop' for now: holding mail that does not address the "
+                        + "integration needs addressing (email channel v2 phase 3), which this version does not have.");
+            }
+        }
+        EmailControl.Review review = emailControl.getReview();
+        if (review == null) {
+            return;
+        }
+        String expiry = blankToNull(review.getExpiry());
+        if (expiry != null) {
+            Duration parsed = parseDuration(expiry);
+            if (parsed == null || parsed.compareTo(MIN_REVIEW_EXPIRY) < 0 || parsed.compareTo(MAX_REVIEW_EXPIRY) > 0) {
+                errors.add("emailControl.review.expiry must be an ISO-8601 duration between PT1H and P90D, e.g. P7D.");
+            }
+        }
+        if (review.getMaxHeldPerDay() != null && (review.getMaxHeldPerDay() < 1 || review.getMaxHeldPerDay() > MAX_MAX_HELD_PER_DAY)) {
+            errors.add("emailControl.review.maxHeldPerDay must be between 1 and " + MAX_MAX_HELD_PER_DAY + ".");
+        }
+        if (review.getMaxHeldPerSenderDomainPerDay() != null
+                && (review.getMaxHeldPerSenderDomainPerDay() < 1
+                        || review.getMaxHeldPerSenderDomainPerDay() > MAX_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY)) {
+            errors.add("emailControl.review.maxHeldPerSenderDomainPerDay must be between 1 and " + MAX_MAX_HELD_PER_SENDER_DOMAIN_PER_DAY + ".");
+        }
+        List<String> reviewers = review.getReviewers();
+        if (reviewers != null) {
+            if (reviewers.size() > MAX_REVIEWERS) {
+                errors.add("emailControl.review.reviewers holds at most " + MAX_REVIEWERS + " entries.");
+            }
+            for (int i = 0; i < reviewers.size(); i++) {
+                String reviewer = reviewers.get(i);
+                if (reviewer == null || reviewer.isBlank() || reviewer.length() > 255 || hasControl(reviewer)
+                        || reviewer.trim().equals(REVIEWER_ROLE_PREFIX)) {
+                    errors.add("emailControl.review.reviewers entry " + (i + 1) + " must be an EDDI user id or 'role:<name>'.");
+                }
+            }
+        }
+    }
+
+    private static void refusalAction(List<String> errors, String field, String value) {
+        String action = blankToNull(value);
+        if (action != null && !EmailControl.OnRefused.DROP.equalsIgnoreCase(action.trim())
+                && !EmailControl.OnRefused.REVIEW.equalsIgnoreCase(action.trim())) {
+            errors.add("emailControl.onRefused." + field + " must be 'drop' or 'review'.");
         }
     }
 
@@ -710,6 +875,9 @@ public record EmailChannelSettings(
         }
         if (settings.mode() == Mode.TRIGGER && !settings.requireAuthentication() && settings.senderAllowlist().isEmpty()) {
             warnings.add(WARNING_OPEN_TRIGGER);
+        }
+        if (settings.mode() == Mode.TRIGGER && !settings.requireAuthentication()) {
+            warnings.add(WARNING_ANONYMOUS_TOOLS);
         }
         if (allowlistIsBroad(settings.senderAllowlist(), settings.address())) {
             warnings.add(WARNING_ALLOWLIST_BROAD);
@@ -765,6 +933,13 @@ public record EmailChannelSettings(
      * authentication.
      */
     public static final String WARNING_OPEN_TRIGGER = "email.open-trigger";
+    /**
+     * Trigger mode with {@code requireAuthentication: false}: unauthenticated mail
+     * runs anonymously with every tool its target's agent has (today's behaviour,
+     * kept for existing integrations). Mail released from review never does: it
+     * runs with the target's {@code readOnlyTools} only (plan §7.3).
+     */
+    public static final String WARNING_ANONYMOUS_TOOLS = "email.anonymous-tools";
     /** An agent the integration targets has tools and no tool approvals. */
     public static final String WARNING_TOOLS_WITHOUT_APPROVALS = "email.tools-without-approvals";
     /**

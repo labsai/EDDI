@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.reply.EmailReplySender;
 import ai.labs.eddi.integrations.email.reply.EmailReplyThread;
+import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
@@ -148,10 +149,35 @@ public class EmailInboundSweeper {
             LOGGER.warnf("Email inbound sweep (stranded turns) failed: %s", e.getMessage());
         }
         try {
+            expireHeld(now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email inbound sweep (held mail) failed: %s", e.getMessage());
+        }
+        try {
             ensureSchedules();
         } catch (RuntimeException e) {
             LOGGER.warnf("Email inbound sweep (poll schedules) failed: %s", e.getMessage());
         }
+    }
+
+    /**
+     * Drops held mail nobody decided before its review expired (v3 plan §7.1):
+     * {@code HELD → REFUSED}, reason {@code review_expired}. Conditional, so a
+     * reviewer deciding at the same moment wins or loses cleanly.
+     *
+     * @return how many were dropped
+     */
+    int expireHeld(Instant now) {
+        int expired = 0;
+        for (LedgerEntry row : ledger.findDue(Kind.TRIGGER, State.HELD, now, BATCH)) {
+            String review = EmailReviewState.EXPIRED + String.join("+", EmailReviewState.reasons(row.review()));
+            if (ledger.transitionReview(row.id(), State.HELD, State.REFUSED, review, null, null, null, EmailReviewState.REVIEW_EXPIRED, now)) {
+                expired++;
+                metrics.inbound(row.integrationId(), null, EmailReviewState.REVIEW_EXPIRED);
+                LOGGER.infof("Email integration %s: held mail %s was not decided in time and is dropped", sanitize(row.integrationId()), row.id());
+            }
+        }
+        return expired;
     }
 
     /**

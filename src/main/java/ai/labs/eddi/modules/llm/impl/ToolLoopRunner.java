@@ -658,7 +658,9 @@ class ToolLoopRunner {
                                                     toolSources, setup.toolEndpoints()),
                                     task, memory, toolCanonicalNames, currentMessages, aiMessage, trace, exchangeRecorder),
                             setup.toolRequestResolvers(), currentMessages, aiMessage, trace, exchangeRecorder);
-                    var gateResult = screened.gateResult();
+                    // A released, unauthenticated mail may use only readOnlyTools: what
+                    // either gate gated is refused here, never paused (v3 plan §7.3).
+                    var gateResult = refuseReadOnlyOnly(emailGate, screened.gateResult(), currentMessages, aiMessage, trace, exchangeRecorder);
                     // The pin step below reuses what the screening already resolved.
                     var pinResolvers = screened.resolvers();
 
@@ -1215,6 +1217,32 @@ class ToolLoopRunner {
             });
         }
         return new Screened(screenedGate, memoised);
+    }
+
+    /**
+     * Under an email gate that allows only {@code readOnlyTools}
+     * ({@link EmailApprovalGate.Policy#readOnlyOnly()}), refuses every gated call
+     * with a DENIED result instead of pausing for an approver: no approval may
+     * widen what a released, unauthenticated mail can do.
+     */
+    private static ToolApprovalGate.GateResult refuseReadOnlyOnly(EmailApprovalGate.Policy emailGate, ToolApprovalGate.GateResult gateResult,
+                                                                  List<ChatMessage> currentMessages, AiMessage aiMessage,
+                                                                  List<Map<String, Object>> trace, ToolExchangeRecorder exchangeRecorder) {
+        List<ToolExecutionRequest> refused = EmailApprovalGate.refusedAsReadOnlyOnly(emailGate, gateResult);
+        if (refused.isEmpty()) {
+            return gateResult;
+        }
+        for (ToolExecutionRequest req : refused) {
+            addResult(currentMessages, aiMessage, req,
+                    "{\"status\":\"DENIED\",\"reason\":\"this conversation may use only read-only tools; do not retry\"}", exchangeRecorder);
+            Map<String, Object> step = new HashMap<>();
+            step.put("type", "tool_error");
+            step.put("tool", req.name());
+            withCallId(step, req);
+            step.put("error", EmailApprovalGate.READ_ONLY_ONLY_REASON);
+            trace.add(step);
+        }
+        return new ToolApprovalGate.GateResult(List.of(), gateResult.allowed(), gateResult.gateReasonByCallId());
     }
 
     /**

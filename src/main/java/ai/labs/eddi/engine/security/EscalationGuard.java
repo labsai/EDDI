@@ -67,8 +67,10 @@ public final class EscalationGuard {
             "create_channel_integration", "update_channel_integration", "delete_channel_integration",
             // email sender lists (C1)
             "update_email_senders",
+            // held-mail decisions (C3): a mail must never release itself or its kin
+            "decide_held_email",
             // later phases of the email control plan, guarded before they exist
-            "update_email_roles", "update_email_send_out", "decide_held_email",
+            "update_email_roles", "update_email_send_out",
             // HITL decisions (McpHitlTools)
             "resume_conversation", "approve_group_phase", "submit_group_human_input",
             // team handoff decisions (McpTeamHandoffTools): "a human decision"

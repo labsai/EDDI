@@ -362,4 +362,27 @@ class EmailInboundSweeperTest {
 
         assertEquals(1, sweeper.settleHeldStarts(now));
     }
+
+    @Test
+    @DisplayName("held mail nobody decided is dropped as review_expired once its review expires, and not before (v3 §7.1)")
+    void expiresHeldMail() {
+        Instant now = Instant.now();
+        LedgerEntry fresh = new LedgerEntry("held-fresh", "int-1", Kind.TRIGGER, Direction.IN, "<f@x.com>", null, "imap:INBOX:1:1", "in:f",
+                "a@x.com", State.HELD, 0, now.plusSeconds(3600), null, null, "held:not_allowlisted", now, now, now.plus(Duration.ofDays(30)), null,
+                "h", null, "aligned-pass", "held:not_allowlisted");
+        LedgerEntry old = new LedgerEntry("held-old", "int-1", Kind.TRIGGER, Direction.IN, "<o@x.com>", null, "imap:INBOX:1:2", "in:o", "b@x.com",
+                State.HELD, 0, now.minusSeconds(1), null, null, "held:not_allowlisted+unauthenticated", now, now, now.plus(Duration.ofDays(30)), null,
+                "h", null, "fail", "held:not_allowlisted+unauthenticated");
+        ledger.put(fresh);
+        ledger.put(old);
+
+        assertEquals(1, sweeper.expireHeld(now));
+
+        LedgerEntry expired = ledger.findById("held-old").orElseThrow();
+        assertEquals(State.REFUSED, expired.state());
+        assertEquals("review_expired", expired.lastError());
+        assertEquals("expired:not_allowlisted+unauthenticated", expired.review());
+        assertEquals(State.HELD, ledger.findById("held-fresh").orElseThrow().state());
+        assertEquals(0, sweeper.expireHeld(now), "settled once");
+    }
 }

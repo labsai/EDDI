@@ -262,6 +262,12 @@ class EmailMailboxPollerTest {
                 }
 
                 @Override
+                public MarkResult markHeld(MailboxMessage message, EmailChannelSettings s) {
+                    events.add("hold:" + message.uid());
+                    return MarkResult.MOVED;
+                }
+
+                @Override
                 public void close() {
                     // nothing to close
                 }
@@ -306,6 +312,46 @@ class EmailMailboxPollerTest {
         poller.poll(ID);
 
         assertTrue(events.contains("find:<held@x.com>:imap:INBOX:1:7:" + hash), events.toString());
+    }
+
+    @Test
+    @DisplayName("held mail (v3 §7.2) is marked as held, never pins the cursor, and the batch gets one notice")
+    void heldMailAdvancesTheCursor() {
+        initialise(9);
+        transport.add(10, Instant.now());
+        transport.add(11, Instant.now());
+        transport.add(12, Instant.now());
+        dispositions.put(10L, Disposition.HELD);
+        dispositions.put(11L, Disposition.HELD);
+
+        var report = poller.poll(ID);
+
+        assertEquals(List.of("ledger:10", "hold:10", "ledger:11", "hold:11", "ledger:12", "mark:12"), events);
+        assertEquals(12, state.read(ID).orElseThrow().lastUid(), "the cursor passes held mail");
+        verify(processor).notifyHeld(argThat(ctx -> ID.equals(ctx.integrationId())), eq(2), any());
+        assertTrue(report.message().contains("2 held"), report.message());
+    }
+
+    @Test
+    @DisplayName("a released held mail is resubmitted only as the mail that was held: another mail with its Message-ID counts as lost")
+    void releasedResubmissionChecksTheHash() {
+        initialise(0);
+        Instant now = Instant.now();
+        byte[] held = EmailTestMail.mail().bytes();
+        var released = new LedgerEntry("row-rel", ID, Kind.TRIGGER, Direction.IN, "<rel@x.com>", null, "imap:EDDI/Held:1:7", "in:rel", "a@x.com",
+                State.RECEIVED, 0, now, null, null, "review_released", now, now, now.plus(Duration.ofDays(30)), null,
+                new MailTransport.FoundMessage(held, now, "x").sha256(), null, "fail", "released:runOnce:unauthenticated");
+        when(processor.pendingResubmissions(eq(ID), any())).thenReturn(List.of(released));
+        transport.byMessageId.put("<rel@x.com>", new MailTransport.FoundMessage(EmailTestMail.mail().body("other").bytes(), now, "imap:INBOX:1:9"));
+
+        poller.poll(ID);
+
+        verify(processor).resubmissionLost(any(), eq(released), any());
+        verify(processor, never()).process(any(), argThat(m -> m != null && "<rel@x.com>".equals(m.envelopeMessageId())), any());
+
+        transport.byMessageId.put("<rel@x.com>", new MailTransport.FoundMessage(held, now, "imap:EDDI/Held:1:7"));
+        poller.poll(ID);
+        verify(processor).process(any(), argThat(m -> m != null && "<rel@x.com>".equals(m.envelopeMessageId())), any());
     }
 
     @Test

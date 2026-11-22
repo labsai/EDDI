@@ -100,6 +100,16 @@ final class McpRoles {
     static final List<String> OVERSIGHT = List.of(ADMIN, EDITOR, APPROVER);
 
     /**
+     * Held email (email channel v3 plan §7.3): the method-level
+     * {@code @RolesAllowed} of the held-mail endpoints of
+     * {@code IRestChannelIntegrationStore}. The approver is in it because deciding
+     * held mail is approving; whether this caller reviews this integration (EDIT,
+     * or {@code emailControl.review.reviewers}) is checked by the REST resource
+     * after this gate.
+     */
+    static final List<String> HELD_MAIL = List.of(ADMIN, EDITOR, APPROVER);
+
+    /**
      * Team budget reads — one team's budget and history, and the cross-team
      * listing: the read {@code @RolesAllowed} of {@code IRestGroupBudget} and
      * {@code IRestTeamBudgets}, which admit {@code eddi-viewer} next to the

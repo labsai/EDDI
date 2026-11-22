@@ -137,6 +137,9 @@ class McpRoleTierParityTest {
     private static final Set<String> OVERSIGHT_TOOLS = Set.of("summarize_approvals", "list_autonomy_recommendations", "get_autonomy_state",
             "count_pending_audit_samples");
 
+    /** Held email: the held-mail endpoints' admin/editor/approver tier. */
+    private static final Set<String> HELD_MAIL_TOOLS = Set.of("list_held_email", "decide_held_email");
+
     /** Team budget reads: REST's admin/editor/viewer tier. */
     private static final Set<String> BUDGET_READ_TOOLS = Set.of("read_team_budget", "list_team_budgets");
 
@@ -162,6 +165,9 @@ class McpRoleTierParityTest {
         }
         if (OVERSIGHT_TOOLS.contains(tool)) {
             return McpRoles.OVERSIGHT;
+        }
+        if (HELD_MAIL_TOOLS.contains(tool)) {
+            return McpRoles.HELD_MAIL;
         }
         if (BUDGET_READ_TOOLS.contains(tool)) {
             return McpRoles.BUDGET_READ;
@@ -243,7 +249,7 @@ class McpRoleTierParityTest {
     @DisplayName("every tool admits exactly the roles of its tier — measured, one role at a time")
     void measuredMatrixEqualsTheDocumentedTiers() throws Exception {
         Map<String, Set<String>> measured = measureMatrix();
-        assertEquals(122, measured.size());
+        assertEquals(124, measured.size());
 
         var violations = new ArrayList<String>();
         for (var entry : measured.entrySet()) {
@@ -372,6 +378,9 @@ class McpRoleTierParityTest {
         record MethodTier(Class<?> rest, String method, List<String> tier) {
         }
         for (MethodTier mt : List.of(
+                new MethodTier(IRestChannelIntegrationStore.class, "readHeldEmail", McpRoles.HELD_MAIL), // list_held_email
+                new MethodTier(IRestChannelIntegrationStore.class, "readHeldEmailPreview", McpRoles.HELD_MAIL),
+                new MethodTier(IRestChannelIntegrationStore.class, "decideHeldEmail", McpRoles.HELD_MAIL), // decide_held_email
                 new MethodTier(IRestModelPriceCatalog.class, "readCatalog", McpRoles.AUTHOR), // read_model_prices
                 new MethodTier(IRestModelPriceCatalog.class, "resolve", McpRoles.AUTHOR),
                 new MethodTier(IRestModelPriceCatalog.class, "unpriced", McpRoles.AUTHOR),

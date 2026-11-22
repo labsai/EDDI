@@ -91,6 +91,41 @@ public class EmailSenderListAudit {
         }
     }
 
+    /** Task id of a held-mail decision entry (v3 plan §7.3). */
+    public static final String HELD_TASK_ID = "email.held";
+
+    /** The action recorded for a held-mail decision. */
+    public static final String HELD_ACTION = "EMAIL_HELD_MAIL_DECIDED";
+
+    /**
+     * Records a reviewer's decision on a held mail: who, which row, what, why. The
+     * sender appears only as its pseudonym; the note is scrubbed of addresses.
+     */
+    public void heldMailDecided(String integrationId, String rowId, String decision, List<String> reasons, String authVerdict, String sender,
+                                String note) {
+        try {
+            if (ledger == null || !ledger.isResolvable() || !ledger.get().isEnabled()) {
+                return;
+            }
+            Map<String, Object> output = new LinkedHashMap<>();
+            output.put("integrationId", integrationId);
+            output.put("ledgerId", rowId);
+            output.put("decision", decision);
+            output.put("heldFor", reasons);
+            output.put("authVerdict", authVerdict);
+            if (sender != null && sender.indexOf('@') > 0) {
+                output.put("senderDomain", sender.substring(sender.lastIndexOf('@') + 1));
+                output.put("senderPseudonym", pseudonym(sender));
+            }
+            output.put("note", scrubAddresses(note));
+            ledger.get().submit(new AuditEntry(UUID.randomUUID().toString(), null, null, null, actor(), null, 0, HELD_TASK_ID, "email", 0, 0,
+                    Map.of("action", HELD_ACTION), output, null, null, List.of(HELD_ACTION), 0.0, Instant.now(), null, null));
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Could not write the held-mail audit entry of email integration %s: %s", LogSanitizer.sanitize(integrationId),
+                    LogSanitizer.sanitize(e.getMessage()));
+        }
+    }
+
     /** An address-shaped token inside free text; bounded classes, no nesting. */
     private static final Pattern ADDRESS_IN_TEXT = Pattern
             .compile("(?:\"[^\"\\r\\n]{1,64}\"|[^\\s@<>,;\"'()]{1,64})@[^\\s@<>,;\"'()]{1,255}");

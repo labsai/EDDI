@@ -40,6 +40,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
@@ -387,6 +388,15 @@ public class ImapMailTransport implements MailTransport {
 
         @Override
         public MarkResult markProcessed(MailboxMessage message, EmailChannelSettings settings) throws MailboxException {
+            return mark(message, settings, settings.moveToFolder());
+        }
+
+        @Override
+        public MarkResult markHeld(MailboxMessage message, EmailChannelSettings settings) throws MailboxException {
+            return mark(message, settings, settings.heldFolder());
+        }
+
+        private MarkResult mark(MailboxMessage message, EmailChannelSettings settings, String moveTo) throws MailboxException {
             IMAPMessage imap = ((ImapMessage) message).message;
             try {
                 boolean flagged = false;
@@ -404,7 +414,7 @@ public class ImapMailTransport implements MailTransport {
                     // a mail from running twice; the keyword only spares a re-download.
                     warnNoKeywords(settings);
                 }
-                if (!settings.movesProcessed()) {
+                if (moveTo == null) {
                     return flagged ? MarkResult.FLAGGED : MarkResult.NOTHING;
                 }
                 if (!store.hasCapability("MOVE")) {
@@ -414,7 +424,7 @@ public class ImapMailTransport implements MailTransport {
                     }
                     return flagged ? MarkResult.FLAGGED_NOT_MOVED : MarkResult.NOTHING;
                 }
-                Folder destination = store.getFolder(settings.moveToFolder());
+                Folder destination = store.getFolder(moveTo);
                 if (!destination.exists()) {
                     destination.create(Folder.HOLDS_MESSAGES);
                 }
@@ -455,14 +465,17 @@ public class ImapMailTransport implements MailTransport {
                                 || candidates.stream().anyMatch(c -> preferredSourceRef.equals(c.sourceRef())));
                 if (!settled && settings.movesProcessed()) {
                     // The mail may have been moved since: B in the polled folder must not
-                    // shadow the approved A in the move folder.
-                    Folder moved = store.getFolder(settings.moveToFolder());
-                    if (moved.exists()) {
-                        moved.open(Folder.READ_ONLY);
-                        try {
-                            candidates.addAll(search((IMAPFolder) moved, messageId, maxBytes, false));
-                        } finally {
-                            moved.close(false);
+                    // shadow the approved A in the move folder — or, for held mail, in the
+                    // Held folder (v3 plan §7.3).
+                    for (String name : new LinkedHashSet<>(List.of(settings.moveToFolder(), settings.heldFolder()))) {
+                        Folder moved = store.getFolder(name);
+                        if (moved.exists()) {
+                            moved.open(Folder.READ_ONLY);
+                            try {
+                                candidates.addAll(search((IMAPFolder) moved, messageId, maxBytes, false));
+                            } finally {
+                                moved.close(false);
+                            }
                         }
                     }
                 }

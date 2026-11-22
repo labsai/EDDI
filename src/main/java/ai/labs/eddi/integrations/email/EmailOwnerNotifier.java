@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.connections.ConnectionsConfig;
 import ai.labs.eddi.engine.mail.AddressNormalizer;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.MailSendException;
@@ -21,6 +22,7 @@ import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.context.ApplicationScoped;
+import jakarta.enterprise.inject.Instance;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
@@ -31,6 +33,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.time.temporal.ChronoUnit;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
@@ -92,7 +95,13 @@ public class EmailOwnerNotifier {
          */
         SMIME_HOLD_EXPIRED("smime_hold_expired", "a reply held because it could not be S/MIME-signed (emailControl.smime.sign "
                 + "'required') waited eddi.email.smime.max-hold and was given up, unsent; check the email ledger rows of kind REPLY in "
-                + "state FAILED with reason smime_unavailable:expired, and fix the signing certificate");
+                + "state FAILED with reason smime_unavailable:expired, and fix the signing certificate"),
+        /**
+         * Mail would have been held for review, but today's cap
+         * ({@code emailControl.review.maxHeldPerDay}) is reached (v3 phase C3).
+         */
+        REVIEW_FULL("review_full", "its held-mail review queue reached emailControl.review.maxHeldPerDay for today, so further mail "
+                + "that would have been held is dropped until the next UTC day; decide the held mail, or raise the cap");
 
         private final String id;
         private final String text;
@@ -115,6 +124,11 @@ public class EmailOwnerNotifier {
         boolean isSigningProblem() {
             return this == CERTIFICATE_EXPIRING || this == SMIME_UNAVAILABLE;
         }
+
+        /** About held mail; mail intake goes on. */
+        boolean isReviewProblem() {
+            return this == REVIEW_FULL;
+        }
     }
 
     private final SystemMailer mailer;
@@ -123,6 +137,14 @@ public class EmailOwnerNotifier {
     private final MeterRegistry meterRegistry;
     private final NotifyRecipientPolicy recipientPolicy;
     private final Duration retention;
+
+    /**
+     * For the Manager link in held-mail notices. Field-injected so the constructor
+     * stays the one the tests use; absent, the notice names the page without a
+     * link.
+     */
+    @Inject
+    Instance<ConnectionsConfig> connectionsConfig;
 
     @Inject
     public EmailOwnerNotifier(SystemMailer mailer, IEmailMailboxStateStore stateStore, IEmailMessageLedger ledger, MeterRegistry meterRegistry,
@@ -163,7 +185,9 @@ public class EmailOwnerNotifier {
             return false;
         }
         LOGGER.warnf(
-                reason.isReplyProblem() || reason.isSigningProblem() ? "Email integration %s: %s." : "Email integration %s stopped taking mail: %s.",
+                reason.isReplyProblem() || reason.isSigningProblem() || reason.isReviewProblem()
+                        ? "Email integration %s: %s."
+                        : "Email integration %s stopped taking mail: %s.",
                 sanitize(integrationId),
                 reason.text);
         if (mailer == null || !mailer.isEnabled() || settings == null || settings.ownerNotifyAddresses().isEmpty()) {
@@ -192,7 +216,11 @@ public class EmailOwnerNotifier {
         String name = flatten(integrationName == null ? integrationId : integrationName);
         String subject;
         String text;
-        if (reason.isSigningProblem()) {
+        if (reason.isReviewProblem()) {
+            subject = "[EDDI] Email integration review queue full: " + name;
+            text = "The email integration '" + name + "' (" + integrationId + "): " + reason.text
+                    + ".\n\nNo content of any mail is included here.\n";
+        } else if (reason.isSigningProblem()) {
             subject = "[EDDI] Email integration S/MIME certificate: " + name;
             text = "The email integration '" + name + "' (" + integrationId + "): " + reason.text
                     + ".\n\nMail keeps being processed. No content of any conversation is included here.\n";
@@ -229,6 +257,123 @@ public class EmailOwnerNotifier {
                     now.plus(retention)));
         } catch (RuntimeException e) {
             LOGGER.debugf("Could not record the notice ledger row: %s", e.getMessage());
+        }
+    }
+
+    /** Held rows a notice counts at most ("50 or more"). */
+    public static final int MAX_HELD_COUNTED = 200;
+
+    /** The Manager page where held mail is decided. */
+    static final String APPROVALS_PATH = "/manage/approvals";
+
+    /**
+     * Tells the reviewers that mail is waiting for review (v3 plan §7.2): one
+     * notice per poll batch that held mail, at most one per integration and UTC
+     * hour cluster-wide, to {@code ownerNotifyAddresses} through the system mailer.
+     * It counts, and links to the Manager approvals page; it never names a sender
+     * or a subject — that is what the authenticated preview is for.
+     *
+     * @return whether this call was the one that notified
+     */
+    public boolean notifyHeld(String integrationId, String integrationName, EmailChannelSettings settings, int heldNow, int waiting, Instant now) {
+        String hour = now.atZone(ZoneOffset.UTC).toLocalDateTime().truncatedTo(ChronoUnit.HOURS).toString();
+        boolean claimed;
+        try {
+            claimed = stateStore.claimNotice(integrationId, hour + ":held", now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email integration %s: could not record the held-mail notice: %s", sanitize(integrationId), e.getMessage());
+            return false;
+        }
+        if (!claimed) {
+            return false;
+        }
+        LOGGER.infof("Email integration %s: %d mail(s) held for review, %d waiting.", sanitize(integrationId), heldNow, waiting);
+        if (mailer == null || !mailer.isEnabled() || settings == null || settings.ownerNotifyAddresses().isEmpty()) {
+            return true;
+        }
+        MailAddress from = mailer.from().orElse(null);
+        if (from == null) {
+            return true;
+        }
+        String name = flatten(integrationName == null ? integrationId : integrationName);
+        String link = approvalsUrl();
+        String subject = "[EDDI] Mail held for review: " + name;
+        String text = "The email integration '" + name + "' (" + integrationId + ") held " + heldNow + " mail(s) for review instead of "
+                + "dropping them; " + (waiting >= MAX_HELD_COUNTED ? MAX_HELD_COUNTED + " or more" : String.valueOf(waiting))
+                + " are waiting for a decision.\n\nDecide them (discard, run once, or run and allow the sender) in the EDDI Manager"
+                + (link == null ? ", on the Approvals page." : ": " + link) + "\nUndecided mail is dropped after "
+                + settings.reviewExpiry().toDays() + " day(s). No content of any mail is included here.\n";
+        for (String address : settings.ownerNotifyAddresses()) {
+            Optional<String> recipient = AddressNormalizer.tryNormalize(address);
+            if (recipient.isEmpty()) {
+                continue;
+            }
+            if (!recipientPolicy.allows(recipient.get())) {
+                count("not_allowed");
+                continue;
+            }
+            deliver(integrationId, "held", hour, from, recipient.get(), subject, text, now);
+        }
+        return true;
+    }
+
+    /**
+     * The Manager approvals page, or null when no usable public base URL is set.
+     */
+    String approvalsUrl() {
+        if (connectionsConfig == null || !connectionsConfig.isResolvable()) {
+            return null;
+        }
+        try {
+            ConnectionsConfig config = connectionsConfig.get();
+            String base = config.getPublicBaseUrl();
+            if (base == null || base.isBlank() || config.publicBaseUrlProblem().isPresent()) {
+                return null;
+            }
+            return (base.endsWith("/") ? base.substring(0, base.length() - 1) : base) + APPROVALS_PATH;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** Sends one held-mail notice and records its NOTICE row. */
+    private void deliver(String integrationId, String reasonId, String window, MailAddress from, String recipient, String subject, String text,
+                         Instant now) {
+        String messageId = MessageIds.generate(from.domain());
+        State state;
+        String error = null;
+        String provider = null;
+        try {
+            var rendered = PlainTextMailRenderer.render(new OutboundMail(from, List.of(new MailAddress(recipient, null)), List.of(), subject, text,
+                    messageId, null, null, OutboundMail.Kind.AUTO_GENERATED, now));
+            provider = mailer.send(rendered, List.of(new MailAddress(recipient, null))).serverResponse();
+            state = State.SENT;
+            count("sent");
+        } catch (MailSendException | IllegalArgumentException | IllegalStateException e) {
+            state = State.FAILED;
+            error = e.getClass().getSimpleName() + ": " + (e.getMessage() == null ? "" : e.getMessage());
+            if (error.length() > 300) {
+                error = error.substring(0, 300) + "…";
+            }
+            count("failed");
+            LOGGER.warnf("Email integration %s: the %s notice could not be sent: %s", sanitize(integrationId), reasonId, error);
+        }
+        try {
+            ledger.insertIfAbsent(new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.NOTICE, Direction.OUT, messageId, null, reasonId,
+                    noticeKey(integrationId, window, reasonId, recipient), recipient, state, 1, null, null, provider, error, now, now,
+                    now.plus(retention)));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Could not record the notice ledger row: %s", e.getMessage());
+        }
+    }
+
+    static String noticeKey(String integrationId, String window, String reasonId, String recipient) {
+        try {
+            byte[] hash = MessageDigest.getInstance("SHA-256")
+                    .digest(("NOTICE\n" + integrationId + "\n" + window + "\n" + reasonId + "\n" + recipient).getBytes(StandardCharsets.UTF_8));
+            return "notice:" + HexFormat.of().formatHex(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new IllegalStateException("SHA-256 is not available", e);
         }
     }
 

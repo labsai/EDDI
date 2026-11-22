@@ -40,6 +40,7 @@ import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.UserConversation;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier.Reason;
 import ai.labs.eddi.integrations.email.ledger.IEmailMailboxStateStore;
+import ai.labs.eddi.integrations.email.ledger.EmailReviewState;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
@@ -144,7 +145,13 @@ public class EmailInboundProcessor {
         /** Leave it unmarked; a later poll retries it. */
         DEFERRED,
         /** Leave it unmarked and stop this poll's batch (a budget or quota is hit). */
-        STOP
+        STOP,
+        /**
+         * Held for a reviewer (v3 plan §7.2): recorded for good like {@link #SETTLED} —
+         * the cursor advances past it — and marked processed, moved to the Held folder
+         * when processed mail is moved.
+         */
+        HELD
     }
 
     /** Everything the processor needs about the integration a mail arrived on. */
@@ -340,11 +347,44 @@ public class EmailInboundProcessor {
         if (sender.equals(settings.address()) || SenderPatterns.matchesAny(sender, settings.senderBlocklist())) {
             return refuse(ctx, row, "blocked:blocklist", EmailMetrics.BLOCKED, now);
         }
-        if (!settings.senderAllowlist().isEmpty() && !SenderPatterns.matchesAny(sender, settings.senderAllowlist())) {
-            return refuse(ctx, row, "blocked:not_allowlisted", EmailMetrics.BLOCKED, now);
+        // 6b. The reviewable checks (v3 plan §7): the allowlist and the authentication
+        // requirement, both evaluated. The mail is held for a reviewer when every
+        // failing one is set to review; otherwise refused exactly as before. Everything
+        // above (loops, bounces, no single sender, the blocklist and the own address)
+        // is
+        // never reviewable. A mail a reviewer released skips exactly the checks that
+        // held it — every other check, and a reviewable one that newly fails, runs.
+        String rawHash = sha256Hex(raw);
+        boolean released = EmailReviewState.isReleased(row.review());
+        if (released && !rawHash.equalsIgnoreCase(String.valueOf(row.contentHash()))) {
+            // A Message-ID is not a secret: only the mail that was reviewed runs.
+            LOGGER.warnf("Email integration %s: mail %s carries the Message-ID of a mail a reviewer released, but not its content; it does "
+                    + "not run", sanitize(id), row.id());
+            count(ctx, EmailMetrics.DEFERRED);
+            return Disposition.DEFERRED;
         }
-        if (!authenticated && settings.requireAuthentication()) {
-            return refuse(ctx, row, "unauthenticated:" + verdictId(authentication), EmailMetrics.UNAUTHENTICATED, now);
+        List<String> releasedFor = released ? EmailReviewState.reasons(row.review()) : List.of();
+        // Released without an aligned pass, or the live result disagrees with the
+        // stored one: anonymous, read-only, never any outgoing mail (fail closed).
+        if (released && !EmailReviewState.alignedPass(row.authVerdict())) {
+            authenticated = false;
+        }
+        boolean anonymousRelease = released && !authenticated;
+        List<String> failing = new ArrayList<>();
+        if (!settings.senderAllowlist().isEmpty() && !SenderPatterns.matchesAny(sender, settings.senderAllowlist())
+                && !releasedFor.contains(EmailReviewState.NOT_ALLOWLISTED)) {
+            failing.add(EmailReviewState.NOT_ALLOWLISTED);
+        }
+        if (!authenticated && settings.requireAuthentication() && !releasedFor.contains(EmailReviewState.UNAUTHENTICATED)) {
+            failing.add(EmailReviewState.UNAUTHENTICATED);
+        }
+        if (!failing.isEmpty()) {
+            if (!released && reviewable(failing, settings)) {
+                return hold(ctx, row, failing, authentication, rawHash, sender, now);
+            }
+            return failing.get(0).equals(EmailReviewState.NOT_ALLOWLISTED)
+                    ? refuse(ctx, row, "blocked:not_allowlisted", EmailMetrics.BLOCKED, now)
+                    : refuse(ctx, row, "unauthenticated:" + verdictId(authentication), EmailMetrics.UNAUTHENTICATED, now);
         }
 
         // 7. Budgets. Over one, the mail waits in the mailbox; no sender hears
@@ -361,7 +401,7 @@ public class EmailInboundProcessor {
         }
 
         // 8. Identity and route.
-        String userId = !authenticated
+        String userId = !authenticated || anonymousRelease
                 ? EmailUserIdentity.anonymous()
                 : settings.identityMode() == EmailChannelSettings.IdentityMode.INTEGRATION
                         ? EmailUserIdentity.integration(id)
@@ -369,6 +409,10 @@ public class EmailInboundProcessor {
         ChannelTarget target = EmailTargetRouting.route(ctx.integration(), settings.address(), parsed);
         if (target == null || target.getTargetId() == null || target.getTargetId().isBlank()) {
             return refuse(ctx, row, "unroutable", EmailMetrics.UNROUTABLE, now);
+        }
+        if (anonymousRelease && target.getType() == ChannelTarget.TargetType.GROUP) {
+            // A group has no readOnlyTools to restrict the released mail to.
+            return refuse(ctx, row, "review_released_group_anonymous", EmailMetrics.BLOCKED, now);
         }
 
         // 9. Correlation (opt-in, authenticated senders only; sender is part of the
@@ -442,7 +486,6 @@ public class EmailInboundProcessor {
         // The approval binds the mail that was held, not its Message-ID (which any mail
         // can carry): only a mail hashing as the held one did runs without a second
         // hold. Kept in its own field, so a deferral or a retry in between keeps it.
-        String rawHash = sha256Hex(raw);
         boolean startApproved = EmailApprovalNotes.START_APPROVED.equals(row.approvalState());
         boolean approvedMail = startApproved && rawHash.equalsIgnoreCase(String.valueOf(row.contentHash()));
         if (startApproved && !approvedMail) {
@@ -451,8 +494,15 @@ public class EmailInboundProcessor {
         }
         boolean preRun = !approvedMail && (approvalPolicy == ChannelTarget.ApprovalPolicy.EVERY_TURN
                 || approvalPolicy == ChannelTarget.ApprovalPolicy.FIRST_CONTACT && isFirstContact(id, sender, authenticated, target, row));
-        Context approvalGate = EmailApprovalGate.contextValue(approvalPolicy.json(), target.getReadOnlyTools(), preRun,
-                rejectedReply(target, settings), preRunReason(target, authenticated), preRun ? heldMailView(parsed) : null);
+        // A released mail without an aligned pass may use only readOnlyTools, whatever
+        // the target's approvalPolicy says (v3 plan §7.3): the gate is armed even for
+        // policy none, and refuses (never pauses for) every other call.
+        String gatePolicy = anonymousRelease && approvalPolicy == ChannelTarget.ApprovalPolicy.NONE
+                ? EmailApprovalGate.POLICY_ACTIONS
+                : approvalPolicy.json();
+        Context approvalGate = EmailApprovalGate.contextValue(gatePolicy, target.getReadOnlyTools(), preRun,
+                anonymousRelease ? null : rejectedReply(target, settings), preRunReason(target, authenticated), preRun ? heldMailView(parsed) : null,
+                anonymousRelease);
 
         // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
@@ -621,14 +671,97 @@ public class EmailInboundProcessor {
      * deferred (not due yet), or null when it is due and must be processed now.
      */
     static Disposition dispositionOf(LedgerEntry row, Instant now) {
-        if (row.state() == State.RECEIVED || row.state() == State.CLAIMED) {
+        return switch (row.state()) {
             // A live claim belongs to the poll that holds it: leave the mail alone (and
             // unmarked). A claim past its deadline is due again — the caller requeues it.
-            return row.nextAttemptAt() != null && row.nextAttemptAt().isAfter(now) ? Disposition.DEFERRED : null;
+            case RECEIVED, CLAIMED -> row.nextAttemptAt() != null && row.nextAttemptAt().isAfter(now) ? Disposition.DEFERRED : null;
+            // Held for a reviewer: recorded for good until decided, so the cursor never
+            // waits for it. A release puts it back to RECEIVED for the resubmission path.
+            case HELD -> Disposition.SETTLED;
+            // TURN_SUBMITTED, DONE, REFUSED: the turn ran, runs, or was decided against —
+            // never again. (TURN_SUBMITTED after a crash is the stranded sweep's.)
+            case TURN_SUBMITTED, DONE, REFUSED -> Disposition.SETTLED;
+            // Outbound states never belong to an inbound row; settle rather than loop.
+            case PENDING, SENT, FAILED, SUPPRESSED -> Disposition.SETTLED;
+        };
+    }
+
+    /**
+     * Whether every failing reviewable check is set to {@code review}
+     * ({@code emailControl.onRefused}).
+     */
+    static boolean reviewable(List<String> failing, EmailChannelSettings settings) {
+        for (String reason : failing) {
+            boolean review = EmailReviewState.NOT_ALLOWLISTED.equals(reason) ? settings.reviewsNotAllowlisted() : settings.reviewsUnauthenticated();
+            if (!review) {
+                return false;
+            }
         }
-        // TURN_SUBMITTED, DONE, REFUSED: the turn ran, runs, or was decided against —
-        // never again. (TURN_SUBMITTED after a crash is the stranded sweep's.)
-        return Disposition.SETTLED;
+        return !failing.isEmpty();
+    }
+
+    /**
+     * How long a held mail waits for a decision:
+     * {@code emailControl.review.expiry}, at most the ledger retention minus one
+     * day, so the row outlives its review.
+     */
+    Duration reviewExpiry(EmailChannelSettings settings) {
+        Duration expiry = settings.reviewExpiry();
+        Duration max = retention.minusDays(1);
+        return max.isNegative() || max.isZero() ? Duration.ofHours(1) : expiry.compareTo(max) > 0 ? max : expiry;
+    }
+
+    /**
+     * Holds the mail for a reviewer (v3 plan §7.2) — within the daily caps, else it
+     * is refused as {@code review_full}. The row records every failing reason, the
+     * authentication verdict and the hash of the mail; no body. The reviewers hear
+     * about it once per poll batch ({@link #notifyHeld}).
+     */
+    private Disposition hold(IntegrationContext ctx, LedgerEntry row, List<String> failing, MailAuthentication authentication, String rawHash,
+                             String sender, Instant now) {
+        String id = ctx.integrationId();
+        EmailChannelSettings settings = ctx.settings();
+        Instant today = startOfUtcDay(now);
+        try {
+            if (ledger.countHeldSince(id, null, today) >= settings.maxHeldPerDay()) {
+                ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.REVIEW_FULL, now);
+                return refuse(ctx, row, EmailReviewState.REVIEW_FULL, EmailMetrics.REVIEW_FULL, now);
+            }
+            String domain = sender.substring(sender.lastIndexOf('@') + 1);
+            if (ledger.countHeldSince(id, domain, today) >= settings.maxHeldPerSenderDomainPerDay()) {
+                return refuse(ctx, row, EmailReviewState.REVIEW_FULL_DOMAIN, EmailMetrics.REVIEW_FULL, now);
+            }
+        } catch (RuntimeException e) {
+            // A count that cannot be read: try again later rather than hold uncapped.
+            return defer(ctx, row, now.plus(RETRY_SHORT), "store_unavailable", EmailMetrics.DEFERRED, now);
+        }
+        String review = EmailReviewState.held(failing);
+        if (!ledger.transitionReview(row.id(), State.RECEIVED, State.HELD, review, verdictId(authentication), rawHash,
+                now.plus(reviewExpiry(settings)),
+                review, now)) {
+            count(ctx, EmailMetrics.DEFERRED);
+            return Disposition.DEFERRED;
+        }
+        count(ctx, EmailMetrics.HELD);
+        audit(ctx, row, review, sender, "held");
+        LOGGER.infof("Email integration %s: mail %s held for review (%s)", sanitize(id), row.id(), review);
+        return Disposition.HELD;
+    }
+
+    /**
+     * Tells the reviewers once that a poll held mail: one notice per batch, at most
+     * one per hour per integration ({@link EmailOwnerNotifier#notifyHeld}).
+     */
+    public void notifyHeld(IntegrationContext ctx, int heldThisPoll, Instant now) {
+        if (heldThisPoll <= 0) {
+            return;
+        }
+        try {
+            ownerNotifier.notifyHeld(ctx.integrationId(), ctx.integration().getName(), ctx.settings(), heldThisPoll,
+                    ledger.findHeld(ctx.integrationId(), EmailOwnerNotifier.MAX_HELD_COUNTED).size(), now);
+        } catch (RuntimeException e) {
+            LOGGER.warnf("Email integration %s: the held-mail notice could not be sent: %s", sanitize(ctx.integrationId()), e.getMessage());
+        }
     }
 
     /**
@@ -1209,7 +1342,7 @@ public class EmailInboundProcessor {
     private Disposition refuse(IntegrationContext ctx, LedgerEntry row, String reason, String outcome, Instant now) {
         finish(row, State.REFUSED, reason, now);
         count(ctx, outcome);
-        audit(ctx, row, reason, row.recipient());
+        audit(ctx, row, reason, row.recipient(), "refused");
         LOGGER.infof("Email integration %s: mail %s refused (%s)", sanitize(ctx.integrationId()), row.id(), reason);
         return Disposition.SETTLED;
     }
@@ -1245,6 +1378,10 @@ public class EmailInboundProcessor {
      * HITL notifications, replies and GDPR erasure write for that address.
      */
     private void audit(IntegrationContext ctx, LedgerEntry row, String reason, String sender) {
+        audit(ctx, row, reason, sender, "refused");
+    }
+
+    private void audit(IntegrationContext ctx, LedgerEntry row, String reason, String sender, String outcome) {
         if (!auditLedger.isResolvable()) {
             return;
         }
@@ -1255,7 +1392,7 @@ public class EmailInboundProcessor {
             }
             Map<String, Object> detail = new LinkedHashMap<>();
             detail.put("integrationId", ctx.integrationId());
-            detail.put("outcome", "refused");
+            detail.put("outcome", outcome);
             int colon = reason.indexOf(':');
             detail.put("reason", colon > 0 ? reason.substring(0, colon) : reason);
             detail.put("detail", reason);
