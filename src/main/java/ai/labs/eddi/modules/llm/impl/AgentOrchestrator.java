@@ -6,6 +6,7 @@ package ai.labs.eddi.modules.llm.impl;
 
 import ai.labs.eddi.configs.agents.IAgentStore;
 import ai.labs.eddi.engine.hitl.oversight.samples.SampledAuditRecorder;
+import ai.labs.eddi.engine.hitl.tools.MandatoryApprovalRule;
 import ai.labs.eddi.engine.hitl.tools.AllowedToolCallObserver;
 import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.configs.deployment.IDeploymentStore;
@@ -20,7 +21,9 @@ import ai.labs.eddi.datastore.serialization.IJsonSerialization;
 import ai.labs.eddi.configs.properties.IUserMemoryStore;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.lifecycle.exceptions.LifecycleException;
+import ai.labs.eddi.engine.attachments.AttachmentShareService;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.documents.DocumentSettings;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
@@ -60,6 +63,7 @@ import ai.labs.eddi.configs.groups.IAgentGroupStore;
 import ai.labs.eddi.configs.groups.ISharedArtifactStore;
 import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.ConfigProvider;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import ai.labs.eddi.modules.llm.guardrails.GuardrailService;
 import org.jboss.logging.Logger;
 
@@ -281,6 +285,26 @@ class AgentOrchestrator implements IAgentOrchestrator {
 
     @Inject
     volatile AttachmentTextExtractor attachmentTextExtractor;
+
+    /**
+     * File sharing through {@code converseWithAgent} (the agent's
+     * {@code documents.sharing.*}). Field-injected for the same reason as the
+     * stores above; null under direct construction, which means the three-argument
+     * tool and no sharing.
+     */
+    @Inject
+    volatile AttachmentShareService attachmentShareService;
+
+    @Inject
+    volatile DocumentSettings documentSettings;
+
+    /**
+     * {@code eddi.attachments.max-per-turn}: a delegate's turn takes no more files,
+     * so a share is capped at it. 0 under direct construction, read as the built-in
+     * default.
+     */
+    @ConfigProperty(name = "eddi.attachments.max-per-turn", defaultValue = "5")
+    int maxAttachmentsPerTurn;
 
     /**
      * I5's two dependencies, field-injected rather than constructor-injected for
@@ -811,11 +835,37 @@ class AgentOrchestrator implements IAgentOrchestrator {
      *            the terminal reply tool of {@code answerMode: "tool"} (also
      *            present in {@code toolSpecs}, with no executor), or null when the
      *            task answers in text
+     * @param mandatoryApprovalRules
+     *            the mandatory, argument-aware approval rules the tool sources
+     *            attached this turn
+     *            ({@code ToolSourceProvider#mandatoryApprovals}); a call one
+     *            matches is gated whatever the agent's approval patterns say. Never
+     *            null
      */
     record ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
             Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
             Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
-            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool,
+            List<MandatoryApprovalRule> mandatoryApprovalRules) {
+
+        ToolSetup {
+            mandatoryApprovalRules = mandatoryApprovalRules == null ? List.of() : List.copyOf(mandatoryApprovalRules);
+        }
+
+        /** A setup without mandatory-approval rules. */
+        ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
+                Map<String, String> toolSources, List<ToolSpecification> builtInSpecs,
+                Map<String, String> toolCanonicalNames, Map<String, String> toolEndpoints,
+                Map<String, ToolRequestResolver> toolRequestResolvers, ToolSpecification answerTool) {
+            this(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers, answerTool,
+                    List.of());
+        }
+
+        /** This setup with {@code rules} as its mandatory-approval rules. */
+        ToolSetup withMandatoryApprovalRules(List<MandatoryApprovalRule> rules) {
+            return new ToolSetup(toolSpecs, toolExecutors, toolSources, builtInSpecs, toolCanonicalNames, toolEndpoints, toolRequestResolvers,
+                    answerTool, rules);
+        }
 
         /** A setup without a reply tool. */
         ToolSetup(List<ToolSpecification> toolSpecs, Map<String, ToolExecutor> toolExecutors,
@@ -902,12 +952,18 @@ class AgentOrchestrator implements IAgentOrchestrator {
         merger.addAll(List.of(httpCallToolsProvider, mcpToolsProvider, a2aToolsProvider()), ctx);
 
         var assembled = merger.build();
+        // The mandatory, argument-aware approval rules the providers attached to their
+        // tools this turn. Carried on the setup through the LAZY completion and the
+        // reply tool alike, so the live loop and the resume classify with the same
+        // rules.
+        var mandatoryRules = merger.mandatoryApprovalRules();
         if (externalLazy) {
-            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task), task);
+            return withAnswerTool(LazyToolCatalog.complete(assembled, phaseOneNames, lazyBuiltins, task).withMandatoryApprovalRules(mandatoryRules),
+                    task);
         }
         var setup = new ToolSetup(new ArrayList<>(assembled.specs()), new HashMap<>(assembled.executors()),
                 new HashMap<>(assembled.toolSources()), builtInSpecs, assembled.toolCanonicalNames(),
-                assembled.toolEndpoints(), assembled.toolRequestResolvers());
+                assembled.toolEndpoints(), assembled.toolRequestResolvers(), null, mandatoryRules);
         return withAnswerTool(setup, task);
     }
 
@@ -957,7 +1013,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
         if (onlyTool) {
             AnswerTool.noteOnlyTool(task);
         }
-        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool);
+        return new ToolSetup(specs, executors, sources, builtIns, canonicalNames, endpoints, resolvers, answerTool,
+                setup.mandatoryApprovalRules());
     }
 
     private static <V> Map<String, V> copyOf(Map<String, V> map) {
@@ -1186,7 +1243,7 @@ class AgentOrchestrator implements IAgentOrchestrator {
         // honouring "all"); this method's job is only to stop skipping it.
         // Constructed per call since deploymentStore is field-injected (see that
         // class's Javadoc).
-        dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory);
+        dynamicAgentToolsProvider().addDynamicAgentTools(tools, whitelist, memory, null, null, task.getDocuments());
 
         // Outside the whitelist branch on purpose: readAttachment is part of
         // attachment support, not a capability the built-in tools config governs.
@@ -1300,7 +1357,8 @@ class AgentOrchestrator implements IAgentOrchestrator {
                 guard != null
                         ? (agentId, principal) -> guard.principalMayUse(agentId, principal,
                                 caller != null && caller.isAdminActingAs(principal))
-                        : null);
+                        : null,
+                new DynamicAgentToolsProvider.FileSharing(attachmentShareService, attachmentStore, documentSettings, maxAttachmentsPerTurn));
     }
 
     // Kept as declared delegators (not inlined) since tests reference them by

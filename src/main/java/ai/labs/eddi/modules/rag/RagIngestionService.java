@@ -8,6 +8,8 @@ import ai.labs.eddi.configs.rag.model.KnowledgeBaseStorage;
 import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility;
+import ai.labs.eddi.modules.ingestion.IngestionPipeline;
 import ai.labs.eddi.modules.llm.impl.EmbeddingModelFactory;
 import dev.langchain4j.model.embedding.request.EmbeddingInputType;
 import ai.labs.eddi.modules.llm.impl.EmbeddingStoreFactory;
@@ -16,9 +18,12 @@ import dev.langchain4j.data.document.DocumentSplitter;
 import dev.langchain4j.data.document.Metadata;
 import dev.langchain4j.data.document.splitter.DocumentSplitters;
 import dev.langchain4j.data.segment.TextSegment;
+import dev.langchain4j.exception.UnsupportedFeatureException;
 import dev.langchain4j.model.embedding.EmbeddingModel;
 import dev.langchain4j.store.embedding.EmbeddingStore;
 import dev.langchain4j.store.embedding.EmbeddingStoreIngestor;
+import dev.langchain4j.store.embedding.IngestionResult;
+import dev.langchain4j.store.embedding.filter.Filter;
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -29,6 +34,8 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
 import static dev.langchain4j.store.embedding.filter.MetadataFilterBuilder.metadataKey;
 
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.ReentrantLock;
@@ -342,6 +349,169 @@ public class RagIngestionService {
             return DeleteOutcome.UNSUPPORTED;
         } finally {
             lock.unlock();
+        }
+    }
+
+    /**
+     * Stores prepared document text in a <em>document index</em>, replacing what
+     * the index held for the same document. Synchronous: the caller — a background
+     * document job — owns the thread and needs the failure.
+     *
+     * <p>
+     * The chunks are told apart from everything else in the index's store by
+     * metadata this method sets and no caller can choose:
+     * <ul>
+     * <li>{@code kbId} = {@link KnowledgeBaseStorage#docLibKbId} of the
+     * configuration — derived from its id, never passed in, so a caller cannot
+     * write under another knowledge base's tag (the 6.5.0 mistake this class's
+     * {@link #ingest} Javadoc records);</li>
+     * <li>{@code sourceKey} = the document owner, {@code doclib|<ownerKey>};</li>
+     * <li>{@code documentId} = the root attachment's storage reference.</li>
+     * </ul>
+     * pgvector indexes {@code (documentId, sourceKey)}, which serves the owner
+     * filter retrieval builds.
+     *
+     * <p>
+     * The configuration must be eligible
+     * ({@link DocumentIndexEligibility#ineligibility}) at the moment of the write:
+     * the check runs here, before anything is embedded, whatever the caller checked
+     * earlier.
+     *
+     * <p>
+     * Replacement: the new chunks are stored first and then every older chunk of
+     * the document — whatever its {@code sourceKey}, so a re-index after an owner
+     * change leaves nothing under the previous owner — is removed, under the
+     * document's lock.
+     *
+     * @param ragConfigId
+     *            the document index's RAG configuration id
+     * @param ragConfig
+     *            that configuration
+     * @param segments
+     *            the prepared text; at least one
+     * @param sourceKey
+     *            the owner, {@code doclib|<ownerKey>}
+     * @param documentId
+     *            the root's storage reference
+     * @return what langchain4j reports for the ingestion (token usage)
+     * @throws IllegalStateException
+     *             when the configuration is not an eligible document index, or the
+     *             store cannot delete the document's previous chunks (the new ones
+     *             are then stored alongside them)
+     * @throws IllegalArgumentException
+     *             when an argument is missing or malformed
+     */
+    public IngestionResult ingestPrepared(String ragConfigId, RagConfiguration ragConfig, List<PreparedSegment> segments, String sourceKey,
+                                          String documentId) {
+        String ineligible = DocumentIndexEligibility.ineligibility(ragConfig);
+        if (ineligible != null) {
+            throw new IllegalStateException("Knowledge base " + sanitize(ragConfigId) + " cannot hold document chunks: " + ineligible);
+        }
+        String kbId = KnowledgeBaseStorage.docLibKbId(ragConfigId);
+        if (sourceKey == null || !sourceKey.startsWith(DOCLIB_SOURCE_KEY_PREFIX) || sourceKey.length() == DOCLIB_SOURCE_KEY_PREFIX.length()) {
+            throw new IllegalArgumentException("A document chunk's sourceKey is '" + DOCLIB_SOURCE_KEY_PREFIX + "<ownerKey>'");
+        }
+        requireDocumentId(documentId);
+        if (segments == null || segments.isEmpty()) {
+            throw new IllegalArgumentException("Nothing to index; use deleteByDocumentId to remove a document");
+        }
+        String ingestionId = UUID.randomUUID().toString();
+        List<Document> documents = new ArrayList<>(segments.size());
+        for (PreparedSegment segment : segments) {
+            if (segment == null) {
+                throw new IllegalArgumentException("A prepared segment is null");
+            }
+            // The segment's own metadata first, the identifying keys last: a key set
+            // here wins, whatever the segment carried (PreparedSegment refuses them too).
+            Metadata metadata = Metadata.from(segment.metadata());
+            metadata.put(METADATA_KB_ID, kbId)
+                    .put(IngestionPipeline.METADATA_SOURCE_KEY, sourceKey)
+                    .put(IngestionPipeline.METADATA_DOCUMENT_ID, documentId)
+                    .put(METADATA_INGESTION_ID, ingestionId);
+            documents.add(Document.from(segment.text(), metadata));
+        }
+
+        DocumentSplitter splitter = DocumentSplitters.recursive(ragConfig.chunkSizeOrDefault(), ragConfig.chunkOverlapOrDefault());
+        EmbeddingModel model = embeddingModelFactory.getOrCreate(ragConfig, EmbeddingInputType.DOCUMENT);
+        EmbeddingStore<TextSegment> store = embeddingStoreFactory.getOrCreateForIngestion(ragConfigId, ragConfig);
+        EmbeddingStoreIngestor ingestor = EmbeddingStoreIngestor.builder().documentSplitter(splitter).embeddingModel(model).embeddingStore(store)
+                .build();
+
+        ReentrantLock lock = documentLock(ragConfigId, kbId, documentId);
+        lock.lock();
+        try {
+            IngestionResult result = ingestor.ingest(documents);
+            try {
+                store.removeAll(documentChunks(kbId, documentId).and(metadataKey(METADATA_INGESTION_ID).isNotEqualTo(ingestionId)));
+            } catch (UnsupportedOperationException | UnsupportedFeatureException e) {
+                throw new IllegalStateException("The vector store of document index " + sanitize(ragConfigId)
+                        + " cannot delete by metadata, so the document's previous chunks are still stored", e);
+            }
+            LOGGER.infof("Indexed %d prepared segment(s) of a document into document index %s", segments.size(), sanitize(ragConfigId));
+            return result;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Removes every chunk of one document from a document index: those tagged
+     * {@link KnowledgeBaseStorage#docLibKbId} of the configuration with this
+     * {@code documentId}, <b>whatever their {@code sourceKey}</b> — a filter built
+     * from the document's current owner would miss chunks written before an owner
+     * change. Never refused for eligibility: removing a user's chunks must always
+     * be possible. Synchronous; takes the document's lock, as
+     * {@link #ingestPrepared} does.
+     *
+     * @param ragConfigId
+     *            the document index's RAG configuration id
+     * @param ragConfig
+     *            that configuration, which decides the store
+     * @param documentId
+     *            the root's storage reference
+     * @return what was done
+     * @throws IllegalArgumentException
+     *             when the document id is missing
+     * @throws RuntimeException
+     *             when the store fails to delete; the caller should retry
+     */
+    public DeleteOutcome deleteByDocumentId(String ragConfigId, RagConfiguration ragConfig, String documentId) {
+        requireDocumentId(documentId);
+        String kbId = KnowledgeBaseStorage.docLibKbId(ragConfigId);
+        ReentrantLock lock = documentLock(ragConfigId, kbId, documentId);
+        try {
+            if (!lock.tryLock(deleteLockTimeout.toMillis(), TimeUnit.MILLISECONDS)) {
+                return DeleteOutcome.BUSY;
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return DeleteOutcome.BUSY;
+        }
+        try {
+            embeddingStoreFactory.getOrCreate(ragConfigId, ragConfig).removeAll(documentChunks(kbId, documentId));
+            return DeleteOutcome.DELETED;
+        } catch (UnsupportedOperationException | UnsupportedFeatureException e) {
+            LOGGER.warnf("Document index %s cannot delete by metadata, so a document's chunks were not deleted: %s", sanitize(ragConfigId),
+                    e.getMessage());
+            return DeleteOutcome.UNSUPPORTED;
+        } finally {
+            lock.unlock();
+        }
+    }
+
+    /**
+     * Prefix of a document chunk's {@code sourceKey}: {@code doclib|<ownerKey>}.
+     */
+    public static final String DOCLIB_SOURCE_KEY_PREFIX = "doclib|";
+
+    /** One document's chunks in one document index. Built here only. */
+    private static Filter documentChunks(String docLibKbId, String documentId) {
+        return metadataKey(METADATA_KB_ID).isEqualTo(docLibKbId).and(metadataKey(IngestionPipeline.METADATA_DOCUMENT_ID).isEqualTo(documentId));
+    }
+
+    private static void requireDocumentId(String documentId) {
+        if (documentId == null || documentId.isBlank()) {
+            throw new IllegalArgumentException("A document id (the root's storage reference) is required");
         }
     }
 

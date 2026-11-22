@@ -204,6 +204,21 @@ public final class KnowledgeBaseStorage {
         return requireName(config);
     }
 
+    /** Prefix of the chunk tag of a document index: {@code doclib:<id>}. */
+    public static final String DOCLIB_KB_ID_PREFIX = "doclib:";
+
+    /**
+     * The value every <em>document</em> chunk of a document index carries under
+     * {@link #METADATA_KB_ID}: {@code doclib:<ragConfigId>}. Never equal to
+     * {@link #chunkKbId} of a configuration in the per-id layout (an id contains no
+     * {@code :}), so ordinary retrieval, which filters on {@code chunkKbId}, never
+     * matches a document chunk, and the knowledge base's own text endpoints never
+     * delete one.
+     */
+    public static String docLibKbId(String ragConfigId) {
+        return DOCLIB_KB_ID_PREFIX + requireId(ragConfigId);
+    }
+
     /**
      * Whether retrieval restricts results to chunks tagged with this knowledge
      * base's id. Only in the per-id layout: chunks a 6.5.0 instance wrote carry no
