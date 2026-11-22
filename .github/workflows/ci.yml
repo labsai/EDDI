@@ -5,7 +5,9 @@ on:
     branches: [main]
     tags: ["[0-9]*"]
   pull_request:
-    branches: [main]
+    # integration/** carries work packages whose dependencies are still in
+    # review; this line lives only on those branches and never reaches main.
+    branches: [main, 'integration/**']
 
 # Three pushes to a PR branch used to leave three full pipelines in flight —
 # three `mvn clean test` runs over 20,000+ tests, three Testcontainers runs,
