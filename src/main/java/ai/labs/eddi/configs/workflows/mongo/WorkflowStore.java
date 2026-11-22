@@ -6,6 +6,8 @@ package ai.labs.eddi.configs.workflows.mongo;
 
 import ai.labs.eddi.configs.descriptors.IDocumentDescriptorStore;
 import ai.labs.eddi.configs.descriptors.ResourceUtilities;
+import ai.labs.eddi.configs.rag.IRagStore;
+import ai.labs.eddi.configs.rag.model.RagConfiguration;
 import ai.labs.eddi.configs.workflows.IWorkflowStore;
 import ai.labs.eddi.configs.workflows.model.WorkflowConfiguration;
 import ai.labs.eddi.configs.descriptors.model.DocumentDescriptor;
@@ -13,6 +15,7 @@ import ai.labs.eddi.datastore.AbstractResourceStore;
 import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.datastore.IResourceStorageFactory;
 import ai.labs.eddi.datastore.serialization.IDocumentBuilder;
+import ai.labs.eddi.engine.documents.index.DocumentIndexEligibility;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.utils.RestUtilities;
 import ai.labs.eddi.utils.RuntimeUtilities;
@@ -69,10 +72,73 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
         this.resourceClientLibrary = resourceClientLibrary;
     }
 
+    /**
+     * Where a RAG step's configuration is read from to refuse a document index.
+     * Lazily, and optional so the store can still be built with {@code new}: then
+     * the save check is skipped and retrieval's runtime skip is what holds.
+     */
+    private Provider<IRagStore> ragStore;
+
+    @Inject
+    void useRagStore(Provider<IRagStore> ragStore) {
+        this.ragStore = ragStore;
+    }
+
     @Override
     public IResourceStore.IResourceId create(WorkflowConfiguration workflowConfiguration) throws IResourceStore.ResourceStoreException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        refuseDocumentIndexSteps(workflowConfiguration);
         return super.create(workflowConfiguration);
+    }
+
+    /**
+     * A workflow may not use a document index as a RAG step: a document index holds
+     * users' and conversations' files, and a RAG step's retrieval answers every
+     * user of the agent. This also covers an LLM task's {@code knowledgeBases} and
+     * {@code enableWorkflowRag}, which only ever reach the workflow's own RAG
+     * steps. The RAG side refuses the reverse order (the flag turned on while a
+     * workflow uses the configuration); a step whose configuration does not exist
+     * is left to the runtime skip in {@code RagContextProvider}.
+     *
+     * @throws IllegalArgumentException
+     *             naming the step
+     */
+    void refuseDocumentIndexSteps(WorkflowConfiguration workflowConfiguration) throws IResourceStore.ResourceStoreException {
+        if (ragStore == null || workflowConfiguration == null || workflowConfiguration.getWorkflowSteps() == null) {
+            return;
+        }
+        List<WorkflowConfiguration.WorkflowStep> steps = workflowConfiguration.getWorkflowSteps();
+        for (int i = 0; i < steps.size(); i++) {
+            Object uri = steps.get(i).getConfig() == null ? null : steps.get(i).getConfig().get("uri");
+            URI configUri = uri == null ? null : parseResourceUri(uri.toString());
+            if (configUri == null || !DocumentIndexEligibility.RAG_RESOURCE_HOST.equals(configUri.getHost())) {
+                continue;
+            }
+            IResourceStore.IResourceId ragId;
+            try {
+                ragId = RestUtilities.extractResourceId(configUri);
+            } catch (IllegalArgumentException e) {
+                continue; // malformed: RagTask refuses it at deploy
+            }
+            if (ragId == null || ragId.getId() == null) {
+                continue;
+            }
+            RagConfiguration rag;
+            try {
+                IRagStore rags = ragStore.get();
+                Integer version = ragId.getVersion() == null || ragId.getVersion() < 1
+                        ? rags.getCurrentResourceId(ragId.getId()).getVersion()
+                        : ragId.getVersion();
+                rag = rags.read(ragId.getId(), version);
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                continue;
+            }
+            if (DocumentIndexEligibility.isDocumentIndex(rag)) {
+                throw new IllegalArgumentException("workflowSteps[" + i + "] uses RAG configuration " + ragId.getId()
+                        + ", which is a document index (\"documentIndex\": true). A document index holds users' documents "
+                        + "and is never an agent's knowledge base; use an ordinary RAG configuration.");
+            }
+        }
     }
 
     @Override
@@ -80,6 +146,7 @@ public class WorkflowStore extends AbstractResourceStore<WorkflowConfiguration> 
     public Integer update(String id, Integer version, WorkflowConfiguration workflowConfiguration)
             throws IResourceStore.ResourceStoreException, IResourceStore.ResourceModifiedException, IResourceStore.ResourceNotFoundException {
         RuntimeUtilities.checkCollectionNoNullElements(workflowConfiguration.getWorkflowSteps(), WORKFLOW_EXTENSIONS_FIELD);
+        refuseDocumentIndexSteps(workflowConfiguration);
         return super.update(id, version, workflowConfiguration);
     }
 

@@ -416,6 +416,8 @@ connections/
 
 > **Important**: File extensions use legacy names (`behavior`, `httpcalls`, `langchain`) while URIs use v6 names (`rules`, `apicalls`, `llm`). The import service maps between them via `AbstractBackupService` constants.
 
+> **`documents` in a `langchain.json` task**: only the keys [langchain.md → Documents](langchain.md#documents-documents) lists as available are accepted — today `sharing.delegation`, `sharing.maxFilesPerShare`, `sharing.maxSharesPerTurn` and `sharing.maxDepth`, which let `converse_with_agent` hand files on. Any other key in the block fails the import with "not available in this version".
+
 > **Pipeline step**: If your output texts or quick replies contain `{properties.x}` placeholders, you **must** include `eddi://ai.labs.templating` after every step that produces that output. Without it, Qute expressions in output are not resolved. Prompts, HTTP call bodies and property values need no such step: `LlmTask`, `ApiCallsTask` and `PropertySetterTask` render their own.
 
 ### URI format (v6 canonical)

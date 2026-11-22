@@ -111,6 +111,21 @@ public class DocumentSettings {
         return config.getOptionalValue(property, Long.class).orElse(fallback);
     }
 
+    // --- WP-6.1: the deployment's default document index ---
+
+    /**
+     * The deployment's default document index: a RAG configuration id or URI,
+     * validated at startup ({@code DocumentIndexDefaultCheck}) and before every
+     * write. Unset by default: without it, and without a task's
+     * {@code documents.index.rag}, document search stays lexical.
+     */
+    public static final String INDEX_DEFAULT_RAG = "eddi.documents.index.default-rag";
+
+    /** {@link #INDEX_DEFAULT_RAG}, when set to something other than blank. */
+    public Optional<String> indexDefaultRag() {
+        return ConfigProvider.getConfig().getOptionalValue(INDEX_DEFAULT_RAG, String.class).map(String::strip).filter(value -> !value.isEmpty());
+    }
+
     // --- WP-4b.1: daily document spend ceilings ---
 
     /**

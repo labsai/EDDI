@@ -14,6 +14,12 @@ import ai.labs.eddi.configs.groups.model.AgentGroupConfiguration.GroupMember;
 import ai.labs.eddi.configs.groups.model.GroupConversation;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.engine.api.IConversationService;
+import ai.labs.eddi.engine.attachments.AttachmentShareService;
+import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.attachments.SharePolicy;
+import ai.labs.eddi.engine.documents.DocumentSettings;
+import ai.labs.eddi.engine.documents.EffectiveDocumentsConfig;
+import ai.labs.eddi.engine.memory.AttachmentContextExtractor;
 import ai.labs.eddi.engine.memory.IConversationMemory;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.MemoryKeys;
@@ -21,6 +27,9 @@ import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IAgentFactory;
 import ai.labs.eddi.engine.setup.AgentSetupService;
+import ai.labs.eddi.modules.llm.model.DocumentsConfig;
+import ai.labs.eddi.modules.llm.tools.AttachmentShareBinding;
+import ai.labs.eddi.modules.llm.tools.ConverseWithAgentAndFilesTool;
 import ai.labs.eddi.modules.llm.tools.ConverseWithAgentTool;
 import ai.labs.eddi.modules.llm.tools.CreateSubAgentTool;
 import ai.labs.eddi.modules.llm.tools.FindAgentsByCapabilityTool;
@@ -134,6 +143,33 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      */
     static final String KEY_DELEGATIONS_PREFIX = "tools:delegations:";
 
+    /**
+     * Step-data key of the conversation's file shares this turn
+     * ({@code documents.sharing.maxSharesPerTurn}). One key for the whole turn, not
+     * one per task: the limit counts every share made in the turn, whichever LLM
+     * task makes it.
+     */
+    static final String KEY_SHARES = "documents:shares";
+
+    /**
+     * What handing files on through {@code converseWithAgent} needs. Absent (or
+     * with a {@code null} service or store) means no file sharing at all: the
+     * three-argument tool, as before.
+     *
+     * @param service
+     *            the share rule
+     * @param store
+     *            the attachment store
+     * @param settings
+     *            the operator defaults and bounds for the {@code documents} block;
+     *            {@code null} means none
+     * @param maxAttachmentsPerTurn
+     *            {@code eddi.attachments.max-per-turn}; a value below 1 means the
+     *            built-in default
+     */
+    record FileSharing(AttachmentShareService service, IAttachmentStore store, DocumentSettings settings, int maxAttachmentsPerTurn) {
+    }
+
     private final AgentSetupService agentSetupService;
     private final CapabilityRegistryService capabilityRegistryService;
     private final IConversationService conversationService;
@@ -149,6 +185,9 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      */
     private final BiPredicate<String, String> useCheck;
 
+    /** File sharing through delegation, or {@code null} for none. */
+    private final FileSharing fileSharing;
+
     DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
@@ -161,6 +200,15 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
             IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
             IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck) {
+        this(agentSetupService, capabilityRegistryService, conversationService, agentFactory, agentStore, deploymentStore,
+                liveDiscussionRegistry, agentGroupStore, useCheck, null);
+    }
+
+    DynamicAgentToolsProvider(AgentSetupService agentSetupService, CapabilityRegistryService capabilityRegistryService,
+            IConversationService conversationService, IAgentFactory agentFactory, IAgentStore agentStore,
+            IDeploymentStore deploymentStore, LiveDiscussionRegistry liveDiscussionRegistry,
+            IAgentGroupStore agentGroupStore, BiPredicate<String, String> useCheck, FileSharing fileSharing) {
+        this.fileSharing = fileSharing;
         this.useCheck = useCheck;
         this.agentSetupService = agentSetupService;
         this.capabilityRegistryService = capabilityRegistryService;
@@ -241,7 +289,8 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             return ToolContribution.empty();
         }
         List<Object> tools = new ArrayList<>();
-        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId(), ctx.task().getId());
+        addDynamicAgentTools(tools, ctx.builtInToolsWhitelist(), ctx.memory(), ctx.groupConversationId(), ctx.task().getId(),
+                ctx.task().getDocuments());
         if (tools.isEmpty()) {
             return ToolContribution.empty();
         }
@@ -276,6 +325,17 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      */
     void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId,
                               String taskId) {
+        addDynamicAgentTools(tools, whitelist, memory, groupConversationId, taskId, null);
+    }
+
+    /**
+     * @param documents
+     *            the LLM task's {@code documents} block (may be {@code null}); its
+     *            {@code sharing.*} keys decide whether {@code converseWithAgent}
+     *            can hand files on
+     */
+    void addDynamicAgentTools(List<Object> tools, List<String> whitelist, IConversationMemory memory, String groupConversationId,
+                              String taskId, DocumentsConfig documents) {
         // V7. An omitted whitelist means "all built-in tools" everywhere else —
         // docs/langchain.md says so ("Omitting builtInToolsWhitelist enables all
         // available built-in tools") and BuiltinToolsProvider implements exactly
@@ -351,10 +411,20 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
             // Counted on the step: this method runs once per tool assembly, and a turn
             // assembles once per cascade step and again on a HITL resume.
             TurnCounter delegations = TurnCounter.onStep(memory, KEY_DELEGATIONS_PREFIX + (taskId != null ? taskId : "default"));
-            tools.add(new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
-                    resolveDelegationCeiling(memory), delegations));
-            LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
-                    sanitize(parentAgentId), delegationDepth);
+            AttachmentShareBinding shareBinding = shareBinding(memory, documents);
+            var converse = new ConverseWithAgentTool(conversationService, userId, dynamicConfig, delegationDepth, delegationUseCheck,
+                    resolveDelegationCeiling(memory), delegations, shareBinding);
+            // Exactly one of the two classes (I8): the files argument exists only when
+            // delegation may hand files on and memory shows a stored file to hand on.
+            if (shareBinding != null && dynamicConfig.isEnabled() && dynamicConfig.isAllowDelegation() && hasStoredFile(memory)) {
+                tools.add(new ConverseWithAgentAndFilesTool(converse));
+                LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled with files for agent='%s' at delegation depth %d",
+                        sanitize(parentAgentId), delegationDepth);
+            } else {
+                tools.add(converse);
+                LOGGER.debugf("[DYNAMIC] ConverseWithAgentTool enabled for agent='%s' at delegation depth %d",
+                        sanitize(parentAgentId), delegationDepth);
+            }
         }
         // Finding I4: allowRecruitment was documented as an enforced cap but was
         // never read. Capability lookup is the recruitment entry point, so it is
@@ -811,8 +881,73 @@ class DynamicAgentToolsProvider implements ToolSourceProvider {
      * guard is inert on exactly the turns that matter.
      */
     static int resolveDelegationDepth(IConversationMemory memory) {
-        String contextKey = "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH;
+        return resolveHopCount(memory, "context:" + ConverseWithAgentTool.CONTEXT_DELEGATION_DEPTH);
+    }
 
+    /**
+     * How many hops the files of this conversation have travelled
+     * ({@code context:attachmentShareDepth}): 0 for a conversation no file was
+     * handed into. Read like {@link #resolveDelegationDepth} — current step first,
+     * else the deepest earlier step — so a later turn without the context cannot
+     * reset it.
+     */
+    static int resolveAttachmentShareDepth(IConversationMemory memory) {
+        return resolveHopCount(memory, "context:" + ConverseWithAgentTool.CONTEXT_ATTACHMENT_SHARE_DEPTH);
+    }
+
+    /**
+     * The binding that lets {@code converseWithAgent} hand files on, or
+     * {@code null} when the effective {@code documents.sharing.delegation} is off
+     * or nothing to share with is wired. Reads configuration and memory only —
+     * never the attachment store.
+     */
+    private AttachmentShareBinding shareBinding(IConversationMemory memory, DocumentsConfig documents) {
+        if (fileSharing == null || fileSharing.service() == null || fileSharing.store() == null) {
+            return null;
+        }
+        EffectiveDocumentsConfig.Sharing sharing;
+        try {
+            sharing = EffectiveDocumentsConfig
+                    .resolve(documents, fileSharing.settings() != null ? fileSharing.settings() : DocumentSettings.none()).sharing();
+        } catch (RuntimeException e) {
+            LOGGER.warnf("[DYNAMIC] The documents block could not be resolved (%s); converseWithAgent shares no files",
+                    e.getClass().getSimpleName());
+            return null;
+        }
+        if (!sharing.delegation()) {
+            return null;
+        }
+        int perTurn = fileSharing.maxAttachmentsPerTurn() > 0
+                ? fileSharing.maxAttachmentsPerTurn()
+                : AttachmentContextExtractor.DEFAULT_MAX_ATTACHMENTS_PER_TURN;
+        // A delegate's turn takes at most eddi.attachments.max-per-turn files, so a
+        // share never promises more than that.
+        var policy = new SharePolicy(Math.min(sharing.maxFilesPerShare(), perTurn), sharing.maxSharesPerTurn(), sharing.maxDepth(),
+                resolveAttachmentShareDepth(memory), Set.of(),
+                TurnCounter.onStep(memory, KEY_SHARES));
+        return new AttachmentShareBinding(memory, fileSharing.service(), fileSharing.store(), policy);
+    }
+
+    /**
+     * Whether memory shows a stored (blob-backed) file on this turn or an earlier
+     * one — the same memory-only scan that gates {@code readAttachment}, so a turn
+     * without files never reaches the attachment store (I8).
+     */
+    static boolean hasStoredFile(IConversationMemory memory) {
+        var currentStep = memory.getCurrentStep();
+        if (currentStep != null) {
+            // Exact-match read: "attachments" is a prefix of attachments:extracts etc.
+            IData<List<?>> current = currentStep.getData(MemoryKeys.ATTACHMENTS);
+            if (current != null && AttachmentContextExtractor.attachmentsFrom(current.getResult()).stream()
+                    .anyMatch(attachment -> attachment.getStorageRef() != null)) {
+                return true;
+            }
+        }
+        return !AttachmentContextExtractor.attachmentsFromPreviousTurns(memory).isEmpty();
+    }
+
+    /** {@link #resolveDelegationDepth}'s lookup, for any hop-count context key. */
+    private static int resolveHopCount(IConversationMemory memory, String contextKey) {
         var currentStep = memory.getCurrentStep();
         if (currentStep != null) {
             Integer depth = parseDelegationDepth(currentStep.getData(contextKey));

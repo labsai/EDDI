@@ -393,7 +393,7 @@ Two group-specific bounds: the per-turn cap (`eddi.attachments.max-per-turn`) ap
 
 ## Sharing between agents — the rule
 
-Every path that hands a stored file from one conversation to another follows one rule, implemented once in `AttachmentShareService` (`engine/attachments`). Today only its read check (rule 3) is in use, by the nested-group pass-through above — that path is neither metered nor audited as a share; the agent tools that pass files on (delegation first) call the full service.
+Every path that hands a stored file from one conversation to another follows one rule, implemented once in `AttachmentShareService` (`engine/attachments`). Delegation — `converse_with_agent` with its `attachments` argument, see [Handing files to a delegated agent](#handing-files-to-a-delegated-agent) — calls the full service; the nested-group pass-through above uses only its read check (rule 3) and is neither metered nor audited as a share.
 
 1. **A model names files; it never holds a reference.** What a conversation's model may name is its **listing**: the files it owns or was granted (`listAccessible`), minus the files of a turn an input guardrail refused (withheld). Each entry is shown by its file name — `(unnamed)` for a file stored without one, never the `storageRef` — and can also be named by its 1-based number. The listing is sorted by name (then by reference), so the same files always list the same way, but a file added or granted later can shift the numbers: a number is only meaningful against the listing shown in the same turn. A name that matches several files is refused with their numbers; a name that is not in the listing is `not found`, whether the file exists elsewhere or not at all.
 2. **Server code picks both ends.** The source is the conversation the tool is bound to; the target is a conversation server code created for the share. Neither comes from a model or from client context.
@@ -408,6 +408,12 @@ Every path that hands a stored file from one conversation to another follows one
 | `eddi_attachment_share_refused_total` | `reason` (`not_found`, `ambiguous`, `part`, `mime_type`, `depth`, `files_per_share`, `shares_per_turn`, `target`, `grant_failed`, `unavailable`) | Share requests refused |
 
 Granting is idempotent on both stores (MongoDB adds to a set, PostgreSQL appends only when absent), so sharing the same file twice leaves one grant.
+
+## Handing files to a delegated agent
+
+An agent whose LLM task sets `documents.sharing.delegation: true` can hand whole files of its conversation to another agent: `converse_with_agent(agentId, message, conversationId, attachments)`, where `attachments` lists file names (or numbers) of the conversation's files. The delegate's conversation is granted each file and receives it on the message turn as `attachment_<n>` = `{storageRef, fileName}` — the stored-reference form a client uses — so from there everything on this page applies to it unchanged: MIME and size come from the store, `eddi.attachments.max-per-turn` and the forward caps apply, and the delegate gets `readAttachment`.
+
+Files go only to the conversation the call starts, or to one this conversation started earlier; a file the delegate received can be handed on again until `documents.sharing.maxDepth` hops. The configuration, the limits and the rules are in [langchain.md → Handing files to a delegated agent](langchain.md#handing-files-to-a-delegated-agent).
 
 ## Architecture Notes
 

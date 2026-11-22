@@ -131,9 +131,9 @@ class EffectiveDocumentsConfigTest {
         @Test
         @DisplayName("a stored key that is not live resolves to off, with one warning naming it")
         void storedNonLiveKeyIsIgnored() throws Exception {
-            var e = EffectiveDocumentsConfig.resolve(parse("{\"sharing\":{\"delegation\":true}}"), DocumentSettings.none());
-            assertFalse(e.sharing().delegation());
-            assertEquals(List.of("documents.sharing.delegation is not available in this version and is ignored"), e.clampWarnings());
+            var e = EffectiveDocumentsConfig.resolve(parse("{\"sharing\":{\"handoff\":true}}"), DocumentSettings.none());
+            assertFalse(e.sharing().handoff());
+            assertEquals(List.of("documents.sharing.handoff is not available in this version and is ignored"), e.clampWarnings());
         }
 
         @Test
@@ -150,10 +150,10 @@ class EffectiveDocumentsConfigTest {
         @Test
         @DisplayName("an operator default for a key that is not live is ignored too")
         void operatorDefaultForNonLiveKey() {
-            var settings = DocumentSettings.of(Map.of("sharing.delegation", "true"), DocumentBounds.none());
+            var settings = DocumentSettings.of(Map.of("sharing.handoff", "true"), DocumentBounds.none());
             var e = EffectiveDocumentsConfig.resolve(null, settings);
-            assertFalse(e.sharing().delegation());
-            assertEquals(List.of("eddi.documents.defaults.sharing.delegation configures a key that is not available in this version"
+            assertFalse(e.sharing().handoff());
+            assertEquals(List.of("eddi.documents.defaults.sharing.handoff configures a key that is not available in this version"
                     + " and is ignored"), e.clampWarnings());
         }
 
