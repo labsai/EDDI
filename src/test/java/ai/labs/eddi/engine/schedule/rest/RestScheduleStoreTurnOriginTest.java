@@ -200,6 +200,55 @@ class RestScheduleStoreTurnOriginTest {
         verify(scheduleStore).requeueDeadLetter("s1");
     }
 
+    @Test
+    @DisplayName("an enable for a tainted request taints the schedule before it is switched on")
+    void enableFromTaintedRequestTaintsFirst() throws Exception {
+        when(scheduleStore.readSchedule("s1")).thenReturn(schedule("s1"));
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals(200, rest.enableSchedule("s1").getStatus());
+        }
+
+        InOrder order = inOrder(scheduleStore);
+        ArgumentCaptor<ScheduleConfiguration> stamped = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        order.verify(scheduleStore).updateSchedule(eq("s1"), stamped.capture());
+        order.verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(true), any());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stamped.getValue().getMetadata()));
+    }
+
+    @Test
+    @DisplayName("an untainted enable, and any disable, write nothing but the switch")
+    void untaintedEnableOnlySwitches() throws Exception {
+        when(scheduleStore.readSchedule("s1")).thenReturn(schedule("s1"));
+
+        assertEquals(200, rest.enableSchedule("s1").getStatus());
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals(200, rest.disableSchedule("s1").getStatus());
+        }
+
+        verify(scheduleStore, never()).updateSchedule(any(), any());
+        verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(true), any());
+        verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(false), any());
+    }
+
+    @Test
+    @DisplayName("a dead-letter dismissal for a tainted request taints the schedule before it is re-armed")
+    void dismissFromTaintedRequestTaintsFirst() throws Exception {
+        ScheduleConfiguration dead = schedule("s1");
+        dead.setFireStatus(FireStatus.DEAD_LETTERED);
+        when(scheduleStore.readSchedule("s1")).thenReturn(dead);
+
+        try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
+            assertEquals(200, rest.dismissDeadLetter("s1").getStatus());
+        }
+
+        InOrder order = inOrder(scheduleStore);
+        ArgumentCaptor<ScheduleConfiguration> stamped = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        order.verify(scheduleStore).updateSchedule(eq("s1"), stamped.capture());
+        order.verify(scheduleStore).dismissDeadLetter(eq("s1"), any());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stamped.getValue().getMetadata()));
+    }
+
     private ScheduleConfiguration updated(String id) throws Exception {
         ArgumentCaptor<ScheduleConfiguration> captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
         verify(scheduleStore).updateSchedule(eq(id), captor.capture());
