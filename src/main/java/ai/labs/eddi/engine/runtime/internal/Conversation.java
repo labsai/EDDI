@@ -695,7 +695,7 @@ public class Conversation implements IConversation {
 
             if (!extraction.errors().isEmpty()) {
                 extraction.errors().forEach(err -> LOGGER.warnv("Attachment issue in conversation {0}: {1}",
-                        conversationMemory.getConversationId(), err));
+                        conversationMemory.getConversationId(), sanitize(err)));
                 var errorData = new Data<>(MemoryKeys.ATTACHMENT_ERRORS.key(), extraction.errors());
                 errorData.setPublic(false);
                 currentStep.storeData(errorData);

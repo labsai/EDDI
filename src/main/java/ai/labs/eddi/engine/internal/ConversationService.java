@@ -2855,9 +2855,12 @@ public class ConversationService implements IConversationService, UserErasurePar
                 // No task is known when a turn arrives: the receiving split is the one an
                 // agent gets without split settings - every agent's while no split.* key
                 // is available to designers.
-                return documentStructureService != null
-                        ? documentStructureService.partResolver(documentStructureService.deploymentSplit())
-                        : null;
+                // Resolved per part, so a turn without parts never reads the settings.
+                DocumentStructureService structure = documentStructureService;
+                return structure == null
+                        ? null
+                        : (storageRef, conversationId, unit, pages, split) -> structure.partResolver(structure.deploymentSplit())
+                                .resolve(storageRef, conversationId, unit, pages, split);
             }
 
             @Override

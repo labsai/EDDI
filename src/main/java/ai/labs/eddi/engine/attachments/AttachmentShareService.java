@@ -421,6 +421,19 @@ public class AttachmentShareService {
                     countRefusal(Refusal.PART_INVALID);
                     refused.add(new ShareResult.Refused(name, ex.getMessage()));
                     continue;
+                } catch (RuntimeException ex) {
+                    // A store or extractor fault refuses this file only: the files already
+                    // shared by this call are still reported and audited.
+                    LOGGER.warnf("Could not resolve a part of an attachment of conversation '%s': %s",
+                            LogSanitizer.sanitize(sourceConversationId), ex.getClass().getSimpleName());
+                    refuse(refused, name, Refusal.PART_INVALID);
+                    continue;
+                }
+                if (effective == null || effective.isWholeFile()) {
+                    // A part never widens to the whole file (a selector carrying only a split
+                    // hash, say).
+                    refuse(refused, name, Refusal.PART_INVALID);
+                    continue;
                 }
                 if (!e.derived() || !effective.equals(e.selector())) {
                     ConversationListing.Entry root = list.entryForRoot(e.rootRef()).orElse(e);

@@ -291,6 +291,17 @@ class AttachmentContextExtractorPartsTest {
         }
 
         @Test
+        void aViewRecordedOnAnAcceptedTurn_neverReleasesAWithheldRoot() {
+            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(new Attachment("application/pdf", "r.pdf", 1, REF))));
+            withholdCurrentStep();
+            memory.startNextStep();
+            memory.getCurrentStep().storeData(new Data<>(MemoryKeys.ATTACHMENTS.key(), List.of(recorded(VIEW, null, REF))));
+            memory.startNextStep();
+
+            assertTrue(AttachmentContextExtractor.withheldStorageRefs(memory).contains(REF));
+        }
+
+        @Test
         void identity_distinguishesParts() {
             Attachment whole = new Attachment("application/pdf", "report.pdf", 10, REF);
             assertEquals("ref:" + REF, AttachmentContextExtractor.identity(whole));

@@ -131,6 +131,15 @@ class DocumentStructureServiceTest {
         }
 
         @Test
+        void aCacheHit_stillAsksTheStoreWhoMayRead() throws Exception {
+            service.manifest(PDF, OWNER, SplitConfig.defaults());
+            service.manifest(PDF, OWNER, SplitConfig.defaults());
+
+            // The store authorizes every call; the cache is consulted only after it.
+            verify(store, times(2)).ownerOf(PDF, OWNER);
+        }
+
+        @Test
         void coldCache_readsTheStoredManifest_withoutExtracting() throws Exception {
             DocumentManifest first = service.manifest(PDF, OWNER, SplitConfig.defaults());
 

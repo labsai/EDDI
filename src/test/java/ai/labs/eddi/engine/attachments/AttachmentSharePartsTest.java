@@ -24,9 +24,11 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 /**
  * Sharing a part of a file: pages are authoritative, the grant is on the root,
@@ -160,6 +162,32 @@ class AttachmentSharePartsTest {
 
             assertEquals(Refusal.NOT_FOUND.text(), result.refused().get(0).reason());
             verify(store, never()).grantAccess(any(), any());
+        }
+
+        @Test
+        void aSplitHashAlone_neverWidensToTheWholeFile() throws Exception {
+            var splitOnly = new AttachmentSelector(PDF, null, null, SplitConfig.defaults().hash());
+
+            ShareResult result = service.share(A, listingOf(A, List.of()), List.of(splitOnly), B, ShareReason.DELEGATION, policy(null),
+                    ShareParties.UNKNOWN);
+
+            assertTrue(result.shared().isEmpty());
+            verify(store, never()).grantAccess(any(), any());
+        }
+
+        @Test
+        void aFaultWhileResolving_refusesThatFileOnly() throws Exception {
+            var failing = mock(DocumentStructureService.class);
+            when(failing.resolve(any(), any(), any(), any(), any(), any())).thenThrow(new IllegalStateException("driver fault"));
+            var withFailing = new AttachmentShareService(store, registry, null, failing);
+
+            ShareResult result = withFailing.share(A, listingOf(A, List.of()),
+                    List.of(AttachmentSelector.wholeFile(TXT), new AttachmentSelector(PDF, "1-2", null, null)), B, ShareReason.DELEGATION,
+                    policy(null), ShareParties.UNKNOWN);
+
+            assertEquals(1, result.shared().size(), "the file shared before the fault is still reported");
+            assertEquals(Refusal.PART_INVALID.text(), result.refused().get(0).reason());
+            verify(store, never()).grantAccess(PDF, B);
         }
 
         @Test

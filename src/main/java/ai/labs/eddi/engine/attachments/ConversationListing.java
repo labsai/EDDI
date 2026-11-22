@@ -241,20 +241,28 @@ public record ConversationListing(String conversationId, List<Entry> entries, Se
         if (rootEntry == null || withheld.contains(root) || withheld.contains(ref)) {
             return null;
         }
+        boolean view;
+        try {
+            // Asked of the store: a root may be recorded under another spelling of its
+            // reference than the one listAccessible returns.
+            view = store.getDerivation(ref, conversationId).isPresent();
+        } catch (Exception e) {
+            return null;
+        }
         AttachmentSelector selector = AttachmentSelector.fromAttachment(recorded);
-        if (root.equals(ref) && selector.isWholeFile()) {
+        if (!view && selector.isWholeFile()) {
             // The root itself, already listed.
             return null;
         }
         String name;
-        if (root.equals(ref)) {
+        if (!view) {
             name = partName(rootEntry.displayName(), selector);
         } else {
             String own = recorded.getFileName() != null && !recorded.getFileName().isBlank() ? recorded.getFileName().strip() : null;
             name = own != null ? own : partName(rootEntry.displayName(), selector);
         }
-        String mime = root.equals(ref) ? rootEntry.mimeType() : recorded.getMimeType();
-        long size = root.equals(ref) ? rootEntry.sizeBytes() : recorded.getSizeBytes();
+        String mime = !view ? rootEntry.mimeType() : recorded.getMimeType();
+        long size = !view ? rootEntry.sizeBytes() : recorded.getSizeBytes();
         return new Entry(name, selector, mime, size, true, root);
     }
 

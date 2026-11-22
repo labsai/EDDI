@@ -195,7 +195,7 @@ public class DocumentStructureService {
         SplitConfig config = split != null ? split : SplitConfig.defaults();
         IAttachmentStore store = requireStore();
         String root = rootOf(store, storageRef, conversationId);
-        if (!root.equals(storageRef)) {
+        if (isView(store, storageRef, conversationId)) {
             throw new SelectorException(Reason.NOT_PDF, "only a stored PDF can be sent in parts, not a view of one");
         }
         requirePdf(store, root, conversationId);
@@ -392,6 +392,19 @@ public class DocumentStructureService {
                 throw new SelectorException(Reason.NOT_FOUND, NOT_FOUND);
             }
             return root;
+        } catch (AttachmentStoreException e) {
+            throw notFound(e);
+        }
+    }
+
+    /**
+     * Whether a reference names a derived view rather than a root. Asked of the
+     * store, not by comparing references: a store may accept more than one spelling
+     * of a root's reference.
+     */
+    private static boolean isView(IAttachmentStore store, String storageRef, String conversationId) {
+        try {
+            return store.getDerivation(storageRef, conversationId).isPresent();
         } catch (AttachmentStoreException e) {
             throw notFound(e);
         }

@@ -207,9 +207,10 @@ public final class AttachmentContextExtractor {
         }
         String stripped = value.strip();
         if (stripped.length() > MAX_PART_FIELD_CHARS) {
-            // Too long to be a page range, unit or split. Kept, cut, so the part is
-            // refused rather than silently widened to the whole file.
-            stripped = stripped.substring(0, MAX_PART_FIELD_CHARS);
+            // Too long to be a page range, unit or split. Kept, cut and marked so it can
+            // never parse, so the part is refused rather than silently widened to the
+            // whole file or narrowed to a shorter range.
+            stripped = stripped.substring(0, MAX_PART_FIELD_CHARS - 1) + "…";
         }
         if (attachment.getMetadata() == null) {
             attachment.setMetadata(new LinkedHashMap<>());
@@ -463,8 +464,10 @@ public final class AttachmentContextExtractor {
                 Attachment attachment = asAttachment(value);
                 if (attachment != null && attachment.getStorageRef() != null) {
                     target.add(attachment.getStorageRef());
+                    // A recorded view only ever withholds its root, never releases it: the
+                    // root itself must be attached on an accepted turn for that.
                     String root = rootRefOf(attachment);
-                    if (root != null) {
+                    if (root != null && target == withheld) {
                         target.add(root);
                     }
                 }
