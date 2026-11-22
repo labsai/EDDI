@@ -98,7 +98,8 @@ model's tool calls.
   execution of a gated call — `ApprovedCallScope`, which `ToolLoopResumer` binds around exactly that call
   (`isActiveFor(conversationId)`, so another conversation's approval does not count; `OutboundHttp` honours it on the
   first hop only). Across EDDI's own API the sender says so in `X-Eddi-Approved-Call`, engine-owned like the taint
-  header (httpcalls, `OutboundHttp`, MCP `_meta` → header): set only during the approved call, replaced everywhere else.
+  header (httpcalls, `OutboundHttp`, MCP `_meta` → header, the internal loopback of the MCP admin tools): set only
+  during the approved call, replaced everywhere else.
 - **Credentials and sharing (medium).** `GUARDED_PATHS` gains resource shares/requests/visibility/space/owner, the
   secrets vault (tenant and space, grants, rotation), connections and their settings, a user's connection
   authorize/grant, and workspace settings. No user or role administration endpoint exists; no MCP tool writes any
@@ -123,6 +124,13 @@ model's tool calls.
   conversation.
 - The MCP binding reads the request through `CurrentVertxRequest`, which quarkus-mcp-server sets; the IT is what
   proves it, and fails if a release stops doing so.
+- The fail-closed branch (an active request context whose taint cannot be read) has no test.
+- The backlog exploit test stands in for `createGroupConversation` and runs the member turn under the bound taint;
+  the #1499 tests cover those two links. The Manager's confirm dialog before a page Save is not tested at page
+  level (the helper and the API call are).
+- Other workspace content a cadence quotes (lessons, outcomes) was not reviewed for the same laundering.
+- Found on the way: the interceptor test's `@Tool` fixtures named like real tools broke every `@QuarkusTest` boot on
+  #1499 (duplicate feature methods); renamed.
 
 ### Decision log
 
