@@ -538,7 +538,8 @@ public class EmailReplySender {
             String provider = sent.providerResponse();
             if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, null, sent.signed(), now)) {
                 metrics.reply("sent", sent.signed());
-                metrics.replyLatency(Duration.between(row.createdAt(), now));
+                // Wall clock: the first attempt runs with the time the row was written.
+                metrics.replyLatency(Duration.between(row.createdAt(), Instant.now()));
                 audit(row, "sent", provider, null);
                 groupReplies.invalidate(row.id());
                 LOGGER.infof("Email integration %s: reply %s for conversation %s sent", sanitize(row.integrationId()), row.id(),

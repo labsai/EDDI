@@ -42,7 +42,7 @@ Phase C2 of the email channel v3 control plan (`planning/email-channel-v3-contro
 - **Manager.** S/MIME section and SMTP fields in trigger mode in the email settings, the `SMIME_SIGNING` connection form
   (app-kit validation and labels), a self-test panel on the channel page; all 11 locales.
 - **Operator.** Prompt describes `emailControl`, `SMIME_SIGNING` and the self-test (no new allow-list entries: the
-  operator still has no channel tools). Revision 81 → 82.
+  operator still has no channel tools). Revision 81 → 83 (see the review fixes).
 - **Docs.** `email-integration.md` (S/MIME signing, self-test, common SMTP keys, `emailControl`), `connections.md`
   (`SMIME_SIGNING`), `metrics.md`, `configuration-reference.md` (`eddi.email.smime.check-interval`, `eddi.email.smime.max-hold`), the Full Metrics
   dashboard (days-left query on the email suppressions panel), `mcp-server.md`, the `eddi-admin` skill.
@@ -100,7 +100,9 @@ An independent review of the branch; each finding verified in the code first.
   recommend a signing-only certificate.
 - **Bouncy Castle tree.** `dependency:tree -Dincludes=org.bouncycastle`: only `*-lts8on` 2.73.13; nothing to exclude.
 - **Operator.** The prompt now names the maximum hold, `nonRepudiation`, the untrusted-root rule and the self-test's
-  chain verdicts; revision stays 82 (not yet released), fingerprint updated.
+  chain verdicts. Revision 83: `main` has meanwhile reached 82 with another prompt, so this
+  branch's 82 would not reach deployments already on it; expect a conflict on `operator-revision.json` at merge
+  (take 83 and the fingerprint the test prints).
 
 ### Unverified / next
 

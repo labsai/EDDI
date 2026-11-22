@@ -489,7 +489,8 @@ recognised **before** the own-address refusal, its result is recorded and it is 
 a turn. The token travels only in the `X-EDDI-Self-Test` header, never in the body, and the returned mail counts only
 when its `Message-ID` is the one the test was sent with, so a forged or quoting mail cannot write a result. A token is
 valid for 15 minutes and for one use — a replayed or forwarded copy, or an expired test, is refused like any other mail
-from the integration's own address.
+from the integration's own address. A relay that rewrites the `Message-ID` or drops unknown headers therefore makes
+the test expire rather than report.
 
 `GET /channelstore/channels/{id}/email-self-test/{token}` returns `status` (`waiting`, `done`, `expired`,
 `send_failed`), the raw `checks` and `findings` in plain words, for example:

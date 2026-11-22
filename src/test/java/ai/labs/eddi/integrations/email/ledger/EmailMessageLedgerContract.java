@@ -101,6 +101,23 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("a self-test slot row — terminal, no recipient, no next attempt — is a claim: its key is taken once")
+    default void selfTestSlotRow() {
+        LedgerEntry slot = new LedgerEntry(UUID.randomUUID().toString(), "integration-1", Kind.SELF_TEST, Direction.OUT,
+                "<self-test-slot.1.0@eddi.invalid>", null, "slot", "self-test-slot:integration-1:1:0", null, State.DONE, 0, null, null, null, null,
+                NOW, NOW, NOW.plus(Duration.ofHours(2)));
+        assertTrue(ledger().insertIfAbsent(slot));
+        LedgerEntry again = new LedgerEntry(UUID.randomUUID().toString(), "integration-1", Kind.SELF_TEST, Direction.OUT,
+                "<self-test-slot.1.0.b@eddi.invalid>", null, "slot", "self-test-slot:integration-1:1:0", null, State.DONE, 0, null, null, null,
+                null, NOW, NOW, NOW.plus(Duration.ofHours(2)));
+        assertFalse(ledger().insertIfAbsent(again), "the slot is taken");
+        LedgerEntry stored = ledger().findByIdempotencyKey("self-test-slot:integration-1:1:0").orElseThrow();
+        assertNull(stored.recipient());
+        assertEquals(State.DONE, stored.state());
+        assertEquals(0, ledger().countPending(), "a slot is not pending");
+    }
+
+    @Test
     @DisplayName("a second row with the same idempotency key, or the same message id, is refused")
     default void uniqueKeys() {
         LedgerEntry first = entry("key-1", NOW, "a@example.com");
