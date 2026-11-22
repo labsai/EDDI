@@ -23,25 +23,31 @@ import java.util.Optional;
  * or a continuation, passes through {@link #decide}; nothing else can name a
  * recipient, and the model never does.
  * <p>
- * <b>The rule.</b> The authenticated {@code From} of the mail the reply answers
- * — never its {@code Cc}, never another recipient, and the {@code Reply-To}
- * only with {@code honorReplyTo: true} and exactly one valid {@code Reply-To}.
- * A reply needs all of:
+ * <b>The rule.</b> The {@code To} is the authenticated {@code From} of the mail
+ * the reply answers — and the {@code Reply-To} only with
+ * {@code honorReplyTo: true} and exactly one valid {@code Reply-To}. The
+ * {@code Cc} is empty unless the integration copies the thread
+ * ({@code replyAudience: thread}) and the conversation runs as its
+ * {@code email-thread:} identity; then {@link EmailReplyAudience} derives it
+ * from the answered mail's signed {@code To}/{@code Cc}, bounded by
+ * {@code replyAllowedRecipients} (email v2 plan §9). A reply needs all of:
  * <ol>
  * <li>the integration is in conversation mode now;</li>
  * <li>the answered mail is this integration's inbound {@code TRIGGER} row and
  * reached a turn ({@code TURN_SUBMITTED} or {@code DONE}) — a refused mail
  * never gets one;</li>
  * <li>the conversation runs as an authenticated email identity of this
- * integration — {@code email:<id>:<address>} or {@code email:<id>}, which are
- * minted only for a DKIM-aligned pass — never {@code email-anon:} or anyone
- * else;</li>
+ * integration — {@code email:<id>:<address>}, {@code email:<id>} or
+ * {@code email-thread:<id>:<digest>}, which are minted only for a DKIM-aligned
+ * pass — never {@code email-anon:}, another integration's, or anyone else;</li>
  * <li>the mail's step in conversation memory (written by the inbound processor,
  * not by the sender) is the same mail, with the verdict {@code aligned-pass}
  * and the same {@code From} as the ledger row;</li>
  * <li>under {@code identityMode: perSender} with
  * {@code threadParticipants: originalSenderOnly}, the conversation's identity
- * is that very address;</li>
+ * is that very address — except for an {@code email-thread:} conversation,
+ * which names no address: who may continue it was decided when the mail was
+ * admitted (the participant guard of the inbound processor);</li>
  * <li>the recipient is not the integration's own address.</li>
  * </ol>
  * Unauthenticated mail cannot reach a turn in conversation mode at all
@@ -57,17 +63,29 @@ public final class EmailReplyRecipients {
      * The decision.
      *
      * @param recipient
-     *            the one normalised address to send to, or null
+     *            the one normalised address to send to (the {@code To}), or null
      * @param refusal
      *            why not, a stable code, or null
+     * @param audience
+     *            the {@code To} and the {@code Cc} recipients
+     *            ({@link EmailReplyAudience}); null when refused
      */
-    public record Decision(String recipient, String refusal) {
+    public record Decision(String recipient, String refusal, EmailReplyAudience.Audience audience) {
+        public Decision(String recipient, String refusal) {
+            this(recipient, refusal, recipient == null ? null : EmailReplyAudience.Audience.senderOnly(recipient));
+        }
+
         public boolean allowed() {
             return recipient != null && refusal == null;
         }
 
+        /** The {@code Cc} recipients, empty when refused or sender-only. */
+        public List<String> cc() {
+            return audience == null ? List.of() : audience.cc();
+        }
+
         static Decision refuse(String code) {
-            return new Decision(null, code);
+            return new Decision(null, code, null);
         }
 
         @Override
@@ -123,24 +141,37 @@ public final class EmailReplyRecipients {
         }
         if (settings.identityMode() == EmailChannelSettings.IdentityMode.PER_SENDER
                 && settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ORIGINAL_SENDER_ONLY
+                && !EmailUserIdentity.isThreadIdentityOf(conversationUserId, integrationId)
                 && !EmailUserIdentity.perSender(integrationId, sender).equals(conversationUserId)) {
             return Decision.refuse("identity_mismatch");
         }
-        String recipient = settings.honorReplyTo() ? singleReplyTo(stepMail).orElse(sender) : sender;
+        String recipient = recipientFor(settings, stepMail, sender);
         if (isOwn(settings, recipient)) {
             return Decision.refuse("own_address");
         }
-        return new Decision(recipient, null);
+        return new Decision(recipient, null, EmailReplyAudience.compute(integrationId, settings, stepMail, recipient, conversationUserId));
     }
 
     /**
-     * {@code email:<integrationId>} or {@code email:<integrationId>:<address>} —
-     * never {@code email-anon:}, never another integration's, never a person's own
-     * principal.
+     * The {@code To} of a reply to {@code sender}'s mail: the sender, or its single
+     * {@code Reply-To} under {@code honorReplyTo}. Public so the inbound processor
+     * can tell the agent who will read its answer before the turn runs.
+     */
+    public static String recipientFor(EmailChannelSettings settings, Map<String, Object> stepMail, String sender) {
+        return settings.honorReplyTo() ? singleReplyTo(stepMail).orElse(sender) : sender;
+    }
+
+    /**
+     * {@code email:<integrationId>}, {@code email:<integrationId>:<address>} or
+     * {@code email-thread:<integrationId>:<digest>} — never {@code email-anon:},
+     * never another integration's, never a person's own principal.
      */
     static boolean isAuthenticatedIdentity(String userId, String integrationId) {
         if (userId == null || integrationId == null || userId.startsWith(EmailUserIdentity.ANONYMOUS_PREFIX)) {
             return false;
+        }
+        if (EmailUserIdentity.isThreadIdentityOf(userId, integrationId)) {
+            return true;
         }
         String shared = EmailUserIdentity.integration(integrationId);
         if (userId.equals(shared)) {
@@ -149,9 +180,6 @@ public final class EmailReplyRecipients {
         return userId.startsWith(shared + ":") && EmailUserIdentity.addressOf(userId).isPresent();
     }
 
-    /**
-     * The one valid {@code Reply-To} address of the step's mail, if exactly one.
-     */
     /**
      * The integration's address, an alias, or a plus-address of either: a reply
      * there would come back into the mailbox, and an alias that is a distribution
@@ -164,6 +192,9 @@ public final class EmailReplyRecipients {
         return settings.aliases().stream().anyMatch(alias -> EmailChannelSettings.isPlusAddressOf(recipient, alias));
     }
 
+    /**
+     * The one valid {@code Reply-To} address of the step's mail, if exactly one.
+     */
     static Optional<String> singleReplyTo(Map<String, Object> stepMail) {
         if (!(stepMail.get("replyTo") instanceof List<?> replyTo) || replyTo.size() != 1 || !(replyTo.get(0) instanceof String only)) {
             return Optional.empty();

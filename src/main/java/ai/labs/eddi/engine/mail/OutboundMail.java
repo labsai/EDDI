@@ -122,6 +122,14 @@ public record OutboundMail(MailAddress from, List<MailAddress> to, List<MailAddr
                 references, Kind.AUTO_REPLIED, null);
     }
 
+    /**
+     * This mail with {@code copies} as its {@code Cc} — for a reply whose audience
+     * the caller's policy decided (email v2 plan §9.3).
+     */
+    public OutboundMail withCc(List<MailAddress> copies) {
+        return new OutboundMail(from, to, copies, subject, text, messageId, inReplyTo, references, kind, date);
+    }
+
     /** No body, subject or addresses: this record ends up in log lines. */
     @Override
     public String toString() {

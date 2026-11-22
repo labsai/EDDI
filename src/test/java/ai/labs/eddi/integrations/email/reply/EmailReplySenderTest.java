@@ -18,6 +18,7 @@ import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory;
+import ai.labs.eddi.integrations.email.EmailMetrics;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.EmailOwnerNotifier;
 import ai.labs.eddi.integrations.email.EmailThreads;
@@ -34,6 +35,7 @@ import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import io.quarkus.qute.Engine;
 import jakarta.mail.internet.InternetAddress;
 import jakarta.enterprise.inject.Instance;
+import jakarta.mail.Message;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,6 +48,7 @@ import java.io.ByteArrayInputStream;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -58,6 +61,7 @@ import java.util.concurrent.Future;
 
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.CONVERSATION;
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.INTEGRATION;
+import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.MAILBOX;
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.MESSAGE_ID;
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.NOW;
 import static ai.labs.eddi.integrations.email.reply.EmailReplyTestSupport.SENDER;
@@ -102,6 +106,8 @@ class EmailReplySenderTest {
     /** Records sends; fails as told. */
     static final class RecordingTransport implements MailTransport {
         final List<String> recipients = new ArrayList<>();
+        /** Every envelope, To first. */
+        final List<List<String>> envelopes = new ArrayList<>();
         final List<byte[]> messages = new ArrayList<>();
         final List<MailSendException> failures = new ArrayList<>();
         final List<RuntimeException> crashes = new ArrayList<>();
@@ -128,6 +134,14 @@ class EmailReplySenderTest {
             recipients.add(recipient);
             messages.add(mime);
             return "250 2.0.0 queued";
+        }
+
+        @Override
+        public synchronized String send(String integrationId, EmailChannelSettings settings, byte[] mime, List<String> envelope)
+                throws MailSendException {
+            String accepted = send(integrationId, settings, mime, envelope.get(0));
+            envelopes.add(List.copyOf(envelope));
+            return accepted;
         }
     }
 
@@ -376,6 +390,155 @@ class EmailReplySenderTest {
             assertEquals(1, transport.recipients.size(), "the legacy row and the first reply fill the conversation's cap of 2");
             LedgerEntry held = replies().stream().filter(r -> r.state() == State.SUPPRESSED).findFirst().orElseThrow();
             assertEquals(EmailReplySender.THREAD_BUDGET, held.lastError());
+        }
+    }
+
+    @Nested
+    @DisplayName("replies to the thread (email v2 plan §9.5)")
+    class ThreadAudience {
+
+        static final String COLLEAGUE = "bob@supplier.com";
+        static final String OTHER = "carol@supplier.com";
+        final String threadUser = EmailUserIdentity.thread(INTEGRATION, "<root@supplier.com>");
+
+        Map<String, String> threadConfig(String extraAllowed) {
+            return new HashMap<>(
+                    Map.of("replyAudience", "thread", "actWhen", "addressed", "replyAllowedRecipients", "*@supplier.com" + extraAllowed));
+        }
+
+        Map<String, Object> copiedMail() {
+            Map<String, Object> mail = new HashMap<>(mail());
+            mail.put("to", List.of(MAILBOX, COLLEAGUE));
+            mail.put("cc", List.of(OTHER, "eve@external.com"));
+            return mail;
+        }
+
+        SimpleConversationMemorySnapshot threadAnswer(String answer) {
+            return snapshot(ConversationState.READY, threadUser, output("Hello.", null), output(answer, copiedMail()));
+        }
+
+        @Test
+        @DisplayName("internal colleagues on the mail are copied — envelope, header and record; an external one is not")
+        void copied() throws Exception {
+            integration(threadConfig(""));
+            var settings = settings(threadConfig(""));
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+
+            var row = sender.onTurnCompleted(INTEGRATION, settings, inbound, CONVERSATION, threadAnswer("Ships Monday."), NOW).orElseThrow();
+
+            assertEquals(List.of(List.of(SENDER, COLLEAGUE, OTHER)), transport.envelopes);
+            MimeMessage sent = parse(transport.messages.get(0));
+            assertEquals(SENDER, sent.getRecipients(Message.RecipientType.TO)[0].toString());
+            assertEquals(List.of(COLLEAGUE, OTHER), Arrays.stream(sent.getRecipients(Message.RecipientType.CC)).map(Object::toString).toList());
+            assertEquals(SENDER, ledger.findById(row.id()).orElseThrow().recipient(), "the row's recipient stays the To");
+            assertEquals(List.of(SENDER, COLLEAGUE, OTHER), ledger.findReplyRecipients(row.id()).stream().map(r -> r.address()).toList());
+            assertTrue(ledger.hasSentReply(CONVERSATION, COLLEAGUE), "a copied colleague may continue the thread");
+            assertFalse(ledger.hasSentReply(CONVERSATION, "eve@external.com"));
+            ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(audit).submit(entry.capture());
+            assertEquals(2, entry.getValue().output().get("ccCount"));
+            assertEquals(List.of("supplier.com"), entry.getValue().output().get("ccDomains"));
+            assertFalse(entry.getValue().output().toString().contains(COLLEAGUE), "no copy's address in the audit ledger");
+            assertEquals(1.0, registry.get(EmailMetrics.OUTBOUND_RECIPIENTS).summary().count());
+            assertEquals(3.0, registry.get(EmailMetrics.OUTBOUND_RECIPIENTS).summary().totalAmount());
+        }
+
+        @Test
+        @DisplayName("a conversation that does not run as the thread identity copies nobody, even under replyAudience thread")
+        void perSenderConversationNotCopied() throws Exception {
+            integration(threadConfig(""));
+            var settings = settings(threadConfig(""));
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+            var perSender = snapshot(ConversationState.READY, EmailUserIdentity.perSender(INTEGRATION, SENDER), output("Hello.", null),
+                    output("Ships Monday.", copiedMail()));
+
+            sender.onTurnCompleted(INTEGRATION, settings, inbound, CONVERSATION, perSender, NOW).orElseThrow();
+
+            assertEquals(List.of(List.of(SENDER)), transport.envelopes);
+        }
+
+        @Test
+        @DisplayName("a suppressed copy is left out and the rest still get the reply; a suppressed To suppresses all of it")
+        void suppressedCopy() throws Exception {
+            integration(threadConfig(""));
+            var settings = settings(threadConfig(""));
+            suppressions.suppress(INTEGRATION, COLLEAGUE, "bounce:5.1.1", NOW);
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+
+            var row = sender.onTurnCompleted(INTEGRATION, settings, inbound, CONVERSATION, threadAnswer("Ships Monday."), NOW).orElseThrow();
+
+            assertEquals(List.of(List.of(SENDER, OTHER)), transport.envelopes);
+            assertFalse(ledger.hasSentReply(CONVERSATION, COLLEAGUE));
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
+
+            suppressions.suppress(INTEGRATION, SENDER, "bounce:5.1.1", NOW);
+            LedgerEntry second = inbound("in-2", "<q2@supplier.com>", SENDER, State.TURN_SUBMITTED);
+            ledger.put(second);
+            Map<String, Object> secondMail = new HashMap<>(copiedMail());
+            secondMail.put("messageId", "<q2@supplier.com>");
+            sender.onTurnCompleted(INTEGRATION, settings, second, CONVERSATION,
+                    snapshot(ConversationState.READY, threadUser, output("Hello.", null), output("Again.", secondMail)), NOW);
+            assertEquals(1, transport.envelopes.size(), "nothing to anyone when the To is suppressed");
+        }
+
+        @Test
+        @DisplayName("a retry sends to the stored copies narrowed by the current settings, never to a newly allowed address")
+        void retryNarrowsNeverWidens() throws Exception {
+            integration(threadConfig(""));
+            LedgerEntry inbound = storedInbound(State.DONE);
+            transport.failures.add(new MailSendException(MailSendException.Category.CONNECT, false, "down", null));
+            var row = sender.onTurnCompleted(INTEGRATION, settings(threadConfig("")), inbound, CONVERSATION, threadAnswer("Ships Monday."), NOW)
+                    .orElseThrow();
+            assertEquals(List.of(SENDER, COLLEAGUE, OTHER), ledger.findReplyRecipients(row.id()).stream().map(r -> r.address()).toList());
+            // Between attempts the admin narrows the allowlist to Bob and widens it to the
+            // external domain: Carol is dropped, Eve is not added.
+            Map<String, String> changed = threadConfig("");
+            changed.put("replyAllowedRecipients", COLLEAGUE + ",*@external.com");
+            integration(changed);
+            when(conversations.readConversation(CONVERSATION, true, false, List.of())).thenReturn(threadAnswer("Ships Monday."));
+
+            sender.sweep(ledger.findById(row.id()).orElseThrow().nextAttemptAt().plusSeconds(1));
+
+            assertEquals(List.of(List.of(SENDER, COLLEAGUE)), transport.envelopes);
+            assertEquals(List.of(SENDER, COLLEAGUE), ledger.findReplyRecipients(row.id()).stream().map(r -> r.address()).toList(),
+                    "a dropped copy is not a participant");
+            assertFalse(ledger.hasSentReply(CONVERSATION, OTHER));
+            assertFalse(ledger.hasSentReply(CONVERSATION, "eve@external.com"));
+        }
+
+        @Test
+        @DisplayName("more copies than maxReplyRecipients: the sender alone, noted on the row and counted")
+        void capped() throws Exception {
+            Map<String, String> config = threadConfig("");
+            config.put("maxReplyRecipients", "1");
+            integration(config);
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+
+            var row = sender.onTurnCompleted(INTEGRATION, settings(config), inbound, CONVERSATION, threadAnswer("Ships Monday."), NOW).orElseThrow();
+
+            assertEquals(List.of(List.of(SENDER)), transport.envelopes);
+            assertEquals(EmailReplySender.CC_CAPPED, ledger.findById(row.id()).orElseThrow().lastError());
+            assertEquals(1.0, registry.get(EmailMetrics.OUTBOUND_CC_CAPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("a permanent bounce for a copy suppresses that address only; the reply stays SENT")
+        void copyBounce() throws Exception {
+            integration(threadConfig(""));
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+            var row = sender.onTurnCompleted(INTEGRATION, settings(threadConfig("")), inbound, CONVERSATION, threadAnswer("x"), NOW).orElseThrow();
+
+            assertTrue(sender.applyDeliveryReport(INTEGRATION, new DeliveryReport("delivery-status", null, row.messageId(),
+                    List.of(new DeliveryReport.Recipient(COLLEAGUE, "failed", "5.1.1", null))), NOW));
+
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state());
+            assertTrue(suppressions.isSuppressed(INTEGRATION, COLLEAGUE));
+            assertFalse(suppressions.isSuppressed(INTEGRATION, SENDER));
+            assertFalse(ledger.hasSentReply(CONVERSATION, COLLEAGUE), "a copy that bounced never received the reply");
+            assertTrue(ledger.hasSentReply(CONVERSATION, OTHER));
+            assertFalse(sender.applyDeliveryReport(INTEGRATION, new DeliveryReport("delivery-status", null, row.messageId(),
+                    List.of(new DeliveryReport.Recipient("eve@external.com", "failed", "5.1.1", null))), NOW), "not one of its recipients");
+            assertFalse(suppressions.isSuppressed(INTEGRATION, "eve@external.com"));
         }
     }
 

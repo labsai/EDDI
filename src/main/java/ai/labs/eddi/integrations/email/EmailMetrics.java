@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.DistributionSummary;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
 
@@ -33,6 +34,10 @@ public final class EmailMetrics {
     public static final String OUTBOUND = "eddi.email.outbound";
     public static final String OUTBOUND_LATENCY = "eddi.email.outbound.latency";
     public static final String SUPPRESSIONS = "eddi.email.suppressions";
+    /** Envelope recipients of one sent reply: 1, or 1 plus its copies. */
+    public static final String OUTBOUND_RECIPIENTS = "eddi.email.outbound.recipients";
+    /** Replies whose copies {@code maxReplyRecipients} dropped. */
+    public static final String OUTBOUND_CC_CAPPED = "eddi.email.outbound.cc_capped";
 
     /** Inbound outcomes, a bounded set. */
     public static final String PROCESSED = "processed";
@@ -115,6 +120,21 @@ public final class EmailMetrics {
     public void reply(String outcome) {
         if (registry != null) {
             registry.counter(OUTBOUND, "kind", "reply", "outcome", outcome).increment();
+        }
+    }
+
+    /** How many envelope recipients a sent reply had (email v2 plan §9.5). */
+    public void replyRecipients(int count) {
+        if (registry != null) {
+            DistributionSummary.builder(OUTBOUND_RECIPIENTS).description("Envelope recipients of a sent conversation-mode reply").register(registry)
+                    .record(count);
+        }
+    }
+
+    /** A thread reply sent to the sender only because it had too many copies. */
+    public void ccCapped() {
+        if (registry != null) {
+            registry.counter(OUTBOUND_CC_CAPPED).increment();
         }
     }
 
