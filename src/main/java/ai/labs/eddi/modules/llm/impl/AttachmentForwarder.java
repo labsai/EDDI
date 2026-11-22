@@ -4,7 +4,13 @@
  */
 package ai.labs.eddi.modules.llm.impl;
 
+import ai.labs.eddi.engine.attachments.AttachmentSelector;
+import ai.labs.eddi.engine.attachments.ConversationListing;
+import ai.labs.eddi.engine.attachments.Derivation;
 import ai.labs.eddi.engine.attachments.IAttachmentStore;
+import ai.labs.eddi.engine.documents.EffectiveDocumentsConfig;
+import ai.labs.eddi.engine.documents.SelectorException;
+import ai.labs.eddi.engine.documents.SelectorResolver;
 import ai.labs.eddi.engine.httpclient.outbound.BodyMode;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundHttp;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundRequest;
@@ -17,7 +23,12 @@ import ai.labs.eddi.engine.memory.IConversationMemory.IWritableConversationStep;
 import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.model.Attachment;
 import ai.labs.eddi.engine.memory.model.Data;
+import ai.labs.eddi.modules.ingestion.extract.PdfSliceBuilder;
+import ai.labs.eddi.modules.ingestion.extract.PdfSliceBuilder.SliceTooLargeException;
+import ai.labs.eddi.modules.ingestion.extract.UnreadableDocumentException;
 import ai.labs.eddi.modules.llm.capability.ModelCapabilityService;
+import ai.labs.eddi.modules.llm.impl.DocumentForwardPlanner.Form;
+import ai.labs.eddi.modules.llm.impl.DocumentForwardPlanner.Sizes;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor;
 import ai.labs.eddi.modules.llm.tools.impl.AttachmentTextExtractor.AttachmentExtractionException;
 import ai.labs.eddi.utils.LogSanitizer;
@@ -35,11 +46,17 @@ import jakarta.inject.Inject;
 import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Base64;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
 
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENTS;
 import static ai.labs.eddi.engine.memory.MemoryKeys.ATTACHMENT_ERRORS;
@@ -61,7 +78,12 @@ import static ai.labs.eddi.modules.llm.tools.UrlValidationUtils.validateUrl;
  * else a metadata note.</li>
  * <li>{@code application/pdf} → native {@link PdfFileContent} when the model
  * supports documents, else PDFBox text extraction inlined as
- * {@link TextContent}.</li>
+ * {@link TextContent}. A stored PDF that names a page range (an
+ * {@link AttachmentSelector} part) sends only those pages: a PDF of them built
+ * by {@link PdfSliceBuilder} (cached as a {@code PDF_SLICE} derived blob),
+ * preceded by a header naming the file and pages, or — for a model without
+ * document support, or a slice too large to send — those pages' text under the
+ * same header. {@link DocumentForwardPlanner} decides which.</li>
  * <li>text-like ({@code text/*}, JSON, XML, CSV, YAML) → decoded and inlined
  * (no capability required).</li>
  * <li>{@code audio/*} → {@link AudioContent} when supported, else a note.</li>
@@ -83,6 +105,8 @@ public class AttachmentForwarder {
     private final ModelCapabilityService capabilityService;
     private final AttachmentTextExtractor textExtractor;
     private final OutboundHttp http;
+    private final PdfSliceBuilder sliceBuilder;
+    private final Path workDir;
     private final long maxForwardBytes;
     private final long maxAggregateBytes;
     private final Counter forwardedCounter;
@@ -94,15 +118,44 @@ public class AttachmentForwarder {
             ModelCapabilityService capabilityService,
             AttachmentTextExtractor textExtractor,
             OutboundHttp http,
+            PdfSliceBuilder sliceBuilder,
             MeterRegistry meterRegistry,
             @ConfigProperty(name = "eddi.attachments.max-forward-bytes",
                             defaultValue = "10485760") long maxForwardBytes,
             @ConfigProperty(name = "eddi.attachments.max-forward-aggregate-bytes",
                             defaultValue = "20971520") long maxAggregateBytes) {
+        this(attachmentStore, capabilityService, textExtractor, http, sliceBuilder, defaultWorkDir(), meterRegistry,
+                maxForwardBytes, maxAggregateBytes);
+    }
+
+    /** With a default slice builder. */
+    public AttachmentForwarder(IAttachmentStore attachmentStore,
+            ModelCapabilityService capabilityService,
+            AttachmentTextExtractor textExtractor,
+            OutboundHttp http,
+            MeterRegistry meterRegistry,
+            long maxForwardBytes,
+            long maxAggregateBytes) {
+        this(attachmentStore, capabilityService, textExtractor, http, new PdfSliceBuilder(), defaultWorkDir(), meterRegistry,
+                maxForwardBytes, maxAggregateBytes);
+    }
+
+    /** For tests: slices are built in {@code workDir}. */
+    AttachmentForwarder(IAttachmentStore attachmentStore,
+            ModelCapabilityService capabilityService,
+            AttachmentTextExtractor textExtractor,
+            OutboundHttp http,
+            PdfSliceBuilder sliceBuilder,
+            Path workDir,
+            MeterRegistry meterRegistry,
+            long maxForwardBytes,
+            long maxAggregateBytes) {
         this.attachmentStore = attachmentStore;
         this.capabilityService = capabilityService;
         this.textExtractor = textExtractor;
         this.http = http;
+        this.sliceBuilder = sliceBuilder != null ? sliceBuilder : new PdfSliceBuilder();
+        this.workDir = workDir != null ? workDir : defaultWorkDir();
         this.forwardedCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.forwarded") : null;
         // Separate from `forwarded`: a re-inline repeats every attachment-free
         // turn, so folding it into the first-time counter would quietly turn one
@@ -112,6 +165,15 @@ public class AttachmentForwarder {
         this.errorsCounter = meterRegistry != null ? meterRegistry.counter("eddi.attachment.errors") : null;
         this.maxForwardBytes = maxForwardBytes;
         this.maxAggregateBytes = maxAggregateBytes;
+    }
+
+    /**
+     * Where slices are written while they are built: the JVM's temporary directory.
+     * A configurable work directory arrives with the file-backed processing of
+     * large documents.
+     */
+    private static Path defaultWorkDir() {
+        return Path.of(System.getProperty("java.io.tmpdir", "."));
     }
 
     /**
@@ -157,6 +219,19 @@ public class AttachmentForwarder {
                         ModelCapabilityService.Support visionOverride,
                         ModelCapabilityService.Support documentsOverride,
                         ModelCapabilityService.Support audioOverride, boolean record) {
+        forward(messages, memory, provider, model, visionOverride, documentsOverride, audioOverride, record, null);
+    }
+
+    /**
+     * As above, with the task's effective {@code documents} configuration for
+     * {@link DocumentForwardPlanner} ({@code null}: the defaults). No key of it
+     * changes how a PDF is sent yet.
+     */
+    public void forward(List<ChatMessage> messages, IConversationMemory memory, String provider, String model,
+                        ModelCapabilityService.Support visionOverride,
+                        ModelCapabilityService.Support documentsOverride,
+                        ModelCapabilityService.Support audioOverride, boolean record,
+                        EffectiveDocumentsConfig documents) {
         if (messages == null || messages.isEmpty()) {
             return;
         }
@@ -177,19 +252,24 @@ public class AttachmentForwarder {
         List<String> errors = new ArrayList<>();
         long[] aggregate = {0L};
         int added = 0;
+        // Read only when a part is present, so a turn without one does exactly what
+        // it did before parts existed.
+        Set<String> withheld = attachments.stream().map(AttachmentSelector::fromAttachment).anyMatch(DocumentForwardPlanner::isPart)
+                ? AttachmentContextExtractor.withheldStorageRefs(memory)
+                : Set.of();
 
         for (Attachment att : attachments) {
-            Content content = process(att, memory.getConversationId(), provider, model, aggregate, extracts, errors,
-                    visionOverride, documentsOverride, audioOverride);
-            if (content != null) {
-                contents.add(content);
+            List<Content> produced = process(att, memory.getConversationId(), provider, model, aggregate, extracts, errors,
+                    visionOverride, documentsOverride, audioOverride, withheld, documents);
+            if (!produced.isEmpty()) {
+                contents.addAll(produced);
                 added++;
             }
         }
 
         if (added > 0) {
             messages.set(lastUserIdx, UserMessage.from(contents));
-            LOGGER.debugf("Forwarded %d attachment content item(s) to the LLM", added);
+            LOGGER.debugf("Forwarded %d attachment(s) to the LLM", added);
         }
         if (record) {
             recordMetrics(added, errors.size());
@@ -260,19 +340,17 @@ public class AttachmentForwarder {
         for (Attachment att : reinline) {
             // Same caps, byte resolution and vision gating as a current-turn
             // image; a resolve failure degrades to the skip note, never a throw.
-            Content content = process(att, memory.getConversationId(), provider, model, aggregate,
+            List<Content> produced = process(att, memory.getConversationId(), provider, model, aggregate,
                     new ArrayList<>(), errors, visionOverride,
-                    ModelCapabilityService.Support.AUTO, ModelCapabilityService.Support.AUTO);
-            if (content != null) {
-                contents.add(content);
-                // Only an actual image counts as re-inlined: a failed store load
-                // or cap skip comes back as a TextContent note — the model is
-                // told, but counting it would claim "1 image re-inlined" (and
-                // increment the counter) on every remaining turn of a
-                // conversation whose blob is permanently gone.
-                if (content instanceof ImageContent) {
-                    inlined++;
-                }
+                    ModelCapabilityService.Support.AUTO, ModelCapabilityService.Support.AUTO, Set.of(), null);
+            contents.addAll(produced);
+            // Only an actual image counts as re-inlined: a failed store load
+            // or cap skip comes back as a TextContent note — the model is
+            // told, but counting it would claim "1 image re-inlined" (and
+            // increment the counter) on every remaining turn of a
+            // conversation whose blob is permanently gone.
+            if (produced.stream().anyMatch(ImageContent.class::isInstance)) {
+                inlined++;
             }
         }
 
@@ -325,17 +403,22 @@ public class AttachmentForwarder {
         }
     }
 
-    private Content process(Attachment att, String conversationId, String provider, String model,
-                            long[] aggregate, List<String> extracts, List<String> errors,
-                            ModelCapabilityService.Support visionOverride,
-                            ModelCapabilityService.Support documentsOverride,
-                            ModelCapabilityService.Support audioOverride) {
+    /**
+     * The content one attachment becomes: usually one item, two for a page range
+     * sent as a PDF (header, then the slice), none when it is dropped.
+     */
+    private List<Content> process(Attachment att, String conversationId, String provider, String model,
+                                  long[] aggregate, List<String> extracts, List<String> errors,
+                                  ModelCapabilityService.Support visionOverride,
+                                  ModelCapabilityService.Support documentsOverride,
+                                  ModelCapabilityService.Support audioOverride,
+                                  Set<String> withheld, EffectiveDocumentsConfig documents) {
         String mime = att.getMimeType() == null ? "" : att.getMimeType().toLowerCase(Locale.ROOT);
         String name = att.getFileName() != null ? att.getFileName() : "unnamed";
 
         if (att.getContentSource() == Attachment.ContentSource.NONE) {
             errors.add("Attachment '" + name + "' has no content and was not forwarded.");
-            return null;
+            return List.of();
         }
 
         // Fast path: an image the provider can fetch by URL — no download needed.
@@ -347,11 +430,21 @@ public class AttachmentForwarder {
                 && capabilityService.supportsVision(provider, model, visionOverride)
                 && capabilityService.supportsImageUrl(provider, model)) {
             try {
-                return ImageContent.from(URI.create(att.getUrl()));
+                return List.of(ImageContent.from(URI.create(att.getUrl())));
             } catch (Exception e) {
                 errors.add("Image '" + name + "' URL could not be attached: " + e.getMessage());
-                return null;
+                return List.of();
             }
+        }
+
+        // A part of a stored PDF is sent as that part, never as the whole file. Its
+        // bytes are resolved and capped differently: the slice counts, not the file.
+        AttachmentSelector selector = AttachmentSelector.fromAttachment(att);
+        if (isPdf && DocumentForwardPlanner.isPart(selector)) {
+            var capabilities = new DocumentForwardPlanner.Capabilities(
+                    capabilityService.supportsDocuments(provider, model, documentsOverride));
+            return processPart(att, selector, name, conversationId, capabilities, aggregate, extracts, errors, withheld,
+                    documents);
         }
 
         // Everything else needs the bytes in hand. A skip (cap/load/fetch failure)
@@ -361,37 +454,226 @@ public class AttachmentForwarder {
             bytes = resolveBytes(att, conversationId, aggregate);
         } catch (ForwardSkipException e) {
             errors.add(e.getMessage());
-            return TextContent.from(e.getMessage());
+            return List.of(TextContent.from(e.getMessage()));
         }
 
         if (isImage) {
             if (!capabilityService.supportsVision(provider, model, visionOverride)) {
-                return note(errors, name, mime, att.getSizeBytes(),
-                        "model does not support images");
+                return List.of(note(errors, name, mime, att.getSizeBytes(),
+                        "model does not support images"));
             }
-            return ImageContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType());
+            return List.of(ImageContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType()));
         }
 
         if (isPdf) {
-            if (capabilityService.supportsDocuments(provider, model, documentsOverride)) {
-                return PdfFileContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType());
+            var capabilities = new DocumentForwardPlanner.Capabilities(
+                    capabilityService.supportsDocuments(provider, model, documentsOverride));
+            Form form = DocumentForwardPlanner.plan(selector, capabilities, null, documents);
+            if (form == Form.WHOLE_NATIVE) {
+                return List.of(PdfFileContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType()));
             }
-            return extractInline(bytes, att.getMimeType(), name, extracts, errors,
-                    "PDF text-extracted (model has no native document support)");
+            return List.of(extractInline(bytes, att.getMimeType(), name, extracts, errors,
+                    "PDF text-extracted (model has no native document support)"));
         }
 
         if (textExtractor.canExtractText(att.getMimeType())) {
-            return extractInline(bytes, att.getMimeType(), name, extracts, errors, "inlined as text");
+            return List.of(extractInline(bytes, att.getMimeType(), name, extracts, errors, "inlined as text"));
         }
 
         if (isAudio) {
             if (!capabilityService.supportsAudio(provider, model, audioOverride)) {
-                return note(errors, name, mime, att.getSizeBytes(), "model does not support audio");
+                return List.of(note(errors, name, mime, att.getSizeBytes(), "model does not support audio"));
             }
-            return AudioContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType());
+            return List.of(AudioContent.from(Base64.getEncoder().encodeToString(bytes), att.getMimeType()));
         }
 
-        return note(errors, name, mime, att.getSizeBytes(), "unsupported type");
+        return List.of(note(errors, name, mime, att.getSizeBytes(), "unsupported type"));
+    }
+
+    /**
+     * A page range of a stored PDF: a PDF of those pages for a document-capable
+     * model, else those pages' text, each behind a header naming the file and the
+     * pages. Every failure ends in the pages' text or a note; none sends the whole
+     * file.
+     */
+    private List<Content> processPart(Attachment att, AttachmentSelector selector, String name, String conversationId,
+                                      DocumentForwardPlanner.Capabilities capabilities, long[] aggregate,
+                                      List<String> extracts, List<String> errors, Set<String> withheld,
+                                      EffectiveDocumentsConfig documents) {
+        String ref = att.getStorageRef();
+        if (withheld.contains(ref) || withheld.contains(rootRefOf(att))) {
+            // An input guardrail refused this file on an earlier turn of this
+            // conversation; naming part of it again does not release it.
+            errors.add("Attachment '" + name + "' was not sent: the file was withheld earlier in this conversation.");
+            return List.of();
+        }
+        String part = ConversationListing.partName(name, selector);
+        SelectorResolver.PageRange range;
+        try {
+            range = SelectorResolver.parsePages(selector.pages());
+        } catch (SelectorException e) {
+            return List.of(partNote(errors, part, "the page range is missing or invalid (" + e.getMessage() + ")"));
+        }
+
+        byte[] root;
+        try {
+            root = attachmentStore.load(ref, conversationId);
+        } catch (IAttachmentStore.AttachmentStoreException e) {
+            String msg = "Stored attachment '" + name + "' could not be loaded: " + e.getMessage();
+            errors.add(msg);
+            return List.of(TextContent.from(msg));
+        }
+
+        Sizes sizes = Sizes.beforeSlice(maxForwardBytes, maxAggregateBytes - aggregate[0]);
+        Form form = DocumentForwardPlanner.plan(selector, capabilities, sizes, documents);
+        String reason = capabilities.documents() ? null : "the model has no native document support";
+        if (form == Form.SLICE_NATIVE) {
+            try {
+                byte[] slice = slice(root, ref, range, name, conversationId, sizes.sliceLimit());
+                form = DocumentForwardPlanner.plan(selector, capabilities, sizes.withSlice(slice.length), documents);
+                if (form == Form.SLICE_NATIVE) {
+                    aggregate[0] += slice.length;
+                    return List.of(
+                            TextContent.from("[Attachment " + part + " (application/pdf) — only pages " + pagesText(range)
+                                    + " of the file, sent as a PDF of those pages]"),
+                            PdfFileContent.from(Base64.getEncoder().encodeToString(slice), "application/pdf"));
+                }
+                reason = sliceTooLarge(sizes.sliceLimit());
+            } catch (SliceTooLargeException e) {
+                reason = sliceTooLarge(e.maxBytes());
+            } catch (UnreadableDocumentException e) {
+                LOGGER.debugf("A PDF slice could not be built for conversation='%s': %s",
+                        LogSanitizer.sanitize(conversationId), e.getMessage());
+                reason = "a PDF of those pages could not be built";
+            }
+            errors.add("Attachment '" + part + "' was sent as text: " + reason + ".");
+        }
+        return List.of(rangeText(root, ref, range, part, conversationId, extracts, errors, reason));
+    }
+
+    private static String sliceTooLarge(long limit) {
+        return "the PDF of those pages is larger than the " + limit + " bytes one file may take in this request";
+    }
+
+    /**
+     * The slice: the cached {@code PDF_SLICE} when one exists and still fits, else
+     * built now and cached. A slice the store does not keep (a per-source cap, any
+     * store failure) is still sent.
+     *
+     * @throws SliceTooLargeException
+     *             when it does not fit {@code limit}
+     */
+    private byte[] slice(byte[] root, String ref, SelectorResolver.PageRange range, String name, String conversationId,
+                         long limit) {
+        String unitId = "p" + range.text();
+        Optional<IAttachmentStore.Attachment> cached = Optional.empty();
+        try {
+            cached = attachmentStore.findDerived(ref, Derivation.Kind.PDF_SLICE, unitId, conversationId);
+        } catch (IAttachmentStore.AttachmentStoreException | RuntimeException e) {
+            LOGGER.debugf("No cached PDF slice could be looked up: %s", e.getClass().getSimpleName());
+        }
+        if (cached != null && cached.isPresent() && cached.get().sizeBytes() <= limit) {
+            try {
+                byte[] bytes = attachmentStore.load(cached.get().storageRef(), conversationId);
+                if (bytes != null && bytes.length > 0 && bytes.length <= limit) {
+                    return bytes;
+                }
+            } catch (IAttachmentStore.AttachmentStoreException | RuntimeException e) {
+                LOGGER.debugf("A cached PDF slice could not be loaded; building it again: %s", e.getClass().getSimpleName());
+            }
+        }
+        byte[] bytes = build(root, range, limit);
+        try {
+            attachmentStore.storeDerived(bytes, "application/pdf", sliceFileName(name, range),
+                    Derivation.of(ref, Derivation.Kind.PDF_SLICE, unitId), conversationId);
+        } catch (IAttachmentStore.AttachmentDerivedCapException e) {
+            LOGGER.debugf("A PDF slice was sent without being cached: %s", e.getMessage());
+        } catch (IAttachmentStore.AttachmentStoreException | RuntimeException e) {
+            LOGGER.debugf("A PDF slice could not be cached: %s", e.getClass().getSimpleName());
+        }
+        return bytes;
+    }
+
+    private byte[] build(byte[] root, SelectorResolver.PageRange range, long limit) {
+        if (limit <= 0) {
+            throw new SliceTooLargeException(0);
+        }
+        Path file = sliceBuilder.slice(root, range.from(), range.to(), limit, workDir);
+        try {
+            return Files.readAllBytes(file);
+        } catch (IOException e) {
+            throw new UnreadableDocumentException("The PDF slice could not be read back.", e);
+        } finally {
+            try {
+                Files.deleteIfExists(file);
+            } catch (IOException e) {
+                LOGGER.warnv("A PDF slice work file could not be deleted: {0}", e.getClass().getSimpleName());
+            }
+        }
+    }
+
+    /**
+     * The pages' text behind the part header. The range is checked against the
+     * document first: the extractor widens an end page past the last page to the
+     * whole rest of the document.
+     */
+    private Content rangeText(byte[] root, String ref, SelectorResolver.PageRange range, String part, String conversationId,
+                              List<String> extracts, List<String> errors, String reason) {
+        Integer pageCount = pageCount(root, ref, conversationId);
+        if (pageCount == null) {
+            return partNote(errors, part, "the PDF could not be read");
+        }
+        if (range.to() > pageCount) {
+            return partNote(errors, part, "the file has only " + pageCount + " page(s)");
+        }
+        try {
+            String text = textExtractor.extractPdfText(root, range.from(), range.to(), textExtractor.getDefaultMaxChars());
+            if (text == null || text.isBlank()) {
+                return partNote(errors, part, "those pages have no extractable text");
+            }
+            extracts.add(part + ": " + text);
+            return TextContent.from("[Attachment " + part + " (application/pdf) — text of pages " + pagesText(range)
+                    + " only" + (reason != null ? "; " + reason : "") + "]\n" + text);
+        } catch (AttachmentExtractionException e) {
+            return partNote(errors, part, "text extraction failed: " + e.getMessage());
+        }
+    }
+
+    private Integer pageCount(byte[] root, String ref, String conversationId) {
+        try {
+            Integer known = attachmentStore.pageCount(ref, conversationId);
+            if (known != null && known > 0) {
+                return known;
+            }
+        } catch (IAttachmentStore.AttachmentStoreException | RuntimeException e) {
+            LOGGER.debugf("The page count of a stored PDF is not recorded: %s", e.getClass().getSimpleName());
+        }
+        try {
+            return textExtractor.extractPdfInfo(root).numberOfPages();
+        } catch (AttachmentExtractionException e) {
+            return null;
+        }
+    }
+
+    private static Content partNote(List<String> errors, String part, String reason) {
+        String msg = "[Attachment: " + part + " — not forwarded: " + reason + ". No other part of the file was sent instead.]";
+        errors.add(msg);
+        return TextContent.from(msg);
+    }
+
+    private static String pagesText(SelectorResolver.PageRange range) {
+        return range.from() == range.to() ? String.valueOf(range.from()) : range.from() + "–" + range.to();
+    }
+
+    private static String sliceFileName(String name, SelectorResolver.PageRange range) {
+        String base = name.toLowerCase(Locale.ROOT).endsWith(".pdf") ? name.substring(0, name.length() - 4) : name;
+        return base + " (p" + range.text() + ").pdf";
+    }
+
+    private static String rootRefOf(Attachment att) {
+        Map<String, String> metadata = att.getMetadata();
+        String root = metadata != null ? metadata.get(AttachmentSelector.META_ROOT) : null;
+        return root != null && !root.isBlank() ? root : att.getStorageRef();
     }
 
     /**
