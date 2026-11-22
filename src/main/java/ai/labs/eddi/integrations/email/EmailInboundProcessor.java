@@ -446,7 +446,9 @@ public class EmailInboundProcessor {
         if (intent != null && existingConversation == null) {
             try {
                 UserConversation mapped = userConversationStore.readUserConversation(intent, userId);
-                if (threadAudience && mapped != null && mapped.getConversationId() != null && isLive(stateOf(mapped.getConversationId()))
+                // Ended or not: a non-participant must not take a thread's shared key over
+                // after its conversation ended either.
+                if (threadAudience && mapped != null && mapped.getConversationId() != null
                         && !participantOf(mapped.getConversationId(), settings, sender)) {
                     // The thread hijack guard on the shared key (email v2 plan §9.4): a
                     // Message-ID is no secret, so naming the thread proves nothing. A sender
@@ -986,10 +988,6 @@ public class EmailInboundProcessor {
         return EmailReplyAudience.compute(integrationId, settings, mailMap, to, conversationUserId);
     }
 
-    private static boolean isLive(ConversationState state) {
-        return state != null && state != ConversationState.ENDED;
-    }
-
     /** Every address mail from which is this integration's own. */
     private static Set<String> ownSenders(EmailChannelSettings settings) {
         Set<String> own = new LinkedHashSet<>(settings.aliases());
@@ -1134,13 +1132,25 @@ public class EmailInboundProcessor {
     boolean participantOf(String conversationId, EmailChannelSettings settings, String sender) {
         // The first mail that ran in the conversation names its original sender.
         Optional<LedgerEntry> first = ledger.findInboundTurn(conversationId, false);
-        if (first.isPresent() && sender.equals(first.get().recipient())) {
-            return true;
+        boolean firstSender = first.isPresent() && sender.equals(first.get().recipient());
+        boolean anyParticipant = settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT;
+        if (!settings.repliesToThread()) {
+            return firstSender || anyParticipant && ledger.hasSentReply(conversationId, sender);
         }
-        // Under a thread audience everyone a reply in the conversation was sent to,
-        // Cc included, is a participant: they read it, and may answer it.
-        return (settings.threadParticipants() == EmailChannelSettings.ThreadParticipants.ANY_AUTHENTICATED_PARTICIPANT
-                || settings.repliesToThread()) && ledger.hasSentReply(conversationId, sender);
+        // Under a thread audience a continuing sender reads the conversation's history
+        // through the agent, so being copied once is not enough (email v2 plan §9.4):
+        // with anyAuthenticatedParticipant they must have been sent EVERY reply the
+        // conversation sent so far — anything said to the agent without them stays out
+        // of their reach, and they get a conversation of their own instead. With
+        // originalSenderOnly (the default) only the first sender continues it.
+        if (!anyParticipant) {
+            return firstSender;
+        }
+        long sent = ledger.countSentReplies(conversationId);
+        if (sent == 0) {
+            return firstSender;
+        }
+        return ledger.countSentRepliesTo(conversationId, sender) == sent;
     }
 
     /**

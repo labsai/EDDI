@@ -555,6 +555,26 @@ interface EmailMessageLedgerContract {
     }
 
     @Test
+    @DisplayName("participants: the sent replies of a conversation, counted in all and per address (To or Cc)")
+    default void sentReplyCounts() {
+        LedgerEntry first = reply("int-1", "conv-3", "reply:c1", "alice@example.com", State.SENT, NOW);
+        LedgerEntry second = reply("int-1", "conv-3", "reply:c2", "alice@example.com", State.SENT, NOW);
+        LedgerEntry unsent = reply("int-1", "conv-3", "reply:c3", "bob@example.com", State.FAILED, NOW);
+        ledger().insertIfAbsent(first);
+        ledger().insertIfAbsent(second);
+        ledger().insertIfAbsent(unsent);
+        ledger().addReplyRecipients(recipientsOf(first, "alice@example.com", "bob@example.com"));
+        ledger().addReplyRecipients(recipientsOf(second, "alice@example.com"));
+        ledger().addReplyRecipients(recipientsOf(unsent, "bob@example.com"));
+
+        assertEquals(2, ledger().countSentReplies("conv-3"));
+        assertEquals(2, ledger().countSentRepliesTo("conv-3", "alice@example.com"), "she read every reply");
+        assertEquals(1, ledger().countSentRepliesTo("conv-3", "bob@example.com"), "he missed the second; the failed one does not count");
+        assertEquals(0, ledger().countSentRepliesTo("conv-3", "carol@example.com"));
+        assertEquals(0, ledger().countSentReplies("conv-none"));
+    }
+
+    @Test
     @DisplayName("GDPR: recipients are found by address; erasing an address removes its entries and the children of its rows")
     default void recipientErasure() {
         LedgerEntry toAlice = reply("int-1", "conv-5", "reply:g1", "alice@example.com", State.SENT, NOW);

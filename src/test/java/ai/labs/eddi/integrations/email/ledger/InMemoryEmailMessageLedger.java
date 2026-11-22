@@ -183,6 +183,23 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public synchronized long countSentReplies(String conversationId) {
+        return rows.values().stream()
+                .filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY && r.direction() == Direction.OUT
+                        && r.state() == State.SENT)
+                .count();
+    }
+
+    @Override
+    public synchronized long countSentRepliesTo(String conversationId, String recipient) {
+        return rows.values().stream()
+                .filter(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY && r.direction() == Direction.OUT
+                        && r.state() == State.SENT && (recipient.equals(r.recipient()) || recipients.values().stream()
+                                .anyMatch(c -> c.rowId().equals(r.id()) && c.role() == RecipientRole.CC && recipient.equals(c.address()))))
+                .count();
+    }
+
+    @Override
     public synchronized void addReplyRecipients(List<ReplyRecipient> entries) {
         for (ReplyRecipient entry : entries) {
             recipients.putIfAbsent(entry.rowId() + "\n" + entry.address(), entry);

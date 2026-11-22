@@ -243,9 +243,26 @@ class EmailThreadRepliesTest {
         assertEquals(List.of(List.of(ALICE, BOB)), envelopes);
     }
 
+    static final Map<String, String> ANY_PARTICIPANT = Map.of("threadParticipants", "anyAuthenticatedParticipant");
+
     @Test
-    @DisplayName("Bob, copied on EDDI's reply, continues the same conversation")
+    @DisplayName("with anyAuthenticatedParticipant, Bob, copied on every reply so far, continues the same conversation")
     void copiedColleagueContinues() {
+        EmailInboundProcessor processor = processor();
+        EmailTestMail first = startThread(processor);
+        String eddiId = sentReplyId(0);
+
+        EmailTestMail fromBob = EmailTestMail.mail().from(BOB).to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), fromBob.polled(2), Instant.now());
+
+        assertEquals("conv-1", sayConversations.get(1));
+        assertEquals(1, counter.get());
+    }
+
+    @Test
+    @DisplayName("threadParticipants originalSenderOnly (the default) is honoured: a copied Bob gets a conversation of his own")
+    void originalSenderOnlyHonoured() {
         EmailInboundProcessor processor = processor();
         EmailTestMail first = startThread(processor);
         String eddiId = sentReplyId(0);
@@ -254,8 +271,30 @@ class EmailThreadRepliesTest {
                 .header("References: " + first.messageId() + " " + eddiId);
         processor.process(context(Map.of()), fromBob.polled(2), Instant.now());
 
-        assertEquals("conv-1", sayConversations.get(1));
-        assertEquals(1, counter.get());
+        assertNotEquals("conv-1", sayConversations.get(1));
+        assertEquals(EmailUserIdentity.threadForSender(INTEGRATION, first.messageId(), BOB), userIds.get(sayConversations.get(1)));
+    }
+
+    @Test
+    @DisplayName("copied once is not enough: after a reply Bob was not sent, he cannot continue and read it through the agent")
+    void missedReplyForks() {
+        EmailInboundProcessor processor = processor();
+        EmailTestMail first = startThread(processor);
+        String eddiId = sentReplyId(0);
+        // Alice follows up privately: no Cc, so EDDI's second reply goes to her alone.
+        EmailTestMail privately = EmailTestMail.mail().to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), privately.polled(2), Instant.now());
+        assertEquals("conv-1", sayConversations.get(1), "she read every reply");
+        complete(1, "Your private question: answered.");
+        assertEquals(List.of(ALICE), envelopes.get(1));
+
+        EmailTestMail fromBob = EmailTestMail.mail().from(BOB).to(MAILBOX).header("In-Reply-To: " + eddiId)
+                .header("References: " + first.messageId() + " " + eddiId);
+        processor.process(context(ANY_PARTICIPANT), fromBob.polled(3), Instant.now());
+
+        assertNotEquals("conv-1", sayConversations.get(2));
+        assertEquals(EmailUserIdentity.threadForSender(INTEGRATION, first.messageId(), BOB), userIds.get(sayConversations.get(2)));
     }
 
     @Test

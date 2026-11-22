@@ -408,6 +408,21 @@ public interface IEmailMessageLedger {
     boolean hasSentReply(String conversationId, String recipient);
 
     /**
+     * How many {@link Kind#REPLY} rows of {@code conversationId} reached
+     * {@link State#SENT}.
+     */
+    long countSentReplies(String conversationId);
+
+    /**
+     * How many of those went to {@code recipient} (normalised) — as their
+     * {@code To}, or as a {@code Cc} the child store still holds. Equal to
+     * {@link #countSentReplies} exactly when the address read every reply the
+     * conversation sent: the test of who may continue a thread conversation under
+     * {@code replyAudience: thread} (email v2 plan §9.4).
+     */
+    long countSentRepliesTo(String conversationId, String recipient);
+
+    /**
      * Records the recipients of a reply row. Idempotent per
      * {@code (rowId, address)}: a recipient written twice is kept once.
      */

@@ -424,6 +424,32 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public long countSentReplies(String conversationId) {
+        return count("SELECT COUNT(*) FROM " + TABLE + " WHERE conversation_id = ? AND kind = 'REPLY' AND direction = 'OUT' AND state = 'SENT'",
+                conversationId);
+    }
+
+    @Override
+    public long countSentRepliesTo(String conversationId, String recipient) {
+        return count("SELECT COUNT(*) FROM " + TABLE + " l WHERE l.conversation_id = ? AND l.kind = 'REPLY' AND l.direction = 'OUT' "
+                + "AND l.state = 'SENT' AND (l.recipient = ? OR EXISTS (SELECT 1 FROM " + RECIPIENTS_TABLE
+                + " r WHERE r.row_id = l.id AND r.address = ? AND r.role = 'CC'))", conversationId, recipient, recipient);
+    }
+
+    private long count(String sql, String... parameters) {
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            for (int i = 0; i < parameters.length; i++) {
+                statement.setString(i + 1, parameters[i]);
+            }
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() ? rows.getLong(1) : 0;
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to count the email ledger replies of a conversation", e);
+        }
+    }
+
+    @Override
     public void addReplyRecipients(List<ReplyRecipient> entries) {
         if (entries == null || entries.isEmpty()) {
             return;

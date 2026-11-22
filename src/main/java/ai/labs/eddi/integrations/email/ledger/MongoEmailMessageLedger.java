@@ -260,21 +260,39 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean hasSentReply(String conversationId, String recipient) {
-        Bson sentReply = Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
-                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()));
-        if (rows.find(Filters.and(sentReply, Filters.eq(F_RECIPIENT, recipient))).first() != null) {
-            return true;
-        }
-        List<String> rowIds = new ArrayList<>();
-        for (Document copied : recipients.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(R_ADDRESS, recipient),
-                Filters.eq(R_ROLE, RecipientRole.CC.name()))).limit(MAX_RECIPIENT_ROWS_CHECKED)) {
-            rowIds.add(copied.getString(R_ROW));
-        }
-        return !rowIds.isEmpty() && rows.find(Filters.and(sentReply, Filters.in(F_ID, rowIds))).first() != null;
+        return rows.find(sentRepliesTo(conversationId, recipient)).first() != null;
     }
 
-    /** Reply rows one participant check reads at most. */
-    static final int MAX_RECIPIENT_ROWS_CHECKED = 500;
+    @Override
+    public long countSentReplies(String conversationId) {
+        return rows.countDocuments(sentReplies(conversationId));
+    }
+
+    @Override
+    public long countSentRepliesTo(String conversationId, String recipient) {
+        return rows.countDocuments(sentRepliesTo(conversationId, recipient));
+    }
+
+    private static Bson sentReplies(String conversationId) {
+        return Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
+                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()));
+    }
+
+    /**
+     * The SENT replies of a conversation to {@code recipient}: its {@code To}, or a
+     * {@code Cc} the child store holds. Every copy entry of that address in that
+     * conversation is read — one per reply it was copied on, so bounded by the
+     * conversation's replies — and none is left out of the count.
+     */
+    private Bson sentRepliesTo(String conversationId, String recipient) {
+        List<String> rowIds = new ArrayList<>();
+        for (Document copied : recipients.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(R_ADDRESS, recipient),
+                Filters.eq(R_ROLE, RecipientRole.CC.name()))).projection(new Document(R_ROW, 1))) {
+            rowIds.add(copied.getString(R_ROW));
+        }
+        Bson to = Filters.eq(F_RECIPIENT, recipient);
+        return Filters.and(sentReplies(conversationId), rowIds.isEmpty() ? to : Filters.or(to, Filters.in(F_ID, rowIds)));
+    }
 
     @Override
     public void addReplyRecipients(List<ReplyRecipient> entries) {
