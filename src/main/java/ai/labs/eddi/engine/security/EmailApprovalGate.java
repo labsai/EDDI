@@ -75,6 +75,19 @@ public final class EmailApprovalGate {
     public static final String PRE_RUN_START = "start";
 
     /**
+     * Value of {@link #PRE_RUN_MARKER} when the held turn inherited the wait from
+     * the conversation's recorded gate: no mail started it.
+     */
+    public static final String PRE_RUN_INHERITED = "inherited";
+
+    /**
+     * What the approver is shown for a turn that inherited the wait: there is no
+     * mail to show, so the target's mail-specific reason does not fit.
+     */
+    public static final String INHERITED_PRE_RUN_REASON = "A turn of a mail conversation that no new mail started (a continuation or a "
+            + "scheduled check-back) waits for approval before the agent runs.";
+
+    /**
      * Conversation-output key written on the step a pre-run rejection answered, so
      * the email reply path sends {@code rejectedReply} instead of a generic text.
      */
@@ -400,7 +413,7 @@ public final class EmailApprovalGate {
         if (inherited == null || !POLICY_EVERY_TURN.equalsIgnoreCase(inherited.policy())) {
             return null;
         }
-        return new Policy(inherited.policy(), inherited.readOnlyTools(), true, inherited.rejectedReply(), inherited.pauseReason(), null);
+        return new Policy(inherited.policy(), inherited.readOnlyTools(), true, inherited.rejectedReply(), INHERITED_PRE_RUN_REASON, null);
     }
 
     /**

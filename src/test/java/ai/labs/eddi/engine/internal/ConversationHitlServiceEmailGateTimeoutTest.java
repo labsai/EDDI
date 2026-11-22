@@ -105,6 +105,21 @@ class ConversationHitlServiceEmailGateTimeoutTest {
     }
 
     @Test
+    @DisplayName("an inherited wait (a continuation) gets its own reason, not the target's mail reason")
+    void inheritedPreRunReason() {
+        memory = new ConversationMemory("conv5", "agent1", 1, "email:int1:alice@example.com");
+        memory.setOrigin(TurnOrigin.EMAIL);
+        memory.setEmailApprovalGate(Map.of("policy", "everyTurn", "pauseReason", "A mail to target 'intake' waits."));
+        memory.setHitlPauseType("RULE");
+        memory.getCurrentStep().storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, EmailApprovalGate.PRE_RUN_INHERITED));
+
+        ConversationHitlService.applyEmailGateTimeout(memory, "PT72H");
+
+        assertEquals(EmailApprovalGate.INHERITED_PRE_RUN_REASON, memory.getHitlPauseReason());
+        assertEquals(HitlTimeoutPolicy.AUTO_REJECT, memory.getHitlTimeoutPolicy());
+    }
+
+    @Test
     @DisplayName("the expiry: a configured positive duration, else the default")
     void expiry() {
         assertEquals("PT24H", ConversationHitlService.emailGateExpiry(" PT24H "));

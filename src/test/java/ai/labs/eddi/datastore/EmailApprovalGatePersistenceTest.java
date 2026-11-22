@@ -157,6 +157,13 @@ class EmailApprovalGatePersistenceTest extends MongoTestBase {
         // The continuation's turn writes the memory back: the recorded gate goes with
         // it.
         assertEquals("everyTurn", ConversationMemoryUtilities.convertConversationMemory(loaded).getEmailApprovalGate().get("policy"), backend);
+        // And an update of the stored document (the write path of every later turn)
+        // keeps it: stored again over itself, then reloaded.
+        var stored = store.loadConversationMemorySnapshot(conversationId);
+        store.storeConversationMemorySnapshot(stored);
+        var reloaded = store.loadConversationMemorySnapshot(conversationId);
+        assertEquals("everyTurn", reloaded.getEmailApprovalGate().get("policy"), backend + ": an update keeps the recorded gate");
+        assertEquals(List.of("http.get:*"), reloaded.getEmailApprovalGate().get("readOnlyTools"), backend);
     }
 
     @ParameterizedTest(name = "{0}")

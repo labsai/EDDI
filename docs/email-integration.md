@@ -547,7 +547,12 @@ but carries no target, so it has no email gate of its own; the delegating tool c
 - **No raw mail is stored.** The rendered input enters conversation memory like any user input; attachments are
   stored only with `attachments: store`, under the attachment store's retention.
 - The ledger row of a mail holds its Message-ID, the sender's address, its state and conversation — no body or
-  subject — for `eddi.email.ledger-retention` (30 days).
+  subject — for `eddi.email.ledger-retention` (30 days). A mail the approval gate held also keeps a SHA-256 of its raw
+  bytes (`contentHash`), which reveals nothing of it.
+- A mail the approval gate holds before the agent runs carries a view of itself for the approver — sender, subject,
+  attachment names and the first 2,000 characters of its text — in the turn's `emailApproval` context (so on the
+  conversation step, also after a rejection) and in the pause's approval context. It is conversation data like the
+  mail's input: erased and exported with the conversation. The recorded gate on the conversation never holds it.
 - **Erasure and export** by address (`DELETE /admin/gdpr/{address}` or the MCP tool) reach every
   `email:<integrationId>:<address>` identity — current integrations and those the address's ledger rows name — and the
   ledger rows. See [gdpr-compliance.md](gdpr-compliance.md).

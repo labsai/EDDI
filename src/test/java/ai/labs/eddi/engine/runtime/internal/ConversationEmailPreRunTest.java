@@ -245,6 +245,8 @@ class ConversationEmailPreRunTest {
         assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
         assertEquals(-1, memory.getHitlPausedAbsoluteTaskIndex());
         verify(lifecycleManager, times(1)).executeLifecycle(any(), any());
+        assertEquals(EmailApprovalGate.PRE_RUN_INHERITED, memory.getCurrentStep().getData(EmailApprovalGate.PRE_RUN_MARKER).getResult());
+        assertEquals(EmailApprovalGate.INHERITED_PRE_RUN_REASON, memory.getHitlPauseReason(), "no mail to speak of: its own reason");
 
         conversation().resume(decision(HitlVerdict.APPROVED));
 

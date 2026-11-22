@@ -1523,7 +1523,11 @@ public class Conversation implements IConversation {
         // The marker says whether the held turn is the conversation's start: a rejected
         // start ends the conversation (rejectBeforeRun).
         conversationMemory.getCurrentStep()
-                .storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, startTurn ? EmailApprovalGate.PRE_RUN_START : Boolean.TRUE));
+                .storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, startTurn
+                        ? EmailApprovalGate.PRE_RUN_START
+                        : EmailApprovalGate.INHERITED_PRE_RUN_REASON.equals(gate.pauseReason())
+                                ? EmailApprovalGate.PRE_RUN_INHERITED
+                                : Boolean.TRUE));
         String reason = gate.pauseReason() != null && !gate.pauseReason().isBlank() ? gate.pauseReason() : EmailApprovalGate.DEFAULT_PRE_RUN_REASON;
         throw new ConversationPauseException(firstWorkflowId, -1, reason, ConversationPauseException.PauseOrigin.RULE);
     }

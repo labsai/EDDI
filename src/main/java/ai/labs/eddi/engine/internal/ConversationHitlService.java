@@ -2075,9 +2075,13 @@ class ConversationHitlService {
             memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
             memory.setHitlApprovalTimeout(expiry);
             if (preRun) {
-                memory.setHitlPauseReason(gate.pauseReason() != null && !gate.pauseReason().isBlank()
-                        ? gate.pauseReason()
-                        : EmailApprovalGate.DEFAULT_PRE_RUN_REASON);
+                boolean inherited = EmailApprovalGate.PRE_RUN_INHERITED
+                        .equals(String.valueOf(step.getData(EmailApprovalGate.PRE_RUN_MARKER).getResult()));
+                memory.setHitlPauseReason(inherited
+                        ? EmailApprovalGate.INHERITED_PRE_RUN_REASON
+                        : gate.pauseReason() != null && !gate.pauseReason().isBlank()
+                                ? gate.pauseReason()
+                                : EmailApprovalGate.DEFAULT_PRE_RUN_REASON);
             }
         } else if (memory.getHitlTimeoutPolicy() == HitlTimeoutPolicy.AUTO_APPROVE) {
             memory.setHitlTimeoutPolicy(HitlTimeoutPolicy.AUTO_REJECT);
