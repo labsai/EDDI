@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.security.Principal;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -141,6 +142,34 @@ class RestGroupLessonsTest {
         verify(schedules).createSchedule(captor.capture());
         assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(captor.getValue().getMetadata()));
         assertEquals(GROUP, captor.getValue().getMetadata().get(LessonConsolidationService.METADATA_GROUP_ID_KEY));
+    }
+
+    /**
+     * A reschedule deletes and recreates the schedule; an untainted request must
+     * not shed the taint of the one it replaces.
+     */
+    @Test
+    void reschedulingKeepsTheTaintOfTheReplacedSchedule() throws Exception {
+        var existing = new ScheduleConfiguration();
+        existing.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, TurnOrigin.EMAIL)));
+        when(schedules.readScheduleByName("lesson-consolidation-" + GROUP)).thenReturn(Optional.of(existing));
+        when(schedules.createSchedule(any())).thenReturn("sched-2");
+
+        assertEquals(201, rest.schedule(GROUP, new ScheduleRequest("0 4 * * 1", null)).getStatus());
+
+        var captor = ArgumentCaptor.forClass(ScheduleConfiguration.class);
+        verify(schedules).createSchedule(captor.capture());
+        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(captor.getValue().getMetadata()));
+    }
+
+    @Test
+    void aRescheduleWhoseReadFailsKeepsTheOldSchedule() throws Exception {
+        when(schedules.readScheduleByName("lesson-consolidation-" + GROUP)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        assertEquals(500, rest.schedule(GROUP, new ScheduleRequest("0 4 * * 1", null)).getStatus());
+
+        verify(schedules, never()).deleteSchedulesByName(anyString());
+        verify(schedules, never()).createSchedule(any());
     }
 
     @Test
