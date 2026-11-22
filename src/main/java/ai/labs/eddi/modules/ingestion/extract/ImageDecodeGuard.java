@@ -195,10 +195,13 @@ final class ImageDecodeGuard {
                 if (columns <= 0) {
                     return Optional.of(Refusal.BAD_DIMENSIONS);
                 }
-                // Its rows come from /Height read long-first and /DecodeParms /Rows, which
-                // for an inline image need not be what the image itself reads: the largest
-                long rows = Math.max(main.height(), Math.max(image.getInt(COSName.HEIGHT, COSName.H, 0),
-                        decodeParams(image, ccitt).getInt(COSName.ROWS, 0)));
+                // Its rows as CCITTFaxFilter reads them: /Height (long name first) when it and
+                // /Rows are both positive, else the larger of the two; never fewer than the
+                // image itself declares
+                long ccittHeight = image.getInt(COSName.HEIGHT, COSName.H, 0);
+                long ccittRows = decodeParams(image, ccitt).getInt(COSName.ROWS, 0);
+                long rows = Math.max(main.height(),
+                        ccittRows > 0 && ccittHeight > 0 ? ccittHeight : Math.max(ccittRows, ccittHeight));
                 if (Math.multiplyExact(columns, rows) > maxPixels) {
                     return Optional.of(Refusal.TOO_MANY_PIXELS);
                 }
@@ -330,13 +333,17 @@ final class ImageDecodeGuard {
                 return device;
             }
             COSBase entry = named == null ? null : named.getDictionaryObject(name);
-            return entry == null ? UNRESOLVED : resolve(entry, named, depth + 1, wasDefault);
+            // PDFBox follows a name with getColorSpace(name), which may apply a default
+            // again: only the one hop from a /Default* entry is exempt from it
+            return entry == null ? UNRESOLVED : resolve(entry, named, depth + 1, false);
         }
         if (!(colorSpace instanceof COSArray array) || array.size() == 0
                 || !(array.getObject(0) instanceof COSName family)) {
             return UNKNOWN_COMPONENTS;
         }
         return switch (family.getName()) {
+            // A device name inside an array is that name, /Default* included
+            case "DeviceGray", "DeviceRGB", "DeviceCMYK" -> resolve(family, named, depth + 1, wasDefault);
             case "ICCBased" -> array.size() > 1 && array.getObject(1) instanceof COSStream profile
                     ? bounded(profile.getInt(COSName.N, UNKNOWN_COMPONENTS))
                     : UNKNOWN_COMPONENTS;

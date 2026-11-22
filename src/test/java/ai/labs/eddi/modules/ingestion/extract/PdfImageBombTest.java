@@ -22,6 +22,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.awt.image.BufferedImage;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -40,6 +41,7 @@ import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 @DisplayName("PDF image bombs — refused before allocation, inside the budget, within the heap")
 class PdfImageBombTest {
@@ -394,6 +396,59 @@ class PdfImageBombTest {
             assertEquals(ImageDecodeGuard.UNRESOLVED, ImageDecodeGuard.components(COSName.getPDFName("A"), pdResources));
             assertEquals(ImageDecodeGuard.UNRESOLVED,
                     ImageDecodeGuard.components(COSName.getPDFName("Missing"), pdResources));
+        }
+
+        @Test
+        @DisplayName("past a non-device name the /Default* replacement applies again, as PDFBox applies it")
+        void defaultAppliesAgainAfterAName() {
+            var deviceN = new COSArray();
+            deviceN.add(COSName.DEVICEN);
+            var names = new COSArray();
+            for (int i = 0; i < 1000; i++) {
+                names.add(COSName.getPDFName("c" + i));
+            }
+            deviceN.add(names);
+            // DeviceRGB -> DefaultRGB -> X -> DeviceGray -> DefaultGray -> Y -> 1,000
+            // colourants
+            var chained = new COSDictionary();
+            chained.setItem(COSName.DEFAULT_RGB, COSName.getPDFName("X"));
+            chained.setItem(COSName.getPDFName("X"), COSName.DEVICEGRAY);
+            chained.setItem(COSName.DEFAULT_GRAY, COSName.getPDFName("Y"));
+            chained.setItem(COSName.getPDFName("Y"), deviceN);
+            // DeviceRGB -> DefaultRGB -> X -> DeviceRGB -> DefaultRGB -> …: PDFBox
+            // overflows its stack
+            var looping = new COSDictionary();
+            looping.setItem(COSName.DEFAULT_RGB, COSName.getPDFName("X"));
+            looping.setItem(COSName.getPDFName("X"), COSName.DEVICERGB);
+            // [/DeviceRGB] is DeviceRGB, default included
+            var inArray = new COSDictionary();
+            inArray.setItem(COSName.DEFAULT_RGB, deviceN);
+
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(COSName.DEVICERGB, resources(chained)));
+            assertEquals(ImageDecodeGuard.UNRESOLVED, ImageDecodeGuard.components(COSName.DEVICERGB, resources(looping)));
+            var deviceRgbArray = new COSArray();
+            deviceRgbArray.add(COSName.DEVICERGB);
+            assertEquals(ImageDecodeGuard.TOO_MANY, ImageDecodeGuard.components(deviceRgbArray, resources(inArray)));
+            assertEquals(3, ImageDecodeGuard.components(deviceRgbArray, null));
+        }
+
+        private static PDResources resources(COSDictionary colourSpaces) {
+            var resources = new COSDictionary();
+            resources.setItem(COSName.COLORSPACE, colourSpaces);
+            return new PDResources(resources);
+        }
+
+        @Test
+        @DisplayName("a CCITT /Rows that contradicts a positive /Height is ignored, as PDFBox ignores it")
+        void ccittBogusRows() throws IOException {
+            Decoder decoder = mock(Decoder.class);
+            when(decoder.decode(any(), anyInt())).thenReturn(new BufferedImage(100, 100, BufferedImage.TYPE_INT_RGB));
+            byte[] pdf = PdfFixtures.singleImage("/Width 100 /Height 100 /BitsPerComponent 1 /ColorSpace /DeviceGray"
+                    + " /DecodeParms <</K -1 /Columns 100 /Rows 99999999>>", new byte[100], "/CCITTFaxDecode");
+
+            Result result = normalizeFirst(pdf, decoder, null, BUDGET);
+
+            assertInstanceOf(ImageNormalizer.Encoded.class, result);
         }
 
         @Test
