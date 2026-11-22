@@ -356,10 +356,15 @@ curl -X POST "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-send
 - **Refused with `400`**: an entry that is not `user@domain`, `*@domain` or `*@*.domain` (`*@*` included), an entry
   that would be on both lists, a list over 200 entries, or the same entry both added and removed.
 - **Emptying a non-empty allowlist opens the integration to every sender** — an empty allowlist allows everyone. It
-  is refused unless the request says `"confirmOpen": true`, and then warns `email.allowlist-emptied`.
+  is refused unless the request says `"confirmOpen": true`, and then warns `email.allowlist-emptied`. The same holds
+  for a save of the whole integration, which is where a page Save, a raw-JSON edit or an import-style rewrite would
+  otherwise empty it unnoticed: `PUT /channelstore/channels/{id}?version=n` answers `400` unless it carries
+  `&confirmOpen=true`, the MCP `update_channel_integration` takes a `confirmOpen` argument, and the Manager asks
+  before such a Save.
 - Saves warn `email.allowlist-broad` for an allowlist entry over a whole public suffix (`*@*.co.uk`, `*@github.io`)
   or over the integration's own domain or organisational domain. Prefer exact addresses.
-- **Audit**: every change writes one audit-ledger entry (task `email.senders`, action `EMAIL_SENDERS_CHANGED`) with
+- **Audit**: every change writes one audit-ledger entry (task `email.senders`, action `EMAIL_SENDERS_CHANGED`) — a
+  change made by saving the whole integration as well, with no reason — with
   the actor, the integration, the old and new version, what was added and removed, and the `reason` (at most 500
   characters). An exact address is recorded as its keyed pseudonym — the token the inbound refusals and GDPR erasure
   use for it — and only a domain pattern in clear, because a ledger entry can never be erased.
@@ -370,12 +375,15 @@ curl -X POST "http://localhost:7070/channelstore/channels/$CHANNEL_ID/email-send
 A conversation whose root turn came from a mail carries the **origin taint** `origin=email`, and so does every
 conversation it leads to: a delegate (`converseWithAgent`) or sub-agent it starts or continues, a group discussion
 and every member and nested discussion of it, a check-back it books (`schedule_followup`), and a peer EDDI it calls
-over A2A (the `X-Eddi-Turn-Origin` header). **Known limit of this revision:** a tainted turn that calls EDDI's own
-API (an httpcall to `POST /agents/{id}/start` or the schedule store, or the MCP tools `chat_with_agent`,
-`create_schedule` and `start_group_discussion`) starts a conversation that does not inherit the taint; the guard
-does not see it. Choose the tools of an email-facing agent with that in mind. The taint is stored with the conversation, so a HITL resume next week or
+over A2A (the `X-Eddi-Turn-Origin` header). The taint is stored with the conversation, so a HITL resume next week or
 a self-continuation still carries it, and nothing clears it. A conversation of an `email:` or `email-anon:` user
 counts as tainted even when it predates the stored taint.
+
+**A team backlog carries it too.** A task a tainted turn files or changes — a team handoff (AUTO, or a REVIEW item a
+person later accepts), `POST /groupstore/groups/{id}/workspace/backlog`, the MCP `add_team_task`, a member's task
+tool, a decision rule of a tainted discussion — is stored with the taint, in MongoDB and PostgreSQL alike, and no
+later edit removes it. A cadence run that pulls a tainted task starts a tainted discussion, even though the cadence's
+schedule itself is not tainted, and the results such a run writes back taint the tasks they land on.
 
 **Going through EDDI's own API does not shed it.** Every HTTP request a tainted turn sends carries
 `X-Eddi-Turn-Origin: email`: `httpcalls` (set after the configured headers, so a configuration cannot replace it),
@@ -394,9 +402,16 @@ starts or continues is tainted too:
 | agent test runs; MCP `run_agent_tests` | every test conversation of the run |
 
 The header is taken from any caller, authenticated or not: it can only add the taint, and a request without it is
-simply untainted. Nothing a request says removes a taint. Only a tainted turn sends the header, but it sends it to
-every target — not only to hosts recognised as this deployment, because an EDDI reached under a name the deployment
-does not know would otherwise start an untainted conversation. The value says only that a mail started the turn.
+simply untainted. Nothing a request says removes a taint. Where a request enters, its taint is bound to it
+explicitly — by a JAX-RS filter for REST, and before every MCP tool call for EDDI's MCP server, which no JAX-RS
+filter sees — and a request whose taint cannot be read is treated as tainted.
+
+**The header goes to third-party APIs too.** Only a tainted turn sends it, but it sends it to every target, not only
+to hosts recognised as this deployment, because an EDDI reached under a name the deployment does not know would
+otherwise start an untainted conversation. That is a deliberate departure from the rule for the agent-call marker,
+which never leaves this deployment: a third party learns that an email drove the request, and nothing else. **A relay
+that drops the header sheds the taint** — a proxy, a queue or a third-party service that calls EDDI back without
+it starts an untainted conversation. Do not put such a hop between an email-facing agent and EDDI's API.
 
 A tainted turn is refused, at runtime:
 
@@ -408,13 +423,41 @@ A tainted turn is refused, at runtime:
 - any write (every method but `GET`, `HEAD`, `OPTIONS`, `TRACE`) to `/channelstore/channels/**`,
   `/agents/{id}/resume`, `/groups/{id}/conversations/{id}/approve` or `…/human-input`, the oversight endpoints
   `/hitl/samples/**`, `/hitl/autonomy/**` and `/hitl/analytics/rebuild`, `/administration/spend-control-changes/**`,
-  and a team handoff's `…/workspace/handoffs/{id}/accept` or `…/decline` — from `httpcalls` or any outbound request,
-  wherever the path sits under a prefix, and on every redirect hop. A tainted write is not followed through a
-  redirect.
+  a team handoff's `…/workspace/handoffs/{id}/accept` or `…/decline`, and everything that widens who can use EDDI or
+  its credentials: a resource's shares, share requests, visibility, space and owner
+  (`/descriptorstore/descriptors/{id}/shares/**`), the secrets vault (`/secretstore/**`, `/spacestore/secrets/**`:
+  values, grants, rotation), connections (`/connectionstore/**`, `/connections/{name}/authorize`, `…/grant`) and
+  `/workspaces/settings` — from `httpcalls` or any outbound request, wherever the path sits under a prefix, and on
+  every redirect hop. A tainted write is not followed through a redirect.
+
+No approval unlocks those. **Configuration is the second rule: a tainted turn may write it only when a person
+approved that very call** through the HITL tool-approval gate (`hitlConfig.toolApprovals`). Without it a mail could
+rewrite the prompt, rules or http calls an untainted conversation later runs, and so get its text run with every tool
+refused above. Refused unless approved:
+
+- the tools `create_agent`, `update_agent`, `delete_agent`, `create_api_agent`, `setup_agent`, `apply_agent_changes`,
+  `create_resource`, `update_resource`, `delete_resource`, `deploy_agent`, `undeploy_agent`, `create_agent_trigger`,
+  `update_agent_trigger`, `delete_agent_trigger`, `create_group`, `update_group`, `delete_group`,
+  `create_group_from_template`, and the dynamic-agent tools `createSubAgent` and `retainAgent`;
+- any write to the configuration stores — `/agentstore`, `/workflowstore`, `/llmstore`, `/apicallstore`,
+  `/mcpcallsstore`, `/ragstore` (ingestion included), `/rulestore`, `/outputstore`, `/propertysetterstore`,
+  `/snippetstore`, `/variablestore`, `/spacestore/variables`, `/dictionarystore`, `/parserstore`, `/extensionstore`,
+  `/AgentTriggerStore`, `/deploymentstore`, a group's configuration (`/groupstore/groups`, `/groupstore/groups/{id}`,
+  not its workspace) and `/groupstore/templates`, and their v5 names (`/botstore`, `/packagestore`,
+  `/langchainstore`, `/httpcallsstore`, `/behaviorstore`, `/regulardictionarystore`, `/bottriggerstore`) — and to
+  deploy, undeploy, the setup endpoints under `/administration/agents` and `/backup/import`.
+
+An approved call passes because a person saw it: in the engine the approval is bound around exactly that call's
+execution, for that conversation only, and never extends to a redirect. When the approved call goes through EDDI's
+own API, the request says so in `X-Eddi-Approved-Call: true`, which the engine sets itself and strips from every other
+request a tainted turn sends — no configuration can claim it, and a caller who forged it could as well have left the
+taint header off. These paths are matched anywhere in a URL, so a third-party API whose path happens to contain one
+is refused to a tainted turn too.
 
 The receiving side checks the same lists: a REST request carrying the header that writes to one of those paths
-answers `403` (`errorCode` `EMAIL_ORIGIN`), and EDDI's MCP server fails such a call of one of those tools with
-`EMAIL_ORIGIN` before it runs, whatever name the calling client listed it under.
+answers `403` (`errorCode` `EMAIL_ORIGIN`) — a configuration write unless it also carries `X-Eddi-Approved-Call:
+true` — and EDDI's MCP server fails such a call of one of those tools with `EMAIL_ORIGIN` before it runs, whatever
+name the calling client listed it under.
 
 This runtime check is the boundary. On top of it, saving an email integration is **refused** when a target agent
 holds one of those tools by name (an LLM task's `tools` or `builtInToolsWhitelist`, an `mcpcalls` whitelist or call)

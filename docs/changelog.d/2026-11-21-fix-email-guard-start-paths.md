@@ -60,13 +60,9 @@ header rule.
 
 ### Not covered
 
-- `add_team_task` and team handoffs queue *content* that a later, untainted cadence run works on; the backlog task
-  carries no taint. The decisions on handoffs are refused, the queueing is not.
 - `cancel_conversation`, `cancel_group_discussion`, `review_conversation_rating` and `acknowledge_alert_event` stay
   allowed: none widens who can make EDDI act or approves anything.
-- The two HTTP halves (header sent, header honoured) are unit-tested separately; nothing joins them over a real
-  socket. The MCP server half rests on `ContextSupport.requestContextActivated` setting `CurrentVertxRequest`
-  (quarkus-mcp-server 2.0.4, read from the bytecode), not on a running server.
+- (The backlog and the over-the-socket test are covered by the follow-up entry below.)
 
 ### Decision log
 
@@ -78,4 +74,65 @@ header rule.
 
 ```regression-note
 | 2026-11-21 | Saving an email integration also fails (400) when a target agent holds accept_team_handoff or decline_team_handoff, or an httpcalls write to /hitl/samples, /hitl/autonomy, /hitl/analytics/rebuild, /administration/spend-control-changes or a handoff accept/decline path; a request carrying X-Eddi-Turn-Origin: email that writes to a guarded path now answers 403 | The email v3 §5.3 guard lists widened | Remove the tool or httpcall from that agent; send the request from an untainted turn | fix/email-guard-start-paths |
+```
+
+## 🔒 fix(email): the escalation guard after its security review — backlog, configuration, credentials (2026-11-22)
+
+**Repo:** EDDI (`fix/email-guard-review`, on top of `fix/email-guard-start-paths`) — the findings of an independent
+security review of the §5.3 guard. Threat model: whoever gets a mail processed controls the text and, through it, the
+model's tool calls.
+
+### What changed and why
+
+- **The team backlog no longer launders the taint (high).** `SharedTaskList.TaskItem` and
+  `WorkspaceHandoffs.HandoffOrigin` carry the origin (`origin`, `turnOrigin`), stored in both datastores (the workspace
+  is a JSON document). `SharedTaskList.addTask`/`addAgentTask` stamp `TurnOrigin.current()` on every write — REST
+  `POST …/workspace/backlog`, MCP `add_team_task`, a handoff (AUTO), a member's task tool — and every replacement
+  (`updateTask`, each status transition) keeps the stored taint, so a positional copy cannot drop it. A REVIEW
+  handoff a person accepts keeps the filer's taint; a decision-rule handoff of a tainted discussion is filed under its
+  taint. `TeamCadenceService` binds the combined taint of the pulled tasks around `prepareCadenceDiscussion`, so the
+  run's discussion — and every member conversation — is tainted, and a tainted run's writeback taints the tasks.
+- **Configuration writes need a person (medium).** New `EscalationGuard.CONFIG_TOOLS`/`CONFIG_PATHS`: agent, workflow
+  and extension stores (v5 names too), snippets, variables, triggers, group configs, deploy/undeploy, setup, import,
+  the config MCP tools and `createSubAgent`/`retainAgent`. A tainted turn's write is refused unless it is the approved
+  execution of a gated call — `ApprovedCallScope`, which `ToolLoopResumer` binds around exactly that call
+  (`isActiveFor(conversationId)`, so another conversation's approval does not count; `OutboundHttp` honours it on the
+  first hop only). Across EDDI's own API the sender says so in `X-Eddi-Approved-Call`, engine-owned like the taint
+  header (httpcalls, `OutboundHttp`, MCP `_meta` → header): set only during the approved call, replaced everywhere else.
+- **Credentials and sharing (medium).** `GUARDED_PATHS` gains resource shares/requests/visibility/space/owner, the
+  secrets vault (tenant and space, grants, rotation), connections and their settings, a user's connection
+  authorize/grant, and workspace settings. No user or role administration endpoint exists; no MCP tool writes any
+  of these.
+- **The receiving side binds explicitly (medium).** `TaintedRequestFilter` binds the header on a request-scoped
+  `InboundTurnOrigin`; `McpErrorResultInterceptor` does the same before every MCP tool (the MCP transport is Vert.x,
+  no JAX-RS filter sees it). `TurnOrigin.current()` reads the holder and the request header; an active request
+  context whose taint cannot be read now counts as **tainted**, not untainted. New `EmailOriginTaintHttpIT`
+  exercises it over real HTTP: a REST start and an MCP `create_conversation` with the header give conversations whose
+  `update_email_senders`-shaped httpcall is never sent, and both receiving sides refuse.
+- **`confirmOpen` and the audit on every save (medium-low).** `updateChannel` diffs the stored and saved lists:
+  emptying a non-empty allowlist needs `?confirmOpen=true` (MCP `update_channel_integration` `confirmOpen`), warns
+  `email.allowlist-emptied`, and every change writes `EMAIL_SENDERS_CHANGED`; `updateEmailSenders` delegates, so it
+  audits once. The Manager's page Save asks before such a save.
+- `GroupConversation.setOrigin` never clears or replaces a set taint. Docs: the header goes to third parties on
+  purpose; a relay that drops it sheds the taint. Operator revision 83.
+
+### Not covered
+
+- The in-engine approval is per thread: a nested turn that an approved call runs synchronously on the same thread
+  would share it for `OutboundHttp` (which has no conversation id); the tool and httpcall checks compare the
+  conversation.
+- The MCP binding reads the request through `CurrentVertxRequest`, which quarkus-mcp-server sets; the IT is what
+  proves it, and fails if a release stops doing so.
+
+### Decision log
+
+```decision-log
+| 2026-11-22 | A tainted turn may write configuration only in a call a person approved through the tool-approval gate; shares, secrets, connections and workspace settings stay refused whoever approves | Security review of the email guard: config writes carry mail text into untainted conversations, credential writes widen who can use EDDI | Refusing configuration writes outright (breaks approved, human-seen changes); allowing them with a save-time warning only |
+| 2026-11-22 | Backlog tasks and handoff origins carry the taint, stamped on every write and sticky through every copy; a cadence that pulls a tainted task runs a tainted discussion | The cadence fires from an untainted schedule and would otherwise run mail text untainted | Refusing backlog writes from tainted turns (breaks mail-driven team intake) |
+```
+
+### Regression notes
+
+```regression-note
+| 2026-11-22 | A mail-started conversation's write to an agent/workflow/extension store, snippets, variables, triggers, a group config, deploy/undeploy, setup or import, and its config MCP tools, now fail with "unless a person approves that call"; a full PUT of an email integration that empties a non-empty allowlist answers 400 without confirmOpen=true | Security review of the email escalation guard | Gate the tool with hitlConfig.toolApprovals so a person approves the call; add confirmOpen=true to the save | fix/email-guard-review |
 ```
