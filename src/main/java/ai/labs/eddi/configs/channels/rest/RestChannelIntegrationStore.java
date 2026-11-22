@@ -309,11 +309,17 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
             refuseLegacyConnectorTakeover(channelConfiguration, storedChannelId(id, version));
             validateUniqueName(channelConfiguration, id);
             EmailSenderLists.Change senders = null;
+            // The version the lists are compared against and audited at: ?version=0
+            // names the current one, and the raw store read does not resolve it.
+            Integer baseVersion = version;
             if (isEmail(channelConfiguration)) {
                 emailSupport().validateAgainstDeployment(channelConfiguration, id);
-                senders = before != null
-                        ? EmailSenderLists.diff(before, EmailSenderLists.read(null, channelConfiguration.getPlatformConfig()))
-                        : senderListChange(id, version, channelConfiguration);
+                if (before != null) {
+                    senders = EmailSenderLists.diff(before, EmailSenderLists.read(null, channelConfiguration.getPlatformConfig()));
+                } else {
+                    baseVersion = id == null || version == null ? version : restVersionInfo.validateParameters(id, version);
+                    senders = senderListChange(id, baseVersion, channelConfiguration);
+                }
                 if (senders != null && senders.allowlistEmptied() && !Boolean.TRUE.equals(confirmOpen)) {
                     throw new BadRequestException(EmailSenderLists.CONFIRM_OPEN_REQUIRED);
                 }
@@ -325,7 +331,7 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                 return answered;
             }
             var location = answered.getLocation() == null ? null : RestUtilities.extractResourceId(answered.getLocation());
-            emailSupport().auditSenderListChange(id, version, location == null ? null : location.getVersion(), senders.added(),
+            emailSupport().auditSenderListChange(id, baseVersion, location == null ? null : location.getVersion(), senders.added(),
                     senders.removed(), reason, senders.allowlistEmptied());
             if (!senders.allowlistEmptied()) {
                 return answered;
@@ -337,9 +343,15 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
     }
 
     /**
-     * How the sender lists of the stored version {@code version} differ from the
-     * ones in {@code saved}, or {@code null} when the stored version cannot be read
-     * (the update then fails on its own).
+     * How the sender lists of the stored version {@code version} (already resolved:
+     * never {@code 0}) differ from the ones in {@code saved}, or {@code null} when
+     * that version does not exist — the update then fails on its own, with the 404
+     * or 409 it owes.
+     * <p>
+     * Any other failure to read it refuses the save: without the stored lists there
+     * is no telling whether the save empties the allowlist, and a save that skipped
+     * the check would open the integration to every sender unconfirmed and
+     * unaudited.
      */
     private EmailSenderLists.Change senderListChange(String id, Integer version, ChannelIntegrationConfiguration saved) {
         if (id == null || version == null) {
@@ -348,11 +360,15 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
         ChannelIntegrationConfiguration stored;
         try {
             stored = channelStore.read(id, version);
-        } catch (Exception e) {
+        } catch (IResourceStore.ResourceNotFoundException e) {
             return null;
+        } catch (Exception e) {
+            LOG.errorf("Could not read version %d of email integration '%s' to compare its sender lists; refusing the save", version,
+                    sanitize(id));
+            throw new InternalServerErrorException("The stored sender lists could not be read; the email integration was not saved.");
         }
         if (stored == null) {
-            return null;
+            throw new InternalServerErrorException("The stored sender lists could not be read; the email integration was not saved.");
         }
         return EmailSenderLists.diff(EmailSenderLists.read(version, isEmail(stored) ? stored.getPlatformConfig() : null),
                 EmailSenderLists.read(null, saved.getPlatformConfig()));
