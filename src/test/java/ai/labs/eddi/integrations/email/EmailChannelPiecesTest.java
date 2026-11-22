@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.GdprDeletionResult;
 import ai.labs.eddi.engine.mail.MailAddress;
@@ -43,6 +44,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -261,9 +263,13 @@ class EmailChannelPiecesTest {
 
             assertEquals(Set.of("email:int1:alice@x.com", started, copied), participant.emailUserIdsOf("alice@x.com"));
             assertTrue(participant.emailUserIdsOf(started).isEmpty(), "a thread identity is not expanded again");
-            assertEquals(Set.of("email:int1:alice@x.com"),
-                    new EmailIdentityGdprParticipant(instance, directory, ledger).emailUserIdsOf("alice@x.com"),
-                    "without the conversation store nothing is guessed");
+            assertThrows(IllegalStateException.class,
+                    () -> new EmailIdentityGdprParticipant(instance, directory, ledger).emailUserIdsOf("alice@x.com"),
+                    "without the conversation store the step fails rather than report a thread conversation erased");
+            doThrow(new IResourceStore.ResourceStoreException("db down")).when(store).loadConversationMemorySnapshot("conv-copied");
+            assertThrows(IllegalStateException.class, () -> participant.erase("alice@x.com"), "an unreadable conversation fails the step");
+            doThrow(new IResourceStore.ResourceNotFoundException("gone")).when(store).loadConversationMemorySnapshot("conv-copied");
+            assertEquals(Set.of("email:int1:alice@x.com", started), participant.emailUserIdsOf("alice@x.com"), "one erased already is skipped");
         }
     }
 }

@@ -317,6 +317,32 @@ class EmailThreadRepliesTest {
     }
 
     @Test
+    @DisplayName("a per-sender conversation started before the switch to thread keeps answering its sender alone")
+    void conversationFromBeforeTheSwitch() throws Exception {
+        Instant now = Instant.now();
+        String perSender = EmailUserIdentity.perSender(INTEGRATION, ALICE);
+        ledger.put(new LedgerEntry("old-in", INTEGRATION, Kind.TRIGGER, Direction.IN, "<old@supplier.com>", "conv-old", "imap:INBOX:1:0",
+                "in:old", ALICE, State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+        ledger.put(new LedgerEntry("old-out", INTEGRATION, Kind.REPLY, Direction.OUT, "<eddi.old@contoso.com>", "conv-old", "old-in|reply|1",
+                "reply:old", ALICE, State.SENT, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+        SimpleConversationMemorySnapshot old = new SimpleConversationMemorySnapshot();
+        old.setConversationId("conv-old");
+        old.setAgentId(EmailInboundProcessorTest.AGENT);
+        old.setUserId(perSender);
+        when(conversations.readConversation(eq("conv-old"), any(), any(), anyList())).thenReturn(old);
+        userIds.put("conv-old", perSender);
+
+        EmailTestMail answer = EmailTestMail.mail().to(MAILBOX).header("Cc: " + BOB).header("In-Reply-To: <eddi.old@contoso.com>")
+                .header("References: <old@supplier.com> <eddi.old@contoso.com>");
+        processor().process(context(Map.of()), answer.polled(1), now);
+        complete(0, "Still Monday.");
+
+        assertEquals("conv-old", sayConversations.get(0));
+        assertEquals(Map.of("to", ALICE, "cc", List.of()), mailContext(0).get("audience"), "that conversation carries Alice's memory");
+        assertEquals(List.of(List.of(ALICE)), envelopes);
+    }
+
+    @Test
     @DisplayName("signed view: an unsigned Cc prepended to a replayed signed mail is never copied")
     void unsignedCcNotCopied() {
         verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "supplier.com", "verified", false, List.of(),

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.email;
 
+import ai.labs.eddi.datastore.IResourceStore;
 import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.GdprDeletionResult;
 import ai.labs.eddi.engine.gdpr.IGdprParticipant;
@@ -73,7 +74,10 @@ public class EmailIdentityGdprParticipant implements IGdprParticipant {
         this.conversations = conversations;
     }
 
-    /** Without the conversation store: no thread conversations are reached. */
+    /**
+     * Without the conversation store: an address whose ledger rows name a
+     * conversation cannot be erased here (the step fails).
+     */
     public EmailIdentityGdprParticipant(Instance<GdprComplianceService> gdpr, EmailIntegrationDirectory directory, IEmailMessageLedger ledger) {
         this(gdpr, directory, ledger, null);
     }
@@ -158,8 +162,13 @@ public class EmailIdentityGdprParticipant implements IGdprParticipant {
      */
     private Set<String> threadIdentities(Map<String, String> named) {
         Set<String> ids = new LinkedHashSet<>();
-        if (named.isEmpty() || conversations == null || !conversations.isResolvable()) {
+        if (named.isEmpty()) {
             return ids;
+        }
+        if (conversations == null || !conversations.isResolvable()) {
+            // Not knowing which of them are thread conversations must fail the step, not
+            // report an erasure complete while one may still be there.
+            throw new IllegalStateException("The conversations named by this address's email ledger rows cannot be checked here");
         }
         IConversationMemoryStore store = conversations.get();
         for (var entry : named.entrySet()) {
@@ -167,9 +176,11 @@ public class EmailIdentityGdprParticipant implements IGdprParticipant {
             try {
                 ConversationMemorySnapshot snapshot = store.loadConversationMemorySnapshot(entry.getKey());
                 userId = snapshot == null ? null : snapshot.getUserId();
-            } catch (Exception e) {
-                // Gone (erased already, or retention) or unreadable: nothing to reach here.
+            } catch (IResourceStore.ResourceNotFoundException e) {
+                // Gone already (erased, or retention): nothing to reach here.
                 continue;
+            } catch (IResourceStore.ResourceStoreException e) {
+                throw new IllegalStateException("A conversation named by this address's email ledger rows could not be read", e);
             }
             if (EmailUserIdentity.isThreadIdentityOf(userId, entry.getValue())) {
                 ids.add(userId);
