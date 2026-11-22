@@ -5,12 +5,14 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.documents.spend.DocumentSpendLimits;
 import jakarta.enterprise.context.ApplicationScoped;
 import org.eclipse.microprofile.config.Config;
 import org.eclipse.microprofile.config.ConfigProvider;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 import java.util.function.Function;
 
 /**
@@ -107,5 +109,26 @@ public class DocumentSettings {
 
     private static long derived(Config config, String property, long fallback) {
         return config.getOptionalValue(property, Long.class).orElse(fallback);
+    }
+
+    // --- WP-4b.1: daily document spend ceilings ---
+
+    /**
+     * The cumulative daily ceilings and the bucket retention
+     * ({@code eddi.documents.spend.*}). A CDI instance reads the deployment's
+     * configuration on every call; explicit settings ({@link #of}, {@link #none})
+     * return the built-in defaults (no ceiling, 35 days).
+     */
+    public DocumentSpendLimits spendLimits() {
+        if (bounds != null) {
+            return DocumentSpendLimits.defaults();
+        }
+        Config config = ConfigProvider.getConfig();
+        return new DocumentSpendLimits(usd(config, DocumentSpendLimits.MAX_PER_USER_PER_DAY), usd(config, DocumentSpendLimits.MAX_PER_TEAM_PER_DAY),
+                config.getOptionalValue(DocumentSpendLimits.RETENTION_DAYS, Integer.class).orElse(DocumentSpendLimits.DEFAULT_RETENTION_DAYS));
+    }
+
+    private static OptionalDouble usd(Config config, String property) {
+        return config.getOptionalValue(property, Double.class).map(OptionalDouble::of).orElse(OptionalDouble.empty());
     }
 }

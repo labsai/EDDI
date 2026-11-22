@@ -552,6 +552,14 @@ Per-source caps on **derived files** — the views EDDI stores of an uploaded fi
 
 Deployment defaults for an LLM task's `documents` block ([langchain.md](langchain.md#documents-documents)) follow one convention: the prefix `eddi.documents.defaults.` plus a path, `eddi.documents.defaults.<path>`, where `<path>` is the key's dotted path inside the block, for example `eddi.documents.defaults.split.maxUnitTokens=8000`. A default applies where the agent leaves the key unset, and only to a key that is available in this version; a default for a key of the block that is not available yet, or one that cannot be parsed, is ignored with a WARN for each LLM task when the agent is deployed, whether or not the task has a `documents` block. Only the block's own key paths are read: a misspelled path (`split.maxUnitToken` instead of `split.maxUnitTokens`) is never looked up, so it is ignored **without** a warning. Lists are comma-separated. No `documents` key is available yet, so no default has an effect.
 
+**Daily document spend.** Cumulative ceilings on model spend for document work outside a conversation turn (the background summary of a large document, later the modality bridge), per UTC day. Admission checks the tenant's monthly budget, then the user's ceiling, then the team's; the refusal names the ceiling, the spend so far and the estimate. See [langchain.md → Daily document spend ceilings](langchain.md#daily-document-spend-ceilings). **Nothing charges them yet**: the summary job lands with large-document summaries.
+
+| Property | Default | Description |
+|---|---|---|
+| `eddi.documents.spend.max-per-user-per-day-usd` | (unset) | Dollars one user's document work may spend per UTC day. Unset or negative: no cumulative ceiling; `0` refuses all such work |
+| `eddi.documents.spend.max-per-team-per-day-usd` | (unset) | Dollars one team library's document work may spend per UTC day, on top of the user's ceiling. Unset or negative: no ceiling |
+| `eddi.documents.spend.retention-days` | `35` | UTC days of spend buckets kept, today included; older buckets are deleted by the store when it writes (MongoDB also has a TTL index). At least `1`. A user's buckets are erased with the user |
+
 ---
 
 ## Backup, export & import

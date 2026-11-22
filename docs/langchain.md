@@ -2791,6 +2791,33 @@ inherits the discarded spend as `audit:discarded_cost`, which counts like `audit
 persisted with the step. A rerun adds to the step's own `audit:cost`. So say → undo → say cannot
 reset what a conversation has spent.
 
+#### Daily document spend ceilings
+
+Document work that runs **outside a conversation turn** — the background summary of a large
+document, and later the modality bridge — is not covered by the per-conversation ceiling above,
+because no turn pays for it. It is charged to the document's owner instead, and two operator
+properties bound it per UTC day:
+
+| Property | Bounds |
+|---|---|
+| `eddi.documents.spend.max-per-user-per-day-usd` | What one user's document work may spend per UTC day |
+| `eddi.documents.spend.max-per-team-per-day-usd` | What one team library's document work may spend per UTC day |
+
+Both are unset by default (no cumulative ceiling). Before such work starts it is admitted in this
+order: the tenant's monthly budget, the user's daily ceiling, the team's daily ceiling, then the
+work's own per-document ceiling. Work whose estimate would take the day's spend past a ceiling is
+not started, and the refusal names the ceiling, the spend so far and the estimate. `0` refuses all
+such work; a negative value means no ceiling; an unpriced model's estimate is $0, so it runs until
+a ceiling is reached and its calls are counted. A counter that cannot be read refuses (fail
+closed). Admission is a pre-flight check, not a reservation: work admitted at the same moment can
+together pass a ceiling by what it then spends. Every charge also reaches the tenant's monthly
+budget and the spend sinks as a `DOCUMENT` event ([model-pricing.md](model-pricing.md)).
+
+The day buckets are kept for `eddi.documents.spend.retention-days` (35) and erased with the user
+([GDPR](gdpr-compliance.md)); team buckets hold no user id. **Nothing charges these counters
+yet**: the summary job that does lands with large-document summaries, so in this version the
+properties can be set but have no effect.
+
 #### Tool cache scoping
 
 **What is cached.** Built-in tools, except those bound to one conversation, which

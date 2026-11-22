@@ -5,11 +5,13 @@
 package ai.labs.eddi.engine.documents;
 
 import ai.labs.eddi.engine.attachments.DerivedCaps;
+import ai.labs.eddi.engine.documents.spend.DocumentSpendLimits;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 import java.util.Optional;
+import java.util.OptionalDouble;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -55,5 +57,28 @@ class DocumentSettingsDefaultsTest {
         var expected = new DerivedCaps.Limits(200, 52_428_800L, 20, 52_428_800L, 209_715_200L);
         assertEquals(expected, DocumentSettings.none().derivedCaps());
         assertEquals(expected, new DocumentSettings().derivedCaps(), "no property set in the test configuration");
+    }
+
+    // --- WP-4b.1 ---
+
+    @Test
+    @DisplayName("daily document spend: no ceiling by default, buckets kept 35 days")
+    void spendLimits() {
+        var expected = new DocumentSpendLimits(OptionalDouble.empty(), OptionalDouble.empty(), 35);
+        assertEquals(expected, DocumentSettings.none().spendLimits());
+        assertEquals(expected, new DocumentSettings().spendLimits(), "no ceiling set in the test configuration");
+        assertEquals("eddi.documents.spend.max-per-user-per-day-usd", DocumentSpendLimits.MAX_PER_USER_PER_DAY);
+        assertEquals("eddi.documents.spend.max-per-team-per-day-usd", DocumentSpendLimits.MAX_PER_TEAM_PER_DAY);
+        assertEquals("eddi.documents.spend.retention-days", DocumentSpendLimits.RETENTION_DAYS);
+    }
+
+    @Test
+    @DisplayName("daily document spend: a negative ceiling means none, 0 is a ceiling, retention is at least one day")
+    void spendLimitsNormalised() {
+        var limits = new DocumentSpendLimits(OptionalDouble.of(-1.0), OptionalDouble.of(0.0), 0);
+        assertTrue(limits.maxPerUserPerDayUsd().isEmpty());
+        assertEquals(OptionalDouble.of(0.0), limits.maxPerTeamPerDayUsd());
+        assertEquals(1, limits.retentionDays());
+        assertTrue(new DocumentSpendLimits(OptionalDouble.of(Double.NaN), null, 35).maxPerUserPerDayUsd().isEmpty());
     }
 }
