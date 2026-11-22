@@ -97,6 +97,18 @@ class UserInputExpressionRoundTripTest {
     }
 
     @Test
+    @DisplayName("a lone * is not the wildcard: it does not match a rule's unknown(x)")
+    void asteriskIsNotAWildcard() {
+        Expression typed = new Unknown("*").getExpressions().getFirst();
+        Expression rule = new Expression("unknown", new Expression("confirm"));
+
+        assertEquals("unknown", typed.toString());
+        assertEquals("unknown(ab)", new Unknown("a*b").getExpressions().getFirst().toString());
+        assertFalse(typed.equals(rule));
+        assertFalse(new Unknown("(*)").getExpressions().getFirst().equals(rule));
+    }
+
+    @Test
     @DisplayName("the word the user typed is still the dictionary entry's value")
     void wordValueIsUntouched() {
         assertEquals("a)", new Unknown("a)").getValue());

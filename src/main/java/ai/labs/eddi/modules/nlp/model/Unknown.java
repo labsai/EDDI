@@ -16,9 +16,12 @@ import ai.labs.eddi.modules.nlp.expressions.Expressions;
  * {@code 3))} contributed unbalanced parentheses, which add up across the
  * message until the nesting passes {@code eddi.expressions.max-depth} and the
  * whole turn fails. The token is user text, i.e. data, so the expression keeps
- * its letters and drops only the three characters the notation gives meaning
- * to: {@code (}, {@code )} and {@code ,}. The word itself ({@link #getValue()},
- * match details, the conversation input) is untouched.
+ * its letters and drops only the characters the notation gives meaning to:
+ * {@code (}, {@code )}, {@code ,} and {@code *}. The last is the wildcard
+ * {@link Expression#equals} honours, so a lone {@code *} would otherwise become
+ * {@code unknown(*)} and match every rule written as {@code unknown(x)}. The
+ * word itself ({@link #getValue()}, match details, the conversation input) is
+ * untouched.
  *
  * @author ginccc
  */
@@ -40,7 +43,7 @@ public class Unknown extends Word {
         StringBuilder data = new StringBuilder(value.length());
         for (int i = 0; i < value.length(); i++) {
             char c = value.charAt(i);
-            if (c != '(' && c != ')' && c != ',') {
+            if (c != '(' && c != ')' && c != ',' && c != '*') {
                 data.append(c);
             }
         }
