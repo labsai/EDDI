@@ -291,6 +291,41 @@ public interface IIngestionStateStore {
      */
     void recordStoreFingerprint(String sourceId, String fingerprint);
 
+    /**
+     * What a source's configured scope resolved to, as last recorded by
+     * {@link #recordResolvedScope} — for a Google Drive source, the folder id each
+     * configured path was resolved to. Later runs read the recorded id rather than
+     * resolving the path again, so a renamed folder stays in scope.
+     * <p>
+     * An opaque string the connector composes and reads back; empty for a source
+     * that has never recorded one. Kept in state, never in the versioned
+     * knowledge-base configuration, which a run must not write.
+     */
+    Optional<String> resolvedScope(String sourceId);
+
+    /**
+     * Records what the scope resolved to. Not fenced, like
+     * {@link #recordStoreFingerprint}: written by the run that holds the source.
+     * Removed by {@link #purgeSource}.
+     */
+    void recordResolvedScope(String sourceId, String resolvedScope);
+
+    /**
+     * The signature of the scope the last completed reconciliation of this source
+     * applied, as recorded by {@link #recordScopeSignature}. A run whose scope has
+     * a different signature removes the documents its complete listing did not see
+     * at once, rather than after {@code tombstoneAfterMissedRuns} runs: a folder
+     * taken out of the scope is a configuration change, not an outage. Empty for a
+     * source that has never recorded one.
+     */
+    Optional<String> scopeSignature(String sourceId);
+
+    /**
+     * Records the scope signature a completed reconciliation applied. Not fenced;
+     * removed by {@link #purgeSource}.
+     */
+    void recordScopeSignature(String sourceId, String signature);
+
     /** Every document known for a source, tombstoned ones included. */
     List<DocumentState> listDocuments(String sourceId, int limit);
 

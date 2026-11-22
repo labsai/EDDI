@@ -76,6 +76,25 @@ public interface DiscoveryContext {
     }
 
     /**
+     * What this source's configured scope resolved to, as the connector last
+     * recorded it with {@link #recordResolvedScope} — an opaque string only the
+     * connector reads. A Google Drive source keeps the folder id each configured
+     * path resolved to, so a folder renamed later stays in scope. Empty when
+     * nothing was recorded, or for a framework that keeps no such state.
+     */
+    default Optional<String> resolvedScope() {
+        return Optional.empty();
+    }
+
+    /**
+     * Records what the scope resolved to, in the source's ingestion state — never
+     * in its configuration. Ignored for a preview, which writes nothing.
+     */
+    default void recordResolvedScope(String resolvedScope) {
+        // A framework that keeps no state resolves again on every run.
+    }
+
+    /**
      * Whether the framework wants discovery to stop: the run was cancelled or
      * superseded, or a budget was spent. Checked between documents; a connector
      * that sees true returns with {@link StopReason#CANCELLED} and

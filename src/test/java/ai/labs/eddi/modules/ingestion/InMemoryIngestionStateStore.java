@@ -230,6 +230,28 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
 
     /** Production keeps these in a table of their own, one row per source. */
     private final Map<String, String> storeFingerprints = new HashMap<>();
+    private final Map<String, String> resolvedScopes = new HashMap<>();
+    private final Map<String, String> scopeSignatures = new HashMap<>();
+
+    @Override
+    public synchronized Optional<String> resolvedScope(String sourceId) {
+        return Optional.ofNullable(resolvedScopes.get(sourceId));
+    }
+
+    @Override
+    public synchronized void recordResolvedScope(String sourceId, String resolvedScope) {
+        resolvedScopes.put(sourceId, resolvedScope);
+    }
+
+    @Override
+    public synchronized Optional<String> scopeSignature(String sourceId) {
+        return Optional.ofNullable(scopeSignatures.get(sourceId));
+    }
+
+    @Override
+    public synchronized void recordScopeSignature(String sourceId, String signature) {
+        scopeSignatures.put(sourceId, signature);
+    }
 
     @Override
     public synchronized Optional<String> storeFingerprint(String sourceId) {
@@ -254,6 +276,8 @@ public class InMemoryIngestionStateStore implements IIngestionStateStore {
         documents.values().removeIf(state -> state.sourceId().equals(sourceId));
         runs.values().removeIf(run -> run.sourceId().equals(sourceId));
         storeFingerprints.remove(sourceId);
+        resolvedScopes.remove(sourceId);
+        scopeSignatures.remove(sourceId);
         String prefix = sourceId + KEY_SEPARATOR;
         fencingRunIds.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));
         fencingGenerations.keySet().removeIf(documentKey -> documentKey.startsWith(prefix));

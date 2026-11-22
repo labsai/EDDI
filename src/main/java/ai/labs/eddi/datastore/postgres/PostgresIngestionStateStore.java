@@ -120,7 +120,11 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             // gains it.
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS documents_skipped INTEGER NOT NULL DEFAULT 0",
             "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS stop_reason VARCHAR(32)",
-            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS run_trigger VARCHAR(16)"};
+            "ALTER TABLE rag_ingestion_runs ADD COLUMN IF NOT EXISTS run_trigger VARCHAR(16)",
+            // A source's resolved folder scope and the scope signature its last
+            // reconciliation applied (Google Drive folder scoping).
+            "ALTER TABLE rag_ingestion_sources ADD COLUMN IF NOT EXISTS resolved_scope TEXT",
+            "ALTER TABLE rag_ingestion_sources ADD COLUMN IF NOT EXISTS scope_signature TEXT"};
 
     private final Instance<DataSource> dataSourceInstance;
     private volatile boolean schemaInitialized;
@@ -413,6 +417,60 @@ public class PostgresIngestionStateStore implements IIngestionStateStore {
             statement.executeUpdate();
         } catch (SQLException e) {
             throw new IngestionStateStoreException("Failed to record a source's store fingerprint", e);
+        }
+    }
+
+    @Override
+    public Optional<String> resolvedScope(String sourceId) {
+        return readSourceColumn(sourceId, "resolved_scope", "resolved scope");
+    }
+
+    @Override
+    public void recordResolvedScope(String sourceId, String resolvedScope) {
+        writeSourceColumn(sourceId, "resolved_scope", resolvedScope, "resolved scope");
+    }
+
+    @Override
+    public Optional<String> scopeSignature(String sourceId) {
+        return readSourceColumn(sourceId, "scope_signature", "scope signature");
+    }
+
+    @Override
+    public void recordScopeSignature(String sourceId, String signature) {
+        writeSourceColumn(sourceId, "scope_signature", signature, "scope signature");
+    }
+
+    /**
+     * @param column
+     *            one of this class's own column names, never caller input
+     */
+    private Optional<String> readSourceColumn(String sourceId, String column, String what) {
+        String sql = "SELECT " + column + " FROM rag_ingestion_sources WHERE source_id = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            try (ResultSet resultSet = statement.executeQuery()) {
+                return resultSet.next() ? Optional.ofNullable(resultSet.getString(1)) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to read a source's " + what, e);
+        }
+    }
+
+    /**
+     * @param column
+     *            one of this class's own column names, never caller input
+     */
+    private void writeSourceColumn(String sourceId, String column, String value, String what) {
+        String sql = "INSERT INTO rag_ingestion_sources (source_id, " + column + ", updated_at) VALUES (?, ?, ?) "
+                + "ON CONFLICT (source_id) DO UPDATE SET " + column + " = EXCLUDED." + column
+                + ", updated_at = EXCLUDED.updated_at";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, sourceId);
+            statement.setString(2, value);
+            statement.setTimestamp(3, Timestamp.from(Instant.now()));
+            statement.executeUpdate();
+        } catch (SQLException e) {
+            throw new IngestionStateStoreException("Failed to record a source's " + what, e);
         }
     }
 

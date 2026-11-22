@@ -56,6 +56,12 @@ public final class RecordingEmbeddingStore implements EmbeddingStore<TextSegment
         return this;
     }
 
+    /** Ends {@link #withFailingRemoval}: the backend is well again. */
+    public RecordingEmbeddingStore withWorkingRemoval() {
+        this.removalFails = false;
+        return this;
+    }
+
     /** Simulates a store that cannot change metadata in place. */
     public RecordingEmbeddingStore withoutMetadataUpdates() {
         this.metadataUpdatesSupported = false;

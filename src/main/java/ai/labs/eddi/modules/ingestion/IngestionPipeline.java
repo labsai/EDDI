@@ -471,9 +471,14 @@ public class IngestionPipeline {
                     sourceRun.incompleteReason() != null ? sourceRun.incompleteReason() : sourceRun.stopReason());
             return 0;
         }
-        List<DocumentState> gone = stateStore.bumpAndFindMissing(
-                sourceKey, runId, source.settings().tombstoneAfterMissedRunsOrDefault());
+        int threshold = source.settings().tombstoneAfterMissedRunsOrDefault();
+        boolean scopeChanged = scopeChanged(source, sourceKey, sourceRun);
+        List<DocumentState> gone = stateStore.bumpAndFindMissing(sourceKey, runId, scopeChanged ? 1 : threshold);
+        if (scopeChanged) {
+            gone = outsideTheNewScope(gone, runId, threshold);
+        }
         if (gone.isEmpty()) {
+            recordAppliedScope(sourceKey, sourceRun);
             return 0;
         }
 
@@ -505,7 +510,82 @@ public class IngestionPipeline {
             }
         }
         stateStore.markTombstoned(sourceKey, sweptOrphans ? withMarker(removedIds) : removedIds);
+        long documentsGone = gone.stream().filter(document -> !SWEEP_MARKER.equals(document.documentId())).count();
+        if (removedIds.size() >= documentsGone) {
+            // Only once every document the new scope dropped has really gone: a
+            // vector that could not be removed is still retrievable, and the next run
+            // must still see the scope as changed and try again at once.
+            recordAppliedScope(sourceKey, sourceRun);
+        }
         return removedIds.size();
+    }
+
+    /**
+     * Whether the scope this run listed differs from the one the last completed
+     * reconciliation applied — a folder added to, removed from or excluded from a
+     * Google Drive source.
+     *
+     * <p>
+     * A source that never recorded a signature (its state predates folder scoping,
+     * or this is its first run) is not treated as changed: there is no earlier
+     * scope to compare with, and fast-tracking its first reconciliation would only
+     * drop the miss grace of documents that are simply missing.
+     */
+    private boolean scopeChanged(IngestionSource source, String sourceKey, SourceRun sourceRun) {
+        if (sourceRun.scopeSignature() == null) {
+            return false;
+        }
+        String applied = stateStore.scopeSignature(sourceKey).orElse(null);
+        if (applied == null || applied.equals(sourceRun.scopeSignature())) {
+            return false;
+        }
+        LOGGER.infof("The scope of source '%s' changed since its last completed listing; documents this listing did "
+                + "not see are removed now, not after tombstoneAfterMissedRuns runs",
+                LogSanitizer.sanitize(source.getName()));
+        return true;
+    }
+
+    /**
+     * Of the documents a scope-changed run found missing at a threshold of one,
+     * those that really left: not seen by this complete listing of the new scope.
+     *
+     * <p>
+     * The connector lists the whole new scope, so a document it did not see is
+     * outside it — or deleted, which reconciles it a run or two early and costs
+     * nothing. Two rows keep their normal grace: one this run stamped as
+     * unreachable (its miss count is from earlier runs, and this run learned
+     * nothing about it), and the orphan-sweep marker, whose wait is about a purge,
+     * not about the scope.
+     */
+    private static List<DocumentState> outsideTheNewScope(List<DocumentState> missing, String runId,
+                                                          int threshold) {
+        List<DocumentState> gone = new ArrayList<>();
+        for (DocumentState document : missing) {
+            if (runId.equals(document.lastRunId())) {
+                continue;
+            }
+            if (SWEEP_MARKER.equals(document.documentId()) && document.missedRuns() < threshold) {
+                continue;
+            }
+            gone.add(document);
+        }
+        return gone;
+    }
+
+    /**
+     * Records the scope signature of a completed reconciliation. Best effort: a
+     * failure only means the next completed listing applies the change again.
+     */
+    private void recordAppliedScope(String sourceKey, SourceRun sourceRun) {
+        if (sourceRun.scopeSignature() == null) {
+            return;
+        }
+        try {
+            stateStore.recordScopeSignature(sourceKey, sourceRun.scopeSignature());
+        } catch (RuntimeException e) {
+            LOGGER.warnf(e, "Could not record the scope signature of source '%s'; the next completed listing "
+                    + "applies the scope again", LogSanitizer.sanitize(sourceKey));
+        }
     }
 
     private static List<String> withMarker(List<String> removedIds) {
@@ -821,7 +901,7 @@ public class IngestionPipeline {
      *            the connector's explanation when coverage fell short, for the log
      */
     private record SourceRun(WebCrawler.StopReason stopReason, Coverage coverage, boolean coveredWholeSource,
-            String incompleteReason, String summary) {
+            String incompleteReason, String summary, String scopeSignature) {
     }
 
     /**
@@ -849,7 +929,8 @@ public class IngestionPipeline {
             Partition partition = partitions.get(0);
             connector.verifyAccess(context, partition);
             Instant deadline = uploadDeadline(Instant.now(), source);
-            result = connector.discover(new Discovery(connector, context, partition, deadline, collector));
+            result = connector.discover(new Discovery(connector, context, partition, deadline, collector,
+                    stateStore, mode == Mode.INGEST));
         } catch (SourceException e) {
             throw new IllegalStateException(e.getMessage(), e);
         }
@@ -865,7 +946,7 @@ public class IngestionPipeline {
             case INCREMENTAL, PARTIAL -> false;
         };
         return new SourceRun(WebCrawler.StopReason.valueOf(result.stopReason().name()), result.coverage(), covered,
-                result.incompleteReason(), result.summary());
+                result.incompleteReason(), result.summary(), result.scopeSignature());
     }
 
     /**
@@ -931,14 +1012,30 @@ public class IngestionPipeline {
         private final Partition partition;
         private final Instant deadline;
         private final Collector collector;
+        private final IIngestionStateStore stateStore;
+        private final boolean writesState;
 
         private Discovery(SourceConnector connector, SourceContext context, Partition partition, Instant deadline,
-                Collector collector) {
+                Collector collector, IIngestionStateStore stateStore, boolean writesState) {
             this.connector = connector;
             this.context = context;
             this.partition = partition;
             this.deadline = deadline;
             this.collector = collector;
+            this.stateStore = stateStore;
+            this.writesState = writesState;
+        }
+
+        @Override
+        public Optional<String> resolvedScope() {
+            return stateStore.resolvedScope(context.sourceKey());
+        }
+
+        @Override
+        public void recordResolvedScope(String resolvedScope) {
+            if (writesState) {
+                stateStore.recordResolvedScope(context.sourceKey(), resolvedScope);
+            }
         }
 
         @Override

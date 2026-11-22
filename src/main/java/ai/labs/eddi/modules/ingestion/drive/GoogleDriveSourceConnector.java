@@ -107,6 +107,22 @@ public class GoogleDriveSourceConnector implements SourceConnector {
     static final String HINT_MODIFIED = "modifiedTime";
     static final String HINT_AUTHOR = "author";
     static final String HINT_VERSION = "version";
+    static final String HINT_PARENT = "parentId";
+
+    /** Folders one picker page shows at most. */
+    static final int PICKER_PAGE_SIZE = 200;
+
+    /** How long one picker request may take, retries included. */
+    private static final Duration PICKER_DEADLINE = Duration.ofSeconds(20);
+
+    /** The longest page token the picker passes on to Drive. */
+    static final int MAX_PAGE_TOKEN_LENGTH = 2048;
+
+    /** What the picker accepts as Drive's opaque page token. */
+    private static final Pattern PAGE_TOKEN = Pattern.compile("^[\\x21-\\x7E]{1," + MAX_PAGE_TOKEN_LENGTH + "}$");
+
+    /** The picker's name for the drive's top level. */
+    public static final String PICKER_ROOT = "root";
 
     /** How long a fetch may spend waiting on Drive's rate limit. */
     private static final Duration FETCH_RETRY_WINDOW = Duration.ofMinutes(2);
@@ -148,8 +164,12 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         GoogleDriveSource drive = drive(context);
         DriveApi api = api(context, clock.get().plus(FETCH_RETRY_WINDOW));
         requireDrive(api, drive);
-        for (String folderId : drive.getFolderIds()) {
-            requireFolder(api, drive, folderId);
+        // Folders named by path are resolved, and every configured folder checked,
+        // by discovery, which has the recorded ids to resolve them with.
+        for (String folderId : drive.rootFolderIds()) {
+            if (!folderId.equals(drive.getSharedDriveId())) {
+                requireFolder(api, drive, folderId);
+            }
         }
     }
 
@@ -158,13 +178,22 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         SourceContext source = context.source();
         GoogleDriveSource drive = drive(source);
         DriveApi api = api(source, context.deadline());
-        Listing listing = new Listing(context, drive);
+        DriveScope scope = DriveScope.resolve(api, drive, context.resolvedScope());
+        String resolvedState = scope.recordedState();
+        if (resolvedState != null) {
+            context.recordResolvedScope(resolvedState);
+        }
+        for (String warning : scope.warnings()) {
+            LOGGER.warnf("Source '%s': %s", LogSanitizer.sanitize(source.source().getName()),
+                    LogSanitizer.sanitize(warning));
+        }
+        Listing listing = new Listing(context, drive, scope);
 
         Deque<Folder> queue = new ArrayDeque<>();
         Set<String> visited = new HashSet<>();
-        for (String root : drive.rootFolderIds()) {
-            if (visited.add(root)) {
-                queue.add(new Folder(root, "", true));
+        for (DriveScope.Root root : scope.roots()) {
+            if (visited.add(root.id())) {
+                queue.add(new Folder(root.id(), "", true));
             }
         }
 
@@ -265,11 +294,15 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         } else if (stopReason == StopReason.COMPLETED && clock.get().isAfter(context.deadline())) {
             stopReason = StopReason.TIME_LIMIT;
         }
+        if (listing.incompleteReason != null) {
+            complete = false;
+            incompleteReason = listing.incompleteReason;
+        }
         if (stopReason == StopReason.COMPLETED && complete) {
             // An empty root is the one listing that could be an outage dressed as
             // coverage: a removed member or a moved folder lists nothing rather than
             // failing. Confirmed before it is believed.
-            for (String root : drive.rootFolderIds()) {
+            for (String root : scope.roots().stream().map(DriveScope.Root::id).toList()) {
                 if (rootChildren.getOrDefault(root, 0) == 0) {
                     if (root.equals(drive.getSharedDriveId())) {
                         requireDrive(api, drive);
@@ -289,7 +322,76 @@ public class GoogleDriveSourceConnector implements SourceConnector {
 
         Coverage coverage = stopReason == StopReason.COMPLETED && complete ? Coverage.FULL_LISTING : Coverage.PARTIAL;
         return new DiscoveryResult(stopReason, coverage, coverage == Coverage.PARTIAL ? incompleteReason : null, null,
-                listing.summary(visited.size(), api.requests()));
+                listing.summary(visited.size(), api.requests(), scope.warnings()), scope.signature());
+    }
+
+    /**
+     * One level of the source's Shared Drive, folders only — what the Manager's
+     * folder picker shows. Never a file, and nothing about any file's content.
+     *
+     * <p>
+     * It reads with the source's own connection, so the connection's binding and
+     * base-URL allowlist apply to it exactly as to a run.
+     *
+     * @param parentId
+     *            {@value #PICKER_ROOT} (or null) for the drive's top level, or the
+     *            id of a folder of the source's Shared Drive
+     * @param pageToken
+     *            from the previous page's {@code nextPageToken}, or null
+     * @throws SourceException
+     *             {@link SourceError.Rejected} for a malformed id or token, or a
+     *             folder of another drive; {@link SourceError.NotFound} for a
+     *             folder that does not exist; otherwise as Drive answered
+     */
+    public FolderPage listFolders(SourceContext context, String parentId, String pageToken) throws SourceException {
+        GoogleDriveSource drive = drive(context);
+        String parent = parentId == null || parentId.isBlank() || PICKER_ROOT.equals(parentId)
+                ? drive.getSharedDriveId()
+                : parentId;
+        if (!GoogleDriveSource.DRIVE_ID.matcher(parent).matches()) {
+            throw new SourceException(new SourceError.Rejected("parentId is not a Drive id (letters, digits, '-' "
+                    + "and '_') or '" + PICKER_ROOT + "'"));
+        }
+        if (pageToken != null && !PAGE_TOKEN.matcher(pageToken).matches()) {
+            throw new SourceException(new SourceError.Rejected("pageToken is not a page token this endpoint returned"));
+        }
+        DriveApi api = api(context, clock.get().plus(PICKER_DEADLINE));
+        if (parent.equals(drive.getSharedDriveId())) {
+            requireDrive(api, drive);
+        } else {
+            JsonNode folder;
+            try {
+                folder = api.getFile(parent);
+            } catch (DriveApiException e) {
+                if (e.error().kind() == SourceError.Kind.NOT_FOUND) {
+                    throw new SourceException(new SourceError.NotFound("Folder " + parent + " does not exist or is "
+                            + "not visible to connection '" + drive.getConnection() + "'"), e);
+                }
+                throw e;
+            }
+            if (!drive.getSharedDriveId().equals(folder.path("driveId").asText())) {
+                throw new SourceException(new SourceError.Rejected("Folder " + parent + " is not in Shared Drive "
+                        + drive.getSharedDriveId()));
+            }
+            if (!DriveFormat.FOLDER_MIME.equals(folder.path("mimeType").asText())
+                    || folder.path("trashed").asBoolean(false)) {
+                throw new SourceException(new SourceError.NotFound(parent + " is not a folder of the drive, or it is "
+                        + "in the trash"));
+            }
+        }
+        DriveApi.FolderPage page = api.listFolders(drive.getSharedDriveId(), parent, pageToken, PICKER_PAGE_SIZE);
+        List<PickerFolder> folders = page.folders().stream().map(f -> new PickerFolder(f.id(), f.name())).toList();
+        return new FolderPage(folders, page.nextPageToken());
+    }
+
+    /** A folder as the picker shows it. */
+    public record PickerFolder(String id, String name) {
+    }
+
+    /**
+     * One page of the picker, and the token for the next one (null on the last).
+     */
+    public record FolderPage(List<PickerFolder> folders, String nextPageToken) {
     }
 
     @Override
@@ -486,6 +588,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         metadata.put(SourceMetadataKeys.AUTHOR, hints.get(HINT_AUTHOR));
         metadata.put(SourceMetadataKeys.MODIFIED_AT, hints.get(HINT_MODIFIED));
         metadata.put(SourceMetadataKeys.PARTITION_ID, drive.getSharedDriveId());
+        metadata.put(SourceMetadataKeys.PARENT_ID, hints.get(HINT_PARENT));
         metadata.put(SourceMetadataKeys.PROVIDER, IngestionSource.TYPE_GOOGLE_DRIVE);
         return metadata;
     }
@@ -611,6 +714,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
 
         private final DiscoveryContext context;
         private final GoogleDriveSource drive;
+        private final DriveScope scope;
         private final Set<String> formats;
         private final List<String> excluded;
         private final Partition partition;
@@ -625,10 +729,15 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         private int skippedSize;
         private int skippedShortcuts;
         private int repeatedFolders;
+        private int excludedFolders;
 
-        Listing(DiscoveryContext context, GoogleDriveSource drive) {
+        /** Why this listing cannot count as coverage, when something says so. */
+        private String incompleteReason;
+
+        Listing(DiscoveryContext context, GoogleDriveSource drive, DriveScope scope) {
             this.context = context;
             this.drive = drive;
+            this.scope = scope;
             this.formats = drive.formatsOrDefault();
             this.excluded = drive.getExcludeNamePatterns().stream().map(p -> p.toLowerCase(Locale.ROOT)).toList();
             this.partition = context.partition();
@@ -645,7 +754,14 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             }
             String name = file.name() == null ? file.id() : file.name();
             if (DriveFormat.FOLDER_MIME.equals(file.mimeType())) {
-                if (drive.isIncludeSubfolders() && visited.add(file.id())) {
+                if (!drive.isIncludeSubfolders()) {
+                    return true;
+                }
+                if (scope.admit(file.id(), false) == DriveScope.Admission.EXCLUDED) {
+                    excludedFolders++;
+                    return true;
+                }
+                if (visited.add(file.id())) {
                     queue.add(new Folder(file.id(), folder.child(name), false, Boolean.TRUE.equals(file.canListChildren())));
                 }
                 return true;
@@ -655,6 +771,18 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                 if (DriveFormat.FOLDER_MIME.equals(file.shortcutTargetMimeType())) {
                     if (!drive.isIncludeSubfolders() || target == null
                             || !GoogleDriveSource.DRIVE_ID.matcher(target).matches()) {
+                        return true;
+                    }
+                    // Exclusion wins over the shortcut: the target is judged by where it
+                    // really is in the drive, not by the folder the shortcut sits in.
+                    DriveScope.Admission admission = scope.admit(target, true);
+                    if (admission == DriveScope.Admission.EXCLUDED) {
+                        excludedFolders++;
+                        return true;
+                    }
+                    if (admission == DriveScope.Admission.UNKNOWN) {
+                        incompleteReason = "could not establish whether the target of shortcut " + file.id()
+                                + " lies inside an excluded folder";
                         return true;
                     }
                     // A shortcut back to a folder already listed is how Drive makes a
@@ -704,6 +832,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
                 sizedFiles++;
             }
             Map<String, String> hints = hints(file, name, folder.child(name), drive.maxFileBytesOrDefault());
+            hints.put(HINT_PARENT, folder.id());
             if (format.isNative()) {
                 String version = hints.get(HINT_VERSION);
                 Optional<KnownVersion> known = context.knownVersion(file.id());
@@ -753,7 +882,7 @@ public class GoogleDriveSourceConnector implements SourceConnector {
         }
 
         /** One line for a preview's message and a run's log. */
-        String summary(int folders, int requests) {
+        String summary(int folders, int requests, List<String> warnings) {
             StringBuilder text = new StringBuilder("Google Drive listing: ").append(accepted).append(" file(s) to read");
             if (!acceptedByFormat.isEmpty()) {
                 text.append(" (");
@@ -780,6 +909,12 @@ public class GoogleDriveSourceConnector implements SourceConnector {
             }
             if (repeatedFolders > 0) {
                 text.append(". ").append(repeatedFolders).append(" shortcut(s) to an already listed folder not followed");
+            }
+            if (excludedFolders > 0) {
+                text.append(". ").append(excludedFolders).append(" folder(s) not read: in googleDrive.excludeFolders");
+            }
+            for (String warning : warnings) {
+                text.append(". Warning: ").append(warning);
             }
             return text.toString();
         }

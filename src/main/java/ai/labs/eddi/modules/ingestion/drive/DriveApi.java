@@ -110,10 +110,52 @@ final class DriveApi {
         return json(call(BASE + "/drives/" + driveId + "?fields=" + encode("id,name"), MAX_JSON_BYTES));
     }
 
-    /** {@code files.get} for metadata only. */
+    /**
+     * {@code files.get} for metadata only, with the parent the folder walk needs.
+     */
     JsonNode getFile(String fileId) throws SourceException {
         return json(call(BASE + "/files/" + fileId + "?supportsAllDrives=true&fields="
-                + encode("id,name,mimeType,driveId,trashed,capabilities(canListChildren)"), MAX_JSON_BYTES));
+                + encode("id,name,mimeType,driveId,trashed,parents,capabilities(canListChildren)"), MAX_JSON_BYTES));
+    }
+
+    /**
+     * One page of a folder's direct subfolders that are not in the trash — folders
+     * only, never a file, and nothing about any file's content. What the folder
+     * picker shows and what a configured path is resolved against.
+     *
+     * @param pageSize
+     *            at most 1000, Drive's own limit
+     */
+    FolderPage listFolders(String driveId, String folderId, String pageToken, int pageSize) throws SourceException {
+        Map<String, String> query = new LinkedHashMap<>();
+        query.put("corpora", "drive");
+        query.put("driveId", driveId);
+        query.put("includeItemsFromAllDrives", "true");
+        query.put("supportsAllDrives", "true");
+        query.put("pageSize", String.valueOf(Math.max(1, Math.min(1000, pageSize))));
+        // folderId passed GoogleDriveSource.DRIVE_ID (or came from Drive and was
+        // checked against it), so it cannot close the quote.
+        query.put("q", "'" + folderId + "' in parents and mimeType = '" + DriveFormat.FOLDER_MIME
+                + "' and trashed = false");
+        query.put("orderBy", "name");
+        query.put("fields", "nextPageToken,incompleteSearch,files(id,name,mimeType)");
+        if (pageToken != null) {
+            query.put("pageToken", pageToken);
+        }
+        JsonNode page = json(call(BASE + "/files?" + queryString(query), MAX_JSON_BYTES));
+        List<Folder> folders = new ArrayList<>();
+        for (JsonNode file : page.path("files")) {
+            String id = file.path("id").asText(null);
+            if (id == null || !GoogleDriveSource.DRIVE_ID.matcher(id).matches()
+                    || !DriveFormat.FOLDER_MIME.equals(file.path("mimeType").asText(null))) {
+                continue;
+            }
+            String name = file.path("name").asText(null);
+            folders.add(new Folder(id, name == null ? id : name));
+        }
+        String next = page.path("nextPageToken").asText(null);
+        return new FolderPage(folders, next == null || next.isBlank() ? null : next,
+                page.path("incompleteSearch").asBoolean(false));
     }
 
     /**
@@ -317,6 +359,14 @@ final class DriveApi {
 
     /** One page of a listing. */
     record Page(List<DriveFile> files, String nextPageToken, boolean incompleteSearch) {
+    }
+
+    /** One folder: its id and its name as Drive shows it. */
+    record Folder(String id, String name) {
+    }
+
+    /** One page of a folder's subfolders. */
+    record FolderPage(List<Folder> folders, String nextPageToken, boolean incompleteSearch) {
     }
 
     /**

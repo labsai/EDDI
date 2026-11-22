@@ -76,6 +76,8 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
 
     private static final String FIELD_SOURCE_ID = "sourceId";
     private static final String FIELD_STORE_FINGERPRINT = "storeFingerprint";
+    private static final String FIELD_RESOLVED_SCOPE = "resolvedScope";
+    private static final String FIELD_SCOPE_SIGNATURE = "scopeSignature";
     private static final String FIELD_UPDATED_AT = "updatedAt";
     private static final String FIELD_DOCUMENT_ID = "documentId";
     private static final String FIELD_CONTENT_HASH = "contentHash";
@@ -315,6 +317,42 @@ public class MongoIngestionStateStore implements IIngestionStateStore {
                 Filters.eq(FIELD_SOURCE_ID, sourceId),
                 Updates.combine(
                         Updates.set(FIELD_STORE_FINGERPRINT, fingerprint),
+                        Updates.set(FIELD_UPDATED_AT, Date.from(Instant.now()))),
+                new UpdateOptions().upsert(true)));
+    }
+
+    @Override
+    public Optional<String> resolvedScope(String sourceId) {
+        return readSourceField(sourceId, FIELD_RESOLVED_SCOPE, "read a source's resolved scope");
+    }
+
+    @Override
+    public void recordResolvedScope(String sourceId, String resolvedScope) {
+        writeSourceField(sourceId, FIELD_RESOLVED_SCOPE, resolvedScope, "record a source's resolved scope");
+    }
+
+    @Override
+    public Optional<String> scopeSignature(String sourceId) {
+        return readSourceField(sourceId, FIELD_SCOPE_SIGNATURE, "read a source's scope signature");
+    }
+
+    @Override
+    public void recordScopeSignature(String sourceId, String signature) {
+        writeSourceField(sourceId, FIELD_SCOPE_SIGNATURE, signature, "record a source's scope signature");
+    }
+
+    private Optional<String> readSourceField(String sourceId, String field, String what) {
+        return translating(what, () -> {
+            Document found = sources.find(Filters.eq(FIELD_SOURCE_ID, sourceId)).first();
+            return Optional.ofNullable(found).map(row -> row.getString(field));
+        });
+    }
+
+    private void writeSourceField(String sourceId, String field, String value, String what) {
+        translating(what, () -> sources.updateOne(
+                Filters.eq(FIELD_SOURCE_ID, sourceId),
+                Updates.combine(
+                        Updates.set(field, value),
                         Updates.set(FIELD_UPDATED_AT, Date.from(Instant.now()))),
                 new UpdateOptions().upsert(true)));
     }

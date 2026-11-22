@@ -849,7 +849,8 @@ base, kept current without anyone exporting anything.
   "googleDrive": {
     "connection": "google-drive-sa",
     "sharedDriveId": "0ABcdEFghIJklUk9PVA",
-    "folderIds": ["1xYzAbCdEfGhIjKlMnOpQrStUvWxYz012"],
+    "folders": [{ "path": "Support/Handbook" }, { "id": "1xYzAbCdEfGhIjKlMnOpQrStUvWxYz012", "label": "Runbooks" }],
+    "excludeFolders": [{ "path": "Support/Handbook/Archive" }],
     "includeSubfolders": true,
     "mimeTypes": ["google-docs", "google-sheets", "google-slides", "pdf", "docx", "text"],
     "excludeNamePatterns": ["*DRAFT*", "~$*"]
@@ -861,7 +862,9 @@ base, kept current without anyone exporting anything.
 | --- | --- | --- |
 | `connection` | required | A **`SERVICE`-bound** connection, normally `OAUTH2_JWT_BEARER` with the service account's key (below). A `PER_USER` or `CALLER_SUPPLIED` connection is refused when the run starts, by name: an ingestion run has no user and no caller whose credential it could spend. Reading a person's own Drive is a later phase |
 | `sharedDriveId` | required | The Shared Drive's id, from its URL (`drive.google.com/drive/folders/<id>`). There is no "My Drive" option: a service account sees only what it was added to |
-| `folderIds` | `[]` (the whole drive) | At most 50 folders of that drive to read instead of all of it. Each must be a folder of `sharedDriveId`, which is checked before every run |
+| `folders` | `[]` (the whole drive) | Folders of that drive to read instead of all of it, each `{"path": "Sales/Offers"}` from the drive's root or `{"id": "…"}` — exactly one of the two — with an optional `label` for people. See [Scoping by folder](#scoping-by-folder) |
+| `excludeFolders` | `[]` | Folders, in the same two forms, whose **whole subtree** is not read. Exclusion wins over inclusion at any depth. At most 50 |
+| `folderIds` | `[]` | The older form of `folders`: ids only. Still read, as `{"id": …}` entries, for configurations and ZIPs written before `folders` existed. `folders` and `folderIds` together name at most 50 folders |
 | `includeSubfolders` | `true` | Read the folders' subfolders too, breadth-first |
 | `mimeTypes` | `[]` (all) | The formats to read: `google-docs`, `google-sheets`, `google-slides`, `pdf`, `docx`, `xlsx`, `pptx`, `text`, `markdown`, `csv`, `html` |
 | `excludeNamePatterns` | `[]` | File-name globs to skip, **case-insensitive**: `*` is any run of characters (it crosses the `/` a Drive name may contain), `?` exactly one |
@@ -875,6 +878,55 @@ Drive's listing query; the connection name is held to the connections framework'
 > **Who can read what it indexes.** Every conversation of every agent that uses the knowledge base can
 > retrieve what this source ingested, **whatever each file's sharing says**. Scope the source to the
 > folders meant for that audience. The Manager says so on the source.
+
+#### Scoping by folder
+
+- **By path.** A path is matched from the drive's root one folder name at a time, against the
+  subfolders Drive lists for the level above. Names are compared in Unicode NFC — a name typed on one
+  system and stored decomposed by another is the same name — exactly first, and ignoring case only when
+  nothing matches exactly. A leading or trailing `/` is ignored. An empty name (`Sales//Offers`) or a
+  control character is refused when the knowledge base is saved, and a folder whose own name contains
+  `/` cannot be written as a path: name it by `id`.
+- **Two folders of one name refuse; they never guess.** A level with two folders that match is an
+  error naming both ids, and so is a path that does not exist. Either fails the run — read as "nothing
+  there", a typo would let a complete listing remove every document the folder held.
+- **The id is kept, so a rename does not move the scope.** The first run that sees a path records the
+  id it resolved to in the source's **ingestion state** (`rag_ingestion_sources.resolved_scope` on
+  PostgreSQL, `resolvedScope` on MongoDB) — never in the knowledge-base document, which a run does not
+  write. Later runs read the recorded id, so a folder renamed or moved within the drive keeps being read,
+  and the run's summary says where it is now: `'Sales/Offers' is now 'Sales/Quotes'`. Only when the
+  recorded folder is gone — deleted, in the trash, moved to another drive — is the path resolved again; a
+  path that then resolves nowhere fails the run. Purging the source's state forgets the recorded ids.
+- **Exclusion wins.** An excluded folder is never listed, nor is anything under it. A folder in
+  `folders` that lies inside an excluded one is not read (the summary says so), and a shortcut whose
+  target lies inside one is not followed — judged by where the target really is in the drive, which
+  costs one `files.get` per folder on its way up, and only when something is excluded. If every folder
+  in `folders` is excluded the run fails rather than list nothing. An exclusion whose path never
+  resolved fails the run too (a typo would read what was meant to stay out); one that resolved before
+  and whose folder has since gone is reported and ignored, since nothing is left to exclude.
+- **A scope change takes effect at the next complete listing.** Each run computes a signature of the
+  folder ids it reads and excludes, and of `includeSubfolders`. When it differs from the signature the
+  last completed reconciliation applied, the documents the complete listing did not see are removed at
+  once rather than after `tombstoneAfterMissedRuns` runs: taking a folder out of the scope is a
+  configuration change, not an outage. A folder put into the scope is simply read. A run that stops
+  early — throttled, out of time, at `maxFiles` — removes nothing and leaves the change pending, and so
+  does a removal the vector store refuses. A rename is not a change; resolving a path to a different
+  folder is. A source whose state predates the signature records one on its first run without
+  fast-tracking anything.
+- **What a scope change does not do yet.** Until that complete listing, the removed folder's documents
+  stay retrievable: retrieval does not filter on folder membership yet (the large-scale ingestion
+  plan asks for it in §6.3; it is not built). Each chunk records the folder
+  that held its file (`parentId` metadata) from now on, which is where that filter starts.
+
+**Picking folders.** `GET /ragstore/rags/{id}/sources/{sourceId}/drive/folders?version=N&parentId=root&pageToken=…`
+lists one level of the saved source's Shared Drive — `{"folders": [{"id", "name"}], "nextPageToken"}`,
+at most 200 a page, folders only: never a file, and nothing about any file's content. It reads with
+the source's own connection, so its binding and `baseUrlAllowlist` apply, and needs **EDIT** on the
+knowledge base, like running the source. `parentId` is `root` or a Drive id; a folder of another drive
+is a 400, a missing one a 404, and a drive or folder the service account cannot see a 422 (not a 403,
+which would read as the caller's own EDDI session being refused). Drive's throttling is a 429 with
+`Retry-After`. An unsaved source cannot be browsed: save it first. The Manager's source panel uses this
+for its **Browse the drive** dialog.
 
 #### Setting up the service account
 
@@ -938,7 +990,8 @@ Drive's listing query; the connection name is held to the connections framework'
   drive's root, and lets the version comparison skip what has not changed. An unchanged drive costs its
   listing requests and nothing else. Because the listing is complete, a file that is deleted, trashed
   or moved out of scope is reconciled like a vanished web page: after `tombstoneAfterMissedRuns`
-  complete runs.
+  complete runs — or at the next complete run when the configured scope itself changed (see
+  [Scoping by folder](#scoping-by-folder)).
 - **Shortcuts.** Every listing is limited to the Shared Drive, so a shortcut to a folder elsewhere
   lists nothing and cannot widen the source. A shortcut to a folder inside it is followed once — the
   visited set is the cycle guard a shortcut back to a parent needs. A shortcut to a file is skipped:
@@ -973,8 +1026,9 @@ Drive's listing query; the connection name is held to the connections framework'
 | A root that lists **nothing** | Access is checked again — `drives.get` for the drive, `files.get` for a folder — before the empty listing is believed. A service account removed from the drive, or a folder moved out of it or into the trash, lists nothing rather than failing; believed, two such runs would empty the knowledge base. Access gone fails the run; a drive that really is empty is reconciled |
 | The connection refuses the request (missing, `PER_USER`, target off its `baseUrlAllowlist`, revoked key) | Nothing is sent to Google. The run fails naming the connection and the rule |
 
-Before every run the drive and each listed folder are checked (`drives.get`, `files.get`), so a typo
-in an id or a service account that is not a member fails at once with that explanation.
+Before every run the drive and each configured folder are checked (`drives.get`, `files.get`), so a
+typo in an id or a path, or a service account that is not a member, fails at once with that
+explanation.
 
 **Preview lists without downloading.** A Drive preview walks the listing only — no export, no
 download — and its `message` describes what it found: the number of files by format, the bytes of the
@@ -988,6 +1042,7 @@ out unchanged.
 | ------ | ---- | ------ | ------- |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/run?version=N` | EDIT | Start a run (202 with its `runId`, or 409 if one is in flight) |
 | `POST` | `/ragstore/rags/{id}/sources/{sourceId}/preview?version=N` | EDIT | Crawl and report what would change, embedding nothing. Capped at 2 minutes and a small page count, and at three previews per instance — the rest get 429 with `Retry-After`. A `googleDrive` preview downloads nothing and returns a listing summary (files by format, bytes, skips) as its `message` |
+| `GET` | `/ragstore/rags/{id}/sources/{sourceId}/drive/folders?version=N&parentId=root&pageToken=` | EDIT | A `googleDrive` source's folder picker: one level of folders of its Shared Drive, at most 200 a page, through its own connection — never a file (see [Scoping by folder](#scoping-by-folder)) |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/runs?version=N&limit=20` | VIEW | Run history with counters, cost and errors — including the run in flight, whose counters move while it works |
 | `GET` | `/ragstore/rags/{id}/sources/{sourceId}/schedule?version=N` | VIEW | The source's schedule: next and last fire, failure count, the scheduler's disable reason, and the recent fires with their errors |
 | `GET` | `/ragstore/rags/cron/preview?cron=...&count=3` | — | Whether a cron would be accepted on save (parseable, able to match a date, no more frequent than `eddi.schedule.min-interval-seconds`), and its next fire times in UTC |
@@ -1024,6 +1079,13 @@ its history and re-embedded everything.
 The knowledge-base editor has an **Ingestion Sources** section: add and remove sources, choose between
 **Website**, **Files** and **Google Drive**, edit the scope and the limits, and for a source that has been saved once,
 **Run now**, **Preview**, **Purge state** and the run history with its counters and errors.
+
+A **Google Drive** source lists its **folders to read** and **folders to leave out** as chips. A path
+typed in the field is added to either list; **Browse the drive** opens the saved source's drive as a
+lazy tree — one level is fetched when it is opened, 200 folders at a time — where each folder can be
+included or excluded. A picked folder is stored by id with its path as the label, so a later rename in
+Drive changes nothing. Browsing is disabled until the source is saved and while the editor has unsaved
+changes, because the tree is read with the saved connection.
 
 A **Files** source shows a drop zone instead of the crawl settings. Files can be dropped or chosen,
 several at once, and each is uploaded on its own request with its own progress bar — so a batch that
