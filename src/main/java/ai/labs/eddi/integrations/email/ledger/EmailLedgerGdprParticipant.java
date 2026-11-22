@@ -39,7 +39,10 @@ import java.util.Set;
  * <p>
  * The export lists what a row says about the person — when, which message, its
  * state — and leaves out the claim token and idempotency digest, which are
- * mechanics, not data about them.
+ * mechanics, not data about them. A reply the person was copied on
+ * ({@code replyAudience: thread}) is listed with {@code role: CC}; erasure
+ * removes those entries with the rows
+ * ({@link IEmailMessageLedger#deleteByRecipient}).
  */
 @ApplicationScoped
 public class EmailLedgerGdprParticipant implements IGdprParticipant {
@@ -71,6 +74,25 @@ public class EmailLedgerGdprParticipant implements IGdprParticipant {
     public Object export(String userId) {
         List<Map<String, Object>> rows = new ArrayList<>();
         for (String address : addressesOf(userId)) {
+            // A reply the address was copied on (email v2 plan §9.5): which reply, when.
+            for (var copy : ledger.findReplyRecipientsByAddress(address)) {
+                if (copy.role() != IEmailMessageLedger.RecipientRole.CC) {
+                    continue;
+                }
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("recipient", copy.address());
+                row.put("kind", IEmailMessageLedger.Kind.REPLY.name());
+                row.put("direction", IEmailMessageLedger.Direction.OUT.name());
+                row.put("role", copy.role().name());
+                ledger.findById(copy.rowId()).ifPresent(reply -> {
+                    row.put("state", reply.state().name());
+                    row.put("messageId", reply.messageId());
+                });
+                row.put("conversationId", copy.conversationId());
+                row.put("createdAt", text(copy.createdAt()));
+                row.put("expiresAt", text(copy.expiresAt()));
+                rows.add(row);
+            }
             for (LedgerEntry entry : ledger.findByRecipient(address)) {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("recipient", entry.recipient());

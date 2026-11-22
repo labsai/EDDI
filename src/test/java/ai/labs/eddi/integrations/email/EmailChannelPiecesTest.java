@@ -9,12 +9,16 @@ import ai.labs.eddi.engine.gdpr.GdprComplianceService;
 import ai.labs.eddi.engine.gdpr.GdprDeletionResult;
 import ai.labs.eddi.engine.mail.MailAddress;
 import ai.labs.eddi.engine.mail.SystemMailer;
+import ai.labs.eddi.engine.memory.IConversationMemoryStore;
+import ai.labs.eddi.engine.memory.model.ConversationMemorySnapshot;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.security.ReservedPrincipals;
 import ai.labs.eddi.integrations.email.EmailIntegrationDirectory.EmailIntegration;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.RecipientRole;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.ReplyRecipient;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMailboxStateStore;
 import ai.labs.eddi.integrations.email.ledger.InMemoryEmailMessageLedger;
@@ -33,6 +37,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -80,6 +85,29 @@ class EmailChannelPiecesTest {
             assertTrue(ReservedPrincipals.hasNoPersistentMemory(anonymous));
             assertFalse(ReservedPrincipals.hasNoPersistentMemory(perSender));
             assertFalse(ReservedPrincipals.hasNoPersistentMemory("alice"));
+        }
+
+        @Test
+        @DisplayName("thread identities (email v2 plan §9.2): reserved, memory-less, bound to one integration and one thread")
+        void threadIdentities() {
+            String thread = EmailUserIdentity.thread("int1", "<root@x.com>");
+            assertTrue(thread.startsWith("email-thread:int1:"));
+            assertEquals(thread, EmailUserIdentity.thread("int1", "<root@x.com>"), "one per thread");
+            assertNotEquals(thread, EmailUserIdentity.thread("int1", "<other@x.com>"));
+            String own = EmailUserIdentity.threadForSender("int1", "<root@x.com>", "bob@x.com");
+            assertNotEquals(thread, own, "a non-participant gets a conversation of their own");
+            assertNotEquals(own, EmailUserIdentity.threadForSender("int1", "<root@x.com>", "carol@x.com"));
+            assertTrue(ReservedPrincipals.isReserved(thread), "no signed-in user may carry it");
+            assertTrue(ReservedPrincipals.hasNoPersistentMemory(thread), "colleagues read the answer: no long-term memory");
+            assertTrue(ReservedPrincipals.hasNoPersistentMemory(own));
+            assertTrue(EmailUserIdentity.isEmailIdentity(thread), "the GDPR cascade must not expand it again");
+            assertTrue(EmailUserIdentity.isThreadIdentityOf(thread, "int1"));
+            assertTrue(EmailUserIdentity.isThreadIdentityOf(own, "int1"));
+            assertFalse(EmailUserIdentity.isThreadIdentityOf(thread, "int"), "another integration's id that starts the same way");
+            assertFalse(EmailUserIdentity.isThreadIdentityOf(EmailUserIdentity.thread("int12", "<root@x.com>"), "int1"));
+            assertFalse(EmailUserIdentity.isThreadIdentityOf("email-thread:int1:not-a-digest", "int1"));
+            assertFalse(EmailUserIdentity.isThreadIdentityOf(EmailUserIdentity.perSender("int1", "alice@x.com"), "int1"));
+            assertEquals(Optional.empty(), EmailUserIdentity.addressOf(thread), "names no address");
         }
     }
 
@@ -185,6 +213,57 @@ class EmailChannelPiecesTest {
 
             when(result.failedSteps()).thenReturn(List.of("conversations"));
             assertThrows(IllegalStateException.class, () -> participant.erase("alice@x.com"), "an incomplete nested erasure is reported");
+        }
+
+        @Test
+        @DisplayName("thread conversations (email v2 plan §9.5) are reached through the ledger, only when they run as that integration's thread")
+        @SuppressWarnings("unchecked")
+        void threadConversations() throws Exception {
+            GdprComplianceService service = mock(GdprComplianceService.class);
+            Instance<GdprComplianceService> instance = mock(Instance.class);
+            when(instance.isResolvable()).thenReturn(true);
+            when(instance.get()).thenReturn(service);
+            EmailIntegrationDirectory directory = mock(EmailIntegrationDirectory.class);
+            when(directory.scan()).thenReturn(List.of());
+            var ledger = new InMemoryEmailMessageLedger();
+            Instant now = Instant.now();
+            String started = EmailUserIdentity.thread("int1", "<root@x.com>");
+            String copied = EmailUserIdentity.thread("int1", "<other@x.com>");
+            // Alice started one thread conversation...
+            ledger.insertIfAbsent(new LedgerEntry("in-1", "int1", Kind.TRIGGER, Direction.IN, "<m1@x.com>", "conv-started", null, "in:1",
+                    "alice@x.com", State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+            // ...was copied on a reply in another...
+            LedgerEntry reply = new LedgerEntry("out-1", "int1", Kind.REPLY, Direction.OUT, "<eddi.1@x.com>", "conv-copied", "in-9|reply|1",
+                    "reply:1",
+                    "bob@x.com", State.SENT, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30)));
+            ledger.insertIfAbsent(reply);
+            ledger.addReplyRecipients(List.of(
+                    new ReplyRecipient("out-1", "int1", "conv-copied", "bob@x.com", RecipientRole.TO, now, now.plus(Duration.ofDays(30))),
+                    new ReplyRecipient("out-1", "int1", "conv-copied", "alice@x.com", RecipientRole.CC, now, now.plus(Duration.ofDays(30)))));
+            // ...and her rows also point at a per-sender conversation and at another
+            // integration's thread, which must not be reached this way.
+            ledger.insertIfAbsent(new LedgerEntry("in-2", "int1", Kind.TRIGGER, Direction.IN, "<m2@x.com>", "conv-personal", null, "in:2",
+                    "alice@x.com", State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+            ledger.insertIfAbsent(new LedgerEntry("in-3", "int1", Kind.TRIGGER, Direction.IN, "<m3@x.com>", "conv-foreign", null, "in:3",
+                    "alice@x.com", State.DONE, 1, null, null, null, null, now, now, now.plus(Duration.ofDays(30))));
+            IConversationMemoryStore store = mock(IConversationMemoryStore.class);
+            Map<String, String> owners = Map.of("conv-started", started, "conv-copied", copied, "conv-personal",
+                    EmailUserIdentity.perSender("int1", "carol@x.com"), "conv-foreign", EmailUserIdentity.thread("int2", "<root@x.com>"));
+            when(store.loadConversationMemorySnapshot(anyString())).thenAnswer(invocation -> {
+                var snapshot = new ConversationMemorySnapshot();
+                snapshot.setUserId(owners.get((String) invocation.getArgument(0)));
+                return snapshot;
+            });
+            Instance<IConversationMemoryStore> stores = mock(Instance.class);
+            when(stores.isResolvable()).thenReturn(true);
+            when(stores.get()).thenReturn(store);
+            var participant = new EmailIdentityGdprParticipant(instance, directory, ledger, stores);
+
+            assertEquals(Set.of("email:int1:alice@x.com", started, copied), participant.emailUserIdsOf("alice@x.com"));
+            assertTrue(participant.emailUserIdsOf(started).isEmpty(), "a thread identity is not expanded again");
+            assertEquals(Set.of("email:int1:alice@x.com"),
+                    new EmailIdentityGdprParticipant(instance, directory, ledger).emailUserIdsOf("alice@x.com"),
+                    "without the conversation store nothing is guessed");
         }
     }
 }

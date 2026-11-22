@@ -87,6 +87,32 @@ class EmailLedgerGdprParticipantTest {
     }
 
     @Test
+    @DisplayName("a reply the address was copied on is exported with role CC, and its entry is erased")
+    void copies() {
+        LedgerEntry reply = row("ops@example.com");
+        ledger.insertIfAbsent(reply);
+        ledger.addReplyRecipients(List.of(
+                new IEmailMessageLedger.ReplyRecipient(reply.id(), reply.integrationId(), "conv", "ops@example.com",
+                        IEmailMessageLedger.RecipientRole.TO,
+                        reply.createdAt(), reply.expiresAt()),
+                new IEmailMessageLedger.ReplyRecipient(reply.id(), reply.integrationId(), "conv", "dave@example.com",
+                        IEmailMessageLedger.RecipientRole.CC, reply.createdAt(), reply.expiresAt())));
+        when(directory.find("dave@example.com")).thenReturn(Optional.empty());
+
+        @SuppressWarnings("unchecked")
+        List<Map<String, Object>> exported = (List<Map<String, Object>>) participant.export("dave@example.com");
+        assertEquals(1, exported.size());
+        assertEquals("CC", exported.get(0).get("role"));
+        assertEquals(reply.messageId(), exported.get(0).get("messageId"));
+        assertEquals("SENT", exported.get(0).get("state"));
+
+        participant.erase("dave@example.com");
+        assertTrue(ledger.findReplyRecipientsByAddress("dave@example.com").isEmpty());
+        assertFalse(ledger.hasSentReply("conv", "dave@example.com"));
+        assertEquals(1, ledger.findReplyRecipients(reply.id()).size(), "the To's own entry stays");
+    }
+
+    @Test
     @DisplayName("it runs before the user directory, which erases the address it reads")
     void orderedBeforeDirectory() {
         IGdprParticipant directoryParticipant = new UserDirectoryGdprParticipant(mock(UserDirectory.class));
