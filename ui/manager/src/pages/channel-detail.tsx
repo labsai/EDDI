@@ -439,6 +439,14 @@ export function ChannelDetailPage() {
         return;
       }
       toSave = { ...draft, platformConfig: withEmailFixedKeys(draft.platformConfig) };
+      // Trigger mode never replies: the backend refuses a reply review there, so a
+      // mode left over from conversation mode is dropped rather than saved.
+      if (emailMode(toSave.platformConfig) !== "conversation" && toSave.emailControl?.replyReview) {
+        const emailControl = { ...toSave.emailControl };
+        delete emailControl.replyReview;
+        toSave = { ...toSave, emailControl: Object.keys(emailControl).length > 0 ? emailControl : undefined };
+        if (!toSave.emailControl) delete toSave.emailControl;
+      }
       // Emptying a non-empty allowlist opens the integration to every sender: the
       // backend refuses that save unless it is confirmed, so ask first.
       if (!confirmOpen && emptiesSenderAllowlist(config?.platformConfig, toSave.platformConfig)) {

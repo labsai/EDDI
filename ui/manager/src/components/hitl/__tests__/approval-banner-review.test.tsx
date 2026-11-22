@@ -41,6 +41,18 @@ describe("ApprovalBanner — edit on approve and reason codes", () => {
     });
   });
 
+  it("says when the pause holds an email reply, and only then", () => {
+    const { unmount } = renderWithProviders(
+      <ApprovalBanner surface="regular" pauseDetails={rulePause({ replyReview: true })} onDecide={vi.fn()} />,
+    );
+    expect(screen.getByTestId("reply-review-notice").textContent).toMatch(/email reply/i);
+    expect(screen.getByTestId("edit-answer-toggle")).toBeInTheDocument();
+    unmount();
+
+    renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={rulePause()} onDecide={vi.fn()} />);
+    expect(screen.queryByTestId("reply-review-notice")).not.toBeInTheDocument();
+  });
+
   it("an unchanged edit is a plain approval", () => {
     const onDecide = vi.fn();
     renderWithProviders(<ApprovalBanner surface="regular" pauseDetails={rulePause()} onDecide={onDecide} />);
