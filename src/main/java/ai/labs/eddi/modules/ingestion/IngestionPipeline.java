@@ -319,6 +319,11 @@ public class IngestionPipeline {
      */
     Instant resumeAfter(ProviderThrottledException e, Instant now) {
         if (e.daily()) {
+            if (e.quotaId() == null && e.retryAfter() != null) {
+                // Judged daily only by the length of the delay the provider named, not by
+                // a quota it named: that delay is the better answer.
+                return now.plus(e.retryAfter());
+            }
             Optional<Instant> reset = ProviderRetryHints.dailyReset(e.provider(), now);
             if (reset.isPresent()) {
                 return reset.get();

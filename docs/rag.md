@@ -1050,7 +1050,8 @@ the provider client's short retry and never sleeps on a throttle.
   provider named, and absent when it named none (the 30 s fallback wait is a guess and is not
   recorded). For a daily quota it is the provider's documented reset — Gemini's daily quotas reset at
   midnight Pacific time — or, for a provider whose reset is not known, the delay it named or
-  `eddi.ingestion.throttle.daily-cooldown` (default 1 hour) from the stop.
+  `eddi.ingestion.throttle.daily-cooldown` (default 1 hour) from the stop. A stop judged daily only
+  because the provider asked for more than 5 minutes, naming no quota, keeps that delay.
 - **Scheduled runs wait for it.** Before a scheduled fire claims a run, lists the source or calls the
   provider, it looks at the source's last run: if that run stopped `THROTTLED` and `resumeAfter` is
   still ahead, the fire does nothing and its fire-log entry is `COMPLETED` with a note saying until

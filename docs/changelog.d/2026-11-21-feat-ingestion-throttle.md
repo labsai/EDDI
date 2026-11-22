@@ -90,7 +90,9 @@ against a real `GoogleAiEmbeddingModel` over a fake HTTP client answering the li
   the `DOCUMENT` model get it. A document is still stored whole or not at all.
 - **#1489 (`KnowledgeBaseReembedService`).** Its synchronous probe now waits at most 10 s and throws
   `ProviderThrottledException`; its `catch (RuntimeException)` must rethrow that (so the new mapper
-  answers 429 with `Retry-After`) or `RagFailures` must map it, before the two merge.
+  answers 429 with `Retry-After`) or `RagFailures` must map it, before the two merge. `RagFailures`
+  also needs branches for `ProviderThrottledException` and `ProviderBillingException` ahead of its
+  `RateLimitException` cause check, or a spent balance reads "try again later".
 - **No new run status.** `Status.parse` reads an unknown value as `FAILED`, so a rollback would have
   shown every throttled run as failed. The stop reason carries it instead.
 - **Compatible with phase Q (§3.3).** The decorator is the single place that decides wait-or-stop.

@@ -385,6 +385,12 @@ class IngestionPipelineThrottleTest {
                 new ProviderThrottledException("openai", null, true, null, null), at));
         assertEquals(Instant.parse("2026-11-22T08:00:00Z"), pipeline.resumeAfter(
                 new ProviderThrottledException("gemini", null, true, null, null), at));
+        assertEquals(Instant.parse("2026-11-22T08:00:00Z"), pipeline.resumeAfter(
+                new ProviderThrottledException("gemini", Duration.ofSeconds(30), true, "EmbedRequestsPerDay", null),
+                at), "a named per-day quota resets at midnight Pacific, whatever delay came with it");
+        assertEquals(at.plus(Duration.ofMinutes(20)), pipeline.resumeAfter(
+                new ProviderThrottledException("gemini", Duration.ofMinutes(20), true, null, null), at),
+                "daily only by the length of its delay: that delay is the answer");
         assertEquals(at.plusSeconds(26), pipeline.resumeAfter(
                 new ProviderThrottledException("gemini", Duration.ofSeconds(26), false, null, null), at));
         assertNull(pipeline.resumeAfter(new ProviderThrottledException("gemini", null, false, null, null), at),
