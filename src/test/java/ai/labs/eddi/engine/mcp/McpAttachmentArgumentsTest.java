@@ -63,7 +63,9 @@ class McpAttachmentArgumentsTest {
 
         @Test
         void aNonObjectEntryIsRefused() {
-            assertTrue(oneToOne("[\"abc\"]").isRefused());
+            var parsed = oneToOne("[\"abc\"]");
+            assertTrue(parsed.isRefused());
+            assertTrue(parsed.error().contains("attachments[0] must be a JSON object"), parsed.error());
         }
 
         @Test

@@ -89,11 +89,12 @@ final class McpAttachmentArguments {
             + "(about 15 MB of inline files).";
 
     /*
-     * The argument has already passed the MCP transport's own parser (Vert.x, with
-     * Jackson's default 20,000,000-character string cap) and the request body
-     * limit, so this parser lifts the string cap: an inline file the transport let
-     * through is then judged by the size check below, with a size message, rather
-     * than refused here as "not valid JSON".
+     * The argument has already passed the MCP transport's own parser (Vert.x on a
+     * copy of the application ObjectMapper, with Jackson's default
+     * 20,000,000-character string cap) and the request body limit, so this parser
+     * lifts the string cap: an inline file the transport let through is then judged
+     * by the size check below, with a size message, rather than refused here as
+     * "not valid JSON".
      */
     private static final ObjectMapper MAPPER = new ObjectMapper(
             JsonFactory.builder().streamReadConstraints(StreamReadConstraints.builder().maxStringLength(Integer.MAX_VALUE).build()).build());
