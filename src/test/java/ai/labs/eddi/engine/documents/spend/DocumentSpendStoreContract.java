@@ -31,8 +31,13 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 public interface DocumentSpendStoreContract {
 
-    /** A realistic UTC epoch day (2025-11-22). */
-    long TODAY = 20_414L;
+    /**
+     * A UTC epoch day (2100-01-01) far enough ahead that no bucket a test writes,
+     * even {@code TODAY - 100} with its retention, has an {@code expiresAt} in the
+     * past: MongoDB's TTL monitor would otherwise delete rows in the middle of a
+     * test.
+     */
+    long TODAY = 47_482L;
 
     IDocumentSpendStore store();
 

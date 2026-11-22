@@ -63,7 +63,11 @@ public class MongoDocumentSpendStore implements IDocumentSpendStore {
     private static final String F_EXPIRES = "expiresAt";
 
     private final MongoCollection<Document> days;
-    private volatile boolean indexesAttempted;
+    /** How long after a failed index pass the next one is tried. */
+    static final long INDEX_RETRY_MILLIS = 5 * 60 * 1000L;
+
+    private volatile boolean indexesReady;
+    private volatile long nextIndexAttemptAtMillis;
     private final AtomicLong nextSweepAtMillis = new AtomicLong();
 
     @Inject
@@ -75,16 +79,20 @@ public class MongoDocumentSpendStore implements IDocumentSpendStore {
         return kind.name() + ":" + epochDay + ":" + subject;
     }
 
-    /** Creates the indexes once, bounded in time; never throws. */
+    /**
+     * Creates the indexes, bounded in time; never throws. After a failure (the
+     * database unreachable at first use) the next pass is tried
+     * {@link #INDEX_RETRY_MILLIS} later, so a node does not stay without indexes
+     * and the TTL backstop until it restarts.
+     */
     void ensureIndexes() {
-        if (indexesAttempted) {
+        if (indexesReady || System.currentTimeMillis() < nextIndexAttemptAtMillis) {
             return;
         }
         synchronized (this) {
-            if (indexesAttempted) {
+            if (indexesReady || System.currentTimeMillis() < nextIndexAttemptAtMillis) {
                 return;
             }
-            indexesAttempted = true;
             long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(INDEX_TIMEOUT_SECONDS);
             try {
                 days.withTimeout(remainingMillis(deadline), TimeUnit.MILLISECONDS).createIndex(Indexes.ascending(F_KIND, F_SUBJECT, F_DAY),
@@ -93,8 +101,11 @@ public class MongoDocumentSpendStore implements IDocumentSpendStore {
                         new IndexOptions().name("idx_document_spend_day"));
                 days.withTimeout(remainingMillis(deadline), TimeUnit.MILLISECONDS).createIndex(Indexes.ascending(F_EXPIRES),
                         new IndexOptions().name("idx_document_spend_ttl").expireAfter(0L, TimeUnit.SECONDS));
+                indexesReady = true;
             } catch (RuntimeException e) {
-                LOGGER.warnf("Could not create the %s indexes; lookups fall back to a scan: %s", COLLECTION, sanitize(e.getMessage()));
+                nextIndexAttemptAtMillis = System.currentTimeMillis() + INDEX_RETRY_MILLIS;
+                LOGGER.warnf("Could not create the %s indexes; lookups fall back to a scan until a retry succeeds: %s", COLLECTION,
+                        sanitize(e.getMessage()));
             }
         }
     }
