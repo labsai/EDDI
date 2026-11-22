@@ -7,6 +7,7 @@ package ai.labs.eddi.configs.channels.rest;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.ChannelTarget.ApprovalPolicy;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.ws.rs.BadRequestException;
@@ -14,7 +15,9 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -139,5 +142,39 @@ class RestChannelIntegrationStoreEmailApprovalTest {
         assertFalse(ApprovalPolicy.NONE.gatesTools());
         assertFalse(ApprovalPolicy.ACTIONS.pausesBeforeRun());
         assertTrue(ApprovalPolicy.FIRST_CONTACT.pausesBeforeRun());
+    }
+    private static ChannelIntegrationConfiguration conversationMail(ChannelTarget target, EmailControl.ReplyReview review) {
+        var cfg = new ChannelIntegrationConfiguration();
+        cfg.setName("Mailbox");
+        cfg.setChannelType("email");
+        cfg.setDefaultTargetName("support");
+        cfg.setPlatformConfig(new HashMap<>(Map.of("mode", "conversation", "transport", "imap", "connection", "mailbox", "host",
+                "outlook.office365.com", "address", "agent@contoso.com", "smtpHost", "smtp.office365.com")));
+        cfg.setEmailControl(new EmailControl(null, review, null));
+        cfg.setTargets(List.of(target));
+        return cfg;
+    }
+
+    @Test
+    @DisplayName("replyReview is refused with a GROUP target: a group's answer has no turn that could wait")
+    void replyReviewRefusedWithGroupTarget() {
+        var store = new RestChannelIntegrationStore(null, null, mock(ResourceAccessGuard.class));
+
+        var ex = assertThrows(BadRequestException.class,
+                () -> store.validateConfiguration(conversationMail(target(ChannelTarget.TargetType.GROUP), EmailControl.ReplyReview.ALWAYS)));
+        assertTrue(ex.getMessage().contains("replyReview is not supported with GROUP"), ex.getMessage());
+    }
+
+    @Test
+    @DisplayName("replyReview never with a GROUP target passes the GROUP check")
+    void replyReviewNeverWithGroupTarget() {
+        var store = new RestChannelIntegrationStore(null, null, mock(ResourceAccessGuard.class));
+        try {
+            store.validateConfiguration(conversationMail(target(ChannelTarget.TargetType.GROUP), EmailControl.ReplyReview.NEVER));
+        } catch (BadRequestException e) {
+            assertFalse(e.getMessage().contains("replyReview"), e.getMessage());
+        } catch (RuntimeException e) {
+            // a later check that needs the deployment; the GROUP check passed
+        }
     }
 }

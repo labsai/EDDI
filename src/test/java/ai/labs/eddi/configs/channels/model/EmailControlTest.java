@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -233,6 +234,120 @@ class EmailControlTest {
             assertTrue(warnings.contains(EmailChannelSettings.WARNING_SMIME_NO_CERTIFICATE), warnings.toString());
             var off = EmailChannelSettings.warnings(EmailChannelSettings.from(email(pc, smime(EmailControl.SignMode.FALSE, null))));
             assertFalse(off.contains(EmailChannelSettings.WARNING_SMIME_NO_CERTIFICATE));
+        }
+    }
+    @Nested
+    class ReplyReviewSettings {
+
+        static Map<String, String> conversation() {
+            var pc = trigger();
+            pc.put("mode", "conversation");
+            pc.put("smtpHost", "smtp.office365.com");
+            return pc;
+        }
+
+        static EmailControl review(EmailControl.ReplyReview mode, String... domains) {
+            return new EmailControl(null, mode, domains.length == 0 ? null : List.of(domains));
+        }
+
+        @Test
+        void wireFormIsTheModeName() throws Exception {
+            assertEquals("{\"replyReview\":\"firstContact\",\"internalDomains\":[\"contoso.com\"]}",
+                    MAPPER.writeValueAsString(review(EmailControl.ReplyReview.FIRST_CONTACT, "contoso.com")));
+            assertEquals(EmailControl.ReplyReview.EXTERNAL, MAPPER.readValue("{\"replyReview\":\"External\"}", EmailControl.class).getReplyReview());
+        }
+
+        @Test
+        void anUnknownStoredModeReadsAsAlwaysNeverAsNever() throws Exception {
+            // A stored value that cannot be read must not let a reply out unreviewed.
+            assertEquals(EmailControl.ReplyReview.ALWAYS, MAPPER.readValue("{\"replyReview\":\"sometimes\"}", EmailControl.class).getReplyReview());
+            assertEquals(EmailControl.ReplyReview.ALWAYS, MAPPER.readValue("{\"replyReview\":7}", EmailControl.class).getReplyReview());
+        }
+
+        @Test
+        void anUnknownModeIsARestAndMcpBadRequest() {
+            var parser = new StrictConfigurationParser(MAPPER);
+            assertThrows(BadRequestException.class, () -> parser.parse(
+                    "{\"name\":\"m\",\"channelType\":\"email\",\"emailControl\":{\"replyReview\":\"sometimes\"}}",
+                    ChannelIntegrationConfiguration.class));
+        }
+
+        @Test
+        void copyEqualsAndHashCodeKnowTheNewFields() {
+            // A targeted sender-list update copies emailControl; a copy that dropped
+            // replyReview would silently switch the review off.
+            var original = new EmailControl(new EmailControl.Smime(EmailControl.SignMode.TRUE, "cert"), EmailControl.ReplyReview.ALWAYS,
+                    new ArrayList<>(List.of("contoso.com")));
+            var copy = original.copy();
+            assertEquals(original, copy);
+            assertEquals(original.hashCode(), copy.hashCode());
+            assertEquals(EmailControl.ReplyReview.ALWAYS, copy.getReplyReview());
+            copy.getInternalDomains().add("other.com");
+            assertEquals(List.of("contoso.com"), original.getInternalDomains(), "deep");
+            assertFalse(original.equals(review(EmailControl.ReplyReview.NEVER)));
+        }
+
+        @Test
+        void roundTripsThroughTheStoreMapper() throws Exception {
+            var configuration = email(conversation(), review(EmailControl.ReplyReview.EXTERNAL, "*.contoso.com"));
+            var read = MAPPER.readValue(MAPPER.writeValueAsString(configuration), ChannelIntegrationConfiguration.class);
+            assertEquals(configuration.getEmailControl(), read.getEmailControl());
+            assertEquals(EmailControl.ReplyReview.EXTERNAL, EmailChannelSettings.from(read).replyReview());
+        }
+
+        @Test
+        void defaultsToNever() {
+            assertEquals(EmailControl.ReplyReview.NEVER, EmailChannelSettings.from(email(conversation(), null)).replyReview());
+        }
+
+        @Test
+        void triggerModeRefusesAReviewAndReadsNever() {
+            var errors = EmailChannelSettings.validate(email(trigger(), review(EmailControl.ReplyReview.ALWAYS)));
+            assertTrue(errors.stream().anyMatch(e -> e.contains("emailControl.replyReview belongs to email conversation mode")), errors.toString());
+            assertEquals(EmailControl.ReplyReview.NEVER,
+                    EmailChannelSettings.from(email(trigger(), review(EmailControl.ReplyReview.ALWAYS))).replyReview());
+            assertEquals(List.of(), EmailChannelSettings.validate(email(trigger(), review(EmailControl.ReplyReview.NEVER, "contoso.com"))),
+                    "internal domains are not conversation-only");
+        }
+
+        @Test
+        void internalDomainsAreDomainsOrWildcards() {
+            assertEquals(List.of(), EmailChannelSettings.validate(email(conversation(), review(EmailControl.ReplyReview.EXTERNAL, "contoso.com",
+                    "*.Contoso.co.uk"))));
+            for (String bad : List.of("contoso", "@contoso.com", "*contoso.com", "a@contoso.com", "contoso..com", "*.*.com")) {
+                var errors = EmailChannelSettings.validate(email(conversation(), review(EmailControl.ReplyReview.EXTERNAL, bad)));
+                assertTrue(errors.stream().anyMatch(e -> e.contains("emailControl.internalDomains entry 1")), bad + ": " + errors);
+            }
+            var tooMany = new ArrayList<String>();
+            for (int i = 0; i <= EmailChannelSettings.MAX_INTERNAL_DOMAINS; i++) {
+                tooMany.add("d" + i + ".com");
+            }
+            assertTrue(EmailChannelSettings.validate(email(conversation(), new EmailControl(null, null, tooMany))).stream()
+                    .anyMatch(e -> e.contains("at most")));
+        }
+
+        @Test
+        void isInternalMatchesTheDomainOrItsSubdomains() {
+            var settings = EmailChannelSettings
+                    .from(email(conversation(), review(EmailControl.ReplyReview.EXTERNAL, "contoso.com", "*.partner.org")));
+            assertTrue(settings.isInternal("bob@contoso.com"));
+            assertTrue(settings.isInternal("bob@CONTOSO.com"));
+            assertFalse(settings.isInternal("bob@mail.contoso.com"), "a plain entry is that domain only");
+            assertTrue(settings.isInternal("bob@eu.partner.org"));
+            assertFalse(settings.isInternal("bob@partner.org"), "*.partner.org names subdomains");
+            assertFalse(settings.isInternal("bob@evilcontoso.com"));
+            assertFalse(settings.isInternal("bob@partner.org.evil.com"));
+            assertFalse(settings.isInternal(null));
+            assertFalse(EmailChannelSettings.from(email(conversation(), null)).isInternal("bob@contoso.com"), "no domains: everyone is external");
+        }
+
+        @Test
+        void externalWithoutDomainsWarns() {
+            var warnings = EmailChannelSettings.warnings(EmailChannelSettings.from(email(conversation(), review(EmailControl.ReplyReview.EXTERNAL))));
+            assertTrue(warnings.contains(EmailChannelSettings.WARNING_REPLY_REVIEW_NO_INTERNAL_DOMAINS), warnings.toString());
+            var withDomains = EmailChannelSettings
+                    .warnings(EmailChannelSettings.from(email(conversation(), review(EmailControl.ReplyReview.EXTERNAL, "contoso.com"))));
+            assertFalse(withDomains.contains(EmailChannelSettings.WARNING_REPLY_REVIEW_NO_INTERNAL_DOMAINS));
         }
     }
 }

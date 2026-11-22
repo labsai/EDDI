@@ -8,6 +8,7 @@ import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.ChannelTarget.ApprovalPolicy;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.engine.api.IConversationService;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResponseHandler;
 import ai.labs.eddi.engine.api.IConversationService.ConversationResult;
@@ -23,6 +24,7 @@ import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.model.InputData;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.security.EmailReplyReview;
 import ai.labs.eddi.integrations.email.EmailInboundProcessor.Disposition;
 import ai.labs.eddi.integrations.email.EmailInboundProcessor.IntegrationContext;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
@@ -368,6 +370,78 @@ class EmailInboundProcessorApprovalGateTest {
         String reason = EmailInboundProcessor.preRunReason(target(ApprovalPolicy.EVERY_TURN), true);
         assertFalse(reason.contains("@"));
         assertTrue(reason.contains("intake"));
+    }
+
+    // --- Reply review (email plan v3 §8.2) ----------------------------------
+
+    private static IntegrationContext reviewContext(Map<String, String> pc, EmailControl.ReplyReview mode, String... internalDomains) {
+        ChannelTarget target = target(ApprovalPolicy.NONE);
+        ChannelIntegrationConfiguration configuration = EmailInboundProcessorTest.integration(pc, target);
+        configuration.setEmailControl(new EmailControl(null, mode, internalDomains.length == 0 ? null : List.of(internalDomains)));
+        return new IntegrationContext(INTEGRATION, configuration, EmailChannelSettings.from(configuration), Set.of());
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> reviewOf(Map<String, Context> context) {
+        Context review = context.get(EmailReplyReview.CONTEXT_KEY);
+        return review == null ? null : (Map<String, Object>) review.getValue();
+    }
+
+    @Test
+    @DisplayName("replyReview always: the mail's turn is armed, the conversation's start is not, the reason names no address")
+    void replyReviewAlwaysArmsTheMailTurn() throws Exception {
+        processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.ALWAYS), EmailTestMail.mail().polled(1), Instant.now());
+
+        Map<String, Object> review = reviewOf(inputs.get(0).getContext());
+        assertNotNull(review);
+        assertEquals("always", review.get("mode"));
+        assertFalse(String.valueOf(review.get("reason")).contains("@"), "the reason reaches the audit ledger");
+        assertNull(reviewOf(startContext()), "a reply answers one mail: only its turn is reviewed");
+    }
+
+    @Test
+    @DisplayName("replyReview never (the default): no turn is armed")
+    void replyReviewNeverArmsNothing() throws Exception {
+        processor.process(reviewContext(conversationModeConfig(), null), EmailTestMail.mail().polled(1), Instant.now());
+
+        assertNull(reviewOf(inputs.get(0).getContext()));
+    }
+
+    @Test
+    @DisplayName("replyReview external: a reply to an internal domain goes, one to any other waits")
+    void replyReviewExternalUsesTheRecipientsDomain() throws Exception {
+        processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.EXTERNAL, "supplier.com"), EmailTestMail.mail()
+                .polled(1), Instant.now());
+        assertNull(reviewOf(inputs.get(0).getContext()), "alice@supplier.com is internal");
+
+        processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.EXTERNAL, "*.supplier.com", "contoso.com"),
+                EmailTestMail.mail().messageId("<m2@supplier.com>").polled(2), Instant.now());
+        assertNotNull(reviewOf(inputs.get(1).getContext()), "*.supplier.com names subdomains only");
+    }
+
+    @Test
+    @DisplayName("replyReview external without internal domains: every reply waits")
+    void replyReviewExternalWithoutDomains() throws Exception {
+        processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.EXTERNAL), EmailTestMail.mail().polled(1), Instant.now());
+
+        assertNotNull(reviewOf(inputs.get(0).getContext()));
+    }
+
+    @Test
+    @DisplayName("replyReview firstContact: a sender's first mail waits")
+    void replyReviewFirstContact() throws Exception {
+        processor.process(reviewContext(conversationModeConfig(), EmailControl.ReplyReview.FIRST_CONTACT), EmailTestMail.mail().polled(1),
+                Instant.now());
+
+        assertEquals("firstContact", reviewOf(inputs.get(0).getContext()).get("mode"));
+    }
+
+    @Test
+    @DisplayName("trigger mode never replies, so no turn is armed whatever the stored value says")
+    void replyReviewTriggerMode() throws Exception {
+        processor.process(reviewContext(Map.of(), EmailControl.ReplyReview.ALWAYS), EmailTestMail.mail().polled(1), Instant.now());
+
+        assertNull(reviewOf(inputs.get(0).getContext()));
     }
 
     private static Map<String, String> conversationModeConfig() {

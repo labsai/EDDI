@@ -9,6 +9,7 @@ import ai.labs.eddi.configs.channels.IRestChannelIntegrationStore;
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
 import ai.labs.eddi.configs.channels.model.ChannelTarget;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.configs.channels.model.EmailSelfTestResult;
 import ai.labs.eddi.configs.channels.model.EmailSenderLists;
 import ai.labs.eddi.configs.channels.model.EmailSuppressionView;
@@ -862,6 +863,14 @@ public class RestChannelIntegrationStore implements IRestChannelIntegrationStore
                         "Target '" + target.getName() + "' must have a targetId.");
             }
             validateEmailApprovalFields(target, email);
+            if (email && target.getType() == ChannelTarget.TargetType.GROUP && config.getEmailControl() != null
+                    && EmailChannelSettings.from(config).replyReview() != EmailControl.ReplyReview.NEVER) {
+                // A group discussion's synthesis is sent when the discussion ends; it has no
+                // turn that could wait for a reviewer, so the setting could not hold it.
+                throw new BadRequestException("Target '" + target.getName() + "': emailControl.replyReview is not supported with GROUP "
+                        + "targets — a group discussion's answer has no turn that could wait for review. Set replyReview to 'never' "
+                        + "or target an agent.");
+            }
             if (email && target.isObserveMode()) {
                 // Every mail is addressed to the mailbox; there is no traffic to observe.
                 throw new BadRequestException(

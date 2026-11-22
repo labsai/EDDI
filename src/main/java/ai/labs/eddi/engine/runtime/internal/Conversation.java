@@ -25,6 +25,9 @@ import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.engine.security.EmailReplyReview;
+import ai.labs.eddi.engine.hitl.audit.EditMetrics;
+import ai.labs.eddi.integrations.email.reply.EmailReplyThread;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.configs.properties.model.Property;
 import ai.labs.eddi.configs.properties.model.PropertyValues;
@@ -1504,6 +1507,80 @@ public class Conversation implements IConversation {
             ILifecycleManager lifecycleManager = executableWorkflow.getLifecycleManager();
             lifecycleManager.executeLifecycle(conversationMemory, lifecycleTaskTypes);
         }
+        pauseForReplyReviewIfAsked();
+    }
+
+    /**
+     * Reply review (email plan v3 §8.2): a mail turn the email channel armed
+     * ({@link EmailReplyReview#armed}) pauses once its whole pipeline has run and
+     * before the channel queues the reply — a RULE pause after the last workflow,
+     * with the draft (the whole text the reply would carry) on the step. Its
+     * decision runs no task ({@link #decideReplyReview}). A turn with nothing to
+     * send does not wait.
+     */
+    private void pauseForReplyReviewIfAsked() throws ConversationPauseException {
+        if (executableWorkflows.isEmpty() || !EmailReplyReview.armed(conversationMemory)) {
+            return;
+        }
+        var step = conversationMemory.getCurrentStep();
+        if (step.getData(EmailReplyReview.MARKER) != null || step.getData(EmailReplyReview.DECISION_KEY) != null) {
+            return;
+        }
+        var outputs = conversationMemory.getConversationOutputs();
+        String draft = outputs == null || outputs.isEmpty() ? "" : EmailReplyThread.replyText(outputs, outputs.size() - 1);
+        if (draft.isBlank()) {
+            return;
+        }
+        step.storeData(new Data<>(EmailReplyReview.MARKER, EmailReplyReview.marker(draft)));
+        // What the email channel reads: no notice to the sender, no reply yet.
+        step.addConversationOutputString(EmailReplyReview.OUTPUT_KEY, EmailReplyReview.PENDING);
+        String lastWorkflowId = executableWorkflows.get(executableWorkflows.size() - 1).getWorkflowId();
+        throw new ConversationPauseException(lastWorkflowId, -1, EmailReplyReview.reasonOf(conversationMemory),
+                ConversationPauseException.PauseOrigin.RULE);
+    }
+
+    /**
+     * The decision of a reply review: nothing of the pipeline runs again. An
+     * approval records {@link EmailReplyReview#APPROVED}, or with a changed
+     * {@code editedAnswer} {@link EmailReplyReview#EDITED} and the text the email
+     * channel then sends; a rejection (an expiry too) records
+     * {@link EmailReplyReview#REJECTED}, and nothing is sent. The edit is data:
+     * never a template, a property or a model message; the step keeps digests and
+     * sizes of both texts, the draft stays in the turn's own output.
+     */
+    private void decideReplyReview(HitlDecision decision, IWritableConversationStep step, IData<Object> marker) {
+        String draft = EmailReplyReview.draftOf(marker.getResult());
+        step.removeData(EmailReplyReview.MARKER);
+        // A candidate the agent's own review policy kept is not what this pause
+        // reviews: the whole reply is.
+        takeRevisionCandidate(step);
+        String outcome;
+        var record = new LinkedHashMap<String, Object>();
+        if (decision.getVerdict() == HitlDecision.HitlVerdict.APPROVED) {
+            String edited = decision.getEditedAnswer();
+            if (edited != null && !edited.equals(draft)) {
+                outcome = EmailReplyReview.EDITED;
+                step.addConversationOutputString(EmailReplyReview.TEXT_OUTPUT_KEY, edited);
+                record.put("originalSha256", EditMetrics.sha256Hex(draft));
+                record.put("editedSha256", EditMetrics.sha256Hex(edited));
+                record.put("originalChars", draft == null ? 0 : draft.codePointCount(0, draft.length()));
+                record.put("editedChars", edited.codePointCount(0, edited.length()));
+            } else {
+                outcome = EmailReplyReview.APPROVED;
+            }
+        } else {
+            outcome = EmailReplyReview.REJECTED;
+        }
+        record.put("decision", outcome);
+        if (decision.getDecidedBy() != null) {
+            record.put("decidedBy", decision.getDecidedBy());
+        }
+        step.storeData(new Data<>(EmailReplyReview.DECISION_KEY, record));
+        step.addConversationOutputString(EmailReplyReview.OUTPUT_KEY, outcome);
+        clearHitlStatusMarker(step);
+        clearHitlBookmark();
+        stripPauseAction(step);
+        LOGGER.infof("Reply review of conversation '%s' decided: %s", sanitize(conversationMemory.getConversationId()), outcome);
     }
 
     /**
@@ -1735,6 +1812,7 @@ public class Conversation implements IConversation {
                 executable.getLifecycleManager().executeLifecycle(conversationMemory, null);
             }
         }
+        pauseForReplyReviewIfAsked();
         return true;
     }
 
@@ -2070,6 +2148,14 @@ public class Conversation implements IConversation {
             // gracefully (Task 9). Only RULE pauses short-circuit on REJECTED.
             boolean toolPause = "TOOL_CALL".equals(conversationMemory.getHitlPauseType());
 
+            // Reply review (pauseForReplyReviewIfAsked): the whole turn has run, so the
+            // decision only says what the email channel sends.
+            IData<Object> replyReviewMarker = toolPause ? null : currentStep.getData(EmailReplyReview.MARKER);
+            if (replyReviewMarker != null) {
+                decideReplyReview(decision, currentStep, replyReviewMarker);
+                return;
+            }
+
             // The email gate's pause before the agent ran (pauseBeforeRunIfEmailGateAsks):
             // nothing of the turn has run, so there is no draft to revise or edit. A
             // rejection answers with the target's rejectedReply (none in trigger mode);
@@ -2181,6 +2267,9 @@ public class Conversation implements IConversation {
                 setConversationState(ConversationState.ERROR);
                 throw new LifecycleException("Paused workflow '" + pausedWorkflowId + "' no longer exists (config drift)");
             }
+            // The turn ran to its end after an earlier pause (a tool call, the email
+            // gate before the agent ran): its reply waits for review now.
+            pauseForReplyReviewIfAsked();
         } catch (ConversationStopException unused) {
             endConversation();
         } catch (ConversationPauseException e) {
