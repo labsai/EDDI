@@ -579,10 +579,26 @@ public class EmailReplySender {
                 return;
             }
             Prepared sending = withoutSuppressedCopies(row, prepared);
-            List<String> envelope = new ArrayList<>();
-            envelope.add(row.recipient());
-            envelope.addAll(sending.cc());
-            String provider = transport.send(row.integrationId(), sending.settings(), sending.mail().mime(), envelope);
+            List<String> envelope = envelopeOf(row, sending);
+            String provider;
+            try {
+                provider = transport.send(row.integrationId(), sending.settings(), sending.mail().mime(), envelope);
+            } catch (MailSendException refused) {
+                // The relay refused some copies' RCPT TO and, without sendpartial, sent
+                // nothing to anyone. A dead colleague's address on the mail must not cost
+                // the sender the answer: the refused copies are dropped — narrowing only —
+                // and the rest is submitted once more. A refused To is not narrowed away.
+                List<String> refusedCopies = refusedCopies(refused, row, sending);
+                if (refusedCopies.isEmpty()) {
+                    throw refused;
+                }
+                metrics.reply("cc_rejected");
+                LOGGER.infof("Email integration %s: the relay refused %d Cc recipient(s) of reply %s; sending without them",
+                        sanitize(row.integrationId()), refusedCopies.size(), row.id());
+                sending = withoutCopies(row, sending, refusedCopies);
+                envelope = envelopeOf(row, sending);
+                provider = transport.send(row.integrationId(), sending.settings(), sending.mail().mime(), envelope);
+            }
             if (ledger.complete(row.id(), row.claimToken(), State.SENT, provider, sending.capped() ? CC_CAPPED : null, now)) {
                 metrics.reply("sent");
                 metrics.replyLatency(Duration.between(row.createdAt(), now));
@@ -618,7 +634,43 @@ public class EmailReplySender {
         if (kept.size() == prepared.cc().size()) {
             return prepared;
         }
-        List<String> dropped = prepared.cc().stream().filter(address -> !kept.contains(address)).toList();
+        return withoutCopies(row, prepared, prepared.cc().stream().filter(address -> !kept.contains(address)).toList());
+    }
+
+    /** The To first, then the copies. */
+    private static List<String> envelopeOf(LedgerEntry row, Prepared prepared) {
+        List<String> envelope = new ArrayList<>();
+        envelope.add(row.recipient());
+        envelope.addAll(prepared.cc());
+        return envelope;
+    }
+
+    /**
+     * The copies of {@code prepared} a permanent refusal named, when it named only
+     * copies; empty when it named the To, nobody, or anyone the reply was not going
+     * to (then the reply fails as before).
+     */
+    static List<String> refusedCopies(MailSendException refused, LedgerEntry row, Prepared prepared) {
+        if (!refused.isPermanent() || refused.getRejectedRecipients().isEmpty() || prepared.cc().isEmpty()) {
+            return List.of();
+        }
+        List<String> copies = new ArrayList<>();
+        for (String rejected : refused.getRejectedRecipients()) {
+            String address = AddressNormalizer.tryNormalize(rejected).orElse(rejected);
+            if (address.equals(row.recipient()) || !prepared.cc().contains(address)) {
+                return List.of();
+            }
+            copies.add(address);
+        }
+        return copies;
+    }
+
+    /**
+     * {@code prepared} without {@code dropped}: left out of the envelope, the
+     * header and the record (so they never count as participants).
+     */
+    private Prepared withoutCopies(LedgerEntry row, Prepared prepared, List<String> dropped) {
+        List<String> kept = prepared.cc().stream().filter(address -> !dropped.contains(address)).toList();
         ledger.removeReplyRecipients(row.id(), dropped);
         if (prepared.thread() == null || prepared.body() == null) {
             // Only a Prepared without copies lacks what it was rendered from.

@@ -108,6 +108,11 @@ class EmailReplySenderTest {
         final List<String> recipients = new ArrayList<>();
         /** Every envelope, To first. */
         final List<List<String>> envelopes = new ArrayList<>();
+        /**
+         * Addresses the relay refuses at RCPT TO (550), refusing the whole submission
+         * as Angus does.
+         */
+        final List<String> deadAddresses = new ArrayList<>();
         final List<byte[]> messages = new ArrayList<>();
         final List<MailSendException> failures = new ArrayList<>();
         final List<RuntimeException> crashes = new ArrayList<>();
@@ -139,6 +144,10 @@ class EmailReplySenderTest {
         @Override
         public synchronized String send(String integrationId, EmailChannelSettings settings, byte[] mime, List<String> envelope)
                 throws MailSendException {
+            List<String> dead = envelope.stream().filter(deadAddresses::contains).toList();
+            if (!dead.isEmpty()) {
+                throw new MailSendException(MailSendException.Category.REJECTED, true, "The relay refused the message (550).", null, dead);
+            }
             String accepted = send(integrationId, settings, mime, envelope.get(0));
             envelopes.add(List.copyOf(envelope));
             return accepted;
@@ -519,6 +528,34 @@ class EmailReplySenderTest {
             assertEquals(List.of(List.of(SENDER)), transport.envelopes);
             assertEquals(EmailReplySender.CC_CAPPED, ledger.findById(row.id()).orElseThrow().lastError());
             assertEquals(1.0, registry.get(EmailMetrics.OUTBOUND_CC_CAPPED).counter().count());
+        }
+
+        @Test
+        @DisplayName("a copy the relay refuses at RCPT TO is dropped and the rest get the reply; a refused To still fails it")
+        void refusedCopy() throws Exception {
+            integration(threadConfig(""));
+            transport.deadAddresses.add(COLLEAGUE);
+            LedgerEntry inbound = storedInbound(State.TURN_SUBMITTED);
+
+            var row = sender.onTurnCompleted(INTEGRATION, settings(threadConfig("")), inbound, CONVERSATION, threadAnswer("Ships Monday."), NOW)
+                    .orElseThrow();
+
+            assertEquals(State.SENT, ledger.findById(row.id()).orElseThrow().state(), "the sender still gets the answer");
+            assertEquals(List.of(List.of(SENDER, OTHER)), transport.envelopes);
+            assertEquals(List.of(OTHER), Arrays.stream(parse(transport.messages.get(0)).getRecipients(Message.RecipientType.CC)).map(Object::toString)
+                    .toList(), "the header no longer names the refused copy");
+            assertFalse(ledger.hasSentReply(CONVERSATION, COLLEAGUE));
+            assertFalse(suppressions.isSuppressed(INTEGRATION, COLLEAGUE), "a refusal narrows this reply; it suppresses nobody");
+
+            transport.deadAddresses.add(SENDER);
+            LedgerEntry second = inbound("in-2", "<q2@supplier.com>", SENDER, State.TURN_SUBMITTED);
+            ledger.put(second);
+            Map<String, Object> secondMail = new HashMap<>(copiedMail());
+            secondMail.put("messageId", "<q2@supplier.com>");
+            var failed = sender.onTurnCompleted(INTEGRATION, settings(threadConfig("")), second, CONVERSATION,
+                    snapshot(ConversationState.READY, threadUser, output("Hello.", null), output("Again.", secondMail)), NOW).orElseThrow();
+            assertEquals(State.FAILED, ledger.findById(failed.id()).orElseThrow().state(), "a refused To is not narrowed away");
+            assertEquals(1, transport.envelopes.size());
         }
 
         @Test
