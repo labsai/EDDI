@@ -113,6 +113,33 @@ class SmimeReviewFindingsTest {
         assertEquals(SmimeCertificateCheck.Chain.COMPLETE, chain(List.of(pki.leaf(), pki.intermediate(), pki.root())));
     }
 
+    private static List<X509Certificate> threeLevels(int upperPathLength) throws Exception {
+        Instant now = Instant.now();
+        Instant from = now.minus(Duration.ofDays(5));
+        Instant to = now.plus(Duration.ofDays(500));
+        KeyPair rootKey = rsa();
+        KeyPair upperKey = rsa();
+        KeyPair lowerKey = rsa();
+        KeyPair leafKey = rsa();
+        KeyUsage certSign = new KeyUsage(KeyUsage.keyCertSign);
+        X509Certificate root = certificate("CN=Root", "CN=Root", rootKey, rootKey, from, to, new BasicConstraints(true), certSign);
+        X509Certificate upper = certificate("CN=Root", "CN=Upper", upperKey, rootKey, from, to, new BasicConstraints(upperPathLength), certSign);
+        X509Certificate lower = certificate("CN=Upper", "CN=Lower", lowerKey, upperKey, from, to, new BasicConstraints(0), certSign);
+        X509Certificate leaf = certificate("CN=Lower", "CN=Leaf", leafKey, lowerKey, from, to, null, new KeyUsage(KeyUsage.digitalSignature));
+        return List.of(leaf, lower, upper, root);
+    }
+
+    @Test
+    @DisplayName("an issuer's pathLenConstraint limits the CAs under it")
+    void thePathLengthConstraintIsEnforced() throws Exception {
+        // leaf -> Lower -> Upper -> Root: Upper has one CA (Lower) beneath it.
+        assertEquals(SmimeCertificateCheck.Chain.BROKEN, chain(threeLevels(0)));
+        assertEquals(SmimeCertificateCheck.Chain.COMPLETE, chain(threeLevels(1)));
+        // A direct leaf under a zero-length issuer stays fine.
+        List<X509Certificate> bundle = threeLevels(0);
+        assertEquals(SmimeCertificateCheck.Chain.UNTRUSTED_ROOT, chain(List.of(bundle.get(0), bundle.get(1))));
+    }
+
     @Test
     @DisplayName("the verdict does not depend on the order of two intermediates that share a subject and key")
     void theBundleOrderDoesNotMatter() throws Exception {
