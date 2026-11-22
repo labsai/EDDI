@@ -28,6 +28,7 @@ import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -42,7 +43,7 @@ interface EmailMessageLedgerContract {
     /** Every field a row may store — and no body, subject or MIME. */
     Set<String> ALLOWED_FIELDS = Set.of("id", "integrationid", "kind", "direction", "messageid", "conversationid", "sourceref",
             "idempotencykey", "recipient", "state", "attempts", "nextattemptat", "claimtoken", "providerid", "lasterror", "createdat",
-            "updatedat", "expiresat", "approvalstate", "contenthash", "signed", "authverdict", "review", "reviewstate");
+            "updatedat", "expiresat", "approvalstate", "contenthash", "signed", "authverdict", "review", "reviewstate", "heldat");
 
     IEmailMessageLedger ledger();
 
@@ -628,22 +629,47 @@ interface EmailMessageLedgerContract {
         LedgerEntry a = inbound("int-1", "<c1@example.com>", "a@partner.com", NOW);
         LedgerEntry b = inbound("int-1", "<c2@example.com>", "b@sub.partner.com", NOW);
         LedgerEntry c = inbound("int-1", "<c3@example.com>", "c@other_x.com", NOW);
-        LedgerEntry old = inbound("int-1", "<c4@example.com>", "d@partner.com", NOW.minus(Duration.ofDays(2)));
+        LedgerEntry forged = inbound("int-1", "<c6@example.com>", "f@partner.com", NOW);
+        LedgerEntry heldYesterday = inbound("int-1", "<c4@example.com>", "d@partner.com", NOW);
+        LedgerEntry arrivedEarlier = inbound("int-1", "<c7@example.com>", "g@partner.com", NOW.minus(Duration.ofDays(2)));
         LedgerEntry plain = inbound("int-1", "<c5@example.com>", "e@partner.com", NOW);
-        for (LedgerEntry row : List.of(a, b, c, old, plain)) {
+        for (LedgerEntry row : List.of(a, b, c, forged, heldYesterday, arrivedEarlier, plain)) {
             assertTrue(ledger().insertIfAbsent(row));
         }
-        for (LedgerEntry row : List.of(a, b, c, old)) {
-            assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "none", null, NOW, "held", NOW));
+        for (LedgerEntry row : List.of(a, b, c, arrivedEarlier)) {
+            assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW, "held",
+                    NOW));
         }
+        assertTrue(ledger().transitionReview(forged.id(), State.RECEIVED, State.HELD, "held:not_allowlisted+unauthenticated", "fail", null, NOW,
+                "held", NOW));
+        assertTrue(ledger().transitionReview(heldYesterday.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW,
+                "held", NOW.minus(Duration.ofDays(1))));
         assertTrue(
                 ledger().transitionReview(a.id(), State.HELD, State.REFUSED, "discarded:not_allowlisted", null, null, null, "review_discarded", NOW));
         Instant today = NOW.minus(Duration.ofHours(1));
-        assertEquals(3, ledger().countHeldSince("int-1", null, today));
-        assertEquals(1, ledger().countHeldSince("int-1", "partner.com", today), "exact domain only, the discarded one included");
-        assertEquals(1, ledger().countHeldSince("int-1", "other_x.com", today), "an underscore is not a wildcard");
-        assertEquals(0, ledger().countHeldSince("int-1", "otherxx.com", today));
-        assertEquals(0, ledger().countHeldSince("int-2", null, today));
+        assertEquals(5, ledger().countHeldSince("int-1", null, null, today), "by when it was held: a mail that arrived earlier counts today");
+        assertEquals(2, ledger().countHeldSince("int-1", "partner.com", true, today),
+                "exact domain, aligned only, the discarded one included - the forged one is not partner.com's");
+        assertEquals(1, ledger().countHeldSince("int-1", "other_x.com", true, today), "an underscore is not a wildcard");
+        assertEquals(0, ledger().countHeldSince("int-1", "otherxx.com", true, today));
+        assertEquals(1, ledger().countHeldSince("int-1", "anything.com", false, today), "unauthenticated mail shares one bucket");
+        assertEquals(0, ledger().countHeldSince("int-2", null, null, today));
+        assertNotNull(ledger().findById(forged.id()).orElseThrow().heldAt());
+    }
+
+    @Test
+    @DisplayName("held mail: a release can extend the retention of the row, never shorten it")
+    default void releaseExtendsRetention() {
+        LedgerEntry row = inbound("int-1", "<x1@example.com>", "a@partner.com", NOW);
+        assertTrue(ledger().insertIfAbsent(row));
+        assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.HELD, "held:not_allowlisted", "aligned-pass", null, NOW, "held", NOW));
+        Instant later = NOW.plus(Duration.ofDays(60));
+        assertTrue(ledger().transitionReview(row.id(), State.HELD, State.RECEIVED, "released:runOnce:not_allowlisted", null, null, NOW,
+                "review_released", later, NOW));
+        assertEquals(later, ledger().findById(row.id()).orElseThrow().expiresAt());
+        assertTrue(ledger().transitionReview(row.id(), State.RECEIVED, State.RECEIVED, "released:runOnce:not_allowlisted:anon", null, null, NOW,
+                "x", NOW, NOW));
+        assertEquals(later, ledger().findById(row.id()).orElseThrow().expiresAt(), "never shortened");
     }
 
     @Test

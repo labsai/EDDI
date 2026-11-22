@@ -22,8 +22,10 @@ import ai.labs.eddi.integrations.email.transport.MailTransport;
 import ai.labs.eddi.integrations.email.transport.MailboxException;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
+import org.eclipse.microprofile.config.inject.ConfigProperty;
 import org.jboss.logging.Logger;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -61,6 +63,10 @@ public class EmailHeldMailReview {
     private final MailTransport transport;
     private final MimeMessageParser parser;
     private final EmailSenderListAudit audit;
+
+    /** The ledger retention: a released row lives this long from its release. */
+    @ConfigProperty(name = "eddi.email.ledger-retention", defaultValue = "30d")
+    Duration retention = Duration.ofDays(30);
 
     @Inject
     public EmailHeldMailReview(IEmailMessageLedger ledger, ImapMailTransport transport, MimeMessageParser parser, EmailSenderListAudit audit) {
@@ -169,8 +175,11 @@ public class EmailHeldMailReview {
      */
     public boolean release(LedgerEntry row, String decision, String note, Instant now) {
         List<String> reasons = EmailReviewState.reasons(row.review());
-        if (!ledger.transitionReview(row.id(), State.HELD, State.RECEIVED, EmailReviewState.released(decision, reasons), null, null, now,
-                "review_released", now)) {
+        // The release time (the run's grace for temporary DNS failures) and, without an
+        // aligned pass, the anonymity are written onto the row; the row's retention is
+        // extended so it cannot expire before its run.
+        String review = EmailReviewState.released(decision, reasons, !EmailReviewState.alignedPass(row.authVerdict()), now);
+        if (!ledger.transitionReview(row.id(), State.HELD, State.RECEIVED, review, null, null, now, "review_released", now.plus(retention), now)) {
             return false;
         }
         audit.heldMailDecided(row.integrationId(), row.id(), decision, reasons, row.authVerdict(), row.recipient(), cleanNote(note));

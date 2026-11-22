@@ -179,7 +179,8 @@ public class EmailMailboxPoller {
                 stateStore.saveCursor(id, settings.folder(), start, since, started);
                 return new PollReport(false, "Cursor initialised; mail delivered from now on is processed.");
             }
-            int resubmitted = resubmit(context, session, settings);
+            int[] resubmission = resubmit(context, session, settings);
+            int resubmitted = resubmission[0];
             since = state.get().since();
             // Envelopes are cheap; they are listed beyond the processing cap so skipped
             // (already flagged, too old) messages do not stall the cursor.
@@ -195,7 +196,7 @@ public class EmailMailboxPoller {
             int processed = 0;
             int marked = 0;
             int deferred = 0;
-            int held = 0;
+            int held = resubmission[1];
             Instant deadline = started.plus(maxDuration);
             for (Entry entry : batch.entries()) {
                 if (processed >= maxMessagesPerPoll || Instant.now().isAfter(deadline)) {
@@ -275,8 +276,9 @@ public class EmailMailboxPoller {
      *
      * @return how many were found and processed
      */
-    int resubmit(IntegrationContext context, MailboxSession session, EmailChannelSettings settings) throws MailboxException {
+    int[] resubmit(IntegrationContext context, MailboxSession session, EmailChannelSettings settings) throws MailboxException {
         int done = 0;
+        int held = 0;
         for (var row : processor.pendingResubmissions(context.integrationId(), Instant.now())) {
             Optional<MailTransport.FoundMessage> found;
             try {
@@ -299,10 +301,15 @@ public class EmailMailboxPoller {
                 processor.resubmissionLost(context, row, Instant.now());
                 continue;
             }
-            processor.process(context, refetched(row.messageId(), found.get()), Instant.now());
+            // A handed-back mail can be held now (its sender left the allowlist since): it
+            // is counted and announced like one the cursor found. It stays where it is
+            // in the mailbox; a release finds it there by its Message-ID.
+            if (processor.process(context, refetched(row.messageId(), found.get()), Instant.now()) == Disposition.HELD) {
+                held++;
+            }
             done++;
         }
-        return done;
+        return new int[]{done, held};
     }
 
     /** A message found again, as the processor reads one. */

@@ -240,11 +240,24 @@ public interface IEmailMessageLedger {
      *            joined by {@code +} — or null. Its own field, so deferrals and the
      *            approval gate, which rewrite {@code lastError}, never lose it;
      *            changed only by {@link #transitionReview}
+     * @param heldAt
+     *            inbound rows held for review: when the mail was held (the daily
+     *            caps count by it), or null
      */
     record LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId, String sourceRef,
             String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken, String providerId,
             String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState, String contentHash, Boolean signed,
-            String authVerdict, String review) {
+            String authVerdict, String review, Instant heldAt) {
+
+        /** A row whose review, if any, records no hold time. */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState,
+                String contentHash, Boolean signed, String authVerdict, String review) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts, nextAttemptAt,
+                    claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, approvalState, contentHash, signed, authVerdict, review,
+                    null);
+        }
 
         /** A row without a review. */
         public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
@@ -447,8 +460,19 @@ public interface IEmailMessageLedger {
      *
      * @return whether the row was changed
      */
+    default boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash,
+                                     Instant nextAttemptAt, String lastError, Instant now) {
+        return transitionReview(id, from, to, review, authVerdict, contentHash, nextAttemptAt, lastError, null, now);
+    }
+
+    /**
+     * As the other {@code transitionReview}, also moving {@code expiresAt} to
+     * {@code expiresAt} when that is later — a released row must outlive its run.
+     * Moving to {@link State#HELD} sets {@link LedgerEntry#heldAt()} to
+     * {@code now}.
+     */
     boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash, Instant nextAttemptAt,
-                             String lastError, Instant now);
+                             String lastError, Instant expiresAt, Instant now);
 
     /**
      * Up to {@code limit} {@link Kind#TRIGGER} rows of {@code integrationId} in
@@ -457,12 +481,19 @@ public interface IEmailMessageLedger {
     List<LedgerEntry> findHeld(String integrationId, int limit);
 
     /**
-     * How many {@link Kind#TRIGGER} rows of {@code integrationId} created at or
-     * after {@code since} were ever held for review ({@link LedgerEntry#review()}
-     * set, whatever was decided since — a discard does not free a place), from a
-     * sender of {@code senderDomain} when it is not null.
+     * How many {@link Kind#TRIGGER} rows of {@code integrationId} were held for
+     * review at or after {@code since} ({@link LedgerEntry#heldAt()}, whatever was
+     * decided since — a discard does not free a place).
+     * <ul>
+     * <li>{@code aligned} null: all of them;</li>
+     * <li>{@code aligned} true: those held with an aligned pass from a sender of
+     * {@code senderDomain} — so a forged From cannot use up a real domain's
+     * share;</li>
+     * <li>{@code aligned} false: those held without one, whatever their From claims
+     * — one shared bucket ({@code senderDomain} is ignored).</li>
+     * </ul>
      */
-    long countHeldSince(String integrationId, String senderDomain, Instant since);
+    long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since);
 
     /**
      * The most of {@link LedgerEntry#approvalState()} a store keeps (the PostgreSQL

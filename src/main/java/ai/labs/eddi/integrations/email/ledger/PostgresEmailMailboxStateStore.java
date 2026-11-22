@@ -176,6 +176,20 @@ public class PostgresEmailMailboxStateStore implements IEmailMailboxStateStore {
     }
 
     @Override
+    public Optional<Instant> noticeClaimedAt(String integrationId, String noticeKey) {
+        String sql = "SELECT created_at FROM " + NOTICES + " WHERE integration_id = ? AND notice_key = ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, integrationId);
+            statement.setString(2, noticeKey);
+            try (ResultSet rows = statement.executeQuery()) {
+                return rows.next() && rows.getTimestamp(1) != null ? Optional.of(rows.getTimestamp(1).toInstant()) : Optional.empty();
+            }
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read a mailbox notice", e);
+        }
+    }
+
+    @Override
     public boolean claimNotice(String integrationId, String noticeKey, Instant now) {
         String sql = "INSERT INTO " + NOTICES + " (integration_id, notice_key, created_at) VALUES (?, ?, ?) ON CONFLICT DO NOTHING";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {

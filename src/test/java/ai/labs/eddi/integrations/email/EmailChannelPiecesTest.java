@@ -153,18 +153,24 @@ class EmailChannelPiecesTest {
             var settings = EmailChannelSettings.from(Map.of("mode", "trigger", "transport", "imap", "connection", "c", "host", "imap.x.com",
                     "address", "invoices@contoso.com", "ownerNotifyAddresses", "ops@contoso.com"));
             Instant now = Instant.parse("2026-11-22T14:10:00Z");
+            // 14:10 notice; a mail held at 14:20 waits for a poll in the 15:00 hour.
 
-            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 2, 3, now));
-            assertFalse(notifier.notifyHeld("int1", "Invoices", settings, 1, 4, now.plusSeconds(600)), "the same hour: no second notice");
-            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 1, 4, now.plusSeconds(3600)), "the next hour");
+            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 3, now.minusSeconds(5), now));
+            assertFalse(notifier.notifyHeld("int1", "Invoices", settings, 3, now.minusSeconds(5), now.plusSeconds(60)), "nothing new: nothing");
+            assertFalse(notifier.notifyHeld("int1", "Invoices", settings, 4, now.plusSeconds(600), now.plusSeconds(600)),
+                    "held after this hour's notice: not in the same hour");
+            assertTrue(notifier.notifyHeld("int1", "Invoices", settings, 4, now.plusSeconds(600), now.plusSeconds(3000)),
+                    "but on the next hour's poll, although that poll held nothing");
+            assertFalse(notifier.notifyHeld("int1", "Invoices", settings, 4, now.plusSeconds(600), now.plusSeconds(7000)), "announced once");
             assertTrue(notifier.notifyOnce("int1", "Invoices", settings, EmailOwnerNotifier.Reason.BUDGET, now), "daily notices are unaffected");
 
             ArgumentCaptor<PlainTextMailRenderer.RenderedMail> sent = ArgumentCaptor.forClass(PlainTextMailRenderer.RenderedMail.class);
             verify(mailer, times(3)).send(sent.capture(), anyList());
             String text = new String(sent.getAllValues().get(0).mime(), StandardCharsets.UTF_8);
-            assertTrue(text.contains("held 2 mail(s)"), text);
             assertTrue(text.contains("3 are waiting"), text);
+            assertTrue(text.contains("7 day(s)"), text);
             assertEquals(3, ledger.all().stream().filter(r -> r.kind() == Kind.NOTICE).count());
+            assertEquals("12 hour(s)", EmailOwnerNotifier.describe(Duration.ofHours(12)));
         }
         @Test
         @DisplayName("without a system mailer the notice is a log line only")

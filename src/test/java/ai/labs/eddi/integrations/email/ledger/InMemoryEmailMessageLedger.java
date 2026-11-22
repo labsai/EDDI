@@ -171,21 +171,23 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), r.nextAttemptAt(), r.claimToken(), r.providerId(), r.lastError(),
-                r.createdAt(), now, r.expiresAt(), to, contentHash != null ? contentHash : r.contentHash(), r.signed(), r.authVerdict(), r.review()));
+                r.createdAt(), now, r.expiresAt(), to, contentHash != null ? contentHash : r.contentHash(), r.signed(), r.authVerdict(), r.review(),
+                r.heldAt()));
         return true;
     }
 
     @Override
     public synchronized boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash,
-                                                 Instant nextAttemptAt, String lastError, Instant now) {
+                                                 Instant nextAttemptAt, String lastError, Instant expiresAt, Instant now) {
         LedgerEntry r = rows.get(id);
         if (r == null || r.state() != from) {
             return false;
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), to, r.attempts(), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now,
-                r.expiresAt(), r.approvalState(), contentHash != null ? contentHash : r.contentHash(), r.signed(),
-                authVerdict != null ? authVerdict : r.authVerdict(), review));
+                expiresAt != null && expiresAt.isAfter(r.expiresAt()) ? expiresAt : r.expiresAt(), r.approvalState(),
+                contentHash != null ? contentHash : r.contentHash(), r.signed(), authVerdict != null ? authVerdict : r.authVerdict(), review,
+                to == State.HELD ? now : r.heldAt()));
         return true;
     }
 
@@ -196,11 +198,12 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public synchronized long countHeldSince(String integrationId, String senderDomain, Instant since) {
+    public synchronized long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since) {
         return rows.values().stream()
-                .filter(r -> r.integrationId().equals(integrationId) && r.kind() == Kind.TRIGGER && !r.createdAt().isBefore(since)
-                        && r.review() != null
-                        && (senderDomain == null || r.recipient() != null && r.recipient().endsWith("@" + senderDomain)))
+                .filter(r -> r.integrationId().equals(integrationId) && r.kind() == Kind.TRIGGER && r.heldAt() != null && !r.heldAt().isBefore(since))
+                .filter(r -> aligned == null || aligned == EmailReviewState.alignedPass(r.authVerdict()))
+                .filter(r -> !Boolean.TRUE.equals(aligned) || senderDomain == null
+                        || r.recipient() != null && r.recipient().endsWith("@" + senderDomain))
                 .count();
     }
 

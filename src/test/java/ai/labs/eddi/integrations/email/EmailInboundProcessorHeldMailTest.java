@@ -138,10 +138,14 @@ class EmailInboundProcessorHeldMailTest {
     }
 
     private void release(EmailTestMail mail, String decision) {
+        release(mail, decision, Instant.now());
+    }
+
+    private void release(EmailTestMail mail, String decision, Instant at) {
         LedgerEntry held = row(mail);
         assertTrue(ledger.transitionReview(held.id(), State.HELD, State.RECEIVED,
-                EmailReviewState.released(decision, EmailReviewState.reasons(held.review())), null, null, Instant.now().minusSeconds(1),
-                "review_released", Instant.now()));
+                EmailReviewState.released(decision, EmailReviewState.reasons(held.review()), !EmailReviewState.alignedPass(held.authVerdict()), at),
+                null, null, at.minusSeconds(1), "review_released", at));
     }
 
     @SuppressWarnings("unchecked")
@@ -299,6 +303,58 @@ class EmailInboundProcessorHeldMailTest {
     }
 
     @Test
+    @DisplayName("released days after arrival, a temporary DNS failure on its run defers it - the grace counts from the release")
+    void temporaryFailureOfAReleasedMailDefers() throws Exception {
+        EmailTestMail mail = EmailTestMail.mail().from(STRANGER);
+        IntegrationContext ctx = context(review("review", null), Map.of());
+        Instant arrived = Instant.now().minus(Duration.ofDays(3));
+        processor.process(ctx, once(mail), arrived);
+        release(mail, EmailReviewState.RUN_AND_ALLOW);
+        verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null, null, true, List.of());
+
+        assertEquals(Disposition.DEFERRED, processor.process(ctx, once(mail), Instant.now()));
+
+        assertEquals(State.RECEIVED, row(mail).state(), "the decision is kept for the next try");
+        assertEquals("auth_temporary", row(mail).lastError());
+        assertTrue(EmailReviewState.isReleased(row(mail).review()));
+    }
+
+    @Test
+    @DisplayName("the per-domain share counts only authenticated mail: forged mail claiming the domain cannot block the real sender")
+    void forgedMailCannotFillADomainShare() {
+        EmailControl control = new EmailControl(null, new EmailControl.OnRefused("review", "review", null),
+                new EmailControl.Review(null, 50, 1, null));
+        IntegrationContext ctx = context(control, Map.of());
+        verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null);
+        EmailTestMail forged = EmailTestMail.mail().from("ceo@partner.com");
+        EmailTestMail forged2 = EmailTestMail.mail().from("cfo@elsewhere.com");
+        assertEquals(Disposition.HELD, processor.process(ctx, once(forged), Instant.now()));
+        assertEquals(Disposition.SETTLED, processor.process(ctx, once(forged2), Instant.now()));
+        assertEquals(EmailReviewState.REVIEW_FULL_DOMAIN, row(forged2).lastError(), "unauthenticated mail shares one bucket");
+
+        verdict = new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "partner.com");
+        EmailTestMail real = EmailTestMail.mail().from("alice@partner.com");
+        assertEquals(Disposition.HELD, processor.process(ctx, once(real), Instant.now()), "the real partner's share is untouched");
+    }
+
+    @Test
+    @DisplayName("stored pass, live fail, authentication not required: the run is anonymous, and the row says so for the reply door")
+    void effectiveAnonymityIsWrittenOntoTheRow() throws Exception {
+        EmailTestMail mail = EmailTestMail.mail().from(STRANGER);
+        IntegrationContext ctx = context(review("review", null), Map.of("requireAuthentication", "false"));
+        processor.process(ctx, once(mail), Instant.now());
+        release(mail, EmailReviewState.RUN_ONCE);
+        assertTrue(!EmailReviewState.anonymousRelease(row(mail)), "released with an aligned pass");
+        verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null);
+
+        processor.process(ctx, once(mail), Instant.now());
+
+        assertTrue(startUserId().startsWith(EmailUserIdentity.ANONYMOUS_PREFIX));
+        assertTrue(EmailReviewState.anonymousReleaseMarked(row(mail).review()), row(mail).review());
+        assertTrue(EmailReviewState.anonymousRelease(row(mail)));
+    }
+
+    @Test
     @DisplayName("held as forged, passing on the run: the stored verdict decides - still anonymous and read-only (fail closed)")
     void storedFailVerdictWins() throws Exception {
         verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null);
@@ -368,9 +424,9 @@ class EmailInboundProcessorHeldMailTest {
     void notifyHeld() {
         IntegrationContext ctx = context(review("review", null), Map.of());
         processor.notifyHeld(ctx, 0, Instant.now());
-        verify(notifier, never()).notifyHeld(anyString(), any(), any(), any(Integer.class), any(Integer.class), any());
+        verify(notifier, never()).notifyHeld(anyString(), any(), any(), any(Integer.class), any(), any());
         processor.process(ctx, EmailTestMail.mail().from(STRANGER).polled(1), Instant.now());
-        processor.notifyHeld(ctx, 1, Instant.now());
-        verify(notifier).notifyHeld(eq(INTEGRATION), eq("Invoices"), any(), eq(1), eq(1), any());
+        processor.notifyHeld(ctx, 0, Instant.now());
+        verify(notifier).notifyHeld(eq(INTEGRATION), eq("Invoices"), any(), eq(1), any(Instant.class), any());
     }
 }

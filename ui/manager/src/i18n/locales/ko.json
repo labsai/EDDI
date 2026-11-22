@@ -6020,6 +6020,6 @@
     "maxPerDay": "하루 최대 보류 메일 수",
     "maxPerDomain": "발신 도메인별 하루 최대",
     "reviewers": "검토자",
-    "reviewersHint": "이 연동의 편집자 외에 사용자 ID 또는 role:<이름>. 비우면 eddi-approver. 실행 후 허용에는 항상 편집 권한이 필요합니다."
+    "reviewersHint": "이 연동의 편집자 외에: role:eddi-approver, role:eddi-editor 또는 role:eddi-admin, 또는 이 역할 중 하나를 가진 사용자 ID. 비우면 eddi-approver. 실행 후 허용에는 항상 편집 권한이 필요합니다."
   }
 }

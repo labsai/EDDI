@@ -391,6 +391,11 @@ public record EmailChannelSettings(
     public static final int MAX_REVIEWERS = 20;
     /** Prefix of a {@code reviewers} entry that names a role. */
     public static final String REVIEWER_ROLE_PREFIX = "role:";
+    /**
+     * The roles a {@code role:} reviewer entry may name: exactly those the
+     * held-mail endpoints admit ({@code @RolesAllowed}, MCP {@code HELD_MAIL}).
+     */
+    public static final Set<String> REVIEWER_ROLES = Set.of("eddi-admin", "eddi-editor", "eddi-approver");
 
     /** Whether mail refused as not allowlisted is held for review. */
     public boolean reviewsNotAllowlisted() {
@@ -820,9 +825,14 @@ public record EmailChannelSettings(
             }
             for (int i = 0; i < reviewers.size(); i++) {
                 String reviewer = reviewers.get(i);
-                if (reviewer == null || reviewer.isBlank() || reviewer.length() > 255 || hasControl(reviewer)
-                        || reviewer.trim().equals(REVIEWER_ROLE_PREFIX)) {
+                if (reviewer == null || reviewer.isBlank() || reviewer.length() > 255 || hasControl(reviewer)) {
                     errors.add("emailControl.review.reviewers entry " + (i + 1) + " must be an EDDI user id or 'role:<name>'.");
+                } else if (reviewer.trim().startsWith(REVIEWER_ROLE_PREFIX)
+                        && !REVIEWER_ROLES.contains(reviewer.trim().substring(REVIEWER_ROLE_PREFIX.length()).trim())) {
+                    // The held-mail endpoints admit only these roles: any other would be
+                    // refused at the door, so naming it would silently do nothing.
+                    errors.add("emailControl.review.reviewers entry " + (i + 1) + " names a role the held-mail endpoints do not admit: use "
+                            + "role:eddi-admin, role:eddi-editor or role:eddi-approver, or a user id of someone who holds one of them.");
                 }
             }
         }

@@ -6020,6 +6020,6 @@
     "maxPerDay": "Höchstens zurückgehaltene Mails pro Tag",
     "maxPerDomain": "Höchstens pro Absenderdomain und Tag",
     "reviewers": "Prüfer",
-    "reviewersHint": "Benutzer-IDs oder role:<name>, zusätzlich zu den Bearbeitern dieser Integration. Leer: eddi-approver. Ausführen und zulassen braucht immer Bearbeitungsrechte."
+    "reviewersHint": "Zusätzlich zu den Bearbeitern dieser Integration: role:eddi-approver, role:eddi-editor oder role:eddi-admin, oder Benutzer-IDs von Personen mit einer dieser Rollen. Leer: eddi-approver. Ausführen und zulassen braucht immer Bearbeitungsrechte."
   }
 }

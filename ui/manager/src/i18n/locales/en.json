@@ -6020,6 +6020,6 @@
     "maxPerDay": "Held mail per day at most",
     "maxPerDomain": "Per sender domain and day at most",
     "reviewers": "Reviewers",
-    "reviewersHint": "User ids or role:<name>, besides this integration's editors. Empty: eddi-approver. Run and allow always needs edit access."
+    "reviewersHint": "Besides this integration's editors: role:eddi-approver, role:eddi-editor or role:eddi-admin, or user ids of people who hold one of those roles. Empty: eddi-approver. Run and allow always needs edit access."
   }
 }

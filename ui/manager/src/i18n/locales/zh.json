@@ -6020,6 +6020,6 @@
     "maxPerDay": "每天最多暂扣邮件数",
     "maxPerDomain": "每个发件域每天最多",
     "reviewers": "审核人",
-    "reviewersHint": "除本集成的编辑者外的用户 ID 或 role:<名称>。留空：eddi-approver。运行并允许始终需要编辑权限。"
+    "reviewersHint": "除本集成的编辑者外：role:eddi-approver、role:eddi-editor 或 role:eddi-admin，或拥有其中一个角色的用户 ID。留空：eddi-approver。运行并允许始终需要编辑权限。"
   }
 }

@@ -621,7 +621,7 @@ Both modes.
 | `emailControl.review.expiry` | `P7D` | ISO-8601 duration (`PT1H` to `P90D`). Undecided held mail is dropped (`review_expired`). At most the ledger retention (`eddi.email.ledger-retention`) minus one day: the save says so |
 | `emailControl.review.maxHeldPerDay` | `50` | Per integration and UTC day; beyond it mail is refused as `review_full` and the owners hear once that day |
 | `emailControl.review.maxHeldPerSenderDomainPerDay` | `5` | So one sender cannot fill the queue for everyone; beyond it `review_full:sender_domain`. A discard does not free a place |
-| `emailControl.review.reviewers` | *(none)* | Who may decide besides the integration's editors: EDDI user ids, or `role:<name>`. Empty: the editors and `eddi-approver` |
+| `emailControl.review.reviewers` | *(none)* | Who may decide besides the integration's editors: `role:eddi-approver`, `role:eddi-editor` or `role:eddi-admin` (any other role is refused at save — the held-mail endpoints admit only these), or EDDI user ids of people who hold one of them. Empty: the editors and `eddi-approver` |
 
 **Never reviewable:** loops and bounces, `blocked:no_single_sender`, `blocked:blocklist` (which also covers mail from
 the integration's own address), oversize mail, the per-sender limit, the daily budget and tenant quotas. These are
@@ -665,8 +665,18 @@ names a sender or a subject. The reviewer principals' own addresses are not used
 - Every decision leaves an audit entry (`taskId: email.held`): who, which row, what, the reasons, the verdict, and the
   sender only as domain plus pseudonym.
 - Who may decide: the integration's editors, plus `emailControl.review.reviewers` (default `eddi-approver`). A listed user id or role reaches the endpoints only if the caller also holds `eddi-admin`, `eddi-editor` or `eddi-approver` — the roles the held-mail endpoints admit. A
-  conversation an email started can never decide held mail: `decide_held_email` and the decision endpoint are on the
-  [escalation guard's](#a-mail-cannot-change-its-own-rules) lists.
+  conversation an email started can never decide held mail, nor read it: `decide_held_email`, `list_held_email`, the
+  decision endpoint and the held-mail reads refuse it ([escalation guard](#a-mail-cannot-change-its-own-rules)) — held
+  mail is other senders' untrusted text.
+- `runAndAllowOffered` is answered for the caller: true only for an aligned pass **and** a caller with edit access.
+- A per-domain share counts only mail whose From authenticated (aligned pass): forged mail claiming a domain cannot use
+  up that domain's share. Unauthenticated mail shares one bucket of `maxHeldPerSenderDomainPerDay`, whatever domain it
+  claims. The caps count by when a mail was held.
+- A released mail's grace for a temporary DNS/DKIM failure (one day) counts from its release, not its arrival; its row's
+  retention is extended from the release.
+
+**Rolling out.** Older EDDI nodes do not know the `HELD` state: in a cluster that runs both versions, an old node that
+reads a held row fails on it. Upgrade every node before setting any `onRefused` value to `review`.
 
 Existing integrations with `requireAuthentication: false` keep today's behaviour — unauthenticated mail runs
 anonymously with every tool its agent has — and saving one warns `email.anonymous-tools`.

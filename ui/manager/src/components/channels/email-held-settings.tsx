@@ -1,4 +1,4 @@
-import { useId } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Input } from "@eddi/app-kit/components/ui/input";
 import type { EmailControl, EmailRefusalAction } from "@/lib/api/channels";
@@ -46,6 +46,11 @@ export function EmailHeldMailFields({
     onChange(withHeldMailSettings(emailControl, { ...onRefused, [key]: value }, review));
   const setReview = (patch: NonNullable<EmailControl["review"]>) => onChange(withHeldMailSettings(emailControl, onRefused, { ...review, ...patch }));
   const numberOrUndefined = (value: string) => (value.trim() === "" ? undefined : Number(value));
+  // The reviewers field is edited as text and committed as a list on blur, so a
+  // comma typed mid-entry is not swallowed; it follows a reload of the document.
+  const reviewersText = (review.reviewers ?? []).join(", ");
+  const [reviewersDraft, setReviewersDraft] = useState(reviewersText);
+  useEffect(() => setReviewersDraft(reviewersText), [reviewersText]);
 
   return (
     <div className="space-y-3 border-t border-border/50 pt-3" data-testid="email-held-settings">
@@ -94,10 +99,11 @@ export function EmailHeldMailFields({
         </div>
         <div className="space-y-1">
           <label htmlFor={`${uid}-rev`} className={labelClass}>{t("emailHeld.reviewers", "Reviewers")}</label>
-          <Input id={`${uid}-rev`} defaultValue={(review.reviewers ?? []).join(", ")} placeholder="role:eddi-approver, alice" data-testid="email-held-reviewers"
+          <Input id={`${uid}-rev`} value={reviewersDraft}
+            onChange={(e) => setReviewersDraft(e.target.value)} placeholder="role:eddi-approver, alice" data-testid="email-held-reviewers"
             onBlur={(e) => setReview({ reviewers: e.target.value.split(",").map((s) => s.trim()).filter(Boolean) })} />
           <p className={hintClass}>
-            {t("emailHeld.reviewersHint", "User ids or role:<name>, besides this integration's editors. Empty: eddi-approver. Run and allow always needs edit access.")}
+            {t("emailHeld.reviewersHint", "Besides this integration's editors: role:eddi-approver, role:eddi-editor or role:eddi-admin, or user ids of people who hold one of those roles. Empty: eddi-approver. Run and allow always needs edit access.")}
           </p>
         </div>
       </div>

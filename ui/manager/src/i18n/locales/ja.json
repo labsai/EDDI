@@ -6020,6 +6020,6 @@
     "maxPerDay": "1日あたりの保留メール上限",
     "maxPerDomain": "送信元ドメインごとの1日上限",
     "reviewers": "レビュー担当者",
-    "reviewersHint": "この連携の編集者に加えて、ユーザー ID または role:<名前>。空の場合は eddi-approver。実行して許可には常に編集権限が必要です。"
+    "reviewersHint": "この連携の編集者に加えて: role:eddi-approver、role:eddi-editor、role:eddi-admin、またはこれらのいずれかのロールを持つユーザーの ID。空の場合は eddi-approver。実行して許可には常に編集権限が必要です。"
   }
 }

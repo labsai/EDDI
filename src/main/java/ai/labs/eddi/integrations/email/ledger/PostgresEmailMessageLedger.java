@@ -43,7 +43,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     private static final String COLUMNS = "id, integration_id, kind, direction, message_id, conversation_id, source_ref, idempotency_key, "
             + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at, "
-            + "approval_state, content_hash, signed, auth_verdict, review_state";
+            + "approval_state, content_hash, signed, auth_verdict, review_state, held_at";
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS email_message_ledger (
@@ -70,6 +70,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 signed BOOLEAN,
                 auth_verdict VARCHAR(32),
                 review_state VARCHAR(128),
+                held_at TIMESTAMP,
                 CONSTRAINT uq_email_ledger_idempotency UNIQUE (idempotency_key),
                 CONSTRAINT uq_email_ledger_message UNIQUE (integration_id, direction, message_id)
             )
@@ -86,7 +87,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS signed BOOLEAN",
             // Held mail (v3 phase C3): the verdict it was held with, and its review.
             "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS auth_verdict VARCHAR(32)",
-            "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS review_state VARCHAR(128)"};
+            "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS review_state VARCHAR(128)",
+            "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS held_at TIMESTAMP"};
 
     private static final String[] INDEXES = {"CREATE INDEX IF NOT EXISTS idx_email_ledger_due ON email_message_ledger (state, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_recipient ON email_message_ledger (recipient)",
@@ -97,7 +99,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_approval ON email_message_ledger (approval_state, next_attempt_at) "
                     + "WHERE approval_state IS NOT NULL",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_held ON email_message_ledger (integration_id, state, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_held ON email_message_ledger (integration_id, state, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_held_at ON email_message_ledger (integration_id, held_at) WHERE held_at IS NOT NULL"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -139,7 +142,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public boolean insertIfAbsent(LedgerEntry entry) {
         String sql = "INSERT INTO " + TABLE + " (" + COLUMNS
-                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
+                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
             statement.setString(i++, entry.id());
@@ -164,7 +167,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             statement.setString(i++, entry.contentHash());
             setBoolean(statement, i++, entry.signed());
             statement.setString(i++, IEmailMessageLedger.cap(entry.authVerdict(), MAX_AUTH_VERDICT));
-            statement.setString(i, IEmailMessageLedger.cap(entry.review(), MAX_REVIEW));
+            statement.setString(i++, IEmailMessageLedger.cap(entry.review(), MAX_REVIEW));
+            statement.setTimestamp(i, timestamp(entry.heldAt()));
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write an email ledger row", e);
@@ -400,9 +404,11 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash, Instant nextAttemptAt,
-                                    String lastError, Instant now) {
+                                    String lastError, Instant expiresAt, Instant now) {
         String sql = "UPDATE " + TABLE + " SET state = ?, review_state = ?, next_attempt_at = ?, last_error = ?, updated_at = ?, "
-                + "auth_verdict = COALESCE(?, auth_verdict), content_hash = COALESCE(?, content_hash) WHERE id = ? AND state = ?";
+                + "auth_verdict = COALESCE(?, auth_verdict), content_hash = COALESCE(?, content_hash), "
+                + "held_at = CASE WHEN ? THEN ? ELSE held_at END, expires_at = GREATEST(expires_at, COALESCE(?, expires_at)) "
+                + "WHERE id = ? AND state = ?";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, to.name());
             statement.setString(2, IEmailMessageLedger.cap(review, MAX_REVIEW));
@@ -411,8 +417,11 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             statement.setTimestamp(5, timestamp(now));
             statement.setString(6, IEmailMessageLedger.cap(authVerdict, MAX_AUTH_VERDICT));
             statement.setString(7, contentHash);
-            statement.setString(8, id);
-            statement.setString(9, from.name());
+            statement.setBoolean(8, to == State.HELD);
+            statement.setTimestamp(9, timestamp(now));
+            statement.setTimestamp(10, timestamp(expiresAt));
+            statement.setString(11, id);
+            statement.setString(12, from.name());
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to change the review of an email ledger row", e);
@@ -439,13 +448,16 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public long countHeldSince(String integrationId, String senderDomain, Instant since) {
-        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND kind = 'TRIGGER' AND created_at >= ? "
-                + "AND review_state IS NOT NULL" + (senderDomain == null ? "" : " AND recipient LIKE ? ESCAPE '\\'");
+    public long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since) {
+        boolean byDomain = Boolean.TRUE.equals(aligned) && senderDomain != null;
+        String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND kind = 'TRIGGER' AND held_at >= ?"
+                + (Boolean.TRUE.equals(aligned) ? " AND auth_verdict = 'aligned-pass'" : "")
+                + (Boolean.FALSE.equals(aligned) ? " AND (auth_verdict IS NULL OR auth_verdict <> 'aligned-pass')" : "")
+                + (byDomain ? " AND recipient LIKE ? ESCAPE '\\'" : "");
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             statement.setString(1, integrationId);
             statement.setTimestamp(2, timestamp(since));
-            if (senderDomain != null) {
+            if (byDomain) {
                 statement.setString(3, "%@" + senderDomain.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_"));
             }
             try (ResultSet rows = statement.executeQuery()) {
@@ -593,7 +605,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 rows.getInt("attempts"), instant(rows.getTimestamp("next_attempt_at")), rows.getString("claim_token"), rows.getString("provider_id"),
                 rows.getString("last_error"), instant(rows.getTimestamp("created_at")), instant(rows.getTimestamp("updated_at")),
                 instant(rows.getTimestamp("expires_at")), rows.getString("approval_state"), rows.getString("content_hash"),
-                (Boolean) rows.getObject("signed"), rows.getString("auth_verdict"), rows.getString("review_state"));
+                (Boolean) rows.getObject("signed"), rows.getString("auth_verdict"), rows.getString("review_state"),
+                instant(rows.getTimestamp("held_at")));
     }
 
     private static Timestamp timestamp(Instant instant) {

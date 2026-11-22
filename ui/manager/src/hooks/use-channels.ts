@@ -1,4 +1,5 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useHasRole } from "@eddi/app-kit/hooks/use-auth";
 import {
   getEnrichedChannelDescriptors,
   getChannel,
@@ -136,12 +137,16 @@ const HELD_EMAIL_KEY = ["held-email"] as const;
  * its own kind.
  */
 export function useAllHeldEmail(enabled = true) {
+  // Only the roles the endpoint admits ask at all; a refusal stops the polling.
+  const isAdmin = useHasRole("eddi-admin");
+  const isEditor = useHasRole("eddi-editor");
+  const isApprover = useHasRole("eddi-approver");
   const query = useQuery({
     queryKey: [...HELD_EMAIL_KEY, "all"],
     queryFn: () => getAllHeldEmail(),
-    enabled,
+    enabled: enabled && (isAdmin || isEditor || isApprover),
     retry: false,
-    refetchInterval: 30_000,
+    refetchInterval: (q) => (q.state.error ? false : 30_000),
   });
   const queues: HeldEmailQueue[] = query.data ?? [];
   return { queues, isLoading: query.isLoading };

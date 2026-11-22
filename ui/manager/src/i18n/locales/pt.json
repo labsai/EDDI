@@ -6072,6 +6072,6 @@
     "maxPerDay": "E-mails retidos por dia no máximo",
     "maxPerDomain": "No máximo por domínio remetente e dia",
     "reviewers": "Revisores",
-    "reviewersHint": "IDs de usuário ou role:<nome>, além dos editores desta integração. Vazio: eddi-approver. Executar e permitir sempre exige permissão de edição."
+    "reviewersHint": "Além dos editores desta integração: role:eddi-approver, role:eddi-editor ou role:eddi-admin, ou IDs de usuários que tenham um desses papéis. Vazio: eddi-approver. Executar e permitir sempre exige permissão de edição."
   }
 }

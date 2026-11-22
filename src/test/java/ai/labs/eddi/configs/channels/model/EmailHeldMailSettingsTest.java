@@ -75,6 +75,10 @@ class EmailHeldMailSettingsTest {
         assertTrue(errors.stream().anyMatch(e -> e.startsWith("emailControl.review.maxHeldPerDay")), errors.toString());
         assertTrue(errors.stream().anyMatch(e -> e.startsWith("emailControl.review.maxHeldPerSenderDomainPerDay")), errors.toString());
         assertTrue(errors.stream().anyMatch(e -> e.startsWith("emailControl.review.reviewers")), errors.toString());
+        List<String> roleErrors = EmailChannelSettings.validate(trigger(Map.of()),
+                control(null, new EmailControl.Review(null, null, null, List.of("role:support", "role:eddi-editor"))));
+        assertEquals(1, roleErrors.size(), "only a role the held-mail endpoints admit: " + roleErrors);
+        assertTrue(roleErrors.get(0).contains("entry 1"), roleErrors.toString());
         assertEquals(List.of(), EmailChannelSettings.validate(trigger(Map.of()), control(new EmailControl.OnRefused("review", "drop", "drop"),
                 new EmailControl.Review("PT12H", 1, 1, List.of("role:eddi-approver", "bob")))));
     }

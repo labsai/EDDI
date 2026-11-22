@@ -119,6 +119,12 @@ public class MongoEmailMailboxStateStore implements IEmailMailboxStateStore {
     }
 
     @Override
+    public Optional<Instant> noticeClaimedAt(String integrationId, String noticeKey) {
+        Document found = notices.find(new Document("_id", integrationId + "|" + noticeKey)).first();
+        return found == null || found.getDate("createdAt") == null ? Optional.empty() : Optional.of(found.getDate("createdAt").toInstant());
+    }
+
+    @Override
     public boolean claimNotice(String integrationId, String noticeKey, Instant now) {
         try {
             notices.insertOne(new Document("_id", integrationId + "|" + noticeKey).append("integrationId", integrationId).append("createdAt",

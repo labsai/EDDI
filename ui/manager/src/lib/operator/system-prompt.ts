@@ -2246,7 +2246,7 @@ your tool schemas do not cover it, not as a routine first step:
   and limits are never reviewable. emailControl.review: expiry (ISO-8601,
   default P7D, at most the ledger retention minus a day; then review_expired),
   maxHeldPerDay (50) and maxHeldPerSenderDomainPerDay (5; beyond: refused
-  review_full), reviewers (user ids or role:<name>; default the editors and
+  review_full), reviewers (role:eddi-approver, role:eddi-editor, role:eddi-admin, or user ids of people holding one; default the editors and
   eddi-approver). List it with GET /channelstore/channels/{id}/email-held
   (rowId, sender, authVerdict, heldFor, expiresAt, runAndAllowOffered,
   runsAnonymously). You do not read held mail's content and never decide it:

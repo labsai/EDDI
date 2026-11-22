@@ -57,3 +57,30 @@ whether it is processed at all. Documented in [email-integration.md](../email-in
   this base. Reviewer principals' own addresses: EDDI cannot look them up, so notices go to `ownerNotifyAddresses`.
 - `email.anonymous-tools` does not name the tools yet; Slack held-mail cards wait for #1438; the GDPR cascade over
   `email-anon:` conversations named by ledger rows (§13) is open.
+
+## ✉️ fix(email): held-mail review follow-ups — v3 phase C3 (2026-11-22)
+
+**Repo:** EDDI · **Branch:** `feat/email-held-mail`
+
+Fixes from the independent review of the C3 commits.
+
+- **A released mail's temporary-DNS grace counts from its release** (`EmailInboundProcessor.temporaryGraceStart`): the
+  review value records the release time (`released:<decision>:<reasons>[:anon]:<epochSecond>`), so a DKIM tempfail on
+  the run of a mail released days after arrival defers it instead of refusing it — and losing a `runAndAllow`.
+- **Per-domain caps count only aligned-pass mail.** `countHeldSince(integration, domain, aligned, since)`: forged From
+  addresses share one bucket and cannot use up a real domain's share. The caps count by the new `heldAt` (Mongo field,
+  Postgres column `held_at`, `ADD COLUMN IF NOT EXISTS`), not by arrival.
+- **Tainted turns cannot read held mail.** `list_held_email` is on `EscalationGuard.GUARDED_TOOLS`; the REST list,
+  preview and cross-integration read refuse an `origin=email` turn.
+- **`role:` reviewers** must name `eddi-admin`, `eddi-editor` or `eddi-approver` (validated at save): the held-mail
+  endpoints admit only those roles, so any other would silently do nothing. Docs, UI hint (11 locales) and operator
+  prompt say so (operator revision bumped).
+- Smaller: the effective anonymity of a run is written onto the row (`:anon`), so the reply door refuses by the row
+  alone; a release extends the row's retention; a mail held on resubmission is counted and announced; held-mail notices
+  name hours for sub-day expiries and are re-tried on the next hour's poll when mail was held after this hour's notice
+  (`IEmailMailboxStateStore.noticeClaimedAt`); a non-editor gets the same 403 for an unknown integration as for one they
+  do not review; `runAndAllowOffered` considers the caller's EDIT right; the Manager polls held mail only for the roles
+  that may read it and stops on a refusal.
+
+**Rolling out:** older nodes cannot read `HELD` rows (an unknown state fails their row mapping). In a mixed-version
+cluster, upgrade every node before setting any `emailControl.onRefused` value to `review`.

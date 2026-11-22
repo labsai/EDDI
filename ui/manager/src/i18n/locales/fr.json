@@ -6072,6 +6072,6 @@
     "maxPerDay": "Courriels retenus par jour au maximum",
     "maxPerDomain": "Au maximum par domaine d'expéditeur et par jour",
     "reviewers": "Réviseurs",
-    "reviewersHint": "Identifiants d'utilisateur ou role:<nom>, en plus des éditeurs de cette intégration. Vide : eddi-approver. Exécuter et autoriser exige toujours le droit de modification."
+    "reviewersHint": "En plus des éditeurs de cette intégration : role:eddi-approver, role:eddi-editor ou role:eddi-admin, ou les identifiants de personnes ayant l'un de ces rôles. Vide : eddi-approver. Exécuter et autoriser exige toujours le droit de modification."
   }
 }

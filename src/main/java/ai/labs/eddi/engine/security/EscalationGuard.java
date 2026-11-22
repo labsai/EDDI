@@ -69,6 +69,8 @@ public final class EscalationGuard {
             "update_email_senders",
             // held-mail decisions (C3): a mail must never release itself or its kin
             "decide_held_email",
+            // held-mail reads (C3): other senders' untrusted text, never for a mail turn
+            "list_held_email",
             // later phases of the email control plan, guarded before they exist
             "update_email_roles", "update_email_send_out",
             // HITL decisions (McpHitlTools)

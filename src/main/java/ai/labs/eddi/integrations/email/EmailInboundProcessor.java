@@ -327,7 +327,9 @@ public class EmailInboundProcessor {
             LOGGER.infof("Email integration %s: mail %s is its own self-test; settled without a turn", sanitize(id), row.id());
             return Disposition.SETTLED;
         }
-        if (authentication.temporary() && !authentication.isAuthenticated() && row.createdAt().plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
+        // A released mail gets its grace from the moment it was released, not from its
+        // arrival days earlier: a DNS hiccup on its run must not cost the decision.
+        if (authentication.temporary() && !authentication.isAuthenticated() && temporaryGraceStart(row).plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
             return defer(ctx, row, now.plus(RETRY_SHORT), "auth_temporary", EmailMetrics.DEFERRED, now);
         }
         parsed = parsed.withAuthentication(authentication);
@@ -377,6 +379,15 @@ public class EmailInboundProcessor {
         }
         if (!authenticated && settings.requireAuthentication() && !releasedFor.contains(EmailReviewState.UNAUTHENTICATED)) {
             failing.add(EmailReviewState.UNAUTHENTICATED);
+        }
+        if (failing.isEmpty() && anonymousRelease && !EmailReviewState.anonymousReleaseMarked(row.review())) {
+            // The effective anonymity goes onto the row, so the reply door refuses every
+            // outgoing mail of it by the row alone — also when the live verdict, not the
+            // stored one, made the run anonymous.
+            String marked = EmailReviewState.markedAnonymous(row.review());
+            if (ledger.transitionReview(row.id(), State.RECEIVED, State.RECEIVED, marked, null, null, row.nextAttemptAt(), row.lastError(), now)) {
+                row = ledger.findById(row.id()).orElse(row);
+            }
         }
         if (!failing.isEmpty()) {
             if (!released && reviewable(failing, settings)) {
@@ -687,6 +698,15 @@ public class EmailInboundProcessor {
     }
 
     /**
+     * Where the temporary-authentication grace of {@code row} starts: its release
+     * for a mail a reviewer released, else its arrival.
+     */
+    static Instant temporaryGraceStart(LedgerEntry row) {
+        Instant released = EmailReviewState.releasedAt(row.review());
+        return released != null ? released : row.createdAt();
+    }
+
+    /**
      * Whether every failing reviewable check is set to {@code review}
      * ({@code emailControl.onRefused}).
      */
@@ -723,12 +743,16 @@ public class EmailInboundProcessor {
         EmailChannelSettings settings = ctx.settings();
         Instant today = startOfUtcDay(now);
         try {
-            if (ledger.countHeldSince(id, null, today) >= settings.maxHeldPerDay()) {
+            if (ledger.countHeldSince(id, null, null, today) >= settings.maxHeldPerDay()) {
                 ownerNotifier.notifyOnce(id, ctx.integration().getName(), settings, Reason.REVIEW_FULL, now);
                 return refuse(ctx, row, EmailReviewState.REVIEW_FULL, EmailMetrics.REVIEW_FULL, now);
             }
+            // The per-domain share counts only mail whose From authenticated: forged mail
+            // claiming partner.com must not use up partner.com's share. Unauthenticated
+            // mail shares one bucket, whatever domain it claims.
+            boolean aligned = authentication.isAuthenticated();
             String domain = sender.substring(sender.lastIndexOf('@') + 1);
-            if (ledger.countHeldSince(id, domain, today) >= settings.maxHeldPerSenderDomainPerDay()) {
+            if (ledger.countHeldSince(id, domain, aligned, today) >= settings.maxHeldPerSenderDomainPerDay()) {
                 return refuse(ctx, row, EmailReviewState.REVIEW_FULL_DOMAIN, EmailMetrics.REVIEW_FULL, now);
             }
         } catch (RuntimeException e) {
@@ -753,12 +777,20 @@ public class EmailInboundProcessor {
      * one per hour per integration ({@link EmailOwnerNotifier#notifyHeld}).
      */
     public void notifyHeld(IntegrationContext ctx, int heldThisPoll, Instant now) {
-        if (heldThisPoll <= 0) {
-            return;
-        }
         try {
-            ownerNotifier.notifyHeld(ctx.integrationId(), ctx.integration().getName(), ctx.settings(), heldThisPoll,
-                    ledger.findHeld(ctx.integrationId(), EmailOwnerNotifier.MAX_HELD_COUNTED).size(), now);
+            // Asked on every poll, not only one that held mail: a mail held just after
+            // this hour's notice is announced on a poll of the next hour.
+            List<LedgerEntry> waiting = ledger.findHeld(ctx.integrationId(), EmailOwnerNotifier.MAX_HELD_COUNTED);
+            Instant newest = null;
+            for (LedgerEntry row : waiting) {
+                if (row.heldAt() != null && (newest == null || row.heldAt().isAfter(newest))) {
+                    newest = row.heldAt();
+                }
+            }
+            if (newest == null) {
+                return;
+            }
+            ownerNotifier.notifyHeld(ctx.integrationId(), ctx.integration().getName(), ctx.settings(), waiting.size(), newest, now);
         } catch (RuntimeException e) {
             LOGGER.warnf("Email integration %s: the held-mail notice could not be sent: %s", sanitize(ctx.integrationId()), e.getMessage());
         }

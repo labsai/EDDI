@@ -191,7 +191,7 @@ class RestChannelIntegrationStoreHeldMailTest {
         assertEquals("*@supplier.com," + STRANGER, saved.getValue().getPlatformConfig().get("senderAllowlist"));
         LedgerEntry after = ledger.findById(row.id()).orElseThrow();
         assertEquals(State.RECEIVED, after.state());
-        assertEquals("released:runAndAllow:not_allowlisted", after.review());
+        assertTrue(after.review().startsWith("released:runAndAllow:not_allowlisted:"), after.review());
         verify(audit).heldMailDecided(eq(ID), eq(row.id()), eq("runAndAllow"), any(), eq("aligned-pass"), eq(STRANGER), eq("known partner"));
     }
 
@@ -220,7 +220,7 @@ class RestChannelIntegrationStoreHeldMailTest {
         verify(channelStore, never()).update(anyString(), anyInt(), any());
 
         assertEquals(200, sut.decideHeldEmail(ID, once.id(), decision("runOnce")).getStatus());
-        assertEquals("released:runOnce:not_allowlisted", ledger.findById(once.id()).orElseThrow().review());
+        assertTrue(ledger.findById(once.id()).orElseThrow().review().startsWith("released:runOnce:not_allowlisted:"));
     }
 
     @Test
@@ -229,6 +229,7 @@ class RestChannelIntegrationStoreHeldMailTest {
         when(guard.hasAccess(ID, AccessLevel.EDIT)).thenReturn(false);
         when(identity.hasRole("eddi-approver")).thenReturn(true);
         when(channelStore.read(ID, 3)).thenReturn(email(List.of("role:mail-desk", "dave")));
+        // (A role other than the three is refused at save; at runtime it is honoured.)
         LedgerEntry row = held(ID, "fail");
 
         assertThrows(ForbiddenException.class, () -> sut.decideHeldEmail(ID, row.id(), decision("discard")));
@@ -269,6 +270,43 @@ class RestChannelIntegrationStoreHeldMailTest {
 
         assertEquals(409, refused.getResponse().getStatus());
         assertTrue(String.valueOf(refused.getResponse().getEntity()).contains("added to the allowlist"));
+    }
+
+    @Test
+    @DisplayName("a conversation an email started cannot read held mail either: list, preview and the cross-integration read")
+    void taintedTurnCannotRead() throws Exception {
+        LedgerEntry row = held(ID, "aligned-pass");
+
+        assertThrows(ForbiddenException.class, () -> TurnOrigin.callWith(TurnOrigin.EMAIL, () -> sut.readHeldEmailPreview(ID, row.id())));
+        assertThrows(ForbiddenException.class, () -> TurnOrigin.callWith(TurnOrigin.EMAIL, () -> sut.readHeldEmail(ID, 50)));
+        assertThrows(ForbiddenException.class, () -> TurnOrigin.callWith(TurnOrigin.EMAIL, () -> sut.readAllHeldEmail(50)));
+    }
+
+    @Test
+    @DisplayName("a non-editor gets the same 403 for an unknown integration as for one they do not review; run-and-allow is not offered")
+    void noExistenceOracleAndNoOfferWithoutEdit() throws Exception {
+        String unknown = "999999999999999999999999";
+        when(guard.hasAccess(ID, AccessLevel.EDIT)).thenReturn(false);
+        when(channelStore.getCurrentResourceId(unknown)).thenThrow(new IResourceStore.ResourceNotFoundException("gone"));
+        assertThrows(ForbiddenException.class, () -> sut.readHeldEmail(unknown, 50));
+        assertThrows(ForbiddenException.class, () -> sut.readHeldEmail(ID, 50), "not an approver either");
+
+        when(identity.hasRole("eddi-approver")).thenReturn(true);
+        held(ID, "aligned-pass");
+        assertTrue(sut.readHeldEmail(ID, 50).items().stream().noneMatch(EmailHeldMailView.Item::runAndAllowOffered),
+                "an approver without EDIT cannot run and allow");
+        when(guard.hasAccess(ID, AccessLevel.EDIT)).thenReturn(true);
+        assertTrue(sut.readHeldEmail(ID, 50).items().stream().allMatch(EmailHeldMailView.Item::runAndAllowOffered));
+    }
+
+    @Test
+    @DisplayName("a release extends the row's retention and records when it happened")
+    void releaseExtendsRetention() throws Exception {
+        LedgerEntry row = held(ID, "aligned-pass");
+        sut.decideHeldEmail(ID, row.id(), decision("runOnce"));
+        LedgerEntry after = ledger.findById(row.id()).orElseThrow();
+        assertTrue(after.expiresAt().isAfter(Instant.now().plus(Duration.ofDays(29))), String.valueOf(after.expiresAt()));
+        assertTrue(EmailReviewState.releasedAt(after.review()) != null, after.review());
     }
 
     @Test

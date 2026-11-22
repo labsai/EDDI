@@ -355,6 +355,23 @@ class EmailMailboxPollerTest {
     }
 
     @Test
+    @DisplayName("a handed-back mail that is held on resubmission is counted and announced")
+    void resubmissionHeld() {
+        initialise(0);
+        Instant now = Instant.now();
+        var back = new LedgerEntry("row-back", ID, Kind.TRIGGER, Direction.IN, "<back@x.com>", "conv-1", "imap:INBOX:1:8", "in:back", "a@x.com",
+                State.RECEIVED, 1, now, null, null, "resubmit", now, now, now.plus(Duration.ofDays(30)));
+        when(processor.pendingResubmissions(eq(ID), any())).thenReturn(List.of(back));
+        transport.byMessageId.put("<back@x.com>", new MailTransport.FoundMessage(EmailTestMail.mail().bytes(), now, "imap:INBOX:1:8"));
+        dispositions.put(-1L, Disposition.HELD); // a refetched message has no UID
+
+        var report = poller.poll(ID);
+
+        verify(processor).notifyHeld(argThat(ctx -> ID.equals(ctx.integrationId())), eq(1), any());
+        assertTrue(report.message().contains("1 held"), report.message());
+    }
+
+    @Test
     @DisplayName("the processor is never asked about mail without its integration context")
     void contextCarriesIntegration() {
         initialise(0);

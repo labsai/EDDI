@@ -275,11 +275,23 @@ public class EmailOwnerNotifier {
      *
      * @return whether this call was the one that notified
      */
-    public boolean notifyHeld(String integrationId, String integrationName, EmailChannelSettings settings, int heldNow, int waiting, Instant now) {
-        String hour = now.atZone(ZoneOffset.UTC).toLocalDateTime().truncatedTo(ChronoUnit.HOURS).toString();
+    public boolean notifyHeld(String integrationId, String integrationName, EmailChannelSettings settings, int waiting, Instant newestHeldAt,
+                              Instant now) {
+        if (newestHeldAt == null || waiting <= 0) {
+            return false;
+        }
+        String hour = heldNoticeKey(now);
         boolean claimed;
         try {
-            claimed = stateStore.claimNotice(integrationId, hour + ":held", now);
+            // Nothing held since the last notice (this hour's or the last one's):
+            // nothing to say. Held later than it: say so, but at most once per hour — a
+            // mail held just after this hour's notice is announced by the next hour's.
+            Instant last = later(stateStore.noticeClaimedAt(integrationId, hour).orElse(null),
+                    stateStore.noticeClaimedAt(integrationId, heldNoticeKey(now.minus(Duration.ofHours(1)))).orElse(null));
+            if (last != null && !newestHeldAt.isAfter(last)) {
+                return false;
+            }
+            claimed = stateStore.claimNotice(integrationId, hour, now);
         } catch (RuntimeException e) {
             LOGGER.warnf("Email integration %s: could not record the held-mail notice: %s", sanitize(integrationId), e.getMessage());
             return false;
@@ -287,7 +299,7 @@ public class EmailOwnerNotifier {
         if (!claimed) {
             return false;
         }
-        LOGGER.infof("Email integration %s: %d mail(s) held for review, %d waiting.", sanitize(integrationId), heldNow, waiting);
+        LOGGER.infof("Email integration %s: %d mail(s) held for review are waiting.", sanitize(integrationId), waiting);
         if (mailer == null || !mailer.isEnabled() || settings == null || settings.ownerNotifyAddresses().isEmpty()) {
             return true;
         }
@@ -298,11 +310,11 @@ public class EmailOwnerNotifier {
         String name = flatten(integrationName == null ? integrationId : integrationName);
         String link = approvalsUrl();
         String subject = "[EDDI] Mail held for review: " + name;
-        String text = "The email integration '" + name + "' (" + integrationId + ") held " + heldNow + " mail(s) for review instead of "
-                + "dropping them; " + (waiting >= MAX_HELD_COUNTED ? MAX_HELD_COUNTED + " or more" : String.valueOf(waiting))
+        String text = "The email integration '" + name + "' (" + integrationId + ") held mail for review instead of dropping it: "
+                + (waiting >= MAX_HELD_COUNTED ? MAX_HELD_COUNTED + " or more" : String.valueOf(waiting))
                 + " are waiting for a decision.\n\nDecide them (discard, run once, or run and allow the sender) in the EDDI Manager"
-                + (link == null ? ", on the Approvals page." : ": " + link) + "\nUndecided mail is dropped after "
-                + settings.reviewExpiry().toDays() + " day(s). No content of any mail is included here.\n";
+                + (link == null ? ", on the Approvals page." : ": " + link) + "\nUndecided mail is dropped after " + describe(settings.reviewExpiry())
+                + ". No content of any mail is included here.\n";
         for (String address : settings.ownerNotifyAddresses()) {
             Optional<String> recipient = AddressNormalizer.tryNormalize(address);
             if (recipient.isEmpty()) {
@@ -315,6 +327,19 @@ public class EmailOwnerNotifier {
             deliver(integrationId, "held", hour, from, recipient.get(), subject, text, now);
         }
         return true;
+    }
+
+    static String heldNoticeKey(Instant at) {
+        return at.atZone(ZoneOffset.UTC).toLocalDateTime().truncatedTo(ChronoUnit.HOURS) + ":held";
+    }
+
+    private static Instant later(Instant a, Instant b) {
+        return a == null ? b : b == null || a.isAfter(b) ? a : b;
+    }
+
+    /** "7 day(s)", or "12 hour(s)" for an expiry under a day. */
+    static String describe(Duration expiry) {
+        return expiry.toDays() >= 1 && expiry.toHours() % 24 == 0 ? expiry.toDays() + " day(s)" : Math.max(1, expiry.toHours()) + " hour(s)";
     }
 
     /**

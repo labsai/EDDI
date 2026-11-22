@@ -74,6 +74,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_AUTH_VERDICT = "authVerdict";
     /** Inbound rows held for review: where the review stands. */
     static final String F_REVIEW = "review";
+    /** Inbound rows held for review: when they were held. */
+    static final String F_HELD_AT = "heldAt";
 
     private final MongoCollection<Document> rows;
 
@@ -98,6 +100,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 new IndexOptions().name("idx_email_ledger_approval").sparse(true));
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_STATE), Indexes.ascending(F_CREATED)),
                 new IndexOptions().name("idx_email_ledger_held"));
+        rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_HELD_AT)),
+                new IndexOptions().name("idx_email_ledger_held_at").sparse(true));
     }
 
     @Override
@@ -252,7 +256,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean transitionReview(String id, State from, State to, String review, String authVerdict, String contentHash, Instant nextAttemptAt,
-                                    String lastError, Instant now) {
+                                    String lastError, Instant expiresAt, Instant now) {
         List<Bson> updates = new ArrayList<>();
         updates.add(Updates.set(F_STATE, to.name()));
         updates.add(Updates.set(F_REVIEW, IEmailMessageLedger.cap(review, MAX_REVIEW)));
@@ -264,6 +268,12 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         }
         if (contentHash != null) {
             updates.add(Updates.set(F_CONTENT_HASH, contentHash));
+        }
+        if (to == State.HELD) {
+            updates.add(Updates.set(F_HELD_AT, Date.from(now)));
+        }
+        if (expiresAt != null) {
+            updates.add(Updates.max(F_EXPIRES, Date.from(expiresAt)));
         }
         return rows.updateOne(Filters.and(Filters.eq(F_ID, id), Filters.eq(F_STATE, from.name())), Updates.combine(updates))
                 .getModifiedCount() == 1;
@@ -280,11 +290,16 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
-    public long countHeldSince(String integrationId, String senderDomain, Instant since) {
+    public long countHeldSince(String integrationId, String senderDomain, Boolean aligned, Instant since) {
         List<Bson> filters = new ArrayList<>(List.of(Filters.eq(F_INTEGRATION, integrationId), Filters.eq(F_KIND, Kind.TRIGGER.name()),
-                Filters.gte(F_CREATED, Date.from(since)), Filters.ne(F_REVIEW, null)));
-        if (senderDomain != null) {
-            filters.add(Filters.regex(F_RECIPIENT, "@" + Pattern.quote(senderDomain) + "$"));
+                Filters.gte(F_HELD_AT, Date.from(since))));
+        if (Boolean.TRUE.equals(aligned)) {
+            filters.add(Filters.eq(F_AUTH_VERDICT, EmailReviewState.ALIGNED_PASS));
+            if (senderDomain != null) {
+                filters.add(Filters.regex(F_RECIPIENT, "@" + Pattern.quote(senderDomain) + "$"));
+            }
+        } else if (Boolean.FALSE.equals(aligned)) {
+            filters.add(Filters.ne(F_AUTH_VERDICT, EmailReviewState.ALIGNED_PASS));
         }
         return rows.countDocuments(Filters.and(filters));
     }
@@ -365,7 +380,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 .append(F_CREATED, date(entry.createdAt())).append(F_UPDATED, date(entry.updatedAt())).append(F_EXPIRES, date(entry.expiresAt()))
                 .append(F_APPROVAL, IEmailMessageLedger.cap(entry.approvalState(), MAX_APPROVAL_STATE)).append(F_CONTENT_HASH, entry.contentHash())
                 .append(F_SIGNED, entry.signed()).append(F_AUTH_VERDICT, IEmailMessageLedger.cap(entry.authVerdict(), MAX_AUTH_VERDICT))
-                .append(F_REVIEW, IEmailMessageLedger.cap(entry.review(), MAX_REVIEW));
+                .append(F_REVIEW, IEmailMessageLedger.cap(entry.review(), MAX_REVIEW)).append(F_HELD_AT, date(entry.heldAt()));
     }
 
     static LedgerEntry toEntry(Document document) {
@@ -376,7 +391,8 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
                 State.valueOf(document.getString(F_STATE)), attempts == null ? 0 : attempts, instant(document.getDate(F_NEXT)),
                 document.getString(F_CLAIM), document.getString(F_PROVIDER), document.getString(F_ERROR), instant(document.getDate(F_CREATED)),
                 instant(document.getDate(F_UPDATED)), instant(document.getDate(F_EXPIRES)), document.getString(F_APPROVAL),
-                document.getString(F_CONTENT_HASH), document.getBoolean(F_SIGNED), document.getString(F_AUTH_VERDICT), document.getString(F_REVIEW));
+                document.getString(F_CONTENT_HASH), document.getBoolean(F_SIGNED), document.getString(F_AUTH_VERDICT), document.getString(F_REVIEW),
+                instant(document.getDate(F_HELD_AT)));
     }
 
     private static Date date(Instant instant) {
