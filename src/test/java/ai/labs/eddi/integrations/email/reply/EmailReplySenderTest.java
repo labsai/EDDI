@@ -384,6 +384,36 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("a reply that cannot be signed under sign: required is held — never FAILED, no attempt spent, owners told")
+        void unsignableReplyIsHeld() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            for (int i = 0; i < 20; i++) {
+                transport.failures.add(new MailSendException(MailSendException.Category.SIGNING, false, "smime_unavailable: expired", null));
+            }
+            var row = sender.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, answered("Ships Monday."), NOW).orElseThrow();
+            when(conversations.readConversation(CONVERSATION, true, false, List.of())).thenReturn(answered("Ships Monday."));
+
+            Instant at = NOW;
+            for (int sweep = 0; sweep < 10; sweep++) {
+                LedgerEntry held = ledger.findById(row.id()).orElseThrow();
+                assertEquals(State.PENDING, held.state(), "held, not failed, after sweep " + sweep);
+                assertEquals(0, held.attempts(), "a hold spends no attempt");
+                assertTrue(held.lastError().startsWith("smime_unavailable"), held.lastError());
+                at = held.nextAttemptAt().plusSeconds(1);
+                sender.sweep(at);
+            }
+            assertTrue(transport.recipients.isEmpty(), "nothing was sent unsigned");
+            verify(ownerNotifier, atLeastOnce()).notifyOnce(eq(INTEGRATION), any(), any(), eq(EmailOwnerNotifier.Reason.SMIME_UNAVAILABLE), any());
+            assertTrue(registry.get("eddi.email.outbound").tag("outcome", "held").counter().count() >= 10);
+
+            transport.failures.clear();
+            sender.sweep(ledger.findById(row.id()).orElseThrow().nextAttemptAt().plusSeconds(1));
+            LedgerEntry sent = ledger.findById(row.id()).orElseThrow();
+            assertEquals(State.SENT, sent.state(), "sent once the certificate is fixed");
+            assertEquals(Boolean.FALSE, sent.signed());
+        }
+
+        @Test
         @DisplayName("a permanent refusal ends FAILED and notifies the owners; so does the last attempt")
         void failed() {
             LedgerEntry inbound = storedInbound(State.DONE);

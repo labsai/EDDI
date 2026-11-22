@@ -47,7 +47,7 @@ public class SmimeSignerTest {
     /**
      * Verifies with Bouncy Castle directly; returns whether every signer verifies.
      */
-    static boolean bouncyCastleVerifies(byte[] raw) throws Exception {
+    public static boolean bouncyCastleVerifies(byte[] raw) throws Exception {
         MimeMessage message = parse(raw);
         SMIMESigned signed = new SMIMESigned((MimeMultipart) message.getContent());
         Collection<SignerInformation> signers = signed.getSignerInfos().getSigners();

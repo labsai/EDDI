@@ -303,15 +303,14 @@ public class EmailInboundProcessor {
 
         // 5. Who sent it — or rather, whether the From can be believed.
         MailAuthentication authentication = authenticator.authenticate(raw, parsed, message.internalDate(), null);
-        if (authentication.temporary() && !authentication.isAuthenticated() && row.createdAt().plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
-            return defer(ctx, row, now.plus(RETRY_SHORT), "auth_temporary", EmailMetrics.DEFERRED, now);
-        }
-        parsed = parsed.withAuthentication(authentication);
-        boolean authenticated = authentication.isAuthenticated();
 
         // 5a. The integration's own sending-health self-test (v3 plan §6.5), before the
-        // own-address refusal: recorded and settled here, never a turn. A replayed or
-        // expired token is not recognised and meets the own-address refusal below.
+        // temporary-verdict deferral (a DNS failure is one of the things it reports,
+        // and
+        // the test closes after 15 minutes) and before the own-address refusal:
+        // recorded
+        // and settled here, never a turn. A replayed or expired token is not recognised
+        // and meets the own-address refusal below.
         if (selfTest != null && selfTest.isResolvable() && selfTest.get().recognize(id, settings, parsed, raw, authentication, now)) {
             // REFUSED, not DONE: DONE counts as a turn (per-sender limits, thread lookup).
             finish(row, State.REFUSED, EmailSelfTest.SETTLED_REASON, now);
@@ -319,6 +318,11 @@ public class EmailInboundProcessor {
             LOGGER.infof("Email integration %s: mail %s is its own self-test; settled without a turn", sanitize(id), row.id());
             return Disposition.SETTLED;
         }
+        if (authentication.temporary() && !authentication.isAuthenticated() && row.createdAt().plus(MAX_TEMPORARY_DEFERRAL).isAfter(now)) {
+            return defer(ctx, row, now.plus(RETRY_SHORT), "auth_temporary", EmailMetrics.DEFERRED, now);
+        }
+        parsed = parsed.withAuthentication(authentication);
+        boolean authenticated = authentication.isAuthenticated();
 
         // 6. Delivery reports for replies this integration sent, then loops, lists,
         // authentication requirement. A report is still refused as a loop: it is

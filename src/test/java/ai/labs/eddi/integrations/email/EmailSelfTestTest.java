@@ -183,6 +183,12 @@ class EmailSelfTestTest {
         IConversationService conversations;
         EmailInboundProcessor processor;
         MailAuthentication verdict;
+        SimpleMeterRegistry inboundMeters;
+
+        double inbound(String outcome) {
+            var counter = inboundMeters.find(EmailMetrics.INBOUND).tag("outcome", outcome).counter();
+            return counter == null ? 0 : counter.count();
+        }
 
         @BeforeEach
         @SuppressWarnings("unchecked")
@@ -191,11 +197,12 @@ class EmailSelfTestTest {
             SenderAuthenticator authenticator = mock(SenderAuthenticator.class);
             verdict = new MailAuthentication(MailAuthentication.Verdict.PASS_UNALIGNED, "contoso-com.20230601.gappssmtp.com");
             when(authenticator.authenticate(any(), any(), any(), any())).thenAnswer(invocation -> verdict);
+            inboundMeters = new SimpleMeterRegistry();
             processor = new EmailInboundProcessor(ledger, new InMemoryEmailMailboxStateStore(), new MimeMessageParser(new HtmlToMarkdownConverter()),
                     authenticator, conversations, mock(IGroupConversationService.class), new EmailInboundProcessorTest.FakeUserConversations(),
                     new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build()), mock(Instance.class),
                     mock(EmailOwnerNotifier.class), mock(EmailReplySender.class), mock(Instance.class), mock(GdprPseudonymizer.class),
-                    new SimpleMeterRegistry(), Duration.ofMinutes(30), Duration.ofDays(30));
+                    inboundMeters, Duration.ofMinutes(30), Duration.ofDays(30));
             Instance<EmailSelfTest> instance = mock(Instance.class);
             when(instance.isResolvable()).thenReturn(true);
             when(instance.get()).thenReturn(selfTest);
@@ -241,6 +248,24 @@ class EmailSelfTestTest {
                     && f.text().contains("signs as contoso-com.20230601.gappssmtp.com, not contoso.com")));
             assertTrue(result.findings().stream().anyMatch(f -> f.code().equals("dmarc.present")));
             assertNull(result.token(), "the token is shown only when the test starts");
+            // Settled by the self-test branch itself, not by the loop guard behind it.
+            assertEquals(1.0, inbound(EmailMetrics.SELF_TEST));
+            assertEquals(0.0, inbound(EmailMetrics.LOOP));
+        }
+
+        @Test
+        @DisplayName("a temporary DNS failure does not defer the test mail past its 15 minutes: it is recorded at once")
+        void temporaryVerdictStillRecorded() {
+            verdict = new MailAuthentication(MailAuthentication.Verdict.FAIL, null, "dns lookup failed", true, List.of());
+            var started = selfTest.start(INTEGRATION, settings(WITH_SMTP));
+
+            assertEquals(Disposition.SETTLED, processor.process(context(), polled(transport.sent.get(0), 1), now.plusSeconds(60)));
+
+            verifyNoInteractions(conversations);
+            var result = selfTest.read(INTEGRATION, started.token()).orElseThrow();
+            assertEquals(EmailSelfTestResult.DONE, result.status());
+            assertTrue(result.checks().dnsTemporary());
+            assertEquals("dkim.dns-temporary", result.findings().get(0).code());
         }
 
         @Test
