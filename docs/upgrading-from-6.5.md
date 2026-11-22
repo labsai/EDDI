@@ -297,7 +297,7 @@ From 6.7.1, the EDDI image adds the flag to `JDK_JAVA_OPTIONS`, and the Keycloak
 
 ### Behaviour changes in 6.7.1
 
-Besides the Java4Shell flag above, 6.7.1 changes five things a working 6.7.0 deployment can notice:
+Besides the Java4Shell flag above, 6.7.1 changes these things a working 6.7.0 deployment can notice:
 
 - **Tools generated from an OpenAPI spec.** A query parameter the spec does not mark as required is now an
   optional tool argument, and an empty value is left off the request instead of being sent as `?name=`. An operation
@@ -308,14 +308,39 @@ Besides the Java4Shell flag above, 6.7.1 changes five things a working 6.7.0 dep
 - **`chat_managed` (MCP) picks a random deployment** of the intent's trigger for a new conversation, as the REST
   managed-conversation endpoint already did, instead of always the first. A trigger with one deployment is unaffected.
 - **Unknown words in the expression string.** Input the parser does not recognise is stored as `unknown(...)` with
-  the characters `(`, `)` and `,` removed, so a message with stray parentheses no longer fails the turn. A behavior
-  rule that matched those characters inside `unknown(...)` no longer sees them.
+  the characters `(`, `)`, `,` and `*` removed, so a message with stray parentheses no longer fails the turn. This
+  also closes an expression injection in 6.7.0: a single chat word such as `),confirm(yes),x` used to parse into a
+  top-level `confirm(yes)` and fire the rule that listens for it, and a lone `*` became the wildcard `unknown(*)`,
+  which matches every rule written as `unknown(x)`. A behavior rule that matched those characters inside
+  `unknown(...)` no longer sees them, and a message that is only one of them (a lone `*` or `)`) becomes a bare
+  `unknown`, which a catch-all `unknown(*)` rule does not match.
+- **Workspaces: resources that predate ownership.** With workspaces on (`eddi.workspaces.enabled=true`) and
+  `legacy-visibility=shared`, a resource with no owner made every caller its owner, so any editor could delete it,
+  publish it to anonymous callers or move it into their own space. Every caller now gets at most edit access to such
+  a resource: reading, using, editing and deploying still work, but delete, share, visibility and move are
+  admin-only until an owner is assigned with `PUT /descriptorstore/descriptors/{id}/shares/owner`. Explicit grants
+  still count in full. See [Resources that predate ownership](workspaces.md#resources-that-predate-ownership).
+- **Mail and web ingestion.** HTML nested more than eight blockquotes or list levels deep keeps its text but loses
+  the `>` and indent markers past the eighth level; on 6.7.0 one deeply quoted mail of a few hundred kilobytes could
+  allocate hundreds of megabytes. A hiding rule inside `@media screen`, `@media all`, `@layer` or `@supports` now
+  hides text from the model, as a top-level rule does. A crawled link with a raw space is now fetched.
+- **Import and sync.** A merge import or sync whose update the store refuses (an invalid dictionary regex, say) now
+  fails with the store's error and rolls back (a refused prompt snippet is skipped instead, and the import
+  continues); 6.7.0 reported success and stored the document as a duplicate. A
+  `sourceAgentId` on sync and preview must be a hex id or a UUID; any other value is refused with 400.
+- **Helm: the Keycloak image digest.** Chart 2.14.2 pins `keycloak.image.digest`, and the digest wins over the tag.
+  A values file that overrides only `keycloak.image.tag` (or `repository`, for a mirror) keeps running the pinned
+  26.8.2 build or fails to pull. Set `keycloak.image.digest` to the digest of the image you mean, or clear it with
+  `--set keycloak.image.digest=""`.
 - **Platform Operator.** Activation works again on a fresh install or upgrade (the `setup-api` prompt cap is
   250,000 characters, up from 100,000), and the operator revision becomes 62, so the Manager reports that existing
   operators should be upgraded.
-- **Model catalog.** The model pickers suggest Claude Fable 5.2, GPT-6.2, Gemini 4 and Kimi K3.1, and the Gemini,
-  Vertex and Mistral pickers no longer suggest `gemini-2.5-pro`, `gemini-2.5-flash`, `mistral-large-2512` or
-  `mistral-medium-3-5`; agents that name those
-  models keep running. Gemini `thinkingLevel` accepts `xhigh` on Gemini 4 Neon and Hydrogen. Cost tracking prices
-  `claude-fable-5-2` at $8 / $40 per million input / output tokens instead of the `claude-fable-5*` fallback of
-  $10 / $50.
+- **Model catalog.** The model pickers suggest Claude Fable 5.2, GPT-6.2, Gemini 4 and Kimi K3.1, and the Gemini
+  and Mistral pickers no longer suggest `gemini-2.5-pro`, `gemini-2.5-flash`, `mistral-large-2512` or
+  `mistral-medium-3-5`; agents that name those models keep running. Gemini `thinkingLevel` accepts `xhigh` on
+  Gemini 4 Neon and Hydrogen. Cost tracking prices `claude-fable-5-2` at $8 / $40 per million input / output tokens
+  instead of the `claude-fable-5*` fallback of $10 / $50, and gains reference prices for the Claude Mythos ids.
+  **The new GPT-6.2 and Gemini 4 suggestions have no reference price.** Under the default `unpricedPolicy: ALLOW`
+  their calls cost $0, so budgets and `maxCostPerConversationUsd` do not see them; `REFUSE_WHEN_BUDGETED` refuses
+  them while a dollar ceiling applies, and `REFUSE` always. Add a price for the model you use, as
+  [Model pricing → The deployment price catalog](model-pricing.md#the-deployment-price-catalog) describes, before relying on a budget for it.

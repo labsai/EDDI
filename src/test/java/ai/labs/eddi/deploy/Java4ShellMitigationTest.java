@@ -39,8 +39,8 @@ import static org.junit.jupiter.api.Assertions.fail;
  * <p>
  * Dropping the flag fails nothing else: the JVM runs, every test passes, and
  * the host is exposed again. So this test pins it in each of the five places.
- * <b>When the pinned images carry a fixed JDK, remove the flag from all five
- * and delete this test in the same change.</b>
+ * <b>When the flag is no longer wanted as a second line of defence, remove it
+ * from all five and delete this test in the same change.</b>
  *
  * <p>
  * Plain file reads, no Docker, so it runs in the ordinary {@code mvn test}.
