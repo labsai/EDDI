@@ -113,6 +113,14 @@ public class WebCrawler {
     private static final int MAX_SITEMAPS = 20;
 
     /**
+     * Distinct documents remembered as linked only through a URL too long to fetch.
+     * Each costs the sink a lookup after the crawl, so a site cannot plant
+     * millions; past this, discovery is incomplete and deletions are not
+     * reconciled.
+     */
+    static final int MAX_OVERSIZED_LINKS = 1_000;
+
+    /**
      * Hard ceiling on the frontier. Reached only by a site whose URL space is
      * generated rather than authored; past it, a crawl is collecting URLs it can
      * never fetch within any budget an operator can configure.
@@ -254,8 +262,10 @@ public class WebCrawler {
             frontier.releaseDeferred(candidate.canonicalId());
         }
 
-        if (stopReason != StopReason.CANCELLED) {
-            reportOversized(request, sink, frontier, robotsByHost, counters);
+        // Only a crawl that covered its source is reconciled, so only then can an
+        // unreported document be counted missed, and only then is the work worth it.
+        if (stopReason == StopReason.COMPLETED && !counters.discoveryIncomplete) {
+            reportOversized(request, sink, frontier, robotsByHost, counters, deadline);
         }
         if (stopReason == StopReason.PAGE_LIMIT && counters.sitemapPages > 0) {
             // Sitemap pages are queued at depth 0, so maxDepth does not narrow them. A
@@ -471,7 +481,7 @@ public class WebCrawler {
             return;
         }
         // Retained like any queued URL, so it is charged like one.
-        if (!frontier.admit(canonical.length())) {
+        if (frontier.oversized.size() >= MAX_OVERSIZED_LINKS || !frontier.admit(canonical.length())) {
             counters.discoveryIncomplete = true;
             return;
         }
@@ -492,9 +502,17 @@ public class WebCrawler {
      * reporting it would leave every run of that source inconclusive.
      */
     private static void reportOversized(CrawlRequest request, CrawlSink sink, Frontier frontier,
-                                        Map<String, RobotsPolicy> robotsByHost, Counters counters) {
+                                        Map<String, RobotsPolicy> robotsByHost, Counters counters, Instant deadline) {
         for (String documentId : frontier.oversized) {
-            if (frontier.queued.contains(documentId) || !sink.holds(documentId)) {
+            if (sink.isCancelled() || Thread.currentThread().isInterrupted() || Instant.now().isAfter(deadline)) {
+                // The rest go unreported, so their absence must not read as deletion.
+                counters.discoveryIncomplete = true;
+                return;
+            }
+            // Queued, polled or delivered: a redirect delivers under the id it landed
+            // on, which was never queued, and that too means another link reached it.
+            if (frontier.queued.contains(documentId) || frontier.visited.contains(documentId)
+                    || frontier.delivered.contains(documentId) || !sink.holds(documentId)) {
                 continue;
             }
             // Queued, a page robots.txt disallows is skipped rather than reported; the
@@ -881,8 +899,9 @@ public class WebCrawler {
         // Reaching a cap means the sitemap may list more than was read.
         boolean decompressionCapped = gzipped && bytes.length >= MAX_DECOMPRESSED_SITEMAP_BYTES;
         if (!looksLikeXml(bytes)) {
-            List<String> lines = textSitemapUrls(bytes, bytes == body ? declaredCharset : null);
-            return new Sitemap(lines, List.of(), !decompressionCapped && lines.size() < MAX_SITEMAP_URLS);
+            boolean[] whole = {true};
+            List<String> lines = textSitemapUrls(bytes, bytes == body ? declaredCharset : null, whole);
+            return new Sitemap(lines, List.of(), whole[0] && !decompressionCapped && lines.size() < MAX_SITEMAP_URLS);
         }
         // A charset from the HTTP header describes the compressed bytes, not what is
         // inside them; the XML declaration is authoritative for those.
@@ -890,22 +909,23 @@ public class WebCrawler {
                 sitemapUrl, Parser.xmlParser());
         Set<String> found = new LinkedHashSet<>();
         String root = rootName(xml);
+        boolean whole = true;
         switch (root) {
-            case "sitemapindex" -> collectText(xml, "loc", "sitemap", found);
-            case "rss", "rdf" -> collectText(xml, "link", "item", found);
+            case "sitemapindex" -> whole = collectText(xml, "loc", "sitemap", found);
+            case "rss", "rdf" -> whole = collectText(xml, "link", "item", found);
             case "feed" -> {
                 for (Element link : xml.getAllElements()) {
                     String rel = link.attr("rel");
                     if ("link".equals(localName(link)) && "entry".equals(localName(link.parent()))
                             && (rel.isEmpty() || "alternate".equals(rel))) {
-                        addIfHttp(link.attr("href"), found);
+                        whole &= addIfHttp(link.attr("href"), found);
                     }
                 }
             }
-            default -> collectText(xml, "loc", "url", found);
+            default -> whole = collectText(xml, "loc", "url", found);
         }
         List<String> urls = List.copyOf(found);
-        boolean complete = !decompressionCapped && urls.size() < MAX_SITEMAP_URLS
+        boolean complete = whole && !decompressionCapped && urls.size() < MAX_SITEMAP_URLS
                 && (!SITEMAP_ROOTS.contains(root) || endsWithClosingRoot(bytes, xml.charset(), root));
         return "sitemapindex".equals(root) ? new Sitemap(List.of(), urls, complete) : new Sitemap(urls, List.of(), complete);
     }
@@ -968,10 +988,12 @@ public class WebCrawler {
         return (colon >= 0 ? name.substring(colon + 1) : name).equalsIgnoreCase(root);
     }
 
-    private static void collectText(Document xml, String element, String parent, Set<String> into) {
+    /** @return false when a URL was dropped for its length */
+    private static boolean collectText(Document xml, String element, String parent, Set<String> into) {
+        boolean whole = true;
         for (Element candidate : xml.getAllElements()) {
             if (into.size() >= MAX_SITEMAP_URLS) {
-                return;
+                return whole;
             }
             // Leaf elements only. text() is all descendant text, so a <loc> nested in
             // a <url> nested in a <loc> copied the whole subtree once per level, and
@@ -979,21 +1001,28 @@ public class WebCrawler {
             // nothing but its URL.
             if (element.equals(localName(candidate)) && parent.equals(localName(candidate.parent()))
                     && candidate.childrenSize() == 0) {
-                addIfHttp(candidate.text(), into);
+                whole &= addIfHttp(candidate.text(), into);
             }
         }
+        return whole;
     }
 
-    private static void addIfHttp(String url, Set<String> into) {
+    /**
+     * @return false when the URL was dropped for its length, so the sitemap was not
+     *         read whole
+     */
+    private static boolean addIfHttp(String url, Set<String> into) {
         String trimmed = url == null ? "" : url.trim();
         if (trimmed.length() > MAX_SITEMAP_URL_LENGTH) {
             // No page has a URL this long, and keeping thousands of them would
-            // multiply the body's size in memory.
-            return;
+            // multiply the body's size in memory. But a page listed only this way goes
+            // unseen, and must not then read as deleted.
+            return false;
         }
         if ((trimmed.startsWith("http://") || trimmed.startsWith("https://")) && into.size() < MAX_SITEMAP_URLS) {
             into.add(trimmed);
         }
+        return true;
     }
 
     /** The document element's name, without prefix, lower-cased. */
@@ -1039,7 +1068,7 @@ public class WebCrawler {
         return false;
     }
 
-    private static List<String> textSitemapUrls(byte[] bytes, String declaredCharset) {
+    private static List<String> textSitemapUrls(byte[] bytes, String declaredCharset, boolean[] whole) {
         Charset charset = StandardCharsets.UTF_8;
         if (declaredCharset != null) {
             try {
@@ -1054,7 +1083,7 @@ public class WebCrawler {
         }
         Set<String> found = new LinkedHashSet<>();
         for (String line : text.split("\\R")) {
-            addIfHttp(line, found);
+            whole[0] &= addIfHttp(line, found);
         }
         return List.copyOf(found);
     }

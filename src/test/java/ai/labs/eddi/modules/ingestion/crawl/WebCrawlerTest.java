@@ -405,6 +405,52 @@ class WebCrawlerTest {
         }
 
         @Test
+        @DisplayName("an oversized link is not reported for a document a redirect delivered")
+        void overlongLinkNotReportedForARedirectTarget() {
+            // /a lands on /ok, so /ok is delivered under an id that was never queued.
+            String overlongToOk = SITE + "/ok?utm_source=" + "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            FakeSite site = new FakeSite()
+                    .page(SITE + "/", linkTo(SITE + "/a", overlongToOk))
+                    .redirect(SITE + "/a", SITE + "/ok", "<html><body>OK</body></html>");
+            RecordingSink sink = new RecordingSink().knows(SITE + "/ok", null, null);
+
+            new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertTrue(sink.documentIds().contains(SITE + "/ok"), sink.documentIds().toString());
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("past MAX_OVERSIZED_LINKS, discovery is incomplete and nothing is looked up")
+        void tooManyOversizedLinksMakeDiscoveryIncomplete() {
+            // Spread over three pages: one page holding them all is past maxBytesPerPage.
+            String padding = "a".repeat(WebCrawler.MAX_LINK_LENGTH);
+            int total = WebCrawler.MAX_OVERSIZED_LINKS + 1;
+            FakeSite site = new FakeSite();
+            String[] pages = {SITE + "/", SITE + "/b", SITE + "/c"};
+            for (int page = 0; page < pages.length; page++) {
+                List<String> links = new ArrayList<>();
+                if (page == 0) {
+                    links.add(SITE + "/b");
+                    links.add(SITE + "/c");
+                }
+                for (int i = page; i < total; i += pages.length) {
+                    links.add(SITE + "/p" + i + "?utm_source=" + padding);
+                }
+                site.page(pages[page], linkTo(links.toArray(String[]::new)));
+            }
+            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
+
+            CrawlSummary summary = new WebCrawler(site)
+                    .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
+
+            assertTrue(summary.discoveryIncomplete(), "a crawl that stopped remembering links has not covered the source");
+            assertFalse(summary.coveredWholeSource());
+            assertTrue(sink.errors().isEmpty(), "an uncovered run is not reconciled, so nothing is reported: " + sink.errors());
+        }
+
+        @Test
         @DisplayName("a broken exclude pattern does not reduce the crawl to its seed")
         void brokenExcludeDoesNotBreakCrawl() {
             // The draft compiled patterns without escaping, and the resulting
@@ -1000,9 +1046,9 @@ class WebCrawlerTest {
         @DisplayName("a sitemap URL too long to fetch is reported as content unknown, not skipped silently")
         void overlongSitemapUrlIsReportedUnknown() {
             // A sitemap <loc> over MAX_SITEMAP_URL_LENGTH is dropped as it is parsed, so
-            // this
-            // one is short as written and only too long once encoded: 1,000 emoji are 2,000
-            // chars and 12,000 encoded. The space is what makes it need encoding at all.
+            // this one is short as written and only too long once encoded: 1,000 emoji
+            // are 2,000 chars and 12,000 encoded. The space is what makes it need
+            // encoding at all.
             String overlong = SITE + "/listed?utm_source=a%20b " + "\uD83D\uDE00".repeat(1_000);
             assertTrue(overlong.length() <= WebCrawler.MAX_SITEMAP_URL_LENGTH);
             FakeSite site = new FakeSite()
@@ -1017,6 +1063,20 @@ class WebCrawlerTest {
             assertEquals(1, sink.errors().size(), sink.errors().toString());
             assertEquals(SITE + "/listed", sink.errors().get(0).documentId());
             assertTrue(sink.errors().get(0).contentUnknown());
+        }
+
+        @Test
+        @DisplayName("a sitemap URL dropped for its length leaves discovery incomplete")
+        void sitemapUrlOverTheParseCapMakesDiscoveryIncomplete() {
+            String tooLong = SITE + "/listed?q=" + "a".repeat(WebCrawler.MAX_SITEMAP_URL_LENGTH);
+            FakeSite site = new FakeSite()
+                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
+                    .sitemap(SITE + "/sitemap.xml", tooLong)
+                    .page(SITE + "/", "<html><body>no links here</body></html>");
+
+            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
+
+            assertTrue(summary.discoveryIncomplete(), "a page listed only that way went unseen, so absence is not deletion");
         }
 
         @Test

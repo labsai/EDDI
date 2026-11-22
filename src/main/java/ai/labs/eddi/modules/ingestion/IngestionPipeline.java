@@ -1083,8 +1083,18 @@ public class IngestionPipeline {
         @Override
         public boolean holds(String documentId) {
             // Only an ingest run reconciles, and only a live document can be missed.
-            return mode == Mode.INGEST
-                    && stateStore.lookup(sourceKey, documentId).filter(state -> !state.tombstoned()).isPresent();
+            if (mode != Mode.INGEST) {
+                return false;
+            }
+            try {
+                return stateStore.lookup(sourceKey, documentId).filter(state -> !state.tombstoned()).isPresent();
+            } catch (RuntimeException e) {
+                // Answered as held: the document is then reported unreachable rather
+                // than missed, and a store blink cannot fail a crawl that finished.
+                LOGGER.warnf("Could not look up document %s of source '%s' (%s); treating it as held",
+                        LogSanitizer.sanitize(documentId), LogSanitizer.sanitize(sourceKey), e.getClass().getSimpleName());
+                return true;
+            }
         }
 
         @Override
