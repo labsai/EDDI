@@ -151,12 +151,13 @@ model's tool calls.
 
 ### What changed and why
 
-- **A gated configuration write of a mail-started turn is pinned again (major).** The approval preview
+- **A gated `httpcalls` configuration write of a mail-started turn is pinned again (major).** The approval preview
   (`ApiCallExecutor.resolve`) ran the escalation guard as an unapproved call: no approval exists at gate time, and the
   resume re-check runs outside `ApprovedCallScope` too. So the preview was refused, and the call was approved unpinned,
   on its tool name and arguments, not on the request that runs. A preview now judges the configuration write as the
   approved execution would. It sends nothing, the guarded endpoints (channels, approvals) are still refused in it, and
-  the real build at execution still needs the approved scope.
+  the real build at execution still needs the approved scope. (An MCP configuration tool has no request resolver and
+  is approved on its name and arguments, as before.)
 - **An approval is stated only for its own conversation (major).** The MCP `approvedCall` meta, `OutboundHttp`'s
   first hop and the internal loopback's `X-Eddi-Approved-Call` used the unscoped `ApprovedCallScope.isActive()`. A
   conversation that an approved call starts or continues inline runs its tool calls on the same thread and inherited
@@ -203,6 +204,10 @@ model's tool calls.
   request thread, where no approval is bound.
 - Nested pipeline work that is not a tool call (a loopback REST request from a pipeline task of a conversation that
   an approved call runs inline) still sees the outer call's conversation as the one running.
+- The gate and the resume re-check resolve the pinned request under the same bound taint by construction; a real
+  pause and resume of a tainted configuration write is not exercised by a test.
+- Other delete-and-recreate schedule paths (`EmailPollScheduler`, `ConversationContinuations`) were not reviewed
+  for the reschedule rule applied to lesson consolidation here.
 
 ### Decision log
 

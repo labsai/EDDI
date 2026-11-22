@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.httpclient.outbound;
 
 import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Hop;
 import ai.labs.eddi.engine.httpclient.outbound.OutboundEngine.Received;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
@@ -159,6 +160,36 @@ class OutboundHttpEscalationGuardTest {
             }
         }), "the approval covers the target the person saw, not a redirect");
         assertEquals(1, redirected.hops.size());
+    }
+
+    @Test
+    @DisplayName("a tool call of a conversation an approved call runs inline does not inherit that approval")
+    void nestedConversationIsNotApproved() {
+        principals.bind(new ResolutionPrincipal("alice", Provenance.VERIFIED, TurnOrigin.EMAIL));
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+
+        Engine nested = new Engine().respond(200, Map.of());
+        assertThrows(OutboundBlockedException.class, () -> ApprovedCallScope.run(protection, "conv-a",
+                () -> ApprovedCallScope.inConversation("conv-b", () -> {
+                    try {
+                        return facade(nested).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+                    } catch (OutboundBlockedException e) {
+                        throw e;
+                    } catch (Exception e) {
+                        throw new IllegalStateException(e);
+                    }
+                })));
+        assertEquals(0, nested.hops.size());
+
+        Engine own = new Engine().respond(200, Map.of());
+        ApprovedCallScope.run(protection, "conv-a", () -> ApprovedCallScope.inConversation("conv-a", () -> {
+            try {
+                return facade(own).send(post("https://eddi.example.com/llmstore/llms/aabbccddee1122334455aa01"), text());
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+        }));
+        assertEquals(1, own.hops.size(), "the approved call's own tool call is sent");
     }
 
     @Test
