@@ -12,6 +12,7 @@ import ai.labs.eddi.engine.memory.model.ConversationProperties;
 import ai.labs.eddi.engine.memory.model.ConversationState;
 import ai.labs.eddi.engine.memory.model.SimpleConversationMemorySnapshot;
 import ai.labs.eddi.engine.model.*;
+import ai.labs.eddi.engine.security.OwnershipValidator;
 import ai.labs.eddi.engine.triggermanagement.IRestAgentTriggerStore;
 import ai.labs.eddi.engine.triggermanagement.IUserConversationStore;
 import ai.labs.eddi.engine.triggermanagement.model.AgentTriggerConfiguration;
@@ -32,7 +33,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.mockito.InOrder;
 
-import java.lang.reflect.Field;
 import java.net.URI;
 import java.util.*;
 
@@ -59,17 +59,14 @@ class RestAgentManagementExtendedTest {
         agentTriggerStore = mock(IRestAgentTriggerStore.class);
         identity = mock(SecurityIdentity.class);
         asyncResponse = mock(AsyncResponse.class);
+        // The claim is the store's default method over createUserConversation and
+        // readUserConversation; let the mock run it so those stubs decide.
+        when(userConversationStore.createOrAdopt(any())).thenCallRealMethod();
     }
 
     private RestAgentManagement create(boolean checkAuth) throws Exception {
-        var mgmt = new RestAgentManagement(restAgentEngine, userConversationStore,
-                agentTriggerStore, checkAuth);
-
-        Field identityField = RestAgentManagement.class.getDeclaredField("identity");
-        identityField.setAccessible(true);
-        identityField.set(mgmt, identity);
-
-        return mgmt;
+        return new RestAgentManagement(restAgentEngine, userConversationStore,
+                agentTriggerStore, checkAuth, identity, mock(OwnershipValidator.class));
     }
 
     private AgentTriggerConfiguration triggerWithDeployment(String agentId) {
@@ -162,7 +159,7 @@ class RestAgentManagementExtendedTest {
             mgmt.loadConversationMemory("intent-1", "user-1", "en",
                     false, false, List.of(), asyncResponse);
 
-            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", "112233445566778899aabbcc");
             verify(asyncResponse).resume(snapshot);
         }
 
@@ -196,7 +193,7 @@ class RestAgentManagementExtendedTest {
             mgmt.loadConversationMemory("intent-1", "user-1", "en",
                     false, false, List.of(), asyncResponse);
 
-            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", "112233445566778899aabbcc");
             verify(asyncResponse).resume(snapshot);
         }
     }
@@ -318,6 +315,7 @@ class RestAgentManagementExtendedTest {
         private void assertNothingCreatedOrReplaced() throws Exception {
             verify(userConversationStore, never()).createUserConversation(any());
             verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(userConversationStore, never()).deleteUserConversationIfMatches(anyString(), anyString(), anyString());
             verify(restAgentEngine, never()).startConversationWithContext(any(), any(), any(), any());
             verify(restAgentEngine, never()).startConversation(any(), any(), any());
             verify(restAgentEngine, never()).readConversation(any(), any(), any(), any());
@@ -362,7 +360,7 @@ class RestAgentManagementExtendedTest {
             assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
 
             assertNothingCreatedOrReplaced();
-            verify(asyncResponse, never()).resume(any());
+            verifyNoInteractions(asyncResponse);
         }
 
         @Test
@@ -394,7 +392,7 @@ class RestAgentManagementExtendedTest {
             assertThrows(UnauthorizedException.class, () -> callLoad(mgmt));
 
             assertNothingCreatedOrReplaced();
-            verify(asyncResponse, never()).resume(any());
+            verifyNoInteractions(asyncResponse);
         }
 
         @Test
@@ -514,6 +512,8 @@ class RestAgentManagementExtendedTest {
             assertEquals(environment, stored.getValue().getEnvironment());
             assertEquals(NEW_CONV_ID, stored.getValue().getConversationId());
             verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(userConversationStore, never()).deleteUserConversationIfMatches(anyString(), anyString(), anyString());
+            verify(restAgentEngine, never()).endConversation(anyString());
             assertProceededOnNewConversation(say, snapshot);
         }
 
@@ -535,9 +535,11 @@ class RestAgentManagementExtendedTest {
             }
 
             InOrder order = inOrder(userConversationStore, restAgentEngine);
-            order.verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            order.verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", ENDED_CONV_ID);
             order.verify(restAgentEngine).startConversationWithContext(eq("agent-1"), eq(environment), eq("user-1"), anyMap());
             order.verify(userConversationStore).createUserConversation(any());
+            verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(restAgentEngine, never()).endConversation(anyString());
             assertProceededOnNewConversation(say, snapshot);
         }
 
@@ -552,7 +554,7 @@ class RestAgentManagementExtendedTest {
 
             callLoad(mgmt);
 
-            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", ENDED_CONV_ID);
             verify(userConversationStore).createUserConversation(any());
             verify(asyncResponse).resume(snapshot);
         }
@@ -665,7 +667,7 @@ class RestAgentManagementExtendedTest {
 
             mgmt.loadConversationMemory("intent-1", "user-1", "de", false, false, List.of(), asyncResponse);
 
-            verify(userConversationStore).deleteUserConversation("intent-1", "user-1");
+            verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", ENDED_CONV_ID);
             assertTriggerContextUnchanged();
             assertEngineGot(contextSentToEngine(), "de");
         }
@@ -704,6 +706,150 @@ class RestAgentManagementExtendedTest {
             assertEquals(Set.of(RestAgentManagement.KEY_LANG), sent.keySet());
             assertEquals("en", sent.get(RestAgentManagement.KEY_LANG).getValue());
             assertNull(trigger.getAgentDeployments().getFirst().getInitialContext());
+        }
+    }
+
+    // ─── Two requests race for the same mapping ─────────────────
+
+    /**
+     * Two requests for the same intent and user that both find no mapping, or the
+     * same ended one, both start a conversation and both try to store it. Only one
+     * insert can win: the loser must act on the winner's conversation and end the
+     * one it started, which nothing points at any more. Before the fix the
+     * ended-conversation branch deleted unconditionally (so a late request could
+     * remove the winner's fresh mapping) and answered a lost insert with a 500, and
+     * neither branch ended its orphan.
+     */
+    @Nested
+    @DisplayName("Concurrent claims converge on one conversation")
+    class ConcurrentClaims {
+
+        private static final String ENDED_CONV_ID = "112233445566778899aabbcc";
+        private static final String OWN_CONV_ID = "aabbccddee112233aabbccdd";
+        private static final String WINNER_CONV_ID = "ffeeddccbbaa998877665544";
+
+        private final UserConversation winner = new UserConversation("intent-1", "user-1", Deployment.Environment.production, "agent-1",
+                WINNER_CONV_ID);
+
+        /** This request starts its own conversation, {@link #OWN_CONV_ID}. */
+        private void givenOwnStartSucceeds() {
+            when(agentTriggerStore.readAgentTrigger("intent-1")).thenReturn(triggerWithDeployment("agent-1"));
+            var location = URI.create("eddi://ai.labs.conversation/conversationstore/conversations/" + OWN_CONV_ID + "?version=1");
+            when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
+                    .thenReturn(Response.status(201).header("location", location.toString()).build());
+        }
+
+        /**
+         * This request's start succeeds, but another request stored its mapping first.
+         */
+        private SimpleConversationMemorySnapshot givenOwnStartLosesTheInsert() throws Exception {
+            givenOwnStartSucceeds();
+            doThrow(new IResourceStore.ResourceAlreadyExistsException("duplicate key"))
+                    .when(userConversationStore).createUserConversation(any());
+            when(restAgentEngine.getConversationState(WINNER_CONV_ID)).thenReturn(ConversationState.READY);
+            var snapshot = new SimpleConversationMemorySnapshot();
+            when(restAgentEngine.readConversation(eq(WINNER_CONV_ID), any(), any(), any())).thenReturn(snapshot);
+            return snapshot;
+        }
+
+        @Test
+        @DisplayName("ended mapping: conditional delete, then the winner is adopted and the own conversation ended")
+        void endedReplacementRaceConvergesOnTheWinner() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1"))
+                    .thenReturn(new UserConversation("intent-1", "user-1", Deployment.Environment.production, "agent-1", ENDED_CONV_ID))
+                    .thenReturn(winner);
+            when(restAgentEngine.getConversationState(ENDED_CONV_ID)).thenReturn(ConversationState.ENDED);
+            // The winner already replaced the ended mapping, so this delete matches
+            // nothing.
+            when(userConversationStore.deleteUserConversationIfMatches("intent-1", "user-1", ENDED_CONV_ID)).thenReturn(false);
+            var snapshot = givenOwnStartLosesTheInsert();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            verify(userConversationStore).deleteUserConversationIfMatches("intent-1", "user-1", ENDED_CONV_ID);
+            verify(userConversationStore, never()).deleteUserConversation(anyString(), anyString());
+            verify(restAgentEngine).readConversation(eq(WINNER_CONV_ID), any(), any(), any());
+            verify(asyncResponse).resume(snapshot);
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            verify(restAgentEngine, never()).endConversation(WINNER_CONV_ID);
+        }
+
+        @Test
+        @DisplayName("no mapping: the winner is adopted and the own conversation ended")
+        void absentMappingRaceEndsTheOrphan() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null).thenReturn(winner);
+            var snapshot = givenOwnStartLosesTheInsert();
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            verify(asyncResponse).resume(snapshot);
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            verify(restAgentEngine, never()).endConversation(WINNER_CONV_ID);
+        }
+
+        @Test
+        @DisplayName("say, no mapping: the turn goes to the winner's conversation")
+        void sayRaceTalksToTheWinner() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null).thenReturn(winner);
+            givenOwnStartLosesTheInsert();
+
+            mgmt.sayWithinContext("intent-1", "user-1", false, false, List.of(), new InputData("Hello", Map.of()), asyncResponse);
+
+            verify(restAgentEngine).sayWithinContext(eq(WINNER_CONV_ID), any(), any(), any(), any(), eq(asyncResponse));
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            verify(asyncResponse, never()).resume(any(Response.class));
+        }
+
+        @Test
+        @DisplayName("ending the orphan fails: the request is still served on the winner")
+        void orphanEndFailureDoesNotFailTheRequest() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null).thenReturn(winner);
+            var snapshot = givenOwnStartLosesTheInsert();
+            when(restAgentEngine.endConversation(OWN_CONV_ID)).thenThrow(new IllegalStateException("store down"));
+
+            mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse);
+
+            verify(asyncResponse).resume(snapshot);
+        }
+
+        @Test
+        @DisplayName("the winner is gone again before it can be read: own conversation ended, the store error surfaces")
+        void vanishedWinnerEndsOwnConversationAndFails() throws Exception {
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenOwnStartLosesTheInsert();
+
+            assertThrows(IResourceStore.ResourceStoreException.class,
+                    () -> mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse));
+
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            verifyNoInteractions(asyncResponse);
+        }
+
+        @Test
+        @DisplayName("the claim fails unchecked: own conversation ended, the driver error surfaces")
+        void uncheckedClaimFailureEndsOwnConversation() throws Exception {
+            // The MongoDB store lets driver failures through unchecked (a MongoException
+            // from its read, a non-duplicate MongoWriteException from its insert), where
+            // PostgreSQL wraps them as ResourceStoreException. The conversation started
+            // here is unreachable either way.
+            var mgmt = create(false);
+            when(userConversationStore.readUserConversation("intent-1", "user-1")).thenReturn(null);
+            givenOwnStartSucceeds();
+            var driverFailure = new IllegalStateException("Timed out while waiting for a server");
+            doThrow(driverFailure).when(userConversationStore).createUserConversation(any());
+
+            var thrown = assertThrows(IllegalStateException.class,
+                    () -> mgmt.loadConversationMemory("intent-1", "user-1", "en", false, false, List.of(), asyncResponse));
+
+            assertSame(driverFailure, thrown);
+            verify(restAgentEngine).endConversation(OWN_CONV_ID);
+            // Neither overload of resume: the error reaches the JAX-RS mappers as thrown.
+            verifyNoInteractions(asyncResponse);
         }
     }
 
@@ -896,7 +1042,7 @@ class RestAgentManagementExtendedTest {
             when(restAgentEngine.startConversationWithContext(eq("agent-1"), any(), eq("user-1"), anyMap()))
                     .thenReturn(Response.status(500).build());
 
-            // The concurrent-creation fallback finds no conversation either, so the
+            // The engine refused the start, so there is no conversation to claim: the
             // failure is reported as a 500 rather than dereferencing null.
             assertThrows(InternalServerErrorException.class, () -> mgmt.loadConversationMemory("intent-1", "user-1", "en",
                     false, false, List.of(), asyncResponse));

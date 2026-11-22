@@ -108,7 +108,7 @@
 # Same digest as the runtime stage below, deliberately: base-image-check.yml
 # parses the LAST FROM line, and its sed rewrites every line carrying the pin,
 # so the two stages move together.
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:e898c4ad1c8cfb5afee86917906356226956813733ebc27bbf33f762bb3b8f08 AS docs
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb AS docs
 # COPY writes as root, and the UBI runtime base's default USER is 185, which
 # could not then delete from /docs.
 USER root
@@ -119,7 +119,7 @@ RUN rm -f /docs/changelog.md \
       /docs/SUMMARY.md
 
 # --- Stage: runtime ---
-FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:e898c4ad1c8cfb5afee86917906356226956813733ebc27bbf33f762bb3b8f08
+FROM registry.access.redhat.com/ubi10/openjdk-25-runtime:1.24@sha256:6110c805def9e7fffdece743564942e528cb713696e40f5c77c36870d707a4fb
 
 ### Red Hat Container Certification — required labels
 # A sentinel default, so an un-parameterised build is obviously not a release.
@@ -230,7 +230,19 @@ EXPOSE 7070
 # survive an operator's JAVA_OPTS. A JVM that ran out of heap keeps half-working,
 # holding its conversation leases and in-flight turns; exiting lets the orchestrator
 # restart it and, in cluster mode, lets the leases expire to another node.
-ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError"
+#
+# -XX:-UseBASE64Intrinsics is the interim mitigation for Java4Shell (CVE-2026-114938,
+# Red Hat RHSB-2026-018): on x86-64 CPUs with AVX-512 VBMI the JVM decodes Base64 through
+# an accelerated intrinsic that malformed input turns into memory corruption and code
+# execution. EDDI decodes attacker-controlled Base64 before authentication (MIME encoded
+# words and DKIM signatures of inbound mail, webhook signature headers). The flag removes
+# only that code path; decoding falls back to the plain Java loop. It rides here, not on
+# JAVA_OPTS_APPEND, for the same reason as the two flags above. It is a product flag in
+# this JDK, so no -XX:+UnlockDiagnosticVMOptions is needed. The base image pin now carries
+# the fixed OpenJDK (25.0.5.1, confirmed with `java -version`), so the flag is a second line
+# of defence. Remove it, together with Java4ShellMitigationTest (which fails the build if the
+# flag is dropped alone), in a change of its own; see docs/security.md.
+ENV JDK_JAVA_OPTIONS="--add-modules=jdk.incubator.vector -XX:+ExitOnOutOfMemoryError -XX:-UseBASE64Intrinsics"
 # Heap = 75 % of the container memory limit (run-java's default is 50 %). Conversation
 # turns run on virtual threads, so heap, not threads, bounds how many turns a node holds,
 # and half the container idle is wasted capacity. The other 25 % covers metaspace,

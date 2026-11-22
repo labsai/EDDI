@@ -175,7 +175,7 @@ public class ExpressionProvider implements IExpressionProvider {
             } catch (ExpressionLimitExceededException e) {
                 throw e;
             } catch (RuntimeException e) {
-                log.error(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s",
+                log.warn(format("Error while parsing Expression: %s, indexOfOpening: %s, indexOfClosing: %s, message: %s",
                         sanitize(source.substring(start, end)), indexOfOpening - start, indexOfClosing - start, e.getLocalizedMessage()));
             }
         } else {

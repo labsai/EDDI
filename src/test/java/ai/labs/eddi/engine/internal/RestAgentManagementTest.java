@@ -26,7 +26,6 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import java.lang.reflect.Field;
 import java.util.List;
 import java.util.Map;
 
@@ -47,7 +46,7 @@ class RestAgentManagementTest {
     private AsyncResponse asyncResponse;
 
     @BeforeEach
-    void setUp() throws Exception {
+    void setUp() {
         restAgentEngine = mock(IRestAgentEngine.class);
         userConversationStore = mock(IUserConversationStore.class);
         agentTriggerStore = mock(IRestAgentTriggerStore.class);
@@ -57,15 +56,7 @@ class RestAgentManagementTest {
 
         // Auth disabled for tests
         restAgentManagement = new RestAgentManagement(restAgentEngine, userConversationStore,
-                agentTriggerStore, false);
-
-        // Inject the security identity
-        Field identityField = RestAgentManagement.class.getDeclaredField("identity");
-        identityField.setAccessible(true);
-        identityField.set(restAgentManagement, identity);
-        Field validatorField = RestAgentManagement.class.getDeclaredField("ownershipValidator");
-        validatorField.setAccessible(true);
-        validatorField.set(restAgentManagement, ownershipValidator);
+                agentTriggerStore, false, identity, ownershipValidator);
     }
 
     /**

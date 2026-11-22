@@ -562,6 +562,10 @@ The conversation is auto-created on first message and reused on subsequent calls
 
 - **First call** with a new intent+userId: creates a new conversation and sends the message
 - **Subsequent calls** with the same intent+userId: reuses the existing conversation (like continuing in the same chat window)
+- **Ended conversation**: the next call replaces it with a fresh one
+- **Several deployments** on the trigger: each new conversation goes to one picked at random, as with the REST managed endpoints
+- **Concurrent first calls** for the same intent+userId: both land in one conversation. The call that loses the race to store the mapping uses the winner's conversation and ends the one it started
+- **Agent not ready** (startup, rolling deploy): returns an error with `"errorCode": "UNAVAILABLE"`; retry shortly. No conversation was created
 - Returns an error if no agent trigger is configured for the given intent
 
 ---
@@ -764,7 +768,7 @@ Deployment notes:
 
 **The realm ships the client this uses: `eddi-mcp`.** Public, authorization code + PKCE (`S256` required), no direct access grant, and carrying the same protocol mappers as `eddi-frontend`. That last part is not a detail — the realm defines no `roles` client scope, so **a client without the `realm-roles` mapper issues tokens that authenticate and then fail every tool with "requires role"**, because EDDI reads roles from `realm_access/roles`. If you provision your realm by hand, copy those mappers.
 
-Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.8.0, the version every compose, Kubernetes and Helm stack and the auth E2E tier pin: both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
+Its redirect URIs are `http://localhost:*` and `http://127.0.0.1:*`. Verified against Keycloak 26.8.0 (every compose, Kubernetes and Helm stack and the auth E2E tier now pin 26.8.2, a patch release of the same line): both wildcard forms match a loopback callback on any port, PKCE is genuinely required (a request without `code_challenge_method` is refused with `Missing parameter: code_challenge_method`), the password grant is refused, and a non-loopback redirect is refused with `Invalid parameter: redirect_uri`. **Which callback URL your particular client uses is its own business and not something this repo can verify** — if yours is not a loopback URL, add it to `eddi-mcp` in the admin console.
 
 - **Point your client at the client id.** Discovery names the authorization server, not which client to be, so each client has to be told:
   - **Claude Code** — `claude mcp add --transport http --client-id eddi-mcp --callback-port 8080 eddi https://eddi.example.com/mcp`. The callback port is worth fixing: without it Claude Code picks a random one, and while `eddi-mcp`'s redirect URIs are wildcards that accept any port, a realm hardened to a single redirect URI would not. **[ext]** Some Claude Code versions attempt dynamic registration even with a client id configured, and fail with "Incompatible auth server: does not support dynamic client registration" — if you hit that, the hand-pasted token below is the fallback.

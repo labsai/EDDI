@@ -35,6 +35,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -189,6 +190,24 @@ class GeminiThoughtSignatureTest {
         assertEquals("The platform is healthy.", second.text());
         assertEquals(SIGNATURE, stub.replayedSignature(),
                 "the streaming follow-up request must carry the signature verbatim");
+    }
+
+    @Test
+    @DisplayName("thinkingLevel=xhigh reaches the request on the synchronous and the streaming path")
+    void xhighThinkingLevelReachesBothRequestPaths() throws Exception {
+        // build() and buildStreaming() check thinkingLevel against separate
+        // lists; a value missing from one is silently dropped on that path only.
+        Map<String, String> xhigh = params();
+        xhigh.put("modelName", "gemini-4-neon");
+        xhigh.put(GeminiLanguageModelBuilder.KEY_THINKING_LEVEL, "xhigh");
+
+        GeminiApiStub syncStub = new GeminiApiStub();
+        builder.build(xhigh, syncStub).chat(firstTurn());
+        assertEquals("xhigh", syncStub.firstThinkingLevel(), "synchronous request");
+
+        GeminiApiStub streamStub = new GeminiApiStub();
+        collect(builder.buildStreaming(xhigh, streamStub), firstTurn());
+        assertEquals("xhigh", streamStub.firstThinkingLevel(), "streaming request");
     }
 
     /**
@@ -348,6 +367,17 @@ class GeminiThoughtSignatureTest {
                     }
                 }
                 return null;
+            } catch (Exception e) {
+                throw new IllegalStateException("stub could not parse the recorded request", e);
+            }
+        }
+
+        /** The thinkingLevel the first request carried, lower-cased, or null. */
+        String firstThinkingLevel() {
+            try {
+                String level = MAPPER.readTree(requestBodies.getFirst()).path("generationConfig").path("thinkingConfig")
+                        .path("thinkingLevel").asText(null);
+                return level == null ? null : level.toLowerCase(Locale.ROOT);
             } catch (Exception e) {
                 throw new IllegalStateException("stub could not parse the recorded request", e);
             }
