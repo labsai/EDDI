@@ -625,7 +625,9 @@ With `replyAudience: thread`, colleagues on a mail read EDDI's answer too. The r
 - **No long-term memory.** A person's long-term memory would otherwise reach whoever is copied, and later mails can
   add readers. So on such an integration every conversation runs as **`email-thread:<integrationId>:<digest of the
   thread root>`**, which reads and writes no long-term properties and gets no memory tools — the thread itself
-  (conversation memory) works as usual, since every reader already has it. Only a conversation that runs as this
+  (conversation memory) works as usual — note that someone copied once becomes a participant and can later continue a
+  conversation that also holds mails others sent to EDDI alone, and pause notices and continuations are copied like
+  any reply. Only a conversation that runs as this
   integration's thread identity is ever copied: one started before the switch to `thread` (as `email:<id>:<address>`,
   with that person's memory) still answers its sender alone.
 - **Settings only narrow between attempts.** A retry sends to the copies the reply was queued with, intersected with
