@@ -193,7 +193,7 @@ audit trail → server log → the configuration that produced it. Follow
   per mail: `mode: "trigger"` never replies, `mode: "conversation"` replies in the thread over
   SMTP (an SMTP host is required) to the DKIM/DMARC-authenticated sender only (with the honorReplyTo setting
   true, to the mail's single Reply-To instead; with `replyAudience: "thread"` it also copies the mail's
-  internal recipients matching `replyAllowedRecipients`, and those conversations keep no long-term memory). Its credential is a
+  internal recipients matching its allowed-recipient patterns, and those conversations keep no long-term memory). Its credential is a
   connection name whose allowlist names the IMAP (and SMTP) origin, and the result's `warnings`
   (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
   `email.honor-reply-to`, `email.reply-audience-thread`) are worth relaying. Where a helpdesk already owns the mailbox, use a
