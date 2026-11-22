@@ -5,7 +5,9 @@
 package ai.labs.eddi.configs.groups.mongo;
 
 import ai.labs.eddi.configs.groups.model.GroupWorkspace;
+import ai.labs.eddi.configs.groups.model.SharedTaskList;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.datastore.mongo.MongoResourceStorageFactory;
 import ai.labs.eddi.datastore.mongo.MongoTestBase;
 import com.mongodb.client.model.Filters;
@@ -22,6 +24,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -147,5 +150,24 @@ class GroupWorkspaceStoreMongoContainerTest extends MongoTestBase {
         assertEquals(WorkspaceHandoffs.Intake.APPROVED_EDITED, back.originOf("task-1").intake());
         assertEquals(List.of("agent:a", "group:src-group"), back.originOf("task-1").lineage());
         assertTrue(back.isDeclinedSince("dk-declined", Instant.parse("2026-10-01T00:00:00Z")));
+    }
+
+    @Test
+    @DisplayName("the origin taint of a backlog task and of a handoff survives a store round trip (email plan v3 §5.3)")
+    void taint_roundTrips() throws Exception {
+        GroupWorkspace ws = store.readOrCreate(GROUP_ID);
+        SharedTaskList.TaskItem tainted = ws.getBacklog()
+                .addTask(new SharedTaskList.TaskItem("From a mail", "d", 1).taintedBy(TurnOrigin.EMAIL));
+        SharedTaskList.TaskItem clean = ws.getBacklog().addTask(new SharedTaskList.TaskItem("From a person", "d", 1));
+        var origin = new WorkspaceHandoffs.HandoffOrigin("h-2", WorkspaceHandoffs.SourceKind.AGENT, "agent-1", 1, "conv-1", null,
+                WorkspaceHandoffs.Trigger.TOOL, null, null, null, 1, List.of("agent:agent-1"), "dk-2", Instant.parse("2026-11-02T10:00:00Z"),
+                WorkspaceHandoffs.Intake.PENDING, null, TurnOrigin.EMAIL);
+        ws.getHandoffs().addInbox(new WorkspaceHandoffs.InboxItem("h-2", "Mail work", "details", 3, origin));
+        assertTrue(store.casRevision(ws));
+
+        GroupWorkspace back = store.find(GROUP_ID);
+        assertEquals(TurnOrigin.EMAIL, back.getBacklog().findById(tainted.id()).origin());
+        assertNull(back.getBacklog().findById(clean.id()).origin());
+        assertEquals(TurnOrigin.EMAIL, back.getHandoffs().findInbox("h-2").origin().turnOrigin());
     }
 }

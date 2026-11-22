@@ -24,6 +24,7 @@ import ai.labs.eddi.engine.audit.model.AuditEntry;
 import ai.labs.eddi.engine.internal.GroupConversationService;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffAdmission.Decision;
 import ai.labs.eddi.engine.runtime.internal.handoff.HandoffResult.Outcome;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.modules.llm.tools.quota.IToolQuotaStore;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaKey;
 import ai.labs.eddi.modules.llm.tools.quota.ToolQuotaRules;
@@ -459,7 +460,8 @@ public class TeamHandoffService {
                     return HandoffResult.of(Outcome.BACKLOG_FULL,
                             "That team's backlog is full. Do not retry; tell the user the team needs to clear its backlog.");
                 }
-                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, request.bet()).filedBy(writingAgentOf(request)));
+                TaskItem task = backlog.addTask(new TaskItem(subject, description, priority, request.bet()).filedBy(writingAgentOf(request))
+                        .taintedBy(origin.turnOrigin()));
                 handoffs.putOrigin(task.id(), origin);
                 landed = "backlog";
             } else {
@@ -532,7 +534,7 @@ public class TeamHandoffService {
         }
         return new HandoffOrigin(handoffId, request.sourceKind(), request.sourceId(), request.sourceVersion(), request.sourceConversationId(),
                 request.sourceMemberAgentId(), request.trigger(), request.decisionRef(), request.artifactId(), request.reference(),
-                request.hop() + 1, lineage, dedupeKey, now, intake, null);
+                request.hop() + 1, lineage, dedupeKey, now, intake, null, TurnOrigin.current());
     }
 
     // ----------------------------------------------------------------- helpers
