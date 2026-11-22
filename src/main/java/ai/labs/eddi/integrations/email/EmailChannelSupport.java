@@ -216,7 +216,7 @@ public class EmailChannelSupport {
             if (outcome.result().expiresSoon()) {
                 warnings.add(EmailChannelSettings.WARNING_SMIME_CERTIFICATE_EXPIRING);
             }
-            if (outcome.result().chain() == SmimeCertificateCheck.Chain.COMPLETE) {
+            if (outcome.result().chain().untrusted()) {
                 warnings.add(EmailChannelSettings.WARNING_SMIME_UNTRUSTED_CHAIN);
             }
         }

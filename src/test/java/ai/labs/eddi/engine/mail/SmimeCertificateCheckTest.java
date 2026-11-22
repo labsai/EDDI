@@ -8,8 +8,10 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
 import java.security.cert.TrustAnchor;
+import java.security.cert.X509Certificate;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 
@@ -61,6 +63,13 @@ class SmimeCertificateCheckTest {
         void keyUsageWithoutDigitalSignatureIsRefused() throws Exception {
             var result = check(SmimeTestCertificates.Leaf.valid(ADDRESS).withoutDigitalSignature(), ADDRESS);
             assertEquals(List.of(SmimeCertificateCheck.Problem.KEY_USAGE), result.problems());
+        }
+
+        @Test
+        void nonRepudiationAloneMaySign() throws Exception {
+            // RFC 8550 §4.4.2: digitalSignature or nonRepudiation.
+            var result = check(SmimeTestCertificates.Leaf.valid(ADDRESS).nonRepudiationOnly(), ADDRESS);
+            assertTrue(result.usable(), result.describe());
         }
 
         @Test
@@ -116,6 +125,55 @@ class SmimeCertificateCheckTest {
             var result = SmimeCertificateCheck.check(new SmimeIdentity(issued.key(), List.of(issued.leaf())), ADDRESS, Instant.now(), Set.of());
             assertEquals(SmimeCertificateCheck.Chain.BROKEN, result.chain());
             assertTrue(result.problems().contains(SmimeCertificateCheck.Problem.CHAIN));
+        }
+
+        @Test
+        void leafAndIntermediateWithoutTheRootAreUsableButUntrusted() throws Exception {
+            // The typical .p12 of an S/MIME-only CA the JDK does not ship.
+            var issued = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            var result = SmimeCertificateCheck.check(issued.identity(), ADDRESS, Instant.now(), Set.of());
+            assertEquals(SmimeCertificateCheck.Chain.UNTRUSTED_ROOT, result.chain());
+            assertTrue(result.usable(), result.describe());
+            assertTrue(result.chain().untrusted());
+        }
+
+        @Test
+        void leafAndIntermediateBuildToAGivenRoot() throws Exception {
+            var issued = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            var result = SmimeCertificateCheck.check(issued.identity(), ADDRESS, Instant.now(),
+                    Set.of(new TrustAnchor(SmimeTestCertificates.ca(), null)));
+            assertEquals(SmimeCertificateCheck.Chain.TRUSTED, result.chain());
+            assertFalse(result.chain().untrusted());
+        }
+
+        @Test
+        void aLeafTheShippedIntermediateDidNotSignIsBroken() throws Exception {
+            var issued = SmimeTestCertificates.issueForgedUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            var result = SmimeCertificateCheck.check(issued.identity(), ADDRESS, Instant.now(), Set.of());
+            assertEquals(SmimeCertificateCheck.Chain.BROKEN, result.chain());
+            assertTrue(result.problems().contains(SmimeCertificateCheck.Problem.CHAIN));
+        }
+
+        @Test
+        void anIntermediateTheShippedRootDidNotSignIsBroken() throws Exception {
+            // The root's name is in the bundle, but its key did not sign the intermediate:
+            // broken, not "an absent root".
+            var issued = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            List<X509Certificate> bundle = new ArrayList<>(issued.chain());
+            bundle.add(SmimeTestCertificates.impostorRoot());
+            var result = SmimeCertificateCheck.check(new SmimeIdentity(issued.key(), bundle), ADDRESS, Instant.now(), Set.of());
+            assertEquals(SmimeCertificateCheck.Chain.BROKEN, result.chain());
+            assertTrue(result.problems().contains(SmimeCertificateCheck.Problem.CHAIN));
+        }
+
+        @Test
+        void anUntrustedRootDoesNotExcuseAnExpiredOrMismatchedLeaf() throws Exception {
+            var expired = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS).expired());
+            var result = SmimeCertificateCheck.check(expired.identity(), ADDRESS, Instant.now(), Set.of());
+            assertTrue(result.problems().contains(SmimeCertificateCheck.Problem.EXPIRED), result.describe());
+            var other = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid("ceo@contoso.com"));
+            assertEquals(List.of(SmimeCertificateCheck.Problem.ADDRESS_MISMATCH),
+                    SmimeCertificateCheck.check(other.identity(), ADDRESS, Instant.now(), Set.of()).problems());
         }
 
         @Test

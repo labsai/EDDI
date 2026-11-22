@@ -53,7 +53,11 @@ public record EmailSelfTestResult(String status, String token, String expiresAt,
      * @param dnsTemporary
      *            whether a DNS lookup failed, so the verdict may be incomplete
      * @param smime
-     *            {@code verified}, {@code not_signed}, {@code invalid} or
+     *            {@code verified} (verifies, and the chain it carries builds to a
+     *            publicly trusted root), {@code verified_untrusted_root} (verifies,
+     *            but the chain ends at a root the JDK does not trust),
+     *            {@code chain_broken} (verifies, but the chain it carries is broken
+     *            or incomplete), {@code not_signed}, {@code invalid} or
      *            {@code wrong_signer} (verifies, but the certificate names another
      *            address)
      * @param smimeExpected
@@ -80,6 +84,7 @@ public record EmailSelfTestResult(String status, String token, String expiresAt,
      *            {@code dkim.unaligned}, {@code dkim.missing},
      *            {@code dkim.inconclusive}, {@code dkim.failed},
      *            {@code dkim.dns-temporary}, {@code smime.verified},
+     *            {@code smime.untrusted-root}, {@code smime.chain-broken},
      *            {@code smime.missing}, {@code smime.off}, {@code smime.invalid},
      *            {@code smime.wrong-signer}, {@code dmarc.present},
      *            {@code dmarc.absent}, {@code dmarc.unknown}, {@code send.failed}
@@ -149,8 +154,14 @@ public record EmailSelfTestResult(String status, String token, String expiresAt,
             }
         }
         switch (c.smime()) {
-            case "verified" -> findings.add(new Finding("smime.verified", "ok", "The S/MIME signature verified: recipients' mail clients "
-                    + "show the message as signed by this mailbox."));
+            case "verified" -> findings.add(new Finding("smime.verified", "ok", "The S/MIME signature verified, and its certificate chain "
+                    + "leads to a publicly trusted root: recipients' mail clients show the message as signed by this mailbox."));
+            case "verified_untrusted_root" -> findings.add(new Finding("smime.untrusted-root", "warning", "The S/MIME signature verified, "
+                    + "but its certificate chain ends at a root that is not publicly trusted. Recipients whose mail client does not trust "
+                    + "that root see the signature as untrusted; whether to trust it is their decision."));
+            case "chain_broken" -> findings.add(new Finding("smime.chain-broken", "problem", "The S/MIME signature verified, but the "
+                    + "certificate chain it carries is broken or incomplete, so recipients cannot build it. Ship the intermediate "
+                    + "certificates with the signing certificate."));
             case "invalid" -> findings.add(new Finding("smime.invalid", "problem", "The mail was S/MIME-signed, but the signature did not "
                     + "verify: something changed the mail on the way. Check for a gateway that rewrites or adds footers to outgoing mail."));
             case "wrong_signer" -> findings.add(new Finding("smime.wrong-signer", "problem", "The S/MIME signature verified, but its "

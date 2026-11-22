@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
@@ -73,10 +74,46 @@ class ImapMailTransportSigningTest {
     void noSigningBean() {
         AtomicInteger lookups = new AtomicInteger();
         var transport = transport(lookups, null);
-        assertThrows(MailSendException.class,
+        var reply = assertThrows(MailSendException.class,
                 () -> transport.sendMail("i", settings("conversation", EmailControl.SignMode.REQUIRED), new byte[]{1}, "a@b.com"));
-        assertThrows(MailSendException.class, () -> transport.sendSelfTest("i", settings("trigger", EmailControl.SignMode.REQUIRED), new byte[]{1}));
+        assertEquals(MailSendException.Category.SIGNING, reply.getCategory());
+        assertFalse(reply.isPermanent(), "held, not failed");
+        var selfTest = assertThrows(MailSendException.class,
+                () -> transport.sendSelfTest("i", settings("trigger", EmailControl.SignMode.REQUIRED), new byte[]{1}));
+        assertEquals(MailSendException.Category.SIGNING, selfTest.getCategory());
         assertEquals(0, lookups.get());
+    }
+
+    @Test
+    @DisplayName("a transport that cannot sign sends nothing under 'required' (the MailTransport default), and sends unsigned otherwise")
+    void defaultSendMailHonoursRequired() throws Exception {
+        AtomicInteger sends = new AtomicInteger();
+        MailTransport unsigning = new MailTransport() {
+            @Override
+            public String id() {
+                return "test";
+            }
+
+            @Override
+            public MailboxSession open(String integrationId, EmailChannelSettings settings) {
+                throw new UnsupportedOperationException();
+            }
+
+            @Override
+            public String send(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) {
+                sends.incrementAndGet();
+                return "250 ok";
+            }
+        };
+        var e = assertThrows(MailSendException.class,
+                () -> unsigning.sendMail("i", settings("conversation", EmailControl.SignMode.REQUIRED), new byte[]{1}, "a@b.com"));
+        assertEquals(MailSendException.Category.SIGNING, e.getCategory());
+        assertFalse(e.isPermanent());
+        assertEquals(0, sends.get(), "nothing left unsigned");
+
+        var sent = unsigning.sendMail("i", settings("conversation", EmailControl.SignMode.TRUE), new byte[]{1}, "a@b.com");
+        assertFalse(sent.signed());
+        assertEquals(1, sends.get());
     }
 
     @Test

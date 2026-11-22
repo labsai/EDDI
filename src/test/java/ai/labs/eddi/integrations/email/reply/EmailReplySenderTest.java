@@ -414,6 +414,48 @@ class EmailReplySenderTest {
         }
 
         @Test
+        @DisplayName("a held reply is given up after eddi.email.smime.max-hold: FAILED smime_unavailable:expired, audited, a final notice")
+        void heldReplyExpires() throws Exception {
+            LedgerEntry inbound = storedInbound(State.DONE);
+            for (int i = 0; i < 200; i++) {
+                transport.failures.add(new MailSendException(MailSendException.Category.SIGNING, false, "smime_unavailable: expired", null));
+            }
+            var row = sender.onTurnCompleted(INTEGRATION, settings(), inbound, CONVERSATION, answered("Ships Monday."), NOW).orElseThrow();
+            when(conversations.readConversation(CONVERSATION, true, false, List.of())).thenReturn(answered("Ships Monday."));
+
+            Instant giveUpAt = NOW.plus(EmailReplySender.DEFAULT_SMIME_MAX_HOLD);
+            Instant at = NOW;
+            int sweeps = 0;
+            while (ledger.findById(row.id()).orElseThrow().state() == State.PENDING && sweeps < 200) {
+                LedgerEntry held = ledger.findById(row.id()).orElseThrow();
+                assertFalse(held.nextAttemptAt().isAfter(giveUpAt), "no hold runs past the deadline");
+                at = held.nextAttemptAt().plusSeconds(1);
+                sender.sweep(at);
+                sweeps++;
+            }
+            LedgerEntry failed = ledger.findById(row.id()).orElseThrow();
+            assertEquals(State.FAILED, failed.state(), "given up, not left for retention to delete");
+            assertTrue(failed.lastError().startsWith(EmailReplySender.SMIME_HOLD_EXPIRED), failed.lastError());
+            assertFalse(at.isBefore(giveUpAt), "not before the maximum hold");
+            assertTrue(at.isBefore(giveUpAt.plus(Duration.ofHours(1))), "and not much after it");
+            assertTrue(transport.recipients.isEmpty(), "nothing was sent unsigned");
+            verify(ownerNotifier).notifyOnce(eq(INTEGRATION), any(), any(), eq(EmailOwnerNotifier.Reason.SMIME_HOLD_EXPIRED), any());
+            ArgumentCaptor<AuditEntry> entry = ArgumentCaptor.forClass(AuditEntry.class);
+            verify(audit).submit(entry.capture());
+            assertEquals("failed", entry.getValue().output().get("outcome"));
+            assertTrue(String.valueOf(entry.getValue().output().get("error")).startsWith(EmailReplySender.SMIME_HOLD_EXPIRED));
+        }
+
+        @Test
+        @DisplayName("the maximum hold defaults to 72h and never outlives the ledger retention")
+        void maxHoldIsSane() {
+            assertEquals(Duration.ofHours(72), EmailReplySender.saneMaxHold(null, Duration.ofDays(30)));
+            assertEquals(Duration.ofHours(72), EmailReplySender.saneMaxHold(Duration.ZERO, Duration.ofDays(30)));
+            assertEquals(Duration.ofHours(1), EmailReplySender.saneMaxHold(Duration.ofMinutes(5), Duration.ofDays(30)));
+            assertEquals(Duration.ofDays(30).minusHours(2), EmailReplySender.saneMaxHold(Duration.ofDays(60), Duration.ofDays(30)));
+        }
+
+        @Test
         @DisplayName("a permanent refusal ends FAILED and notifies the owners; so does the last attempt")
         void failed() {
             LedgerEntry inbound = storedInbound(State.DONE);

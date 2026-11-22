@@ -52,7 +52,20 @@ public final class SmimeTestCertificates {
 
     /** What the leaf certificate carries. */
     public record Leaf(String address, boolean useEc, boolean digitalSignature, boolean emailProtection, Instant notBefore, Instant notAfter,
-            boolean selfSigned) {
+            boolean selfSigned, boolean nonRepudiation) {
+
+        public Leaf(String address, boolean useEc, boolean digitalSignature, boolean emailProtection, Instant notBefore, Instant notAfter,
+                boolean selfSigned) {
+            this(address, useEc, digitalSignature, emailProtection, notBefore, notAfter, selfSigned, false);
+        }
+
+        /**
+         * Key usage {@code nonRepudiation} alone, no {@code digitalSignature} (RFC 8550
+         * §4.4.2 accepts either).
+         */
+        public Leaf nonRepudiationOnly() {
+            return new Leaf(address, useEc, false, emailProtection, notBefore, notAfter, selfSigned, true);
+        }
 
         /** A usable RSA certificate for {@code address}, valid for a year. */
         public static Leaf valid(String address) {
@@ -113,6 +126,79 @@ public final class SmimeTestCertificates {
         return caCertificate;
     }
 
+    private static KeyPair intermediateKey;
+    private static X509Certificate intermediateCertificate;
+
+    /** An intermediate CA, issued by {@link #ca()}. */
+    public static synchronized X509Certificate intermediate() throws Exception {
+        if (intermediateCertificate == null) {
+            X509Certificate root = ca();
+            intermediateKey = rsa();
+            Instant now = Instant.now();
+            X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(new X500Name(root.getSubjectX500Principal().getName()),
+                    BigInteger.valueOf(SERIAL.incrementAndGet()), Date.from(now.minus(Duration.ofDays(30))),
+                    Date.from(now.plus(Duration.ofDays(1825))), new X500Name("CN=EDDI Test S/MIME Intermediate"), intermediateKey.getPublic());
+            builder.addExtension(Extension.basicConstraints, true, new BasicConstraints(0));
+            builder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.keyCertSign | KeyUsage.cRLSign));
+            intermediateCertificate = new JcaX509CertificateConverter()
+                    .getCertificate(builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(rsaCa.getPrivate())));
+        }
+        return intermediateCertificate;
+    }
+
+    /**
+     * A leaf issued by {@link #intermediate()}, chained as the usual {@code .p12}
+     * of an S/MIME-only CA: leaf and intermediate, without the root.
+     */
+    public static Issued issueUnderIntermediate(Leaf leaf) throws Exception {
+        X509Certificate intermediate = intermediate();
+        KeyPair pair = leaf.useEc() ? ec() : rsa();
+        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(new X500Name(intermediate.getSubjectX500Principal().getName()),
+                BigInteger.valueOf(SERIAL.incrementAndGet()), Date.from(leaf.notBefore()), Date.from(leaf.notAfter()),
+                new X500Name("CN=EDDI Test Mailbox"), pair.getPublic());
+        builder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(new GeneralName(GeneralName.rfc822Name, leaf.address())));
+        builder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+        builder.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_emailProtection));
+        X509Certificate certificate = new JcaX509CertificateConverter()
+                .getCertificate(builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(intermediateKey.getPrivate())));
+        return new Issued(pair.getPrivate(), List.of(certificate, intermediate));
+    }
+
+    /**
+     * A leaf that names {@link #intermediate()} as its issuer but is signed by
+     * another key: shipped with that intermediate, its chain is broken.
+     */
+    /**
+     * A self-signed certificate with the subject of {@link #ca()} but another key:
+     * it did not sign {@link #intermediate()}.
+     */
+    public static X509Certificate impostorRoot() throws Exception {
+        X509Certificate root = ca();
+        KeyPair impostor = rsa();
+        X500Name name = new X500Name(root.getSubjectX500Principal().getName());
+        Instant now = Instant.now();
+        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(name, BigInteger.valueOf(SERIAL.incrementAndGet()),
+                Date.from(now.minus(Duration.ofDays(30))), Date.from(now.plus(Duration.ofDays(3650))), name, impostor.getPublic());
+        builder.addExtension(Extension.basicConstraints, true, new BasicConstraints(true));
+        return new JcaX509CertificateConverter()
+                .getCertificate(builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(impostor.getPrivate())));
+    }
+
+    public static Issued issueForgedUnderIntermediate(Leaf leaf) throws Exception {
+        X509Certificate intermediate = intermediate();
+        KeyPair pair = rsa();
+        KeyPair impostor = rsa();
+        X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(new X500Name(intermediate.getSubjectX500Principal().getName()),
+                BigInteger.valueOf(SERIAL.incrementAndGet()), Date.from(leaf.notBefore()), Date.from(leaf.notAfter()),
+                new X500Name("CN=EDDI Test Mailbox"), pair.getPublic());
+        builder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(new GeneralName(GeneralName.rfc822Name, leaf.address())));
+        builder.addExtension(Extension.keyUsage, true, new KeyUsage(KeyUsage.digitalSignature));
+        builder.addExtension(Extension.extendedKeyUsage, false, new ExtendedKeyUsage(KeyPurposeId.id_kp_emailProtection));
+        X509Certificate certificate = new JcaX509CertificateConverter()
+                .getCertificate(builder.build(new JcaContentSignerBuilder("SHA256withRSA").build(impostor.getPrivate())));
+        return new Issued(pair.getPrivate(), List.of(certificate, intermediate));
+    }
+
     public static Issued issue(Leaf leaf) throws Exception {
         X509Certificate ca = ca();
         KeyPair pair = leaf.useEc() ? ec() : rsa();
@@ -121,8 +207,11 @@ public final class SmimeTestCertificates {
         X509v3CertificateBuilder builder = new JcaX509v3CertificateBuilder(issuer, BigInteger.valueOf(SERIAL.incrementAndGet()),
                 Date.from(leaf.notBefore()), Date.from(leaf.notAfter()), subject, pair.getPublic());
         builder.addExtension(Extension.subjectAlternativeName, false, new GeneralNames(new GeneralName(GeneralName.rfc822Name, leaf.address())));
-        builder.addExtension(Extension.keyUsage, true,
-                new KeyUsage(leaf.digitalSignature() ? KeyUsage.digitalSignature | KeyUsage.keyEncipherment : KeyUsage.keyEncipherment));
+        int usage = leaf.digitalSignature() ? KeyUsage.digitalSignature | KeyUsage.keyEncipherment : KeyUsage.keyEncipherment;
+        if (leaf.nonRepudiation()) {
+            usage = KeyUsage.nonRepudiation;
+        }
+        builder.addExtension(Extension.keyUsage, true, new KeyUsage(usage));
         builder.addExtension(Extension.extendedKeyUsage, false,
                 new ExtendedKeyUsage(leaf.emailProtection() ? KeyPurposeId.id_kp_emailProtection : KeyPurposeId.id_kp_clientAuth));
         PrivateKey signer = leaf.selfSigned() ? pair.getPrivate() : rsaCa.getPrivate();

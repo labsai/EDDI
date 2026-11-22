@@ -16,6 +16,7 @@ import ai.labs.eddi.engine.mail.MailSendException;
 import ai.labs.eddi.engine.mail.MessageIds;
 import ai.labs.eddi.engine.mail.OutboundMail;
 import ai.labs.eddi.engine.mail.PlainTextMailRenderer;
+import ai.labs.eddi.engine.mail.SmimeCertificateCheck;
 import ai.labs.eddi.engine.mail.SmimeSigner;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
@@ -55,7 +56,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.UUID;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static ai.labs.eddi.utils.LogSanitizer.sanitize;
@@ -71,15 +71,24 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * {@code self_test}. It never starts a turn.
  * <p>
  * <b>The token.</b> 32 random bytes, base64url, returned once to the caller who
- * started the test and carried in the mail's {@value #TOKEN_HEADER} header
- * (and, for providers that drop unknown headers, in its body). Only its SHA-256
- * is stored. It is valid for {@link #VALIDITY} and for one use: the ledger
- * transition from {@code SENT} to {@code DONE} is atomic, so a second copy of
- * the mail — a replay, a forward back to the mailbox — finds the row already
- * done and is refused like any other mail from the integration's own address.
+ * started the test and carried in the mail's {@value #TOKEN_HEADER} header —
+ * only there: a token in the body would let any mail that quotes or forwards
+ * the test mail count as its result. Only its SHA-256 is stored. A returned
+ * mail counts only when it carries the token in that header <em>and</em> its
+ * {@code Message-ID} is the one the test mail was sent with, so a forged mail
+ * cannot write a result without both. The token is valid for {@link #VALIDITY}
+ * and for one use: the ledger transition from {@code SENT} to {@code DONE} is
+ * atomic, so a second copy of the mail — a replay, a forward back to the
+ * mailbox — finds the row already done and is refused like any other mail from
+ * the integration's own address.
  * <p>
  * <b>The limit.</b> At most {@value #MAX_PER_HOUR} tests per integration per
- * hour, counted from the ledger (cluster-wide, both datastores).
+ * clock hour (UTC), cluster-wide and atomic: a test starts only by claiming one
+ * of the hour's {@value #MAX_PER_HOUR} slot rows in the ledger, whose
+ * idempotency key ({@code self-test-slot:<integrationId>:<hour>:<n>}) is unique
+ * on both datastores, so two nodes can never both take the last one. A fixed
+ * window, not a sliding one: up to twice the limit can start across the turn of
+ * an hour.
  */
 @ApplicationScoped
 public class EmailSelfTest {
@@ -97,7 +106,6 @@ public class EmailSelfTest {
 
     static final String SUBJECT = "EDDI sending-health self-test";
     static final String RESULT_PREFIX = "self_test:v1;";
-    private static final Pattern BODY_TOKEN = Pattern.compile("Self-test token: ([A-Za-z0-9_-]{43})");
     private static final Pattern TOKEN = Pattern.compile("^[A-Za-z0-9_-]{43}$");
     private static final Session SESSION = Session.getInstance(new Properties());
     private static final SecureRandom RANDOM = new SecureRandom();
@@ -159,7 +167,7 @@ public class EmailSelfTest {
                     + "first. A trigger-mode integration still never replies; it uses the relay only for this test.", false);
         }
         Instant now = Instant.now(clock);
-        if (ledger.countCreatedSince(settings.address(), Kind.SELF_TEST, now.minus(Duration.ofHours(1))) >= MAX_PER_HOUR) {
+        if (!claimSlot(integrationId, now)) {
             throw new Refused("At most " + MAX_PER_HOUR + " self-tests per integration per hour. Try again later.", true);
         }
         String token = newToken();
@@ -187,12 +195,40 @@ public class EmailSelfTest {
         }
     }
 
-    /** The test mail, with the token in its header and its body. */
+    /**
+     * Claims one of the hour's {@value #MAX_PER_HOUR} slots of
+     * {@code integrationId}: the first slot row whose unique key is still free.
+     * Atomic per row on both datastores
+     * ({@link IEmailMessageLedger#insertIfAbsent}), so the limit holds however many
+     * nodes start tests at once. A slot row is terminal ({@code DONE}), names no
+     * recipient and is removed an hour after its window closed.
+     */
+    boolean claimSlot(String integrationId, Instant now) {
+        long hour = Math.floorDiv(now.getEpochSecond(), Duration.ofHours(1).toSeconds());
+        Instant expires = Instant.ofEpochSecond((hour + 2) * Duration.ofHours(1).toSeconds());
+        for (int slot = 0; slot < MAX_PER_HOUR; slot++) {
+            String key = SLOT_PREFIX + integrationId + ":" + hour + ":" + slot;
+            LedgerEntry row = new LedgerEntry(UUID.randomUUID().toString(), integrationId, Kind.SELF_TEST, Direction.OUT,
+                    "<self-test-slot." + hour + "." + slot + "@eddi.invalid>", null, SLOT_SOURCE, key, null, State.DONE, 0, null, null, null,
+                    null, now, now, expires);
+            if (ledger.insertIfAbsent(row)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** The idempotency-key prefix of a slot row. */
+    static final String SLOT_PREFIX = "self-test-slot:";
+    /** The {@code sourceRef} of a slot row (a test row holds a token hash). */
+    static final String SLOT_SOURCE = "slot";
+
+    /** The test mail, with the token in its header (never in its body). */
     static byte[] render(EmailChannelSettings settings, String messageId, String token, Instant now) {
         MailAddress self = new MailAddress(settings.address(), settings.fromName());
         String text = "This is a sending-health self-test of an EDDI email integration. EDDI reads it back from this mailbox to check "
                 + "how the mail provider signs mail from this address (DKIM, DMARC) and whether the S/MIME signature verifies.\n\n"
-                + "You can ignore or delete it. It never starts an agent conversation.\n\n" + "Self-test token: " + token + "\n";
+                + "You can ignore or delete it. It never starts an agent conversation.\n";
         byte[] rendered = PlainTextMailRenderer.render(new OutboundMail(self, List.of(new MailAddress(settings.address(), null)), List.of(), SUBJECT,
                 text, messageId, null, List.of(), OutboundMail.Kind.AUTO_GENERATED, now)).mime();
         try {
@@ -220,11 +256,12 @@ public class EmailSelfTest {
      * sender was authenticated and before the own-address refusal.
      * <p>
      * True only when every condition holds: {@code From} is the integration's own
-     * address, the mail carries a token, the token's hash names a
-     * {@link Kind#SELF_TEST} row of <em>this</em> integration that is still open
-     * ({@code SENT}) and younger than {@link #VALIDITY}, and this call is the one
-     * that moved it to {@code DONE}. Anything else returns false, and the mail
-     * meets the normal checks — where its own address refuses it.
+     * address, the mail carries a token in its {@value #TOKEN_HEADER} header, the
+     * token's hash names a {@link Kind#SELF_TEST} row of <em>this</em> integration
+     * that is still open ({@code SENT}) and younger than {@link #VALIDITY}, the
+     * mail's {@code Message-ID} is the row's, and this call is the one that moved
+     * it to {@code DONE}. Anything else returns false, and the mail meets the
+     * normal checks — where its own address refuses it.
      */
     public boolean recognize(String integrationId, EmailChannelSettings settings, InboundMail mail, byte[] raw, MailAuthentication authentication,
                              Instant now) {
@@ -232,16 +269,17 @@ public class EmailSelfTest {
         if (from == null || settings.address() == null || !from.equals(settings.address())) {
             return false;
         }
-        String token = tokenOf(raw, mail);
+        String token = tokenOf(raw);
         if (token == null) {
             return false;
         }
         Optional<LedgerEntry> row = ledger.findByIdempotencyKey(key(hash(token)));
         if (row.isEmpty() || row.get().kind() != Kind.SELF_TEST || !integrationId.equals(row.get().integrationId())
-                || row.get().state() != State.SENT || !row.get().createdAt().plus(VALIDITY).isAfter(now)) {
+                || row.get().state() != State.SENT || !row.get().createdAt().plus(VALIDITY).isAfter(now) || mail.syntheticMessageId()
+                || !row.get().messageId().equals(mail.messageId())) {
             return false;
         }
-        String result = encode(evaluate(settings, raw, authentication));
+        String result = encode(evaluate(settings, raw, authentication, now));
         // The atomic SENT -> DONE is what makes the token single-use.
         boolean closed = ledger.transition(row.get().id(), State.SENT, State.DONE, null, null, result, false, now);
         if (closed) {
@@ -250,8 +288,11 @@ public class EmailSelfTest {
         return closed;
     }
 
-    /** The token in the mail's header or, failing that, its body. */
-    static String tokenOf(byte[] raw, InboundMail mail) {
+    /**
+     * The token in the mail's {@value #TOKEN_HEADER} header, or null — never one
+     * from the body, which any quoting or forwarding mail can carry.
+     */
+    static String tokenOf(byte[] raw) {
         try {
             InternetHeaders headers = new InternetHeaders(new ByteArrayInputStream(raw));
             String[] values = headers.getHeader(TOKEN_HEADER);
@@ -259,19 +300,13 @@ public class EmailSelfTest {
                 return values[0].trim();
             }
         } catch (MessagingException e) {
-            // Unreadable headers carry no token; the body may.
-        }
-        if (mail.text() != null) {
-            Matcher matcher = BODY_TOKEN.matcher(mail.text());
-            if (matcher.find()) {
-                return matcher.group(1);
-            }
+            // Unreadable headers carry no token.
         }
         return null;
     }
 
     /** What the returned mail shows. */
-    EmailSelfTestResult.Checks evaluate(EmailChannelSettings settings, byte[] raw, MailAuthentication authentication) {
+    EmailSelfTestResult.Checks evaluate(EmailChannelSettings settings, byte[] raw, MailAuthentication authentication, Instant now) {
         String domain = IEmailSuppressionStore.domainOf(settings.address());
         String signingDomain = authentication == null ? null : authentication.signingDomain();
         if (signingDomain == null && authentication != null) {
@@ -289,7 +324,7 @@ public class EmailSelfTest {
             case NOT_SIGNED -> "not_signed";
             case INVALID -> "invalid";
             case VERIFIED -> smime.signerAddresses().stream().map(a -> AddressNormalizer.tryNormalize(a).orElse(a))
-                    .anyMatch(a -> a.equalsIgnoreCase(settings.address())) ? "verified" : "wrong_signer";
+                    .anyMatch(a -> a.equalsIgnoreCase(settings.address())) ? trust(smime, now) : "wrong_signer";
         };
         String dmarcResult;
         String dmarcDomain = null;
@@ -302,6 +337,25 @@ public class EmailSelfTest {
         }
         return new EmailSelfTestResult.Checks(dkim, signingDomain, authentication != null && authentication.isAuthenticated(), temporary, smimeResult,
                 settings.wantsSignature(), dmarcResult, dmarcDomain, isMicrosoft365(settings), domain);
+    }
+
+    /**
+     * A verified signature, by how far the chain it carries builds:
+     * {@code verified} (to a root in the JDK trust store),
+     * {@code verified_untrusted_root} (complete, or to a root that is not shipped
+     * and not publicly trusted — recipients decide whether they trust it), or
+     * {@code chain_broken}.
+     */
+    static String trust(SmimeSigner.VerificationResult smime, Instant now) {
+        if (smime.certificates().isEmpty()) {
+            return "chain_broken";
+        }
+        SmimeCertificateCheck.Chain chain = SmimeCertificateCheck.chainOf(smime.certificates(), now);
+        return switch (chain) {
+            case TRUSTED -> "verified";
+            case COMPLETE, UNTRUSTED_ROOT -> "verified_untrusted_root";
+            case BROKEN -> "chain_broken";
+        };
     }
 
     /**

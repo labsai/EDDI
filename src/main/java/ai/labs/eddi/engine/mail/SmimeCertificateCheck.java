@@ -46,17 +46,34 @@ import java.util.Set;
  * subject's {@code E=} attribute — equals the mailbox address, compared
  * normalised. A recipient's client checks exactly this, so a certificate for
  * another address produces a signature every client flags as forged;</li>
- * <li>key usage, when present, includes {@code digitalSignature}; extended key
- * usage, when present, includes {@code emailProtection} (or
- * {@code anyExtendedKeyUsage}) — RFC 8550 §4.4. A certificate without either
- * extension is not restricted by it;</li>
+ * <li>key usage, when present, includes {@code digitalSignature} or
+ * {@code nonRepudiation} — RFC 8550 §4.4.2, under which a receiving agent
+ * accepts a signature from a certificate with at least one of the two; extended
+ * key usage, when present, includes {@code emailProtection} (or
+ * {@code anyExtendedKeyUsage}). A certificate without either extension is not
+ * restricted by it;</li>
  * <li>valid now: not before its {@code notBefore}, not after its
  * {@code notAfter};</li>
  * <li>its chain builds: to a root in the JDK trust store
- * ({@link Chain#TRUSTED}), or — shipped complete with its own root — at least
- * internally ({@link Chain#COMPLETE}, usable but not publicly trusted, so
- * recipients see an untrusted signer). Neither is {@link Chain#BROKEN}.</li>
+ * ({@link Chain#TRUSTED}); or, from the leaf through the certificates shipped
+ * with it, to a self-signed root that is shipped too ({@link Chain#COMPLETE});
+ * or from the leaf through at least one shipped intermediate to a certificate
+ * whose issuer is not in the bundle ({@link Chain#UNTRUSTED_ROOT} — the usual
+ * {@code .p12} of an S/MIME-only CA, which ships leaf and intermediate but no
+ * root). The last two are usable, with a warning: EDDI cannot know whether a
+ * recipient trusts that root.</li>
  * </ul>
+ * A chain is {@link Chain#BROKEN} — and the certificate unusable — when a
+ * certificate's issuer is in the bundle but its signature does not verify with
+ * that issuer's key, or when the leaf comes alone and its issuer is not a
+ * public root (nothing lets a recipient build the chain: ship the
+ * intermediates).
+ * <p>
+ * <b>What this does not decide.</b> Revocation is not checked, and neither is
+ * whether a recipient trusts the root: that is the recipient's decision, made
+ * in their mail client. EDDI refuses only what makes a signature unusable for
+ * everyone — a wrong address, wrong key usages, a date outside the validity, a
+ * chain whose signatures do not verify.
  */
 public final class SmimeCertificateCheck {
 
@@ -76,7 +93,10 @@ public final class SmimeCertificateCheck {
     public enum Problem {
         /** No SAN or subject e-mail equals the mailbox address. */
         ADDRESS_MISMATCH("the certificate is issued to %s, not to the mailbox address"),
-        /** Key usage present without {@code digitalSignature}. */
+        /**
+         * Key usage present with neither {@code digitalSignature} nor
+         * {@code nonRepudiation}.
+         */
         KEY_USAGE("its key usage does not allow digital signatures"),
         /** Extended key usage present without {@code emailProtection}. */
         EXTENDED_KEY_USAGE("its extended key usage does not include emailProtection (S/MIME)"),
@@ -84,8 +104,11 @@ public final class SmimeCertificateCheck {
         NOT_YET_VALID("it is not valid yet"),
         /** After {@code notAfter}. */
         EXPIRED("it has expired"),
-        /** The chain does not build, not even internally. */
-        CHAIN("its certificate chain is incomplete: ship the intermediate certificates with it");
+        /**
+         * The chain is broken: a signature in it does not verify, or the leaf comes
+         * without the intermediates that lead to a root.
+         */
+        CHAIN("its certificate chain is broken or incomplete: ship the intermediate certificates with it");
 
         private final String text;
 
@@ -108,8 +131,19 @@ public final class SmimeCertificateCheck {
         TRUSTED,
         /** Internally, to a root shipped with it that the JDK does not trust. */
         COMPLETE,
-        /** Not at all. */
-        BROKEN
+        /**
+         * Through the shipped intermediates to a certificate whose issuer (the root) is
+         * neither shipped nor in the JDK trust store. Usable; recipients decide whether
+         * they trust it.
+         */
+        UNTRUSTED_ROOT,
+        /** A signature in the chain does not verify, or the leaf comes alone. */
+        BROKEN;
+
+        /** Whether recipients' clients may show the signer as untrusted. */
+        public boolean untrusted() {
+            return this == COMPLETE || this == UNTRUSTED_ROOT;
+        }
     }
 
     /**
@@ -185,7 +219,8 @@ public final class SmimeCertificateCheck {
             problems.add(Problem.ADDRESS_MISMATCH);
         }
         boolean[] keyUsage = leaf.getKeyUsage();
-        if (keyUsage != null && (keyUsage.length == 0 || !keyUsage[0])) {
+        // Bit 0 is digitalSignature, bit 1 nonRepudiation (RFC 5280 §4.2.1.3).
+        if (keyUsage != null && !(keyUsage.length > 0 && keyUsage[0]) && !(keyUsage.length > 1 && keyUsage[1])) {
             problems.add(Problem.KEY_USAGE);
         }
         try {
@@ -275,7 +310,15 @@ public final class SmimeCertificateCheck {
         }
     }
 
-    private static Chain chainOf(List<X509Certificate> chain, Instant now, Set<TrustAnchor> trustAnchors) {
+    /**
+     * How far {@code chain} (leaf first) builds at {@code now} against the JDK's
+     * trusted roots — for the certificates a received signature carries.
+     */
+    public static Chain chainOf(List<X509Certificate> chain, Instant now) {
+        return chainOf(chain, now, jdkTrustAnchors());
+    }
+
+    static Chain chainOf(List<X509Certificate> chain, Instant now, Set<TrustAnchor> trustAnchors) {
         X509Certificate leaf = chain.getFirst();
         if (trustAnchors != null && !trustAnchors.isEmpty()) {
             try {
@@ -291,34 +334,51 @@ public final class SmimeCertificateCheck {
                 // Not to a public root; try the shipped chain on its own.
             }
         }
-        return internallyComplete(chain) ? Chain.COMPLETE : Chain.BROKEN;
+        return internalChain(chain);
     }
 
     /**
-     * Whether each certificate is signed by a later one in the list and the walk
-     * ends in a self-signed root that is also in the list.
+     * The chain judged on its own: walked from the leaf, each certificate verified
+     * with the key of the certificate in the list whose subject is its issuer.
+     * <ul>
+     * <li>{@link Chain#COMPLETE}: the walk ends at a self-signed root in the
+     * list;</li>
+     * <li>{@link Chain#UNTRUSTED_ROOT}: it passed at least one intermediate and
+     * ends at a certificate whose issuer no certificate in the list is;</li>
+     * <li>{@link Chain#BROKEN}: a certificate whose issuer <em>is</em> in the list
+     * does not verify with its key, a self-signed certificate does not verify with
+     * its own, the walk loops, or the leaf's issuer is absent and no intermediate
+     * was shipped.</li>
+     * </ul>
      */
-    static boolean internallyComplete(List<X509Certificate> chain) {
+    static Chain internalChain(List<X509Certificate> chain) {
         X509Certificate current = chain.getFirst();
         Set<X509Certificate> visited = new HashSet<>();
         while (visited.add(current)) {
-            if (current.getIssuerX500Principal().equals(current.getSubjectX500Principal()) && verifies(current, current.getPublicKey())) {
-                return true;
+            if (current.getIssuerX500Principal().equals(current.getSubjectX500Principal())) {
+                return verifies(current, current.getPublicKey()) ? Chain.COMPLETE : Chain.BROKEN;
             }
             X509Certificate issuer = null;
+            boolean issuerShipped = false;
             for (X509Certificate candidate : chain) {
-                if (candidate != current && candidate.getSubjectX500Principal().equals(current.getIssuerX500Principal())
-                        && verifies(current, candidate.getPublicKey())) {
-                    issuer = candidate;
-                    break;
+                if (candidate != current && candidate.getSubjectX500Principal().equals(current.getIssuerX500Principal())) {
+                    issuerShipped = true;
+                    if (verifies(current, candidate.getPublicKey())) {
+                        issuer = candidate;
+                        break;
+                    }
                 }
             }
             if (issuer == null) {
-                return false;
+                if (issuerShipped) {
+                    return Chain.BROKEN; // the issuer is in the bundle, and its key did not make this signature
+                }
+                // The root is not shipped: fine after an intermediate, not for a lone leaf.
+                return current == chain.getFirst() ? Chain.BROKEN : Chain.UNTRUSTED_ROOT;
             }
             current = issuer;
         }
-        return false;
+        return Chain.BROKEN;
     }
 
     private static boolean verifies(X509Certificate certificate, PublicKey key) {

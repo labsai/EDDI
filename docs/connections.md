@@ -239,7 +239,10 @@ a server — the key signs inside EDDI, and only the public certificate travels 
   `${connection:…}` in an HTTP call, an MCP server, a mail login, XOAUTH2 — refuses it with `UNSUPPORTED_PLACEMENT`,
   so the key can never leave as a header.
 - Whether the certificate fits the mailbox (address, key usages, expiry, chain) is checked by the integration that names
-  it, at save time and daily — see [S/MIME signing](email-integration.md#smime-signing).
+  it, at save time and daily — see [S/MIME signing](email-integration.md#smime-signing). Ship the intermediate
+  certificates with the leaf; the root may be left out (the usual `.p12` of an S/MIME-only CA): such a chain signs, with
+  a warning, because whether to trust the root is each recipient's decision. Prefer a **signing-only** certificate
+  (no `keyEncipherment`): EDDI cannot read mail encrypted to it.
 
 ### Per-end-user OAuth
 

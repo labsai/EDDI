@@ -49,6 +49,9 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -163,6 +166,55 @@ class EmailSelfTestTest {
             var e = assertThrows(EmailSelfTest.Refused.class, () -> selfTest.start(INTEGRATION, settings(WITH_SMTP)));
             assertTrue(e.rateLimited());
             assertEquals(EmailSelfTest.MAX_PER_HOUR, transport.sent.size());
+        }
+
+        @Test
+        @DisplayName("the limit is per integration and cluster-wide: a second node sharing the ledger gets no extra slot")
+        void rateLimitIsPerIntegrationAcrossNodes() {
+            var otherNode = new EmailSelfTest(ledger, transport, dmarc, mock(MailDnsResolver.class), new SimpleMeterRegistry(), Duration.ofDays(30),
+                    Clock.fixed(now, ZoneOffset.UTC));
+            for (int i = 0; i < EmailSelfTest.MAX_PER_HOUR; i++) {
+                (i % 2 == 0 ? selfTest : otherNode).start(INTEGRATION, settings(WITH_SMTP));
+            }
+            assertThrows(EmailSelfTest.Refused.class, () -> otherNode.start(INTEGRATION, settings(WITH_SMTP)));
+            assertThrows(EmailSelfTest.Refused.class, () -> selfTest.start(INTEGRATION, settings(WITH_SMTP)));
+            // Another integration on the same address has its own slots.
+            assertEquals(EmailSelfTestResult.WAITING, selfTest.start("another-integration", settings(WITH_SMTP)).status());
+            // The next hour has new ones.
+            var nextHour = new EmailSelfTest(ledger, transport, dmarc, mock(MailDnsResolver.class), new SimpleMeterRegistry(), Duration.ofDays(30),
+                    Clock.fixed(now.plus(Duration.ofHours(1)), ZoneOffset.UTC));
+            assertEquals(EmailSelfTestResult.WAITING, nextHour.start(INTEGRATION, settings(WITH_SMTP)).status());
+        }
+
+        @Test
+        @DisplayName("a slot is claimed atomically: the last one goes to exactly one of two racing starts")
+        void lastSlotGoesToOne() throws Exception {
+            for (int i = 0; i < EmailSelfTest.MAX_PER_HOUR - 1; i++) {
+                assertTrue(selfTest.claimSlot(INTEGRATION, now));
+            }
+            var pool = Executors.newFixedThreadPool(8);
+            try {
+                var gate = new CountDownLatch(1);
+                List<Future<Boolean>> claims = new ArrayList<>();
+                for (int i = 0; i < 8; i++) {
+                    claims.add(pool.submit(() -> {
+                        gate.await();
+                        return selfTest.claimSlot(INTEGRATION, now);
+                    }));
+                }
+                gate.countDown();
+                int won = 0;
+                for (var claim : claims) {
+                    won += claim.get() ? 1 : 0;
+                }
+                assertEquals(1, won);
+            } finally {
+                pool.shutdownNow();
+            }
+            var slot = ledger.findByIdempotencyKey(EmailSelfTest.SLOT_PREFIX + INTEGRATION + ":"
+                    + Math.floorDiv(now.getEpochSecond(), 3600) + ":0").orElseThrow();
+            assertEquals(State.DONE, slot.state(), "terminal");
+            assertNull(slot.recipient(), "no address");
         }
 
         @Test
@@ -310,6 +362,37 @@ class EmailSelfTestTest {
         }
 
         @Test
+        @DisplayName("the right token with another Message-ID is not recognised, and the test stays open")
+        void otherMessageIdRefused() throws Exception {
+            var started = selfTest.start(INTEGRATION, settings(WITH_SMTP));
+            String sent = new String(transport.sent.get(0), StandardCharsets.ISO_8859_1);
+            String original = new MimeMessage(null, new ByteArrayInputStream(transport.sent.get(0))).getMessageID();
+            byte[] forged = sent.replace(original, "<forged.1@contoso.com>").getBytes(StandardCharsets.ISO_8859_1);
+            var parser = new MimeMessageParser(new HtmlToMarkdownConverter());
+            assertFalse(selfTest.recognize(INTEGRATION, settings(WITH_SMTP), parser.parse(forged, MailLimits.defaults(), true), forged, verdict,
+                    now.plusSeconds(30)));
+            assertEquals(EmailSelfTestResult.WAITING, selfTest.read(INTEGRATION, started.token()).orElseThrow().status());
+            // The genuine mail still closes it.
+            assertTrue(selfTest.recognize(INTEGRATION, settings(WITH_SMTP), parser.parse(transport.sent.get(0), MailLimits.defaults(), true),
+                    transport.sent.get(0), verdict, now.plusSeconds(40)));
+        }
+
+        @Test
+        @DisplayName("a token in the body only is not recognised, even under the right Message-ID")
+        void bodyTokenRefused() throws Exception {
+            var started = selfTest.start(INTEGRATION, settings(WITH_SMTP));
+            String sent = new String(transport.sent.get(0), StandardCharsets.ISO_8859_1);
+            assertFalse(sent.contains("token: " + started.token()), "the body does not carry the token");
+            String headerLine = EmailSelfTest.TOKEN_HEADER + ": " + started.token() + "\r\n";
+            assertTrue(sent.contains(headerLine), sent);
+            byte[] bodyOnly = (sent.replace(headerLine, "") + "Self-test token: " + started.token() + "\r\n").getBytes(StandardCharsets.ISO_8859_1);
+            var parsed = new MimeMessageParser(new HtmlToMarkdownConverter()).parse(bodyOnly, MailLimits.defaults(), true);
+            assertTrue(parsed.text().contains(started.token()), "the token is in the parsed body");
+            assertFalse(selfTest.recognize(INTEGRATION, settings(WITH_SMTP), parsed, bodyOnly, verdict, now.plusSeconds(30)));
+            assertEquals(EmailSelfTestResult.WAITING, selfTest.read(INTEGRATION, started.token()).orElseThrow().status());
+        }
+
+        @Test
         @DisplayName("a token in a mail from someone else is not recognised")
         void foreignSender() throws Exception {
             var started = selfTest.start(INTEGRATION, settings(WITH_SMTP));
@@ -367,10 +450,27 @@ class EmailSelfTestTest {
             byte[] mail = EmailSelfTest.render(settings(WITH_SMTP), "<eddi.1@contoso.com>", EmailSelfTest.newToken(), now);
             byte[] signed = SmimeSigner.sign(mail, issued.identity());
             var checks = selfTest.evaluate(settings(WITH_SMTP), signed,
-                    new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "contoso.com"));
-            assertEquals("verified", checks.smime());
+                    new MailAuthentication(MailAuthentication.Verdict.ALIGNED_PASS, "contoso.com"), now);
+            // The test CA is in no public trust store: verified, but not trusted.
+            assertEquals("verified_untrusted_root", checks.smime());
+            assertTrue(EmailSelfTestResult.findings(checks).stream()
+                    .anyMatch(f -> f.code().equals("smime.untrusted-root") && f.level().equals("warning")));
             var other = SmimeTestCertificates.issue(SmimeTestCertificates.Leaf.valid("ceo@contoso.com"));
-            assertEquals("wrong_signer", selfTest.evaluate(settings(WITH_SMTP), SmimeSigner.sign(mail, other.identity()), null).smime());
+            assertEquals("wrong_signer", selfTest.evaluate(settings(WITH_SMTP), SmimeSigner.sign(mail, other.identity()), null, now).smime());
+        }
+
+        @Test
+        @DisplayName("a verified signature over leaf and intermediate without the root is untrusted-root; a broken chain is a problem")
+        void smimeChainFoldedIn() throws Exception {
+            byte[] mail = EmailSelfTest.render(settings(WITH_SMTP), "<eddi.2@contoso.com>", EmailSelfTest.newToken(), now);
+            var bundle = SmimeTestCertificates.issueUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            assertEquals("verified_untrusted_root",
+                    selfTest.evaluate(settings(WITH_SMTP), SmimeSigner.sign(mail, bundle.identity()), null, now).smime());
+            var forged = SmimeTestCertificates.issueForgedUnderIntermediate(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            var checks = selfTest.evaluate(settings(WITH_SMTP), SmimeSigner.sign(mail, forged.identity()), null, now);
+            assertEquals("chain_broken", checks.smime());
+            assertTrue(EmailSelfTestResult.findings(checks).stream()
+                    .anyMatch(f -> f.code().equals("smime.chain-broken") && f.level().equals("problem")));
         }
     }
 }

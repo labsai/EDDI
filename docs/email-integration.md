@@ -416,6 +416,18 @@ client shows it as signed by the mailbox, the signature survives forwarding, and
 text. It is signed immediately before SMTP submission, after the body is final. Owner notices, digests and HITL
 notifications go through the deployment's system mailer and are **not** signed.
 
+The signed text part is always **quoted-printable** (or base64). Replies are `format=flowed`, which ends every
+soft-wrapped line in a space; sent as `7bit`, a relay that strips trailing whitespace would change the signed bytes
+and break the signature, and the part cannot be re-encoded after signing (RFC 1847). So EDDI re-encodes a `7bit` or
+`8bit` text part as quoted-printable before it signs: a trailing space travels as `=20` (RFC 3676 §4.2), and the
+recipient sees the same text.
+
+The signature carries **no `SMIMECapabilities`** attribute. That attribute tells a correspondent's client which
+encryption algorithms the signer can decrypt, and EDDI never decrypts mail: an encrypted reply would reach the agent as
+an unreadable attachment. A client can still encrypt to a certificate it collected from a signature, so prefer a
+**signing-only certificate** (key usage `digitalSignature`/`nonRepudiation`, without `keyEncipherment`), to which no
+client encrypts.
+
 ```json
 {
   "channelType": "email",
@@ -426,7 +438,7 @@ notifications go through the deployment's system mailer and are **not** signed.
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `emailControl.smime.sign` | `true` | `true`: sign when a signing connection is named; without one the mail goes out unsigned and the save warns `email.smime-no-certificate`, so upgrades and quick setups keep working. `"required"`: **never send unsigned** — a missing, expired, mismatched or unreadable certificate holds the outgoing mail (the ledger row waits with reason `smime_unavailable`, is tried again hourly without using up its attempts, and the owners are told once a day), and saving with an unusable certificate is refused. `false`: never sign |
+| `emailControl.smime.sign` | `true` | `true`: sign when a signing connection is named; without one the mail goes out unsigned and the save warns `email.smime-no-certificate`, so upgrades and quick setups keep working. `"required"`: **never send unsigned** — a missing, expired, mismatched or unreadable certificate holds the outgoing mail (the ledger row waits with reason `smime_unavailable`, is tried again hourly without using up its attempts, and the owners are told once a day), and saving with an unusable certificate is refused. A reply still held `eddi.email.smime.max-hold` (default `72h`) after it was written is given up: `FAILED` with reason `smime_unavailable:expired`, an audit entry, and a final owner notice `smime_hold_expired` — it is never deleted silently by the ledger retention. `false`: never sign. Any other value is refused on a REST or MCP write; in a stored document (written by hand or a later version) it reads as `true`, with a WARN, so the integration still loads |
 | `emailControl.smime.connection` | *(none)* | Name of a connection of auth type [`SMIME_SIGNING`](connections.md#an-smime-signing-certificate) holding the certificate and key |
 
 Under `true`, a configured certificate that cannot sign (expired, say) does not stop mail: it goes out unsigned, the
@@ -437,11 +449,21 @@ checked when the integration is saved and again every day (`eddi.email.smime.che
 
 - an `rfc822Name` subject alternative name — or, without one, the subject's e-mail attribute — equals `address`
   (compared normalised). A certificate for another address is refused under `required` and a warning otherwise;
-- key usage, when present, includes `digitalSignature`; extended key usage, when present, includes `emailProtection`;
+- key usage, when present, includes `digitalSignature` or `nonRepudiation` (either is enough, RFC 8550 §4.4.2);
+  extended key usage, when present, includes `emailProtection`;
 - it is valid now. Within 30 days of expiry the save warns `email.smime-certificate-expiring`, the owners get the notice
   `certificate_expiring` once a day, and `eddi_email_smime_certificate_days_left{integration}` shows the days left;
-- its chain builds to a root in the JDK trust store. A chain shipped complete with its own, not publicly trusted, root
-  still signs, with the warning `email.smime-untrusted-chain`: recipients see an untrusted signer.
+- its chain is sound. Best, it builds to a root in the JDK trust store. A bundle that builds from the leaf through
+  its intermediate(s) to a root that is **not** in the JDK trust store — shipped with the bundle, or absent from it, as
+  in the usual `.p12` of an S/MIME-only CA (leaf and intermediate, no root) — still signs, with the warning
+  `email.smime-untrusted-chain`. A chain is refused (`chain`) only when it is broken: a certificate whose issuer is in
+  the bundle does not verify with that issuer's key, or the leaf comes alone without the intermediates that lead to a
+  root. An expired, address-mismatched or wrong-usage leaf is refused whatever its chain.
+
+**What EDDI checks, and what it leaves to the recipient.** EDDI refuses only what makes a signature unusable for
+everyone: the address, the key usages, the validity dates and a chain whose signatures do not verify. It does not check
+revocation, and it does not decide whether a root is trustworthy — **trust is the recipient's decision**, made by their
+mail client and its trust store. A root that is not publicly trusted is a warning, never a refusal.
 
 OUT rows of the [message ledger](#the-message-ledger) record `signed: true|false` (never the signature), and
 `eddi_email_outbound_total` carries `signed="true|false"`.
@@ -458,13 +480,16 @@ common case: a domain publishes the provider's DKIM key, but signing was never s
 own stand-in domain and every receiver, EDDI included, treats the mail as unauthenticated
 (`unauthenticated:pass-unaligned`).
 
-`POST /channelstore/channels/{id}/email-self-test` (edit access; at most 5 per integration per hour, else 429) sends a
+`POST /channelstore/channels/{id}/email-self-test` (edit access; at most 5 per integration per clock hour (UTC), else 429 — counted
+atomically across the cluster by claiming one of the hour's slot rows in the ledger, so a fixed window: up to 10 can start across the turn of an hour) sends a
 short mail from the integration to its own `address` through its SMTP relay — trigger mode too, which never replies but
 may test its relay — signed as `emailControl.smime` says, and answers `{status: "waiting", token, expiresAt}`. The
 token is shown only in that answer; only its SHA-256 is stored. When the next poll reads the mail back, it is
 recognised **before** the own-address refusal, its result is recorded and it is settled as `self_test`: it never starts
-a turn. A token is valid for 15 minutes and for one use — a replayed or forwarded copy, or an expired test, is refused
-like any other mail from the integration's own address.
+a turn. The token travels only in the `X-EDDI-Self-Test` header, never in the body, and the returned mail counts only
+when its `Message-ID` is the one the test was sent with, so a forged or quoting mail cannot write a result. A token is
+valid for 15 minutes and for one use — a replayed or forwarded copy, or an expired test, is refused like any other mail
+from the integration's own address.
 
 `GET /channelstore/channels/{id}/email-self-test/{token}` returns `status` (`waiting`, `done`, `expired`,
 `send_failed`), the raw `checks` and `findings` in plain words, for example:
@@ -472,8 +497,11 @@ like any other mail from the integration's own address.
 > Your provider signs as `labs-ai.20230601.gappssmtp.com`, not `labs.ai`: start DKIM authentication for `labs.ai` in
 > your provider's admin console.
 
-It reports the DKIM verdict and signing domain, DMARC alignment, whether the S/MIME signature verified (and for this
-mailbox's certificate), and whether the domain publishes DMARC (advice only). **Microsoft 365 does not DKIM-sign mail
+It reports the DKIM verdict and signing domain, DMARC alignment, whether the S/MIME signature verified — for this
+mailbox's certificate, and how far the chain the signature carries builds: `verified` (to a publicly trusted root,
+finding `smime.verified`), `verified_untrusted_root` (to a root outside the JDK trust store, finding
+`smime.untrusted-root`, a warning) or `chain_broken` (finding `smime.chain-broken`, a problem) — and whether the domain
+publishes DMARC (advice only). **Microsoft 365 does not DKIM-sign mail
 inside one organisation**, so there an unsigned result is reported as `inconclusive`, with the advice to test from
 outside. The Manager runs it from the integration's page (**Run self-test**); MCP clients use `run_email_self_test`.
 

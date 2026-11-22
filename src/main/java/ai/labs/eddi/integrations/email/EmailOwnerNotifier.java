@@ -85,7 +85,14 @@ public class EmailOwnerNotifier {
          */
         SMIME_UNAVAILABLE("smime_unavailable", "its mail cannot be S/MIME-signed (the certificate is missing, expired, does not match "
                 + "the mailbox address, or cannot be read). With emailControl.smime.sign 'required' outgoing mail is held until it is "
-                + "fixed; otherwise it goes out unsigned");
+                + "fixed; otherwise it goes out unsigned"),
+        /**
+         * A reply held for its S/MIME signature (sign 'required') reached
+         * {@code eddi.email.smime.max-hold} and was given up, unsent.
+         */
+        SMIME_HOLD_EXPIRED("smime_hold_expired", "a reply held because it could not be S/MIME-signed (emailControl.smime.sign "
+                + "'required') waited eddi.email.smime.max-hold and was given up, unsent; check the email ledger rows of kind REPLY in "
+                + "state FAILED with reason smime_unavailable:expired, and fix the signing certificate");
 
         private final String id;
         private final String text;
@@ -101,7 +108,7 @@ public class EmailOwnerNotifier {
 
         /** A reply was held back; mail intake goes on. */
         boolean isReplyProblem() {
-            return this == REPLY_FAILED || this == THREAD_THROTTLED;
+            return this == REPLY_FAILED || this == THREAD_THROTTLED || this == SMIME_HOLD_EXPIRED;
         }
 
         /** About the S/MIME certificate; mail intake goes on. */

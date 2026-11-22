@@ -8,9 +8,11 @@ import ai.labs.eddi.configs.rest.StrictConfigurationParser;
 import ai.labs.eddi.datastore.serialization.SerializationCustomizer;
 import ai.labs.eddi.secrets.sanitize.ConfigSecretRedactor;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import jakarta.ws.rs.BadRequestException;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -79,8 +81,36 @@ class EmailControlTest {
         }
 
         @Test
-        void anUnknownSignValueIsRefused() {
-            assertThrows(Exception.class, () -> MAPPER.readValue("{\"smime\":{\"sign\":\"sometimes\"}}", EmailControl.class));
+        void anUnknownSignValueReadsAsTrueFromTheStore() throws Exception {
+            // A stored document with a value this version does not know still loads.
+            assertEquals(EmailControl.SignMode.TRUE,
+                    MAPPER.readValue("{\"smime\":{\"sign\":\"sometimes\"}}", EmailControl.class).getSmime().getSign());
+            assertEquals(EmailControl.SignMode.TRUE, MAPPER.readValue("{\"smime\":{\"sign\":7}}", EmailControl.class).getSmime().getSign());
+            var read = MAPPER.readValue("{\"name\":\"m\",\"channelType\":\"email\",\"emailControl\":{\"smime\":{\"sign\":{\"x\":1},"
+                    + "\"connection\":\"cert\"}}}", ChannelIntegrationConfiguration.class);
+            assertEquals(EmailControl.SignMode.TRUE, read.getEmailControl().getSmime().getSign());
+            assertEquals("cert", read.getEmailControl().getSmime().getConnection(), "the fields after it are still read");
+        }
+
+        @Test
+        void anUnknownSignValueIsARestAndMcpBadRequest() {
+            var parser = new StrictConfigurationParser(MAPPER);
+            assertThrows(BadRequestException.class,
+                    () -> parser.parse("{\"name\":\"m\",\"channelType\":\"email\",\"emailControl\":{\"smime\":{\"sign\":\"sometimes\"}}}",
+                            ChannelIntegrationConfiguration.class));
+            assertThrows(BadRequestException.class, () -> parser.rejectUnknownFields(
+                    "{\"name\":\"m\",\"channelType\":\"email\",\"emailControl\":{\"smime\":{\"sign\":\"yes\"}}}"
+                            .getBytes(StandardCharsets.UTF_8),
+                    ChannelIntegrationConfiguration.class));
+        }
+
+        @Test
+        void copyIsDeep() {
+            var original = new EmailControl(new EmailControl.Smime(EmailControl.SignMode.REQUIRED, "cert"));
+            var copy = original.copy();
+            assertEquals(original, copy);
+            copy.getSmime().setConnection("other");
+            assertEquals("cert", original.getSmime().getConnection());
         }
 
         @Test

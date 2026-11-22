@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.transport;
 
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
+import ai.labs.eddi.configs.channels.model.EmailControl;
 import ai.labs.eddi.engine.mail.MailSendException;
 
 import java.time.Instant;
@@ -113,9 +114,16 @@ public interface MailTransport {
 
     /**
      * {@link #send}, reporting whether the message was signed. A transport that
-     * signs overrides this; the default sends what it is given, unsigned.
+     * signs overrides this. The default cannot sign: it sends what it is given,
+     * unsigned — except under {@code emailControl.smime.sign: required}, where it
+     * sends nothing and fails with a {@code SIGNING} error (not permanent, so the
+     * reply is held, exactly as when the certificate is missing).
      */
     default Sent sendMail(String integrationId, EmailChannelSettings settings, byte[] mime, String recipient) throws MailSendException {
+        if (settings != null && settings.smimeSign() == EmailControl.SignMode.REQUIRED) {
+            throw new MailSendException(MailSendException.Category.SIGNING, false,
+                    "smime_unavailable: transport " + id() + " cannot S/MIME-sign, and emailControl.smime.sign is required.", null);
+        }
         return new Sent(send(integrationId, settings, mime, recipient), false);
     }
 

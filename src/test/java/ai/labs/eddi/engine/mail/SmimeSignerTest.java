@@ -5,13 +5,16 @@
 package ai.labs.eddi.engine.mail;
 
 import jakarta.mail.Session;
+import jakarta.mail.internet.MimeBodyPart;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.mail.internet.MimeMultipart;
+import org.bouncycastle.asn1.ASN1ObjectIdentifier;
 import org.bouncycastle.cert.X509CertificateHolder;
 import org.bouncycastle.cms.CMSException;
 import org.bouncycastle.cms.SignerInformation;
 import org.bouncycastle.cms.jcajce.JcaSimpleSignerInfoVerifierBuilder;
 import org.bouncycastle.mail.smime.SMIMESigned;
+import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
@@ -24,6 +27,7 @@ import java.util.Properties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -112,6 +116,49 @@ public class SmimeSignerTest {
         }
 
         @Test
+        @DisplayName("format=flowed trailing spaces are quoted-printable inside the signed part: a relay that strips them breaks nothing")
+        void trailingSpacesSurviveARelayThatStripsThem() throws Exception {
+            var issued = SmimeTestCertificates.issue(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            String paragraph = "Thank you for your request. We have checked the stock levels in all three warehouses and can confirm "
+                    + "that the full quantity ships on Monday, with delivery expected two working days later.";
+            byte[] original = rendered(paragraph + "\n\nRegards");
+            String unsigned = new String(original, StandardCharsets.ISO_8859_1);
+            // The precondition the test depends on: the flowed body has soft-wrapped lines
+            // ending in a space, sent 7bit.
+            assertTrue(unsigned.contains(" \r\n"), "the fixture must soft-wrap");
+            assertTrue(unsigned.toLowerCase().contains("content-transfer-encoding: 7bit"), unsigned);
+
+            byte[] signed = SmimeSigner.sign(original, issued.identity());
+            String text = new String(signed, StandardCharsets.ISO_8859_1);
+            MimeBodyPart content = (MimeBodyPart) ((MimeMultipart) parse(signed).getContent()).getBodyPart(0);
+            assertEquals("quoted-printable", content.getEncoding());
+            String signedPart;
+            try (var raw = content.getRawInputStream()) {
+                signedPart = new String(raw.readAllBytes(), StandardCharsets.ISO_8859_1);
+            }
+            assertFalse(signedPart.contains(" \r\n") || signedPart.contains("\t\r\n") || signedPart.endsWith(" "),
+                    "no raw trailing whitespace in the signed part");
+            assertTrue(signedPart.contains("=20\r\n"), "the trailing spaces are encoded");
+
+            byte[] relayed = text.replaceAll("[ \t]+\r\n", "\r\n").getBytes(StandardCharsets.ISO_8859_1);
+            assertTrue(bouncyCastleVerifies(relayed), "the signature survives a whitespace-stripping relay");
+            assertEquals(SmimeSigner.Verification.VERIFIED, SmimeSigner.verify(relayed).verification());
+            MimeMultipart parts = (MimeMultipart) parse(relayed).getContent();
+            assertTrue(parts.getBodyPart(0).isMimeType("text/plain"));
+            assertTrue(parts.getBodyPart(0).getContentType().toLowerCase().contains("format=flowed"), parts.getBodyPart(0).getContentType());
+            assertEquals(parse(original).getContent().toString(), parts.getBodyPart(0).getContent().toString(), "the recipient reads the same text");
+        }
+
+        @Test
+        @DisplayName("the signature does not advertise SMIMECapabilities: EDDI cannot read mail encrypted to it")
+        void advertisesNoEncryptionCapabilities() throws Exception {
+            var issued = SmimeTestCertificates.issue(SmimeTestCertificates.Leaf.valid(ADDRESS));
+            SMIMESigned signed = new SMIMESigned((MimeMultipart) parse(SmimeSigner.sign(rendered("caps"), issued.identity())).getContent());
+            SignerInformation signer = signed.getSignerInfos().getSigners().iterator().next();
+            assertNull(signer.getSignedAttributes().get(new ASN1ObjectIdentifier("1.2.840.113549.1.9.15")), "no SMIMECapabilities attribute");
+        }
+
+        @Test
         void carriesTheCertificateChain() throws Exception {
             var issued = SmimeTestCertificates.issue(SmimeTestCertificates.Leaf.valid(ADDRESS));
             MimeMessage message = parse(SmimeSigner.sign(rendered("chain"), issued.identity()));
@@ -129,6 +176,7 @@ public class SmimeSignerTest {
             var result = SmimeSigner.verify(SmimeSigner.sign(rendered("x"), issued.identity()));
             assertEquals(SmimeSigner.Verification.VERIFIED, result.verification());
             assertEquals(List.of(ADDRESS), result.signerAddresses());
+            assertEquals(issued.chain(), result.certificates(), "the signer's certificate first, then the rest of the chain");
         }
 
         @Test

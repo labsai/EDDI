@@ -4,10 +4,18 @@
  */
 package ai.labs.eddi.configs.channels.model;
 
-import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonValue;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonToken;
+import com.fasterxml.jackson.databind.DeserializationContext;
+import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
+import com.fasterxml.jackson.databind.deser.std.StdDeserializer;
+import com.fasterxml.jackson.databind.exc.InvalidFormatException;
+import org.jboss.logging.Logger;
 
+import java.io.IOException;
 import java.util.Locale;
 import java.util.Objects;
 
@@ -55,6 +63,11 @@ public class EmailControl {
 
     public void setSmime(Smime smime) {
         this.smime = smime;
+    }
+
+    /** A deep copy: changing the copy never changes this object. */
+    public EmailControl copy() {
+        return new EmailControl(smime == null ? null : new Smime(smime.getSign(), smime.getConnection()));
     }
 
     @Override
@@ -124,7 +137,14 @@ public class EmailControl {
      * {@code emailControl.smime.sign}. On the wire a JSON {@code true},
      * {@code false} or the string {@code "required"}; the strings {@code "true"}
      * and {@code "false"} are read too, and written back as booleans.
+     * <p>
+     * <b>Strict on write, lenient on read</b>, like the rest of this object: a REST
+     * or MCP write with any other value is a 400 (the strict configuration mapper),
+     * while a stored document that holds one — written by a later version, or by
+     * hand — still loads, reading it as {@link #TRUE} with a warning, so one bad
+     * value never makes the whole integration unloadable.
      */
+    @JsonDeserialize(using = SignModeDeserializer.class)
     public enum SignMode {
         /**
          * Sign when a signing connection is configured; without one the mail goes out
@@ -156,7 +176,6 @@ public class EmailControl {
          * @throws IllegalArgumentException
          *             for anything else, naming the accepted values
          */
-        @JsonCreator
         public static SignMode fromJson(Object value) {
             if (value instanceof Boolean flag) {
                 return flag ? TRUE : FALSE;
@@ -174,6 +193,46 @@ public class EmailControl {
                 }
             }
             throw new IllegalArgumentException("emailControl.smime.sign must be true, false or \"required\".");
+        }
+    }
+
+    /**
+     * Reads {@link SignMode}. An unknown value fails on a mapper that fails on
+     * unknown properties — the strict mapper of REST and MCP writes
+     * ({@code StrictConfigurationParser}), which answers 400 — and reads as
+     * {@link SignMode#TRUE}, logged, on every other: the persistence mappers, ZIP
+     * import and sync.
+     */
+    static final class SignModeDeserializer extends StdDeserializer<SignMode> {
+
+        private static final Logger LOGGER = Logger.getLogger(SignModeDeserializer.class);
+
+        SignModeDeserializer() {
+            super(SignMode.class);
+        }
+
+        @Override
+        public SignMode deserialize(JsonParser parser, DeserializationContext context) throws IOException {
+            JsonToken token = parser.currentToken();
+            Object value;
+            if (token == JsonToken.VALUE_TRUE || token == JsonToken.VALUE_FALSE) {
+                value = parser.getBooleanValue();
+            } else if (token == JsonToken.VALUE_STRING) {
+                value = parser.getText();
+            } else {
+                value = parser.getText();
+                parser.skipChildren();
+            }
+            try {
+                return SignMode.fromJson(value);
+            } catch (IllegalArgumentException e) {
+                if (context.isEnabled(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES)) {
+                    throw InvalidFormatException.from(parser, e.getMessage(), value, SignMode.class);
+                }
+                LOGGER.warnf("emailControl.smime.sign holds an unknown value; reading it as true (sign when a certificate is configured). "
+                        + "Save the integration again to correct it.");
+                return SignMode.TRUE;
+            }
         }
     }
 }
