@@ -79,7 +79,7 @@ public class LoopbackCallerAuthFilter implements ClientRequestFilter {
             // through here, and TaintedRequestFilter would refuse it without this.
             // Engine-owned like the taint, always set, so it is never inherited.
             requestContext.getHeaders().putSingle(TurnOrigin.APPROVED_HEADER,
-                    String.valueOf(ApprovedCallScope.isActive() || TurnOrigin.inboundApproved()));
+                    String.valueOf(ApprovedCallScope.approvesHere() || TurnOrigin.inboundApproved()));
         }
         if (requestContext.getHeaders().containsKey(HttpHeaders.AUTHORIZATION)) {
             // An explicit header wins. Nothing sets one today, but a caller that does

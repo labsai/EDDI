@@ -390,7 +390,7 @@ public class OutboundHttp {
             // by way of a redirect that keeps the method.
             // A configuration write passes only as the approved execution of a gated call,
             // and only to the target the person saw: never through a redirect.
-            boolean approved = hops == 0 && ApprovedCallScope.isActive();
+            boolean approved = hops == 0 && ApprovedCallScope.approvesHere();
             Optional<String> escalation = EscalationGuard.refuseRequest(method, uri, approved);
             if (escalation.isPresent()) {
                 throw new OutboundBlockedException(escalation.get());

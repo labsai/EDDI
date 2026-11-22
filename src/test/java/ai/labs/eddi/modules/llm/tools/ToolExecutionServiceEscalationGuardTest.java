@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.modules.llm.tools;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+import ai.labs.eddi.engine.hitl.tools.SelfUngatingGuard;
 import ai.labs.eddi.engine.security.ResolutionPrincipal;
 import ai.labs.eddi.engine.security.ResolutionPrincipal.Provenance;
 import ai.labs.eddi.engine.security.ResolutionPrincipalContext;
@@ -88,6 +90,25 @@ class ToolExecutionServiceEscalationGuardTest {
         verify(rateLimiter, never()).tryAcquire(any(), anyString(), anyInt());
         verify(cacheService, never()).get(any(), anyString(), any());
         assertEquals(1.0, meterRegistry.counter("eddi.tool.execution.escalation_refused", "tool", "update_email_senders").count());
+    }
+
+    /**
+     * A tool of conversation B that runs inside the approved execution of a call of
+     * conversation A (a nested agent call, on the same thread) must not state A's
+     * approval on its requests; A's own tool does, on the worker thread too.
+     */
+    @Test
+    @DisplayName("a tool states an approval only when the approved call is its own conversation's, on the worker thread too")
+    void approvalIsScopedToTheToolsConversation() {
+        var protection = SelfUngatingGuard.Protection.ofAgent("agent-1");
+        for (int timeoutMs : new int[]{ToolExecutionService.TIMEOUT_DISABLED, 5_000}) {
+            String own = ApprovedCallScope.run(protection, "conv-a", () -> service.executeToolWrapped(ToolInvocation.of("calculator"), "{}", null,
+                    "conv-a", () -> String.valueOf(ApprovedCallScope.approvesHere()), false, false, false, 60, timeoutMs));
+            String nested = ApprovedCallScope.run(protection, "conv-a", () -> service.executeToolWrapped(ToolInvocation.of("calculator"), "{}",
+                    null, "conv-b", () -> String.valueOf(ApprovedCallScope.approvesHere()), false, false, false, 60, timeoutMs));
+            assertEquals("true", own, "timeout " + timeoutMs);
+            assertEquals("false", nested, "timeout " + timeoutMs);
+        }
     }
 
     @Test
