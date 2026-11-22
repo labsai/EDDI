@@ -6,7 +6,12 @@ package ai.labs.eddi.engine.mail;
 
 import javax.net.ssl.TrustManagerFactory;
 import javax.net.ssl.X509TrustManager;
-import javax.security.auth.x500.X500Principal;
+import org.bouncycastle.asn1.ASN1String;
+import org.bouncycastle.asn1.x500.AttributeTypeAndValue;
+import org.bouncycastle.asn1.x500.RDN;
+import org.bouncycastle.asn1.x500.X500Name;
+import org.bouncycastle.asn1.x500.style.BCStyle;
+
 import java.nio.charset.StandardCharsets;
 import java.security.GeneralSecurityException;
 import java.security.KeyStore;
@@ -33,7 +38,6 @@ import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -83,8 +87,9 @@ public final class SmimeCertificateCheck {
     static final String EKU_ANY = "2.5.29.37.0";
     /** SAN type of an {@code rfc822Name}. */
     private static final int SAN_RFC822 = 1;
+    /** Index of keyCertSign in the {@code KeyUsage} bit string. */
+    private static final int KEY_USAGE_KEY_CERT_SIGN = 5;
     /** The OID of the PKCS#9 {@code emailAddress} attribute ({@code E=}). */
-    private static final String OID_EMAIL_ADDRESS = "1.2.840.113549.1.9.1";
 
     /** How soon an expiry is reported as coming. */
     public static final Duration EXPIRY_WARNING = Duration.ofDays(30);
@@ -266,12 +271,19 @@ public final class SmimeCertificateCheck {
             // An unparseable SAN extension names nobody.
         }
         if (names.isEmpty()) {
-            String subject = certificate.getSubjectX500Principal().getName(X500Principal.RFC2253, Map.of(OID_EMAIL_ADDRESS, "E"));
-            for (String part : subject.split("(?<!\\\\),")) {
-                String trimmed = part.trim();
-                if (trimmed.regionMatches(true, 0, "E=", 0, 2)) {
-                    names.add(trimmed.substring(2).trim());
+            // Read the PKCS#9 attribute from the structured subject, not from its
+            // RFC 2253 rendering, which escapes characters such as '+' and joins the
+            // attributes of a multi-valued RDN.
+            try {
+                for (RDN rdn : X500Name.getInstance(certificate.getSubjectX500Principal().getEncoded()).getRDNs(BCStyle.EmailAddress)) {
+                    for (AttributeTypeAndValue pair : rdn.getTypesAndValues()) {
+                        if (BCStyle.EmailAddress.equals(pair.getType()) && pair.getValue() instanceof ASN1String text) {
+                            names.add(text.getString().trim());
+                        }
+                    }
                 }
+            } catch (RuntimeException e) {
+                // An unparseable subject names nobody.
             }
         }
         return names;
@@ -342,7 +354,7 @@ public final class SmimeCertificateCheck {
                 // Not to a public root; try the shipped chain on its own.
             }
         }
-        return internalChain(chain);
+        return internalChain(chain, now);
     }
 
     /**
@@ -359,34 +371,68 @@ public final class SmimeCertificateCheck {
      * was shipped.</li>
      * </ul>
      */
-    static Chain internalChain(List<X509Certificate> chain) {
-        X509Certificate current = chain.getFirst();
-        Set<X509Certificate> visited = new HashSet<>();
-        while (visited.add(current)) {
+    static Chain internalChain(List<X509Certificate> chain, Instant now) {
+        return walk(chain.getFirst(), chain, new HashSet<>(), now, true);
+    }
+
+    /**
+     * One step of the walk. Every candidate issuer is tried, so the verdict is the
+     * best path the bundle holds and does not depend on the order of its
+     * certificates.
+     */
+    private static Chain walk(X509Certificate current, List<X509Certificate> chain, Set<X509Certificate> path, Instant now, boolean leaf) {
+        if (!path.add(current)) {
+            return Chain.BROKEN;
+        }
+        try {
             if (current.getIssuerX500Principal().equals(current.getSubjectX500Principal())) {
                 return verifies(current, current.getPublicKey()) ? Chain.COMPLETE : Chain.BROKEN;
             }
-            X509Certificate issuer = null;
             boolean issuerShipped = false;
+            Chain best = Chain.BROKEN;
             for (X509Certificate candidate : chain) {
-                if (candidate != current && candidate.getSubjectX500Principal().equals(current.getIssuerX500Principal())) {
-                    issuerShipped = true;
-                    if (verifies(current, candidate.getPublicKey())) {
-                        issuer = candidate;
-                        break;
-                    }
+                if (candidate == current || !candidate.getSubjectX500Principal().equals(current.getIssuerX500Principal())) {
+                    continue;
+                }
+                issuerShipped = true;
+                if (!mayIssue(candidate, now) || !verifies(current, candidate.getPublicKey())) {
+                    continue;
+                }
+                Chain next = walk(candidate, chain, path, now, false);
+                if (next == Chain.COMPLETE) {
+                    return Chain.COMPLETE;
+                }
+                if (next == Chain.UNTRUSTED_ROOT) {
+                    best = Chain.UNTRUSTED_ROOT;
                 }
             }
-            if (issuer == null) {
-                if (issuerShipped) {
-                    return Chain.BROKEN; // the issuer is in the bundle, and its key did not make this signature
-                }
-                // The root is not shipped: fine after an intermediate, not for a lone leaf.
-                return current == chain.getFirst() ? Chain.BROKEN : Chain.UNTRUSTED_ROOT;
+            if (best != Chain.BROKEN || issuerShipped) {
+                return best; // the issuer is in the bundle: it either leads somewhere or the chain is broken
             }
-            current = issuer;
+            // The root is not shipped: fine after an intermediate, not for a lone leaf.
+            return leaf ? Chain.BROKEN : Chain.UNTRUSTED_ROOT;
+        } finally {
+            path.remove(current);
         }
-        return Chain.BROKEN;
+    }
+
+    /**
+     * Whether a shipped certificate may vouch for another at {@code now}: valid
+     * then, a CA, and, when it states key usage, allowed to sign certificates. A
+     * version 1 certificate has no extensions to read, so a self-signed one passes
+     * as the root it is.
+     */
+    private static boolean mayIssue(X509Certificate issuer, Instant now) {
+        Date at = Date.from(now);
+        if (at.before(issuer.getNotBefore()) || at.after(issuer.getNotAfter())) {
+            return false;
+        }
+        boolean legacyRoot = issuer.getVersion() == 1 && issuer.getIssuerX500Principal().equals(issuer.getSubjectX500Principal());
+        if (issuer.getBasicConstraints() < 0 && !legacyRoot) {
+            return false;
+        }
+        boolean[] usage = issuer.getKeyUsage();
+        return usage == null || (usage.length > KEY_USAGE_KEY_CERT_SIGN && usage[KEY_USAGE_KEY_CERT_SIGN]);
     }
 
     private static boolean verifies(X509Certificate certificate, PublicKey key) {

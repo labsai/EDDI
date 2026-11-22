@@ -223,6 +223,11 @@ public final class SmimeSigner {
             if (!(content instanceof MimeMultipart multipart)) {
                 return new VerificationResult(Verification.NOT_SIGNED, List.of());
             }
+            if (multipart.getCount() != 2) {
+                // RFC 1847 section 2.1: exactly the content and the signature. A third part
+                // would never be read.
+                return new VerificationResult(Verification.INVALID, List.of());
+            }
             SMIMESigned signed = new SMIMESigned(multipart);
             Store<X509CertificateHolder> certificates = signed.getCertificates();
             Collection<SignerInformation> signers = signed.getSignerInfos().getSigners();

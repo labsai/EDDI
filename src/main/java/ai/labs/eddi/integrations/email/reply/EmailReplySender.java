@@ -231,13 +231,15 @@ public class EmailReplySender {
         this.pseudonymizer = pseudonymizer;
         this.metrics = new EmailMetrics(meterRegistry);
         this.executor = executor;
-        this.retention = retention == null || retention.isZero() || retention.isNegative() ? Duration.ofDays(30) : retention;
+        this.retention = retention == null || retention.isZero() || retention.isNegative()
+                ? Duration.ofDays(30)
+                : retention.compareTo(MIN_RETENTION) < 0 ? MIN_RETENTION : retention;
         this.retry = new LedgerRetry(ledger, maxAttempts, retryBackoff);
         this.smimeMaxHold = saneMaxHold(smimeMaxHold, this.retention);
         // Every attempt can hold its lease and then wait the longest backoff. The
         // direct executor runs eviction on the writing thread, not some time later.
         this.groupReplies = Caffeine.newBuilder().maximumSize(MAX_CACHED_GROUP_REPLIES)
-                .expireAfterWrite(LEASE.plus(LedgerRetry.MAX_BACKOFF).multipliedBy(retry.maxAttempts())).executor(Runnable::run).build();
+                .expireAfterWrite(groupReplyLifetime(retry.maxAttempts(), this.smimeMaxHold)).executor(Runnable::run).build();
     }
 
     // --- Entry points --------------------------------------------------------
@@ -569,6 +571,22 @@ public class EmailReplySender {
      */
     static final Duration SMIME_HOLD = Duration.ofHours(1);
 
+    /**
+     * The shortest ledger retention the sender runs with: two holds' worth of slack
+     * plus one hold, so a held row always reaches its give-up step before the
+     * ledger removes it. A smaller {@code eddi.email.ledger-retention} is raised.
+     */
+    static final Duration MIN_RETENTION = SMIME_HOLD.multipliedBy(3);
+
+    /**
+     * How long a group reply's content stays retrievable: every retry attempt can
+     * hold its lease and wait the longest backoff, and a reply held for its S/MIME
+     * certificate must still be there when the hold ends.
+     */
+    static Duration groupReplyLifetime(int maxAttempts, Duration maxHold) {
+        return LEASE.plus(LedgerRetry.MAX_BACKOFF).multipliedBy(maxAttempts).plus(maxHold);
+    }
+
     /** The default of {@code eddi.email.smime.max-hold}. */
     public static final Duration DEFAULT_SMIME_MAX_HOLD = Duration.ofHours(72);
 
@@ -587,7 +605,11 @@ public class EmailReplySender {
             hold = SMIME_HOLD;
         }
         Duration ceiling = retention.minus(SMIME_HOLD.multipliedBy(2));
-        if (ceiling.compareTo(SMIME_HOLD) >= 0 && hold.compareTo(ceiling) > 0) {
+        if (ceiling.compareTo(SMIME_HOLD) < 0) {
+            ceiling = SMIME_HOLD; // a retention below MIN_RETENTION; the constructor raises it, this keeps the
+                                  // method total
+        }
+        if (hold.compareTo(ceiling) > 0) {
             LOGGER.warnf("eddi.email.smime.max-hold (%s) is not shorter than eddi.email.ledger-retention (%s); held replies are given up "
                     + "after %s instead, before retention removes them.", hold, retention, ceiling);
             hold = ceiling;

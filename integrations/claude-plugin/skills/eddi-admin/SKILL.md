@@ -197,7 +197,7 @@ audit trail → server log → the configuration that produced it. Follow
   (`email.open-trigger`, `email.tools-without-approvals`, `email.ai-disclosure-disabled`,
   `email.honor-reply-to`, `email.smime-no-certificate`, `email.smime-certificate-expiring`) are
   worth relaying. Mail it sends is S/MIME-signed when `emailControl.smime.connection` names an
-  `SMIME_SIGNING` connection (`sign: "required"` holds mail rather than send it unsigned). To check
+  `SMIME_SIGNING` connection and signing is not switched off (`sign: false` sends it unsigned; `sign: "required"` holds mail rather than send it unsigned). To check
   that the provider DKIM-signs the domain, run `run_email_self_test` (no token: start; then call it
   again with the returned token for the findings). Where a helpdesk already owns the mailbox, use a
   `webhook` channel instead. `read_docs("email-integration")`.
