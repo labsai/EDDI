@@ -12218,7 +12218,7 @@
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "description": "`eddi_attachment_*_total` — multimodal attachment handling.",
+          "description": "`eddi_attachment_*_total` — multimodal attachment handling, files shared between conversations (by path) or refused (by reason), and the derived files (views of an uploaded file: structure, page text, images, slices) stored by kind and in bytes.",
           "gridPos": {
             "h": 7,
             "w": 12,
@@ -12269,6 +12269,50 @@
               "editorMode": "code",
               "range": true,
               "legendFormat": "quota rejected: {{scope}}"
+            },
+            {
+              "refId": "E",
+              "expr": "sum by (path) (rate(eddi_attachment_shared_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "shared: {{path}}"
+            },
+            {
+              "refId": "F",
+              "expr": "sum by (reason) (rate(eddi_attachment_share_refused_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "share refused: {{reason}}"
+            },
+            {
+              "refId": "G",
+              "expr": "sum by (kind) (rate(eddi_attachment_derived_stored_total{job=~\"$job\"}[$__rate_interval]))",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "derived stored: {{kind}}"
+            },
+            {
+              "refId": "H",
+              "expr": "sum(rate(eddi_attachment_derived_bytes_total{job=~\"$job\"}[$__rate_interval])) or on() vector(0)",
+              "datasource": {
+                "type": "prometheus",
+                "uid": "${datasource}"
+              },
+              "editorMode": "code",
+              "range": true,
+              "legendFormat": "derived bytes"
             }
           ],
           "fieldConfig": {
@@ -12304,7 +12348,20 @@
                 ]
               }
             },
-            "overrides": []
+            "overrides": [
+              {
+                "matcher": {
+                  "id": "byFrameRefID",
+                  "options": "H"
+                },
+                "properties": [
+                  {
+                    "id": "unit",
+                    "value": "Bps"
+                  }
+                ]
+              }
+            ]
           },
           "options": {
             "legend": {
