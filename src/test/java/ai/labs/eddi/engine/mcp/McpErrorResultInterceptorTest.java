@@ -47,17 +47,17 @@ class McpErrorResultInterceptorTest {
             return "";
         }
 
-        @Tool(name = "update_email_senders", description = "x")
+        @Tool(name = "fixture_update_email_senders", description = "x")
         public String updateEmailSenders() {
             return "";
         }
 
         @Tool(description = "x")
-        public String accept_team_handoff() {
+        public String fixture_accept_team_handoff() {
             return "";
         }
 
-        @Tool(name = "update_resource", description = "x")
+        @Tool(name = "fixture_update_resource", description = "x")
         public String updateResource() {
             return "";
         }
@@ -156,7 +156,7 @@ class McpErrorResultInterceptorTest {
     @Test
     @DisplayName("a guarded tool called from a tainted MCP request fails with EMAIL_ORIGIN and never runs")
     void taintedRequestRefusedGuardedTool() throws Exception {
-        for (String method : new String[]{"updateEmailSenders", "accept_team_handoff"}) {
+        for (String method : new String[]{"updateEmailSenders", "fixture_accept_team_handoff"}) {
             InvocationContext ctx = invocation(method, "{\"ok\":true}");
             try (var request = TurnOriginTestSupport.inboundRequest(TurnOrigin.EMAIL)) {
                 var thrown = assertThrows(ToolCallException.class, () -> interceptor.toToolError(ctx));
