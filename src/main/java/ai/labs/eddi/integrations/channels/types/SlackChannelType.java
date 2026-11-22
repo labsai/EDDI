@@ -24,7 +24,13 @@ public class SlackChannelType implements ChannelTypeDescriptor {
 
     public static final String ID = "slack";
 
-    private static final URI API_ORIGIN = URI.create("https://slack.com");
+    /**
+     * The Slack Web API base every bot token is sent to: the one definition the
+     * Slack client and the router's vault-host check both use.
+     */
+    public static final String API_BASE = "https://slack.com/api/";
+
+    private static final URI API_ORIGIN = URI.create(URI.create(API_BASE).getScheme() + "://" + URI.create(API_BASE).getAuthority());
 
     @Override
     public String id() {

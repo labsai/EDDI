@@ -58,6 +58,15 @@ Phase 0.4–0.5 of the same plan.
   - **Who may claim an application's DMs.** A save that makes an integration its application's channel-less DM owner needs EDIT access to the connection, not only USE: anyone a connection is shared with may send through it, but must not take over its application's direct messages.
   - **One read per send.** `resolveService` checks the binding and auth type on the same connection document it resolves from, instead of reading it a second time that an edit could change in between. It also refuses a non-https target.
   - **Smaller fixes.** A registry that fails to construct now reaches the router's WARN instead of one DEBUG line per document. A client-id lookup failure at save is reported, not thrown. The dropped-key counter counts once per document version and key, not on every refresh, and the logged key is sanitized. Type tags on the counters are registered ids or `other`. `applicationKey` refuses a blank id. A duplicate of an integration with an application id gets a message that says why it cannot be copied. Stale Javadoc references were fixed.
+- **PR review round (CodeRabbit, GitHub Code Quality).** Like the third round, these close paths a future descriptor could open; no shipped type reaches them.
+  - **A channel-bound integration never owns an application's DMs,** even when a descriptor's `routingKeys` puts it under the `@app:` key: `getIntegrationForApplication` refuses an integration with a `channelId`, and save refuses such a routing key.
+  - **Save validation order.** The type's own `validate` runs before routing keys are derived from its fields, so a missing `appId` is reported as such instead of surfacing as an exception from `applicationKey(null)`.
+  - **No vault reference in an allowed key.** Nothing resolves one for a connection-backed type, so it would be stored and used as a literal identifier.
+  - **Allowlist entries are canonicalised** before the https check, so `"https://"` with no host is refused as malformed.
+  - **Every send refusal is counted,** including a missing connection and a deployment without connections.
+  - **The dropped-key counter has its own dedup state,** so a vault change, which re-arms the credential warnings, does not count the same key again.
+  - **One Slack API base.** `SlackChannelType.API_BASE` is the single definition, read by `SlackWebApiClient` and the router's vault-host check (the dependency runs from Slack to channels, never back).
+  - The k8s monitoring copies were regenerated (`scripts/sync-monitoring-assets.py`), the `ChannelIntegrationConfiguration` Javadoc says a descriptor must declare `connection` itself, and the tests' `pc(...)` helpers refuse an odd argument count.
 
 ### Tests
 

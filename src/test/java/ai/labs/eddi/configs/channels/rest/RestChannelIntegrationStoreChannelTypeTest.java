@@ -84,6 +84,9 @@ class RestChannelIntegrationStoreChannelTypeTest {
     }
 
     private static Map<String, String> pc(String... kv) {
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("pc(...) takes key/value pairs, got " + kv.length + " arguments");
+        }
         var map = new HashMap<String, String>();
         map.put("connection", "fakechat-bot");
         map.put("appId", "app-1");

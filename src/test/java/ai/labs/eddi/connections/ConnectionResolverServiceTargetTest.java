@@ -131,6 +131,16 @@ class ConnectionResolverServiceTargetTest {
     }
 
     @Test
+    @DisplayName("without a fixed origin, an allowlist entry with no host is refused as malformed")
+    void noOriginHostlessAllowlist() {
+        register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://"));
+        var ex = assertThrows(ConnectionException.class, () -> resolver.requireServiceTarget(REF, null, Set.of()));
+        assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, ex.getReason());
+        register(AuthType.OAUTH2_CLIENT_CREDENTIALS, Binding.SERVICE, List.of("https://smba.trafficmanager.net"));
+        assertDoesNotThrow(() -> resolver.requireServiceTarget(REF, null, Set.of()));
+    }
+
+    @Test
     @DisplayName("a connection without an auth type is refused, not a NullPointerException")
     void nullAuthType() {
         register(null, Binding.SERVICE, List.of("https://discord.com"));

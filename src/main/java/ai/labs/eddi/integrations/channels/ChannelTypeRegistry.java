@@ -187,10 +187,16 @@ public class ChannelTypeRegistry {
             // skipped before sorting, which would otherwise throw.
             List<String> keys = pc.keySet().stream().filter(Objects::nonNull).sorted().toList();
             for (String key : keys) {
+                String value = pc.get(key);
                 if (allowed.contains(key)) {
+                    // The router never resolves a vault reference for this type, so one
+                    // here would be stored and used as a literal identifier.
+                    if (value != null && value.contains("${vault:")) {
+                        errors.add("platformConfig." + key + " must not be a vault reference: a " + descriptor.id()
+                                + " integration holds no secrets, and its settings are used as written.");
+                    }
                     continue;
                 }
-                String value = pc.get(key);
                 if (value != null && value.contains("${vault:")) {
                     errors.add("platformConfig." + key + " is not a " + descriptor.id() + " setting, and a " + descriptor.id()
                             + " integration holds no secrets, not even as a vault reference: put the credential in an EDDI "
@@ -207,17 +213,6 @@ public class ChannelTypeRegistry {
                 // like one could take over an application's DM route.
                 errors.add("platformConfig.channelId must not start with '@'.");
             }
-            // Every key the type is routed by, not just channelId: a type may route by
-            // another key (a Teams conversationId), and one in the application
-            // namespace other than this integration's own would claim another
-            // application's direct messages.
-            String ownApplicationKey = descriptor.applicationId(pc).filter(id -> !id.isBlank())
-                    .map(ChannelTypeDescriptor::applicationKey).orElse(null);
-            for (String routingKey : descriptor.routingKeys(null, pc)) {
-                if (routingKey != null && routingKey.startsWith("@") && !routingKey.equals(ownApplicationKey) && !routingKey.equals(channelId)) {
-                    errors.add("A " + descriptor.id() + " routing key must not start with '@': '" + routingKey + "'.");
-                }
-            }
             String connection = pc.get(ChannelTypeDescriptor.KEY_CONNECTION);
             if (connection == null || connection.isBlank()) {
                 errors.add("A " + descriptor.id() + " integration requires platformConfig.connection: the name of the EDDI connection "
@@ -227,7 +222,48 @@ public class ChannelTypeRegistry {
                         + "connection as <tenant>/<name>, or either wrapped as ${connection:...}.");
             }
         }
-        errors.addAll(descriptor.validate(pc));
+        List<String> typeErrors = descriptor.validate(pc);
+        errors.addAll(typeErrors);
+        // Routing keys are derived from the type's own fields, so they are judged only
+        // once those fields are valid: a missing appId must be reported as such, not
+        // surface as an exception from the key derivation.
+        if (descriptor.connectionBacked() && typeErrors.isEmpty()) {
+            errors.addAll(routingKeyErrors(descriptor, pc));
+        }
+        return errors;
+    }
+
+    /**
+     * Every key the type is routed by, not just {@code channelId}: a type may route
+     * by another key (a Teams conversationId), and one in the application namespace
+     * other than this integration's own would claim another application's direct
+     * messages. Its own application key is allowed only on a channel-less
+     * integration, the one that answers that application's DMs.
+     */
+    private static List<String> routingKeyErrors(ChannelTypeDescriptor descriptor, Map<String, String> pc) {
+        List<String> errors = new ArrayList<>();
+        String channelId = pc.get(ChannelTypeDescriptor.KEY_CHANNEL_ID);
+        boolean channelBound = channelId != null && !channelId.isBlank();
+        String ownApplicationKey = descriptor.applicationId(pc).filter(id -> !id.isBlank())
+                .map(ChannelTypeDescriptor::applicationKey).orElse(null);
+        List<String> routingKeys;
+        try {
+            routingKeys = descriptor.routingKeys(null, pc);
+        } catch (RuntimeException e) {
+            errors.add("The " + descriptor.id() + " routing keys could not be derived from platformConfig: " + e.getMessage());
+            return errors;
+        }
+        for (String routingKey : routingKeys) {
+            if (routingKey == null || !routingKey.startsWith("@") || routingKey.equals(channelId)) {
+                continue;
+            }
+            if (!routingKey.equals(ownApplicationKey)) {
+                errors.add("A " + descriptor.id() + " routing key must not start with '@': '" + routingKey + "'.");
+            } else if (channelBound) {
+                errors.add("A " + descriptor.id() + " integration bound to channel '" + channelId + "' must not be routed by its "
+                        + "application key: only the channel-less integration answers the application's direct messages.");
+            }
+        }
         return errors;
     }
 }

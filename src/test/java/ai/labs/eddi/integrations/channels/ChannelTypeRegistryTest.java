@@ -17,6 +17,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -232,6 +233,40 @@ class ChannelTypeRegistryTest {
         @DisplayName("the integration's own application key is fine")
         void ownApplicationKey() {
             assertEquals(List.of(), ChannelTypeRegistry.validatePlatformConfig(byConversation, fakeConfig()));
+        }
+
+        @Test
+        @DisplayName("a channel-bound integration may not be routed by its own application key")
+        void ownApplicationKeyOnChannel() {
+            ChannelTypeDescriptor bothKeys = new FakeChatChannelType() {
+                @Override
+                public List<String> routingKeys(String resourceId, Map<String, String> platformConfig) {
+                    return List.of(platformConfig.get("channelId"), ChannelTypeDescriptor.applicationKey(platformConfig.get("appId")));
+                }
+            };
+            var pc = fakeConfig();
+            pc.put("channelId", "C1");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(bothKeys, pc);
+            assertEquals(1, errors.size(), errors.toString());
+            assertTrue(errors.get(0).contains("must not be routed by its application key"), errors.toString());
+        }
+
+        @Test
+        @DisplayName("a missing appId is reported as such, not as a routing-key exception")
+        void typeErrorsBeforeRoutingKeys() {
+            var pc = new HashMap<String, String>();
+            pc.put("connection", "fakechat-bot");
+            var errors = assertDoesNotThrow(() -> ChannelTypeRegistry.validatePlatformConfig(byConversation, pc));
+            assertEquals(List.of("A fakechat integration requires platformConfig.appId."), errors);
+        }
+
+        @Test
+        @DisplayName("an allowed key holding a vault reference is refused: nothing resolves it")
+        void vaultReferenceInAllowedKey() {
+            var pc = fakeConfig();
+            pc.put("appId", "${vault:app}");
+            var errors = ChannelTypeRegistry.validatePlatformConfig(new FakeChatChannelType(), pc);
+            assertTrue(errors.stream().anyMatch(e -> e.contains("platformConfig.appId must not be a vault reference")), errors.toString());
         }
 
         @Test

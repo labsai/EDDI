@@ -26,12 +26,12 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
@@ -100,6 +100,9 @@ class ChannelTargetRouterChannelTypeTest {
     }
 
     private static Map<String, String> pc(String... kv) {
+        if (kv.length % 2 != 0) {
+            throw new IllegalArgumentException("pc(...) takes key/value pairs, got " + kv.length + " arguments");
+        }
         var map = new HashMap<String, String>();
         for (int i = 0; i < kv.length; i += 2) {
             map.put(kv[i], kv[i + 1]);
@@ -251,6 +254,11 @@ class ChannelTargetRouterChannelTypeTest {
         var lastRefresh = ChannelTargetRouter.class.getDeclaredField("lastRefreshTime");
         lastRefresh.setAccessible(true);
         lastRefresh.set(counted, 0L);
+        // What a vault change does: credential warnings are re-armed for rotated
+        // secrets, which must not count the same dropped key again.
+        var warned = ChannelTargetRouter.class.getDeclaredField("unusableCredentialWarned");
+        warned.setAccessible(true);
+        ((Set<?>) warned.get(counted)).clear();
         assertTrue(counted.getIntegration(FakeChatChannelType.ID, "C1").isPresent());
         verify(descriptorStore, times(2)).readDescriptors(eq("ai.labs.channel"), anyString(), anyInt(), anyInt(), anyBoolean());
         assertEquals(1, meters.find("eddi_channel_config_keys_dropped_total").tags("type", FakeChatChannelType.ID).counter().count());
@@ -270,9 +278,10 @@ class ChannelTargetRouterChannelTypeTest {
 
         assertTrue(multiRouter.getIntegrationByName(FakeChatChannelType.ID, "fake").isPresent(),
                 "the name scan must not see one integration under two keys as two integrations");
-        assertSame(multiRouter.getIntegration(FakeChatChannelType.ID, "C1").orElseThrow(),
-                multiRouter.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").orElseThrow());
-        assertNotNull(multiRouter.resolveDefaultForOrigin(InboundOrigin.application(FakeChatChannelType.ID, "app-1"), "hi"));
+        assertTrue(multiRouter.getIntegration(FakeChatChannelType.ID, "C1").isPresent(), "its channel still routes");
+        assertTrue(multiRouter.getIntegrationForApplication(FakeChatChannelType.ID, "app-1").isEmpty(),
+                "a channel-bound integration under its application key must not own the application's DMs");
+        assertNull(multiRouter.resolveDefaultForOrigin(InboundOrigin.application(FakeChatChannelType.ID, "app-1"), "hi"));
     }
 
     @Test

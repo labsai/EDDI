@@ -360,7 +360,9 @@ public class ConnectionResolver {
                     "Connection '" + connection.getName() + "' has an empty baseUrlAllowlist, so it may not be sent anywhere.");
         }
         for (String allowed : allowlist) {
-            if (allowed == null || !allowed.trim().toLowerCase(Locale.ROOT).startsWith("https://")) {
+            // Canonicalised first, so an entry such as "https://" with no host is
+            // refused as malformed rather than passing a prefix test.
+            if (allowed == null || !canonicalise(allowed, connection).startsWith("https://")) {
                 throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                         "Connection '" + connection.getName() + "' lists a non-https origin in its baseUrlAllowlist; a channel "
                                 + "credential is only ever sent over https.");

@@ -273,6 +273,25 @@ class ChannelConnectionCredentialsTest {
             var ex = assertThrows(ConnectionException.class, () -> credentials.resolve(integration, FakeChatChannelType.ORIGIN));
             assertEquals(ConnectionException.Reason.INVALID_CONFIGURATION, ex.getReason());
             verifyNoInteractions(resolver);
+            assertEquals(1, refusedInvalidConfiguration());
+        }
+
+        @Test
+        @DisplayName("a send without connections in the deployment is refused and counted")
+        void resolveWithoutResolver() {
+            when(instance.isResolvable()).thenReturn(false);
+            var integration = new ChannelIntegrationConfiguration();
+            integration.setChannelType(FakeChatChannelType.ID);
+            integration.setPlatformConfig(Map.of("connection", "bot"));
+            assertThrows(ConnectionException.class, () -> credentials.resolve(integration, FakeChatChannelType.ORIGIN));
+            verifyNoInteractions(resolver);
+            assertEquals(1, refusedInvalidConfiguration());
+        }
+
+        private double refusedInvalidConfiguration() {
+            var counter = meters.find("eddi_channel_credential_refused_total").tags("type", "fakechat", "reason", "invalid_configuration")
+                    .counter();
+            return counter == null ? 0 : counter.count();
         }
     }
 }

@@ -249,15 +249,16 @@ public class ChannelConnectionCredentials {
                 .filter(ChannelTypeDescriptor::connectionBacked)
                 .orElseThrow(() -> new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
                         "Channel type '" + integration.getChannelType() + "' does not take its credential from a connection."));
-        String reference = connectionReference(integration.getPlatformConfig());
-        if (reference == null) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
-                    "The channel integration names no connection in platformConfig.connection.");
-        }
-        if (connectionResolver == null || !connectionResolver.isResolvable()) {
-            throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION, "Connections are not available in this deployment.");
-        }
         try {
+            String reference = connectionReference(integration.getPlatformConfig());
+            if (reference == null) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "The channel integration names no connection in platformConfig.connection.");
+            }
+            if (connectionResolver == null || !connectionResolver.isResolvable()) {
+                throw new ConnectionException(ConnectionException.Reason.INVALID_CONFIGURATION,
+                        "Connections are not available in this deployment.");
+            }
             return connectionResolver.get().resolveService(reference, target, descriptor.acceptedConnectionAuthTypes());
         } catch (ConnectionException e) {
             channelTypes.recordCredentialRefused(descriptor.id(), e.getReason().name().toLowerCase(Locale.ROOT));

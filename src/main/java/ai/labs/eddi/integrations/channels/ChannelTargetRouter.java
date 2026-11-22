@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.caching.ICache;
 import ai.labs.eddi.engine.caching.ICacheFactory;
 import ai.labs.eddi.engine.model.AgentDeploymentStatus;
 import ai.labs.eddi.engine.model.Deployment;
+import ai.labs.eddi.integrations.channels.types.SlackChannelType;
 import ai.labs.eddi.secrets.SecretResolver;
 import ai.labs.eddi.secrets.VaultHostAllowlist;
 import ai.labs.eddi.secrets.model.SecretReference;
@@ -80,7 +81,7 @@ public class ChannelTargetRouter {
     /**
      * Where a Slack bot token is sent - checked against the secret's allowedHosts.
      */
-    private static final String SLACK_API_DESTINATION = "https://slack.com/api/";
+    private static final String SLACK_API_DESTINATION = SlackChannelType.API_BASE;
 
     private final IChannelIntegrationStore channelStore;
     private final IDocumentDescriptorStore descriptorStore;
@@ -155,6 +156,13 @@ public class ChannelTargetRouter {
      * warning every minute.
      */
     private final Set<String> unusableCredentialWarned = ConcurrentHashMap.newKeySet();
+    /**
+     * Dropped keys already counted, per integration version and key. Separate from
+     * {@link #unusableCredentialWarned}, which a vault change clears so rotated
+     * credentials warn again: a dropped key is no credential, and a vault change
+     * must not count it a second time.
+     */
+    private final Set<String> droppedKeyCounted = ConcurrentHashMap.newKeySet();
     private final AtomicInteger weakWebhookSecretWarnings = new AtomicInteger();
 
     /**
@@ -472,7 +480,16 @@ public class ChannelTargetRouter {
             return Optional.empty();
         }
         // Re-checked rather than trusted from the key, so the answer is the
-        // integration that declares this application and nothing else.
+        // integration that declares this application and nothing else. A
+        // descriptor's routing keys are not proof of channel-lessness either: one
+        // that emits the application key for a channel-bound integration must not
+        // hand that channel's tenant the application's direct messages.
+        String boundChannel = direct.getPlatformConfig() == null
+                ? null
+                : direct.getPlatformConfig().get(ChannelTypeDescriptor.KEY_CHANNEL_ID);
+        if (boundChannel != null && !boundChannel.isBlank()) {
+            return Optional.empty();
+        }
         boolean declares = channelTypes.find(normalizedType)
                 .flatMap(descriptor -> descriptor.applicationId(direct.getPlatformConfig()))
                 .filter(applicationId::equals)
@@ -1379,10 +1396,11 @@ public class ChannelTargetRouter {
         for (String key : new TreeSet<>(kept.keySet())) {
             if (!allowed.contains(key)) {
                 kept.remove(key);
-                // Counted once per integration version and key, like the warning — not on
-                // every refresh, which would make the counter measure refresh frequency.
-                if (warnUnusable(integrationKey, key, "is not a " + descriptor.id() + " setting (" + descriptor.id()
-                        + " credentials come from the named connection)", false)) {
+                warnUnusable(integrationKey, key, "is not a " + descriptor.id() + " setting (" + descriptor.id()
+                        + " credentials come from the named connection)", false);
+                // Counted once per integration version and key — not on every refresh,
+                // which would make the counter measure refresh frequency.
+                if (droppedKeyCounted.add(integrationKey + "/" + key)) {
                     channelTypes.recordDroppedKey(descriptor.id());
                 }
             }
