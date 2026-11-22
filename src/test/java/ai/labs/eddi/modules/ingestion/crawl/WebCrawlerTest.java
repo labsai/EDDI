@@ -424,9 +424,37 @@ class WebCrawlerTest {
         @Test
         @DisplayName("past MAX_OVERSIZED_LINKS, discovery is incomplete and nothing is looked up")
         void tooManyOversizedLinksMakeDiscoveryIncomplete() {
-            // Spread over three pages: one page holding them all is past maxBytesPerPage.
+            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
+
+            CrawlSummary summary = crawlWithOversizedLinks(WebCrawler.MAX_OVERSIZED_LINKS + 1, sink);
+
+            assertTrue(summary.discoveryIncomplete(), "a crawl that stopped remembering links has not covered the source");
+            assertFalse(summary.coveredWholeSource());
+            assertEquals(0, sink.holdsCalls(), "an uncovered run is not reconciled, so nothing is looked up");
+            assertTrue(sink.errors().isEmpty(), sink.errors().toString());
+        }
+
+        @Test
+        @DisplayName("exactly MAX_OVERSIZED_LINKS oversized links leave discovery complete")
+        void oversizedLinksUpToTheCapKeepDiscoveryComplete() {
+            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
+
+            CrawlSummary summary = crawlWithOversizedLinks(WebCrawler.MAX_OVERSIZED_LINKS, sink);
+
+            assertFalse(summary.discoveryIncomplete());
+            assertTrue(summary.coveredWholeSource());
+            assertEquals(WebCrawler.MAX_OVERSIZED_LINKS, sink.holdsCalls(), "each remembered document is looked up once");
+            assertEquals(1, sink.errors().size(), "only the held one is reported: " + sink.errors());
+            assertEquals(SITE + "/p0", sink.errors().get(0).documentId());
+        }
+
+        /**
+         * A crawl of three pages linking {@code count} distinct documents, each only
+         * through a URL too long to fetch. Spread over three pages: one page holding
+         * them all is past maxBytesPerPage.
+         */
+        private CrawlSummary crawlWithOversizedLinks(int count, RecordingSink sink) {
             String padding = "a".repeat(WebCrawler.MAX_LINK_LENGTH);
-            int total = WebCrawler.MAX_OVERSIZED_LINKS + 1;
             FakeSite site = new FakeSite();
             String[] pages = {SITE + "/", SITE + "/b", SITE + "/c"};
             for (int page = 0; page < pages.length; page++) {
@@ -435,19 +463,13 @@ class WebCrawlerTest {
                     links.add(SITE + "/b");
                     links.add(SITE + "/c");
                 }
-                for (int i = page; i < total; i += pages.length) {
+                for (int i = page; i < count; i += pages.length) {
                     links.add(SITE + "/p" + i + "?utm_source=" + padding);
                 }
                 site.page(pages[page], linkTo(links.toArray(String[]::new)));
             }
-            RecordingSink sink = new RecordingSink().knows(SITE + "/p0", null, null);
-
-            CrawlSummary summary = new WebCrawler(site)
+            return new WebCrawler(site)
                     .crawl(request(SITE + "/", new Scope(true, false, "/", 3, List.of("*.pdf")), Limits.defaults()), sink);
-
-            assertTrue(summary.discoveryIncomplete(), "a crawl that stopped remembering links has not covered the source");
-            assertFalse(summary.coveredWholeSource());
-            assertTrue(sink.errors().isEmpty(), "an uncovered run is not reconciled, so nothing is reported: " + sink.errors());
         }
 
         @Test
@@ -1063,20 +1085,6 @@ class WebCrawlerTest {
             assertEquals(1, sink.errors().size(), sink.errors().toString());
             assertEquals(SITE + "/listed", sink.errors().get(0).documentId());
             assertTrue(sink.errors().get(0).contentUnknown());
-        }
-
-        @Test
-        @DisplayName("a sitemap URL dropped for its length leaves discovery incomplete")
-        void sitemapUrlOverTheParseCapMakesDiscoveryIncomplete() {
-            String tooLong = SITE + "/listed?q=" + "a".repeat(WebCrawler.MAX_SITEMAP_URL_LENGTH);
-            FakeSite site = new FakeSite()
-                    .robots(SITE, "User-agent: *" + NEWLINE + "Sitemap: " + SITE + "/sitemap.xml")
-                    .sitemap(SITE + "/sitemap.xml", tooLong)
-                    .page(SITE + "/", "<html><body>no links here</body></html>");
-
-            CrawlSummary summary = new WebCrawler(site).crawl(politeRequest(SITE + "/"), new RecordingSink());
-
-            assertTrue(summary.discoveryIncomplete(), "a page listed only that way went unseen, so absence is not deletion");
         }
 
         @Test

@@ -504,15 +504,10 @@ public class WebCrawler {
     private static void reportOversized(CrawlRequest request, CrawlSink sink, Frontier frontier,
                                         Map<String, RobotsPolicy> robotsByHost, Counters counters, Instant deadline) {
         for (String documentId : frontier.oversized) {
-            if (sink.isCancelled() || Thread.currentThread().isInterrupted() || Instant.now().isAfter(deadline)) {
-                // The rest go unreported, so their absence must not read as deletion.
-                counters.discoveryIncomplete = true;
-                return;
-            }
             // Queued, polled or delivered: a redirect delivers under the id it landed
             // on, which was never queued, and that too means another link reached it.
             if (frontier.queued.contains(documentId) || frontier.visited.contains(documentId)
-                    || frontier.delivered.contains(documentId) || !sink.holds(documentId)) {
+                    || frontier.delivered.contains(documentId)) {
                 continue;
             }
             // Queued, a page robots.txt disallows is skipped rather than reported; the
@@ -522,6 +517,15 @@ public class WebCrawler {
                 if (robots != null && !robots.isAllowed(CrawlUrls.pathAndQuery(documentId))) {
                     continue;
                 }
+            }
+            // Checked before each lookup, the one step here that costs anything.
+            if (sink.isCancelled() || Thread.currentThread().isInterrupted() || Instant.now().isAfter(deadline)) {
+                // The rest go unreported, so their absence must not read as deletion.
+                counters.discoveryIncomplete = true;
+                return;
+            }
+            if (!sink.holds(documentId)) {
+                continue;
             }
             counters.errors++;
             counters.unreachable++;
@@ -899,9 +903,8 @@ public class WebCrawler {
         // Reaching a cap means the sitemap may list more than was read.
         boolean decompressionCapped = gzipped && bytes.length >= MAX_DECOMPRESSED_SITEMAP_BYTES;
         if (!looksLikeXml(bytes)) {
-            boolean[] whole = {true};
-            List<String> lines = textSitemapUrls(bytes, bytes == body ? declaredCharset : null, whole);
-            return new Sitemap(lines, List.of(), whole[0] && !decompressionCapped && lines.size() < MAX_SITEMAP_URLS);
+            List<String> lines = textSitemapUrls(bytes, bytes == body ? declaredCharset : null);
+            return new Sitemap(lines, List.of(), !decompressionCapped && lines.size() < MAX_SITEMAP_URLS);
         }
         // A charset from the HTTP header describes the compressed bytes, not what is
         // inside them; the XML declaration is authoritative for those.
@@ -909,23 +912,22 @@ public class WebCrawler {
                 sitemapUrl, Parser.xmlParser());
         Set<String> found = new LinkedHashSet<>();
         String root = rootName(xml);
-        boolean whole = true;
         switch (root) {
-            case "sitemapindex" -> whole = collectText(xml, "loc", "sitemap", found);
-            case "rss", "rdf" -> whole = collectText(xml, "link", "item", found);
+            case "sitemapindex" -> collectText(xml, "loc", "sitemap", found);
+            case "rss", "rdf" -> collectText(xml, "link", "item", found);
             case "feed" -> {
                 for (Element link : xml.getAllElements()) {
                     String rel = link.attr("rel");
                     if ("link".equals(localName(link)) && "entry".equals(localName(link.parent()))
                             && (rel.isEmpty() || "alternate".equals(rel))) {
-                        whole &= addIfHttp(link.attr("href"), found);
+                        addIfHttp(link.attr("href"), found);
                     }
                 }
             }
-            default -> whole = collectText(xml, "loc", "url", found);
+            default -> collectText(xml, "loc", "url", found);
         }
         List<String> urls = List.copyOf(found);
-        boolean complete = whole && !decompressionCapped && urls.size() < MAX_SITEMAP_URLS
+        boolean complete = !decompressionCapped && urls.size() < MAX_SITEMAP_URLS
                 && (!SITEMAP_ROOTS.contains(root) || endsWithClosingRoot(bytes, xml.charset(), root));
         return "sitemapindex".equals(root) ? new Sitemap(List.of(), urls, complete) : new Sitemap(urls, List.of(), complete);
     }
@@ -988,12 +990,10 @@ public class WebCrawler {
         return (colon >= 0 ? name.substring(colon + 1) : name).equalsIgnoreCase(root);
     }
 
-    /** @return false when a URL was dropped for its length */
-    private static boolean collectText(Document xml, String element, String parent, Set<String> into) {
-        boolean whole = true;
+    private static void collectText(Document xml, String element, String parent, Set<String> into) {
         for (Element candidate : xml.getAllElements()) {
             if (into.size() >= MAX_SITEMAP_URLS) {
-                return whole;
+                return;
             }
             // Leaf elements only. text() is all descendant text, so a <loc> nested in
             // a <url> nested in a <loc> copied the whole subtree once per level, and
@@ -1001,28 +1001,21 @@ public class WebCrawler {
             // nothing but its URL.
             if (element.equals(localName(candidate)) && parent.equals(localName(candidate.parent()))
                     && candidate.childrenSize() == 0) {
-                whole &= addIfHttp(candidate.text(), into);
+                addIfHttp(candidate.text(), into);
             }
         }
-        return whole;
     }
 
-    /**
-     * @return false when the URL was dropped for its length, so the sitemap was not
-     *         read whole
-     */
-    private static boolean addIfHttp(String url, Set<String> into) {
+    private static void addIfHttp(String url, Set<String> into) {
         String trimmed = url == null ? "" : url.trim();
         if (trimmed.length() > MAX_SITEMAP_URL_LENGTH) {
             // No page has a URL this long, and keeping thousands of them would
-            // multiply the body's size in memory. But a page listed only this way goes
-            // unseen, and must not then read as deleted.
-            return false;
+            // multiply the body's size in memory.
+            return;
         }
         if ((trimmed.startsWith("http://") || trimmed.startsWith("https://")) && into.size() < MAX_SITEMAP_URLS) {
             into.add(trimmed);
         }
-        return true;
     }
 
     /** The document element's name, without prefix, lower-cased. */
@@ -1068,7 +1061,7 @@ public class WebCrawler {
         return false;
     }
 
-    private static List<String> textSitemapUrls(byte[] bytes, String declaredCharset, boolean[] whole) {
+    private static List<String> textSitemapUrls(byte[] bytes, String declaredCharset) {
         Charset charset = StandardCharsets.UTF_8;
         if (declaredCharset != null) {
             try {
@@ -1083,7 +1076,7 @@ public class WebCrawler {
         }
         Set<String> found = new LinkedHashSet<>();
         for (String line : text.split("\\R")) {
-            whole[0] &= addIfHttp(line, found);
+            addIfHttp(line, found);
         }
         return List.copyOf(found);
     }

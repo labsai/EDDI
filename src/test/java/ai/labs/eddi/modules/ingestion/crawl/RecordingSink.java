@@ -20,6 +20,7 @@ final class RecordingSink implements CrawlSink {
     private final Map<String, ConditionalHeaders> knownValidators = new HashMap<>();
 
     private int cancelAfterPages = Integer.MAX_VALUE;
+    private int holdsCalls;
 
     /** Pretends a previous run stored these validators for a document. */
     RecordingSink knows(String documentId, String etag, String lastModified) {
@@ -40,7 +41,13 @@ final class RecordingSink implements CrawlSink {
 
     @Override
     public boolean holds(String documentId) {
+        holdsCalls++;
         return knownValidators.containsKey(documentId);
+    }
+
+    /** How often the crawler asked whether a document is held. */
+    int holdsCalls() {
+        return holdsCalls;
     }
 
     @Override
