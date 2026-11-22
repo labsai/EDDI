@@ -968,14 +968,16 @@
       "basic": "Usuário e senha",
       "clientCredentials": "Conta de serviço OAuth",
       "authorizationCode": "Login de usuário OAuth",
-      "jwtBearer": "Conta de serviço com chave de assinatura"
+      "jwtBearer": "Conta de serviço com chave de assinatura",
+      "smimeSigning": "Certificado de assinatura de e-mail"
     },
     "choice": {
       "staticBody": "Um cabeçalho fixo, igual para todos — X-Api-Key, ou Authorization: Bearer …",
       "basicBody": "HTTP Basic. O {{productName}} faz a codificação, então a senha continua sendo uma entrada separada do cofre, que você pode trocar sozinha.",
       "clientCredentialsBody": "O agente se identifica como ele mesmo. Um token de acesso compartilhado por todos, renovado automaticamente.",
       "authorizationCodeBody": "Cada pessoa associa a própria conta e o agente age em nome dela. Exige login ativado e um cofre.",
-      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos."
+      "jwtBearerBody": "O agente entra como ele mesmo com uma chave privada em vez de um segredo — uma conta de serviço do Google, por exemplo. Um único token de acesso compartilhado por todos.",
+      "smimeSigningBody": "Um certificado S/MIME com o qual uma integração de e-mail assina os e-mails enviados. Nunca é enviado a lugar nenhum: só o certificado público viaja na assinatura."
     },
     "binding": {
       "perUser": "Por pessoa",

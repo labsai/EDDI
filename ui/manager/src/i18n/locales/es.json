@@ -4588,7 +4588,8 @@
       "paramValueTooLong": "Un valor de parámetro tiene como máximo 512 caracteres.",
       "paramValueCredentialShaped": "Uno de estos valores parece una clave o un token. Este mapa se almacena en texto plano y se envía en una URL: aquí solo caben parámetros de protocolo no secretos.",
       "thumbprintFormat": "No es una huella de la longitud correcta: x5t#S256 necesita la huella SHA-256 y x5t la SHA-1 — en hexadecimal o base64url.",
-      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación."
+      "thumbprintRequiredEntra": "Microsoft Entra solo identifica la clave por la huella de su certificado. Pegue la huella del certificado que subió al registro de la aplicación.",
+      "originNotSmtp": "Un certificado de firma enumera los relés SMTP cuyo correo firma: smtps://host o smtp://host:587."
     },
     "backToList": "Volver a Conexiones",
     "headerSecret": "Secreto guardado",
@@ -4634,7 +4635,11 @@
         "label": "Cuenta de servicio de Google (clave JSON)",
         "description": "Las API de Google como cuenta de servicio, firmadas con su clave privada (portador JWT, RFC 7523). Guarde el archivo de clave JSON descargado como UNA sola entrada del almacén y haga referencia a ella como clave privada; de ahí se leen el emisor y el ID de clave. Añada https://oauth2.googleapis.com a la lista de permitidos de endpoints de credenciales. Sin delegación en todo el dominio, la cuenta solo ve lo que se comparte con ella."
       }
-    }
+    },
+    "smimeHint": "Guarde primero el certificado en la bóveda: un almacén de claves PKCS#12 (.p12/.pfx) en base64, o texto PEM con la clave privada seguida de la cadena de certificados. El certificado debe estar emitido para la dirección del buzón que firma con él.",
+    "smimeCertificate": "Certificado y clave privada",
+    "smimePassword": "Contraseña del almacén de claves o de la clave (opcional)",
+    "smimeOriginsHint": "Indique los relés SMTP cuyo correo puede firmar este certificado, p. ej. smtp://smtp.office365.com:587 o smtps://smtp.gmail.com."
   },
   "workspaces": {
     "allSpaces": "Todos los espacios",
@@ -5627,13 +5632,19 @@
       "fromNameInvalid": "El nombre del remitente puede tener como máximo {{max}} caracteres, sin saltos de línea.",
       "replyTemplateTooLong": "La plantilla de respuesta puede tener como máximo {{max}} caracteres.",
       "aiDisclosureTooLong": "El aviso de IA puede tener como máximo {{max}} caracteres.",
-      "maxRepliesPerThreadPerHour": "El límite de respuestas debe ser un número entero de 1 a 1000."
+      "maxRepliesPerThreadPerHour": "El límite de respuestas debe ser un número entero de 1 a 1000.",
+      "smimeConnectionRequired": "La firma 'required' necesita una conexión de firma: sin ella se retendría todo el correo saliente.",
+      "smimeConnectionInvalid": "Un nombre de conexión solo tiene letras, dígitos, '.', '_' y '-'."
     },
     "warning": {
       "openTrigger": "Guardado, pero cualquiera en internet puede hacer que este agente se ejecute: no hay lista de remitentes permitidos y se procesa el correo no autenticado.",
       "toolsWithoutApprovals": "Guardado, pero un agente al que apunta esta integración tiene herramientas sin aprobaciones. El contenido del correo es entrada no fiable: añada hitlConfig.toolApprovals para las herramientas que cambian cosas.",
       "aiDisclosureDisabled": "Guardado, pero las respuestas ya no dicen que las escribió una IA. Normas de transparencia como la Ley de IA de la UE esperan que las personas sepan que hablan con una IA.",
-      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta."
+      "honorReplyTo": "Guardado, pero las respuestas van a la dirección Reply-To, que DMARC no autentica: quien pueda enviar correo autenticado desde un dominio permitido decide adónde va la respuesta.",
+      "smimeNoCertificate": "Guardado, pero el correo sale sin firmar: la firma S/MIME está activada y no se indica ninguna conexión SMIME_SIGNING. Añada una en Firma S/MIME o desactive la firma.",
+      "smimeCertificateUnusable": "Guardado, pero el certificado S/MIME no puede firmar el correo de este buzón (dirección incorrecta, falta el uso de clave, caducado o cadena incompleta), así que el correo sale sin firmar.",
+      "smimeCertificateExpiring": "Guardado. El certificado S/MIME caduca en menos de 30 días: renuévelo y actualice la conexión SMIME_SIGNING.",
+      "smimeUntrustedChain": "Guardado, pero el certificado S/MIME no conduce a una raíz de confianza pública, así que los clientes de correo de los destinatarios mostrarán la firma como no fiable."
     },
     "defaultTargetHint": "El destino predeterminado recibe cada correo cuyo plus-tag (invoices+urgent@…) o asunto no coincide con el disparador de ningún otro destino. Puede añadir más destinos tras la creación.",
     "triggerLabel": "Plus-tags o palabras del asunto",
@@ -5666,7 +5677,50 @@
     "replyTemplate": "Plantilla de respuesta",
     "replyTemplateHint": "Envuelve la respuesta del agente, que se inserta como texto y nunca se ejecuta como plantilla. Variables:",
     "noteDkim": "Las respuestas necesitan un servidor de correo que firme el correo saliente con DKIM para el dominio del buzón, y un registro DMARC para ese dominio — {{productName}} no firma. Sin ellos, las respuestas acaban en spam o se rechazan. Exchange Online y la mayoría de los proveedores firman el correo enviado en cuanto DKIM está activado para el dominio.",
-    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Una respuesta que rebota de forma permanente pone la dirección en la lista de supresión de esta integración, y {{productName}} no le envía nada más hasta que un administrador la borre (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "DKIM firma para su dominio",
+        "dkimUnaligned": "DKIM firma para otro dominio",
+        "dkimMissing": "Sin firma DKIM",
+        "dkimInconclusive": "DKIM: no concluyente dentro de Microsoft 365",
+        "dkimFailed": "La firma DKIM no se verifica",
+        "dkimDnsTemporary": "Falló una consulta DNS",
+        "smimeVerified": "Firma S/MIME verificada",
+        "smimeMissing": "Se esperaba una firma S/MIME y no llegó ninguna",
+        "smimeOff": "Sin firma S/MIME",
+        "smimeInvalid": "La firma S/MIME no se verifica",
+        "smimeWrongSigner": "El certificado S/MIME es de otra dirección",
+        "dmarcPresent": "Registro DMARC publicado",
+        "dmarcAbsent": "Sin registro DMARC",
+        "dmarcUnknown": "No se pudo comprobar DMARC",
+        "sendFailed": "No se pudo enviar el correo de prueba",
+        "testExpired": "El correo de prueba no volvió"
+      },
+      "rateLimited": "Como máximo 5 autopruebas por hora. Inténtelo más tarde.",
+      "hint": "Envía un correo breve del buzón a sí mismo a través de su relé SMTP, lo lee en el siguiente sondeo e indica cómo lo firma su proveedor (DKIM, DMARC) y si la firma S/MIME se verifica. Nunca inicia una conversación con un agente.",
+      "noSmtp": "Configure primero un host SMTP y guarde: la prueba se envía a través de él.",
+      "unsaved": "La prueba usa la configuración guardada; guarde primero sus cambios para probarlos.",
+      "run": "Ejecutar autoprueba",
+      "waiting": "Correo de prueba enviado. Esperando al siguiente sondeo del buzón para leerlo…",
+      "done": "El correo de prueba ha vuelto.",
+      "expired": "El correo de prueba no volvió en 15 minutos.",
+      "sendFailed": "No se pudo enviar el correo de prueba.",
+      "sentSigned": "(enviado con firma S/MIME)",
+      "sentUnsigned": "(enviado sin firmar)",
+      "title": "Autoprueba del estado de envío"
+    },
+    "sendingSection": "Envío (SMTP)",
+    "smtpTriggerHint": "Opcional en el modo disparador, que nunca responde: el relé solo se usa para la autoprueba del estado de envío.",
+    "smimeSection": "Firma S/MIME",
+    "smimeSign": "Firmar el correo saliente",
+    "smimeSignOn": "Activada — firmar cuando haya un certificado configurado (predeterminado)",
+    "smimeSignRequired": "Obligatoria — nunca enviar correo sin firmar",
+    "smimeSignOff": "Desactivada",
+    "smimeSignRequiredHint": "Un certificado ausente, caducado o que no coincide retiene el correo saliente y avisa a los responsables; nada sale sin firmar.",
+    "smimeSignHint": "Los clientes de correo de los destinatarios muestran el correo firmado como procedente de este buzón. El correo del remitente del sistema (avisos a responsables) no se firma.",
+    "smimeConnection": "Conexión del certificado de firma",
+    "smimeConnectionHint": "El nombre de una conexión SMIME_SIGNING con un certificado emitido para la dirección del buzón; su lista de permitidos debe contener el origen SMTP."
   },
   "feedback": {
     "title": "Valoraciones",

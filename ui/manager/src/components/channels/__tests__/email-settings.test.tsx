@@ -125,14 +125,21 @@ describe("EmailPlatformFields — conversation mode", () => {
     expect(screen.getByTestId("email-problem-smtpHostRequired")).toBeInTheDocument();
   });
 
-  it("switching back to trigger drops every reply key", async () => {
+  it("switching back to trigger drops every reply key, and keeps the SMTP relay for the self-test", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
     renderWithProviders(<Harness initial={{ ...BASE, smtpHost: "smtp.example.com", aiDisclosure: "", honorReplyTo: "true" }} onChange={onChange} />);
 
     await user.selectOptions(screen.getByTestId("email-mode"), "trigger");
 
-    expect(onChange).toHaveBeenLastCalledWith({ mode: "trigger", transport: "imap", connection: "mailbox", host: "imap.example.com", address: "support@example.com" });
+    expect(onChange).toHaveBeenLastCalledWith({
+      mode: "trigger",
+      transport: "imap",
+      connection: "mailbox",
+      host: "imap.example.com",
+      address: "support@example.com",
+      smtpHost: "smtp.example.com",
+    });
   });
 
   it("switching the disclosure off writes an empty value and warns; on again restores the default", async () => {
@@ -185,5 +192,56 @@ describe("EmailSecurityNotes", () => {
     renderWithProviders(<EmailSecurityNotes conversation />);
     expect(screen.getByTestId("email-dkim-note").textContent).toContain("DKIM");
     expect(screen.getByTestId("email-bounce-note").textContent).toContain("email-suppressions/clear");
+  });
+});
+
+describe("EmailPlatformFields — sending and S/MIME", () => {
+  const TRIGGER = { mode: "trigger", connection: "mailbox", host: "imap.example.com", address: "support@example.com" };
+
+  it("shows the SMTP relay in trigger mode too, as used only for the self-test", () => {
+    renderWithProviders(<EmailPlatformFields platformConfig={TRIGGER} onChange={vi.fn()} />);
+    expect(screen.getByTestId("email-smtp-host")).toBeInTheDocument();
+    expect(screen.getByTestId("email-smtp-trigger-hint")).toBeInTheDocument();
+    expect(screen.queryByTestId("email-replies-section")).toBeNull();
+    // No SMTP host is needed in trigger mode.
+    expect(screen.queryByTestId("email-problem-smtpHostRequired")).toBeNull();
+  });
+
+  it("hides the S/MIME settings when the caller does not handle emailControl", () => {
+    renderWithProviders(<EmailPlatformFields platformConfig={TRIGGER} onChange={vi.fn()} />);
+    expect(screen.queryByTestId("email-smime-section")).toBeNull();
+  });
+
+  it("defaults to signing on and writes required with the connection", async () => {
+    const user = userEvent.setup();
+    const onEmailControlChange = vi.fn();
+    function ControlHarness() {
+      const [control, setControl] = useState<Record<string, unknown> | null>(null);
+      return (
+        <EmailPlatformFields
+          platformConfig={TRIGGER}
+          onChange={vi.fn()}
+          emailControl={control}
+          onEmailControlChange={(next) => {
+            setControl(next);
+            onEmailControlChange(next);
+          }}
+        />
+      );
+    }
+    renderWithProviders(<ControlHarness />);
+
+    expect(screen.getByTestId("email-smime-sign")).toHaveValue("true");
+    await user.selectOptions(screen.getByTestId("email-smime-sign"), "required");
+    expect(onEmailControlChange).toHaveBeenLastCalledWith({ smime: { sign: "required" } });
+    expect(screen.getByTestId("email-problem-smimeConnectionRequired")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("email-smime-connection"), "cert");
+    expect(onEmailControlChange).toHaveBeenLastCalledWith({ smime: { sign: "required", connection: "cert" } });
+    expect(screen.queryByTestId("email-problem-smimeConnectionRequired")).toBeNull();
+
+    await user.selectOptions(screen.getByTestId("email-smime-sign"), "false");
+    expect(onEmailControlChange).toHaveBeenLastCalledWith({ smime: { sign: false, connection: "cert" } });
+    expect(screen.getByTestId("email-smime-connection")).toBeDisabled();
   });
 });

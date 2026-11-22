@@ -3,11 +3,14 @@ import {
   EMAIL_FIXED_KEYS,
   aiDisclosureEnabled,
   emailConfigProblems,
+  emailControlProblems,
   emailMode,
   initialEmailPlatformConfig,
   isOpenTrigger,
   isSenderPattern,
+  smimeSign,
   withEmailFixedKeys,
+  withSmime,
 } from "@/lib/email-channel";
 
 const VALID = {
@@ -98,7 +101,8 @@ describe("email channel rules", () => {
 
   it("drops the other mode's keys, so the backend never refuses a hidden value", () => {
     const trigger = withEmailFixedKeys({ ...VALID, smtpHost: "smtp.example.com", aiDisclosure: "", correlateThreads: "true" });
-    expect(trigger).toEqual({ ...VALID, mode: "trigger", transport: "imap", correlateThreads: "true" });
+    // smtpHost is a common key now: trigger mode keeps it for the self-test.
+    expect(trigger).toEqual({ ...VALID, mode: "trigger", transport: "imap", smtpHost: "smtp.example.com", correlateThreads: "true" });
     const conversation = withEmailFixedKeys({
       ...VALID,
       mode: "conversation",
@@ -134,6 +138,10 @@ describe("email conversation mode rules", () => {
 
   it("ignores conversation fields in trigger mode, and is never an open trigger", () => {
     expect(emailConfigProblems({ ...VALID, smtpHost: "" })).toEqual([]);
+    // An SMTP relay set in trigger mode (for the self-test) is still checked.
+    expect(emailConfigProblems({ ...VALID, smtpHost: "smtp.example.com" })).toEqual([]);
+    expect(emailConfigProblems({ ...VALID, smtpHost: "10.0.0.5" })).toEqual(["smtpHostIpLiteral"]);
+    expect(emailConfigProblems({ ...VALID, smtpHost: "smtp.example.com", smtpPort: "25" })).toEqual(["smtpPort"]);
     expect(isOpenTrigger({ ...CONVERSATION, requireAuthentication: "false" })).toBe(false);
   });
 
@@ -152,5 +160,29 @@ describe("email conversation mode rules", () => {
     expect(saved.mode).toBe("conversation");
     expect(saved.smtpHost).toBe("smtp.example.com");
     expect(saved.honorReplyTo).toBe("true");
+  });
+});
+
+describe("emailControl.smime", () => {
+  it("defaults to signing on, and reads required and off", () => {
+    expect(smimeSign(null)).toBe(true);
+    expect(smimeSign({ smime: {} })).toBe(true);
+    expect(smimeSign({ smime: { sign: "required" } })).toBe("required");
+    expect(smimeSign({ smime: { sign: false } })).toBe(false);
+  });
+
+  it("mirrors the backend: required needs a connection, and a name follows the grammar", () => {
+    expect(emailControlProblems(null)).toEqual([]);
+    expect(emailControlProblems({ smime: { sign: "required" } })).toEqual(["smimeConnectionRequired"]);
+    expect(emailControlProblems({ smime: { sign: "required", connection: "mailbox-smime" } })).toEqual([]);
+    expect(emailControlProblems({ smime: { connection: "bad name/x" } })).toEqual(["smimeConnectionInvalid"]);
+  });
+
+  it("writes only what differs from the defaults, and keeps other sections", () => {
+    expect(withSmime(null, { sign: true })).toBeNull();
+    expect(withSmime(null, { sign: "required", connection: " cert " })).toEqual({ smime: { sign: "required", connection: "cert" } });
+    expect(withSmime({ smime: { sign: false } }, { sign: true })).toBeNull();
+    expect(withSmime({ senders: { allow: ["a@b.com"] } }, { sign: false })).toEqual({ senders: { allow: ["a@b.com"] }, smime: { sign: false } });
+    expect(withSmime({ senders: { allow: [] }, smime: { connection: "x" } }, { sign: true, connection: "" })).toEqual({ senders: { allow: [] } });
   });
 });
