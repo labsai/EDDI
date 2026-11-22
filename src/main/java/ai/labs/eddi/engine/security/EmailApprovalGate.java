@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.model.Context;
 import dev.langchain4j.agent.tool.ToolExecutionRequest;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -68,6 +69,12 @@ public final class EmailApprovalGate {
     public static final String PRE_RUN_MARKER = "emailGate:preRun";
 
     /**
+     * Value of {@link #PRE_RUN_MARKER} when the held turn is the conversation's
+     * {@code CONVERSATION_START}: a rejection then ends the conversation.
+     */
+    public static final String PRE_RUN_START = "start";
+
+    /**
      * Conversation-output key written on the step a pre-run rejection answered, so
      * the email reply path sends {@code rejectedReply} instead of a generic text.
      */
@@ -85,9 +92,14 @@ public final class EmailApprovalGate {
      */
     static final Set<String> LOOP_CONTROL_TOOLS = Set.of("discover_tools", "fetch_tool_response_page");
 
-    private static boolean isLoopControl(String name, Map<String, String> toolSources) {
+    /**
+     * Only the built-in ones: a tool of another source (an MCP server, an httpcall)
+     * that happens to share the name, or one whose source is unknown, is gated like
+     * any other call.
+     */
+    static boolean isLoopControl(String name, Map<String, String> toolSources) {
         String source = toolSources != null ? toolSources.get(name) : null;
-        return LOOP_CONTROL_TOOLS.contains(name) && (source == null || "builtin".equals(source));
+        return LOOP_CONTROL_TOOLS.contains(name) && "builtin".equals(source);
     }
 
     /** Pause reason when the mail itself waits before the agent runs. */
@@ -98,6 +110,28 @@ public final class EmailApprovalGate {
     private static final String FIELD_PRE_RUN = "preRun";
     private static final String FIELD_REJECTED_REPLY = "rejectedReply";
     private static final String FIELD_PAUSE_REASON = "pauseReason";
+    private static final String FIELD_MAIL = "mail";
+
+    /** The policy name of a target without an email gate. */
+    public static final String POLICY_NONE = "none";
+    /** The policy a gate that cannot be read falls back to. */
+    public static final String POLICY_ACTIONS = "actions";
+    /** The policy whose every turn waits before the agent runs. */
+    public static final String POLICY_EVERY_TURN = "everyTurn";
+
+    /**
+     * Exact step-data key of the email channel's integration id
+     * ({@code EmailInboundProcessor.INTEGRATION_CONTEXT_KEY}), which only the email
+     * channel writes: on every mail turn and on the start of the conversation it
+     * opens. A delegation or a group member conversation never carries it.
+     */
+    public static final String INTEGRATION_STEP_KEY = "context:emailIntegration";
+
+    /**
+     * The gate of a turn whose gate is unknown or unreadable: every tool call waits
+     * for approval and rule-driven calls are refused (fail closed).
+     */
+    static final Policy FAIL_CLOSED = new Policy(POLICY_ACTIONS, List.of(), false, null, null, null);
 
     private EmailApprovalGate() {
     }
@@ -115,11 +149,21 @@ public final class EmailApprovalGate {
      *            what a rejected pre-run pause answers, or null for nothing
      * @param pauseReason
      *            what the approver is shown for a pre-run pause
+     * @param mail
+     *            what the approver is shown of the held mail on a pre-run pause
+     *            (sender, subject, a body excerpt, attachment names), or null;
+     *            never persisted on the conversation's sticky gate
      */
-    public record Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason) {
+    public record Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason,
+            Map<String, Object> mail) {
 
         public Policy {
             readOnlyTools = readOnlyTools == null ? List.of() : List.copyOf(readOnlyTools);
+            mail = mail == null ? null : Collections.unmodifiableMap(new LinkedHashMap<>(mail));
+        }
+
+        public Policy(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply, String pauseReason) {
+            this(policy, readOnlyTools, preRun, rejectedReply, pauseReason, null);
         }
 
         /** Whether one of {@code addresses} matches a {@code readOnlyTools} pattern. */
@@ -137,15 +181,27 @@ public final class EmailApprovalGate {
 
     /**
      * The context value the email channel writes for a target: a map, because a
-     * {@link Context} carries one value. Null for a target without a gate, so the
-     * key is not written at all.
+     * {@link Context} carries one value. Written for every mail turn, also for a
+     * target without a gate ({@code policy: "none"}), so the conversation records
+     * that it has none — a gate that is unknown fails closed.
      */
     public static Context contextValue(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply,
                                        String pauseReason) {
-        if (policy == null || policy.isBlank() || "none".equalsIgnoreCase(policy)) {
-            return null;
-        }
+        return contextValue(policy, readOnlyTools, preRun, rejectedReply, pauseReason, null);
+    }
+
+    /**
+     * As {@link #contextValue(String, List, boolean, String, String)}, with what
+     * the approver is shown of a held mail ({@code mail}, only with
+     * {@code preRun}).
+     */
+    public static Context contextValue(String policy, List<String> readOnlyTools, boolean preRun, String rejectedReply,
+                                       String pauseReason, Map<String, Object> mail) {
         Map<String, Object> value = new LinkedHashMap<>();
+        if (policy == null || policy.isBlank() || POLICY_NONE.equalsIgnoreCase(policy)) {
+            value.put(FIELD_POLICY, POLICY_NONE);
+            return new Context(Context.ContextType.object, value);
+        }
         value.put(FIELD_POLICY, policy);
         value.put(FIELD_READ_ONLY, readOnlyTools == null ? List.of() : new ArrayList<>(readOnlyTools));
         value.put(FIELD_PRE_RUN, preRun);
@@ -155,28 +211,125 @@ public final class EmailApprovalGate {
         if (pauseReason != null) {
             value.put(FIELD_PAUSE_REASON, pauseReason);
         }
+        if (preRun && mail != null && !mail.isEmpty()) {
+            value.put(FIELD_MAIL, new LinkedHashMap<>(mail));
+        }
         return new Context(Context.ContextType.object, value);
     }
 
     /**
-     * The gate of the turn {@code memory} is running, or null: none when the
-     * conversation is not tainted {@code origin=email}, or the current step carries
-     * no gate.
+     * The gate of the turn {@code memory} is running, or null for none. Only a turn
+     * tainted {@code origin=email} has one. In order:
+     * <ol>
+     * <li>the gate the current step carries (a mail turn, and its HITL
+     * resume);</li>
+     * <li>else the gate the conversation's latest mail turn recorded
+     * ({@link IConversationMemory#getEmailApprovalGate()}) — a self-continuation, a
+     * scheduled check-back or any other later turn carries none of its own;</li>
+     * <li>else, for a conversation the email channel started (a step carries
+     * {@link #INTEGRATION_STEP_KEY}), {@link #FAIL_CLOSED}: its gate is unknown (a
+     * conversation from before the gate was recorded).</li>
+     * </ol>
+     * A gate that is present but cannot be read fails closed too. A tainted
+     * conversation the email channel did not start (a delegation, a group member)
+     * has no gate of its own: the call that started it was gated.
      */
     public static Policy of(IConversationMemory memory) {
         if (memory == null) {
             return null;
         }
+        IConversationMemory.IConversationStep step;
         try {
-            var step = memory.getCurrentStep();
-            IData<Object> data = step == null ? null : step.getData(STEP_KEY);
-            if (data == null || !(isTainted(memory) || EMAIL_TAINT.equals(stepTaint(step.getData(TAINT_STEP_KEY))))) {
-                return null;
-            }
-            return parse(data.getResult());
+            step = memory.getCurrentStep();
+        } catch (RuntimeException e) {
+            step = null;
+        }
+        boolean tainted;
+        try {
+            tainted = isTainted(memory) || step != null && EMAIL_TAINT.equals(stepTaint(step.getData(TAINT_STEP_KEY)));
         } catch (RuntimeException e) {
             return null;
         }
+        if (!tainted) {
+            return null;
+        }
+        try {
+            IData<Object> data = step == null ? null : step.getData(STEP_KEY);
+            if (data != null) {
+                return parse(data.getResult());
+            }
+            Map<String, Object> recorded = memory.getEmailApprovalGate();
+            if (recorded != null && !recorded.isEmpty()) {
+                return parse(recorded);
+            }
+            return startedByEmailChannel(memory) ? FAIL_CLOSED : null;
+        } catch (RuntimeException e) {
+            return FAIL_CLOSED;
+        }
+    }
+
+    /**
+     * Whether the email channel started {@code memory}'s conversation or ran a turn
+     * in it: a step carries its integration id.
+     */
+    static boolean startedByEmailChannel(IConversationMemory memory) {
+        var steps = memory.getAllSteps();
+        if (steps == null) {
+            return false;
+        }
+        for (IData<Object> datum : steps.<Object>getExactDataPerStep(INTEGRATION_STEP_KEY)) {
+            if (datum != null) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Records the gate a mail turn carries on its conversation
+     * ({@link IConversationMemory#setEmailApprovalGate}), so later turns without a
+     * gate of their own are gated as it was. The per-turn {@code preRun} flag and
+     * the held mail are not recorded. Only for a tainted turn: the key is reserved
+     * to the email channel.
+     */
+    public static void record(IConversationMemory memory, List<IData<?>> lifecycleData) {
+        if (memory == null || lifecycleData == null) {
+            return;
+        }
+        IData<?> gateDatum = null;
+        boolean tainted = isTainted(memory);
+        for (IData<?> datum : lifecycleData) {
+            if (datum == null) {
+                continue;
+            }
+            if (STEP_KEY.equals(datum.getKey())) {
+                gateDatum = datum;
+            } else if (TAINT_STEP_KEY.equals(datum.getKey()) && EMAIL_TAINT.equals(stepTaint(datum))) {
+                tainted = true;
+            }
+        }
+        if (gateDatum == null || !tainted) {
+            return;
+        }
+        memory.setEmailApprovalGate(recordable(parse(gateDatum.getResult())));
+    }
+
+    /** The sticky form of {@code policy}: null (no gate) is {@code none}. */
+    static Map<String, Object> recordable(Policy policy) {
+        Map<String, Object> value = new LinkedHashMap<>();
+        if (policy == null) {
+            value.put(FIELD_POLICY, POLICY_NONE);
+            return value;
+        }
+        value.put(FIELD_POLICY, policy.policy());
+        value.put(FIELD_READ_ONLY, new ArrayList<>(policy.readOnlyTools()));
+        if (policy.rejectedReply() != null) {
+            value.put(FIELD_REJECTED_REPLY, policy.rejectedReply());
+        }
+        if (policy.pauseReason() != null) {
+            value.put(FIELD_PAUSE_REASON, policy.pauseReason());
+        }
+        return value;
     }
 
     /**
@@ -205,25 +358,49 @@ public final class EmailApprovalGate {
      * Whether the data a turn is about to run with asks for a pause before the
      * agent runs. Read from the data supplied for this run, not from the step, so a
      * rerun of a step that once paused does not pause again.
+     * <p>
+     * A mail turn says so itself ({@code preRun}). A new turn of a tainted
+     * conversation that carries no gate of its own — a self-continuation, a
+     * scheduled check-back — inherits the conversation's recorded gate
+     * ({@link IConversationMemory#getEmailApprovalGate()}): under {@code everyTurn}
+     * it waits too. {@code firstContact} was decided by the mail that started the
+     * conversation, so it never holds a later turn.
+     *
+     * @param newTurn
+     *            whether this run starts a new step (not a rerun, not the
+     *            conversation's start); only such a turn inherits a pause
      */
-    public static Policy preRunRequested(IConversationMemory memory, List<IData<?>> lifecycleData) {
+    public static Policy preRunRequested(IConversationMemory memory, List<IData<?>> lifecycleData, boolean newTurn) {
         if (memory == null || lifecycleData == null) {
             return null;
         }
         boolean tainted = isTainted(memory);
+        boolean fresh = false;
         Policy requested = null;
         for (IData<?> datum : lifecycleData) {
             if (datum == null) {
                 continue;
             }
             if (STEP_KEY.equals(datum.getKey())) {
+                fresh = true;
                 Policy policy = parse(datum.getResult());
                 requested = policy != null && policy.preRun() ? policy : null;
             } else if (TAINT_STEP_KEY.equals(datum.getKey()) && EMAIL_TAINT.equals(stepTaint(datum))) {
                 tainted = true;
             }
         }
-        return tainted ? requested : null;
+        if (!tainted) {
+            return null;
+        }
+        if (fresh || !newTurn) {
+            return requested;
+        }
+        Map<String, Object> recorded = memory.getEmailApprovalGate();
+        Policy inherited = recorded == null || recorded.isEmpty() ? null : parse(recorded);
+        if (inherited == null || !POLICY_EVERY_TURN.equalsIgnoreCase(inherited.policy())) {
+            return null;
+        }
+        return new Policy(inherited.policy(), inherited.readOnlyTools(), true, inherited.rejectedReply(), inherited.pauseReason(), null);
     }
 
     /**
@@ -288,6 +465,9 @@ public final class EmailApprovalGate {
     /**
      * The addresses of a rule-driven httpcall, as the LLM loop addresses its http
      * tools: {@code http.<method>:<path>}, {@code http:<name>}, {@code <name>}.
+     * {@code path} is expected normalised as the http tools' endpoints are
+     * ({@code HttpCallToolsProvider.normalizeEndpointPath}); a leading slash is
+     * added here only as a last resort.
      */
     public static List<String> httpCallAddresses(String name, String method, String path) {
         List<String> addresses = new ArrayList<>(3);
@@ -329,34 +509,60 @@ public final class EmailApprovalGate {
         return TurnOrigin.EMAIL.equals(memory.getOrigin()) || TurnOrigin.currentIsEmail();
     }
 
+    /**
+     * The gate a stored value describes: null only for an explicit
+     * {@code policy: "none"}. A value of any other shape — no map, no policy, a
+     * policy EDDI does not know, a {@code readOnlyTools} that is not a list — is
+     * {@link #FAIL_CLOSED}: the key is reserved to the email channel, so a value
+     * that cannot be read is a fault, and a fault must not lift the gate.
+     */
     @SuppressWarnings("unchecked")
     static Policy parse(Object stored) {
-        Object value = stored;
-        if (value instanceof Context context) {
-            value = context.getValue();
-        } else if (value instanceof Map<?, ?> map && map.containsKey("value") && !map.containsKey(FIELD_POLICY)) {
-            value = map.get("value");
-        }
-        if (!(value instanceof Map<?, ?> raw)) {
-            return null;
-        }
-        Map<String, Object> map = (Map<String, Object>) raw;
-        Object policy = map.get(FIELD_POLICY);
-        if (policy == null || "none".equalsIgnoreCase(String.valueOf(policy))) {
-            return null;
-        }
-        List<String> readOnly = new ArrayList<>();
-        if (map.get(FIELD_READ_ONLY) instanceof List<?> list) {
-            for (Object entry : list) {
-                if (entry != null && !String.valueOf(entry).isBlank()) {
-                    readOnly.add(String.valueOf(entry).trim());
+        try {
+            Object value = stored;
+            if (value instanceof Context context) {
+                value = context.getValue();
+            } else if (value instanceof Map<?, ?> map && map.containsKey("value") && !map.containsKey(FIELD_POLICY)) {
+                value = map.get("value");
+            }
+            if (!(value instanceof Map<?, ?> raw)) {
+                return FAIL_CLOSED;
+            }
+            Map<String, Object> map = (Map<String, Object>) raw;
+            Object policy = map.get(FIELD_POLICY);
+            if (policy == null) {
+                return FAIL_CLOSED;
+            }
+            String name = String.valueOf(policy).trim();
+            if (POLICY_NONE.equalsIgnoreCase(name)) {
+                return null;
+            }
+            if (KNOWN_POLICIES.stream().noneMatch(name::equalsIgnoreCase)) {
+                return FAIL_CLOSED;
+            }
+            Object rawReadOnly = map.get(FIELD_READ_ONLY);
+            if (rawReadOnly != null && !(rawReadOnly instanceof List<?>)) {
+                return FAIL_CLOSED;
+            }
+            List<String> readOnly = new ArrayList<>();
+            if (rawReadOnly instanceof List<?> list) {
+                for (Object entry : list) {
+                    if (entry != null && !String.valueOf(entry).isBlank()) {
+                        readOnly.add(String.valueOf(entry).trim());
+                    }
                 }
             }
+            Object preRun = map.get(FIELD_PRE_RUN);
+            Object rejected = map.get(FIELD_REJECTED_REPLY);
+            Object reason = map.get(FIELD_PAUSE_REASON);
+            Map<String, Object> mail = map.get(FIELD_MAIL) instanceof Map<?, ?> held ? (Map<String, Object>) held : null;
+            return new Policy(name, readOnly, Boolean.TRUE.equals(preRun) || "true".equalsIgnoreCase(String.valueOf(preRun)),
+                    rejected == null ? null : String.valueOf(rejected), reason == null ? null : String.valueOf(reason), mail);
+        } catch (RuntimeException e) {
+            return FAIL_CLOSED;
         }
-        Object preRun = map.get(FIELD_PRE_RUN);
-        Object rejected = map.get(FIELD_REJECTED_REPLY);
-        Object reason = map.get(FIELD_PAUSE_REASON);
-        return new Policy(String.valueOf(policy), readOnly, Boolean.TRUE.equals(preRun) || "true".equalsIgnoreCase(String.valueOf(preRun)),
-                rejected == null ? null : String.valueOf(rejected), reason == null ? null : String.valueOf(reason));
     }
+
+    /** The policies a gate can carry ({@code ChannelTarget.ApprovalPolicy}). */
+    private static final Set<String> KNOWN_POLICIES = Set.of(POLICY_ACTIONS, "firstContact", POLICY_EVERY_TURN);
 }

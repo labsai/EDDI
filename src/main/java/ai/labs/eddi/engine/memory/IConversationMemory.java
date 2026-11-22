@@ -433,6 +433,25 @@ public interface IConversationMemory extends Serializable {
     }
 
     /**
+     * The email approval gate (email plan v3 §8.1) the conversation's latest mail
+     * turn carried — the target's policy, {@code readOnlyTools},
+     * {@code rejectedReply} and pause reason, never the per-turn {@code preRun}
+     * flag — or {@code null} when no mail turn recorded one. Persisted next to
+     * {@link #getOrigin()} and sticky like it ({@code null} never clears it), so a
+     * later tainted turn that carries no gate of its own — a self-continuation, a
+     * scheduled check-back — is gated as the mail's turn was.
+     * {@code policy: "none"} is recorded too: it tells "no gate" apart from "gate
+     * unknown", which fails closed.
+     */
+    default Map<String, Object> getEmailApprovalGate() {
+        return null;
+    }
+
+    /** Records the gate a mail turn carried. Sticky: {@code null} is ignored. */
+    default void setEmailApprovalGate(Map<String, Object> gate) {
+    }
+
+    /**
      * Agent-level tool-approval config carried onto memory at conversation start
      * (NOT persisted).
      */

@@ -19,6 +19,7 @@ import ai.labs.eddi.engine.memory.IData;
 import ai.labs.eddi.engine.memory.IMemoryItemConverter;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
+import ai.labs.eddi.modules.llm.impl.HttpCallToolsProvider;
 import ai.labs.eddi.engine.runtime.client.configuration.IResourceClientLibrary;
 import ai.labs.eddi.engine.runtime.service.ServiceException;
 import jakarta.enterprise.context.ApplicationScoped;
@@ -122,8 +123,10 @@ public class ApiCallsTask implements ILifecycleTask {
      */
     private static boolean refusedByEmailGate(IConversationMemory memory, IWritableConversationStep currentStep, ApiCall call) {
         var request = call.getRequest();
+        // The path as the LLM loop addresses its http tools, so one readOnlyTools
+        // pattern means the same endpoint for a rule-driven call and a tool call.
         var addresses = EmailApprovalGate.httpCallAddresses(call.getName(), request != null ? request.getMethod() : null,
-                request != null ? request.getPath() : null);
+                request != null && request.getPath() != null ? HttpCallToolsProvider.normalizeEndpointPath(request.getPath()) : null);
         if (!EmailApprovalGate.refusesRuleCall(memory, addresses)) {
             return false;
         }

@@ -78,6 +78,8 @@ public class ConversationMemory implements IConversationMemory {
     private ResolutionPrincipal.Provenance resolutionProvenance;
     /** The origin taint (TurnOrigin), sticky once set. */
     private String origin;
+    /** The email approval gate of the latest mail turn, sticky once set. */
+    private Map<String, Object> emailApprovalGate;
     private volatile boolean cancelled;
     /**
      * Cluster mode: whether this turn's lease is lost; see
@@ -474,6 +476,18 @@ public class ConversationMemory implements IConversationMemory {
     public void setOrigin(String origin) {
         if (origin != null) {
             this.origin = origin;
+        }
+    }
+
+    @Override
+    public Map<String, Object> getEmailApprovalGate() {
+        return this.emailApprovalGate;
+    }
+
+    @Override
+    public void setEmailApprovalGate(Map<String, Object> gate) {
+        if (gate != null) {
+            this.emailApprovalGate = new LinkedHashMap<>(gate);
         }
     }
 

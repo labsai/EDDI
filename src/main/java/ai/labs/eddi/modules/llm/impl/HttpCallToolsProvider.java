@@ -80,7 +80,7 @@ import static ai.labs.eddi.utils.LogSanitizer.sanitize;
  * several unrelated call sites share, for no benefit; staying in-package keeps
  * every dependency at its original visibility.
  */
-class HttpCallToolsProvider implements ToolSourceProvider {
+public class HttpCallToolsProvider implements ToolSourceProvider {
 
     private static final Logger LOGGER = Logger.getLogger(HttpCallToolsProvider.class);
     private static final String HTTPCALLS_TYPE = "eddi://ai.labs.httpcalls";
@@ -891,7 +891,7 @@ class HttpCallToolsProvider implements ToolSourceProvider {
      * An absolute URL keeps only its path, so the same pattern matches however the
      * target server was configured.
      */
-    static String normalizeEndpointPath(String rawPath) {
+    public static String normalizeEndpointPath(String rawPath) {
         String path = rawPath.trim();
         // Request.path defaults to "", and an empty path means the target server's
         // root — ApiCallExecutor sends the request to targetServerUrl unchanged.

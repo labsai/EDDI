@@ -3868,7 +3868,8 @@ public class LlmTask implements ILifecycleTask, IAnswerRevisingTask, IAnswerEdit
                     // approval policy sends it only when readOnlyTools names it.
                     var request = apiCall.getRequest();
                     if (EmailApprovalGate.refusesRuleCall(memory, EmailApprovalGate.httpCallAddresses(apiCall.getName(),
-                            request != null ? request.getMethod() : null, request != null ? request.getPath() : null))) {
+                            request != null ? request.getMethod() : null,
+                            request != null && request.getPath() != null ? HttpCallToolsProvider.normalizeEndpointPath(request.getPath()) : null))) {
                         LOGGER.warnf("httpCall RAG '%s' not executed: the mail turn's approvalPolicy refuses httpcalls readOnlyTools does "
                                 + "not name", httpCallName);
                         return null;

@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.engine.runtime.internal;
 
+import ai.labs.eddi.engine.continuation.ContinuationFireHandler;
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
@@ -23,6 +24,7 @@ import org.junit.jupiter.api.Test;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -32,8 +34,10 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -175,6 +179,107 @@ class ConversationEmailPreRunTest {
         assertEquals(EmailApprovalGate.REJECTED_OUTPUT_VALUE, output.get(EmailApprovalGate.REJECTED_OUTPUT_KEY));
         assertFalse(String.valueOf(output.get(MemoryKeys.OUTPUT_PREFIX)).contains("rejected by a human reviewer"),
                 "not the generic rule-pause text");
+        assertEquals(ConversationState.ENDED, memory.getConversationState(), "a rejected start ends its conversation");
+    }
+
+    @Test
+    @DisplayName("a rejected held start ends the conversation, so a later mail starts a fresh one")
+    void rejectedStartEndsConversation() throws Exception {
+        memory.setOrigin(TurnOrigin.EMAIL);
+        conversation().init(mailContext(true, "No."));
+        assertEquals(EmailApprovalGate.PRE_RUN_START, memory.getCurrentStep().getData(EmailApprovalGate.PRE_RUN_MARKER).getResult());
+
+        conversation().resume(decision(HitlVerdict.REJECTED));
+
+        assertEquals(ConversationState.ENDED, memory.getConversationState());
+    }
+
+    @Test
+    @DisplayName("a rejected everyTurn mail in an existing conversation leaves it open")
+    void rejectedTurnKeepsConversation() throws Exception {
+        memory.setOrigin(TurnOrigin.EMAIL);
+        memory.setConversationState(ConversationState.READY);
+        conversation().say("refund", mailContext(true, "No."));
+
+        conversation().resume(decision(HitlVerdict.REJECTED));
+
+        assertEquals(ConversationState.READY, memory.getConversationState());
+    }
+
+    /** The context a self-continuation turn carries: no gate of its own. */
+    private static Map<String, Context> continuationContext() {
+        return new LinkedHashMap<>(ContinuationFireHandler.inputData(1, 3, "carry on").getContext());
+    }
+
+    /**
+     * The context a persistent scheduled check-back carries
+     * ({@code ScheduleFireExecutor#buildInputData}): the schedule, the user and the
+     * taint, no gate.
+     */
+    private static Map<String, Context> checkBackContext() {
+        Map<String, Context> context = new LinkedHashMap<>();
+        context.put("schedule", new Context(Context.ContextType.object, Map.of("trigger", "scheduled", "scheduleId", "s1")));
+        context.put("userId", new Context(Context.ContextType.string, "email:int1:alice@example.com"));
+        context.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        return context;
+    }
+
+    private void startedByMail(String policy) throws Exception {
+        memory.setOrigin(TurnOrigin.EMAIL);
+        Map<String, Context> start = new LinkedHashMap<>();
+        start.put(TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, TurnOrigin.EMAIL));
+        start.put("emailIntegration", new Context(Context.ContextType.string, "int1"));
+        start.put(EmailApprovalGate.CONTEXT_KEY, EmailApprovalGate.contextValue(policy, List.of("lookup"), false, "No.", null));
+        conversation().init(start);
+        assertEquals(ConversationState.READY, memory.getConversationState());
+    }
+
+    @Test
+    @DisplayName("a continuation of an everyTurn mail conversation pauses before it runs, and an approval runs it exactly once")
+    void continuationOfEveryTurnPauses() throws Exception {
+        startedByMail("everyTurn");
+        assertEquals("everyTurn", memory.getEmailApprovalGate().get("policy"), "the start recorded the gate");
+
+        conversation().say("carry on", continuationContext());
+
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+        assertEquals(-1, memory.getHitlPausedAbsoluteTaskIndex());
+        verify(lifecycleManager, times(1)).executeLifecycle(any(), any());
+
+        conversation().resume(decision(HitlVerdict.APPROVED));
+
+        verify(lifecycleManager, times(1)).executeLifecycleFromIndex(any(), eq(0));
+        assertEquals(ConversationState.READY, memory.getConversationState(), "the approved turn ran and did not pause again");
+    }
+
+    @Test
+    @DisplayName("a scheduled check-back of an actions mail conversation runs under the recorded gate")
+    void checkBackRunsGated() throws Exception {
+        startedByMail("actions");
+        AtomicReference<EmailApprovalGate.Policy> seen = new AtomicReference<>();
+        doAnswer(invocation -> {
+            seen.set(EmailApprovalGate.of(memory));
+            return null;
+        }).when(lifecycleManager).executeLifecycle(any(), any());
+
+        conversation().say("check the order", checkBackContext());
+
+        assertEquals(ConversationState.READY, memory.getConversationState(), "actions never holds a turn before it runs");
+        assertNotNull(seen.get(), "the check-back's tasks see the gate");
+        assertEquals(List.of("lookup"), seen.get().readOnlyTools());
+        assertTrue(EmailApprovalGate.refusesRuleCall(memory, List.of("createOrder")));
+    }
+
+    @Test
+    @DisplayName("a scheduled check-back of an everyTurn mail conversation pauses; a rejection answers with rejectedReply")
+    void checkBackOfEveryTurnPauses() throws Exception {
+        startedByMail("everyTurn");
+
+        conversation().say("check the order", checkBackContext());
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+
+        conversation().resume(decision(HitlVerdict.REJECTED));
+        assertTrue(String.valueOf(memory.getCurrentStep().getConversationOutput().get(MemoryKeys.OUTPUT_PREFIX)).contains("No."));
         assertEquals(ConversationState.READY, memory.getConversationState());
     }
 

@@ -144,6 +144,14 @@ public class Conversation implements IConversation {
      * onto the next one, so the bound holds across pauses and reloads.
      */
     private int revisionRoundsUsed;
+    /**
+     * Whether this run starts a new step of an existing conversation (not a rerun,
+     * not the start): only such a turn inherits the email gate's {@code everyTurn}
+     * pause from the conversation (EmailApprovalGate#preRunRequested).
+     */
+    private boolean newTurn;
+    /** Whether this run is the conversation's {@code CONVERSATION_START} turn. */
+    private boolean startTurn;
 
     /**
      * Conversation output written when a rejection revised the answer: the
@@ -297,10 +305,12 @@ public class Conversation implements IConversation {
         // enableMemoryTools)
         loadUserProperties(conversationMemory, context);
 
+        startTurn = true;
         try {
             var lifecycleData = prepareLifecycleData("", context, null);
             executeConversationStep(lifecycleData, null);
         } finally {
+            startTurn = false;
             recordAgentVersion();
             checkActionsForConversationEnd();
         }
@@ -543,6 +553,7 @@ public class Conversation implements IConversation {
 
         try {
             setConversationState(ConversationState.IN_PROGRESS);
+            newTurn = startNewStep;
 
             if (startNewStep) {
                 startNextStep();
@@ -1483,6 +1494,10 @@ public class Conversation implements IConversation {
                 step.storeData(current != null ? current : datum);
             });
             if (first) {
+                // The gate a mail turn carries is recorded on the conversation, so its
+                // later turns without one (a self-continuation, a scheduled check-back)
+                // are gated as it was (EmailApprovalGate#of).
+                EmailApprovalGate.record(conversationMemory, data);
                 pauseBeforeRunIfEmailGateAsks(data, executableWorkflow.getWorkflowId());
             }
             first = false;
@@ -1501,11 +1516,14 @@ public class Conversation implements IConversation {
      * resume (and the timeout bookmark) that this was the email gate's pause.
      */
     private void pauseBeforeRunIfEmailGateAsks(List<IData<?>> data, String firstWorkflowId) throws ConversationPauseException {
-        EmailApprovalGate.Policy gate = EmailApprovalGate.preRunRequested(conversationMemory, data);
+        EmailApprovalGate.Policy gate = EmailApprovalGate.preRunRequested(conversationMemory, data, newTurn);
         if (gate == null) {
             return;
         }
-        conversationMemory.getCurrentStep().storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, Boolean.TRUE));
+        // The marker says whether the held turn is the conversation's start: a rejected
+        // start ends the conversation (rejectBeforeRun).
+        conversationMemory.getCurrentStep()
+                .storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, startTurn ? EmailApprovalGate.PRE_RUN_START : Boolean.TRUE));
         String reason = gate.pauseReason() != null && !gate.pauseReason().isBlank() ? gate.pauseReason() : EmailApprovalGate.DEFAULT_PRE_RUN_REASON;
         throw new ConversationPauseException(firstWorkflowId, -1, reason, ConversationPauseException.PauseOrigin.RULE);
     }
@@ -2052,11 +2070,12 @@ public class Conversation implements IConversation {
             // nothing of the turn has run, so there is no draft to revise or edit. A
             // rejection answers with the target's rejectedReply (none in trigger mode);
             // an approval runs the whole turn from its first task.
-            boolean emailPreRun = !toolPause && currentStep.getData(EmailApprovalGate.PRE_RUN_MARKER) != null;
+            IData<Object> emailPreRunMarker = toolPause ? null : currentStep.getData(EmailApprovalGate.PRE_RUN_MARKER);
+            boolean emailPreRun = emailPreRunMarker != null;
             if (emailPreRun) {
                 currentStep.removeData(EmailApprovalGate.PRE_RUN_MARKER);
                 if (decision.getVerdict() == HitlDecision.HitlVerdict.REJECTED) {
-                    rejectBeforeRun(currentStep);
+                    rejectBeforeRun(currentStep, EmailApprovalGate.PRE_RUN_START.equals(emailPreRunMarker.getResult()));
                     return;
                 }
                 decision.setEditedAnswer(null);
@@ -2229,8 +2248,13 @@ public class Conversation implements IConversation {
      * A rejected email pre-run pause: the turn ends without running, answered with
      * the target's {@code rejectedReply} when it has one, and marked so the email
      * reply path sends that text rather than a generic one.
+     * <p>
+     * A rejected <em>start</em> — the conversation was held before
+     * {@code CONVERSATION_START} — also ends the conversation: its start never ran,
+     * so it must not stay READY for a later mail of the thread (or the sender's
+     * correlation) to continue as if it had. The next mail starts a fresh one.
      */
-    private void rejectBeforeRun(IWritableConversationStep currentStep) {
+    private void rejectBeforeRun(IWritableConversationStep currentStep, boolean heldStart) {
         EmailApprovalGate.Policy gate = EmailApprovalGate.of(conversationMemory);
         String reply = gate != null ? gate.rejectedReply() : null;
         if (reply != null && !reply.isBlank()) {
@@ -2242,6 +2266,9 @@ public class Conversation implements IConversation {
         currentStep.addConversationOutputString(EmailApprovalGate.REJECTED_OUTPUT_KEY, EmailApprovalGate.REJECTED_OUTPUT_VALUE);
         clearHitlStatusMarker(currentStep);
         clearHitlBookmark();
+        if (heldStart) {
+            endConversation();
+        }
     }
 
     private void clearHitlBookmark() {

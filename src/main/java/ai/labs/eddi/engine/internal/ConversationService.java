@@ -373,6 +373,15 @@ public class ConversationService implements IConversationService, UserErasurePar
     boolean planHashStrict = false;
 
     /**
+     * How long a pause the email approval gate caused waits before it is rejected
+     * (ISO-8601, email plan v3 §8.1). Field-injected with its default for the
+     * directly constructed tests; {@code ConversationHitlService} falls back to the
+     * default for a value that is not a positive duration.
+     */
+    @ConfigProperty(name = "eddi.email.approval-gate.expiry", defaultValue = "PT72H")
+    String emailGateExpiry = "PT72H";
+
+    /**
      * Turns this node runs at once, queued or executing; one more is refused with
      * 503 {@code capacity_exceeded}. Turns run on virtual threads, so the worker
      * pool no longer bounds them — this does, and it is what keeps memory per

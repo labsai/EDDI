@@ -16,6 +16,7 @@ import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
+import java.util.Arrays;
 import java.util.List;
 import java.util.Map;
 
@@ -25,7 +26,10 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -80,10 +84,27 @@ class EmailApprovalGateTest {
         }
 
         @Test
-        @DisplayName("policy none writes no context at all")
-        void noneWritesNothing() {
-            assertNull(EmailApprovalGate.contextValue("none", List.of("*"), true, "x", "y"));
-            assertNull(EmailApprovalGate.contextValue(null, List.of(), false, null, null));
+        @DisplayName("policy none is written explicitly, and reads as no gate")
+        void noneIsExplicit() {
+            Context none = EmailApprovalGate.contextValue("none", List.of("*"), true, "x", "y");
+            assertEquals(Map.of("policy", "none"), none.getValue());
+            assertEquals(Map.of("policy", "none"), EmailApprovalGate.contextValue(null, List.of(), false, null, null).getValue());
+            assertNull(EmailApprovalGate.of(memory(TurnOrigin.EMAIL, none)));
+        }
+
+        @Test
+        @DisplayName("a gate on the step that cannot be read fails closed: every call gated, nothing read-only")
+        void unreadableFailsClosed() {
+            for (Context bad : List.of(new Context(Context.ContextType.string, "everyTurn"),
+                    new Context(Context.ContextType.object, Map.of("readOnlyTools", List.of("*"))),
+                    new Context(Context.ContextType.object, Map.of("policy", "sometimes", "readOnlyTools", List.of("*"))),
+                    new Context(Context.ContextType.object, Map.of("policy", "actions", "readOnlyTools", "*")))) {
+                var gate = EmailApprovalGate.of(memory(TurnOrigin.EMAIL, bad));
+                assertNotNull(gate, "fails closed for " + bad.getValue());
+                assertEquals("actions", gate.policy());
+                assertTrue(gate.readOnlyTools().isEmpty());
+                assertTrue(EmailApprovalGate.refusesRuleCall(memory(TurnOrigin.EMAIL, bad), List.of("lookup")));
+            }
         }
 
         @Test
@@ -175,6 +196,9 @@ class EmailApprovalGateTest {
             assertSame(builtin, EmailApprovalGate.overlay(gate, builtin, Map.of("discover_tools", "builtin"), Map.of()));
             var mcp = new ToolApprovalGate.GateResult(List.of(), List.of(call("c1", "discover_tools")), Map.of());
             assertEquals(1, EmailApprovalGate.overlay(gate, mcp, Map.of("discover_tools", "mcp"), Map.of()).gated().size());
+            var unknown = new ToolApprovalGate.GateResult(List.of(), List.of(call("c1", "fetch_tool_response_page")), Map.of());
+            assertEquals(1, EmailApprovalGate.overlay(gate, unknown, Map.of(), Map.of()).gated().size(),
+                    "a loop helper whose source is unknown is gated: only the built-in one is exempt");
         }
 
         @Test
@@ -246,17 +270,17 @@ class EmailApprovalGateTest {
             var memory = memory(TurnOrigin.EMAIL, null);
             Context preRun = EmailApprovalGate.contextValue("everyTurn", List.of(), true, null, "why");
             List<IData<?>> data = List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, preRun));
-            var gate = EmailApprovalGate.preRunRequested(memory, data);
+            var gate = EmailApprovalGate.preRunRequested(memory, data, true);
             assertNotNull(gate);
             assertEquals("why", gate.pauseReason());
-            assertNull(EmailApprovalGate.preRunRequested(memory, List.of()), "a rerun without the context does not pause");
+            assertNull(EmailApprovalGate.preRunRequested(memory, List.of(), false), "a rerun without the context does not pause");
         }
 
         @Test
         @DisplayName("a gate without preRun does not pause before the run")
         void notPreRun() {
             List<IData<?>> data = List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, actions()));
-            assertNull(EmailApprovalGate.preRunRequested(memory(TurnOrigin.EMAIL, null), data));
+            assertNull(EmailApprovalGate.preRunRequested(memory(TurnOrigin.EMAIL, null), data, true));
         }
 
         @Test
@@ -264,7 +288,124 @@ class EmailApprovalGateTest {
         void untainted() {
             Context preRun = EmailApprovalGate.contextValue("everyTurn", List.of(), true, null, null);
             List<IData<?>> data = List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, preRun));
-            assertNull(EmailApprovalGate.preRunRequested(memory(null, null), data));
+            assertNull(EmailApprovalGate.preRunRequested(memory(null, null), data, true));
+        }
+
+        @Test
+        @DisplayName("everyTurn: a new turn without a gate of its own (a continuation) inherits the pause; a rerun does not")
+        void everyTurnInherited() {
+            var memory = memory(TurnOrigin.EMAIL, null);
+            when(memory.getEmailApprovalGate()).thenReturn(Map.of("policy", "everyTurn", "readOnlyTools", List.of(), "rejectedReply", "No."));
+
+            var gate = EmailApprovalGate.preRunRequested(memory, List.of(), true);
+            assertNotNull(gate);
+            assertTrue(gate.preRun());
+            assertEquals("No.", gate.rejectedReply());
+            assertNull(EmailApprovalGate.preRunRequested(memory, List.of(), false), "a rerun or the start inherits nothing");
+        }
+
+        @Test
+        @DisplayName("firstContact and actions are not inherited as a pause; a fresh gate without preRun wins over the record")
+        void othersNotInherited() {
+            var memory = memory(TurnOrigin.EMAIL, null);
+            when(memory.getEmailApprovalGate()).thenReturn(Map.of("policy", "firstContact"));
+            assertNull(EmailApprovalGate.preRunRequested(memory, List.of(), true));
+
+            when(memory.getEmailApprovalGate()).thenReturn(Map.of("policy", "everyTurn"));
+            Context approvedStart = EmailApprovalGate.contextValue("everyTurn", List.of(), false, null, null);
+            List<IData<?>> data = List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, approvedStart));
+            assertNull(EmailApprovalGate.preRunRequested(memory, data, true));
+        }
+    }
+
+    @Nested
+    @DisplayName("later turns without a gate of their own")
+    class Recorded {
+
+        @Test
+        @DisplayName("a continuation of a gated mail conversation is gated by the recorded gate")
+        void recordedGateApplies() {
+            var memory = memory(TurnOrigin.EMAIL, null);
+            when(memory.getEmailApprovalGate()).thenReturn(Map.of("policy", "actions", "readOnlyTools", List.of("lookup")));
+
+            var gate = EmailApprovalGate.of(memory);
+            assertNotNull(gate);
+            assertEquals(List.of("lookup"), gate.readOnlyTools());
+            assertTrue(EmailApprovalGate.refusesRuleCall(memory, List.of("createOrder")));
+            assertFalse(EmailApprovalGate.refusesRuleCall(memory, List.of("lookup")));
+        }
+
+        @Test
+        @DisplayName("a recorded none is no gate; a fresh gate on the step wins over the record")
+        void recordedNoneAndFreshWins() {
+            var none = memory(TurnOrigin.EMAIL, null);
+            when(none.getEmailApprovalGate()).thenReturn(Map.of("policy", "none"));
+            stepsWithIntegration(none);
+            assertNull(EmailApprovalGate.of(none));
+
+            var fresh = memory(TurnOrigin.EMAIL, EmailApprovalGate.contextValue("none", List.of(), false, null, null));
+            when(fresh.getEmailApprovalGate()).thenReturn(Map.of("policy", "actions"));
+            assertNull(EmailApprovalGate.of(fresh));
+        }
+
+        @Test
+        @DisplayName("a mail conversation without a recorded gate fails closed; a delegation without the channel's marker has none")
+        void unknownGate() {
+            var mailConversation = memory(TurnOrigin.EMAIL, null);
+            stepsWithIntegration(mailConversation);
+            var gate = EmailApprovalGate.of(mailConversation);
+            assertNotNull(gate);
+            assertEquals("actions", gate.policy());
+            assertTrue(gate.readOnlyTools().isEmpty());
+
+            var delegation = memory(TurnOrigin.EMAIL, null);
+            var steps = mock(IConversationMemory.IConversationStepStack.class);
+            when(steps.getExactDataPerStep(EmailApprovalGate.INTEGRATION_STEP_KEY)).thenReturn(Arrays.asList(null, null));
+            when(delegation.getAllSteps()).thenReturn(steps);
+            assertNull(EmailApprovalGate.of(delegation));
+        }
+
+        @Test
+        @DisplayName("the recorded gate never arms an untainted conversation")
+        void untainted() {
+            var memory = memory(null, null);
+            when(memory.getEmailApprovalGate()).thenReturn(Map.of("policy", "actions"));
+            stepsWithIntegration(memory);
+            assertNull(EmailApprovalGate.of(memory));
+        }
+
+        @Test
+        @DisplayName("record: a tainted mail turn's gate is recorded without preRun and the held mail; none is recorded too")
+        void recordsGate() {
+            var memory = memory(null, null);
+            Context gate = EmailApprovalGate.contextValue("everyTurn", List.of("lookup"), true, "No.", "why", Map.of("subject", "hi"));
+            List<IData<?>> data = List.of(new Data<>("context:" + TurnOrigin.CONTEXT_KEY, new Context(Context.ContextType.string, "email")),
+                    new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, gate));
+
+            EmailApprovalGate.record(memory, data);
+
+            verify(memory).setEmailApprovalGate(
+                    Map.of("policy", "everyTurn", "readOnlyTools", List.of("lookup"), "rejectedReply", "No.", "pauseReason", "why"));
+
+            var none = memory(TurnOrigin.EMAIL, null);
+            EmailApprovalGate.record(none, List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY,
+                    EmailApprovalGate.contextValue("none", List.of(), false, null, null))));
+            verify(none).setEmailApprovalGate(Map.of("policy", "none"));
+        }
+
+        @Test
+        @DisplayName("record: an untainted turn records nothing")
+        void untaintedRecordsNothing() {
+            var memory = memory(null, null);
+            EmailApprovalGate.record(memory, List.of(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY, actions())));
+            verify(memory, never()).setEmailApprovalGate(any());
+        }
+
+        private static void stepsWithIntegration(IConversationMemory memory) {
+            var steps = mock(IConversationMemory.IConversationStepStack.class);
+            IData<Object> marker = new Data<>(EmailApprovalGate.INTEGRATION_STEP_KEY, new Context(Context.ContextType.string, "int1"));
+            when(steps.getExactDataPerStep(EmailApprovalGate.INTEGRATION_STEP_KEY)).thenReturn(Arrays.asList(marker, null));
+            when(memory.getAllSteps()).thenReturn(steps);
         }
     }
 }

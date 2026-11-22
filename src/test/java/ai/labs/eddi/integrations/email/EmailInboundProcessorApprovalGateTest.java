@@ -142,12 +142,12 @@ class EmailInboundProcessorApprovalGateTest {
     }
 
     @Test
-    @DisplayName("none (an old configuration): no turn carries a gate")
+    @DisplayName("none (an old configuration): every turn says so explicitly, so the conversation records it has no gate")
     void noneCarriesNoGate() throws Exception {
         processor.process(context(Map.of(), target(null)), EmailTestMail.mail().polled(1), Instant.now());
 
-        assertNull(gateOf(startContext()));
-        assertNull(gateOf(inputs.get(0).getContext()));
+        assertEquals(Map.of("policy", "none"), gateOf(startContext()));
+        assertEquals(Map.of("policy", "none"), gateOf(inputs.get(0).getContext()));
     }
 
     @Test

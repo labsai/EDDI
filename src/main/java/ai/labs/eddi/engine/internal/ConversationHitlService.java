@@ -63,7 +63,6 @@ import ai.labs.eddi.engine.model.PendingApprovalSummary;
 import io.micrometer.core.instrument.Counter;
 import io.micrometer.core.instrument.MeterRegistry;
 import jakarta.enterprise.event.Event;
-import org.eclipse.microprofile.config.ConfigProvider;
 import org.jboss.logging.Logger;
 
 import java.time.Duration;
@@ -1948,7 +1947,7 @@ class ConversationHitlService {
      */
     void populateHitlTimeoutBookmark(IConversationMemory memory) {
         populateTimeoutBookmark(memory);
-        applyEmailGateTimeout(memory, emailGateExpiry());
+        applyEmailGateTimeout(memory, emailGateExpiry(conversationService.emailGateExpiry));
         renderApprovalContext(memory);
         // Last: after the turn's secret scrub (done before this is called) and before
         // the store, so the hash covers exactly what is persisted.
@@ -1986,9 +1985,12 @@ class ConversationHitlService {
     static final String EMAIL_GATE_EXPIRY_PROPERTY = "eddi.email.approval-gate.expiry";
     static final String DEFAULT_EMAIL_GATE_EXPIRY = "PT72H";
 
-    private static String emailGateExpiry() {
+    /**
+     * {@code configured} ({@link ConversationService#emailGateExpiry}) when it is a
+     * positive ISO-8601 duration, else {@link #DEFAULT_EMAIL_GATE_EXPIRY}.
+     */
+    static String emailGateExpiry(String configured) {
         try {
-            String configured = ConfigProvider.getConfig().getOptionalValue(EMAIL_GATE_EXPIRY_PROPERTY, String.class).orElse(null);
             if (configured != null && !configured.isBlank()) {
                 Duration parsed = Duration.parse(configured.trim());
                 if (!parsed.isNegative() && !parsed.isZero()) {
