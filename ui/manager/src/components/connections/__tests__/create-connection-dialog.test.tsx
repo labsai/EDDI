@@ -465,5 +465,20 @@ describe("CreateConnectionDialog — an email signing certificate", () => {
     // Next is blocked until a vault reference is chosen for the certificate.
     await user.click(screen.getByTestId("create-connection-next"));
     expect(await screen.findByTestId("create-connection-smime-certificate-error")).toBeInTheDocument();
+    expect(screen.getByTestId("create-connection-smime-certificate-input")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("refuses a pasted literal certificate, not only an empty field", async () => {
+    const user = userEvent.setup();
+    await renderDialog();
+
+    await user.type(screen.getByTestId("create-connection-name"), "mailbox-smime");
+    await user.click(screen.getByTestId("auth-type-choice-SMIME_SIGNING"));
+    await user.click(screen.getByTestId("create-connection-next"));
+    expect(await screen.findByTestId("create-connection-smime-fields")).toBeInTheDocument();
+
+    await user.type(screen.getByTestId("create-connection-smime-certificate-input"), "-----BEGIN PRIVATE KEY-----");
+    await user.click(screen.getByTestId("create-connection-next"));
+    expect(await screen.findByTestId("create-connection-smime-certificate-error")).toBeInTheDocument();
   });
 });

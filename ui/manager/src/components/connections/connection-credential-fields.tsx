@@ -96,6 +96,7 @@ export function ConnectionCredentialFields({
             referenceOnly
             readOnly={readOnly || !onPatchSmime}
             aria-describedby={fieldId("smime-certificate-error")}
+            aria-invalid={errors["smimeSigning.certificate"] !== undefined || undefined}
             testId={`${idPrefix}-smime-certificate`}
           />
           <ValidationMessage

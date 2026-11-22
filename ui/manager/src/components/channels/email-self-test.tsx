@@ -46,6 +46,8 @@ export function EmailSelfTestPanel({
   const [error, setError] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
   const tokenRef = useRef<string | null>(null);
+  /** The newest poll request; an older response must not overwrite a newer result. */
+  const pollSeq = useRef({ latest: 0 });
 
   const start = useCallback(async () => {
     setStarting(true);
@@ -72,17 +74,25 @@ export function EmailSelfTestPanel({
   useEffect(() => {
     if (!waiting || !tokenRef.current) return;
     const token = tokenRef.current;
+    const seq = pollSeq.current;
+    // Polling goes on until the server says the test is over: past its expiry the
+    // server answers "expired", which is what ends the wait. A stopped timer would
+    // leave the panel waiting, and the button disabled, for good.
     const timer = setInterval(() => {
-      if (result?.expiresAt && Date.parse(result.expiresAt) < Date.now() - SELF_TEST_POLL_MS) {
-        clearInterval(timer);
-        return;
-      }
+      const mine = ++seq.latest;
       getEmailSelfTest(integrationId, token)
-        .then((next) => setResult((prev) => ({ ...next, token: prev?.token })))
-        .catch((e: unknown) => setError(getErrorMessage(e)));
+        .then((next) => {
+          if (mine === seq.latest) setResult((prev) => ({ ...next, token: prev?.token }));
+        })
+        .catch((e: unknown) => {
+          if (mine === seq.latest) setError(getErrorMessage(e));
+        });
     }, SELF_TEST_POLL_MS);
-    return () => clearInterval(timer);
-  }, [waiting, integrationId, result?.expiresAt]);
+    return () => {
+      clearInterval(timer);
+      seq.latest++; // a response still in flight belongs to a poll that no longer exists
+    };
+  }, [waiting, integrationId]);
 
   return (
     <div className="space-y-3" data-testid="email-self-test">

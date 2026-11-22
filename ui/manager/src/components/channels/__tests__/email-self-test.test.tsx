@@ -57,6 +57,31 @@ describe("EmailSelfTestPanel", () => {
     expect(polls).toBe(1);
   });
 
+  it("keeps asking after the expiry time passed, so the server's last word ends the wait", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let polls = 0;
+    server.use(
+      http.post("*/channelstore/channels/mail1/email-self-test", () =>
+        HttpResponse.json({ status: "waiting", token: TOKEN, expiresAt: new Date(Date.now() - 60_000).toISOString() }),
+      ),
+      http.get(`*/channelstore/channels/mail1/email-self-test/${TOKEN}`, () => {
+        polls++;
+        return HttpResponse.json({ status: "expired", findings: [{ code: "test.expired", level: "problem", text: "It did not come back." }] });
+      }),
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWithProviders(<EmailSelfTestPanel integrationId="mail1" hasSmtp />);
+
+    await user.click(screen.getByTestId("email-self-test-start"));
+    await waitFor(() => expect(screen.getByTestId("email-self-test-result")).toHaveAttribute("data-status", "waiting"));
+    await act(async () => {
+      vi.advanceTimersByTime(SELF_TEST_POLL_MS + 10);
+    });
+    await waitFor(() => expect(screen.getByTestId("email-self-test-result")).toHaveAttribute("data-status", "expired"));
+    expect(polls).toBe(1);
+    expect(screen.getByTestId("email-self-test-start")).toBeEnabled();
+  });
+
   it("says so when five tests ran this hour", async () => {
     server.use(http.post("*/channelstore/channels/mail1/email-self-test", () => new HttpResponse("limit", { status: 429 })));
     const user = userEvent.setup();
