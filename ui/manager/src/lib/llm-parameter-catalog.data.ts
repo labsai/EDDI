@@ -19,7 +19,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
               "effect": "rejected",
               "note": "This reasoning model rejects sampling settings such as temperature and topP."
             },
@@ -60,7 +60,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "max": 1,
           "rules": [
             {
-              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
+              "models": "^(o\\d|gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
               "effect": "rejected",
               "note": "This reasoning model rejects sampling settings such as temperature and topP."
             },
@@ -236,7 +236,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
               "note": "This model has no reasoning effort setting."
             },
             {
-              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol|gpt-6\\.2)",
+              "models": "^(gpt-5(-mini|-nano|-pro)?(-\\d{4}-\\d{2}-\\d{2})?$|gpt-5\\.5-pro|gpt-6-astra|gpt-6\\.1-sol)",
               "effect": "rejected",
               "note": "This model does not support reasoningEffort none.",
               "when": {
@@ -446,7 +446,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "default": 1,
           "rules": [
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model accepts only the default temperature of 1.",
               "unless": {
@@ -487,7 +487,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "max": 1,
           "rules": [
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model rejects temperature and topP sent together.",
               "when": {
@@ -495,7 +495,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
               }
             },
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model accepts only the default topP of 0.99.",
               "unless": {
@@ -525,7 +525,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "min": 0,
           "rules": [
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This Claude model rejects topK."
             },
@@ -577,7 +577,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           ],
           "rules": [
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-5(-[12])?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "Thinking mode enabled (with a fixed budget) is not supported on this model; use adaptive.",
               "when": {
@@ -599,7 +599,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
               }
             },
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-(5(-[12])?|preview)|opus-5-5|sonnet-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-(5(-1)?|preview)|opus-5-5|sonnet-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "This model always thinks; disabled is not accepted.",
               "when": {
@@ -674,7 +674,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "min": 1024,
           "rules": [
             {
-              "models": "^claude-(fable-5(-[12])?|mythos-5(-[12])?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
+              "models": "^claude-(fable-5(-1)?|mythos-5(-1)?|opus-(5-5|5|4-8|4-7)|sonnet-5(-5)?|haiku-5-5)(-\\d{8})?$",
               "effect": "rejected",
               "note": "A fixed thinking budget is not supported on this model; use effort."
             }
@@ -968,8 +968,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
             "minimal",
             "low",
             "medium",
-            "high",
-            "xhigh"
+            "high"
           ],
           "rules": [
             {
@@ -985,17 +984,6 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
                 "key": "thinkingLevel",
                 "values": [
                   "minimal"
-                ]
-              }
-            },
-            {
-              "models": "^(models/)?gemini-(?!4-(neon|hydrogen))",
-              "effect": "rejected",
-              "note": "Thinking level xhigh exists only on Gemini 4 Neon and Hydrogen.",
-              "when": {
-                "key": "thinkingLevel",
-                "values": [
-                  "xhigh"
                 ]
               }
             }
@@ -1342,7 +1330,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.[12])",
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
               "effect": "rejected",
               "note": "Azure reasoning models reject frequencyPenalty."
             }
@@ -1359,7 +1347,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "max": 2,
           "rules": [
             {
-              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.[12])",
+              "models": "^(o\\d|codex|gpt-5(?!.*chat)|gpt-6-(sol|luna)|gpt-6\\.1)",
               "effect": "rejected",
               "note": "Azure reasoning models reject presencePenalty."
             }
@@ -3003,7 +2991,7 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "type": "enum",
           "group": "reasoning",
           "label": "Reasoning effort",
-          "description": "How much MiniMax-M3.1-Flash thinks.",
+          "description": "How much MiniMax-M3.1-Flash-Preview thinks.",
           "enum": [
             "low",
             "medium",
@@ -3013,9 +3001,9 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           ],
           "rules": [
             {
-              "models": "^MiniMax-M3\\.1-Flash(-Preview)?$",
+              "models": "^MiniMax-M3\\.1-Flash-Preview$",
               "effect": "rejected",
-              "note": "MiniMax-M3.1-Flash rejects reasoningEffort none.",
+              "note": "MiniMax-M3.1-Flash-Preview rejects reasoningEffort none.",
               "when": {
                 "key": "reasoningEffort",
                 "values": [
@@ -3064,9 +3052,9 @@ export const LLM_PARAMETER_CATALOG_DATA: RawParameterCatalog = {
           "body": true,
           "rules": [
             {
-              "models": "^MiniMax-M3\\.1-Flash(-Preview)?$",
+              "models": "^MiniMax-M3\\.1-Flash-Preview$",
               "effect": "rejected",
-              "note": "MiniMax-M3.1-Flash always thinks.",
+              "note": "MiniMax-M3.1-Flash-Preview always thinks.",
               "when": {
                 "key": "thinkingType",
                 "values": [

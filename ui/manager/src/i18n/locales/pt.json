@@ -4588,7 +4588,8 @@
       "paramValueTooLong": "Um valor de parâmetro tem no máximo 512 caracteres.",
       "paramValueCredentialShaped": "Um destes valores parece uma chave ou um token. Este mapa é guardado em texto simples e enviado num URL — só parâmetros de protocolo não secretos pertencem aqui.",
       "thumbprintFormat": "Não é uma impressão digital do tamanho certo: x5t#S256 exige a impressão SHA-256 e x5t a SHA-1 — em hexadecimal ou base64url.",
-      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação."
+      "thumbprintRequiredEntra": "O Microsoft Entra só identifica a chave pela impressão digital do seu certificado. Cole a impressão digital do certificado que carregou no registo da aplicação.",
+      "originNotSmtp": "Um certificado de assinatura lista os relays SMTP cujos e-mails assina: smtps://host ou smtp://host:587."
     },
     "backToList": "Voltar para Conexões",
     "headerSecret": "Segredo guardado",
@@ -4634,7 +4635,11 @@
         "label": "Conta de serviço do Google (chave JSON)",
         "description": "As APIs do Google como conta de serviço, assinadas com a sua chave privada (portador JWT, RFC 7523). Guarde o ficheiro de chave JSON transferido como UMA única entrada do cofre e referencie-a como chave privada; o emissor e o ID da chave são lidos a partir dele. Adicione https://oauth2.googleapis.com à lista de permissões de endpoints de credenciais. Sem delegação em todo o domínio, a conta só vê o que é partilhado com ela."
       }
-    }
+    },
+    "smimeHint": "Guarde primeiro o certificado no cofre: um repositório de chaves PKCS#12 (.p12/.pfx) em base64, ou texto PEM com a chave privada seguida da cadeia de certificados. O certificado deve ser emitido para o endereço da caixa de correio que assina com ele.",
+    "smimeCertificate": "Certificado e chave privada",
+    "smimePassword": "Senha do repositório de chaves ou da chave (opcional)",
+    "smimeOriginsHint": "Liste os relays SMTP cujos e-mails este certificado pode assinar, p. ex. smtp://smtp.office365.com:587 ou smtps://smtp.gmail.com."
   },
   "workspaces": {
     "allSpaces": "Todos os espaços",
@@ -5627,13 +5632,19 @@
       "fromNameInvalid": "O nome do remetente pode ter no máximo {{max}} caracteres, sem quebras de linha.",
       "replyTemplateTooLong": "O modelo de resposta pode ter no máximo {{max}} caracteres.",
       "aiDisclosureTooLong": "O aviso de IA pode ter no máximo {{max}} caracteres.",
-      "maxRepliesPerThreadPerHour": "O limite de respostas deve ser um número inteiro de 1 a 1000."
+      "maxRepliesPerThreadPerHour": "O limite de respostas deve ser um número inteiro de 1 a 1000.",
+      "smimeConnectionRequired": "A assinatura 'required' precisa de uma conexão de assinatura: sem ela, todo e-mail enviado ficaria retido.",
+      "smimeConnectionInvalid": "Um nome de conexão tem apenas letras, dígitos, '.', '_' e '-'."
     },
     "warning": {
       "openTrigger": "Salvo, mas qualquer pessoa na internet pode fazer este agente executar: não há lista de remetentes permitidos e o e-mail não autenticado é processado.",
       "toolsWithoutApprovals": "Salvo, mas um agente que esta integração atende tem ferramentas sem aprovações. O conteúdo do e-mail é entrada não confiável: adicione hitlConfig.toolApprovals para as ferramentas que alteram coisas.",
       "aiDisclosureDisabled": "Salvo, mas as respostas não dizem mais que uma IA as escreveu. Regras de transparência como o AI Act da UE esperam que as pessoas saibam que estão falando com uma IA.",
-      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta."
+      "honorReplyTo": "Salvo, mas as respostas vão para o endereço Reply-To, que o DMARC não autentica: quem puder enviar e-mail autenticado de um domínio permitido decide para onde vai a resposta.",
+      "smimeNoCertificate": "Salvo, mas os e-mails saem sem assinatura: a assinatura S/MIME está ativada e nenhuma conexão SMIME_SIGNING foi indicada. Adicione uma em Assinatura S/MIME ou desative a assinatura.",
+      "smimeCertificateUnusable": "Salvo, mas o certificado S/MIME não pode assinar os e-mails desta caixa (endereço errado, uso de chave ausente, expirado ou cadeia incompleta), então os e-mails saem sem assinatura.",
+      "smimeCertificateExpiring": "Salvo. O certificado S/MIME expira em até 30 dias: renove-o e atualize a conexão SMIME_SIGNING.",
+      "smimeUntrustedChain": "Salvo, mas o certificado S/MIME não leva a uma raiz publicamente confiável, então os clientes de e-mail dos destinatários mostrarão a assinatura como não confiável."
     },
     "defaultTargetHint": "O destino padrão recebe todo e-mail cujo plus-tag (invoices+urgent@…) ou assunto não corresponde ao gatilho de nenhum outro destino. Você pode adicionar mais destinos após a criação.",
     "triggerLabel": "Plus-tags ou palavras do assunto",
@@ -5666,7 +5677,50 @@
     "replyTemplate": "Modelo de resposta",
     "replyTemplateHint": "Envolve a resposta do agente, que é inserida como texto e nunca executada como modelo. Variáveis:",
     "noteDkim": "As respostas precisam de um servidor de e-mail que assine o e-mail de saída com DKIM para o domínio da caixa postal, e de um registro DMARC para esse domínio — o {{productName}} não assina. Sem eles, as respostas caem no spam ou são rejeitadas. O Exchange Online e a maioria dos provedores assinam o e-mail enviado assim que o DKIM é ativado para o domínio.",
-    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Uma resposta que retorna permanentemente coloca o endereço na lista de supressão desta integração, e o {{productName}} não envia mais nada a ele até que um administrador o remova (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "O DKIM assina para o seu domínio",
+        "dkimUnaligned": "O DKIM assina para outro domínio",
+        "dkimMissing": "Sem assinatura DKIM",
+        "dkimInconclusive": "DKIM: inconclusivo dentro do Microsoft 365",
+        "dkimFailed": "A assinatura DKIM não é verificada",
+        "dkimDnsTemporary": "Falha numa consulta DNS",
+        "smimeVerified": "Assinatura S/MIME verificada",
+        "smimeMissing": "Era esperada uma assinatura S/MIME, nenhuma chegou",
+        "smimeOff": "Sem assinatura S/MIME",
+        "smimeInvalid": "A assinatura S/MIME não é verificada",
+        "smimeWrongSigner": "O certificado S/MIME é de outro endereço",
+        "dmarcPresent": "Registro DMARC publicado",
+        "dmarcAbsent": "Sem registro DMARC",
+        "dmarcUnknown": "Não foi possível verificar o DMARC",
+        "sendFailed": "Não foi possível enviar o e-mail de teste",
+        "testExpired": "O e-mail de teste não voltou"
+      },
+      "rateLimited": "No máximo 5 autotestes por hora. Tente novamente mais tarde.",
+      "hint": "Envia um e-mail curto da caixa para ela mesma pelo seu relay SMTP, lê-o de volta na próxima consulta e informa como o seu provedor o assina (DKIM, DMARC) e se a assinatura S/MIME é válida. Nunca inicia uma conversa com um agente.",
+      "noSmtp": "Defina primeiro um host SMTP e salve: o teste é enviado por ele.",
+      "unsaved": "O teste usa as configurações salvas; salve primeiro as suas alterações para testá-las.",
+      "run": "Executar autoteste",
+      "waiting": "E-mail de teste enviado. Aguardando a próxima consulta da caixa para lê-lo de volta…",
+      "done": "O e-mail de teste voltou.",
+      "expired": "O e-mail de teste não voltou em 15 minutos.",
+      "sendFailed": "Não foi possível enviar o e-mail de teste.",
+      "sentSigned": "(enviado com assinatura S/MIME)",
+      "sentUnsigned": "(enviado sem assinatura)",
+      "title": "Autoteste da saúde de envio"
+    },
+    "sendingSection": "Envio (SMTP)",
+    "smtpTriggerHint": "Opcional no modo gatilho, que nunca responde: o relay é usado apenas para o autoteste da saúde de envio.",
+    "smimeSection": "Assinatura S/MIME",
+    "smimeSign": "Assinar e-mails enviados",
+    "smimeSignOn": "Ativada — assinar quando houver um certificado configurado (padrão)",
+    "smimeSignRequired": "Obrigatória — nunca enviar e-mail sem assinatura",
+    "smimeSignOff": "Desativada",
+    "smimeSignRequiredHint": "Um certificado ausente, expirado ou incompatível retém os e-mails enviados e avisa os responsáveis; nada sai sem assinatura.",
+    "smimeSignHint": "Os clientes de e-mail dos destinatários mostram os e-mails assinados como vindos desta caixa. Os e-mails do remetente do sistema (avisos aos responsáveis) não são assinados.",
+    "smimeConnection": "Conexão do certificado de assinatura",
+    "smimeConnectionHint": "O nome de uma conexão SMIME_SIGNING com um certificado emitido para o endereço da caixa; a sua lista de permissões deve conter a origem SMTP."
   },
   "feedback": {
     "title": "Avaliações",

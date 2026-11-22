@@ -4546,7 +4546,8 @@
       "paramValueTooLong": "参数值最多 512 个字符。",
       "paramValueCredentialShaped": "其中一个值看起来像密钥或令牌。此映射以明文存储并通过 URL 发送——这里只应放非机密的协议参数。",
       "thumbprintFormat": "指纹长度不正确：x5t#S256 需要 SHA-256 指纹，x5t 需要 SHA-1 指纹——以十六进制或 base64url 表示。",
-      "thumbprintRequiredEntra": "Microsoft Entra 仅通过证书指纹识别密钥。请粘贴您上传到应用注册中的证书的指纹。"
+      "thumbprintRequiredEntra": "Microsoft Entra 仅通过证书指纹识别密钥。请粘贴您上传到应用注册中的证书的指纹。",
+      "originNotSmtp": "签名证书列出它为其邮件签名的 SMTP 中继：smtps://host 或 smtp://host:587。"
     },
     "backToList": "返回连接列表",
     "headerSecret": "已存密钥",
@@ -4592,7 +4593,11 @@
         "label": "Google 服务账号（JSON 密钥）",
         "description": "以服务账号身份调用 Google API，并用其私钥签名（RFC 7523 JWT 持有者）。将下载的 JSON 密钥文件作为保险库中的一个条目存储，并将其作为私钥引用；签发者和密钥 ID 从中读取。将 https://oauth2.googleapis.com 添加到凭据端点允许列表。未启用全网域委派时，该账号只能看到与其共享的内容。"
       }
-    }
+    },
+    "smimeHint": "请先将证书存入保管库：base64 编码的 PKCS#12（.p12/.pfx）密钥库，或包含私钥及其后证书链的 PEM 文本。证书必须颁发给使用它签名的邮箱地址。",
+    "smimeCertificate": "证书和私钥",
+    "smimePassword": "密钥库或私钥密码（可选）",
+    "smimeOriginsHint": "列出此证书可为其邮件签名的 SMTP 中继，例如 smtp://smtp.office365.com:587 或 smtps://smtp.gmail.com。"
   },
   "workspaces": {
     "allSpaces": "所有工作区",
@@ -5575,13 +5580,19 @@
       "fromNameInvalid": "发件人名称最多 {{max}} 个字符，且不能包含换行。",
       "replyTemplateTooLong": "回复模板最多 {{max}} 个字符。",
       "aiDisclosureTooLong": "AI 声明最多 {{max}} 个字符。",
-      "maxRepliesPerThreadPerHour": "回复上限必须是 1 到 1000 之间的整数。"
+      "maxRepliesPerThreadPerHour": "回复上限必须是 1 到 1000 之间的整数。",
+      "smimeConnectionRequired": "签名设为 'required' 时需要一个签名连接：否则所有外发邮件都会被暂扣。",
+      "smimeConnectionInvalid": "连接名称只能包含字母、数字、'.'、'_' 和 '-'。"
     },
     "warning": {
       "openTrigger": "已保存，但互联网上的任何人都能让此智能体运行：没有发件人允许列表，且未经验证的邮件也会被处理。",
       "toolsWithoutApprovals": "已保存，但此集成指向的某个智能体有工具却没有工具审批。邮件内容是不可信的输入：请为会更改内容的工具添加 hitlConfig.toolApprovals。",
       "aiDisclosureDisabled": "已保存，但回复不再说明由 AI 撰写。欧盟《人工智能法案》等透明度规则要求人们知道自己在与 AI 交流。",
-      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。"
+      "honorReplyTo": "已保存，但回复会发往 Reply-To 地址，而 DMARC 不验证该地址：任何能从允许的域发送已验证邮件的人，都能决定回复发往何处。",
+      "smimeNoCertificate": "已保存，但邮件将不签名发出：S/MIME 签名已开启，但未指定 SMIME_SIGNING 连接。请在 S/MIME 签名中添加一个，或关闭签名。",
+      "smimeCertificateUnusable": "已保存，但 S/MIME 证书无法为此邮箱的邮件签名（地址错误、缺少密钥用途、已过期或证书链不完整），因此邮件将不签名发出。",
+      "smimeCertificateExpiring": "已保存。S/MIME 证书将在 30 天内过期：请续期并更新 SMIME_SIGNING 连接。",
+      "smimeUntrustedChain": "已保存，但 S/MIME 证书无法追溯到公开受信任的根证书，因此收件人的邮件客户端会将签名显示为不受信任。"
     },
     "defaultTargetHint": "默认目标接收所有加号标签（invoices+urgent@…）或主题都不匹配其他目标触发词的邮件。创建后可以添加更多目标。",
     "triggerLabel": "加号标签或主题词",
@@ -5614,7 +5625,50 @@
     "replyTemplate": "回复模板",
     "replyTemplateHint": "包裹智能体的回答；回答作为文本插入，绝不会作为模板执行。变量：",
     "noteDkim": "回复需要一台为邮箱所在域使用 DKIM 签名外发邮件的邮件服务器，以及该域的 DMARC 记录——{{productName}} 不签名。缺少它们，回复会进入垃圾邮件或被拒收。为该域启用 DKIM 后，Exchange Online 和大多数托管商都会对提交的邮件签名。",
-    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "永久退信的回复会把该地址加入此集成的抑制列表，在管理员清除之前，{{productName}} 不会再向其发送任何内容（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "DKIM 以您的域名签名",
+        "dkimUnaligned": "DKIM 以另一个域名签名",
+        "dkimMissing": "没有 DKIM 签名",
+        "dkimInconclusive": "DKIM：在 Microsoft 365 内部无法判断",
+        "dkimFailed": "DKIM 签名无法验证",
+        "dkimDnsTemporary": "DNS 查询失败",
+        "smimeVerified": "S/MIME 签名已验证",
+        "smimeMissing": "预期有 S/MIME 签名，但未收到",
+        "smimeOff": "未进行 S/MIME 签名",
+        "smimeInvalid": "S/MIME 签名无法验证",
+        "smimeWrongSigner": "S/MIME 证书属于另一个地址",
+        "dmarcPresent": "已发布 DMARC 记录",
+        "dmarcAbsent": "没有 DMARC 记录",
+        "dmarcUnknown": "无法检查 DMARC",
+        "sendFailed": "无法发送测试邮件",
+        "testExpired": "测试邮件未返回"
+      },
+      "rateLimited": "每小时最多 5 次自检。请稍后再试。",
+      "hint": "通过邮箱的 SMTP 中继从邮箱向自身发送一封简短邮件，在下次轮询时读回，并说明您的服务商如何为其签名（DKIM、DMARC）以及 S/MIME 签名是否有效。它从不启动智能体对话。",
+      "noSmtp": "请先设置 SMTP 主机并保存：测试通过它发送。",
+      "unsaved": "测试使用已保存的设置；请先保存更改再进行测试。",
+      "run": "运行自检",
+      "waiting": "测试邮件已发送。正在等待下一次邮箱轮询将其读回…",
+      "done": "测试邮件已返回。",
+      "expired": "测试邮件未在 15 分钟内返回。",
+      "sendFailed": "无法发送测试邮件。",
+      "sentSigned": "（已带 S/MIME 签名发送）",
+      "sentUnsigned": "（未签名发送）",
+      "title": "发送健康自检"
+    },
+    "sendingSection": "发送（SMTP）",
+    "smtpTriggerHint": "在从不回复的触发模式下为可选项：中继仅用于发送健康自检。",
+    "smimeSection": "S/MIME 签名",
+    "smimeSign": "为外发邮件签名",
+    "smimeSignOn": "开启 — 配置了证书时签名（默认）",
+    "smimeSignRequired": "必需 — 从不发送未签名的邮件",
+    "smimeSignOff": "关闭",
+    "smimeSignRequiredHint": "证书缺失、过期或不匹配时，外发邮件会被暂扣并通知负责人；不会有任何邮件未签名发出。",
+    "smimeSignHint": "收件人的邮件客户端会将已签名邮件显示为来自此邮箱。系统邮件发送器发送的邮件（负责人通知）不签名。",
+    "smimeConnection": "签名证书连接",
+    "smimeConnectionHint": "一个 SMIME_SIGNING 连接的名称，其中的证书颁发给该邮箱地址；其允许列表必须包含 SMTP 来源。"
   },
   "feedback": {
     "title": "反馈",

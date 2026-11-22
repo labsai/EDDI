@@ -960,14 +960,16 @@
       "basic": "Username & password",
       "clientCredentials": "OAuth service account",
       "authorizationCode": "OAuth user login",
-      "jwtBearer": "Signed-key service account"
+      "jwtBearer": "Signed-key service account",
+      "smimeSigning": "Email signing certificate"
     },
     "choice": {
       "staticBody": "One fixed header, the same for everyone — X-Api-Key, or Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} does the encoding, so the password stays a separate vault entry you can rotate on its own.",
       "clientCredentialsBody": "The agent signs in as itself. One access token shared by everyone, refreshed automatically.",
       "authorizationCodeBody": "Each person connects their own account and the agent acts as them. Needs sign-in to be switched on, and a vault.",
-      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone."
+      "jwtBearerBody": "The agent signs in as itself with a private key instead of a secret — a Google service account, for example. One access token shared by everyone.",
+      "smimeSigningBody": "An S/MIME certificate an email integration signs its outgoing mail with. Never sent anywhere: only the public certificate travels in the signature."
     },
     "binding": {
       "perUser": "Per user",

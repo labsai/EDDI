@@ -960,14 +960,16 @@
       "basic": "Benutzername & Passwort",
       "clientCredentials": "OAuth-Dienstkonto",
       "authorizationCode": "OAuth-Benutzeranmeldung",
-      "jwtBearer": "Dienstkonto mit Signaturschlüssel"
+      "jwtBearer": "Dienstkonto mit Signaturschlüssel",
+      "smimeSigning": "E-Mail-Signaturzertifikat"
     },
     "choice": {
       "staticBody": "Ein fester Header, für alle gleich — X-Api-Key oder Authorization: Bearer …",
       "basicBody": "HTTP Basic. {{productName}} übernimmt die Kodierung, dadurch bleibt das Passwort ein eigener Vault-Eintrag, den Sie separat wechseln können.",
       "clientCredentialsBody": "Der Agent meldet sich als er selbst an. Ein Access-Token für alle, das automatisch erneuert wird.",
       "authorizationCodeBody": "Jede Person verknüpft ihr eigenes Konto und der Agent handelt in ihrem Namen. Erfordert aktivierte Anmeldung und einen Vault.",
-      "jwtBearerBody": "Der Agent meldet sich mit einem privaten Schlüssel statt eines Geheimnisses als er selbst an — zum Beispiel ein Google-Dienstkonto. Ein Access-Token für alle."
+      "jwtBearerBody": "Der Agent meldet sich mit einem privaten Schlüssel statt eines Geheimnisses als er selbst an — zum Beispiel ein Google-Dienstkonto. Ein Access-Token für alle.",
+      "smimeSigningBody": "Ein S/MIME-Zertifikat, mit dem eine E-Mail-Integration ihre ausgehende Mail signiert. Es wird nirgendwohin gesendet: nur das öffentliche Zertifikat reist in der Signatur mit."
     },
     "binding": {
       "perUser": "Pro Person",

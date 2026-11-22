@@ -4546,7 +4546,8 @@
       "paramValueTooLong": "Ein Parameterwert hat höchstens 512 Zeichen.",
       "paramValueCredentialShaped": "Einer dieser Werte sieht wie ein Schlüssel oder Token aus. Diese Zuordnung wird im Klartext gespeichert und in einer URL gesendet – hierher gehören nur nicht geheime Protokollparameter.",
       "thumbprintFormat": "Kein Fingerabdruck der richtigen Länge: x5t#S256 braucht den SHA-256-Fingerabdruck, x5t den SHA-1-Fingerabdruck — als Hex oder base64url.",
-      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben."
+      "thumbprintRequiredEntra": "Microsoft Entra erkennt den Schlüssel nur am Fingerabdruck seines Zertifikats. Fügen Sie den Fingerabdruck des Zertifikats ein, das Sie in der App-Registrierung hochgeladen haben.",
+      "originNotSmtp": "Ein Signaturzertifikat nennt die SMTP-Relays, deren Mail es signiert: smtps://host oder smtp://host:587."
     },
     "backToList": "Zurück zu den Verbindungen",
     "headerSecret": "Gespeichertes Geheimnis",
@@ -4592,7 +4593,11 @@
         "label": "Google-Dienstkonto (JSON-Schlüssel)",
         "description": "Google-APIs als Dienstkonto, signiert mit dessen privatem Schlüssel (RFC 7523 JWT Bearer). Legen Sie die heruntergeladene JSON-Schlüsseldatei als EINEN Vault-Eintrag ab und referenzieren Sie ihn als privaten Schlüssel; Aussteller und Schlüssel-ID werden daraus gelesen. Fügen Sie https://oauth2.googleapis.com zur Allowlist der Credential-Endpunkte hinzu. Ohne domainweite Delegierung sieht das Konto nur, was mit ihm geteilt wurde."
       }
-    }
+    },
+    "smimeHint": "Legen Sie das Zertifikat zuerst im Tresor ab: einen base64-kodierten PKCS#12-Schlüsselspeicher (.p12/.pfx) oder PEM-Text mit dem privaten Schlüssel, gefolgt von der Zertifikatskette. Das Zertifikat muss auf die Postfachadresse ausgestellt sein, die damit signiert.",
+    "smimeCertificate": "Zertifikat und privater Schlüssel",
+    "smimePassword": "Passwort des Schlüsselspeichers oder Schlüssels (optional)",
+    "smimeOriginsHint": "Nennen Sie die SMTP-Relays, deren Mail dieses Zertifikat signieren darf, z. B. smtp://smtp.office365.com:587 oder smtps://smtp.gmail.com."
   },
   "workspaces": {
     "allSpaces": "Alle Arbeitsbereiche",
@@ -5575,13 +5580,19 @@
       "fromNameInvalid": "Der Absendername darf höchstens {{max}} Zeichen lang sein, ohne Zeilenumbrüche.",
       "replyTemplateTooLong": "Die Antwortvorlage darf höchstens {{max}} Zeichen lang sein.",
       "aiDisclosureTooLong": "Der KI-Hinweis darf höchstens {{max}} Zeichen lang sein.",
-      "maxRepliesPerThreadPerHour": "Das Antwortlimit muss eine ganze Zahl von 1 bis 1000 sein."
+      "maxRepliesPerThreadPerHour": "Das Antwortlimit muss eine ganze Zahl von 1 bis 1000 sein.",
+      "smimeConnectionRequired": "Signierung „required“ braucht eine Signaturverbindung: ohne sie würde jede ausgehende Mail zurückgehalten.",
+      "smimeConnectionInvalid": "Ein Verbindungsname enthält nur Buchstaben, Ziffern, '.', '_' und '-'."
     },
     "warning": {
       "openTrigger": "Gespeichert, aber jeder im Internet kann diesen Agenten auslösen: Es gibt keine Absender-Allowlist, und nicht authentifizierte E-Mails werden verarbeitet.",
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
-      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht."
+      "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
+      "smimeNoCertificate": "Gespeichert, aber Mail geht unsigniert hinaus: S/MIME-Signierung ist an, und keine SMIME_SIGNING-Verbindung ist angegeben. Fügen Sie unter S/MIME-Signierung eine hinzu oder schalten Sie die Signierung aus.",
+      "smimeCertificateUnusable": "Gespeichert, aber das S/MIME-Zertifikat kann die Mail dieses Postfachs nicht signieren (falsche Adresse, fehlende Schlüsselverwendung, abgelaufen oder unvollständige Kette), daher geht Mail unsigniert hinaus.",
+      "smimeCertificateExpiring": "Gespeichert. Das S/MIME-Zertifikat läuft innerhalb von 30 Tagen ab: erneuern Sie es und aktualisieren Sie die SMIME_SIGNING-Verbindung.",
+      "smimeUntrustedChain": "Gespeichert, aber das S/MIME-Zertifikat führt zu keiner öffentlich vertrauenswürdigen Stammzertifizierungsstelle, daher zeigen die Mailprogramme der Empfänger die Signatur als nicht vertrauenswürdig an."
     },
     "defaultTargetHint": "Das Standardziel erhält jede E-Mail, deren Plus-Tag (invoices+urgent@…) oder Betreff zu keinem Trigger eines anderen Ziels passt. Weitere Ziele können Sie nach dem Erstellen hinzufügen.",
     "triggerLabel": "Plus-Tags oder Betreffwörter",
@@ -5614,7 +5625,50 @@
     "replyTemplate": "Antwortvorlage",
     "replyTemplateHint": "Umschließt die Antwort des Agenten, die als Text eingefügt und nie als Vorlage ausgeführt wird. Variablen:",
     "noteDkim": "Antworten brauchen einen Mailserver, der ausgehende E-Mails für die Domain des Postfachs mit DKIM signiert, und einen DMARC-Eintrag für diese Domain — {{productName}} signiert nicht. Ohne beides landen Antworten im Spam oder werden abgelehnt. Exchange Online und die meisten Hoster signieren eingelieferte E-Mails, sobald DKIM für die Domain aktiviert ist.",
-    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear)."
+    "noteBounces": "Eine Antwort, die dauerhaft unzustellbar ist, setzt die Adresse auf die Sperrliste dieser Integration, und {{productName}} sendet ihr nichts mehr, bis ein Administrator den Eintrag löscht (POST /channelstore/channels/<id>/email-suppressions/clear).",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "DKIM signiert für Ihre Domain",
+        "dkimUnaligned": "DKIM signiert für eine andere Domain",
+        "dkimMissing": "Keine DKIM-Signatur",
+        "dkimInconclusive": "DKIM: innerhalb von Microsoft 365 nicht aussagekräftig",
+        "dkimFailed": "DKIM-Signatur lässt sich nicht prüfen",
+        "dkimDnsTemporary": "DNS-Abfrage fehlgeschlagen",
+        "smimeVerified": "S/MIME-Signatur geprüft",
+        "smimeMissing": "S/MIME-Signatur erwartet, keine angekommen",
+        "smimeOff": "Nicht S/MIME-signiert",
+        "smimeInvalid": "S/MIME-Signatur lässt sich nicht prüfen",
+        "smimeWrongSigner": "S/MIME-Zertifikat gilt für eine andere Adresse",
+        "dmarcPresent": "DMARC-Eintrag veröffentlicht",
+        "dmarcAbsent": "Kein DMARC-Eintrag",
+        "dmarcUnknown": "DMARC konnte nicht geprüft werden",
+        "sendFailed": "Die Testmail konnte nicht gesendet werden",
+        "testExpired": "Die Testmail kam nicht zurück"
+      },
+      "rateLimited": "Höchstens 5 Selbsttests pro Stunde. Versuchen Sie es später erneut.",
+      "hint": "Sendet eine kurze Mail vom Postfach an sich selbst über sein SMTP-Relay, liest sie beim nächsten Abruf zurück und zeigt, wie Ihr Anbieter sie signiert (DKIM, DMARC) und ob die S/MIME-Signatur gültig ist. Sie startet nie eine Agentenkonversation.",
+      "noSmtp": "Legen Sie zuerst einen SMTP-Host fest und speichern Sie: der Test wird darüber gesendet.",
+      "unsaved": "Der Test verwendet die gespeicherten Einstellungen; speichern Sie Ihre Änderungen zuerst, um sie zu testen.",
+      "run": "Selbsttest ausführen",
+      "waiting": "Testmail gesendet. Warte auf den nächsten Postfachabruf, der sie zurückliest…",
+      "done": "Die Testmail ist zurückgekommen.",
+      "expired": "Die Testmail kam nicht innerhalb von 15 Minuten zurück.",
+      "sendFailed": "Die Testmail konnte nicht gesendet werden.",
+      "sentSigned": "(S/MIME-signiert gesendet)",
+      "sentUnsigned": "(unsigniert gesendet)",
+      "title": "Selbsttest der Versandgesundheit"
+    },
+    "sendingSection": "Versand (SMTP)",
+    "smtpTriggerHint": "Im Trigger-Modus, der nie antwortet, optional: das Relay wird nur für den Selbsttest der Versandgesundheit genutzt.",
+    "smimeSection": "S/MIME-Signierung",
+    "smimeSign": "Ausgehende Mail signieren",
+    "smimeSignOn": "An — signieren, wenn ein Zertifikat konfiguriert ist (Standard)",
+    "smimeSignRequired": "Erforderlich — nie unsignierte Mail senden",
+    "smimeSignOff": "Aus",
+    "smimeSignRequiredHint": "Ein fehlendes, abgelaufenes oder nicht passendes Zertifikat hält ausgehende Mail zurück und benachrichtigt die Verantwortlichen; nichts geht unsigniert hinaus.",
+    "smimeSignHint": "Die Mailprogramme der Empfänger zeigen signierte Mail als von diesem Postfach kommend an. Mail des Systemmailers (Hinweise an Verantwortliche) wird nicht signiert.",
+    "smimeConnection": "Verbindung des Signaturzertifikats",
+    "smimeConnectionHint": "Der Name einer SMIME_SIGNING-Verbindung mit einem auf die Postfachadresse ausgestellten Zertifikat; ihre Allowlist muss den SMTP-Ursprung enthalten."
   },
   "feedback": {
     "title": "Feedback",

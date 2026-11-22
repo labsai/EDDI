@@ -4546,7 +4546,8 @@
       "paramValueTooLong": "パラメーター値は 512 文字以内です。",
       "paramValueCredentialShaped": "これらの値のいずれかがキーまたはトークンのように見えます。このマップは平文で保存され URL で送信されます。ここに置けるのは秘密でないプロトコルパラメーターだけです。",
       "thumbprintFormat": "正しい長さのサムプリントではありません。x5t#S256 には SHA-256、x5t には SHA-1 のサムプリントが必要です（16 進数または base64url）。",
-      "thumbprintRequiredEntra": "Microsoft Entra はキーを証明書のサムプリントでのみ識別します。アプリ登録にアップロードした証明書のサムプリントを貼り付けてください。"
+      "thumbprintRequiredEntra": "Microsoft Entra はキーを証明書のサムプリントでのみ識別します。アプリ登録にアップロードした証明書のサムプリントを貼り付けてください。",
+      "originNotSmtp": "署名証明書には、署名するメールの SMTP リレーを指定します: smtps://host または smtp://host:587。"
     },
     "backToList": "接続一覧に戻る",
     "headerSecret": "保存済みシークレット",
@@ -4592,7 +4593,11 @@
         "label": "Google サービス アカウント (JSON キー)",
         "description": "サービス アカウントとして Google API を使い、その秘密鍵で署名します (RFC 7523 JWT ベアラー)。ダウンロードした JSON キー ファイルを Vault の 1 つのエントリとして保存し、秘密鍵として参照してください。発行者とキー ID はそこから読み取られます。https://oauth2.googleapis.com を認証情報エンドポイントの許可リストに追加してください。ドメイン全体の委任がない場合、アカウントは共有されたものしか参照できません。"
       }
-    }
+    },
+    "smimeHint": "先に証明書をボールトに保存してください。base64 の PKCS#12 (.p12/.pfx) キーストア、または秘密鍵の後に証明書チェーンを続けた PEM テキストです。証明書は、それで署名するメールボックスのアドレス宛てに発行されている必要があります。",
+    "smimeCertificate": "証明書と秘密鍵",
+    "smimePassword": "キーストアまたは鍵のパスワード（任意）",
+    "smimeOriginsHint": "この証明書が署名してよいメールの SMTP リレーを指定します。例: smtp://smtp.office365.com:587 または smtps://smtp.gmail.com。"
   },
   "workspaces": {
     "allSpaces": "すべてのワークスペース",
@@ -5575,13 +5580,19 @@
       "fromNameInvalid": "送信者名は改行を含まず、最大 {{max}} 文字までです。",
       "replyTemplateTooLong": "返信テンプレートは最大 {{max}} 文字までです。",
       "aiDisclosureTooLong": "AI の開示文は最大 {{max}} 文字までです。",
-      "maxRepliesPerThreadPerHour": "返信の上限は 1 から 1000 までの整数である必要があります。"
+      "maxRepliesPerThreadPerHour": "返信の上限は 1 から 1000 までの整数である必要があります。",
+      "smimeConnectionRequired": "署名 'required' には署名接続が必要です。ないと、すべての送信メールが保留されます。",
+      "smimeConnectionInvalid": "接続名に使えるのは英字、数字、'.'、'_'、'-' だけです。"
     },
     "warning": {
       "openTrigger": "保存しましたが、インターネット上の誰でもこのエージェントを実行させられます。送信者の許可リストがなく、認証されていないメールも処理されます。",
       "toolsWithoutApprovals": "保存しましたが、この統合が対象とするエージェントにツールがあり、ツールの承認がありません。メールの内容は信頼できない入力です。変更を加えるツールには hitlConfig.toolApprovals を追加してください。",
       "aiDisclosureDisabled": "保存しましたが、返信に AI が作成したことが記載されなくなりました。EU AI 法などの透明性ルールは、人々が AI と対話していることを知っているべきだとしています。",
-      "honorReplyTo": "保存しましたが、返信は DMARC が認証しない Reply-To アドレスに送られます。許可されたドメインから認証済みメールを送れる人なら誰でも返信先を決められます。"
+      "honorReplyTo": "保存しましたが、返信は DMARC が認証しない Reply-To アドレスに送られます。許可されたドメインから認証済みメールを送れる人なら誰でも返信先を決められます。",
+      "smimeNoCertificate": "保存しましたが、メールは署名なしで送信されます。S/MIME 署名がオンなのに SMIME_SIGNING 接続が指定されていません。S/MIME 署名で追加するか、署名をオフにしてください。",
+      "smimeCertificateUnusable": "保存しましたが、S/MIME 証明書はこのメールボックスのメールに署名できません（アドレス違い、鍵用途の不足、期限切れ、またはチェーンが不完全）。そのためメールは署名なしで送信されます。",
+      "smimeCertificateExpiring": "保存しました。S/MIME 証明書は 30 日以内に期限切れになります。更新して SMIME_SIGNING 接続を更新してください。",
+      "smimeUntrustedChain": "保存しましたが、S/MIME 証明書は公的に信頼されたルートにつながらないため、受信者のメールクライアントでは署名が信頼できないと表示されます。"
     },
     "defaultTargetHint": "既定のターゲットは、プラスタグ（invoices+urgent@…）や件名が他のどのターゲットのトリガーにも一致しないメールをすべて受け取ります。作成後にターゲットを追加できます。",
     "triggerLabel": "プラスタグまたは件名の単語",
@@ -5614,7 +5625,50 @@
     "replyTemplate": "返信テンプレート",
     "replyTemplateHint": "エージェントの回答を包みます。回答はテキストとして挿入され、テンプレートとして実行されることはありません。変数：",
     "noteDkim": "返信には、メールボックスのドメインについて送信メールに DKIM 署名するメールサーバーと、そのドメインの DMARC レコードが必要です。{{productName}} は署名しません。これらがないと返信は迷惑メールになるか拒否されます。Exchange Online と多くのホスティング事業者は、ドメインで DKIM を有効にすると送信されたメールに署名します。",
-    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。"
+    "noteBounces": "恒久的にバウンスした返信は、そのアドレスをこの統合の抑制リストに追加し、管理者が解除するまで {{productName}} はそのアドレスに何も送りません（POST /channelstore/channels/<id>/email-suppressions/clear）。",
+    "selfTest": {
+      "finding": {
+        "dkimAligned": "DKIM はあなたのドメインで署名しています",
+        "dkimUnaligned": "DKIM は別のドメインで署名しています",
+        "dkimMissing": "DKIM 署名がありません",
+        "dkimInconclusive": "DKIM: Microsoft 365 内では判定できません",
+        "dkimFailed": "DKIM 署名を検証できません",
+        "dkimDnsTemporary": "DNS の参照に失敗しました",
+        "smimeVerified": "S/MIME 署名を検証しました",
+        "smimeMissing": "S/MIME 署名を期待しましたが、届きませんでした",
+        "smimeOff": "S/MIME 署名なし",
+        "smimeInvalid": "S/MIME 署名を検証できません",
+        "smimeWrongSigner": "S/MIME 証明書は別のアドレス用です",
+        "dmarcPresent": "DMARC レコードが公開されています",
+        "dmarcAbsent": "DMARC レコードがありません",
+        "dmarcUnknown": "DMARC を確認できませんでした",
+        "sendFailed": "テストメールを送信できませんでした",
+        "testExpired": "テストメールが戻ってきませんでした"
+      },
+      "rateLimited": "セルフテストは 1 時間に 5 回までです。後でもう一度お試しください。",
+      "hint": "メールボックスから自分宛てに SMTP リレー経由で短いメールを 1 通送り、次のポーリングで読み戻して、プロバイダーがどう署名しているか（DKIM、DMARC）と S/MIME 署名が有効かを示します。エージェントとの会話は開始しません。",
+      "noSmtp": "先に SMTP ホストを設定して保存してください。テストはそこから送信されます。",
+      "unsaved": "テストは保存済みの設定を使います。変更をテストするには先に保存してください。",
+      "run": "セルフテストを実行",
+      "waiting": "テストメールを送信しました。次のメールボックスのポーリングで読み戻すのを待っています…",
+      "done": "テストメールが戻ってきました。",
+      "expired": "テストメールは 15 分以内に戻ってきませんでした。",
+      "sendFailed": "テストメールを送信できませんでした。",
+      "sentSigned": "（S/MIME 署名付きで送信）",
+      "sentUnsigned": "（署名なしで送信）",
+      "title": "送信状態のセルフテスト"
+    },
+    "sendingSection": "送信 (SMTP)",
+    "smtpTriggerHint": "返信しないトリガーモードでは任意です。リレーは送信状態のセルフテストにのみ使われます。",
+    "smimeSection": "S/MIME 署名",
+    "smimeSign": "送信メールに署名",
+    "smimeSignOn": "オン — 証明書が設定されていれば署名（既定）",
+    "smimeSignRequired": "必須 — 署名なしのメールは送信しない",
+    "smimeSignOff": "オフ",
+    "smimeSignRequiredHint": "証明書がない、期限切れ、または一致しない場合は送信メールを保留し、所有者に通知します。署名なしでは何も送信されません。",
+    "smimeSignHint": "受信者のメールクライアントでは、署名付きメールがこのメールボックスからのものと表示されます。システムメーラーのメール（所有者への通知）には署名されません。",
+    "smimeConnection": "署名証明書の接続",
+    "smimeConnectionHint": "メールボックスのアドレス宛てに発行された証明書を持つ SMIME_SIGNING 接続の名前です。その許可リストには SMTP オリジンが含まれている必要があります。"
   },
   "feedback": {
     "title": "フィードバック",

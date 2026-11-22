@@ -6,8 +6,65 @@ import {
   EMAIL_MAX_OWNER_ADDRESSES,
   EMAIL_MAX_REPLY_TEMPLATE_CHARS,
   EMAIL_MAX_TEMPLATE_CHARS,
+  type EmailControlProblem,
   type EmailProblem,
 } from "./email-channel";
+
+/** The translated sentence for one `emailControl` problem. */
+export function emailControlProblemMessage(problem: EmailControlProblem, t: TFunction): string {
+  switch (problem) {
+    case "smimeConnectionRequired":
+      return t(
+        "emailChannel.problem.smimeConnectionRequired",
+        "Signing 'required' needs a signing connection: without one every outgoing mail would be held.",
+      );
+    case "smimeConnectionInvalid":
+      return t(
+        "emailChannel.problem.smimeConnectionInvalid",
+        "A connection name has letters, digits, '.', '_' and '-' only.",
+      );
+  }
+}
+
+/** The title of a self-test finding, by its stable code; unknown codes get none (the text stands alone). */
+export function selfTestFindingTitle(code: string, t: TFunction): string | null {
+  switch (code) {
+    case "dkim.aligned":
+      return t("emailChannel.selfTest.finding.dkimAligned", "DKIM signs for your domain");
+    case "dkim.unaligned":
+      return t("emailChannel.selfTest.finding.dkimUnaligned", "DKIM signs for another domain");
+    case "dkim.missing":
+      return t("emailChannel.selfTest.finding.dkimMissing", "No DKIM signature");
+    case "dkim.inconclusive":
+      return t("emailChannel.selfTest.finding.dkimInconclusive", "DKIM: inconclusive inside Microsoft 365");
+    case "dkim.failed":
+      return t("emailChannel.selfTest.finding.dkimFailed", "DKIM signature does not verify");
+    case "dkim.dns-temporary":
+      return t("emailChannel.selfTest.finding.dkimDnsTemporary", "DNS lookup failed");
+    case "smime.verified":
+      return t("emailChannel.selfTest.finding.smimeVerified", "S/MIME signature verified");
+    case "smime.missing":
+      return t("emailChannel.selfTest.finding.smimeMissing", "Expected an S/MIME signature, none arrived");
+    case "smime.off":
+      return t("emailChannel.selfTest.finding.smimeOff", "Not S/MIME-signed");
+    case "smime.invalid":
+      return t("emailChannel.selfTest.finding.smimeInvalid", "S/MIME signature does not verify");
+    case "smime.wrong-signer":
+      return t("emailChannel.selfTest.finding.smimeWrongSigner", "S/MIME certificate is for another address");
+    case "dmarc.present":
+      return t("emailChannel.selfTest.finding.dmarcPresent", "DMARC record published");
+    case "dmarc.absent":
+      return t("emailChannel.selfTest.finding.dmarcAbsent", "No DMARC record");
+    case "dmarc.unknown":
+      return t("emailChannel.selfTest.finding.dmarcUnknown", "DMARC could not be checked");
+    case "send.failed":
+      return t("emailChannel.selfTest.finding.sendFailed", "The test mail could not be sent");
+    case "test.expired":
+      return t("emailChannel.selfTest.finding.testExpired", "The test mail did not come back");
+    default:
+      return null;
+  }
+}
 
 /**
  * The translated sentence for one email-settings problem. Literal keys on
@@ -111,6 +168,26 @@ export function channelWarningMessage(code: string, t: TFunction): string {
       return t(
         "emailChannel.warning.honorReplyTo",
         "Saved, but replies go to the Reply-To address, which DMARC does not authenticate: whoever can send authenticated mail from an allowed domain decides where the reply goes.",
+      );
+    case "email.smime-no-certificate":
+      return t(
+        "emailChannel.warning.smimeNoCertificate",
+        "Saved, but mail goes out unsigned: S/MIME signing is on, and no SMIME_SIGNING connection is named. Add one under S/MIME signing, or switch signing off.",
+      );
+    case "email.smime-certificate-unusable":
+      return t(
+        "emailChannel.warning.smimeCertificateUnusable",
+        "Saved, but the S/MIME certificate cannot sign this mailbox's mail (wrong address, missing key usage, expired, or an incomplete chain), so mail goes out unsigned.",
+      );
+    case "email.smime-certificate-expiring":
+      return t(
+        "emailChannel.warning.smimeCertificateExpiring",
+        "Saved. The S/MIME certificate expires within 30 days: renew it and update the SMIME_SIGNING connection.",
+      );
+    case "email.smime-untrusted-chain":
+      return t(
+        "emailChannel.warning.smimeUntrustedChain",
+        "Saved, but the S/MIME certificate does not lead to a publicly trusted root, so recipients' mail clients will show the signature as untrusted.",
       );
     default:
       return code;

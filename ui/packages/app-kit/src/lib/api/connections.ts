@@ -50,6 +50,9 @@ export const AUTH_TYPES = [
   "OAUTH2_CLIENT_CREDENTIALS",
   "OAUTH2_JWT_BEARER",
   "OAUTH2_AUTHORIZATION_CODE",
+  // An S/MIME signing certificate for an email integration's outgoing mail. Not
+  // an HTTP credential: only the email transport resolves it.
+  "SMIME_SIGNING",
 ] as const;
 export type AuthType = (typeof AUTH_TYPES)[number];
 
@@ -130,6 +133,16 @@ export interface OAuthConfig {
   certificateThumbprintHeader?: string | null;
 }
 
+/**
+ * The `SMIME_SIGNING` block: the certificate and key an email integration
+ * signs its mail with. Both are `${vault:…}` references — the certificate to a
+ * base64 PKCS#12 keystore or to PEM text with the key and chain.
+ */
+export interface SmimeSigningConfig {
+  certificate?: string | null;
+  password?: string | null;
+}
+
 export interface ConnectionConfiguration {
   /** Referenced as `${connection:name}`. Immutable after create. */
   name: string;
@@ -139,6 +152,8 @@ export interface ConnectionConfiguration {
   allowUnverifiedPrincipal: boolean;
   staticAuth?: StaticAuth | null;
   oauth?: OAuthConfig | null;
+  /** `SMIME_SIGNING` only. */
+  smimeSigning?: SmimeSigningConfig | null;
   /** Origins the credential may be sent to. Required, bare origins only. */
   baseUrlAllowlist: string[];
   timeoutMs?: number | null;
@@ -540,7 +555,21 @@ export function toStoredConnection(
       binding === "PER_USER" ? draft.allowUnverifiedPrincipal : false,
     staticAuth: null,
     oauth: null,
+    smimeSigning: null,
   };
+
+  if (draft.authType === "SMIME_SIGNING") {
+    // Only the signing block: the backend refuses a header or OAuth block beside
+    // it rather than ignoring it. A blank password goes as null — it is optional.
+    const password = draft.smimeSigning?.password;
+    return {
+      ...base,
+      smimeSigning: {
+        certificate: draft.smimeSigning?.certificate ?? "",
+        password: password && password.trim() ? password : null,
+      },
+    };
+  }
 
   if (draft.authType === "STATIC") {
     if (binding === "CALLER_SUPPLIED") {
@@ -662,6 +691,9 @@ export function emptyConnection(
     staticAuth: null,
     oauth: null,
   };
+  if (authType === "SMIME_SIGNING") {
+    return { ...base, smimeSigning: { certificate: "", password: null } };
+  }
   if (resolved === "CALLER_SUPPLIED") {
     // No value slot at all: the caller brings the value, and an empty template
     // here would read as a field waiting to be filled in.

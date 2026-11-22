@@ -20,13 +20,7 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "claude-sonnet-5-5",
     "claude-opus-5-5",
     "claude-haiku-5-5",
-    "claude-fable-5-2",
     "claude-fable-5-1",
-    // Mythos is limited-availability: only organizations verified through
-    // Anthropic's Cyber Verification Program can call it.
-    "claude-mythos-5-2",
-    "claude-mythos-5-1",
-    "claude-mythos-5",
     "claude-opus-5",
     "claude-sonnet-5",
     "claude-fable-5",
@@ -41,9 +35,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // o3-mini (shut down 2026-10-23), gpt-5.4-nano (deprecated) and the gpt-5
     // family (snapshots retire 2026-12-11) were dropped; gpt-5.4-thinking was
     // never an API model id.
-    "gpt-6.2-astra",
-    "gpt-6.2-sol",
-    "gpt-6.1-terra",
     "gpt-6-astra",
     "gpt-6.1-sol",
     "gpt-6-sol",
@@ -61,11 +52,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // gemini-3.7-flash and gemini-3.5-flash were deprecated on 2026-10-08 (their
     // requests now route to 3.8 and 3.6). There is no Gemini Pro newer than the
     // 3.1 preview, and the API documents no bare "gemini-3.1-pro".
-    // gemini-2.5-pro and gemini-2.5-flash are deprecated: from 2026-12-01 they
-    // route to gemini-3.8-flash and gemini-3.5-flash-lite (breaking changes).
-    "gemini-4-neon",
-    "gemini-4-hydrogen",
-    "gemini-4-carbon",
     "gemini-4-argon",
     "gemini-3.8-flash",
     "gemini-3.1-pro-preview",
@@ -73,13 +59,14 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "gemini-3.6-flash",
     "gemini-3.5-flash-lite",
     "gemini-3.1-flash-lite",
+    "gemini-2.5-pro",
+    "gemini-2.5-flash",
     "gemini-2.5-flash-lite",
   ],
   "gemini-vertex": [
     // Vertex retires models on its own schedule: gemini-2.5-* retire there on
     // 2026-10-20 and gemini-3.6-flash on 2026-11-19, while gemini-3.5-flash is
     // not deprecated on Vertex at all.
-    "gemini-4-hydrogen",
     "gemini-4-argon",
     "gemini-3.8-flash",
     "gemini-3.1-pro-preview",
@@ -92,7 +79,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "claude-sonnet-5-5",
     "claude-opus-5-5",
     "claude-haiku-5-5",
-    "claude-fable-5-2",
     "claude-fable-5-1",
     "claude-opus-5",
     "claude-sonnet-5",
@@ -130,9 +116,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // not exist.
     "Qwen/Qwen3.8-27B",
     "openai/gpt-oss-120b",
-    "deepseek-ai/DeepSeek-V4.1-Flash",
+    "deepseek-ai/DeepSeek-V4-Pro",
     "zai-org/GLM-5.3",
-    "moonshotai/Kimi-K3.1-Pro",
     "moonshotai/Kimi-K3",
     "google/gemma-4-26B-A4B-it",
     "meta-llama/Llama-3.1-8B-Instruct",
@@ -144,6 +129,8 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     // Mistral Large 4 has been in public preview since 2026-10-06.
     "mistral-large-4",
     "mistral-large-latest",
+    "mistral-large-2512",
+    "mistral-medium-3-5",
     "mistral-medium-latest",
     "mistral-small-latest",
     "mistral-small-2603",
@@ -158,9 +145,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
   // on Azure AI Foundry. gpt-4o, gpt-4.1 and gpt-4o-mini are deprecated there
   // (retiring by 2027-04-14), and "gpt-4-turbo" was never a Foundry model name.
   "azure-openai": [
-    "gpt-6.2-astra",
-    "gpt-6.2-sol",
-    "gpt-6.1-terra",
     "gpt-6.1-sol",
     "gpt-6-astra",
     "gpt-6-sol",
@@ -182,7 +166,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "global.anthropic.claude-sonnet-5-5",
     "global.anthropic.claude-opus-5-5",
     "global.anthropic.claude-haiku-5-5",
-    "global.anthropic.claude-fable-5-2",
     "global.anthropic.claude-fable-5-1",
     "global.anthropic.claude-opus-5",
     "global.anthropic.claude-sonnet-5",
@@ -190,8 +173,6 @@ export const MODEL_SUGGESTIONS: Record<string, string[]> = {
     "global.anthropic.claude-sonnet-4-6",
     "global.anthropic.claude-haiku-4-5-20251001-v1:0",
     // OpenAI
-    "global.openai.gpt-6.2-astra",
-    "global.openai.gpt-6.2-sol",
     "global.openai.gpt-6.1-sol",
     "global.openai.gpt-6-astra",
     "global.openai.gpt-6-luna",
