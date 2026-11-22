@@ -571,13 +571,13 @@ class McpAdminToolsTest {
 
     @Test
     void updateChannelIntegration_blankResourceId_returnsError() {
-        String result = tools.updateChannelIntegration(null, 1, "{}");
+        String result = tools.updateChannelIntegration(null, 1, "{}", null);
         assertTrue(result.contains("error"));
     }
 
     @Test
     void updateChannelIntegration_blankConfig_returnsError() {
-        String result = tools.updateChannelIntegration("id", 1, null);
+        String result = tools.updateChannelIntegration("id", 1, null, null);
         assertTrue(result.contains("error"));
     }
 

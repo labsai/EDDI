@@ -4,6 +4,8 @@
  */
 package ai.labs.eddi.engine.security;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
+
 import java.net.URI;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
@@ -35,9 +37,22 @@ import java.util.Set;
  * Whether a turn is tainted is {@link TurnOrigin#currentIsEmail()}; outside a
  * tainted turn nothing here refuses anything.
  * <p>
+ * Two rules, two pairs of lists:
+ * <ul>
+ * <li>{@link #GUARDED_TOOLS} and {@link #GUARDED_PATHS} — channel integrations
+ * and senders, approvals, shares, secrets, connections: <b>never</b>, whoever
+ * approves;</li>
+ * <li>{@link #CONFIG_TOOLS} and {@link #CONFIG_PATHS} — agent configuration and
+ * deployment: only when a person approved that very call through the HITL
+ * tool-approval gate. In the engine that is {@link ApprovedCallScope}, bound
+ * around exactly the approved execution; across an HTTP hop to EDDI's own API
+ * the sender says so in {@link TurnOrigin#APPROVED_HEADER}, which it sets
+ * itself and strips from every other request a tainted turn sends.</li>
+ * </ul>
  * <b>Extending it:</b> a new control tool goes into {@link #GUARDED_TOOLS}, a
- * new control endpoint into {@link #GUARDED_PATHS}. Names of tools that do not
- * exist yet are listed on purpose, so the tool cannot ship unguarded.
+ * new control endpoint into {@link #GUARDED_PATHS}, a new configuration store
+ * into {@link #CONFIG_PATHS}. Names of tools that do not exist yet are listed
+ * on purpose, so the tool cannot ship unguarded.
  */
 public final class EscalationGuard {
 
@@ -79,7 +94,82 @@ public final class EscalationGuard {
             List.of("administration", "spend-control-changes", "**"),
             // Team handoff decisions.
             List.of("groupstore", "groups", "*", "workspace", "handoffs", "*", "accept", "**"),
-            List.of("groupstore", "groups", "*", "workspace", "handoffs", "*", "decline", "**"));
+            List.of("groupstore", "groups", "*", "workspace", "handoffs", "*", "decline", "**"),
+            // Who may use a resource: shares, share requests, visibility, space, owner.
+            List.of("descriptorstore", "descriptors", "*", "shares", "**"),
+            // Secrets: values, grants to agents, rotation, reset — tenant and space.
+            List.of("secretstore", "**"),
+            List.of("spacestore", "secrets", "**"),
+            // Connections: their definitions and settings, and a user's grant of one.
+            List.of("connectionstore", "**"),
+            List.of("connections", "*", "authorize", "**"),
+            List.of("connections", "*", "grant", "**"),
+            // Workspace settings (who may do what in a workspace).
+            List.of("workspaces", "settings", "**"));
+
+    /**
+     * Tools that write agent configuration or change what is deployed: a tainted
+     * turn may call them only when a person approved that very call through the
+     * HITL tool-approval gate ({@code ApprovedCallScope}) — see
+     * {@link #refuseTool(String, boolean)}. Kept apart from {@link #GUARDED_TOOLS},
+     * which no approval unlocks and which the save-time check in
+     * {@code EmailAgentToolsInspector} reads.
+     * <p>
+     * Without this, a mail could rewrite the prompt, the http calls or the rules an
+     * untainted conversation later runs, and so get its text run with every tool
+     * this guard refuses the mail's own conversation.
+     */
+    public static final Set<String> CONFIG_TOOLS = Set.of(
+            // agents, their documents and their deployment (McpAdminTools, McpSetupTools)
+            "create_agent", "update_agent", "delete_agent", "create_api_agent", "setup_agent", "apply_agent_changes",
+            "create_resource", "update_resource", "delete_resource", "deploy_agent", "undeploy_agent",
+            // triggers: which agent a channel or intent starts
+            "create_agent_trigger", "update_agent_trigger", "delete_agent_trigger",
+            // group configurations (McpGroupTools)
+            "create_group", "update_group", "delete_group", "create_group_from_template",
+            // dynamic agents (CreateSubAgentTool, TeardownAgentTool): a created agent is
+            // deployed, and a retained one outlives the discussion
+            "createsubagent", "retainagent");
+
+    /**
+     * Configuration endpoints, under the same rule as {@link #CONFIG_TOOLS}: a
+     * tainted turn's write is refused unless a person approved the call. The syntax
+     * is that of {@link #GUARDED_PATHS}, plus {@code $}: the path ends there. The
+     * v5 store names are listed too, because the sending side sees the path before
+     * {@code LegacyPathRewriteFilter} rewrites it.
+     * <p>
+     * A team's workspace (backlog, handoffs, lessons) is not configuration: what a
+     * tainted turn writes there is tainted itself ({@code SharedTaskList}), not
+     * refused.
+     */
+    public static final List<List<String>> CONFIG_PATHS = List.of(
+            List.of("agentstore", "**"), List.of("botstore", "**"),
+            List.of("workflowstore", "**"), List.of("packagestore", "**"),
+            List.of("llmstore", "**"), List.of("langchainstore", "**"),
+            List.of("apicallstore", "**"), List.of("httpcallsstore", "**"),
+            List.of("rulestore", "**"), List.of("behaviorstore", "**"),
+            List.of("dictionarystore", "**"), List.of("regulardictionarystore", "**"),
+            List.of("agenttriggerstore", "**"), List.of("bottriggerstore", "**"),
+            List.of("mcpcallsstore", "**"),
+            List.of("ragstore", "**"),
+            List.of("outputstore", "**"),
+            List.of("propertysetterstore", "**"),
+            List.of("snippetstore", "**"),
+            List.of("variablestore", "**"),
+            List.of("spacestore", "variables", "**"),
+            List.of("parserstore", "**"),
+            List.of("extensionstore", "**"),
+            List.of("deploymentstore", "**"),
+            // group configurations and templates, not the workspace below them
+            List.of("groupstore", "groups", "$"),
+            List.of("groupstore", "groups", "*", "$"),
+            List.of("groupstore", "templates", "**"),
+            // deployment and the setup wizard
+            List.of("administration", "*", "deploy", "**"),
+            List.of("administration", "*", "undeploy", "**"),
+            List.of("administration", "agents", "**"),
+            // import and sync write every kind of document at once
+            List.of("backup", "import", "**"));
 
     /** Methods that cannot change anything; never refused. */
     private static final Set<String> SAFE_METHODS = Set.of("GET", "HEAD", "OPTIONS", "TRACE");
@@ -91,31 +181,111 @@ public final class EscalationGuard {
     public static final String REFUSAL = "Refused: this conversation was started by an email, and a turn that an email started may not "
             + "change channel integrations or their sender lists, nor decide approvals. An administrator can do this in the Manager.";
 
+    /**
+     * The refusal a tainted turn gets for an unapproved configuration write
+     * ({@link #CONFIG_TOOLS}, {@link #CONFIG_PATHS}).
+     */
+    public static final String CONFIG_REFUSAL = "Refused: this conversation was started by an email, and a turn that an email started may "
+            + "not change agent configuration, prompts, triggers or deployments unless a person approves that call. Gate the tool with a "
+            + "tool approval (hitlConfig.toolApprovals), or make the change in the Manager.";
+
     private EscalationGuard() {
     }
 
     /**
      * The refusal for calling {@code toolName} in the turn on this thread, if any.
+     * A configuration tool is allowed when the call is the approved execution of a
+     * gated call ({@link ApprovedCallScope#isActive()}).
      */
     public static Optional<String> refuseTool(String toolName) {
-        return TurnOrigin.currentIsEmail() && isGuardedTool(toolName) ? Optional.of(REFUSAL) : Optional.empty();
+        return refuseTool(toolName, ApprovedCallScope.isActive());
     }
 
-    /** The refusal for sending this request in the turn on this thread, if any. */
+    /**
+     * As {@link #refuseTool(String)}, with whether a person approved this very call
+     * given: {@code approved} unlocks {@link #CONFIG_TOOLS}, never
+     * {@link #GUARDED_TOOLS}.
+     */
+    public static Optional<String> refuseTool(String toolName, boolean approved) {
+        if (!TurnOrigin.currentIsEmail()) {
+            return Optional.empty();
+        }
+        if (isGuardedTool(toolName)) {
+            return Optional.of(REFUSAL);
+        }
+        return !approved && isConfigTool(toolName) ? Optional.of(CONFIG_REFUSAL) : Optional.empty();
+    }
+
+    /**
+     * The refusal for sending this request in the turn on this thread, if any. A
+     * configuration write is allowed during the approved execution of a gated call.
+     */
     public static Optional<String> refuseRequest(String method, URI uri) {
-        return TurnOrigin.currentIsEmail() && isGuardedRequest(method, uri) ? Optional.of(REFUSAL) : Optional.empty();
+        return refuseRequest(method, uri, ApprovedCallScope.isActive());
+    }
+
+    /**
+     * As {@link #refuseRequest(String, URI)}, with whether a person approved this
+     * very call given.
+     */
+    public static Optional<String> refuseRequest(String method, URI uri, boolean approved) {
+        if (!TurnOrigin.currentIsEmail()) {
+            return Optional.empty();
+        }
+        if (isGuardedRequest(method, uri)) {
+            return Optional.of(REFUSAL);
+        }
+        return !approved && isConfigRequest(method, uri == null ? null : uri.getRawPath())
+                ? Optional.of(CONFIG_REFUSAL)
+                : Optional.empty();
+    }
+
+    /**
+     * The refusal for a request that reached EDDI with this method, path and taint,
+     * if any: {@code tainted} is what {@link TurnOrigin#HEADER} said, and
+     * {@code approved} what {@link TurnOrigin#APPROVED_HEADER} said — which only
+     * counts on a tainted request.
+     */
+    public static Optional<String> refuseInbound(String method, String rawPath, boolean tainted, boolean approved) {
+        if (!tainted) {
+            return Optional.empty();
+        }
+        if (isGuardedRequest(method, rawPath)) {
+            return Optional.of(REFUSAL);
+        }
+        return !approved && isConfigRequest(method, rawPath) ? Optional.of(CONFIG_REFUSAL) : Optional.empty();
     }
 
     /** Whether {@code toolName} is, or ends in a namespaced, guarded tool name. */
     public static boolean isGuardedTool(String toolName) {
+        return matchesToolName(toolName, GUARDED_TOOLS);
+    }
+
+    /**
+     * Whether {@code toolName} is, or ends in a namespaced, configuration tool name
+     * ({@link #CONFIG_TOOLS}).
+     */
+    public static boolean isConfigTool(String toolName) {
+        return matchesToolName(toolName, CONFIG_TOOLS);
+    }
+
+    /**
+     * Whether a request with this method to this raw path writes configuration
+     * ({@link #CONFIG_PATHS}).
+     */
+    public static boolean isConfigRequest(String method, String rawPath) {
+        return isWrite(method) && matchesAny(CONFIG_PATHS, rawPath);
+    }
+
+    private static boolean matchesToolName(String toolName, Set<String> names) {
         if (toolName == null || toolName.isBlank()) {
             return false;
         }
         String name = toolName.trim().toLowerCase(Locale.ROOT);
-        if (GUARDED_TOOLS.contains(name)) {
+        if (names.contains(name)) {
             return true;
         }
-        for (String guarded : GUARDED_TOOLS) {
+        for (String guarded : names) {
             if (name.endsWith(guarded) && name.length() > guarded.length()
                     && NAMESPACE_SEPARATORS.indexOf(name.charAt(name.length() - guarded.length() - 1)) >= 0) {
                 return true;
@@ -146,11 +316,12 @@ public final class EscalationGuard {
 
     /** As {@link #isGuardedRequest(String, URI)}, for a raw request path. */
     public static boolean isGuardedRequest(String method, String rawPath) {
-        if (!isWrite(method)) {
-            return false;
-        }
+        return isWrite(method) && matchesAny(GUARDED_PATHS, rawPath);
+    }
+
+    private static boolean matchesAny(List<List<String>> patterns, String rawPath) {
         List<String> segments = normalisedSegments(rawPath);
-        for (List<String> pattern : GUARDED_PATHS) {
+        for (List<String> pattern : patterns) {
             for (int start = 0; start < segments.size(); start++) {
                 if (matches(pattern, segments, start)) {
                     return true;
@@ -165,6 +336,9 @@ public final class EscalationGuard {
         for (String part : pattern) {
             if ("**".equals(part)) {
                 return true;
+            }
+            if ("$".equals(part)) {
+                return position == segments.size();
             }
             if (position >= segments.size()) {
                 return false;

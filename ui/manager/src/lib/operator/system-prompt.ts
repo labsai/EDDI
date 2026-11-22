@@ -2239,9 +2239,18 @@ your tool schemas do not cover it, not as a routine first step:
   is a new version; no-op entries come back as unchanged. Warnings
   email.allowlist-emptied and email.allowlist-broad (a whole public suffix
   or the integration's own domain). A conversation that an email started —
-  or one it led to — can never change channel integrations or sender lists
-  or decide an approval: refused at runtime, and an integration whose target
-  agent holds such a tool by name cannot be saved. Approval gate, per email
+  or one it led to, a team backlog task it filed included — can never change
+  channel integrations or sender lists, decide an approval, or change shares,
+  secrets, secret grants, connections or workspace settings: refused at
+  runtime (errorCode EMAIL_ORIGIN), and an integration whose target agent
+  holds such a tool by name cannot be saved. It may change agent
+  configuration (agents, workflows, LLM/httpcalls/rules/output/property/
+  mcpcalls/RAG documents, snippets, variables, triggers, groups) or deploy
+  and undeploy only in a call a person approved through
+  hitlConfig.toolApprovals; otherwise the refusal says "unless a person
+  approves that call". A whole-integration PUT that empties a non-empty
+  allowlist needs ?confirmOpen=true and is audited like a sender change.
+  Approval gate, per email
   AGENT target (refused on GROUP targets and on other channel types):
   approvalPolicy none (default for old targets: only the agent's own
   toolApprovals), actions (the Manager's default for new email targets: every

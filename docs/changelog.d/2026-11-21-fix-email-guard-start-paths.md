@@ -60,13 +60,9 @@ header rule.
 
 ### Not covered
 
-- `add_team_task` and team handoffs queue *content* that a later, untainted cadence run works on; the backlog task
-  carries no taint. The decisions on handoffs are refused, the queueing is not.
 - `cancel_conversation`, `cancel_group_discussion`, `review_conversation_rating` and `acknowledge_alert_event` stay
   allowed: none widens who can make EDDI act or approves anything.
-- The two HTTP halves (header sent, header honoured) are unit-tested separately; nothing joins them over a real
-  socket. The MCP server half rests on `ContextSupport.requestContextActivated` setting `CurrentVertxRequest`
-  (quarkus-mcp-server 2.0.4, read from the bytecode), not on a running server.
+- (The backlog and the over-the-socket test are covered by the follow-up entry below.)
 
 ### Decision log
 
@@ -79,3 +75,183 @@ header rule.
 ```regression-note
 | 2026-11-21 | Saving an email integration also fails (400) when a target agent holds accept_team_handoff or decline_team_handoff, or an httpcalls write to /hitl/samples, /hitl/autonomy, /hitl/analytics/rebuild, /administration/spend-control-changes or a handoff accept/decline path; a request carrying X-Eddi-Turn-Origin: email that writes to a guarded path now answers 403 | The email v3 §5.3 guard lists widened | Remove the tool or httpcall from that agent; send the request from an untainted turn | fix/email-guard-start-paths |
 ```
+
+## 🔒 fix(email): the escalation guard after its security review — backlog, configuration, credentials (2026-11-22)
+
+**Repo:** EDDI (`fix/email-guard-review`, on top of `fix/email-guard-start-paths`) — the findings of an independent
+security review of the §5.3 guard. Threat model: whoever gets a mail processed controls the text and, through it, the
+model's tool calls.
+
+### What changed and why
+
+- **The team backlog no longer launders the taint (high).** `SharedTaskList.TaskItem` and
+  `WorkspaceHandoffs.HandoffOrigin` carry the origin (`origin`, `turnOrigin`), stored in both datastores (the workspace
+  is a JSON document). `SharedTaskList.addTask`/`addAgentTask` stamp `TurnOrigin.current()` on every write — REST
+  `POST …/workspace/backlog`, MCP `add_team_task`, a handoff (AUTO), a member's task tool — and every replacement
+  (`updateTask`, each status transition) keeps the stored taint, so a positional copy cannot drop it. A REVIEW
+  handoff a person accepts keeps the filer's taint; a decision-rule handoff of a tainted discussion is filed under its
+  taint. `TeamCadenceService` binds the combined taint of the pulled tasks around `prepareCadenceDiscussion`, so the
+  run's discussion — and every member conversation — is tainted, and a tainted run's writeback taints the tasks.
+- **Configuration writes need a person (medium).** New `EscalationGuard.CONFIG_TOOLS`/`CONFIG_PATHS`: agent, workflow
+  and extension stores (v5 names too), snippets, variables, triggers, group configs, deploy/undeploy, setup, import,
+  the config MCP tools and `createSubAgent`/`retainAgent`. A tainted turn's write is refused unless it is the approved
+  execution of a gated call — `ApprovedCallScope`, which `ToolLoopResumer` binds around exactly that call
+  (`isActiveFor(conversationId)`, so another conversation's approval does not count; `OutboundHttp` honours it on the
+  first hop only). Across EDDI's own API the sender says so in `X-Eddi-Approved-Call`, engine-owned like the taint
+  header (httpcalls, `OutboundHttp`, MCP `_meta` → header, the internal loopback of the MCP admin tools): set only
+  during the approved call, replaced everywhere else.
+- **Credentials and sharing (medium).** `GUARDED_PATHS` gains resource shares/requests/visibility/space/owner, the
+  secrets vault (tenant and space, grants, rotation), connections and their settings, a user's connection
+  authorize/grant, and workspace settings. No user or role administration endpoint exists; no MCP tool writes any
+  of these.
+- **The receiving side binds explicitly (medium).** `TaintedRequestFilter` binds the header on a request-scoped
+  `InboundTurnOrigin`; `McpErrorResultInterceptor` does the same before every MCP tool (the MCP transport is Vert.x,
+  no JAX-RS filter sees it). `TurnOrigin.current()` reads the holder and the request header; an active request
+  context whose taint cannot be read now counts as **tainted**, not untainted. New `EmailOriginTaintHttpIT`
+  exercises it over real HTTP: a REST start and an MCP `create_conversation` with the header give conversations whose
+  `update_email_senders`-shaped httpcall is never sent, and both receiving sides refuse.
+- **`confirmOpen` and the audit on every save (medium-low).** `updateChannel` diffs the stored and saved lists:
+  emptying a non-empty allowlist needs `?confirmOpen=true` (MCP `update_channel_integration` `confirmOpen`), warns
+  `email.allowlist-emptied`, and every change writes `EMAIL_SENDERS_CHANGED`; `updateEmailSenders` delegates, so it
+  audits once. The Manager's page Save asks before such a save.
+- `GroupConversation.setOrigin` never clears or replaces a set taint. Docs: the header goes to third parties on
+  purpose; a relay that drops it sheds the taint. Operator revision 84.
+
+### Not covered
+
+- ~~The in-engine approval is per thread: a nested turn that an approved call runs synchronously on the same thread
+  would share it for `OutboundHttp`.~~ Closed by the CodeRabbit round below (`ApprovedCallScope.approvesHere`).
+- The MCP binding reads the request through `CurrentVertxRequest`, which quarkus-mcp-server sets; the IT is what
+  proves it, and fails if a release stops doing so.
+- The fail-closed branch (an active request context whose taint cannot be read) has no test.
+- The backlog exploit test stands in for `createGroupConversation` and runs the member turn under the bound taint;
+  the #1499 tests cover those two links. The Manager's confirm dialog before a page Save is not tested at page
+  level (the helper and the API call are).
+- Other workspace content a cadence quotes (lessons, outcomes) was not reviewed for the same laundering.
+- Found on the way: the interceptor test's `@Tool` fixtures named like real tools broke every `@QuarkusTest` boot on
+  #1499 (duplicate feature methods); renamed.
+
+### Decision log
+
+```decision-log
+| 2026-11-22 | A tainted turn may write configuration only in a call a person approved through the tool-approval gate; shares, secrets, connections and workspace settings stay refused whoever approves | Security review of the email guard: config writes carry mail text into untainted conversations, credential writes widen who can use EDDI | Refusing configuration writes outright (breaks approved, human-seen changes); allowing them with a save-time warning only |
+| 2026-11-22 | Backlog tasks and handoff origins carry the taint, stamped on every write and sticky through every copy; a cadence that pulls a tainted task runs a tainted discussion | The cadence fires from an untainted schedule and would otherwise run mail text untainted | Refusing backlog writes from tainted turns (breaks mail-driven team intake) |
+```
+
+### Regression notes
+
+```regression-note
+| 2026-11-22 | A mail-started conversation's write to an agent/workflow/extension store, snippets, variables, triggers, a group config, deploy/undeploy, setup or import, and its config MCP tools, now fail with "unless a person approves that call"; a full PUT of an email integration that empties a non-empty allowlist answers 400 without confirmOpen=true | Security review of the email escalation guard | Gate the tool with hitlConfig.toolApprovals so a person approves the call; add confirmOpen=true to the save | fix/email-guard-review |
+```
+
+## 🔒 fix(email): the guard after CodeRabbit's review of #1499 — pinning, approval scope, sticky schedules (2026-11-22)
+
+**Repo:** EDDI (`fix/pr1499-coderabbit`, onto `fix/email-guard-start-paths`, PR #1499) — CodeRabbit's review of
+`1c7010074f`: eight inline findings and one outside the diff.
+
+### What changed and why
+
+- **A gated `httpcalls` configuration write of a mail-started turn is pinned again (major).** The approval preview
+  (`ApiCallExecutor.resolve`) ran the escalation guard as an unapproved call: no approval exists at gate time, and the
+  resume re-check runs outside `ApprovedCallScope` too. So the preview was refused, and the call was approved unpinned,
+  on its tool name and arguments, not on the request that runs. A preview now judges the configuration write as the
+  approved execution would. It sends nothing, the guarded endpoints (channels, approvals) are still refused in it, and
+  the real build at execution still needs the approved scope. (An MCP configuration tool has no request resolver and
+  is approved on its name and arguments, as before.)
+- **An approval is stated only for its own conversation (major).** The MCP `approvedCall` meta, `OutboundHttp`'s
+  first hop and the internal loopback's `X-Eddi-Approved-Call` used the unscoped `ApprovedCallScope.isActive()`. A
+  conversation that an approved call starts or continues inline runs its tool calls on the same thread and inherited
+  the approval. `ToolExecutionService` now binds the conversation of every tool it runs
+  (`ApprovedCallScope.inConversation`). The three granting sites use `approvesHere()`, which needs the approval to
+  belong to that conversation. `isActive()` stays where it restricts (`checkOutgoing`).
+- **The schedule taint survives a concurrent clean edit (major).** Both stores' `updateSchedule` now keep a stored
+  `turnOrigin: email` inside the write. On Postgres a `CASE` in the `UPDATE` does it. On Mongo a clean write is
+  conditional on a clean row and is redone with the taint when it matches nothing. The REST merge alone read the row
+  first, so a clean save of an older copy could write the taint away. The match agrees with `TurnOrigin.normalise`
+  (case-insensitive, trimmed).
+- **Enabling or dismissing a schedule from a tainted request taints it (major).** This is done before the write, as
+  `retryDeadLetter` already did. Disabling stamps nothing.
+- **`PUT ?version=0` can no longer empty an email allowlist unconfirmed (major).** The sender-list baseline was read
+  with the raw `0`, which the store does not resolve. The read failed and the `confirmOpen` check and the audit entry
+  were skipped. The version is now resolved first, the audit records the resolved version, and a baseline that cannot
+  be read refuses the save (a missing version still gets the update's own 404/409).
+- **Backlog transitions return the stored task (minor).** All eleven `SharedTaskList` lifecycle methods returned their
+  own positional copy, which has no origin. They now return what `replaceTask` stored, taint included.
+- **A lesson-consolidation reschedule keeps the replaced schedule's taint (minor).** The old schedule is read before
+  it is deleted. A failed read leaves the old schedule in place.
+- **`EmailOriginTaintHttpIT` checks the tainted turns' responses.** An unrelated 404 or 500 left the request count
+  unchanged, so the test passed for the wrong reason.
+- **Manager wording.** The empty-allowlist confirmation and the notice after such a save say that sender
+  authentication limits who can run the agent only when it is enabled. Changed in all 11 locales and in both
+  fallbacks.
+- **Tests from the review's nitpicks.** The continuation test captures the first round write as it is made, and a
+  member-turn test runs a plain round and then a tainted one on the same discussion.
+
+### Design decisions
+
+- **Preview as approved, not a gate-time exemption.** The gate and the resume re-check must resolve the same
+  fingerprint. Exempting only the gate would make every pinned configuration write fail closed at resume.
+- **Bind the running conversation rather than suspend the approval in nested turns.** Suspending it would also drop
+  `SelfUngatingGuard` from the outer call's requests. The binding narrows only the places that grant.
+- **The sticky-taint rule lives in the stores**, so every caller of `updateSchedule` gets it (the REST stamp, retry,
+  enable and dismiss), not only the REST `PUT`.
+
+### Not covered
+
+- `McpErrorResultInterceptor` (the MCP server side) still reads the unscoped `isActive()`. It runs on an inbound
+  request thread, where no approval is bound.
+- Nested pipeline work that is not a tool call (a loopback REST request from a pipeline task of a conversation that
+  an approved call runs inline) still sees the outer call's conversation as the one running.
+- The gate and the resume re-check resolve the pinned request under the same bound taint by construction; a real
+  pause and resume of a tainted configuration write is not exercised by a test.
+- Other delete-and-recreate schedule paths (`EmailPollScheduler`, `ConversationContinuations`) were not reviewed
+  for the reschedule rule applied to lesson consolidation here.
+
+### Decision log
+
+```decision-log
+| 2026-11-22 | An approval preview builds a gated call's request as its approved execution would, guarded endpoints still refused | A refused preview left mail-started configuration writes approved unpinned | Exempting the gate only (resume re-check fails closed); approving such calls unpinned |
+| 2026-11-22 | The engine states a person's approval only on requests of the tool call's own conversation (`ApprovedCallScope.approvesHere`) | A conversation an approved call ran inline inherited the approval over MCP, OutboundHttp and the loopback | Suspending the approval binding inside nested turns (drops the outer call's self-ungating check) |
+```
+
+## 🔒 fix(email): CodeRabbit's re-review of #1499 — one resolved version, no inherited inbound approval, origin-only stamp (2026-11-22)
+
+**Repo:** EDDI (`fix/pr1499-coderabbit-2`, onto `fix/email-guard-start-paths`, PR #1499) — CodeRabbit's re-review
+of `9c4826effc`: two inline findings and one in the review body.
+
+### What changed and why
+
+- **A channel save writes the version it compared (major).** `RestChannelIntegrationStore.saveChannel` resolved
+  `?version=0` for the sender-list comparison and again inside `RestVersionInfo.update`. A save on another node in
+  between (the local `uniquenessLock` does not serialise nodes) made the write land on a version the allowlist check
+  never saw, so a concurrent restriction could be emptied without `confirmOpen`. The version is now resolved once,
+  before the uniqueness checks, and the same value is used for the legacy-connector check, the comparison, the audit
+  and the write. A stale write is the update's `409`.
+- **A turn does not inherit the inbound request's approval (major).** `LoopbackCallerAuthFilter` set
+  `X-Eddi-Approved-Call` from `approvesHere() || TurnOrigin.inboundApproved()`, so a conversation started inside an
+  approved MCP call stated that approval for its own loopback writes. Inside a turn (a bound conversation principal,
+  `TurnOrigin.inTurn()`, or a running tool call, the new `ApprovedCallScope.inToolCall()`) only `approvesHere()`
+  counts. A direct MCP call that runs no turn still passes the inbound approval on. `ApprovedCallScope` now binds the
+  executing conversation in a holder, so "a tool call of no conversation" and "no tool call" differ.
+- **Stamping a schedule's origin no longer rewrites it (minor).** `RestScheduleStore.stampTurnOrigin` (retry, enable,
+  dismiss) wrote back the whole row it read, reverting a configuration edit committed in between. The new
+  `IScheduleStore.setTurnOrigin` sets `metadata.turnOrigin` alone: a Mongo aggregation-pipeline `$set` with
+  `$mergeObjects` (a `metadata: null` row gets a document) and a Postgres `UPDATE` that merges the key into the
+  `metadata` object (`NULL` or JSON `null` start from `{}`). The read stays, only to decide whether to write.
+
+### Tests
+
+- `RestChannelIntegrationStoreEmailSendersTest.versionZeroIsResolvedOnce`: the current version moves from 3 to 4
+  between two resolutions; the save writes version 3 and fails with the store's `ResourceModifiedException`.
+- `LoopbackCallerAuthFilterTest`: inbound approval `true` inside `conv-b` (under an outer binding, as a bare tool
+  call, and in a turn with a bound principal) gives `"false"`; a direct call gives `"true"`, and `"false"` when not
+  approved.
+- `MongoScheduleStoreTest` / `PostgresScheduleStoreTest` (Testcontainers): an edit committed after the stamping path
+  read the schedule survives the stamp, other metadata stays, a row without metadata gets one, a missing id is a
+  `ResourceNotFoundException`. `RestScheduleStoreTurnOriginTest` checks that retry, enable and dismiss call
+  `setTurnOrigin` and never `updateSchedule`.
+
+### Not covered
+
+- The comment on `RestGroupLessons.schedule()` from the same review (a concurrent reschedule can drop an email
+  origin) and the fingerprint-test nitpick in `ApiCallExecutorEscalationGuardTest` are not part of this change.

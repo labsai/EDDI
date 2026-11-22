@@ -11,10 +11,12 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
 import ai.labs.eddi.engine.schedule.mongo.MongoScheduleStore;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import org.junit.jupiter.api.*;
 
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -120,6 +122,92 @@ class MongoScheduleStoreTest extends MongoTestBase {
             store.updateSchedule(id, body);
 
             assertTrue(store.readSchedule(id).isEnabled());
+        }
+
+        @Test
+        @DisplayName("update — a stored origin taint survives a clean write from a copy read before it was set")
+        void updateKeepsStoredTurnOrigin() throws Exception {
+            String id = store.createSchedule(newSchedule("Taint", "agent-1"));
+            var staleCopy = store.readSchedule(id);
+
+            // A tainted turn's edit lands (stored as a caller sent it: not canonical) ...
+            var tainted = store.readSchedule(id);
+            tainted.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, " Email ")));
+            store.updateSchedule(id, tainted);
+            // ... then a clean edit of the copy read before it.
+            staleCopy.setName("Edited");
+            staleCopy.setMetadata(new HashMap<>(Map.of("note", "clean")));
+            store.updateSchedule(id, staleCopy);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit itself lands");
+            assertEquals("clean", found.getMetadata().get("note"));
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(found.getMetadata()), "the taint is sticky");
+
+            // A copy that carries no metadata at all keeps it too.
+            staleCopy.setMetadata(null);
+            store.updateSchedule(id, staleCopy);
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+        }
+
+        @Test
+        @DisplayName("update — a clean schedule's clean write stays clean")
+        void updateOfCleanScheduleStaysClean() throws Exception {
+            String id = store.createSchedule(newSchedule("Taint", "agent-1"));
+            var body = store.readSchedule(id);
+            body.setMetadata(new HashMap<>(Map.of("note", "x")));
+            store.updateSchedule(id, body);
+
+            var found = store.readSchedule(id);
+            assertNull(TurnOrigin.fromMetadata(found.getMetadata()));
+            assertEquals("x", found.getMetadata().get("note"));
+        }
+
+        @Test
+        @DisplayName("setTurnOrigin — stamps the origin alone: an edit committed after the stamping path read the schedule survives")
+        void setTurnOriginKeepsAConcurrentEdit() throws Exception {
+            var created = newSchedule("Taint", "agent-1");
+            created.setMetadata(new HashMap<>(Map.of("note", "kept")));
+            String id = store.createSchedule(created);
+            // The retry/enable/dismiss path reads the schedule to decide whether to stamp
+            // ...
+            var readByStampingPath = store.readSchedule(id);
+            // ... a configuration edit lands in between ...
+            var edit = store.readSchedule(id);
+            edit.setName("Edited");
+            edit.setMessage("edited message");
+            edit.setCronExpression("0 30 * * * ?");
+            store.updateSchedule(id, edit);
+            // ... and the stamp follows.
+            assertNull(TurnOrigin.fromMetadata(readByStampingPath.getMetadata()));
+            store.setTurnOrigin(id, TurnOrigin.EMAIL);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit is not reverted");
+            assertEquals("edited message", found.getMessage());
+            assertEquals("0 30 * * * ?", found.getCronExpression());
+            assertEquals("kept", found.getMetadata().get("note"), "other metadata stays");
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(found.getMetadata()));
+        }
+
+        @Test
+        @DisplayName("setTurnOrigin — a schedule stored without metadata gets one holding the origin; a null origin writes nothing")
+        void setTurnOriginWithoutMetadata() throws Exception {
+            var created = newSchedule("Taint", "agent-1");
+            created.setMetadata(null);
+            String id = store.createSchedule(created);
+
+            store.setTurnOrigin(id, null);
+            assertNull(TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+
+            store.setTurnOrigin(id, TurnOrigin.EMAIL);
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+        }
+
+        @Test
+        @DisplayName("setTurnOrigin non-existent — throws ResourceNotFoundException")
+        void setTurnOriginNotFound() {
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.setTurnOrigin("ghost", TurnOrigin.EMAIL));
         }
 
         @Test

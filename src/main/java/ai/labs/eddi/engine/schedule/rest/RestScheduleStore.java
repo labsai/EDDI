@@ -785,6 +785,9 @@ public class RestScheduleStore implements IRestScheduleStore {
     /**
      * Writes the origin taint of the request into the stored schedule's metadata
      * when the request is tainted and the schedule is not yet; otherwise nothing.
+     * The write sets the origin alone ({@link IScheduleStore#setTurnOrigin}): the
+     * copy read here only decides whether to write, so a configuration edit
+     * committed since that read is not reverted.
      */
     private void stampTurnOrigin(String scheduleId) throws IResourceStore.ResourceStoreException, IResourceStore.ResourceNotFoundException {
         String origin = TurnOrigin.current();
@@ -795,8 +798,7 @@ public class RestScheduleStore implements IRestScheduleStore {
         if (stored == null || origin.equals(TurnOrigin.fromMetadata(stored.getMetadata()))) {
             return;
         }
-        stored.setMetadata(TurnOrigin.stampMetadata(stored.getMetadata(), origin));
-        scheduleStore.updateSchedule(scheduleId, stored);
+        scheduleStore.setTurnOrigin(scheduleId, origin);
     }
 
     /**
@@ -825,6 +827,9 @@ public class RestScheduleStore implements IRestScheduleStore {
             if (schedule.getFireStatus() != FireStatus.DEAD_LETTERED) {
                 return notDeadLettered(schedule.getFireStatus());
             }
+            // A dismissed schedule fires again at its next regular time: a tainted
+            // turn's dismissal taints it first, as its retry would.
+            stampTurnOrigin(scheduleId);
             Instant nextFire = computeNextFireForSchedule(schedule);
             try {
                 scheduleStore.dismissDeadLetter(scheduleId, nextFire);
@@ -1569,6 +1574,10 @@ public class RestScheduleStore implements IRestScheduleStore {
         try {
             Instant nextFire = null;
             if (enabled) {
+                // Enabling re-arms the schedule's fires: a tainted turn's enable taints it
+                // (email plan v3 §5.3), as its edit or retry would — before the switch, so
+                // a stamp that fails leaves the schedule disabled.
+                stampTurnOrigin(scheduleId);
                 // Need to read schedule to compute nextFire
                 ScheduleConfiguration schedule = scheduleStore.readSchedule(scheduleId);
                 nextFire = computeRearmNextFire(schedule);

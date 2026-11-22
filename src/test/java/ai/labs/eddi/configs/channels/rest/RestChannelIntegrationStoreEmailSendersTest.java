@@ -17,6 +17,7 @@ import ai.labs.eddi.engine.security.spaces.ResourceAccessGuard;
 import ai.labs.eddi.integrations.email.EmailChannelSupport;
 import jakarta.enterprise.inject.Instance;
 import jakarta.ws.rs.BadRequestException;
+import jakarta.ws.rs.InternalServerErrorException;
 import jakarta.ws.rs.NotFoundException;
 import jakarta.ws.rs.core.Response;
 import org.junit.jupiter.api.BeforeEach;
@@ -211,6 +212,92 @@ class RestChannelIntegrationStoreEmailSendersTest {
         var result = (EmailSenderLists.UpdateResult) response.getEntity();
         assertEquals(List.of("email.allowlist-broad"), result.warnings());
         assertEquals("email.allowlist-broad", response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
+    }
+
+    @Test
+    @DisplayName("a full PUT that empties the allowlist is refused without confirmOpen, and with it warns and audits once")
+    void fullPutEmptyingTheAllowlist() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        var refused = assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 3, email(Map.of())));
+        assertTrue(refused.getMessage().contains("confirmOpen"));
+        assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 3, false, email(Map.of())));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+
+        Response response = sut.updateChannel(ID, 3, true, email(Map.of()));
+
+        assertTrue(response.getStatus() < 300, String.valueOf(response.getStatus()));
+        assertTrue(response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER).contains(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
+    }
+
+    @Test
+    @DisplayName("PUT ?version=0 compares with the current version: emptying the allowlist still needs confirmOpen, and is audited at it")
+    void versionZeroIsTheCurrentVersion() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        var refused = assertThrows(BadRequestException.class, () -> sut.updateChannel(ID, 0, email(Map.of())));
+        assertTrue(refused.getMessage().contains("confirmOpen"));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+
+        sut.updateChannel(ID, 0, true, email(Map.of()));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of(), List.of("allow:bob@partner.com"), null, true);
+    }
+
+    /**
+     * A save on another node lands between the comparison and the write: version 3
+     * had no allowlist, the concurrent version 4 adds one. Resolving
+     * {@code ?version=0} a second time for the write would empty version 4's
+     * allowlist without {@code confirmOpen}, judged against version 3. The write
+     * goes to the version that was compared, which the store refuses as stale.
+     */
+    @Test
+    @DisplayName("PUT ?version=0 writes the version it compared: a save landing in between is a 409, not an unchecked overwrite")
+    void versionZeroIsResolvedOnce() throws Exception {
+        when(channelStore.getCurrentResourceId(ID)).thenReturn(resourceId(3), resourceId(4));
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of()));
+        when(channelStore.read(ID, 4)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+        when(channelStore.update(eq(ID), eq(3), any())).thenThrow(new IResourceStore.ResourceModifiedException("version 3 is not current"));
+        when(channelStore.update(eq(ID), eq(4), any())).thenReturn(5);
+
+        assertThrows(IResourceStore.ResourceModifiedException.class, () -> sut.updateChannel(ID, 0, email(Map.of())));
+
+        verify(channelStore).update(eq(ID), eq(3), any());
+        verify(channelStore, never()).update(eq(ID), eq(4), any());
+        verify(support, never()).auditSenderListChange(anyString(), any(), any(), any(), any(), any(), anyBoolean());
+    }
+
+    @Test
+    @DisplayName("a save whose stored sender lists cannot be read is refused, not saved unchecked")
+    void unreadableBaselineRefuses() throws Exception {
+        when(channelStore.read(ID, 3)).thenThrow(new IResourceStore.ResourceStoreException("down"));
+
+        assertThrows(InternalServerErrorException.class, () -> sut.updateChannel(ID, 3, email(Map.of())));
+        verify(channelStore, never()).update(anyString(), anyInt(), any());
+    }
+
+    @Test
+    @DisplayName("a full PUT that changes the lists is audited; one that leaves them as they were is not")
+    void fullPutAudits() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com", "senderBlocklist", "spam@contoso.com")));
+
+        sut.updateChannel(ID, 3, email(Map.of("senderAllowlist", "BOB@partner.com", "senderBlocklist", "spam@contoso.com")));
+        verify(support, never()).auditSenderListChange(any(), any(), any(), any(), any(), any(), anyBoolean());
+
+        sut.updateChannel(ID, 3, email(Map.of("senderAllowlist", "bob@partner.com,alice@partner.com")));
+        verify(support).auditSenderListChange(ID, 3, 4, List.of("allow:alice@partner.com"), List.of("block:spam@contoso.com"), null, false);
+    }
+
+    @Test
+    @DisplayName("the targeted edit delegates to the full save: one audit entry, one warning")
+    void targetedEditAuditsOnce() throws Exception {
+        when(channelStore.read(ID, 3)).thenReturn(email(Map.of("senderAllowlist", "bob@partner.com")));
+
+        Response response = sut.updateEmailSenders(ID,
+                new UpdateRequest(3, null, new Entries(List.of("bob@partner.com"), List.of()), "open it up", true));
+
+        verify(support).auditSenderListChange(any(), any(), any(), any(), any(), any(), anyBoolean());
+        assertEquals(EmailSenderLists.WARNING_ALLOWLIST_EMPTIED, response.getHeaderString(RestChannelIntegrationStore.WARNINGS_HEADER));
     }
 
     @Test

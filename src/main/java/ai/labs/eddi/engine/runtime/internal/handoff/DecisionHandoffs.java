@@ -15,6 +15,7 @@ import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.SourceKind;
 import ai.labs.eddi.configs.groups.model.WorkspaceHandoffs.Trigger;
 import ai.labs.eddi.engine.api.IGroupConversationService.GroupDiscussionEventListener;
 import ai.labs.eddi.engine.lifecycle.GroupConversationEventSink;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import ai.labs.eddi.utils.LogSanitizer;
 import jakarta.enterprise.context.ApplicationScoped;
 import jakarta.inject.Inject;
@@ -117,7 +118,10 @@ public class DecisionHandoffs {
                 description, priority, Trigger.DECISION, decisionRef, null, null, state.getHop(), state.getLineage(), dedupeKey,
                 handoff.maxDescriptionChars(),
                 null);
-        HandoffResult result = service.file(request);
+        // The discussion thread runs no turn: a tainted discussion's taint is bound
+        // for the filing, so the handoff and the task it becomes carry it (email plan
+        // v3 §5.3).
+        HandoffResult result = fileWithOrigin(gc.getOrigin(), request);
 
         state.recordFiled(new HandoffRunState.FiledHandoff(result.handoffId(), target.alias(), target.groupId(), result.outcome().name(), subject));
         if (listener != null) {
@@ -127,6 +131,16 @@ public class DecisionHandoffs {
             } catch (RuntimeException e) {
                 LOGGER.debugf("Listener rejected team_handoff event: %s", e.getMessage());
             }
+        }
+    }
+
+    private HandoffResult fileWithOrigin(String origin, HandoffRequest request) {
+        try {
+            return TurnOrigin.callWith(origin, () -> service.file(request));
+        } catch (RuntimeException e) {
+            throw e;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
         }
     }
 

@@ -3525,6 +3525,9 @@
     "selectGroup": "Gruppe auswählen …",
     "unknownGroup": "{{id}} (nicht gefunden)",
     "plaintextSecret": "Legen Sie {{fields}} im Secrets-Tresor ab und referenzieren Sie es als ${vault:…} — Zugangsdaten im Klartext werden nicht gespeichert.",
+    "confirmOpenTitle": "Den letzten erlaubten Absender entfernen?",
+    "confirmOpenDesc": "Mit einer leeren Allowlist kann jeder Absender den Agenten auslösen, begrenzt nur durch die Absender-Authentifizierung, und nur wenn sie aktiviert ist. Die Änderung wird im Audit-Log festgehalten.",
+    "confirmOpenConfirm": "Speichern und öffnen",
     "plaintextStored": "Dieser Channel speichert {{fields}} im Klartext. Legen Sie es im Secrets-Tresor ab und speichern Sie, um es durch eine Referenz zu ersetzen."
   },
   "hitl": {
@@ -5582,7 +5585,7 @@
       "toolsWithoutApprovals": "Gespeichert, aber ein Agent, den diese Integration anspricht, hat Tools ohne Tool-Freigaben. E-Mail-Inhalt ist nicht vertrauenswürdige Eingabe: Fügen Sie hitlConfig.toolApprovals für Tools hinzu, die etwas verändern.",
       "aiDisclosureDisabled": "Gespeichert, aber Antworten sagen nicht mehr, dass eine KI sie geschrieben hat. Transparenzregeln wie der EU AI Act erwarten, dass Menschen wissen, dass sie mit einer KI sprechen.",
       "honorReplyTo": "Gespeichert, aber Antworten gehen an die Reply-To-Adresse, die DMARC nicht authentifiziert: Wer authentifizierte E-Mails von einer erlaubten Domain senden kann, bestimmt, wohin die Antwort geht.",
-      "allowlistEmptied": "Gespeichert, aber die Allowlist ist jetzt leer: Jeder Absender kann den Agenten starten, begrenzt nur durch die Absender-Authentifizierung.",
+      "allowlistEmptied": "Gespeichert, aber die Allowlist ist jetzt leer: Jeder Absender kann den Agenten starten, begrenzt nur durch die Absender-Authentifizierung, und nur wenn sie aktiviert ist.",
       "allowlistBroad": "Gespeichert, aber ein Allowlist-Eintrag lässt ein ganzes öffentliches Suffix (etwa *@*.co.uk) oder die eigene Domain dieser Integration zu. Verwenden Sie lieber genaue Adressen.",
       "approvalPolicyNone": "Gespeichert, aber ein Ziel, dessen Agent handeln kann, hat keine Freigaberichtlinie: Mails nutzen seine Tools nur unter den eigenen Tool-Freigaben des Agenten. Erwägen Sie „Jede Aktion freigeben“.",
       "ruleCallsRefused": "Gespeichert. Ein Ziel mit Freigaberichtlinie hat regelgesteuerte HTTP- oder MCP-Aufrufe: Ein Mail-Turn verweigert sie, sofern „Nur lesende Tools“ sie nicht nennt.",
@@ -5654,7 +5657,7 @@
     "remove": "{{entry}} entfernen",
     "addLabel": "Zu {{list}} hinzufügen",
     "add": "Hinzufügen",
-    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. Eine Unterhaltung, die eine E-Mail gestartet hat, kann diese Listen nie ändern.",
+    "hint": "Verwenden Sie lieber genaue Adressen. Jede angewendete Änderung ist eine neue Version dieser Integration und wird mit ihrem Grund im Audit-Log festgehalten. EDDI verweigert einer Unterhaltung, die eine E-Mail gestartet hat, jede Änderung dieser Listen.",
     "saveFirst": "Speichern oder verwerfen Sie zuerst Ihre anderen Änderungen; die Absenderlisten werden für sich angewendet.",
     "reason": "Warum (für das Audit-Log)",
     "reasonPlaceholder": "z. B. neuer Lieferant, Vertrag 2026-114",

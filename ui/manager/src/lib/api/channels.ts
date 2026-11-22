@@ -156,14 +156,22 @@ export async function createChannel(
   );
 }
 
+/**
+ * Saves a whole integration. `confirmOpen` confirms that the save empties a
+ * non-empty email sender allowlist, which opens the integration to every sender:
+ * the backend refuses such a save without it.
+ */
 export async function updateChannel(
   id: string,
   version: number,
   config: ChannelIntegrationConfiguration,
+  confirmOpen = false,
 ): Promise<ChannelSaveResult> {
+  const params = new URLSearchParams({ version: String(version) });
+  if (confirmOpen) params.set("confirmOpen", "true");
   return toSaveResult(
     await api.putWithResponse<{ location?: string } | undefined>(
-      `/channelstore/channels/${seg(id)}?version=${version}`,
+      `/channelstore/channels/${seg(id)}?${params}`,
       config,
     ),
   );

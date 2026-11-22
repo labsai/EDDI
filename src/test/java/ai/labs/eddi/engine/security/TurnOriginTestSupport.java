@@ -32,6 +32,14 @@ public final class TurnOriginTestSupport {
     }
 
     /**
+     * An inbound request whose sender stated ({@code X-Eddi-Approved-Call}) that a
+     * person approved the call, or did not.
+     */
+    public static AutoCloseable inboundApproved(boolean approved) {
+        return TurnOrigin.useApprovedSource(() -> approved);
+    }
+
+    /**
      * A real {@link ToolExecutionService}, the boundary that refuses a guarded tool
      * in a tainted turn.
      */

@@ -4,7 +4,9 @@
  */
 package ai.labs.eddi.engine.mcp;
 
+import ai.labs.eddi.engine.hitl.tools.ApprovedCallScope;
 import ai.labs.eddi.engine.security.EscalationGuard;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import io.quarkiverse.mcp.server.Tool;
 import io.quarkiverse.mcp.server.ToolCallException;
 import io.quarkus.security.ForbiddenException;
@@ -44,7 +46,12 @@ import static ai.labs.eddi.engine.mcp.McpToolUtils.errorJson;
  * {@link EscalationGuard#GUARDED_TOOLS} from a request that carries the origin
  * taint ({@code X-Eddi-Turn-Origin: email}, as every MCP request a mail-started
  * turn sends does) fails with errorCode {@code EMAIL_ORIGIN} before the tool
- * runs — whatever name the calling client listed the tool under.
+ * runs — whatever name the calling client listed the tool under. A
+ * configuration tool ({@link EscalationGuard#CONFIG_TOOLS}) fails the same way
+ * unless the request also states that a person approved the call
+ * ({@code X-Eddi-Approved-Call: true}). Before either check it binds the
+ * request's taint on the request context ({@code InboundTurnOrigin}): the MCP
+ * HTTP transport is served by Vert.x routes, which no JAX-RS filter sees.
  */
 @McpErrorResults
 @Interceptor
@@ -57,7 +64,20 @@ public class McpErrorResultInterceptor {
         if (tool == null) {
             return context.proceed();
         }
-        Optional<String> escalation = EscalationGuard.refuseTool(toolName(tool, context.getMethod().getName()));
+        // Bind the taint the HTTP request carries on its request context first, so the
+        // tool — and every conversation, schedule, discussion or backlog task it
+        // starts on this thread — runs tainted; a taint that cannot be bound refuses
+        // the call instead of running it untainted.
+        try {
+            TurnOrigin.bindInboundFromActiveRequest();
+        } catch (RuntimeException e) {
+            throw new ToolCallException(errorJson(EscalationGuard.REFUSAL, "EMAIL_ORIGIN", null));
+        }
+        // A configuration tool passes on a tainted request only when its sender
+        // stated that a person approved this call (X-Eddi-Approved-Call), or when it is
+        // itself the engine's approved execution of a gated call.
+        Optional<String> escalation = EscalationGuard.refuseTool(toolName(tool, context.getMethod().getName()),
+                ApprovedCallScope.isActive() || TurnOrigin.inboundApproved());
         if (escalation.isPresent()) {
             throw new ToolCallException(errorJson(escalation.get(), "EMAIL_ORIGIN", null));
         }

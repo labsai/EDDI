@@ -173,14 +173,51 @@ public final class EmailSenderLists {
         }
         boolean emptied = wasAllowlisted && allow.isEmpty();
         if (emptied && !Boolean.TRUE.equals(request.confirmOpen())) {
-            errors.add("This removes the last allowlist entry, and an empty allowlist lets every sender make the agent run. Send "
-                    + "confirmOpen: true if that is what you want, or add the senders who should stay allowed.");
+            errors.add(CONFIRM_OPEN_REQUIRED);
         }
         if (!errors.isEmpty()) {
             throw new InvalidChange(errors);
         }
         return new Change(List.copyOf(allow.values()), List.copyOf(block.values()), added, removed, unchanged, emptied);
     }
+
+    /**
+     * The difference between two stored versions of the lists, in {@link Change}'s
+     * terms ({@code allow:<entry>}, {@code block:<entry>}): what a save of the
+     * whole integration changed. Entries are compared in their normalised form, so
+     * a respelled address is no change.
+     */
+    public static Change diff(View before, View after) {
+        Map<String, String> oldAllow = keyed(before.allow());
+        Map<String, String> oldBlock = keyed(before.block());
+        Map<String, String> newAllow = keyed(after.allow());
+        Map<String, String> newBlock = keyed(after.block());
+        List<String> added = new ArrayList<>();
+        List<String> removed = new ArrayList<>();
+        compare(oldAllow, newAllow, "allow", added, removed);
+        compare(oldBlock, newBlock, "block", added, removed);
+        return new Change(after.allow(), after.block(), added, removed, List.of(), !oldAllow.isEmpty() && newAllow.isEmpty());
+    }
+
+    private static void compare(Map<String, String> before, Map<String, String> after, String name, List<String> added,
+                                List<String> removed) {
+        for (String entry : before.keySet()) {
+            if (!after.containsKey(entry)) {
+                removed.add(name + ":" + entry);
+            }
+        }
+        for (String entry : after.keySet()) {
+            if (!before.containsKey(entry)) {
+                added.add(name + ":" + entry);
+            }
+        }
+    }
+
+    /**
+     * The refusal for emptying a non-empty allowlist without {@code confirmOpen}.
+     */
+    public static final String CONFIRM_OPEN_REQUIRED = "This removes the last allowlist entry, and an empty allowlist lets every sender make "
+            + "the agent run. Send confirmOpen: true if that is what you want, or add the senders who should stay allowed.";
 
     /**
      * {@code platformConfig} with the lists replaced, as a new map; an empty list
