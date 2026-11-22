@@ -151,10 +151,31 @@ public final class EmailReplyReview {
 
     /** The marker value of a pending review. */
     public static Map<String, Object> marker(String draft) {
+        return marker(draft, false);
+    }
+
+    /**
+     * The marker value of a pending review; {@code endAfter} when the turn stopped
+     * its conversation ({@code STOP_CONVERSATION}), which the decision then ends.
+     */
+    public static Map<String, Object> marker(String draft, boolean endAfter) {
         Map<String, Object> value = new LinkedHashMap<>();
         value.put(FIELD_DRAFT, draft);
+        if (endAfter) {
+            value.put(FIELD_END, true);
+        }
         return value;
     }
+
+    /**
+     * Whether the decision of the review {@code marker} describes ends its
+     * conversation.
+     */
+    public static boolean endsAfter(Object marker) {
+        return marker instanceof Map<?, ?> map && Boolean.TRUE.equals(map.get(FIELD_END));
+    }
+
+    private static final String FIELD_END = "endConversation";
 
     /** The draft a pending review's marker holds, or null. */
     public static String draftOf(Object marker) {

@@ -6,12 +6,14 @@ package ai.labs.eddi.engine.runtime.internal;
 
 import ai.labs.eddi.engine.lifecycle.IConversation;
 import ai.labs.eddi.engine.lifecycle.ILifecycleManager;
+import ai.labs.eddi.engine.lifecycle.exceptions.ConversationStopException;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision;
 import ai.labs.eddi.engine.lifecycle.model.HitlDecision.HitlVerdict;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.IPropertiesHandler;
 import ai.labs.eddi.engine.memory.MemoryKeys;
 import ai.labs.eddi.engine.memory.model.ConversationState;
+import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.model.Context;
 import ai.labs.eddi.engine.runtime.IExecutableWorkflow;
 import ai.labs.eddi.engine.security.EmailApprovalGate;
@@ -233,6 +235,51 @@ class ConversationEmailReplyReviewTest {
         assertTrue(!String.valueOf(output(MemoryKeys.OUTPUT_PREFIX)).contains("rejected by a human reviewer"),
                 "not the generic rule-pause text: nothing is mailed");
         verify(lastManager, never()).executeLifecycleFromIndex(any(), anyInt());
+    }
+
+    @Test
+    @DisplayName("CONVERSATION_END: the turn waits for its review first, and the decision ends the conversation")
+    void conversationEndWaitsForTheReview() throws Exception {
+        doAnswer(invocation -> {
+            var step = memory.getCurrentStep();
+            step.addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(answer.get()));
+            step.storeData(new Data<>(MemoryKeys.ACTIONS.key(), List.of("CONVERSATION_END")));
+            return null;
+        }).when(lastManager).executeLifecycle(any(), any());
+
+        conversation().say("thanks, bye", mailTurn(true));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState(), "an ended pause could never be decided");
+
+        conversation().resume(decision(HitlVerdict.APPROVED, null));
+        assertEquals(ConversationState.ENDED, memory.getConversationState());
+        assertEquals(EmailReplyReview.APPROVED, output(EmailReplyReview.OUTPUT_KEY));
+    }
+
+    @Test
+    @DisplayName("STOP_CONVERSATION: the reply it owes waits for review, and the decision ends the conversation")
+    void stopWaitsForTheReview() throws Exception {
+        doAnswer(invocation -> {
+            memory.getCurrentStep().addConversationOutputList(MemoryKeys.OUTPUT_PREFIX, List.of(answer.get()));
+            throw new ConversationStopException();
+        }).when(lastManager).executeLifecycle(any(), any());
+
+        conversation().say("stop", mailTurn(true));
+        assertEquals(ConversationState.AWAITING_HUMAN, memory.getConversationState());
+
+        conversation().resume(decision(HitlVerdict.REJECTED, null));
+        assertEquals(ConversationState.ENDED, memory.getConversationState());
+        assertEquals(EmailReplyReview.REJECTED, output(EmailReplyReview.OUTPUT_KEY));
+    }
+
+    @Test
+    @DisplayName("STOP_CONVERSATION on an unarmed turn ends at once, as before")
+    void stopWithoutReviewEnds() throws Exception {
+        doAnswer(invocation -> {
+            throw new ConversationStopException();
+        }).when(lastManager).executeLifecycle(any(), any());
+
+        conversation().say("stop", mailTurn(false));
+        assertEquals(ConversationState.ENDED, memory.getConversationState());
     }
 
     @Test

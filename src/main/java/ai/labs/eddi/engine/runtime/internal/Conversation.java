@@ -791,7 +791,15 @@ public class Conversation implements IConversation {
         try {
             executeWorkflows(lifecycleData, lifecycleTaskTypes);
         } catch (ConversationStopException unused) {
-            endConversation();
+            // STOP_CONVERSATION ends the conversation, but a reply it still owes waits
+            // for its review first; the decision ends the conversation.
+            try {
+                pauseForReplyReviewIfAsked(true);
+                endConversation();
+            } catch (ConversationPauseException review) {
+                pauseConversation(review);
+                paused = true;
+            }
         } catch (ConversationPauseException e) {
             if (conversationMemory.isCancelled()) {
                 // A cancel that landed while the pausing task ran wins over the
@@ -875,6 +883,12 @@ public class Conversation implements IConversation {
     }
 
     private void checkActionsForConversationEnd() {
+        if (EmailReplyReview.pending(conversationMemory)) {
+            // A reply waits for review (pauseForReplyReviewIfAsked): ending now would
+            // leave a pause no one can decide and drop the reply. The decision's resume
+            // runs this check again and ends the conversation then.
+            return;
+        }
         IData<List<String>> actionData = conversationMemory.getCurrentStep().getLatestData(ACTIONS);
         if (actionData != null) {
             List<String> result = actionData.getResult();
@@ -1519,6 +1533,14 @@ public class Conversation implements IConversation {
      * send does not wait.
      */
     private void pauseForReplyReviewIfAsked() throws ConversationPauseException {
+        pauseForReplyReviewIfAsked(false);
+    }
+
+    /**
+     * As {@link #pauseForReplyReviewIfAsked()}; {@code endAfter} when the turn
+     * stopped the conversation ({@code STOP_CONVERSATION}): the decision ends it.
+     */
+    private void pauseForReplyReviewIfAsked(boolean endAfter) throws ConversationPauseException {
         if (executableWorkflows.isEmpty() || !EmailReplyReview.armed(conversationMemory)) {
             return;
         }
@@ -1531,7 +1553,7 @@ public class Conversation implements IConversation {
         if (draft.isBlank()) {
             return;
         }
-        step.storeData(new Data<>(EmailReplyReview.MARKER, EmailReplyReview.marker(draft)));
+        step.storeData(new Data<>(EmailReplyReview.MARKER, EmailReplyReview.marker(draft, endAfter)));
         // What the email channel reads: no notice to the sender, no reply yet.
         step.addConversationOutputString(EmailReplyReview.OUTPUT_KEY, EmailReplyReview.PENDING);
         String lastWorkflowId = executableWorkflows.get(executableWorkflows.size() - 1).getWorkflowId();
@@ -1580,6 +1602,10 @@ public class Conversation implements IConversation {
         clearHitlStatusMarker(step);
         clearHitlBookmark();
         stripPauseAction(step);
+        if (EmailReplyReview.endsAfter(marker.getResult())) {
+            // The turn had stopped the conversation (STOP_CONVERSATION).
+            endConversation();
+        }
         LOGGER.infof("Reply review of conversation '%s' decided: %s", sanitize(conversationMemory.getConversationId()), outcome);
     }
 
@@ -2271,7 +2297,12 @@ public class Conversation implements IConversation {
             // gate before the agent ran): its reply waits for review now.
             pauseForReplyReviewIfAsked();
         } catch (ConversationStopException unused) {
-            endConversation();
+            try {
+                pauseForReplyReviewIfAsked(true);
+                endConversation();
+            } catch (ConversationPauseException review) {
+                pauseConversation(review);
+            }
         } catch (ConversationPauseException e) {
             if (conversationMemory.isCancelled()) {
                 endConversation(); // cancel wins over a re-pause (see executeConversationStep)
