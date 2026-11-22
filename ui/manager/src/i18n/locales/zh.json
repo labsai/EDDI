@@ -5639,6 +5639,8 @@
         "smimeOff": "未进行 S/MIME 签名",
         "smimeInvalid": "S/MIME 签名无法验证",
         "smimeWrongSigner": "S/MIME 证书属于另一个地址",
+        "smimeUntrustedRoot": "S/MIME 签名已验证，但根证书未被公开信任",
+        "smimeChainBroken": "S/MIME 签名已验证，但证书链已断开",
         "dmarcPresent": "已发布 DMARC 记录",
         "dmarcAbsent": "没有 DMARC 记录",
         "dmarcUnknown": "无法检查 DMARC",

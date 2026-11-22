@@ -51,6 +51,10 @@ export function selfTestFindingTitle(code: string, t: TFunction): string | null 
       return t("emailChannel.selfTest.finding.smimeInvalid", "S/MIME signature does not verify");
     case "smime.wrong-signer":
       return t("emailChannel.selfTest.finding.smimeWrongSigner", "S/MIME certificate is for another address");
+    case "smime.untrusted-root":
+      return t("emailChannel.selfTest.finding.smimeUntrustedRoot", "S/MIME signature verified; the root is not publicly trusted");
+    case "smime.chain-broken":
+      return t("emailChannel.selfTest.finding.smimeChainBroken", "S/MIME signature verified, but the certificate chain is broken");
     case "dmarc.present":
       return t("emailChannel.selfTest.finding.dmarcPresent", "DMARC record published");
     case "dmarc.absent":

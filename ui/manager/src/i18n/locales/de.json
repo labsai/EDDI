@@ -5639,6 +5639,8 @@
         "smimeOff": "Nicht S/MIME-signiert",
         "smimeInvalid": "S/MIME-Signatur lässt sich nicht prüfen",
         "smimeWrongSigner": "S/MIME-Zertifikat gilt für eine andere Adresse",
+        "smimeUntrustedRoot": "S/MIME-Signatur geprüft; das Stammzertifikat ist nicht öffentlich vertrauenswürdig",
+        "smimeChainBroken": "S/MIME-Signatur geprüft, aber die Zertifikatskette ist unterbrochen",
         "dmarcPresent": "DMARC-Eintrag veröffentlicht",
         "dmarcAbsent": "Kein DMARC-Eintrag",
         "dmarcUnknown": "DMARC konnte nicht geprüft werden",

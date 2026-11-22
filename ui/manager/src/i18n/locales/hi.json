@@ -5639,6 +5639,8 @@
         "smimeOff": "S/MIME हस्ताक्षरित नहीं",
         "smimeInvalid": "S/MIME हस्ताक्षर सत्यापित नहीं होता",
         "smimeWrongSigner": "S/MIME प्रमाणपत्र किसी दूसरे पते का है",
+        "smimeUntrustedRoot": "S/MIME हस्ताक्षर सत्यापित; रूट सार्वजनिक रूप से विश्वसनीय नहीं है",
+        "smimeChainBroken": "S/MIME हस्ताक्षर सत्यापित, लेकिन प्रमाणपत्र श्रृंखला टूटी हुई है",
         "dmarcPresent": "DMARC रिकॉर्ड प्रकाशित है",
         "dmarcAbsent": "कोई DMARC रिकॉर्ड नहीं",
         "dmarcUnknown": "DMARC की जाँच नहीं हो सकी",

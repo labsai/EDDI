@@ -5639,6 +5639,8 @@
         "smimeOff": "S/MIME 署名なし",
         "smimeInvalid": "S/MIME 署名を検証できません",
         "smimeWrongSigner": "S/MIME 証明書は別のアドレス用です",
+        "smimeUntrustedRoot": "S/MIME 署名は検証されましたが、ルート証明書は公に信頼されていません",
+        "smimeChainBroken": "S/MIME 署名は検証されましたが、証明書チェーンが途切れています",
         "dmarcPresent": "DMARC レコードが公開されています",
         "dmarcAbsent": "DMARC レコードがありません",
         "dmarcUnknown": "DMARC を確認できませんでした",

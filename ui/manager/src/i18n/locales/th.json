@@ -5639,6 +5639,8 @@
         "smimeOff": "ไม่ได้ลงนาม S/MIME",
         "smimeInvalid": "ตรวจสอบลายเซ็น S/MIME ไม่ผ่าน",
         "smimeWrongSigner": "ใบรับรอง S/MIME เป็นของที่อยู่อื่น",
+        "smimeUntrustedRoot": "ตรวจสอบลายเซ็น S/MIME แล้ว แต่รูทไม่เป็นที่เชื่อถือสาธารณะ",
+        "smimeChainBroken": "ตรวจสอบลายเซ็น S/MIME แล้ว แต่สายใบรับรองขาดตอน",
         "dmarcPresent": "มีการเผยแพร่ระเบียน DMARC",
         "dmarcAbsent": "ไม่มีระเบียน DMARC",
         "dmarcUnknown": "ตรวจสอบ DMARC ไม่ได้",

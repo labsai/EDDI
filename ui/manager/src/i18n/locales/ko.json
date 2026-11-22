@@ -5639,6 +5639,8 @@
         "smimeOff": "S/MIME 서명 없음",
         "smimeInvalid": "S/MIME 서명을 검증할 수 없음",
         "smimeWrongSigner": "S/MIME 인증서가 다른 주소용임",
+        "smimeUntrustedRoot": "S/MIME 서명은 확인되었지만 루트가 공개적으로 신뢰되지 않음",
+        "smimeChainBroken": "S/MIME 서명은 확인되었지만 인증서 체인이 끊어져 있음",
         "dmarcPresent": "DMARC 레코드가 게시됨",
         "dmarcAbsent": "DMARC 레코드 없음",
         "dmarcUnknown": "DMARC를 확인할 수 없음",

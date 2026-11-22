@@ -5847,6 +5847,8 @@
         "smimeOff": "غير موقّع بـ S/MIME",
         "smimeInvalid": "لا يمكن التحقق من توقيع S/MIME",
         "smimeWrongSigner": "شهادة S/MIME لعنوان آخر",
+        "smimeUntrustedRoot": "تم التحقق من توقيع S/MIME؛ الجذر غير موثوق به علنًا",
+        "smimeChainBroken": "تم التحقق من توقيع S/MIME، لكن سلسلة الشهادات مقطوعة",
         "dmarcPresent": "سجل DMARC منشور",
         "dmarcAbsent": "لا يوجد سجل DMARC",
         "dmarcUnknown": "تعذّر التحقق من DMARC",

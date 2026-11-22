@@ -5691,6 +5691,8 @@
         "smimeOff": "Sem assinatura S/MIME",
         "smimeInvalid": "A assinatura S/MIME não é verificada",
         "smimeWrongSigner": "O certificado S/MIME é de outro endereço",
+        "smimeUntrustedRoot": "Assinatura S/MIME verificada; a raiz não é publicamente confiável",
+        "smimeChainBroken": "Assinatura S/MIME verificada, mas a cadeia de certificados está quebrada",
         "dmarcPresent": "Registro DMARC publicado",
         "dmarcAbsent": "Sem registro DMARC",
         "dmarcUnknown": "Não foi possível verificar o DMARC",
