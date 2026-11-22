@@ -13,6 +13,7 @@ import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.FireStatus;
 import ai.labs.eddi.engine.schedule.model.ScheduleConfiguration.TriggerType;
 import ai.labs.eddi.engine.schedule.model.ScheduleFireLog;
+import ai.labs.eddi.engine.security.TurnOrigin;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.*;
 
@@ -20,6 +21,7 @@ import javax.sql.DataSource;
 import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.HashMap;
 import java.time.temporal.ChronoUnit;
 import java.util.HashSet;
 import java.util.List;
@@ -148,6 +150,45 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
             store.updateSchedule(id, body);
 
             assertTrue(store.readSchedule(id).isEnabled());
+        }
+
+        @Test
+        @DisplayName("update — a stored origin taint survives a clean write from a copy read before it was set")
+        void updateKeepsStoredTurnOrigin() throws Exception {
+            String id = store.createSchedule(createCronSchedule("Taint", "agent1", "t"));
+            var staleCopy = store.readSchedule(id);
+
+            // A tainted turn's edit lands (stored as a caller sent it: not canonical) ...
+            var tainted = store.readSchedule(id);
+            tainted.setMetadata(new HashMap<>(Map.of(TurnOrigin.CONTEXT_KEY, " Email ")));
+            store.updateSchedule(id, tainted);
+            // ... then a clean edit of the copy read before it.
+            staleCopy.setName("Edited");
+            staleCopy.setMetadata(new HashMap<>(Map.of("note", "clean")));
+            store.updateSchedule(id, staleCopy);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit itself lands");
+            assertEquals("clean", found.getMetadata().get("note"));
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(found.getMetadata()), "the taint is sticky");
+
+            // A copy that carries no metadata at all keeps it too.
+            staleCopy.setMetadata(null);
+            store.updateSchedule(id, staleCopy);
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+        }
+
+        @Test
+        @DisplayName("update — a clean schedule's clean write stays clean")
+        void updateOfCleanScheduleStaysClean() throws Exception {
+            String id = store.createSchedule(createCronSchedule("Taint", "agent1", "t"));
+            var body = store.readSchedule(id);
+            body.setMetadata(new HashMap<>(Map.of("note", "x")));
+            store.updateSchedule(id, body);
+
+            var found = store.readSchedule(id);
+            assertNull(TurnOrigin.fromMetadata(found.getMetadata()));
+            assertEquals("x", found.getMetadata().get("note"));
         }
 
         @Test
