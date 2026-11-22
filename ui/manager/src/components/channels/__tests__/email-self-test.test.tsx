@@ -82,6 +82,34 @@ describe("EmailSelfTestPanel", () => {
     expect(screen.getByTestId("email-self-test-start")).toBeEnabled();
   });
 
+  it("clears a failed poll's error once a later poll succeeds", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let polls = 0;
+    server.use(
+      http.post("*/channelstore/channels/mail1/email-self-test", () =>
+        HttpResponse.json({ status: "waiting", token: TOKEN, expiresAt: new Date(Date.now() + 900_000).toISOString() }),
+      ),
+      http.get(`*/channelstore/channels/mail1/email-self-test/${TOKEN}`, () => {
+        polls++;
+        return polls === 1 ? new HttpResponse("boom", { status: 500 }) : HttpResponse.json({ status: "done", findings: [] });
+      }),
+    );
+    const user = userEvent.setup({ advanceTimers: vi.advanceTimersByTime });
+    renderWithProviders(<EmailSelfTestPanel integrationId="mail1" hasSmtp />);
+
+    await user.click(screen.getByTestId("email-self-test-start"));
+    await waitFor(() => expect(screen.getByTestId("email-self-test-result")).toHaveAttribute("data-status", "waiting"));
+    await act(async () => {
+      vi.advanceTimersByTime(SELF_TEST_POLL_MS + 10);
+    });
+    expect(await screen.findByTestId("email-self-test-error")).toBeInTheDocument();
+    await act(async () => {
+      vi.advanceTimersByTime(SELF_TEST_POLL_MS + 10);
+    });
+    await waitFor(() => expect(screen.getByTestId("email-self-test-result")).toHaveAttribute("data-status", "done"));
+    expect(screen.queryByTestId("email-self-test-error")).toBeNull();
+  });
+
   it("says so when five tests ran this hour", async () => {
     server.use(http.post("*/channelstore/channels/mail1/email-self-test", () => new HttpResponse("limit", { status: 429 })));
     const user = userEvent.setup();

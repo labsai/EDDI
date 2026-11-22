@@ -78,14 +78,22 @@ export function EmailSelfTestPanel({
     // Polling goes on until the server says the test is over: past its expiry the
     // server answers "expired", which is what ends the wait. A stopped timer would
     // leave the panel waiting, and the button disabled, for good.
+    let inFlight = false; // one request at a time: a slow answer must not be discarded by the next tick
     const timer = setInterval(() => {
+      if (inFlight) return;
+      inFlight = true;
       const mine = ++seq.latest;
       getEmailSelfTest(integrationId, token)
         .then((next) => {
-          if (mine === seq.latest) setResult((prev) => ({ ...next, token: prev?.token }));
+          if (mine !== seq.latest) return;
+          setError(null);
+          setResult((prev) => ({ ...next, token: prev?.token }));
         })
         .catch((e: unknown) => {
           if (mine === seq.latest) setError(getErrorMessage(e));
+        })
+        .finally(() => {
+          inFlight = false;
         });
     }, SELF_TEST_POLL_MS);
     return () => {

@@ -596,7 +596,7 @@ export function ChannelDetailPage() {
         <section className="rounded-xl border border-border/50 p-5 space-y-3" data-testid="email-self-test-section">
           <h2 className="text-sm font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4 text-primary" />{t("emailChannel.selfTest.title", "Sending-health self-test")}</h2>
           <EmailSelfTestPanel
-            key={id}
+            key={`${id}@${version}`}
             integrationId={id}
             hasSmtp={!!(baseline ? (JSON.parse(baseline) as { platformConfig?: Record<string, string> }).platformConfig?.smtpHost : draft.platformConfig.smtpHost)}
             dirty={isDirty}
