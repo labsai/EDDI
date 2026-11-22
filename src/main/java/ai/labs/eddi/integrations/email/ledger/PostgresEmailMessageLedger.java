@@ -41,7 +41,8 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     static final String TABLE = "email_message_ledger";
 
     private static final String COLUMNS = "id, integration_id, kind, direction, message_id, conversation_id, source_ref, idempotency_key, "
-            + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at";
+            + "recipient, state, attempts, next_attempt_at, claim_token, provider_id, last_error, created_at, updated_at, expires_at, "
+            + "approval_state, content_hash";
 
     private static final String CREATE_TABLE = """
             CREATE TABLE IF NOT EXISTS email_message_ledger (
@@ -63,10 +64,19 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 created_at TIMESTAMP NOT NULL,
                 updated_at TIMESTAMP,
                 expires_at TIMESTAMP NOT NULL,
+                approval_state VARCHAR(64),
+                content_hash VARCHAR(64),
                 CONSTRAINT uq_email_ledger_idempotency UNIQUE (idempotency_key),
                 CONSTRAINT uq_email_ledger_message UNIQUE (integration_id, direction, message_id)
             )
             """;
+
+    /**
+     * Columns added after the table first shipped: a table created by an older
+     * release gets them on the first use (the CREATE TABLE above has them already).
+     */
+    private static final String[] MIGRATIONS = {"ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS approval_state VARCHAR(64)",
+            "ALTER TABLE email_message_ledger ADD COLUMN IF NOT EXISTS content_hash VARCHAR(64)"};
 
     private static final String[] INDEXES = {"CREATE INDEX IF NOT EXISTS idx_email_ledger_due ON email_message_ledger (state, next_attempt_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_recipient ON email_message_ledger (recipient)",
@@ -74,7 +84,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_expires ON email_message_ledger (expires_at)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_message_id ON email_message_ledger (message_id)",
             "CREATE INDEX IF NOT EXISTS idx_email_ledger_inbound_sender ON email_message_ledger (integration_id, recipient, kind, created_at)",
-            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)"};
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_conversation ON email_message_ledger (conversation_id, kind, created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_email_ledger_approval ON email_message_ledger (approval_state, next_attempt_at) "
+                    + "WHERE approval_state IS NOT NULL"};
 
     /**
      * Resolved lazily: on a MongoDB deployment the datasource bean is inactive, and
@@ -100,6 +112,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
         }
         try (Connection connection = dataSourceInstance.get().getConnection(); Statement statement = connection.createStatement()) {
             statement.execute(CREATE_TABLE);
+            for (String migration : MIGRATIONS) {
+                statement.execute(migration);
+            }
             for (String index : INDEXES) {
                 statement.execute(index);
             }
@@ -113,7 +128,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     @Override
     public boolean insertIfAbsent(LedgerEntry entry) {
         String sql = "INSERT INTO " + TABLE + " (" + COLUMNS
-                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
+                + ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT DO NOTHING";
         try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
             int i = 1;
             statement.setString(i++, entry.id());
@@ -133,7 +148,9 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
             statement.setString(i++, IEmailMessageLedger.cap(entry.lastError(), MAX_LAST_ERROR));
             statement.setTimestamp(i++, timestamp(entry.createdAt()));
             statement.setTimestamp(i++, timestamp(entry.updatedAt()));
-            statement.setTimestamp(i, timestamp(entry.expiresAt()));
+            statement.setTimestamp(i++, timestamp(entry.expiresAt()));
+            statement.setString(i++, IEmailMessageLedger.cap(entry.approvalState(), MAX_APPROVAL_STATE));
+            statement.setString(i, entry.contentHash());
             return statement.executeUpdate() == 1;
         } catch (SQLException e) {
             throw new IllegalStateException("Failed to write an email ledger row", e);
@@ -337,6 +354,44 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
     }
 
     @Override
+    public boolean transitionApproval(String id, String from, String to, String contentHash, Instant now) {
+        String sql = "UPDATE " + TABLE + " SET approval_state = ?, content_hash = COALESCE(?, content_hash), updated_at = ? WHERE id = ? AND "
+                + (from == null ? "approval_state IS NULL" : "approval_state = ?");
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, IEmailMessageLedger.cap(to, MAX_APPROVAL_STATE));
+            statement.setString(2, contentHash);
+            statement.setTimestamp(3, timestamp(now));
+            statement.setString(4, id);
+            if (from != null) {
+                statement.setString(5, from);
+            }
+            return statement.executeUpdate() == 1;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to change the approval of an email ledger row", e);
+        }
+    }
+
+    @Override
+    public List<LedgerEntry> findByApprovalState(String approvalState, Instant now, int limit) {
+        String sql = "SELECT " + COLUMNS + " FROM " + TABLE + " WHERE approval_state = ? AND kind = 'TRIGGER' "
+                + "AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY next_attempt_at NULLS FIRST LIMIT ?";
+        try (Connection connection = connection(); PreparedStatement statement = connection.prepareStatement(sql)) {
+            statement.setString(1, approvalState);
+            statement.setTimestamp(2, timestamp(now));
+            statement.setInt(3, limit);
+            List<LedgerEntry> result = new ArrayList<>();
+            try (ResultSet rows = statement.executeQuery()) {
+                while (rows.next()) {
+                    result.add(toEntry(rows));
+                }
+            }
+            return result;
+        } catch (SQLException e) {
+            throw new IllegalStateException("Failed to read the held email ledger rows", e);
+        }
+    }
+
+    @Override
     public long countInboundTurns(String integrationId, String sender, Instant since) {
         String sql = "SELECT COUNT(*) FROM " + TABLE + " WHERE integration_id = ? AND recipient = ? AND kind = 'TRIGGER' AND created_at >= ? "
                 + "AND state IN ('TURN_SUBMITTED', 'DONE')";
@@ -434,7 +489,7 @@ public class PostgresEmailMessageLedger implements IEmailMessageLedger {
                 rows.getString("source_ref"), rows.getString("idempotency_key"), rows.getString("recipient"), State.valueOf(rows.getString("state")),
                 rows.getInt("attempts"), instant(rows.getTimestamp("next_attempt_at")), rows.getString("claim_token"), rows.getString("provider_id"),
                 rows.getString("last_error"), instant(rows.getTimestamp("created_at")), instant(rows.getTimestamp("updated_at")),
-                instant(rows.getTimestamp("expires_at")));
+                instant(rows.getTimestamp("expires_at")), rows.getString("approval_state"), rows.getString("content_hash"));
     }
 
     private static Timestamp timestamp(Instant instant) {

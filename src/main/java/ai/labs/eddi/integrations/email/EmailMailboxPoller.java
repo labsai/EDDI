@@ -264,7 +264,9 @@ public class EmailMailboxPoller {
         for (var row : processor.pendingResubmissions(context.integrationId(), Instant.now())) {
             Optional<MailTransport.FoundMessage> found;
             try {
-                found = session.findByMessageId(row.messageId(), settings, settings.maxMessageBytes());
+                // A held mail an approver let through is fetched by what was approved: its
+                // hash first, then where it was seen (EmailApprovalNotes).
+                found = session.findByMessageId(row.messageId(), settings, settings.maxMessageBytes(), row.sourceRef(), row.contentHash());
             } catch (MailboxException e) {
                 if (e.getCategory() != MailboxException.Category.TOO_LARGE) {
                     throw e;

@@ -5,6 +5,7 @@
 package ai.labs.eddi.engine.internal;
 
 import ai.labs.eddi.configs.hitl.HitlTimeoutPolicy;
+import ai.labs.eddi.engine.hitl.context.RenderedApprovalContext;
 import ai.labs.eddi.engine.memory.ConversationMemory;
 import ai.labs.eddi.engine.memory.model.Data;
 import ai.labs.eddi.engine.memory.model.PendingToolCallBatch;
@@ -14,9 +15,14 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * The email approval gate's timeout (email plan v3 §8.1): a pause the gate
@@ -96,5 +102,69 @@ class ConversationHitlServiceEmailGateTimeoutTest {
         ConversationHitlService.applyEmailGateTimeout(memory, "PT72H");
 
         assertEquals(HitlTimeoutPolicy.AUTO_APPROVE, memory.getHitlTimeoutPolicy());
+    }
+
+    @Test
+    @DisplayName("the expiry: a configured positive duration, else the default")
+    void expiry() {
+        assertEquals("PT24H", ConversationHitlService.emailGateExpiry(" PT24H "));
+        assertEquals(ConversationHitlService.DEFAULT_EMAIL_GATE_EXPIRY, ConversationHitlService.emailGateExpiry(null));
+        assertEquals(ConversationHitlService.DEFAULT_EMAIL_GATE_EXPIRY, ConversationHitlService.emailGateExpiry("PT0S"));
+        assertEquals(ConversationHitlService.DEFAULT_EMAIL_GATE_EXPIRY, ConversationHitlService.emailGateExpiry("three days"));
+    }
+
+    private void heldWithMail(String excerpt) {
+        memory = new ConversationMemory("conv3", "agent1", 1, "email:int1:alice@example.com");
+        memory.setOrigin(TurnOrigin.EMAIL);
+        Map<String, Object> mail = new LinkedHashMap<>();
+        mail.put("from", "alice@example.com");
+        mail.put("fromName", "Alice");
+        mail.put("subject", "Refund order 7");
+        mail.put("authenticated", true);
+        mail.put("attachments", List.of("receipt.pdf"));
+        mail.put("excerpt", excerpt);
+        memory.getCurrentStep().storeData(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY,
+                EmailApprovalGate.contextValue("everyTurn", List.of(), true, null, "held", mail)));
+        memory.getCurrentStep().storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, EmailApprovalGate.PRE_RUN_START));
+    }
+
+    @Test
+    @DisplayName("a held mail is the first item of the approval context: sender, subject, attachments, text; credentials redacted")
+    void heldMailInApprovalContext() {
+        heldWithMail("Please refund order 7. Status: https://x/y?api_key=abcdefghijklmnop");
+        var agentItem = new RenderedApprovalContext.Item("Draft", "the agent's block", false, RenderedApprovalContext.SOURCE_AGENT, null, null);
+        memory.setHitlApprovalContext(RenderedApprovalContext.of(List.of(agentItem), false));
+
+        ConversationHitlService.addHeldMailContext(memory);
+
+        var items = memory.getHitlApprovalContext().getItems();
+        assertEquals(2, items.size(), "the designer's blocks stay");
+        assertEquals(EmailApprovalGate.HELD_MAIL_SOURCE, items.get(0).getSource());
+        String text = items.get(0).getText();
+        assertTrue(text.contains("Alice <alice@example.com> (authenticated)"), text);
+        assertTrue(text.contains("Subject: Refund order 7"), text);
+        assertTrue(text.contains("Attachments: receipt.pdf"), text);
+        assertTrue(text.contains("Please refund order 7."), text);
+        assertFalse(text.contains("abcdefghijklmnop"), "credential shapes are redacted: " + text);
+        assertEquals(RenderedApprovalContext.digestOf(items), memory.getHitlApprovalContext().getDigest());
+        assertFalse(memory.getHitlPauseReason() != null && memory.getHitlPauseReason().contains("Refund"),
+                "the pause reason, which the audit ledger keeps, has none of it");
+    }
+
+    @Test
+    @DisplayName("no held mail: a pause that is not the gate's pre-run pause, or a gate without the mail, adds nothing")
+    void noHeldMail() {
+        heldWithMail("x");
+        memory.getCurrentStep().removeData(EmailApprovalGate.PRE_RUN_MARKER);
+        ConversationHitlService.addHeldMailContext(memory);
+        assertNull(memory.getHitlApprovalContext());
+
+        memory = new ConversationMemory("conv4", "agent1", 1, "email:int1:alice@example.com");
+        memory.setOrigin(TurnOrigin.EMAIL);
+        memory.getCurrentStep().storeData(new Data<>("context:" + EmailApprovalGate.CONTEXT_KEY,
+                EmailApprovalGate.contextValue("everyTurn", List.of(), true, null, "held")));
+        memory.getCurrentStep().storeData(new Data<>(EmailApprovalGate.PRE_RUN_MARKER, Boolean.TRUE));
+        ConversationHitlService.addHeldMailContext(memory);
+        assertNull(memory.getHitlApprovalContext());
     }
 }

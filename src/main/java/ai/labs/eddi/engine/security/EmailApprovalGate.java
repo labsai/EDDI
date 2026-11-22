@@ -563,6 +563,50 @@ public final class EmailApprovalGate {
         }
     }
 
+    /** Label of the approval-context item that shows the approver a held mail. */
+    public static final String HELD_MAIL_LABEL = "Mail";
+    /** Source of that item ({@code RenderedApprovalContext.Item#getSource}). */
+    public static final String HELD_MAIL_SOURCE = "email";
+
+    /**
+     * The held mail as the approver reads it: sender, whether the sender was
+     * authenticated, subject, attachment names, then the start of the text. Data
+     * only — the values are never treated as a template.
+     *
+     * @return the text, or null when {@code mail} is null
+     */
+    public static String heldMailText(Map<String, Object> mail) {
+        if (mail == null) {
+            return null;
+        }
+        StringBuilder text = new StringBuilder();
+        Object fromName = mail.get("fromName");
+        Object from = mail.get("from");
+        text.append("From: ");
+        if (fromName != null && !String.valueOf(fromName).isBlank()) {
+            text.append(fromName).append(' ');
+        }
+        text.append('<').append(from == null ? "unknown" : from).append('>');
+        text.append(Boolean.TRUE.equals(mail.get("authenticated")) ? " (authenticated)" : " (not authenticated)").append('\n');
+        Object subject = mail.get("subject");
+        text.append("Subject: ").append(subject == null ? "" : subject).append('\n');
+        if (mail.get("attachments") instanceof List<?> attachments && !attachments.isEmpty()) {
+            text.append("Attachments: ");
+            for (int i = 0; i < attachments.size(); i++) {
+                text.append(i > 0 ? ", " : "").append(attachments.get(i));
+            }
+            text.append('\n');
+        }
+        Object excerpt = mail.get("excerpt");
+        if (excerpt != null && !String.valueOf(excerpt).isBlank()) {
+            text.append('\n').append(excerpt);
+            if (Boolean.TRUE.equals(mail.get("excerptTruncated"))) {
+                text.append("\n[…]");
+            }
+        }
+        return text.toString();
+    }
+
     /** The policies a gate can carry ({@code ChannelTarget.ApprovalPolicy}). */
     private static final Set<String> KNOWN_POLICIES = Set.of(POLICY_ACTIONS, "firstContact", POLICY_EVERY_TURN);
 }

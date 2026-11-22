@@ -46,6 +46,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -181,6 +182,60 @@ class EmailInboundProcessorApprovalGateTest {
         assertEquals(State.DONE, held.state());
         assertEquals("conv-1", held.conversationId());
         assertEquals(EmailApprovalNotes.AWAITING_START, held.lastError());
+        assertEquals(EmailApprovalNotes.AWAITING_START, held.approvalState(), "the hold has its own field");
+        assertNotNull(held.contentHash(), "the hold is bound to the mail's content");
+        assertEquals(64, held.contentHash().length());
+        assertNotNull(held.nextAttemptAt(), "the held-mail sweep looks at it after stranded-after");
+    }
+
+    @Test
+    @DisplayName("everyTurn: the approver is shown the held mail - sender, subject, attachments, the start of the text")
+    void heldMailIsShownToTheApprover() throws Exception {
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+        EmailTestMail mail = EmailTestMail.mail().subject("Refund order 7").body("Please refund order 7 to IBAN X.")
+                .attachment("receipt.pdf", "application/pdf", "%PDF-1.4");
+
+        processor.process(context(Map.of(), target(ApprovalPolicy.EVERY_TURN)), mail.polled(1), Instant.now());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> shown = (Map<String, Object>) gateOf(startContext()).get("mail");
+        assertNotNull(shown);
+        assertEquals("alice@supplier.com", shown.get("from"));
+        assertEquals("Refund order 7", shown.get("subject"));
+        assertEquals(List.of("receipt.pdf"), shown.get("attachments"));
+        assertTrue(String.valueOf(shown.get("excerpt")).contains("Please refund order 7"));
+        assertFalse(EmailInboundProcessor.preRunReason(target(ApprovalPolicy.EVERY_TURN), true).contains("Refund"),
+                "the pause reason, which the audit ledger keeps, stays without it");
+    }
+
+    @Test
+    @DisplayName("a mail that does not wait carries no copy of itself in the gate")
+    void noHeldMailWithoutPreRun() throws Exception {
+        processor.process(context(Map.of(), target(ApprovalPolicy.ACTIONS)), EmailTestMail.mail().polled(1), Instant.now());
+
+        assertNull(gateOf(inputs.get(0).getContext()).get("mail"));
+    }
+
+    /**
+     * One raw form of {@code mail}: its Date header is taken once, so two polls
+     * fetch the same bytes.
+     */
+    private final Map<EmailTestMail, byte[]> raws = new IdentityHashMap<>();
+
+    private byte[] rawOf(EmailTestMail mail) {
+        return raws.computeIfAbsent(mail, EmailTestMail::bytes);
+    }
+
+    private EmailTestMail.Polled polledOnce(EmailTestMail mail, long uid) {
+        return new EmailTestMail.Polled(uid, rawOf(mail), mail.messageId(), Instant.now(), false);
+    }
+
+    /** What EmailReplySender#settleHeldStart does on an approval. */
+    private void approve(EmailTestMail mail) {
+        Instant now = Instant.now();
+        String id = row(mail).id();
+        assertTrue(ledger.transitionApproval(id, EmailApprovalNotes.AWAITING_START, EmailApprovalNotes.START_APPROVED, null, now));
+        assertTrue(ledger.transition(id, State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now));
     }
 
     @Test
@@ -189,17 +244,58 @@ class EmailInboundProcessorApprovalGateTest {
         when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
         EmailTestMail mail = EmailTestMail.mail();
         IntegrationContext ctx = context(Map.of(), target(ApprovalPolicy.EVERY_TURN));
-        processor.process(ctx, mail.polled(1), Instant.now());
-        // What EmailReplySender does on the approval:
-        Instant now = Instant.now();
-        assertTrue(ledger.transition(row(mail).id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now));
+        processor.process(ctx, polledOnce(mail, 1), Instant.now());
+        approve(mail);
         when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.READY);
 
-        processor.process(ctx, mail.polled(1), Instant.now());
+        processor.process(ctx, polledOnce(mail, 1), Instant.now());
 
         verify(conversations, times(1)).startConversation(any(), anyString(), anyString(), any());
         assertEquals(1, inputs.size());
         assertEquals(false, gateOf(inputs.get(0).getContext()).get("preRun"), "one approval, one wait");
+    }
+
+    @Test
+    @DisplayName("an approved start binds the mail that was held: another mail with its Message-ID waits for approval again")
+    void approvalIsBoundToTheContent() throws Exception {
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+        EmailTestMail approved = EmailTestMail.mail().body("Please send the invoice copy.");
+        IntegrationContext ctx = context(Map.of(), target(ApprovalPolicy.EVERY_TURN));
+        processor.process(ctx, polledOnce(approved, 1), Instant.now());
+        approve(approved);
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+        // The re-fetch finds a different mail under the same Message-ID, from the same
+        // (claimed) sender.
+        EmailTestMail other = EmailTestMail.mail().messageId(approved.messageId()).body("Wire 10000 EUR to account X.");
+
+        processor.process(ctx, polledOnce(other, 1), Instant.now());
+
+        assertEquals(1, inputs.size());
+        assertEquals(true, gateOf(inputs.get(0).getContext()).get("preRun"), "the approval does not carry over to other content");
+        assertEquals("conv-1", row(approved).conversationId());
+    }
+
+    @Test
+    @DisplayName("an approval survives a deferral: the retry after conversation_busy runs without a second wait")
+    void approvalSurvivesDeferral() throws Exception {
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.AWAITING_HUMAN);
+        EmailTestMail mail = EmailTestMail.mail();
+        IntegrationContext ctx = context(Map.of(), target(ApprovalPolicy.EVERY_TURN));
+        processor.process(ctx, polledOnce(mail, 1), Instant.now());
+        approve(mail);
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.IN_PROGRESS);
+
+        assertEquals(Disposition.DEFERRED, processor.process(ctx, polledOnce(mail, 1), Instant.now()));
+        LedgerEntry deferred = row(mail);
+        assertEquals("conversation_busy", deferred.lastError(), "the deferral rewrote the note");
+        assertEquals(EmailApprovalNotes.START_APPROVED, deferred.approvalState(), "but not the approval");
+
+        when(conversations.getConversationState("conv-1")).thenReturn(ConversationState.READY);
+        Instant later = Instant.now().plus(Duration.ofMinutes(10));
+        processor.process(ctx, polledOnce(mail, 1), later);
+
+        assertEquals(1, inputs.size());
+        assertEquals(false, gateOf(inputs.get(0).getContext()).get("preRun"));
     }
 
     @Test

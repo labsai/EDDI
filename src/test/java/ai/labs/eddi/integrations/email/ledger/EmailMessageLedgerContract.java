@@ -42,7 +42,7 @@ interface EmailMessageLedgerContract {
     /** Every field a row may store — and no body, subject or MIME. */
     Set<String> ALLOWED_FIELDS = Set.of("id", "integrationid", "kind", "direction", "messageid", "conversationid", "sourceref",
             "idempotencykey", "recipient", "state", "attempts", "nextattemptat", "claimtoken", "providerid", "lasterror", "createdat",
-            "updatedat", "expiresat");
+            "updatedat", "expiresat", "approvalstate", "contenthash");
 
     IEmailMessageLedger ledger();
 
@@ -477,5 +477,41 @@ interface EmailMessageLedgerContract {
         assertEquals(State.FAILED, after.state());
         assertEquals("BOUNCED: 5.1.1", after.lastError());
         assertEquals("conv-9", after.conversationId());
+    }
+
+    @Test
+    @DisplayName("approval hold: its own fields, changed only conditionally, untouched by a transition, a deferral or a claim")
+    default void approvalHold() {
+        LedgerEntry row = inbound("int-1", "<held@example.com>", "alice@example.com", NOW);
+        ledger().insertIfAbsent(row);
+        String hash = "0123456789abcdef".repeat(4);
+
+        assertTrue(ledger().transitionApproval(row.id(), null, "email_gate:awaiting_start", hash, NOW));
+        assertFalse(ledger().transitionApproval(row.id(), null, "email_gate:awaiting_start", hash, NOW), "only from the expected state");
+        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.DONE, "conv-h", null, "email_gate:awaiting_start", false, NOW));
+
+        LedgerEntry held = ledger().findById(row.id()).orElseThrow();
+        assertEquals("email_gate:awaiting_start", held.approvalState());
+        assertEquals(hash, held.contentHash());
+        assertEquals(List.of(row.id()), ledger().findByApprovalState("email_gate:awaiting_start", NOW, 10).stream().map(LedgerEntry::id).toList(),
+                "a held row without a due time is found");
+
+        assertTrue(ledger().transitionApproval(row.id(), "email_gate:awaiting_start", "email_gate:start_approved", null, NOW));
+        assertTrue(ledger().transition(row.id(), State.DONE, State.RECEIVED, null, NOW, "email_gate:start_approved", false, NOW));
+        // A deferral and a claim rewrite lastError; the approval stays.
+        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.RECEIVED, null, NOW.plusSeconds(60), "conversation_busy", false, NOW));
+        assertTrue(ledger().transition(row.id(), State.RECEIVED, State.CLAIMED, null, NOW.plusSeconds(60), null, true, NOW));
+        LedgerEntry claimed = ledger().findById(row.id()).orElseThrow();
+        assertNull(claimed.lastError());
+        assertEquals("email_gate:start_approved", claimed.approvalState());
+        assertEquals(hash, claimed.contentHash(), "a null hash keeps the recorded one");
+        assertTrue(ledger().findByApprovalState("email_gate:awaiting_start", NOW, 10).isEmpty());
+
+        LedgerEntry later = inbound("int-1", "<later@example.com>", "alice@example.com", NOW);
+        ledger().insertIfAbsent(later);
+        ledger().transitionApproval(later.id(), null, "email_gate:awaiting_start", hash, NOW);
+        ledger().transition(later.id(), State.RECEIVED, State.DONE, "conv-l", NOW.plusSeconds(600), "email_gate:awaiting_start", false, NOW);
+        assertTrue(ledger().findByApprovalState("email_gate:awaiting_start", NOW, 10).isEmpty(), "not due before its next look");
+        assertEquals(1, ledger().findByApprovalState("email_gate:awaiting_start", NOW.plusSeconds(601), 10).size());
     }
 }

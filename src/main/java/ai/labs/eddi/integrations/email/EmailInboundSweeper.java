@@ -255,7 +255,72 @@ public class EmailInboundSweeper {
                 metrics.stranded(outcome);
             }
         }
+        // After the submitted rows: a node that died between recording a hold and
+        // closing its row left it TURN_SUBMITTED, and the loop above closes it first.
+        resolved += settleHeldStarts(now);
         return resolved;
+    }
+
+    /**
+     * Mails the email approval gate held before their conversation started
+     * ({@link EmailApprovalNotes#AWAITING_START}) whose pause is no longer pending:
+     * the resume observer settles them when the decision is made, but not when its
+     * node died, the start ended in an error or the pause was cancelled. Those are
+     * settled here from what the conversation shows
+     * ({@link EmailReplySender#settleHeldStart}); one still waiting is looked at
+     * again after {@code stranded-after}.
+     */
+    int settleHeldStarts(Instant now) {
+        if (replies == null) {
+            return 0;
+        }
+        int settled = 0;
+        for (LedgerEntry row : ledger.findByApprovalState(EmailApprovalNotes.AWAITING_START, now, BATCH)) {
+            if (row.state() != State.DONE) {
+                // Still submitted: the stranded-turn resolution closes it first.
+                continue;
+            }
+            try {
+                ConversationState state;
+                try {
+                    state = row.conversationId() == null ? null : conversationService.getConversationState(row.conversationId());
+                } catch (IConversationService.ConversationNotFoundException e) {
+                    state = null;
+                }
+                if (state == null) {
+                    if (replies.settleHeldStartGone(row, now)) {
+                        settled++;
+                        metrics.stranded("held_gone");
+                    }
+                    continue;
+                }
+                if (state == ConversationState.AWAITING_HUMAN || state == ConversationState.IN_PROGRESS) {
+                    ledger.transition(row.id(), row.state(), row.state(), null, now.plus(strandedAfter), row.lastError(), false, now);
+                    continue;
+                }
+                SimpleConversationMemorySnapshot snapshot = readFull(row.conversationId());
+                if (snapshot == null) {
+                    if (replies.settleHeldStartGone(row, now)) {
+                        settled++;
+                        metrics.stranded("held_gone");
+                    }
+                    continue;
+                }
+                var outcome = replies.settleHeldStart(row, snapshot, null, now);
+                if (outcome.outcome() != null) {
+                    settled++;
+                    metrics.stranded("held_settled");
+                    LOGGER.infof("Email integration %s: held mail %s settled by the sweep (%s)", sanitize(row.integrationId()), row.id(),
+                            outcome.outcome());
+                } else {
+                    ledger.transition(row.id(), row.state(), row.state(), null, now.plus(strandedAfter), row.lastError(), false, now);
+                }
+            } catch (RuntimeException e) {
+                // The store could not answer: try again next sweep.
+                LOGGER.debugf("Held mail %s could not be settled yet: %s", row.id(), e.getMessage());
+            }
+        }
+        return settled;
     }
 
     /**

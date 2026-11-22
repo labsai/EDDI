@@ -304,6 +304,14 @@ public class EmailReplySender {
      * approvers are staff, the sender is outside.
      */
     public Optional<LedgerEntry> onResumeCompleted(String conversationId, HitlVerdict verdict, Instant now) {
+        // The email approval gate held this mail before its new conversation started
+        // (email plan v3 §8.1): settled here in either mode — trigger mode too, which
+        // sends nothing but must still hand an approved mail back to the poll.
+        Optional<LedgerEntry> held = heldStartOf(conversationId);
+        if (held.isPresent()) {
+            SimpleConversationMemorySnapshot snapshot = readFull(conversationId);
+            return snapshot == null ? Optional.empty() : settleHeldStart(held.get(), snapshot, verdict, now).reply();
+        }
         Optional<Located> located = locate(conversationId);
         if (located.isEmpty()) {
             return Optional.empty();
@@ -313,17 +321,6 @@ public class EmailReplySender {
             return Optional.empty();
         }
         LedgerEntry inbound = located.get().inbound();
-        // The email approval gate held this mail before its new conversation started
-        // (email plan v3 §8.1). Approved: CONVERSATION_START has now run, and the mail
-        // itself goes back to the poll — its turn answers it, so nothing is sent here.
-        if (EmailApprovalNotes.AWAITING_START.equals(inbound.lastError()) && verdict == HitlVerdict.APPROVED
-                && snapshot.getConversationState() != ConversationState.ERROR) {
-            if (ledger.transition(inbound.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
-                LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", inbound.id(),
-                        sanitize(inbound.integrationId()));
-            }
-            return Optional.empty();
-        }
         if (rejectedBeforeRun(snapshot.getConversationOutputs(), inbound.messageId())) {
             ledger.transition(inbound.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.REJECTED, false, now);
         } else if (verdict == HitlVerdict.APPROVED && snapshot.getConversationState() != ConversationState.ERROR
@@ -336,6 +333,121 @@ public class EmailReplySender {
 
     /** The note the inbound processor closes a paused mail's row with. */
     static final String AWAITING_HUMAN_NOTE = "awaiting_human";
+
+    /** The latest mail of {@code conversationId} when the email gate holds it. */
+    private Optional<LedgerEntry> heldStartOf(String conversationId) {
+        if (conversationId == null) {
+            return Optional.empty();
+        }
+        try {
+            return ledger.findInboundTurn(conversationId, true).filter(row -> EmailApprovalNotes.AWAITING_START.equals(row.approvalState()));
+        } catch (RuntimeException e) {
+            LOGGER.debugf("Ledger rows of conversation %s could not be read: %s", sanitize(conversationId), e.getMessage());
+            return Optional.empty();
+        }
+    }
+
+    /**
+     * How a held start was settled ({@link #settleHeldStart}).
+     *
+     * @param outcome
+     *            the row's new {@code approvalState}, or null when nothing changed
+     *            (still waiting, or settled by someone else)
+     * @param reply
+     *            the notice queued to the sender, if any
+     */
+    public record HeldStartOutcome(String outcome, Optional<LedgerEntry> reply) {
+        static HeldStartOutcome unchanged() {
+            return new HeldStartOutcome(null, Optional.empty());
+        }
+    }
+
+    /**
+     * Settles a mail the email approval gate held before its conversation started
+     * ({@link EmailApprovalNotes#AWAITING_START}), from what its conversation shows
+     * — called by the resume observer and by the stranded sweep, which catches what
+     * the observer missed (a node that died, an event that never came). Once: the
+     * {@code approvalState} change is conditional, and only its winner acts.
+     * <ul>
+     * <li>still paused or running: nothing changes;</li>
+     * <li>approved, and the start did not fail:
+     * {@link EmailApprovalNotes#START_APPROVED}, the row back to {@code RECEIVED}
+     * for the next poll;</li>
+     * <li>rejected: {@link EmailApprovalNotes#REJECTED}, and in conversation mode
+     * the target's {@code rejectedReply};</li>
+     * <li>approved but the start ended in ERROR:
+     * {@link EmailApprovalNotes#START_FAILED};</li>
+     * <li>no verdict (the pause was cancelled):
+     * {@link EmailApprovalNotes#START_CANCELLED}.</li>
+     * </ul>
+     * The last three tell the sender, in conversation mode, as a resume would (the
+     * same reply key, so an observer and a sweep send it once).
+     *
+     * @param verdictHint
+     *            the verdict of the resume event, used only when the step records
+     *            none; may be null
+     */
+    public HeldStartOutcome settleHeldStart(LedgerEntry row, SimpleConversationMemorySnapshot snapshot, HitlVerdict verdictHint, Instant now) {
+        if (row == null || snapshot == null || !EmailApprovalNotes.AWAITING_START.equals(row.approvalState())) {
+            return HeldStartOutcome.unchanged();
+        }
+        ConversationState state = snapshot.getConversationState();
+        if (state == ConversationState.AWAITING_HUMAN || state == ConversationState.IN_PROGRESS) {
+            return HeldStartOutcome.unchanged();
+        }
+        var outputs = snapshot.getConversationOutputs();
+        int step = outputs == null ? -1 : EmailReplyThread.mailStep(outputs, row.messageId());
+        Object recorded = step >= 0 ? outputs.get(step).get(HITL_DECISION_OUTPUT) : null;
+        String verdict = recorded != null ? String.valueOf(recorded) : verdictHint != null ? verdictHint.name() : null;
+        String outcome;
+        if (HitlVerdict.REJECTED.name().equals(verdict) || outputs != null && rejectedBeforeRun(outputs, row.messageId())) {
+            outcome = EmailApprovalNotes.REJECTED;
+        } else if (state == ConversationState.ERROR) {
+            outcome = EmailApprovalNotes.START_FAILED;
+        } else if (HitlVerdict.APPROVED.name().equals(verdict)) {
+            outcome = EmailApprovalNotes.START_APPROVED;
+        } else {
+            outcome = EmailApprovalNotes.START_CANCELLED;
+        }
+        if (!ledger.transitionApproval(row.id(), EmailApprovalNotes.AWAITING_START, outcome, null, now)) {
+            return HeldStartOutcome.unchanged();
+        }
+        if (EmailApprovalNotes.START_APPROVED.equals(outcome)) {
+            // CONVERSATION_START has run; the mail itself goes back to the poll — its
+            // turn answers it, so nothing is sent here.
+            if (ledger.transition(row.id(), State.DONE, State.RECEIVED, null, now, EmailApprovalNotes.START_APPROVED, false, now)) {
+                LOGGER.infof("Mail %s was approved; its turn runs at the next poll of integration %s", row.id(), sanitize(row.integrationId()));
+            }
+            return new HeldStartOutcome(outcome, Optional.empty());
+        }
+        ledger.transition(row.id(), State.DONE, State.DONE, null, null, outcome, false, now);
+        LOGGER.infof("Mail %s held before its conversation started was settled: %s", row.id(), outcome);
+        Optional<EmailIntegration> integration = directory.find(row.integrationId());
+        if (integration.isEmpty() || !integration.get().settings().replies()) {
+            return new HeldStartOutcome(outcome, Optional.empty());
+        }
+        Located located = new Located(row, integration.get().settings());
+        return new HeldStartOutcome(outcome,
+                resumeRequest(located, snapshot, verdict == null ? "NONE" : verdict).flatMap(request -> enqueue(request, now)));
+    }
+
+    /**
+     * The conversation output a resume records its verdict in
+     * ({@code Conversation#resume}).
+     */
+    static final String HITL_DECISION_OUTPUT = "hitlDecision";
+
+    /**
+     * The conversation of a held start is gone: the row ends
+     * {@link EmailApprovalNotes#CONVERSATION_GONE}, nothing is sent.
+     */
+    public boolean settleHeldStartGone(LedgerEntry row, Instant now) {
+        if (row == null || !ledger.transitionApproval(row.id(), EmailApprovalNotes.AWAITING_START, EmailApprovalNotes.CONVERSATION_GONE, null, now)) {
+            return false;
+        }
+        ledger.transition(row.id(), State.DONE, State.DONE, null, null, EmailApprovalNotes.CONVERSATION_GONE, false, now);
+        return true;
+    }
 
     /**
      * Whether the mail's step is one the email approval gate's rejection answered

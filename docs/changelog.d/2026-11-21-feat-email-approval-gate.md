@@ -64,11 +64,66 @@ turn carried.
 ### What's next
 
 - §8.2 reply review on top of `emailControl`; read the expiry from `emailControl.review.expiry` then.
-- A mail whose retry after an approved start is deferred again (budget, busy) loses its `start_approved` note and waits
-  a second time.
 - Delegated conversations of a mail turn carry the taint but no target policy; the delegating call itself is gated.
-- The approved held start relies on the (best-effort, async) `HitlResumeCompletedEvent` observer to put the mail back;
-  a missed event leaves the row `email_gate:awaiting_start` with no reconciliation sweep yet.
-- A rejected held start leaves a `READY` conversation whose `CONVERSATION_START` never ran.
+  The same holds for a scheduled check-back with `conversationStrategy: new`: booking it is a gated tool call.
+- (The items about a lost `start_approved`, the missing reconciliation sweep and the `READY` conversation left by a
+  rejected start are fixed by the entry below.)
 - `AgentOpsToolsProvider.budgetProposalIsGated` still asks only the agent gate (stricter: the budget tools are then
   not offered).
+
+## 🔒 fix(email): the approval gate holds beyond the mail's own turn (2026-11-22)
+
+**Repo:** EDDI (`feat/email-approval-gate`) — findings of an independent review of the entry above.
+
+### What changed and why
+
+- **Later turns are gated too (HIGH).** The gate reached a turn only in the mail turn's context, so a
+  `CONTINUE_CONVERSATION` turn or a scheduled check-back of a mail conversation ran tainted but ungated. The gate a
+  mail turn carries is now recorded on the conversation — `IConversationMemory.getEmailApprovalGate`, snapshot field
+  `emailApprovalGate` next to `origin`, sticky, written by `Conversation.executeWorkflows` through
+  `EmailApprovalGate.record` — without the per-turn `preRun` flag or the held mail. `EmailApprovalGate.of` reads the
+  step's gate, else the recorded one; `preRunRequested` lets a new turn without a gate of its own inherit
+  `everyTurn`'s wait (not a rerun, not the start). `policy: "none"` is written explicitly now, so "no gate" differs
+  from "unknown": a tainted conversation the email channel started (a step carries `context:emailIntegration`) with
+  no recorded gate fails closed (`actions`, nothing read-only). Delegations and group members never carry that marker.
+- **The approval binds the mail, not its Message-ID.** The ledger row gets two columns, `approvalState` and
+  `contentHash` (SHA-256 of the raw mail), in both stores (`ADD COLUMN IF NOT EXISTS` on PostgreSQL), changed only by
+  the new conditional `IEmailMessageLedger.transitionApproval`. `transition()` leaves them alone, so a deferral, a
+  retry or a claim no longer erases an approval (it lived in `lastError` before). On re-fetch the poll asks
+  `MailboxSession.findByMessageId` for the candidate with that hash, then the one at the row's `sourceRef`; the IMAP
+  session reads every exact hit in the polled and the move folder. A mail that does not hash as the held one waits for
+  approval again.
+- **Held starts are always settled.** `EmailReplySender.settleHeldStart` decides a held start from its conversation
+  (the mail step's `hitlDecision`, then the state): approved → `START_APPROVED`, back to `RECEIVED`; rejected →
+  `REJECTED` and `rejectedReply`; approved but ERROR → `email_gate:start_failed`; no verdict →
+  `email_gate:start_cancelled`; gone → `email_gate:conversation_gone`. The resume observer calls it in either mode —
+  trigger mode never located a row before, so an approved start there was stranded. `EmailInboundSweeper` reconciles
+  `AWAITING_START` rows the observer missed (`findByApprovalState`), looking again every `stranded-after` while the
+  pause is pending.
+- **The approver sees the mail.** The held start's context carried the mail without its text or attachments, and the
+  simple snapshot does not show context. The gate's context value now carries a view of the held mail (sender,
+  authentication, subject, attachment names, the first 2,000 characters) and
+  `ConversationHitlService.addHeldMailContext` puts it, redacted, first into the pause's approval context — what the
+  Manager's Approvals page and banner, `get_approval_status` and Slack show. Never into the pause reason, which reaches
+  the audit ledger; `HitlEmailNotifier`'s approver mail still carries only the reason.
+- **Smaller ones.** A gate value that cannot be read fails closed (`EmailApprovalGate.parse`). A rejected held start
+  ends its conversation (marker `emailGate:preRun = "start"`), so the next mail starts a fresh one. Saving warns
+  `email.read-only-everything` for a `readOnlyTools` pattern that matches every tool (Manager toast, 11 locales).
+  `discover_tools` / `fetch_tool_response_page` are exempt only with source `builtin`. Rule-driven httpcall paths are
+  normalised by `HttpCallToolsProvider.normalizeEndpointPath`. `eddi.email.approval-gate.expiry` is a
+  `@ConfigProperty` on `ConversationService`. Operator prompt updated (revision bump).
+
+### Design decisions
+
+- The recorded gate is the latest mail's, not a merge: a target's policy can change between mails, and the newest
+  is what the admin set last.
+- On a content mismatch the mail is held again rather than refused: it is from the same (claimed) sender, and the
+  approver now sees what it says.
+- Legacy mail conversations (from before the gate was recorded) fail closed until their next mail records one.
+
+### Tests
+
+`EmailApprovalGateTest`, `ConversationEmailPreRunTest` (continuation and check-back), `EmailInboundProcessorApprovalGateTest`
+(content binding, deferral), `EmailReplySenderApprovalGateTest`, `EmailInboundSweeperTest`,
+`ConversationHitlServiceEmailGateTimeoutTest`, the ledger contract (`approvalHold`, MongoDB and PostgreSQL ITs), and
+`EmailApprovalGatePersistenceTest` (step context and the recorded gate through both stores).

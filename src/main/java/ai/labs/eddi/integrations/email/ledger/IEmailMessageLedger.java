@@ -15,7 +15,9 @@ import java.util.Optional;
  * MongoDB and PostgreSQL twins, selected by {@code eddi.datastore.type}.
  * <p>
  * <b>What a row is not:</b> a copy of the message. No body, subject or rendered
- * MIME is ever stored; a retry re-renders the message from its source (for a
+ * MIME is ever stored (an inbound row the email approval gate holds keeps a
+ * SHA-256 of the raw mail, {@link LedgerEntry#contentHash()}, which reveals
+ * nothing of it); a retry re-renders the message from its source (for a
  * notification, the pause it is about), so personal data lives in one place and
  * an erased conversation leaves nothing readable behind here. The one address a
  * row holds is its {@link LedgerEntry#recipient()} — the counterpart of the
@@ -194,10 +196,35 @@ public interface IEmailMessageLedger {
      *            when it last changed
      * @param expiresAt
      *            when retention removes it
+     * @param approvalState
+     *            inbound only: where the email approval gate's hold of the mail
+     *            stands ({@code EmailApprovalNotes}), or null. Its own field, so
+     *            that a deferral, a claim or a retry — which rewrite
+     *            {@code lastError} — never lose an approval; changed only by
+     *            {@link #transitionApproval}
+     * @param contentHash
+     *            inbound only: SHA-256 (hex) of the raw mail the gate held, so the
+     *            mail that runs after the approval is the mail that was approved;
+     *            or null
      */
     record LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId, String sourceRef,
             String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken, String providerId,
-            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt, String approvalState, String contentHash) {
+
+        /** A row without an approval hold. */
+        public LedgerEntry(String id, String integrationId, Kind kind, Direction direction, String messageId, String conversationId,
+                String sourceRef, String idempotencyKey, String recipient, State state, int attempts, Instant nextAttemptAt, String claimToken,
+                String providerId, String lastError, Instant createdAt, Instant updatedAt, Instant expiresAt) {
+            this(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state, attempts, nextAttemptAt,
+                    claimToken, providerId, lastError, createdAt, updatedAt, expiresAt, null, null);
+        }
+
+        /** This row with the approval hold of {@code other}. */
+        public LedgerEntry withApprovalOf(LedgerEntry other) {
+            return new LedgerEntry(id, integrationId, kind, direction, messageId, conversationId, sourceRef, idempotencyKey, recipient, state,
+                    attempts, nextAttemptAt, claimToken, providerId, lastError, createdAt, updatedAt, expiresAt,
+                    other == null ? null : other.approvalState(), other == null ? null : other.contentHash());
+        }
 
         public LedgerEntry {
             Objects.requireNonNull(id, "id");
@@ -310,6 +337,31 @@ public interface IEmailMessageLedger {
      * places; retention removes them.
      */
     List<LedgerEntry> findDueResubmissions(String integrationId, Instant now, int limit);
+
+    /**
+     * The most of {@link LedgerEntry#approvalState()} a store keeps (the PostgreSQL
+     * column width).
+     */
+    int MAX_APPROVAL_STATE = 64;
+
+    /**
+     * Sets a row's {@link LedgerEntry#approvalState()} to {@code to}, only if it is
+     * still {@code from} ({@code null}: none yet) — so the resume observer and the
+     * stranded sweep, which both settle a held mail, settle it once. Sets
+     * {@link LedgerEntry#contentHash()} too when {@code contentHash} is not null,
+     * and leaves state, {@code lastError} and {@code nextAttemptAt} alone.
+     *
+     * @return whether the row was changed
+     */
+    boolean transitionApproval(String id, String from, String to, String contentHash, Instant now);
+
+    /**
+     * Up to {@code limit} {@link Kind#TRIGGER} rows whose
+     * {@link LedgerEntry#approvalState()} is {@code approvalState} and whose
+     * {@code nextAttemptAt} is unset or at or before {@code now}, oldest first —
+     * the held mails the stranded sweep reconciles with their conversation.
+     */
+    List<LedgerEntry> findByApprovalState(String approvalState, Instant now, int limit);
 
     /**
      * How many {@link Kind#TRIGGER} rows of {@code integrationId} from

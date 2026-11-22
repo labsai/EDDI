@@ -5,6 +5,8 @@
 package ai.labs.eddi.integrations.email;
 
 import ai.labs.eddi.configs.channels.model.ChannelIntegrationConfiguration;
+import ai.labs.eddi.configs.channels.model.ChannelTarget;
+import ai.labs.eddi.engine.hitl.tools.ToolApprovalPatterns;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.connections.ConnectionException;
 import ai.labs.eddi.connections.ConnectionResolver;
@@ -148,6 +150,37 @@ public class EmailChannelSupport {
         }
     }
 
+    /**
+     * A tool name no configuration uses: a pattern that matches it matches every
+     * bare tool name, and every call carries one among its addresses.
+     */
+    static final String ANY_TOOL_PROBE = "eddi-probe-any-tool-7f3c";
+
+    /**
+     * Names of the gated targets whose {@code readOnlyTools} hold a pattern that
+     * matches every tool — {@code *} and the like — which leaves the gate nothing
+     * to gate.
+     */
+    static List<String> targetsWithEverythingReadOnly(List<ChannelTarget> targets) {
+        List<String> names = new ArrayList<>();
+        if (targets == null) {
+            return names;
+        }
+        for (ChannelTarget target : targets) {
+            if (target == null || target.getType() == ChannelTarget.TargetType.GROUP || !target.effectiveApprovalPolicy().gatesTools()
+                    || target.getReadOnlyTools() == null) {
+                continue;
+            }
+            for (String pattern : target.getReadOnlyTools()) {
+                if (pattern != null && ToolApprovalPatterns.matches(pattern.trim(), ANY_TOOL_PROBE)) {
+                    names.add(target.getName());
+                    break;
+                }
+            }
+        }
+        return names;
+    }
+
     /** Stable warning codes for a saved email integration (never a refusal). */
     public List<String> warnings(ChannelIntegrationConfiguration configuration) {
         EmailChannelSettings settings = EmailChannelSettings.from(configuration.getPlatformConfig());
@@ -168,6 +201,13 @@ public class EmailChannelSupport {
         List<String> noPolicy = toolsInspector.targetsActingWithoutApprovalPolicy(configuration.getTargets());
         if (!noPolicy.isEmpty()) {
             warnings.add(EmailChannelSettings.WARNING_APPROVAL_POLICY_NONE);
+        }
+        List<String> everything = targetsWithEverythingReadOnly(configuration.getTargets());
+        if (!everything.isEmpty()) {
+            warnings.add(EmailChannelSettings.WARNING_READ_ONLY_EVERYTHING);
+            LOGGER.warnf("Email integration '%s': target(s) %s have an approvalPolicy, but a readOnlyTools pattern matches every tool, so no tool "
+                    + "call of a mail turn waits for approval. Name the read-only tools instead.", sanitize(configuration.getName()),
+                    sanitize(String.join(", ", everything)));
         }
         List<String> ruleCalls = toolsInspector.targetsWithRefusedRuleCalls(configuration.getTargets());
         if (!ruleCalls.isEmpty()) {

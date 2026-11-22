@@ -92,9 +92,17 @@ class EmailReplySenderApprovalGateTest {
 
     private void storeInbound(String note) {
         LedgerEntry base = EmailReplyTestSupport.inbound(State.DONE);
+        // A held start has its approval state as well as the note.
+        String approval = EmailApprovalNotes.AWAITING_START.equals(note) ? note : null;
         ledger.put(new LedgerEntry(base.id(), base.integrationId(), base.kind(), base.direction(), base.messageId(), base.conversationId(),
                 base.sourceRef(), base.idempotencyKey(), base.recipient(), base.state(), base.attempts(), null, null, null, note, base.createdAt(),
-                base.updatedAt(), base.expiresAt()));
+                base.updatedAt(), base.expiresAt(), approval, approval == null ? null : "ab".repeat(32)));
+    }
+
+    private static ConversationOutput decidedStep(String text, HitlVerdict verdict) {
+        ConversationOutput step = output(text, mail());
+        step.put("hitlDecision", verdict.name());
+        return step;
     }
 
     private LedgerEntry stored() {
@@ -122,7 +130,109 @@ class EmailReplySenderApprovalGateTest {
 
         assertEquals(State.RECEIVED, stored().state());
         assertEquals(EmailApprovalNotes.START_APPROVED, stored().lastError());
+        assertEquals(EmailApprovalNotes.START_APPROVED, stored().approvalState());
+        assertEquals("ab".repeat(32), stored().contentHash(), "the hash stays to bind the re-fetch");
         assertTrue(transport.recipients.isEmpty(), "the mail's own turn answers it");
+    }
+
+    @Test
+    @DisplayName("trigger mode: an approved held start still goes back to the poll (no reply is ever sent)")
+    void approvedStartInTriggerMode() throws Exception {
+        var configuration = new ChannelIntegrationConfiguration();
+        configuration.setName("Orders");
+        configuration.setChannelType("email");
+        Map<String, String> trigger = new HashMap<>(conversationConfig(Map.of()));
+        trigger.put("mode", "trigger");
+        configuration.setPlatformConfig(trigger);
+        EmailIntegrationDirectory directory = mock(EmailIntegrationDirectory.class);
+        when(directory.find(INTEGRATION))
+                .thenReturn(Optional.of(new EmailIntegration(INTEGRATION, configuration, EmailChannelSettings.from(trigger))));
+        sender = new EmailReplySender(ledger, new InMemoryEmailSuppressionStore(), directory, conversations, transport,
+                new EmailReplyComposer(new TemplatingEngine(Engine.builder().addDefaults().strictRendering(false).build())),
+                mock(EmailOwnerNotifier.class), mock(Instance.class), mock(GdprPseudonymizer.class), new SimpleMeterRegistry(), Runnable::run,
+                Duration.ofDays(30), 3, Duration.ofMinutes(1));
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        conversation(ConversationState.READY, decidedStep("Hello.", HitlVerdict.APPROVED));
+
+        sender.onResumeCompleted(CONVERSATION, HitlVerdict.APPROVED, NOW);
+
+        assertEquals(State.RECEIVED, stored().state());
+        assertEquals(EmailApprovalNotes.START_APPROVED, stored().approvalState());
+    }
+
+    @Test
+    @DisplayName("settled once: a second settle of the same hold (observer and sweep) changes nothing")
+    void settledOnce() throws Exception {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        conversation(ConversationState.READY, decidedStep("Hello.", HitlVerdict.APPROVED));
+        LedgerEntry held = stored();
+        var snapshot = conversations.readConversation(CONVERSATION, true, false, List.of());
+
+        assertEquals(EmailApprovalNotes.START_APPROVED, sender.settleHeldStart(held, snapshot, null, NOW).outcome());
+        assertNull(sender.settleHeldStart(held, snapshot, null, NOW).outcome(), "the approval state is no longer AWAITING_START");
+    }
+
+    @Test
+    @DisplayName("still paused: nothing changes")
+    void stillPausedUnchanged() throws Exception {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        conversation(ConversationState.AWAITING_HUMAN, output("", mail()));
+
+        assertNull(sender.settleHeldStart(stored(), conversations.readConversation(CONVERSATION, true, false, List.of()), null, NOW).outcome());
+        assertEquals(EmailApprovalNotes.AWAITING_START, stored().approvalState());
+    }
+
+    @Test
+    @DisplayName("approved, but CONVERSATION_START ended in ERROR: start_failed, and the sender is told")
+    void approvedButFailed() throws Exception {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        conversation(ConversationState.ERROR, decidedStep("", HitlVerdict.APPROVED));
+
+        var outcome = sender.settleHeldStart(stored(), conversations.readConversation(CONVERSATION, true, false, List.of()), null, NOW);
+
+        assertEquals(EmailApprovalNotes.START_FAILED, outcome.outcome());
+        assertEquals(State.DONE, stored().state());
+        assertEquals(EmailApprovalNotes.START_FAILED, stored().lastError());
+        assertTrue(outcome.reply().isPresent(), "the sender, who got the pause notice, hears it failed");
+    }
+
+    @Test
+    @DisplayName("no verdict (the pause was cancelled): start_cancelled")
+    void cancelled() throws Exception {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        conversation(ConversationState.ENDED, output("", mail()));
+
+        var outcome = sender.settleHeldStart(stored(), conversations.readConversation(CONVERSATION, true, false, List.of()), null, NOW);
+
+        assertEquals(EmailApprovalNotes.START_CANCELLED, outcome.outcome());
+        assertEquals(EmailApprovalNotes.START_CANCELLED, stored().lastError());
+        assertEquals(State.DONE, stored().state());
+    }
+
+    @Test
+    @DisplayName("rejected and its conversation ended: rejected, read from the step before the state")
+    void rejectedEnded() throws Exception {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+        ConversationOutput step = rejectedStep("No.");
+        step.put("hitlDecision", HitlVerdict.REJECTED.name());
+        conversation(ConversationState.ENDED, step);
+
+        var outcome = sender.settleHeldStart(stored(), conversations.readConversation(CONVERSATION, true, false, List.of()), null, NOW);
+
+        assertEquals(EmailApprovalNotes.REJECTED, outcome.outcome());
+        assertTrue(outcome.reply().isPresent());
+    }
+
+    @Test
+    @DisplayName("the conversation is gone: conversation_gone, nothing sent")
+    void gone() {
+        storeInbound(EmailApprovalNotes.AWAITING_START);
+
+        assertTrue(sender.settleHeldStartGone(stored(), NOW));
+        assertEquals(EmailApprovalNotes.CONVERSATION_GONE, stored().approvalState());
+        assertEquals(State.DONE, stored().state());
+        assertFalse(sender.settleHeldStartGone(stored(), NOW), "once");
+        assertTrue(transport.recipients.isEmpty());
     }
 
     @Test

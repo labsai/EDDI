@@ -10,6 +10,7 @@ import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -54,7 +55,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         for (LedgerEntry r : due) {
             LedgerEntry next = new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                     r.idempotencyKey(), r.recipient(), r.state(), r.attempts() + 1, leaseUntil, UUID.randomUUID().toString(), r.providerId(),
-                    r.lastError(), r.createdAt(), now, r.expiresAt());
+                    r.lastError(), r.createdAt(), now, r.expiresAt()).withApprovalOf(r);
             rows.put(r.id(), next);
             claimed.add(next);
         }
@@ -69,7 +70,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), terminal, r.attempts(), r.nextAttemptAt(), null, providerId, lastError, r.createdAt(), now,
-                r.expiresAt()));
+                r.expiresAt()).withApprovalOf(r));
         return true;
     }
 
@@ -81,7 +82,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), nextAttemptAt, null, r.providerId(), lastError, r.createdAt(), now,
-                r.expiresAt()));
+                r.expiresAt()).withApprovalOf(r));
         return true;
     }
 
@@ -123,7 +124,8 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         }
         rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(),
                 conversationId != null ? conversationId : r.conversationId(), r.sourceRef(), r.idempotencyKey(), r.recipient(), to,
-                r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt()));
+                r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt())
+                .withApprovalOf(r));
         return true;
     }
 
@@ -140,6 +142,26 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
                 .filter(r -> r.integrationId().equals(integrationId) && r.state() == State.RECEIVED && r.kind() == Kind.TRIGGER
                         && r.conversationId() != null && r.nextAttemptAt() != null && !r.nextAttemptAt().isAfter(now))
                 .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt)).limit(limit).toList();
+    }
+
+    @Override
+    public synchronized boolean transitionApproval(String id, String from, String to, String contentHash, Instant now) {
+        LedgerEntry r = rows.get(id);
+        if (r == null || !Objects.equals(r.approvalState(), from)) {
+            return false;
+        }
+        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+                r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), r.nextAttemptAt(), r.claimToken(), r.providerId(), r.lastError(),
+                r.createdAt(), now, r.expiresAt(), to, contentHash != null ? contentHash : r.contentHash()));
+        return true;
+    }
+
+    @Override
+    public synchronized List<LedgerEntry> findByApprovalState(String approvalState, Instant now, int limit) {
+        return rows.values().stream()
+                .filter(r -> approvalState.equals(r.approvalState()) && r.kind() == Kind.TRIGGER
+                        && (r.nextAttemptAt() == null || !r.nextAttemptAt().isAfter(now)))
+                .sorted(Comparator.comparing(LedgerEntry::nextAttemptAt, Comparator.nullsFirst(Comparator.naturalOrder()))).limit(limit).toList();
     }
 
     @Override

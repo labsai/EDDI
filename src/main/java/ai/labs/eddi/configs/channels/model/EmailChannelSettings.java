@@ -646,6 +646,12 @@ public record EmailChannelSettings(
      */
     public static final String WARNING_RULE_CALLS_REFUSED = "email.rule-calls-refused";
     /**
+     * A target with an approval policy names a {@code readOnlyTools} pattern that
+     * matches every tool ({@code *}): its mail turns' tool calls never wait, so the
+     * gate does nothing for tools (email plan v3 §8.1).
+     */
+    public static final String WARNING_READ_ONLY_EVERYTHING = "email.read-only-everything";
+    /**
      * An allowlist entry admits far more than one organisation: a whole public
      * suffix ({@code *@*.co.uk}, {@code *@github.io}), or the integration's own
      * domain, whose senders an outsider can often impersonate where the domain's

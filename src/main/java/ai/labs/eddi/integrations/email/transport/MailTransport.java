@@ -7,7 +7,10 @@ package ai.labs.eddi.integrations.email.transport;
 import ai.labs.eddi.configs.channels.model.EmailChannelSettings;
 import ai.labs.eddi.engine.mail.MailSendException;
 
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
+import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
 
@@ -85,6 +88,21 @@ public interface MailTransport {
             return Optional.empty();
         }
 
+        /**
+         * As {@link #findByMessageId(String, EmailChannelSettings, long)}, choosing
+         * among several messages that carry the id: the one whose raw bytes hash to
+         * {@code expectedSha256} (the mail an approver let through, see
+         * {@code EmailApprovalNotes}), else the one at {@code preferredSourceRef}
+         * (where it was first seen), else the first. A Message-ID is not a secret, so a
+         * second mail can carry it; only the hash says which one was approved. Both
+         * preferences may be null.
+         */
+        default Optional<FoundMessage> findByMessageId(String messageId, EmailChannelSettings settings, long maxBytes, String preferredSourceRef,
+                                                       String expectedSha256)
+                throws MailboxException {
+            return findByMessageId(messageId, settings, maxBytes);
+        }
+
         @Override
         void close();
     }
@@ -121,6 +139,41 @@ public interface MailTransport {
         @Override
         public String toString() {
             return "FoundMessage[" + raw.length + " bytes, " + sourceRef + "]";
+        }
+
+        /** SHA-256 (hex) of {@link #raw()}. */
+        public String sha256() {
+            try {
+                return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(raw));
+            } catch (NoSuchAlgorithmException e) {
+                throw new IllegalStateException("SHA-256 is not available", e);
+            }
+        }
+
+        /**
+         * Of the messages found under one Message-ID: the one hashing to
+         * {@code expectedSha256}, else the one at {@code preferredSourceRef}, else the
+         * first; empty for none.
+         */
+        public static Optional<FoundMessage> choose(List<FoundMessage> candidates, String preferredSourceRef, String expectedSha256) {
+            if (candidates == null || candidates.isEmpty()) {
+                return Optional.empty();
+            }
+            if (expectedSha256 != null) {
+                for (FoundMessage candidate : candidates) {
+                    if (expectedSha256.equalsIgnoreCase(candidate.sha256())) {
+                        return Optional.of(candidate);
+                    }
+                }
+            }
+            if (preferredSourceRef != null) {
+                for (FoundMessage candidate : candidates) {
+                    if (preferredSourceRef.equals(candidate.sourceRef())) {
+                        return Optional.of(candidate);
+                    }
+                }
+            }
+            return Optional.of(candidates.get(0));
         }
     }
 

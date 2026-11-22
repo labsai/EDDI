@@ -1438,6 +1438,8 @@ public class McpAdminTools {
                         + "run its tools under the agent's own toolApprovals only; consider approvalPolicy actions";
                 case "email.rule-calls-refused" -> trimmed + ": a target with an approvalPolicy has rule-driven httpcalls or mcpcalls; "
                         + "a mail turn refuses them unless readOnlyTools names them";
+                case "email.read-only-everything" -> trimmed + ": a readOnlyTools pattern of a target with an approvalPolicy matches every "
+                        + "tool (such as *), so no tool call of a mail turn waits for approval; name the read-only tools instead";
                 default -> trimmed;
             });
         }

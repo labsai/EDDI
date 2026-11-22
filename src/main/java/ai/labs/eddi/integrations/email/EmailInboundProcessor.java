@@ -416,11 +416,20 @@ public class EmailInboundProcessor {
         ChannelTarget.ApprovalPolicy approvalPolicy = target.getType() == ChannelTarget.TargetType.GROUP
                 ? ChannelTarget.ApprovalPolicy.NONE
                 : target.effectiveApprovalPolicy();
-        boolean preRun = !EmailApprovalNotes.START_APPROVED.equals(row.lastError())
-                && (approvalPolicy == ChannelTarget.ApprovalPolicy.EVERY_TURN
-                        || approvalPolicy == ChannelTarget.ApprovalPolicy.FIRST_CONTACT && isFirstContact(id, sender, authenticated, target, row));
+        // The approval binds the mail that was held, not its Message-ID (which any mail
+        // can carry): only a mail hashing as the held one did runs without a second
+        // hold. Kept in its own field, so a deferral or a retry in between keeps it.
+        String rawHash = sha256Hex(raw);
+        boolean startApproved = EmailApprovalNotes.START_APPROVED.equals(row.approvalState());
+        boolean approvedMail = startApproved && rawHash.equalsIgnoreCase(String.valueOf(row.contentHash()));
+        if (startApproved && !approvedMail) {
+            LOGGER.warnf("Email integration %s: mail %s carries the Message-ID of a mail an approver let through, but not its content; it "
+                    + "waits for approval again", sanitize(id), row.id());
+        }
+        boolean preRun = !approvedMail && (approvalPolicy == ChannelTarget.ApprovalPolicy.EVERY_TURN
+                || approvalPolicy == ChannelTarget.ApprovalPolicy.FIRST_CONTACT && isFirstContact(id, sender, authenticated, target, row));
         Context approvalGate = EmailApprovalGate.contextValue(approvalPolicy.json(), target.getReadOnlyTools(), preRun,
-                rejectedReply(target, settings), preRunReason(target, authenticated));
+                rejectedReply(target, settings), preRunReason(target, authenticated), preRun ? heldMailView(parsed) : null);
 
         // 10. The claim. Nothing has left EDDI yet: a claim whose node dies is given
         // back and the (unmarked) mail processed again.
@@ -464,7 +473,7 @@ public class EmailInboundProcessor {
                 conversationId = startConversation(target.getTargetId(), userId, id, intent, approvalGate,
                         preRun ? mailData(parsed, List.of(), false) : null);
                 if (preRun && stateOf(conversationId) == ConversationState.AWAITING_HUMAN) {
-                    return heldBeforeStart(ctx, row, conversationId, now);
+                    return heldBeforeStart(ctx, row, conversationId, rawHash, now);
                 }
             } else {
                 costBefore = conversationCost(conversationId);
@@ -616,6 +625,41 @@ public class EmailInboundProcessor {
         return known;
     }
 
+    /** The most of a held mail's text the approver is shown. */
+    static final int HELD_MAIL_EXCERPT_CHARS = 2000;
+    /** The most attachment names the approver is shown. */
+    static final int HELD_MAIL_MAX_ATTACHMENTS = 20;
+
+    /**
+     * What the approver of a held mail is shown of it (email plan v3 §8.1): sender,
+     * subject, whether the sender was authenticated, the attachment names and the
+     * start of the text. It travels in the gate's context value
+     * ({@code EmailApprovalGate}) and lands in the pause's approval context, which
+     * every approval surface shows — never in the pause reason, which reaches the
+     * write-once audit ledger.
+     */
+    static Map<String, Object> heldMailView(InboundMail mail) {
+        Map<String, Object> view = new LinkedHashMap<>();
+        view.put("from", mail.fromAddress());
+        view.put("fromName", mail.fromName());
+        view.put("subject", mail.subject());
+        view.put("authenticated", mail.authentication() != null && mail.authentication().isAuthenticated());
+        List<String> attachments = new ArrayList<>();
+        for (var attachment : mail.attachments()) {
+            if (attachments.size() >= HELD_MAIL_MAX_ATTACHMENTS) {
+                break;
+            }
+            attachments.add(attachment.filename() == null ? "(unnamed)" : attachment.filename());
+        }
+        view.put("attachments", attachments);
+        String text = mail.text() == null ? "" : mail.text();
+        boolean cut = text.length() > HELD_MAIL_EXCERPT_CHARS;
+        int end = cut && Character.isHighSurrogate(text.charAt(HELD_MAIL_EXCERPT_CHARS - 1)) ? HELD_MAIL_EXCERPT_CHARS - 1 : HELD_MAIL_EXCERPT_CHARS;
+        view.put("excerpt", cut ? text.substring(0, end) : text);
+        view.put("excerptTruncated", cut);
+        return view;
+    }
+
     /** What a rejected mail is answered with in conversation mode by default. */
     static final String DEFAULT_REJECTED_REPLY = "Your request was not approved.";
 
@@ -630,8 +674,16 @@ public class EmailInboundProcessor {
      * approval puts it back for the next poll ({@code EmailReplySender}); the
      * sender gets the pause notice now, in conversation mode.
      */
-    private Disposition heldBeforeStart(IntegrationContext ctx, LedgerEntry row, String conversationId, Instant now) {
-        ledger.transition(row.id(), State.TURN_SUBMITTED, State.DONE, conversationId, null, EmailApprovalNotes.AWAITING_START, false, now);
+    private Disposition heldBeforeStart(IntegrationContext ctx, LedgerEntry row, String conversationId, String rawHash, Instant now) {
+        // The hold first, then the close: a node that dies in between leaves a
+        // submitted row the stranded sweep closes, still held, and the held-mail sweep
+        // then settles it. nextAttemptAt is when that sweep looks at it first.
+        String approvalNow = ledger.findById(row.id()).map(LedgerEntry::approvalState).orElse(row.approvalState());
+        if (!ledger.transitionApproval(row.id(), approvalNow, EmailApprovalNotes.AWAITING_START, rawHash, now)) {
+            LOGGER.warnf("Email integration %s: the hold of mail %s could not be recorded", sanitize(ctx.integrationId()), row.id());
+        }
+        ledger.transition(row.id(), State.TURN_SUBMITTED, State.DONE, conversationId, now.plus(strandedAfter), EmailApprovalNotes.AWAITING_START,
+                false, now);
         count(ctx, EmailMetrics.PROCESSED);
         LOGGER.infof("Email integration %s: mail %s waits for approval before conversation %s starts", sanitize(ctx.integrationId()), row.id(),
                 sanitize(conversationId));
@@ -672,7 +724,8 @@ public class EmailInboundProcessor {
         for (LedgerEntry earlier : rows) {
             if (!integrationId.equals(earlier.integrationId()) || earlier.kind() != Kind.TRIGGER || earlier.direction() != Direction.IN
                     || earlier.state() != State.DONE || earlier.id().equals(current.id()) || earlier.conversationId() == null
-                    || earlier.lastError() != null && EmailApprovalNotes.NOT_A_CONTACT.contains(earlier.lastError())) {
+                    || earlier.lastError() != null && EmailApprovalNotes.NOT_A_CONTACT.contains(earlier.lastError())
+                    || EmailApprovalNotes.AWAITING_START.equals(earlier.approvalState())) {
                 continue;
             }
             if (++lookups > MAX_FIRST_CONTACT_LOOKUPS) {
@@ -709,7 +762,7 @@ public class EmailInboundProcessor {
      */
     static String preRunReason(ChannelTarget target, boolean authenticated) {
         String text = "A mail to target '" + target.getName() + "' from " + (authenticated ? "an authenticated" : "an unauthenticated")
-                + " sender waits for approval before the agent runs. Open the conversation to read it.";
+                + " sender waits for approval before the agent runs. The approval shows the mail.";
         return text.length() > 500 ? text.substring(0, 497) + "..." : text;
     }
 

@@ -290,4 +290,76 @@ class EmailInboundSweeperTest {
         verify(replies, never()).ensureFor(any(), any(), any(), any());
         assertEquals(State.DONE, ledger.findById("answered").orElseThrow().state());
     }
+
+    /** A mail the email approval gate held before its conversation started. */
+    private LedgerEntry held(String id, String conversationId, Instant due) {
+        var row = new LedgerEntry(id, "int-1", Kind.TRIGGER, Direction.IN, "<" + id + "@x.com>", conversationId, "imap:INBOX:1:1", "in:" + id,
+                "a@x.com", State.DONE, 1, due, null, null, EmailApprovalNotes.AWAITING_START, now, now, now.plus(Duration.ofDays(30)),
+                EmailApprovalNotes.AWAITING_START, "ab".repeat(32));
+        ledger.put(row);
+        return row;
+    }
+
+    @Test
+    @DisplayName("held starts: a decided pause the observer missed is settled from its conversation")
+    void settlesDecidedHeldStart() throws Exception {
+        held("decided", "c-decided", now.minusSeconds(1));
+        when(conversations.getConversationState("c-decided")).thenReturn(ConversationState.READY);
+        var snapshot = conversation("<decided@x.com>");
+        when(conversations.readConversation("c-decided", true, false, List.of())).thenReturn(snapshot);
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.settleHeldStart(any(), any(), any(), any()))
+                .thenReturn(new EmailReplySender.HeldStartOutcome(EmailApprovalNotes.START_APPROVED, Optional.empty()));
+        sweeper.replies = replies;
+
+        assertEquals(1, sweeper.resolveStranded(now), "the sweep runs the held-start settlement");
+
+        verify(replies).settleHeldStart(any(), eq(snapshot), eq(null), eq(now));
+    }
+
+    @Test
+    @DisplayName("held starts: one still waiting for its approver is looked at again after stranded-after")
+    void waitingHeldStartIsDeferred() {
+        held("waiting", "c-waiting", now.minusSeconds(1));
+        when(conversations.getConversationState("c-waiting")).thenReturn(ConversationState.AWAITING_HUMAN);
+        EmailReplySender replies = mock(EmailReplySender.class);
+        sweeper.replies = replies;
+
+        assertEquals(0, sweeper.settleHeldStarts(now));
+
+        verify(replies, never()).settleHeldStart(any(), any(), any(), any());
+        LedgerEntry after = ledger.findById("waiting").orElseThrow();
+        assertEquals(now.plus(Duration.ofMinutes(30)), after.nextAttemptAt());
+        assertEquals(EmailApprovalNotes.AWAITING_START, after.approvalState());
+        assertTrue(sweeper.settleHeldStarts(now) == 0 && ledger.findByApprovalState(EmailApprovalNotes.AWAITING_START, now, 10).isEmpty(),
+                "not due again until then");
+    }
+
+    @Test
+    @DisplayName("held starts: a conversation that is gone ends the hold")
+    void goneHeldStart() throws Exception {
+        held("gone", "c-gone", now.minusSeconds(1));
+        when(conversations.getConversationState("c-gone")).thenThrow(new IConversationService.ConversationNotFoundException("gone"));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.settleHeldStartGone(any(), any())).thenReturn(true);
+        sweeper.replies = replies;
+
+        assertEquals(1, sweeper.settleHeldStarts(now));
+
+        verify(replies).settleHeldStartGone(any(), eq(now));
+    }
+
+    @Test
+    @DisplayName("held starts: a row the stranded sweep closed without a due time is found too")
+    void heldWithoutDueTime() throws Exception {
+        held("closed", "c-closed", null);
+        when(conversations.getConversationState("c-closed")).thenReturn(ConversationState.ERROR);
+        when(conversations.readConversation("c-closed", true, false, List.of())).thenReturn(conversation("<closed@x.com>"));
+        EmailReplySender replies = mock(EmailReplySender.class);
+        when(replies.settleHeldStart(any(), any(), any(), any()))
+                .thenReturn(new EmailReplySender.HeldStartOutcome(EmailApprovalNotes.START_FAILED, Optional.empty()));
+        sweeper.replies = replies;
+
+        assertEquals(1, sweeper.settleHeldStarts(now));
+    }
 }

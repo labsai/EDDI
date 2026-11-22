@@ -473,7 +473,9 @@ everything the one before it does.
   without the email gate — but **never one the agent's own `toolApprovals` gate**: `readOnlyTools` cannot un-gate
   anything. EDDI cannot tell what changes something; list only tools that do not. Two built-in loop helpers that only
   read what the turn already has are never held by the email gate: `discover_tools` (LAZY tool loading) and
-  `fetch_tool_response_page`. The reply tool of an answer-tool agent is not a tool call either. Every other call
+  `fetch_tool_response_page` — the built-in ones only (source `builtin`); a tool of another source with the same name is
+  gated like any other. A pattern that matches every tool (`*`) turns the gate off for tools: saving warns
+  `email.read-only-everything`. The reply tool of an answer-tool agent is not a tool call either. Every other call
   counts — the conversation-recall and memory tools included (sources `recall:*` and `memory:*`) — so name them if they
   should run freely.
 - **Timeout:** a pause the email gate caused is rejected automatically after `eddi.email.approval-gate.expiry`
@@ -482,12 +484,22 @@ everything the one before it does.
 - **Rule-driven calls are refused.** `httpcalls` (`ApiCallsTask`), `mcpcalls` (`McpCallsTask`) and an LLM task's
   `httpCallRag` run from behavior rules, with no tool loop to pause in, so on a target with a policy a mail turn
   **refuses** them unless `readOnlyTools` names them — an httpcall as `http.<method>:<path>`, `http:<name>` or its
-  name, an mcpcall as `mcp:<tool>`, its tool or its call name. The refusal is recorded on the step
+  name, an mcpcall as `mcp:<tool>`, its tool or its call name. The path is normalised exactly as the HTTP tools'
+  endpoints are (a leading slash added, an absolute URL reduced to its path), so one pattern means the same endpoint
+  for a rule-driven call and a tool call. The refusal is recorded on the step
   (`httpCalls:emailGateRefused`, or the mcpcall's `…Error` entry). Saving warns `email.rule-calls-refused` when such a
   target's workflow has `httpcalls` or `mcpcalls` steps.
 - **Refused** on GROUP targets (a group turn rejects tool approvals automatically, so the gate could not pause
   anything — gate the member agents instead) and on non-email integrations: `400`.
 - Saving warns `email.approval-policy-none` for a target on `none` whose agent has tools or rule-driven calls.
+- **Later turns of the conversation.** The gate reaches a turn in the reserved context key `emailApproval`, which
+  every mail turn carries — `policy: "none"` included. It is also **recorded on the conversation** (snapshot field
+  `emailApprovalGate`, next to `origin`; the latest mail's gate wins), so a turn of that conversation that no mail
+  started — a [self-continuation](long-jobs.md), a scheduled check-back on the same conversation, a HITL resume — is
+  gated exactly as the mail's turn was; under `everyTurn` such a new turn waits before it runs too (a rerun does not).
+  A tainted conversation that the email channel started but that has no recorded gate (one from before the gate was
+  recorded) **fails closed**: every tool call waits and rule-driven calls are refused, as under `actions` with no
+  `readOnlyTools`. A gate value that cannot be read fails closed the same way.
 
 ### Waiting before the agent runs
 
@@ -497,14 +509,30 @@ before its pipeline. It is an ordinary rule pause, so everything that handles ap
 
 - approvers get the [notification](hitl.md#email-notifications), the Manager's **Approvals** page lists it, and MCP
   `list_pending_approvals` / `resume_conversation` decide it. The pause reason names the target and whether the sender
-  was authenticated, never the address or the subject; the mail itself is on the paused step (its input and
-  `context.mail`);
+  was authenticated, never the address or the subject — it reaches the write-once audit ledger and the sender's own
+  notice. **What the approver reads is the pause's approval context**, which every approval surface shows (the
+  Manager's Approvals page and approval banner, `get_approval_status`, Slack): its first item, `Mail`, holds the
+  sender and whether they were authenticated, the subject, the attachment names and the first 2,000 characters of the
+  text, with credential shapes redacted;
 - in conversation mode an authenticated sender gets the [in-thread notice](#approvals-in-the-thread);
 - **approved** (with or without a note): the whole turn runs, from its first task. An edited answer has nothing to
   replace and is ignored. For a new conversation the approval runs `CONVERSATION_START`, then puts the mail back: the
-  next poll fetches it again by its Message-ID and runs it in that conversation, without asking a second time;
+  next poll fetches it again and runs it in that conversation, without asking a second time. **The approval binds the
+  mail that was held, not its Message-ID**, which any mail can carry: the ledger row keeps a SHA-256 of the raw mail
+  (`contentHash`), the poll fetches the candidate with that hash first (then the one where the mail was first seen),
+  and a mail that does not hash the same waits for approval again. The approval has its own ledger field
+  (`approvalState`), so a deferral or a retry before the turn runs keeps it;
 - **rejected** (or timed out): nothing of the turn runs. In conversation mode the sender gets the target's
-  `rejectedReply` — default "Your request was not approved." — and in trigger mode, which never replies, nothing.
+  `rejectedReply` — default "Your request was not approved." — and in trigger mode, which never replies, nothing. A
+  rejected **start** also ends the new conversation: its `CONVERSATION_START` never ran, so a later mail of the thread
+  starts a fresh one instead of continuing it.
+
+A held start is settled when its pause is decided, in either mode. The stranded sweep (`EmailInboundSweeper`) settles
+what that missed — a node that died, a start that ended in an error, a pause that was cancelled: from the conversation,
+approved → back to the poll; rejected → `email_gate:rejected` (and `rejectedReply`); approved but the start failed →
+`email_gate:start_failed`; no verdict → `email_gate:start_cancelled`; the conversation gone →
+`email_gate:conversation_gone`. In conversation mode the sender, who got the pause notice, hears the outcome. A hold
+still waiting for its approver is looked at again every `eddi.email.inbound.stranded-after`.
 
 **First contact** means: no earlier mail from that address to this integration whose turn ran to an answer in a
 conversation of this target's agent. Mail that was rejected, skipped, failed or is still waiting does not count. An
