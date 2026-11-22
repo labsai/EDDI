@@ -286,22 +286,30 @@ public final class SmimeCertificateCheck {
         if (key instanceof ECPrivateKey ec && publicKey instanceof ECPublicKey ecPublic) {
             // The public point cannot be read off an EC private key through the JCA, so a
             // probe signature settles it.
-            return ec.getParams().getCurve().equals(ecPublic.getParams().getCurve()) && signsFor(key, publicKey, "SHA256withECDSA");
+            return ec.getParams().getCurve().equals(ecPublic.getParams().getCurve()) && signsFor(key, publicKey, false);
         }
         if (key.getAlgorithm().equals(publicKey.getAlgorithm())) {
-            return signsFor(key, publicKey, "RSA".equals(key.getAlgorithm()) ? "SHA256withRSA" : "SHA256withECDSA");
+            return signsFor(key, publicKey, "RSA".equals(key.getAlgorithm()));
         }
         return false;
     }
 
-    private static boolean signsFor(PrivateKey key, PublicKey publicKey, String algorithm) {
+    /**
+     * The probe signature for the key family; a literal per branch keeps the
+     * algorithm inventory checkable.
+     */
+    private static Signature newProbeSignature(boolean rsa) throws GeneralSecurityException {
+        return rsa ? Signature.getInstance("SHA256withRSA") : Signature.getInstance("SHA256withECDSA");
+    }
+
+    private static boolean signsFor(PrivateKey key, PublicKey publicKey, boolean rsa) {
         try {
             byte[] probe = "eddi-smime-key-probe".getBytes(StandardCharsets.US_ASCII);
-            Signature signer = Signature.getInstance(algorithm);
+            Signature signer = newProbeSignature(rsa);
             signer.initSign(key);
             signer.update(probe);
             byte[] signature = signer.sign();
-            Signature verifier = Signature.getInstance(algorithm);
+            Signature verifier = newProbeSignature(rsa);
             verifier.initVerify(publicKey);
             verifier.update(probe);
             return verifier.verify(signature);

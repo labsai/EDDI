@@ -68,7 +68,7 @@ class CryptoInventoryTest {
             "SecretKeyFactory", Set.of("PBKDF2WithHmacSHA256"),
             "Mac", Set.of("HmacSHA256"),
             "MessageDigest", Set.of("SHA-256"),
-            "Signature", Set.of("Ed25519", "SHA256withRSA"),
+            "Signature", Set.of("Ed25519", "SHA256withECDSA", "SHA256withRSA"),
             "KeyFactory", Set.of("Ed25519", "RSA"),
             "KeyPairGenerator", Set.of("Ed25519"),
             "SSLContext", Set.of("TLS"));
