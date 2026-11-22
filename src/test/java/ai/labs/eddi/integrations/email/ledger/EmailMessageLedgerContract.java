@@ -7,6 +7,8 @@ package ai.labs.eddi.integrations.email.ledger;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Direction;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.Kind;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.LedgerEntry;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.RecipientRole;
+import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.ReplyRecipient;
 import ai.labs.eddi.integrations.email.ledger.IEmailMessageLedger.State;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
@@ -497,6 +499,91 @@ interface EmailMessageLedgerContract {
         assertEquals(1, ledger().countByConversationSince("conv-9", Kind.REPLY, NOW.minus(Duration.ofHours(1))));
         assertEquals(0, ledger().countByConversationSince("conv-9", Kind.NOTIFY, NOW.minus(Duration.ofHours(1))));
         assertEquals(sent.id(), ledger().findByMessage("int-1", Direction.OUT, sent.messageId()).orElseThrow().id(), "the thread index");
+    }
+
+    static List<ReplyRecipient> recipientsOf(LedgerEntry row, String to, String... cc) {
+        List<ReplyRecipient> recipients = new ArrayList<>();
+        recipients.add(new ReplyRecipient(row.id(), row.integrationId(), row.conversationId(), to, RecipientRole.TO, row.createdAt(),
+                row.expiresAt()));
+        for (String address : cc) {
+            recipients.add(new ReplyRecipient(row.id(), row.integrationId(), row.conversationId(), address, RecipientRole.CC, row.createdAt(),
+                    row.expiresAt()));
+        }
+        return recipients;
+    }
+
+    @Test
+    @DisplayName("reply recipients (email v2 plan §9.5): To first, written once per address, narrowed by removal")
+    default void replyRecipients() {
+        LedgerEntry sent = reply("int-1", "conv-7", "reply:r1", "alice@example.com", State.SENT, NOW);
+        ledger().insertIfAbsent(sent);
+        ledger().addReplyRecipients(recipientsOf(sent, "alice@example.com", "bob@example.com", "carol@example.com"));
+        ledger().addReplyRecipients(recipientsOf(sent, "alice@example.com", "bob@example.com"));
+
+        List<ReplyRecipient> stored = ledger().findReplyRecipients(sent.id());
+        assertEquals(List.of("alice@example.com", "bob@example.com", "carol@example.com"), stored.stream().map(ReplyRecipient::address).toList(),
+                "written once each, To first");
+        assertEquals(RecipientRole.TO, stored.get(0).role());
+        assertEquals(RecipientRole.CC, stored.get(1).role());
+        assertEquals("conv-7", stored.get(1).conversationId());
+
+        assertEquals(1, ledger().removeReplyRecipients(sent.id(), List.of("carol@example.com", "nobody@example.com")));
+        assertEquals(List.of("alice@example.com", "bob@example.com"),
+                ledger().findReplyRecipients(sent.id()).stream().map(ReplyRecipient::address).toList());
+        assertTrue(ledger().findReplyRecipients("no-such-row").isEmpty());
+    }
+
+    @Test
+    @DisplayName("participants: a Cc of a SENT reply is one; of an unsent reply, or a Cc an attempt dropped, is not")
+    default void ccParticipants() {
+        LedgerEntry sent = reply("int-1", "conv-8", "reply:p1", "alice@example.com", State.SENT, NOW);
+        LedgerEntry pending = reply("int-1", "conv-8", "reply:p2", "alice@example.com", State.PENDING, NOW);
+        LedgerEntry other = reply("int-1", "conv-other", "reply:p3", "alice@example.com", State.SENT, NOW);
+        ledger().insertIfAbsent(sent);
+        ledger().insertIfAbsent(pending);
+        ledger().insertIfAbsent(other);
+        ledger().addReplyRecipients(recipientsOf(sent, "alice@example.com", "bob@example.com", "dave@example.com"));
+        ledger().addReplyRecipients(recipientsOf(pending, "alice@example.com", "carol@example.com"));
+        ledger().addReplyRecipients(recipientsOf(other, "alice@example.com", "erin@example.com"));
+
+        assertTrue(ledger().hasSentReply("conv-8", "alice@example.com"), "the To");
+        assertTrue(ledger().hasSentReply("conv-8", "bob@example.com"), "a Cc of a sent reply");
+        assertFalse(ledger().hasSentReply("conv-8", "carol@example.com"), "a Cc of a reply that was never sent");
+        assertFalse(ledger().hasSentReply("conv-8", "erin@example.com"), "a Cc of another conversation's reply");
+        ledger().removeReplyRecipients(sent.id(), List.of("dave@example.com"));
+        assertFalse(ledger().hasSentReply("conv-8", "dave@example.com"), "a Cc the attempt dropped never received it");
+    }
+
+    @Test
+    @DisplayName("GDPR: recipients are found by address; erasing an address removes its entries and the children of its rows")
+    default void recipientErasure() {
+        LedgerEntry toAlice = reply("int-1", "conv-5", "reply:g1", "alice@example.com", State.SENT, NOW);
+        LedgerEntry toBob = reply("int-1", "conv-6", "reply:g2", "bob@example.com", State.SENT, NOW);
+        ledger().insertIfAbsent(toAlice);
+        ledger().insertIfAbsent(toBob);
+        ledger().addReplyRecipients(recipientsOf(toAlice, "alice@example.com", "carol@example.com"));
+        ledger().addReplyRecipients(recipientsOf(toBob, "bob@example.com", "alice@example.com", "carol@example.com"));
+
+        assertEquals(2, ledger().findReplyRecipientsByAddress("alice@example.com").size(), "To of one, Cc of the other");
+        assertEquals(1, ledger().deleteByRecipient("alice@example.com"), "her own row");
+        assertTrue(ledger().findReplyRecipientsByAddress("alice@example.com").isEmpty(), "her Cc entry on bob's reply too");
+        assertTrue(ledger().findReplyRecipients(toAlice.id()).isEmpty(), "the children of her row");
+        assertEquals(List.of("bob@example.com", "carol@example.com"),
+                ledger().findReplyRecipients(toBob.id()).stream().map(ReplyRecipient::address).toList(), "bob's reply keeps its other recipients");
+        assertFalse(ledger().hasSentReply("conv-6", "alice@example.com"));
+    }
+
+    @Test
+    @DisplayName("retention removes reply recipients with their rows")
+    default void recipientRetention() {
+        LedgerEntry old = new LedgerEntry(UUID.randomUUID().toString(), "int-1", Kind.REPLY, Direction.OUT, "<eddi.old@contoso.com>", "conv-4",
+                "row|reply|0", "reply:old", "alice@example.com", State.SENT, 1, null, null, null, null, NOW.minus(Duration.ofDays(31)),
+                NOW.minus(Duration.ofDays(31)), NOW.minus(Duration.ofSeconds(1)));
+        ledger().insertIfAbsent(old);
+        ledger().addReplyRecipients(recipientsOf(old, "alice@example.com", "bob@example.com"));
+        ledger().deleteExpired(NOW);
+        assertTrue(ledger().findReplyRecipients(old.id()).isEmpty());
+        assertTrue(ledger().findReplyRecipientsByAddress("bob@example.com").isEmpty());
     }
 
     @Test

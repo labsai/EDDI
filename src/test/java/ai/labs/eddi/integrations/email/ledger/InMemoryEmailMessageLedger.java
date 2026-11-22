@@ -6,6 +6,7 @@ package ai.labs.eddi.integrations.email.ledger;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,6 +23,18 @@ import java.util.UUID;
 public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
 
     private final Map<String, LedgerEntry> rows = new LinkedHashMap<>();
+    private final Map<String, ReplyRecipient> recipients = new LinkedHashMap<>();
+
+    /**
+     * Writes a row the way the stores do: the free-text fields capped at their
+     * column width.
+     */
+    private void store(LedgerEntry r) {
+        rows.put(r.id(), new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+                r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), r.nextAttemptAt(), r.claimToken(),
+                IEmailMessageLedger.cap(r.providerId(), MAX_PROVIDER_ID), IEmailMessageLedger.cap(r.lastError(), MAX_LAST_ERROR), r.createdAt(),
+                r.updatedAt(), r.expiresAt(), r.threadKey()));
+    }
 
     @Override
     public synchronized boolean insertIfAbsent(LedgerEntry entry) {
@@ -31,7 +44,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
                 return false;
             }
         }
-        rows.put(entry.id(), entry);
+        store(entry);
         return true;
     }
 
@@ -55,7 +68,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
             LedgerEntry next = new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                     r.idempotencyKey(), r.recipient(), r.state(), r.attempts() + 1, leaseUntil, UUID.randomUUID().toString(), r.providerId(),
                     r.lastError(), r.createdAt(), now, r.expiresAt(), r.threadKey());
-            rows.put(r.id(), next);
+            store(next);
             claimed.add(next);
         }
         return claimed;
@@ -67,7 +80,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         if (r == null || r.state() != State.PENDING || claimToken == null || !claimToken.equals(r.claimToken())) {
             return false;
         }
-        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+        store(new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), terminal, r.attempts(), r.nextAttemptAt(), null, providerId, lastError, r.createdAt(), now,
                 r.expiresAt(), r.threadKey()));
         return true;
@@ -79,7 +92,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         if (r == null || r.state() != State.PENDING || claimToken == null || !claimToken.equals(r.claimToken())) {
             return false;
         }
-        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
+        store(new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(), r.conversationId(), r.sourceRef(),
                 r.idempotencyKey(), r.recipient(), r.state(), r.attempts(), nextAttemptAt, null, r.providerId(), lastError, r.createdAt(), now,
                 r.expiresAt(), r.threadKey()));
         return true;
@@ -98,6 +111,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public synchronized long deleteExpired(Instant now) {
+        recipients.values().removeIf(r -> !r.expiresAt().isAfter(now));
         int before = rows.size();
         rows.values().removeIf(r -> !r.expiresAt().isAfter(now));
         return before - rows.size();
@@ -121,7 +135,7 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
         if (r == null || r.state() != from) {
             return false;
         }
-        rows.put(id, new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(),
+        store(new LedgerEntry(r.id(), r.integrationId(), r.kind(), r.direction(), r.messageId(),
                 conversationId != null ? conversationId : r.conversationId(), r.sourceRef(), r.idempotencyKey(), r.recipient(), to,
                 r.attempts() + (countAttempt ? 1 : 0), nextAttemptAt, r.claimToken(), r.providerId(), lastError, r.createdAt(), now, r.expiresAt(),
                 r.threadKey()));
@@ -162,8 +176,36 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public synchronized boolean hasSentReply(String conversationId, String recipient) {
-        return rows.values().stream().anyMatch(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY
-                && r.direction() == Direction.OUT && r.state() == State.SENT && recipient.equals(r.recipient()));
+        return rows.values().stream()
+                .anyMatch(r -> conversationId.equals(r.conversationId()) && r.kind() == Kind.REPLY && r.direction() == Direction.OUT
+                        && r.state() == State.SENT && (recipient.equals(r.recipient()) || recipients.values().stream()
+                                .anyMatch(c -> c.rowId().equals(r.id()) && c.role() == RecipientRole.CC && recipient.equals(c.address()))));
+    }
+
+    @Override
+    public synchronized void addReplyRecipients(List<ReplyRecipient> entries) {
+        for (ReplyRecipient entry : entries) {
+            recipients.putIfAbsent(entry.rowId() + "\n" + entry.address(), entry);
+        }
+    }
+
+    @Override
+    public synchronized List<ReplyRecipient> findReplyRecipients(String rowId) {
+        List<ReplyRecipient> found = new ArrayList<>(recipients.values().stream().filter(r -> r.rowId().equals(rowId)).toList());
+        found.sort(Comparator.comparing(r -> r.role() == RecipientRole.CC));
+        return found;
+    }
+
+    @Override
+    public synchronized long removeReplyRecipients(String rowId, Collection<String> addresses) {
+        int before = recipients.size();
+        recipients.values().removeIf(r -> r.rowId().equals(rowId) && addresses.contains(r.address()));
+        return before - recipients.size();
+    }
+
+    @Override
+    public synchronized List<ReplyRecipient> findReplyRecipientsByAddress(String address) {
+        return recipients.values().stream().filter(r -> address.equals(r.address())).toList();
     }
 
     @Override
@@ -195,6 +237,8 @@ public class InMemoryEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public synchronized long deleteByRecipient(String recipient) {
+        List<String> rowIds = rows.values().stream().filter(r -> recipient.equals(r.recipient())).map(LedgerEntry::id).toList();
+        recipients.values().removeIf(r -> recipient.equals(r.address()) || rowIds.contains(r.rowId()));
         int before = rows.size();
         rows.values().removeIf(r -> recipient.equals(r.recipient()));
         return before - rows.size();

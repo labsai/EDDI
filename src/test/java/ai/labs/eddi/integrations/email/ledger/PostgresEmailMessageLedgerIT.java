@@ -35,7 +35,7 @@ class PostgresEmailMessageLedgerIT extends PostgresTestBase implements EmailMess
 
     @Override
     public void clear() throws Exception {
-        truncateTables(dataSource, PostgresEmailMessageLedger.TABLE);
+        truncateTables(dataSource, PostgresEmailMessageLedger.TABLE, PostgresEmailMessageLedger.RECIPIENTS_TABLE);
     }
 
     @Override

@@ -30,6 +30,7 @@ class MongoEmailMessageLedgerIT extends MongoTestBase implements EmailMessageLed
     @Override
     public void clear() {
         getDatabase().getCollection(MongoEmailMessageLedger.COLLECTION).deleteMany(new Document());
+        getDatabase().getCollection(MongoEmailMessageLedger.RECIPIENTS_COLLECTION).deleteMany(new Document());
     }
 
     @Override

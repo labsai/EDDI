@@ -4,6 +4,7 @@
  */
 package ai.labs.eddi.integrations.email.ledger;
 
+import com.mongodb.MongoBulkWriteException;
 import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
@@ -11,6 +12,7 @@ import com.mongodb.client.model.FindOneAndUpdateOptions;
 import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.model.Indexes;
+import com.mongodb.client.model.InsertManyOptions;
 import com.mongodb.client.model.ReturnDocument;
 import com.mongodb.client.model.Sorts;
 import com.mongodb.client.model.Updates;
@@ -22,6 +24,8 @@ import org.bson.conversions.Bson;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.Date;
 import java.util.List;
 import java.util.Optional;
@@ -38,6 +42,9 @@ import java.util.concurrent.TimeUnit;
  * and due: the first sweeper's update moves {@code nextAttemptAt} past
  * {@code now}, so the second one's filter no longer matches. A TTL index on
  * {@code expiresAt} backs up the explicit retention sweep.
+ * <p>
+ * Reply recipients live in {@value #RECIPIENTS_COLLECTION}, one document per
+ * {@code (row, address)} (that pair is its {@code _id}), with the same TTL.
  */
 @ApplicationScoped
 @DefaultBean
@@ -67,7 +74,14 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
     static final String F_EXPIRES = "expiresAt";
     static final String F_THREAD = "threadKey";
 
+    static final String RECIPIENTS_COLLECTION = "email_reply_recipients";
+    static final String R_ROW = "rowId";
+    static final String R_ADDRESS = "address";
+    static final String R_ROLE = "role";
+    static final String R_POSITION = "position";
+
     private final MongoCollection<Document> rows;
+    private final MongoCollection<Document> recipients;
 
     @Inject
     public MongoEmailMessageLedger(MongoDatabase database) {
@@ -88,6 +102,13 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
         rows.createIndex(Indexes.compoundIndex(Indexes.ascending(F_INTEGRATION), Indexes.ascending(F_THREAD), Indexes.ascending(F_KIND),
                 Indexes.ascending(F_CREATED)), new IndexOptions().name("idx_email_ledger_thread"));
         rows.createIndex(Indexes.ascending(F_EXPIRES), new IndexOptions().name("idx_email_ledger_ttl").expireAfter(0L, TimeUnit.SECONDS));
+        this.recipients = database.getCollection(RECIPIENTS_COLLECTION);
+        recipients.createIndex(Indexes.ascending(R_ROW), new IndexOptions().name("idx_email_reply_recipients_row"));
+        recipients.createIndex(Indexes.compoundIndex(Indexes.ascending(F_CONVERSATION), Indexes.ascending(R_ADDRESS)),
+                new IndexOptions().name("idx_email_reply_recipients_conversation"));
+        recipients.createIndex(Indexes.ascending(R_ADDRESS), new IndexOptions().name("idx_email_reply_recipients_address"));
+        recipients.createIndex(Indexes.ascending(F_EXPIRES),
+                new IndexOptions().name("idx_email_reply_recipients_ttl").expireAfter(0L, TimeUnit.SECONDS));
     }
 
     @Override
@@ -167,6 +188,7 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public long deleteExpired(Instant now) {
+        recipients.deleteMany(Filters.lte(F_EXPIRES, Date.from(now)));
         return rows.deleteMany(Filters.lte(F_EXPIRES, Date.from(now))).getDeletedCount();
     }
 
@@ -238,9 +260,76 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public boolean hasSentReply(String conversationId, String recipient) {
-        return rows.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
-                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()), Filters.eq(F_RECIPIENT, recipient)))
-                .first() != null;
+        Bson sentReply = Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(F_KIND, Kind.REPLY.name()),
+                Filters.eq(F_DIRECTION, Direction.OUT.name()), Filters.eq(F_STATE, State.SENT.name()));
+        if (rows.find(Filters.and(sentReply, Filters.eq(F_RECIPIENT, recipient))).first() != null) {
+            return true;
+        }
+        List<String> rowIds = new ArrayList<>();
+        for (Document copied : recipients.find(Filters.and(Filters.eq(F_CONVERSATION, conversationId), Filters.eq(R_ADDRESS, recipient),
+                Filters.eq(R_ROLE, RecipientRole.CC.name()))).limit(MAX_RECIPIENT_ROWS_CHECKED)) {
+            rowIds.add(copied.getString(R_ROW));
+        }
+        return !rowIds.isEmpty() && rows.find(Filters.and(sentReply, Filters.in(F_ID, rowIds))).first() != null;
+    }
+
+    /** Reply rows one participant check reads at most. */
+    static final int MAX_RECIPIENT_ROWS_CHECKED = 500;
+
+    @Override
+    public void addReplyRecipients(List<ReplyRecipient> entries) {
+        if (entries == null || entries.isEmpty()) {
+            return;
+        }
+        List<Document> documents = new ArrayList<>();
+        for (int i = 0; i < entries.size(); i++) {
+            ReplyRecipient entry = entries.get(i);
+            documents.add(new Document(F_ID, entry.rowId() + "\n" + entry.address()).append(R_ROW, entry.rowId())
+                    .append(F_INTEGRATION, entry.integrationId()).append(F_CONVERSATION, entry.conversationId()).append(R_ADDRESS, entry.address())
+                    .append(R_ROLE, entry.role().name()).append(R_POSITION, i).append(F_CREATED, Date.from(entry.createdAt()))
+                    .append(F_EXPIRES, Date.from(entry.expiresAt())));
+        }
+        try {
+            recipients.insertMany(documents, new InsertManyOptions().ordered(false));
+        } catch (MongoBulkWriteException e) {
+            // A recipient already recorded (a retried enqueue) is kept once; anything
+            // else is a real failure.
+            if (e.getWriteErrors().stream().anyMatch(error -> error.getCode() != DUPLICATE_KEY_ERROR_CODE)) {
+                throw e;
+            }
+        }
+    }
+
+    @Override
+    public List<ReplyRecipient> findReplyRecipients(String rowId) {
+        List<Document> found = new ArrayList<>();
+        recipients.find(Filters.eq(R_ROW, rowId)).into(found);
+        found.sort(Comparator.comparing((Document d) -> RecipientRole.CC.name().equals(d.getString(R_ROLE)))
+                .thenComparing(d -> d.getInteger(R_POSITION, 0)));
+        return found.stream().map(MongoEmailMessageLedger::toRecipient).toList();
+    }
+
+    @Override
+    public long removeReplyRecipients(String rowId, Collection<String> addresses) {
+        if (addresses == null || addresses.isEmpty()) {
+            return 0;
+        }
+        return recipients.deleteMany(Filters.and(Filters.eq(R_ROW, rowId), Filters.in(R_ADDRESS, addresses))).getDeletedCount();
+    }
+
+    @Override
+    public List<ReplyRecipient> findReplyRecipientsByAddress(String address) {
+        List<ReplyRecipient> result = new ArrayList<>();
+        for (Document document : recipients.find(Filters.eq(R_ADDRESS, address))) {
+            result.add(toRecipient(document));
+        }
+        return result;
+    }
+
+    private static ReplyRecipient toRecipient(Document document) {
+        return new ReplyRecipient(document.getString(R_ROW), document.getString(F_INTEGRATION), document.getString(F_CONVERSATION),
+                document.getString(R_ADDRESS), RecipientRole.valueOf(document.getString(R_ROLE)), instant(document.getDate(F_CREATED)),
+                instant(document.getDate(F_EXPIRES)));
     }
 
     @Override
@@ -269,6 +358,14 @@ public class MongoEmailMessageLedger implements IEmailMessageLedger {
 
     @Override
     public long deleteByRecipient(String recipient) {
+        List<String> rowIds = new ArrayList<>();
+        for (Document document : rows.find(Filters.eq(F_RECIPIENT, recipient)).projection(new Document(F_ID, 1))) {
+            rowIds.add(document.getString(F_ID));
+        }
+        if (!rowIds.isEmpty()) {
+            recipients.deleteMany(Filters.in(R_ROW, rowIds));
+        }
+        recipients.deleteMany(Filters.eq(R_ADDRESS, recipient));
         return rows.deleteMany(Filters.eq(F_RECIPIENT, recipient)).getDeletedCount();
     }
 

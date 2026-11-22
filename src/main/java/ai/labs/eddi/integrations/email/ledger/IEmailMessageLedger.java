@@ -5,6 +5,7 @@
 package ai.labs.eddi.integrations.email.ledger;
 
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
@@ -52,6 +53,15 @@ import java.util.Optional;
  * {@code In-Reply-To}/{@code References}, so the row is also the thread index
  * ({@link #findByMessage} with {@link Direction#OUT}). Relay webhooks will add
  * single-use replay tokens.
+ * <p>
+ * <b>Reply recipients.</b> A reply that copies the thread
+ * ({@code replyAudience: thread}, email v2 plan §9.5) has more than one
+ * address. The row's own {@link LedgerEntry#recipient()} stays its {@code To};
+ * every recipient, the {@code To} included, is also a {@link ReplyRecipient} —
+ * the child store {@code email_reply_recipients} — written when the reply is
+ * queued and narrowed when an attempt drops a {@code Cc}. It is what
+ * {@link #hasSentReply} reads (a {@code Cc} of a reply that was sent is a
+ * participant of its thread) and what GDPR export and erasure reach by address.
  */
 public interface IEmailMessageLedger {
 
@@ -88,6 +98,47 @@ public interface IEmailMessageLedger {
     /** In or out. */
     enum Direction {
         IN, OUT
+    }
+
+    /** How an address received a reply. */
+    enum RecipientRole {
+        TO, CC
+    }
+
+    /**
+     * One recipient of a reply row (email v2 plan §9.5).
+     *
+     * @param rowId
+     *            the reply's ledger row
+     * @param integrationId
+     *            its integration
+     * @param conversationId
+     *            its conversation, or null
+     * @param address
+     *            the normalised address
+     * @param role
+     *            {@code To} or {@code Cc}
+     * @param createdAt
+     *            when it was written
+     * @param expiresAt
+     *            when retention removes it (the row's own)
+     */
+    record ReplyRecipient(String rowId, String integrationId, String conversationId, String address, RecipientRole role, Instant createdAt,
+            Instant expiresAt) {
+        public ReplyRecipient {
+            Objects.requireNonNull(rowId, "rowId");
+            Objects.requireNonNull(integrationId, "integrationId");
+            Objects.requireNonNull(address, "address");
+            Objects.requireNonNull(role, "role");
+            Objects.requireNonNull(createdAt, "createdAt");
+            Objects.requireNonNull(expiresAt, "expiresAt");
+        }
+
+        /** No address: recipients reach log lines. */
+        @Override
+        public String toString() {
+            return "ReplyRecipient[row=" + rowId + ", " + role + "]";
+        }
     }
 
     /** What a message is for. */
@@ -282,7 +333,10 @@ public interface IEmailMessageLedger {
     /** Rows not yet terminal, store-wide (the pending gauge). */
     long countPending();
 
-    /** Removes rows whose retention ended at or before {@code now}. */
+    /**
+     * Removes rows — and reply recipients — whose retention ended at or before
+     * {@code now}.
+     */
     long deleteExpired(Instant now);
 
     /** The row of one message, by the inbound dedup key. */
@@ -344,11 +398,37 @@ public interface IEmailMessageLedger {
     Optional<LedgerEntry> findInboundTurn(String conversationId, boolean latest);
 
     /**
-     * Whether a {@link Kind#REPLY} row of {@code conversationId} to
-     * {@code recipient} (normalised) reached {@link State#SENT} — the
-     * {@code anyAuthenticatedParticipant} test of who may continue a thread.
+     * Whether a {@link Kind#REPLY} row of {@code conversationId} that reached
+     * {@link State#SENT} went to {@code recipient} (normalised) — as its
+     * {@code To}, or as a {@code Cc} the child store still holds for it. The test
+     * of who may continue a thread ({@code anyAuthenticatedParticipant}, and every
+     * participant under {@code replyAudience: thread}). A recipient of a reply that
+     * was never sent, or a {@code Cc} an attempt dropped, does not count.
      */
     boolean hasSentReply(String conversationId, String recipient);
+
+    /**
+     * Records the recipients of a reply row. Idempotent per
+     * {@code (rowId, address)}: a recipient written twice is kept once.
+     */
+    void addReplyRecipients(List<ReplyRecipient> recipients);
+
+    /** The recipients of {@code rowId}, {@code To} first, then in written order. */
+    List<ReplyRecipient> findReplyRecipients(String rowId);
+
+    /**
+     * Removes recipients of {@code rowId} — the {@code Cc}s an attempt no longer
+     * sends to (suppressed, or narrowed by the settings), so they do not count as
+     * participants.
+     *
+     * @return how many were removed
+     */
+    long removeReplyRecipients(String rowId, Collection<String> addresses);
+
+    /**
+     * Every reply recipient entry of {@code address} (normalised), for GDPR export.
+     */
+    List<ReplyRecipient> findReplyRecipientsByAddress(String address);
 
     /**
      * How many {@code kind} rows of {@code conversationId} were created at or after
@@ -370,7 +450,9 @@ public interface IEmailMessageLedger {
     List<LedgerEntry> findByRecipient(String recipient);
 
     /**
-     * Removes rows addressed to {@code recipient} (normalised), for GDPR erasure.
+     * Removes rows addressed to {@code recipient} (normalised), with their reply
+     * recipients, and every reply recipient entry of that address on other rows —
+     * for GDPR erasure.
      */
     long deleteByRecipient(String recipient);
 }
