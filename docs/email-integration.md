@@ -395,7 +395,7 @@ starts or continues is tainted too:
 |---|---|
 | `POST /agents/{id}/start`, `POST /agents/{conversationId}` (and the streaming, `/v1` and A2A variants); MCP `chat_with_agent`, `create_conversation`, `talk_to_agent`, `chat_managed` | the conversation, for good |
 | `POST`/`PUT /schedulestore/schedules`; MCP `create_schedule` | the schedule (`metadata.turnOrigin`), so every fire runs tainted; an edit never removes a stored taint |
-| `POST …/schedules/{id}/fire`, the dead-letter retry; MCP `fire_schedule_now`, `retry_failed_schedule` | the fire; a retry also taints the schedule |
+| `POST …/schedules/{id}/fire`, the dead-letter retry; MCP `fire_schedule_now`, `retry_failed_schedule` | the fire; a retry also taints the schedule (setting `metadata.turnOrigin` alone, so a concurrent edit is kept) |
 | team cadences and lesson-consolidation schedules; MCP `create_team_cadence`, `schedule_lesson_consolidation` | the schedule, so its discussions start tainted |
 | `POST /groups/{id}/conversations` (and streaming); MCP `discuss_with_group`, `start_group_discussion` | the discussion and every member conversation |
 | a continuation or a follow-up of an existing discussion; MCP `continue_group_discussion`, `followup_with_member` | the discussion from then on, and every member turn, also of members an untainted round started |
@@ -451,7 +451,9 @@ the approval card shows the request the call will send, and the approval is
 [pinned](hitl.md#request-pinning--approval-binds-to-a-request-not-a-tool-name) to it as for any other conversation; an
 MCP tool has no request to resolve and is approved on its name and arguments. In
 the engine the approval is bound around exactly that call's execution, for that conversation only (a conversation the
-approved call starts or continues inline does not inherit it), and never extends to a redirect. When the approved call goes through EDDI's
+approved call starts or continues inline does not inherit it), and never extends to a redirect. An approved MCP
+request's approval reaches EDDI's own API only from that call itself: a turn it starts states only the engine's
+approval of a call of that turn's conversation. When the approved call goes through EDDI's
 own API, the request says so in `X-Eddi-Approved-Call: true`, which the engine sets itself and strips from every other
 request a tainted turn sends — no configuration can claim it, and a caller who forged it could as well have left the
 taint header off. These paths are matched anywhere in a URL, so a third-party API whose path happens to contain one

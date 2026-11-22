@@ -182,11 +182,11 @@ class RestScheduleStoreTurnOriginTest {
             assertEquals(200, rest.retryDeadLetter("s1").getStatus());
         }
 
+        // The origin alone: writing the copy read back would revert a concurrent edit.
         InOrder order = inOrder(scheduleStore);
-        ArgumentCaptor<ScheduleConfiguration> stamped = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        order.verify(scheduleStore).updateSchedule(eq("s1"), stamped.capture());
+        order.verify(scheduleStore).setTurnOrigin("s1", TurnOrigin.EMAIL);
         order.verify(scheduleStore).requeueDeadLetter("s1");
-        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stamped.getValue().getMetadata()));
+        verify(scheduleStore, never()).updateSchedule(any(), any());
     }
 
     @Test
@@ -197,6 +197,7 @@ class RestScheduleStoreTurnOriginTest {
         assertEquals(200, rest.retryDeadLetter("s1").getStatus());
 
         verify(scheduleStore, never()).updateSchedule(any(), any());
+        verify(scheduleStore, never()).setTurnOrigin(any(), any());
         verify(scheduleStore).requeueDeadLetter("s1");
     }
 
@@ -209,11 +210,11 @@ class RestScheduleStoreTurnOriginTest {
             assertEquals(200, rest.enableSchedule("s1").getStatus());
         }
 
+        // The origin alone: writing the copy read back would revert a concurrent edit.
         InOrder order = inOrder(scheduleStore);
-        ArgumentCaptor<ScheduleConfiguration> stamped = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        order.verify(scheduleStore).updateSchedule(eq("s1"), stamped.capture());
+        order.verify(scheduleStore).setTurnOrigin("s1", TurnOrigin.EMAIL);
         order.verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(true), any());
-        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stamped.getValue().getMetadata()));
+        verify(scheduleStore, never()).updateSchedule(any(), any());
     }
 
     @Test
@@ -227,6 +228,7 @@ class RestScheduleStoreTurnOriginTest {
         }
 
         verify(scheduleStore, never()).updateSchedule(any(), any());
+        verify(scheduleStore, never()).setTurnOrigin(any(), any());
         verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(true), any());
         verify(scheduleStore).setScheduleEnabled(eq("s1"), eq(false), any());
     }
@@ -242,11 +244,11 @@ class RestScheduleStoreTurnOriginTest {
             assertEquals(200, rest.dismissDeadLetter("s1").getStatus());
         }
 
+        // The origin alone: writing the copy read back would revert a concurrent edit.
         InOrder order = inOrder(scheduleStore);
-        ArgumentCaptor<ScheduleConfiguration> stamped = ArgumentCaptor.forClass(ScheduleConfiguration.class);
-        order.verify(scheduleStore).updateSchedule(eq("s1"), stamped.capture());
+        order.verify(scheduleStore).setTurnOrigin("s1", TurnOrigin.EMAIL);
         order.verify(scheduleStore).dismissDeadLetter(eq("s1"), any());
-        assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(stamped.getValue().getMetadata()));
+        verify(scheduleStore, never()).updateSchedule(any(), any());
     }
 
     private ScheduleConfiguration updated(String id) throws Exception {

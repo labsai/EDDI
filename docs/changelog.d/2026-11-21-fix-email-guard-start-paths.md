@@ -198,8 +198,6 @@ model's tool calls.
 
 ### Not covered
 
-- `stampTurnOrigin` (retry, enable, dismiss) still writes the whole row it read. The taint itself can no longer be
-  lost, but a concurrent configuration edit in that window is overwritten, as before.
 - `McpErrorResultInterceptor` (the MCP server side) still reads the unscoped `isActive()`. It runs on an inbound
   request thread, where no approval is bound.
 - Nested pipeline work that is not a tool call (a loopback REST request from a pipeline task of a conversation that
@@ -215,3 +213,45 @@ model's tool calls.
 | 2026-11-22 | An approval preview builds a gated call's request as its approved execution would, guarded endpoints still refused | A refused preview left mail-started configuration writes approved unpinned | Exempting the gate only (resume re-check fails closed); approving such calls unpinned |
 | 2026-11-22 | The engine states a person's approval only on requests of the tool call's own conversation (`ApprovedCallScope.approvesHere`) | A conversation an approved call ran inline inherited the approval over MCP, OutboundHttp and the loopback | Suspending the approval binding inside nested turns (drops the outer call's self-ungating check) |
 ```
+
+## 🔒 fix(email): CodeRabbit's re-review of #1499 — one resolved version, no inherited inbound approval, origin-only stamp (2026-11-22)
+
+**Repo:** EDDI (`fix/pr1499-coderabbit-2`, onto `fix/email-guard-start-paths`, PR #1499) — CodeRabbit's re-review
+of `9c4826effc`: two inline findings and one in the review body.
+
+### What changed and why
+
+- **A channel save writes the version it compared (major).** `RestChannelIntegrationStore.saveChannel` resolved
+  `?version=0` for the sender-list comparison and again inside `RestVersionInfo.update`. A save on another node in
+  between (the local `uniquenessLock` does not serialise nodes) made the write land on a version the allowlist check
+  never saw, so a concurrent restriction could be emptied without `confirmOpen`. The version is now resolved once,
+  before the uniqueness checks, and the same value is used for the legacy-connector check, the comparison, the audit
+  and the write. A stale write is the update's `409`.
+- **A turn does not inherit the inbound request's approval (major).** `LoopbackCallerAuthFilter` set
+  `X-Eddi-Approved-Call` from `approvesHere() || TurnOrigin.inboundApproved()`, so a conversation started inside an
+  approved MCP call stated that approval for its own loopback writes. Inside a turn (a bound conversation principal,
+  `TurnOrigin.inTurn()`, or a running tool call, the new `ApprovedCallScope.inToolCall()`) only `approvesHere()`
+  counts. A direct MCP call that runs no turn still passes the inbound approval on. `ApprovedCallScope` now binds the
+  executing conversation in a holder, so "a tool call of no conversation" and "no tool call" differ.
+- **Stamping a schedule's origin no longer rewrites it (minor).** `RestScheduleStore.stampTurnOrigin` (retry, enable,
+  dismiss) wrote back the whole row it read, reverting a configuration edit committed in between. The new
+  `IScheduleStore.setTurnOrigin` sets `metadata.turnOrigin` alone: a Mongo aggregation-pipeline `$set` with
+  `$mergeObjects` (a `metadata: null` row gets a document) and a Postgres `UPDATE` that merges the key into the
+  `metadata` object (`NULL` or JSON `null` start from `{}`). The read stays, only to decide whether to write.
+
+### Tests
+
+- `RestChannelIntegrationStoreEmailSendersTest.versionZeroIsResolvedOnce`: the current version moves from 3 to 4
+  between two resolutions; the save writes version 3 and fails with the store's `ResourceModifiedException`.
+- `LoopbackCallerAuthFilterTest`: inbound approval `true` inside `conv-b` (under an outer binding, as a bare tool
+  call, and in a turn with a bound principal) gives `"false"`; a direct call gives `"true"`, and `"false"` when not
+  approved.
+- `MongoScheduleStoreTest` / `PostgresScheduleStoreTest` (Testcontainers): an edit committed after the stamping path
+  read the schedule survives the stamp, other metadata stays, a row without metadata gets one, a missing id is a
+  `ResourceNotFoundException`. `RestScheduleStoreTurnOriginTest` checks that retry, enable and dismiss call
+  `setTurnOrigin` and never `updateSchedule`.
+
+### Not covered
+
+- The comment on `RestGroupLessons.schedule()` from the same review (a concurrent reschedule can drop an email
+  origin) and the fingerprint-test nitpick in `ApiCallExecutorEscalationGuardTest` are not part of this change.

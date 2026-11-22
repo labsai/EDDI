@@ -464,6 +464,40 @@ public class PostgresScheduleStore implements IScheduleStore {
         }
     }
 
+    /**
+     * One {@code UPDATE} of the {@code turnOrigin} key of {@code metadata} alone —
+     * see {@link IScheduleStore#setTurnOrigin}.
+     */
+    @Override
+    public void setTurnOrigin(String scheduleId, String origin)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        if (origin == null) {
+            return;
+        }
+        ensureSchema();
+        int rows;
+        // Only an object is merged into: SQL NULL and a JSON null alike start from {},
+        // since `'null'::jsonb || object` would build an array.
+        String sql = """
+                UPDATE eddi_schedules SET
+                    metadata=(CASE WHEN jsonb_typeof(metadata) = 'object' THEN metadata ELSE '{}'::jsonb END)
+                        || jsonb_build_object('turnOrigin', ?::text),
+                    updated_at=?
+                WHERE id=?
+                """;
+        try (Connection conn = dataSourceInstance.get().getConnection(); PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setString(1, origin);
+            ps.setLong(2, Instant.now().toEpochMilli());
+            ps.setString(3, scheduleId);
+            rows = ps.executeUpdate();
+        } catch (SQLException e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set the origin of schedule " + scheduleId, e);
+        }
+        if (rows == 0) {
+            throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
+        }
+    }
+
     @Override
     public void setScheduleEnabled(String scheduleId, boolean enabled, Instant nextFire, String disabledReason)
             throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {

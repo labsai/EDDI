@@ -325,6 +325,32 @@ public class MongoScheduleStore implements IScheduleStore {
         }
     }
 
+    /**
+     * One update of {@code metadata.turnOrigin} alone — see
+     * {@link IScheduleStore#setTurnOrigin}. An aggregation-pipeline update, so a
+     * schedule stored with {@code metadata: null} gets a metadata document instead
+     * of failing the dotted {@code $set}.
+     */
+    @Override
+    public void setTurnOrigin(String scheduleId, String origin)
+            throws IResourceStore.ResourceNotFoundException, IResourceStore.ResourceStoreException {
+        if (origin == null) {
+            return;
+        }
+        UpdateResult result;
+        try {
+            var merged = new Document("$mergeObjects",
+                    Arrays.asList("$" + METADATA, new Document(TurnOrigin.CONTEXT_KEY, new Document("$literal", origin))));
+            result = scheduleCollection.updateOne(eq(ID, scheduleId),
+                    List.of(new Document("$set", new Document(METADATA, merged).append(UPDATED_AT, epochMillis(Instant.now())))));
+        } catch (Exception e) {
+            throw new IResourceStore.ResourceStoreException("Failed to set the origin of schedule " + scheduleId, e);
+        }
+        if (result.getMatchedCount() == 0) {
+            throw new IResourceStore.ResourceNotFoundException("Schedule with id=" + scheduleId + " not found");
+        }
+    }
+
     // Fix #3: Atomic field-level updates instead of replaceOne() for targeted
     // changes
     @Override

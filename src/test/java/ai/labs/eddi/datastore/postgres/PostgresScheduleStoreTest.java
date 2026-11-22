@@ -192,6 +192,53 @@ class PostgresScheduleStoreTest extends PostgresTestBase {
         }
 
         @Test
+        @DisplayName("setTurnOrigin — stamps the origin alone: an edit committed after the stamping path read the schedule survives")
+        void setTurnOriginKeepsAConcurrentEdit() throws Exception {
+            var created = createCronSchedule("Taint", "agent1", "t");
+            created.setMetadata(new HashMap<>(Map.of("note", "kept")));
+            String id = store.createSchedule(created);
+            // The retry/enable/dismiss path reads the schedule to decide whether to stamp
+            // ...
+            var readByStampingPath = store.readSchedule(id);
+            // ... a configuration edit lands in between ...
+            var edit = store.readSchedule(id);
+            edit.setName("Edited");
+            edit.setMessage("edited message");
+            edit.setCronExpression("0 30 * * * ?");
+            store.updateSchedule(id, edit);
+            // ... and the stamp follows.
+            assertNull(TurnOrigin.fromMetadata(readByStampingPath.getMetadata()));
+            store.setTurnOrigin(id, TurnOrigin.EMAIL);
+
+            var found = store.readSchedule(id);
+            assertEquals("Edited", found.getName(), "the edit is not reverted");
+            assertEquals("edited message", found.getMessage());
+            assertEquals("0 30 * * * ?", found.getCronExpression());
+            assertEquals("kept", found.getMetadata().get("note"), "other metadata stays");
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(found.getMetadata()));
+        }
+
+        @Test
+        @DisplayName("setTurnOrigin — a schedule stored without metadata gets one holding the origin; a null origin writes nothing")
+        void setTurnOriginWithoutMetadata() throws Exception {
+            var created = createCronSchedule("Taint", "agent1", "t");
+            created.setMetadata(null);
+            String id = store.createSchedule(created);
+
+            store.setTurnOrigin(id, null);
+            assertNull(TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+
+            store.setTurnOrigin(id, TurnOrigin.EMAIL);
+            assertEquals(TurnOrigin.EMAIL, TurnOrigin.fromMetadata(store.readSchedule(id).getMetadata()));
+        }
+
+        @Test
+        @DisplayName("setTurnOrigin non-existent — throws ResourceNotFoundException")
+        void setTurnOriginNotFound() {
+            assertThrows(IResourceStore.ResourceNotFoundException.class, () -> store.setTurnOrigin("ghost", TurnOrigin.EMAIL));
+        }
+
+        @Test
         @DisplayName("updateSchedule non-existent — throws ResourceNotFoundException")
         void updateNonExistent() {
             var config = createCronSchedule("N/A", "a", "t");
