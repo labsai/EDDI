@@ -2250,23 +2250,33 @@ your tool schemas do not cover it, not as a routine first step:
   never unsigned; a missing, expired, mismatched or unreadable certificate
   HOLDS the reply (ledger reason smime_unavailable, retried hourly without
   using up attempts, owner notice), and saving with an unusable certificate is
-  refused. Owner notices and HITL mails (system mailer) are never signed.
+  refused. A reply still held after eddi.email.smime.max-hold (default 72h) is
+  given up: FAILED with reason smime_unavailable:expired, audited, final owner
+  notice smime_hold_expired. An unknown sign value is a 400 on write; in a
+  stored document it reads as true. The signature advertises no encryption
+  capabilities (encrypted mail cannot be read here; recommend a signing-only
+  certificate). Owner notices and HITL mails (system mailer) are never signed.
   SMIME_SIGNING connection: binding SERVICE, smimeSigning.certificate =
   \${vault:...} holding a base64 PKCS#12 keystore or PEM key plus chain,
   smimeSigning.password = \${vault:...} (optional), baseUrlAllowlist = the
   SMTP origins whose mail it may sign; it never resolves as an HTTP header or
   a mail login. The certificate's rfc822Name SAN (or subject e-mail) must
-  equal address; key usage digitalSignature and extended key usage
-  emailProtection when present; not expired; chain to a public root (else save
-  warning email.smime-untrusted-chain). Other save warnings:
+  equal address; key usage digitalSignature or nonRepudiation and extended key
+  usage emailProtection when present; not expired; chain to a public root. A
+  leaf plus intermediate(s) whose root is not publicly trusted or not shipped
+  (the usual .p12 of an S/MIME-only CA) still signs, with save warning
+  email.smime-untrusted-chain: trust is the recipient's decision. Refused only
+  when the chain is broken (a signature in it does not verify) or the leaf
+  comes without its intermediates. Other save warnings:
   email.smime-certificate-unusable, email.smime-certificate-expiring (within
   30 days; checked daily too, owner notice, gauge
   eddi_email_smime_certificate_days_left). Ledger OUT rows record signed.
   Sending-health self-test: POST /channelstore/channels/<id>/email-self-test
-  (edit access, at most 5 per hour, needs smtpHost) mails the mailbox itself
+  (edit access, at most 5 per clock hour, needs smtpHost) mails the mailbox itself
   with a single-use 15-minute token; GET .../email-self-test/<token> then
   reports in plain words the DKIM verdict and signing domain, alignment,
-  whether S/MIME verified and whether DMARC is published ("inconclusive" on
+  whether S/MIME verified (verified, verified_untrusted_root or chain_broken)
+  and whether DMARC is published ("inconclusive" on
   Microsoft 365, which does not DKIM-sign mail inside one organisation). A
   "signs as x.gappssmtp.com, not <domain>" finding means DKIM authentication
   for the domain was never started at the provider. The test mail never starts
