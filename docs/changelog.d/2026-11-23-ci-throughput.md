@@ -80,6 +80,36 @@ data.
   and the Manager's AGENTS.md/CONTRIBUTING.md describe CI Gate, Coverage Gate and the Vitest
   shards.
 
+### Second review round (before CodeRabbit's first review)
+
+An independent read-only review from the PR-triage session found the gitleaks tolerance still let a
+PR allowlist its own secret: a `.gitleaks.toml` with `paths = ['.*']` (or `useDefault = false`)
+passed the PR re-scan, and the merge-queue scan then read that same config. Fixed:
+
+- **The rules always come from `main`.** A merge-queue run restores `.gitleaks.toml` from
+  `merge_group.base_sha` before scanning (it keeps the group's `.gitleaksignore`: exact fingerprints,
+  each a reviewed decision about one finding). The PR re-scan restores the base rules itself.
+- **Tolerance only for fingerprints, and only for findings.** The PR re-scan applies only when
+  `.gitleaks.toml` is unchanged and every line the PR adds to `.gitleaksignore` is a
+  `commit:path:rule:line` fingerprint (or blank/comment). The main scan now runs with
+  `--exit-code 2` and publishes `base_leaks=true` only on findings, so an error exit (a missing
+  commit, a bad config) is never tolerated. CI Gate requires both outputs; its warning no longer
+  claims a second check in the queue.
+- Both steps were executed against scratch repositories with the pinned gitleaks image (8 cases:
+  leak / clean / error exit; untouched, fingerprint-only, fingerprint plus a second leak, loosened
+  `.gitleaks.toml`, non-fingerprint line), and the gate script against 21 simulated outcomes.
+- **`preflight-check` joins CI Gate** (required on a pull request that changed code; exempt from the
+  merge-queue skip rule, since it asserts the bare pom version label only a PR build carries). A
+  failing Red Hat dry run used to surface only as `preflight-push` failing on `main` after the image
+  was published.
+- **AGENTS.md** said the queue "merges only what passed CI Gate"; that is true only once CI Gate is
+  a required check. Until then the queue waits for `Build & Test` and `CodeQL Analysis` alone, so
+  the manual main-is-green and one-at-a-time rules still apply — now said so.
+- Left as is: `SystemMailerTest` and `SafeSocketConnectorAngusSmokeTest` reserve a free port, close
+  it and expect "connection refused"; three forks make a collision on that port slightly more
+  likely, as any other process on the runner already could. Not seen in the 40,817-test forked run.
+  The merged-check warning in the Integration Tests log is now labelled as expected in the step.
+
 ### Considered and not done
 
 - **Sharding Integration Tests.** A matrix renames the `Integration Tests` check that

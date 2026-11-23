@@ -1430,7 +1430,8 @@ jobs:
         # -Djacoco.haltOnFailure=false: `verify` still runs the merged-check
         # execution here, but this job has no unit-test data (target/jacoco.exec), so
         # it would grade integration-test coverage alone against the UT+IT threshold.
-        # The 90/80 gate is enforced in coverage-gate, on all three data files;
+        # So its "Rule violated ... covered ratio" WARNING in this log is expected and
+        # means nothing. The 90/80 gate is enforced in coverage-gate, on all three data files;
         # BuildQualityGatesTest pins that it stays armed there.
         run: ./mvnw verify -DskipITs=false -DskipUTs=true -DskipUi=true -Djacoco.haltOnFailure=false -Dquarkus.bootstrap.effective-model-builder=true -B
         env:
@@ -2165,9 +2166,12 @@ jobs:
   gitleaks:
     name: Secret Scanning
     runs-on: ubuntu-latest
-    # Read by CI Gate: "true" when a pull request that changes the gitleaks config
-    # passes a re-scan with that config (see the last step).
+    # Read by CI Gate. base_leaks: "true" when the scan failed because it FOUND
+    # leaks (not on an error exit). pr_config_scan: "true" when a pull request whose
+    # only gitleaks change is new .gitleaksignore fingerprints passes a re-scan with
+    # them (see the last step).
     outputs:
+      base_leaks: ${{ steps.scan.outputs.leaks }}
       pr_config_scan: ${{ steps.pr_config.outputs.passed }}
     steps:
       - name: Checkout
@@ -2198,19 +2202,28 @@ jobs:
       # secret in the same pull request that introduces it. Taking both from
       # the base branch means a config change takes effect once it is merged
       # and reviewed, rather than while it is still being proposed.
+      #
+      # A merge-queue run restores the RULES (.gitleaks.toml) from main as well, so
+      # a queued change cannot loosen the rules it is scanned with. It keeps the
+      # group's .gitleaksignore: those are exact commit:path:rule:line fingerprints,
+      # each one a reviewed, approved decision about one finding — which is how a
+      # test fixture gets allowlisted at all.
       - name: Take the gitleaks config from the base branch
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
         env:
-          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          EVENT: ${{ github.event_name }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
         run: |
           set -euo pipefail
-          for f in .gitleaksignore .gitleaks.toml; do
-            if git cat-file -e "$PR_BASE:$f" 2> /dev/null; then
-              git show "$PR_BASE:$f" > "$f"
+          files=".gitleaksignore .gitleaks.toml"
+          [ "$EVENT" = "merge_group" ] && files=".gitleaks.toml"
+          for f in $files; do
+            if git cat-file -e "$BASE_SHA:$f" 2> /dev/null; then
+              git show "$BASE_SHA:$f" > "$f"
               echo "restored $f from the base branch"
             elif [ -e "$f" ]; then
               rm -f "$f"
-              echo "removed $f, which this pull request adds and the base branch does not have"
+              echo "removed $f, which this change adds and the base branch does not have"
             fi
           done
 
@@ -2220,6 +2233,7 @@ jobs:
       # years ago, so scanning everything would fail the build on day one for
       # reasons no PR author can fix.
       - name: Scan commits in this event
+        id: scan
         env:
           EVENT: ${{ github.event_name }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
@@ -2268,18 +2282,29 @@ jobs:
             echo "no usable base commit for this $EVENT, scanning only $PUSH_AFTER"
           fi
 
-          ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="$LOG_OPTS" .
+          # Exit code 2 means "leaks found"; anything else non-zero is an error
+          # (bad config, missing commit). CI Gate's tolerance applies to findings
+          # only, so the two are told apart here.
+          rc=0
+          ./gitleaks git --redact=100 --no-banner --exit-code 2 --log-opts="$LOG_OPTS" . || rc=$?
+          if [ "$rc" -eq 2 ]; then
+            echo "leaks=true" >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+          exit "$rc"
 
       # The scan above used the BASE branch's config, so a pull request that
-      # allowlists a test fixture fails it by design. When — and only when — the
-      # PR changes .gitleaksignore or .gitleaks.toml, scan the same range again with
-      # the PR's own config. CI Gate tolerates the failure above only if this one
-      # passes, so a secret riding along with an honest config edit still blocks.
-      # A config that disables rules or allowlists broadly would pass this too:
-      # the reviewer reading that config diff remains the control. The check
-      # itself stays red. A PR that tightens the config (a stricter rule, or a
-      # malformed file) fails here with no tolerance, which is intended.
-      - name: Re-scan with this pull request's gitleaks config
+      # allowlists a test fixture fails it by design. This step decides whether
+      # that failure is the fixture case and nothing more. It applies only when
+      # the PR leaves .gitleaks.toml (the rules) untouched and its .gitleaksignore
+      # change adds nothing but exact commit:path:rule:line fingerprints. It then
+      # re-scans the same range with the base RULES and the PR's fingerprints.
+      # CI Gate tolerates the failure above only if this passes, so every finding
+      # the PR has not fingerprinted one by one still blocks. A fingerprint is a
+      # human decision about one finding: reviewing those lines is the control,
+      # and the check itself stays red for the reviewer to read. A PR that
+      # changes .gitleaks.toml gets no tolerance at all.
+      - name: Re-scan with this pull request's gitleaks fingerprints
         id: pr_config
         if: ${{ always() && github.event_name == 'pull_request' }}
         env:
@@ -2290,17 +2315,35 @@ jobs:
           # Against the merge-base, not the base tip: a config change that landed on
           # main after this branch was cut is not this PR's change.
           FORK_POINT=$(git merge-base "$PR_BASE" "$PR_HEAD")
-          if git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore .gitleaks.toml; then
-            echo "this pull request does not change the gitleaks config; nothing to re-scan"
+          if ! git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaks.toml; then
+            echo "this pull request changes .gitleaks.toml, the rules; no tolerance applies"
             exit 0
           fi
-          for f in .gitleaksignore .gitleaks.toml; do
-            if git cat-file -e "$PR_HEAD:$f" 2> /dev/null; then
-              git show "$PR_HEAD:$f" > "$f"
-            else
-              rm -f "$f"
-            fi
-          done
+          if git diff --quiet "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore; then
+            echo "this pull request does not change .gitleaksignore; nothing to re-scan"
+            exit 0
+          fi
+          # Every line the PR adds must be a fingerprint (or blank, or a comment).
+          ADDED=$(git diff --no-color -U0 "$FORK_POINT" "$PR_HEAD" -- .gitleaksignore \
+            | grep -E '^\+' | grep -vE '^\+\+\+' | sed 's/^+//' || true)
+          OTHER=$(printf '%s\n' "$ADDED" | grep -vE '^[0-9a-f]{40}:[^:]+:[A-Za-z0-9_-]+:[0-9]+[[:space:]]*$' \
+            | grep -vE '^[[:space:]]*(#.*)?$' || true)
+          if [ -n "$OTHER" ]; then
+            echo "::warning::.gitleaksignore gains lines that are not commit:path:rule:line fingerprints; no tolerance applies:"
+            printf '%s\n' "$OTHER"
+            exit 0
+          fi
+          # The base rules with the PR's fingerprints. The rules are restored here
+          # again rather than trusted from the earlier step: this one runs under
+          # always(), so it must not depend on that step having succeeded.
+          if git cat-file -e "$PR_BASE:.gitleaks.toml" 2> /dev/null; then
+            git show "$PR_BASE:.gitleaks.toml" > .gitleaks.toml
+          else
+            rm -f .gitleaks.toml
+          fi
+          if git cat-file -e "$PR_HEAD:.gitleaksignore" 2> /dev/null; then
+            git show "$PR_HEAD:.gitleaksignore" > .gitleaksignore
+          fi
           ./gitleaks git --redact=100 --no-banner --exit-code 1 --log-opts="--no-merges $PR_BASE..$PR_HEAD" .
           echo "passed=true" >> "$GITHUB_OUTPUT"
 
@@ -3173,7 +3216,9 @@ jobs:
   #
   # It needs every job docker needs (whatever blocks publishing blocks merging —
   # BuildQualityGatesTest pins that) plus the cheap lints, whose own comments say a
-  # skip there merges a change nothing graded. Changelog Discipline is left out:
+  # skip there merges a change nothing graded, and preflight-check: the Red Hat
+  # dry run on the PR's image, which would otherwise surface only as
+  # preflight-push failing on main after the image is already published. Changelog Discipline is left out:
   # it is documented as reporting, not blocking (AGENTS.md §2 rule 8).
   #
   # always(), so it reports on every run — a skipped required check counts as
@@ -3188,11 +3233,14 @@ jobs:
   # from the base branch, so a PR that allowlists a fixture cannot pass it. That
   # failure is tolerated, loudly, only when the PR changes .gitleaksignore or
   # .gitleaks.toml AND a re-scan with the PR's own config passes (Secret
-  # Scanning's pr_config_scan output); otherwise it blocks.
+  # Scanning's pr_config_scan output); otherwise it blocks. Narrower still: the
+  # base scan must have failed on findings (base_leaks), not on an error, and the
+  # PR's change must be .gitleaksignore fingerprints only — .gitleaks.toml (the
+  # rules) is always taken from main, in the merge queue too.
   ci-gate:
     name: CI Gate
     runs-on: ubuntu-latest
-    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate]
+    needs: [detect-changes, release-pointers, shell-lint, manifest-lint, build-and-test, integration-test, coverage-gate, trivy-scan, codeql, codeql-ui, gitleaks, build-image, openapi-snapshot, e2e-fullstack, e2e-auth, e2e-operator, e2e-gate, ui-gate, preflight-check]
     if: always()
     steps:
       - name: Require every job this change needed to pass
@@ -3224,15 +3272,19 @@ jobs:
           #    only the ones step 2 names.
           for job in $(jq -r 'keys[]' <<< "$NEEDS"); do
             r=$(result "$job")
-            if [ "$EVENT" = "merge_group" ] && [ "$r" = "skipped" ]; then
+            # preflight-check is the one exception: a pull-request-only dry run (it
+            # asserts the bare pom version label that only a PR build carries), and
+            # the same Dockerfile was certified on the PR before it was queued.
+            if [ "$EVENT" = "merge_group" ] && [ "$r" = "skipped" ] && [ "$job" != "preflight-check" ]; then
               fail "$job was skipped on a merge-queue run, where every job has to run"
               continue
             fi
             case "$r" in
               success | skipped) ;;
               *)
-                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ] && [ "$(output gitleaks pr_config_scan)" = "true" ]; then
-                  echo "::warning::Secret Scanning failed with the BASE branch's gitleaks config but passed with this PR's own .gitleaksignore/.gitleaks.toml. Tolerated, because the PR's allowlist entry cannot apply until it merges. Review the allowlist change itself; the merge-queue run scans with the merged config again."
+                if [ "$job" = "gitleaks" ] && [ "$r" = "failure" ] && [ "$EVENT" = "pull_request" ] && [ "$GITLEAKS_CONFIG" = "true" ] \
+                  && [ "$(output gitleaks base_leaks)" = "true" ] && [ "$(output gitleaks pr_config_scan)" = "true" ]; then
+                  echo "::warning::Secret Scanning found leaks with the base branch's gitleaks config; every one of them is covered by a fingerprint this PR adds to .gitleaksignore, and the rules are unchanged. Tolerated, because the PR's own fingerprints cannot apply until it merges. A fingerprint allowlists that finding for good: review each added line as a decision that the value is not a real secret."
                 else
                   fail "$job=$r"
                 fi
@@ -3267,6 +3319,8 @@ jobs:
           require shell-lint "$SCRIPTS"
           require manifest-lint "$(either "$CODE" "$OPERATOR_DOCS")"
           require release-pointers "$RELEASE_POINTERS"
+          # PR-only (see above): required on a pull request that changed code.
+          if [ "$EVENT" = "pull_request" ]; then require preflight-check "$CODE"; fi
 
           if [ "$STATUS" -ne 0 ]; then
             exit 1

@@ -1572,7 +1572,7 @@ class BuildQualityGatesTest {
 
         List<String> gateNeeds = ciJobNeeds(jobs.get("ci-gate"));
         List<String> missing = new ArrayList<>(ciJobNeeds(jobs.get("docker")));
-        missing.addAll(List.of("shell-lint", "manifest-lint", "release-pointers"));
+        missing.addAll(List.of("shell-lint", "manifest-lint", "release-pointers", "preflight-check"));
         missing.removeAll(gateNeeds);
         assertEquals(List.of(), missing,
                 "ci-gate in " + CI_WORKFLOW + " must need these: each one blocks publishing (or is a lint whose skip"
@@ -1584,9 +1584,17 @@ class BuildQualityGatesTest {
         assertTrue(gate.contains("[ \"$EVENT\" = \"merge_group\" ] && [ \"$r\" = \"skipped\" ]"),
                 "ci-gate must fail on ANY skipped need on a merge_group run, not only on the jobs it names one by"
                         + " one: every job is forced to run there, so a skip means it was never graded");
-        assertTrue(gate.contains("[ \"$(output gitleaks pr_config_scan)\" = \"true\" ]"),
-                "ci-gate may tolerate a pull-request Secret Scanning failure only when the re-scan with the PR's own"
-                        + " gitleaks config passed, or a secret riding along with a config edit merges");
+        assertTrue(gate.contains("[ \"$(output gitleaks pr_config_scan)\" = \"true\" ]")
+                && gate.contains("[ \"$(output gitleaks base_leaks)\" = \"true\" ]"),
+                "ci-gate may tolerate a pull-request Secret Scanning failure only when that scan found leaks (not an"
+                        + " error) and the re-scan with the PR's own fingerprints passed, or a secret riding along with a"
+                        + " config edit merges");
+        String gitleaks = jobs.get("gitleaks");
+        assertTrue(gitleaks.contains("[ \"$EVENT\" = \"merge_group\" ] && files=\".gitleaks.toml\""),
+                "a merge-queue run must scan with main's .gitleaks.toml, or a queued change loosens the rules it is"
+                        + " scanned with");
+        assertTrue(gitleaks.contains("changes .gitleaks.toml, the rules; no tolerance applies"),
+                "the pull-request re-scan must refuse any change to .gitleaks.toml: only fingerprints may be added");
         assertTrue(read(CI_WORKFLOW).contains("merge_group:"),
                 CI_WORKFLOW + " no longer triggers on merge_group, so the merge queue would wait for checks forever");
     }

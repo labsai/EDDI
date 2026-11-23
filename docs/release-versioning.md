@@ -223,7 +223,7 @@ job that enforces the JaCoCo 90/80 coverage gate, on the execution data both tes
 **`ci-gate` (CI Gate) is the check that says a commit may land** — meant to be the required
 status check and what the merge queue waits for, once the repository settings make it so
 (until then `Build & Test` and `CodeQL Analysis` are the required checks). It needs everything `docker`
-needs plus shell-lint, manifest-lint and release-pointers, runs on every event (`if: always()`),
+needs plus shell-lint, manifest-lint, release-pointers and (on a pull request) preflight-check, runs on every event (`if: always()`),
 and fails when any of them failed or was cancelled, or when a job the change required did not
 succeed (on a merge-queue run, every job is required). A `merge_group` run — the merge queue
 testing `main` plus the queued PR(s) — takes the full pipeline and publishes nothing.
